@@ -2,7 +2,9 @@
 // delegating service the loopback administration routes use, so the parent
 // thread's rules, the peer grant on the target, the approvals there, the result
 // framed as outside content, and cancellation are one set of rules. The agent
-// supplies a task and a member; it never supplies a posture.
+// supplies a task, a member and that member's own id for the Project; it never
+// supplies a posture. This host's Project id only identifies the parent's Project
+// here: Projects have their own ids on each host, so it is never sent on.
 
 import { decodeDelegationStartCommand, type Project } from "@octant/contracts";
 import type {
@@ -46,7 +48,7 @@ export function createAgentRemoteDelegation(
         command = decodeDelegationStartCommand({
           parent: { mode: "work", threadId: input.parentThreadId },
           targetMemberId: input.targetMemberId,
-          projectId: input.projectId,
+          projectId: input.targetProjectId,
           task: input.task,
           authority: { mode: "work", posture: "approval-gated" },
         });

@@ -61,6 +61,8 @@ export interface AgentRunDelegationInput {
   readonly after?: ReadonlyArray<string>;
   /** A roster member that runs the child on its own host instead of this one. */
   readonly targetMemberId?: string;
+  /** The member's own id for the Project to run in; required with a target member. */
+  readonly targetProjectId?: string;
 }
 
 /**
@@ -75,6 +77,8 @@ export interface RemoteDelegationPort {
     readonly mode: OctantMode;
     readonly projectId: string | undefined;
     readonly targetMemberId: string;
+    /** The member's id for the Project; `projectId` is this host's, for the parent check alone. */
+    readonly targetProjectId: string;
     readonly task: string;
   }) => Promise<AgentRunDelegationResult>;
 }
@@ -191,6 +195,12 @@ export async function startAgentRunDelegation(
       reason: "session-paused",
       message: "This run is paused, so no new helper starts until it is resumed.",
     };
+  if (input.targetProjectId !== undefined && input.targetMemberId === undefined)
+    return {
+      status: "refused",
+      reason: "remote-delegation-options-unsupported",
+      message: "A target Project only means something together with a target member.",
+    };
   if (input.targetMemberId !== undefined) {
     // The child runs on its own host's default model with its own context, so
     // choices that only mean something on this host are refused, not dropped.
@@ -213,12 +223,20 @@ export async function startAgentRunDelegation(
         reason: "remote-delegation-unavailable",
         message: "This host cannot start helpers on other members.",
       };
+    if (input.targetProjectId === undefined)
+      return {
+        status: "refused",
+        reason: "remote-delegation-project-required",
+        message:
+          "Name the Project to run in on that member (targetProjectId): Projects have their own ids on each host.",
+      };
     return options.remote.start({
       parentThreadId: options.parentThreadId,
       windowId: options.windowId,
       mode: options.mode,
       projectId: options.projectId,
       targetMemberId: input.targetMemberId,
+      targetProjectId: input.targetProjectId,
       task: input.task,
     });
   }

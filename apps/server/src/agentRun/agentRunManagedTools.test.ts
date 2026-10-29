@@ -25,6 +25,7 @@ const ids = {
   run: "00000000-0000-4000-8000-0000000000a1",
   project: "00000000-0000-4000-8000-0000000000b1",
   member: "00000000-0000-4000-8000-0000000000c1",
+  targetProject: "00000000-0000-4000-8000-0000000000b2",
 };
 
 const authority: AgentRunAuthority = {
@@ -277,6 +278,7 @@ describe("agents managed tools", () => {
       operation: "delegate",
       task: "Look",
       targetMemberId: ids.member,
+      targetProjectId: ids.targetProject,
     });
 
     expect(outcome.result).toMatchObject({ status: "delegated-remote", state: "accepted" });
@@ -287,9 +289,41 @@ describe("agents managed tools", () => {
         mode: "chat",
         projectId: ids.project,
         targetMemberId: ids.member,
+        targetProjectId: ids.targetProject,
         task: "Look",
       },
     ]);
+    expect(calls).toEqual([]);
+  });
+
+  it("refuses a target member without the Project to run in there, and a Project without a member", async () => {
+    const { set, calls } = tool({
+      remote: {
+        start: async () => {
+          throw new Error("must not be asked");
+        },
+      },
+    });
+
+    const noProject = await call(set, {
+      operation: "delegate",
+      task: "Look",
+      targetMemberId: ids.member,
+    });
+    const noMember = await call(set, {
+      operation: "delegate",
+      task: "Look",
+      targetProjectId: ids.targetProject,
+    });
+
+    expect(noProject.result).toMatchObject({
+      status: "refused",
+      reason: "remote-delegation-project-required",
+    });
+    expect(noMember.result).toMatchObject({
+      status: "refused",
+      reason: "remote-delegation-options-unsupported",
+    });
     expect(calls).toEqual([]);
   });
 
@@ -306,11 +340,13 @@ describe("agents managed tools", () => {
       operation: "delegate",
       task: "Look",
       targetMemberId: ids.member,
+      targetProjectId: ids.targetProject,
     });
     const named = await call(withRemote.set, {
       operation: "delegate",
       task: "Look",
       targetMemberId: ids.member,
+      targetProjectId: ids.targetProject,
       providerInstanceId: String(ids.provider),
       modelId: "gpt-4o",
     });
@@ -318,6 +354,7 @@ describe("agents managed tools", () => {
       operation: "delegate",
       task: "Look",
       targetMemberId: ids.member,
+      targetProjectId: ids.targetProject,
       includeParentContext: true,
     });
 

@@ -47,6 +47,8 @@ const decodeProjectId = Schema.decodeUnknownSync(ProjectId);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 const PROJECT = decodeProjectId("11111111-1111-4111-8111-111111111111");
 const OTHER_PROJECT = decodeProjectId("22222222-2222-4222-8222-222222222222");
+/** The parent's Project on A: Projects have their own ids on each host, so B does not know it. */
+const PARENT_PROJECT_ON_A = decodeProjectId("44444444-4444-4444-8444-444444444444");
 const PARENT_THREAD = "33333333-3333-4333-8333-333333333333";
 const OTHER_THREAD = "55555555-5555-4555-8555-555555555555";
 
@@ -1730,8 +1732,9 @@ describe("an agent's helper request that names another member", () => {
     parentThreadId: PARENT_THREAD,
     windowId: "window-a",
     mode: overrides.mode ?? ("work" as const),
-    projectId: String(PROJECT),
+    projectId: String(PARENT_PROJECT_ON_A),
     targetMemberId: b.hostId,
+    targetProjectId: String(PROJECT),
     task: "Summarize the open questions in the notes folder.",
   });
 
@@ -1805,6 +1808,24 @@ describe("an agent's helper request that names another member", () => {
     expect(aboveParent).toMatchObject({ status: "refused", reason: "authority-above-parent" });
     expect(paused.child.started).toHaveLength(0);
     expect(planOnly.child.started).toHaveLength(0);
+  });
+
+  it("refuses a Project the member does not have, including this host's own id for the parent's Project", async () => {
+    const { a, b, child } = await threeHosts();
+
+    const fromThisHost = await agentPort(a).start({
+      ...request(b),
+      targetProjectId: String(PARENT_PROJECT_ON_A),
+    });
+    const outsideGrant = await agentPort(a).start({
+      ...request(b),
+      targetProjectId: String(OTHER_PROJECT),
+    });
+
+    for (const refused of [fromThisHost, outsideGrant]) {
+      expect(refused).toMatchObject({ status: "refused", reason: "target-refused" });
+    }
+    expect(child.started).toHaveLength(0);
   });
 
   it("reports a member without a delegation grant as a refusal without repeating its words", async () => {

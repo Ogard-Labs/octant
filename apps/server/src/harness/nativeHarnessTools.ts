@@ -621,6 +621,9 @@ async function execute(
           ...(input.targetMemberId === undefined
             ? {}
             : { targetMemberId: String(input.targetMemberId) }),
+          ...(input.targetProjectId === undefined
+            ? {}
+            : { targetProjectId: String(input.targetProjectId) }),
         });
         return started.status === "accepted" || started.status === "delegated-remote"
           ? ok(started)

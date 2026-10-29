@@ -354,8 +354,10 @@ it. Work runs on the default model that computer's Work settings name. A plan-on
 request or one that names a provider profile is refused.
 
 An agent in a Work thread can ask for a helper on another computer by naming that
-member. It sends a task and nothing else: no model, no earlier helpers to wait on,
-and none of the thread's conversation. The work asks before each edit, and never
+member and the Project to use there. Each computer has its own Project ids, so
+you give the agent the id from the other computer. It sends a task and nothing
+else: no model, no earlier helpers to wait on, and none of the thread's
+conversation. The work asks before each edit, and never
 runs above the thread's own access or the other computer's grant. If the thread
 has no hub, the member is unknown, the other computer has not granted it, or the
 thread is paused, the agent is told the request was refused. Reading the result

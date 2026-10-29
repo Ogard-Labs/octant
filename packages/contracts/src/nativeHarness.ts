@@ -308,6 +308,12 @@ export const NativeHarnessDelegateArguments = Schema.Union(
      */
     targetMemberId: Schema.optional(HubMemberId),
     /**
+     * The Project to run in on that member. Projects have their own ids on each
+     * host, so this is the member's id for it, never this host's; the member
+     * checks it against the grant it holds for this host.
+     */
+    targetProjectId: Schema.optional(ProjectId),
+    /**
      * Runs this child waits for. It starts only once all of them completed,
      * receives their replies, and never runs if one failed or was cancelled.
      */

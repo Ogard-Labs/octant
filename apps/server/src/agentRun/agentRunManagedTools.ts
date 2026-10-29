@@ -109,6 +109,12 @@ const AGENTS_TOOL_DEFINITION = {
         description:
           "Run the child on another member of the person's hub instead of this host. Work threads only, task only: no model, after, or parent context. The member's own grant decides what it may do, and its result comes back to this thread as outside content.",
       },
+      targetProjectId: {
+        type: "string",
+        maxLength: 36,
+        description:
+          "With targetMemberId: that member's own id for the Project to run in. Required there, since each host has its own Project ids; the member refuses one its grant does not cover.",
+      },
       runId: {
         type: "string",
         maxLength: 128,
@@ -161,6 +167,7 @@ interface AgentsToolInput {
   readonly reasoning?: string;
   readonly after?: ReadonlyArray<string>;
   readonly targetMemberId?: string;
+  readonly targetProjectId?: string;
   readonly runId?: string;
   readonly timeoutMs?: number;
 }
@@ -231,6 +238,8 @@ function parseInput(inputJson: string): AgentsToolInput | undefined {
     return undefined;
   const targetMemberId = record.targetMemberId;
   if (targetMemberId !== undefined && typeof targetMemberId !== "string") return undefined;
+  const targetProjectId = record.targetProjectId;
+  if (targetProjectId !== undefined && typeof targetProjectId !== "string") return undefined;
   const runId = record.runId;
   if (runId !== undefined && typeof runId !== "string") return undefined;
   const expectedVersion = record.expectedVersion;
@@ -261,6 +270,7 @@ function parseInput(inputJson: string): AgentsToolInput | undefined {
     ...(reasoning === undefined ? {} : { reasoning }),
     ...(after === undefined ? {} : { after }),
     ...(targetMemberId === undefined ? {} : { targetMemberId }),
+    ...(targetProjectId === undefined ? {} : { targetProjectId }),
     ...(runId === undefined ? {} : { runId }),
     ...(expectedVersion === undefined ? {} : { expectedVersion }),
     ...(message === undefined ? {} : { message }),
