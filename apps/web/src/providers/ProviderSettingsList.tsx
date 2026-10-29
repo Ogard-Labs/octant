@@ -61,6 +61,7 @@ import {
   driverLabel,
   outsideDriverHoldGuidance,
   providerRefusalGuidance,
+  providerWithheldReason,
   formatProbeTimestamp,
   incompatibleReadinessFacts,
   protocolLabel,
@@ -693,7 +694,11 @@ function ProviderRow(props: ProviderRowProps) {
   const detectedLocally = isDetectedLocally(props.instance, props.discoverySnapshot);
   const canEnable = canEnableProvider(props.instance, props.discoverySnapshot, detectedLocally);
   const detectedButDisabled = !props.instance.enabled && detectedLocally;
-  const enableBlocked = !props.instance.enabled && !canEnable;
+  // A driver the host withholds cannot be turned on; the card says why instead
+  // of inviting it.
+  const withheldReason = providerWithheldReason(props.instance, props.observed);
+  const withheldOff = !props.instance.enabled && withheldReason !== undefined;
+  const enableBlocked = withheldOff || (!props.instance.enabled && !canEnable);
   // A disabled binary-backed provider the finished scan never found: the switch
   // stays usable and the row says why the scan is silent. A driver the latest
   // scan never reached — the usual cause is the scan running out of its time
@@ -703,11 +708,12 @@ function ProviderRow(props: ProviderRowProps) {
     props.discoverySnapshot?.searchedDirectories?.some(
       (entry) => entry.driverKind === props.instance.driverKind,
     ) === true;
-  const scanSilence =
-    !props.instance.enabled &&
-    canEnable &&
-    !detectedLocally &&
-    providerBinaryPath(props.instance) !== undefined
+  const scanSilence = withheldOff
+    ? withheldReason
+    : !props.instance.enabled &&
+        canEnable &&
+        !detectedLocally &&
+        providerBinaryPath(props.instance) !== undefined
       ? scanCoveredDriver
         ? "Not found by the latest scan in the locations it searched — you can still enable it; the host checks the binary first."
         : "The latest scan did not check this provider — you can still enable it; the host checks the binary first."
@@ -897,10 +903,9 @@ function ProviderRow(props: ProviderRowProps) {
           disabled={disabled || enableBlocked}
           {...(enableBlocked
             ? {
-                disabledReason: providerDetectionBlockedReason(
-                  props.discoverySnapshot,
-                  hostPlatform,
-                ),
+                disabledReason:
+                  withheldReason ??
+                  providerDetectionBlockedReason(props.discoverySnapshot, hostPlatform),
               }
             : {})}
           label={`Enable ${name}`}

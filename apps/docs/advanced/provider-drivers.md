@@ -222,7 +222,8 @@ await runOutsideDriverConformance({
 ```
 
 The kit checks the handshake, the probe, a streamed answer, that the driver
-keeps answering after a cancel and after a session ends, that its failures
+keeps answering after a cancel (even one that lands while it is reading an
+answer) and after a session ends, that its failures
 carry a category, and that every request it asks for stays on the configured
 address and asks for the key only where the provider sends it. It hands the
 driver response bodies in small pieces, as Octant does. Passing the kit

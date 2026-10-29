@@ -191,6 +191,39 @@ const defaultHostContext = {
 export type BundledProviderDriverActivationPatch = Partial<ExtensionActivationContext>;
 
 /**
+ * Bundled drivers Octant does not offer, each with the reason a person sees
+ * where an existing instance of it reports unavailable. A withheld driver is
+ * not admitted: discovery offers nothing for it, no instance is created, and no
+ * process starts. Stored instances and their threads stay. Remove the entry to
+ * offer the driver again.
+ *
+ * fx 0.0.15 under Octant's deny-default Seatbelt profile (denied System
+ * Keychain reads, measured 2026-10-28): fx's HTTP pool aborts certificate
+ * loading instead of falling back to /etc/ssl/cert.pem, so it cannot reach the
+ * Vercel AI Gateway and its model catalog drops to one model. Octant does not
+ * grant fx Keychain reads. Remove this entry at the first stock fx release that
+ * falls back to /etc/ssl/cert.pem.
+ */
+const WITHHELD_BUNDLED_PROVIDER_DRIVERS: Readonly<
+  Partial<Record<ProviderDriverKind, { readonly reason: string }>>
+> = {
+  fx: {
+    reason:
+      "fx is not offered yet: the current fx release cannot load certificates inside Octant's sandbox, so it cannot reach the Vercel AI Gateway. Your fx provider and its threads are kept.",
+  },
+};
+
+/** Why Octant withholds this bundled driver, or undefined when it is offered. */
+export function bundledProviderDriverWithheldReason(
+  driverKind: ProviderDriverKind,
+): string | undefined {
+  return WITHHELD_BUNDLED_PROVIDER_DRIVERS[driverKind]?.reason;
+}
+
+const withheldPatch = (driverKind: ProviderDriverKind): BundledProviderDriverActivationPatch =>
+  bundledProviderDriverWithheldReason(driverKind) === undefined ? {} : { compatible: false };
+
+/**
  * Host-scope activation for bundled vendor drivers. Packages are reviewed,
  * enabled by default, and safe in Chat, Work, and Code. A patch can flip the
  * plugin switch, component switch, or compatibility without inventing a
@@ -223,7 +256,10 @@ export function resolveBundledProviderDriverActivation(
   patch: BundledProviderDriverActivationPatch = {},
 ) {
   const component = bundledProviderDriverComponent(plugin);
-  const activation = bundledProviderDriverActivation(patch);
+  const activation = bundledProviderDriverActivation({
+    ...withheldPatch(plugin.driverKind),
+    ...patch,
+  });
   if (!isExtensionComponentModeSafe("chat", component)) {
     return { kind: "blocked" as const, reason: "mode-prohibited" as const };
   }

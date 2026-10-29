@@ -81,6 +81,29 @@ describe("first-run provider readiness", () => {
     ]);
   });
 
+  it("gives an Off provider the host's withheld reason instead of the plain turned-off line", () => {
+    const reason = "fx is not offered yet: the current fx release cannot load certificates.";
+    const fx = instance({ displayName: "fx", driverKind: "fx", enabled: false });
+
+    const summary = summarize({
+      instances: [fx],
+      observedByInstance: new Map([
+        [
+          fx.id,
+          observed({
+            readiness: "unavailable",
+            processState: "stopped",
+            models: [],
+            reason: "driver-not-admitted",
+            message: reason,
+          }),
+        ],
+      ]),
+    });
+
+    expect(summary.providers[0]).toMatchObject({ state: "disabled", detail: reason });
+  });
+
   it("reports a probed provider as ready only when the host also observed models", () => {
     const withModels = summarize({
       instances: [instance()],
