@@ -956,6 +956,13 @@ export class HubService {
               wake: {
                 ...hub.wake,
                 spokes: hub.wake.spokes.filter((spoke) => String(spoke.memberId) !== memberId),
+                ...(hub.wake.withdrawals === undefined
+                  ? {}
+                  : {
+                      withdrawals: hub.wake.withdrawals.filter(
+                        (withdrawal) => String(withdrawal.memberId) !== memberId,
+                      ),
+                    }),
               },
             }),
         // A removed member loses its owner powers here with the roster entry.

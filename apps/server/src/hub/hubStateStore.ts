@@ -83,10 +83,21 @@ export const WakeSpokeRecord = Schema.Struct({
 }).annotations(strict);
 export type WakeSpokeRecord = typeof WakeSpokeRecord.Type;
 
+/**
+ * When a spoke last withdrew its wake state. It carries no times and no address and
+ * never wakes anything; it only stops an older hand-back from bringing them back.
+ */
+export const WakeWithdrawal = Schema.Struct({
+  memberId: HubMemberId,
+  withdrawnAt: Schema.Int,
+}).annotations(strict);
+export type WakeWithdrawal = typeof WakeWithdrawal.Type;
+
 /** The hub's wake service: its own switch, off until the person turns it on, and the times it holds. */
 export const HubWakeState = Schema.Struct({
   enabled: Schema.Boolean,
   spokes: Schema.Array(WakeSpokeRecord),
+  withdrawals: Schema.optional(Schema.Array(WakeWithdrawal)),
   /** Counts the times the switch changed; spokes learn it from the heartbeat and resend when it moves. */
   generation: Schema.optional(Schema.Int),
   /** The revision of the last copy handed to the standbys; it only rises, so a late older copy can be told apart. */
