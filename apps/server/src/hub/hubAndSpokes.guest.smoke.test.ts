@@ -55,7 +55,7 @@ function guestTransport(network: HubTestNetwork): PinnedListenerTransportPort {
   };
 }
 
-async function startHubAndSpoke() {
+async function startHubAndSpoke(spokeNow?: () => number) {
   const network = new HubTestNetwork();
   const hub = await startHubTestHost({
     name: "Mac mini",
@@ -68,6 +68,7 @@ async function startHubAndSpoke() {
     address: "100.101.102.104",
     network,
     cleanups,
+    ...(spokeNow === undefined ? {} : { now: spokeNow }),
   });
   const enabled = hub.hub.enable(window);
   if (enabled.status !== "enabled") throw new Error(enabled.status);
@@ -296,6 +297,79 @@ describe("a guest joining a hub that has a spoke", () => {
     ).toEqual([]);
   });
 
+  it("answers a guest asking again with the device it already holds while that device is active", async () => {
+    const { network, hub, spoke } = await startHubAndSpoke();
+    const { record, signer } = await joinGuest(hub, network, spoke);
+    const target = guestSpokeTargets(record).find((entry) => entry.role === "spoke");
+    if (target === undefined) throw new Error("The roster gave no spoke.");
+    const ask = () =>
+      admitGuestOnSpoke({
+        target,
+        signer,
+        deviceLabel: "Phone",
+        transport: guestTransport(network),
+      });
+    const first = await ask();
+
+    const again = await ask();
+
+    if (first.status !== "admitted" || again.status !== "admitted")
+      throw new Error("Not admitted.");
+    expect(again.deviceId).toBe(first.deviceId);
+    expect(spoke.administration.listDevices().map((device) => device.state)).toEqual(["active"]);
+  });
+
+  it("admits a guest again with a new device when the one it holds expired from disuse", async () => {
+    let clock = Date.now();
+    const { network, hub, spoke } = await startHubAndSpoke(() => clock);
+    const { record, signer } = await joinGuest(hub, network, spoke);
+    const target = guestSpokeTargets(record).find((entry) => entry.role === "spoke");
+    if (target === undefined) throw new Error("The roster gave no spoke.");
+    const ask = () =>
+      admitGuestOnSpoke({
+        target,
+        signer,
+        deviceLabel: "Phone",
+        transport: guestTransport(network),
+        now: () => clock,
+      });
+    const first = await ask();
+    if (first.status !== "admitted") throw new Error("Not admitted.");
+
+    clock += 31 * 24 * 60 * 60 * 1_000;
+    const again = await ask();
+
+    if (again.status !== "admitted") throw new Error(JSON.stringify(again));
+    expect(again.deviceId).not.toBe(first.deviceId);
+    const states = new Map(
+      spoke.administration.listDevices().map((device) => [device.deviceId, device.state]),
+    );
+    expect(states.get(first.deviceId)).toBe("revoked");
+    expect(states.get(again.deviceId)).toBe("active");
+  });
+
+  it("refuses a guest whose device was revoked and creates no new one", async () => {
+    const { network, hub, spoke } = await startHubAndSpoke();
+    const { record, signer } = await joinGuest(hub, network, spoke);
+    const target = guestSpokeTargets(record).find((entry) => entry.role === "spoke");
+    if (target === undefined) throw new Error("The roster gave no spoke.");
+    const ask = () =>
+      admitGuestOnSpoke({
+        target,
+        signer,
+        deviceLabel: "Phone",
+        transport: guestTransport(network),
+      });
+    const first = await ask();
+    if (first.status !== "admitted") throw new Error("Not admitted.");
+    spoke.administration.revokeDevice({ deviceId: first.deviceId });
+
+    const again = await ask();
+
+    expect(again).toEqual({ status: "refused", httpStatus: 403, kind: "device-revoked" });
+    expect(spoke.administration.listDevices().map((device) => device.state)).toEqual(["revoked"]);
+  });
+
   it("keeps a left hub's guest devices to revoke while the device pairing is not running and revokes them once it is", async () => {
     const { network, hub, spoke } = await startHubAndSpoke();
     const { record, signer } = await joinGuest(hub, network, spoke);
@@ -340,6 +414,7 @@ describe("a guest joining a hub that has a spoke", () => {
       admitIntroducedDevice: () => {
         throw new Error("No admission is expected.");
       },
+      deviceLifecycle: () => "active",
       revokeDevice: (deviceId) => {
         spoke.administration.revokeDevice({ deviceId });
       },

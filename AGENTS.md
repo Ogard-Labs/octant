@@ -392,14 +392,17 @@ conditions below are met; it does not authorize merging or releasing.
   characters in October 2026 and hid the current state.)
 - An action only the maintainer can perform (a credential, a billed provider
   turn, a second machine, a signing key, a subjective sign-off) is recorded
-  once, in full, on the standing maintainer-actions list: the "Waiting on
-  Henrik" section of the current release project's description in Linear.
-  Each entry names the issue, the exact action, and what it unblocks. The
-  issue's status block still names the blocker in one line (owner
-  "maintainer", the prerequisite, and a link to the list) so the closeout
-  rule above is met, but the steps live on the list alone, so a maintainer
-  sitting can run the whole list in one pass and hygiene passes do not repeat
-  it per issue.
+  once, in full, as an item on the standing maintainer-actions issue, titled
+  "Maintainer live smokes". Each item names the issue, the exact action, and
+  what it unblocks. The issue's status block still names the blocker in one
+  line (owner "maintainer", the prerequisite, and a link to the list) so the
+  closeout rule above is met, but the steps live on the list alone, so a
+  maintainer sitting can run the whole list in one pass and hygiene passes do
+  not repeat it per issue.
+- An issue whose code is complete and whose only remaining items are
+  maintainer live checks is closed as Done. Those checks stay as items on the
+  maintainer-actions issue, which reports their results back to the issue they
+  confirm.
 - Reopen a closed issue only for a reproduced regression or evidence its closure
   was incorrect. Preserve the closure evidence and explain the reason.
 
@@ -432,7 +435,11 @@ once its owning specification documents its authority, privacy, and release
 boundaries. The authorization covers design and implementation; creating an
 account, spending money, submitting to a store, deploying a hosted service, or
 weakening any invariant each still needs a separate explicit maintainer
-action. Connectors (MCP servers added by hand, imported
+action. App Store distribution of a person's own apps is admitted (maintainer
+decision, 2026-10-28) under the
+[Apple devices distribution rules](docs/design/apple-devices.md#distribution):
+each upload, submission, and release is a local person's confirmed act.
+Connectors (MCP servers added by hand, imported
 from other tools on this Mac, signed in to, or chosen from the bundled catalog)
 are in scope under the architecture's
 [connector rules](docs/architecture.md#extensions-and-skills): user-added packages

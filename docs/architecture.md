@@ -30,13 +30,19 @@ The design rests on a small set of invariants that every package obeys:
   on. Remote access is host-to-device over the user's
   own network; traffic among a person's own hub and spokes there is not a
   third-party call ([Hub and spokes](design/hub-and-spokes.md), designed and
-  not built). Four host-initiated
+  not built). Five host-initiated
   HTTPS calls exist in code: desktop update checks against a signed feed, managed
   device-tool update checks against the npm registry, server marketplace
   fetches when the person searches, inspects, previews, or installs from the
-  catalog, and calls to the public Canvas share service when the person
+  catalog, calls to the public Canvas share service when the person
   publishes, updates, or revokes a public link (and the host retries a revoke
-  it could not complete). All have a Settings off switch: Public links starts
+  it could not complete), and App Store Connect API requests to
+  `api.appstoreconnect.apple.com` only (no other host, no redirect) when a
+  person checks, submits for App Review, or releases a version of their own
+  app, from the Apple workbench or by asking the thread's agent. The first four have a Settings off switch; App Store Connect is
+  reached only from a person's action, and a host with no App Store Connect key
+  makes no request ([Apple physical devices and distribution](design/apple-devices.md#distribution)).
+  The switches: Public links starts
   off and off means no share-service request except finishing a revoke; marketplace off means no catalog
   request; Updates off disables automatic update checks (manual Check for
   updates may still contact the signed feed); device tools' automatic updates
@@ -717,7 +723,26 @@ device.
 `/api/apple/devices` is readable by a paired device, and
 `/api/apple/device-leases`, `/api/apple/device-actions`, and
 `/api/apple/device-screenshots` (the pixels of a thread's latest device
-screenshot) are local-only.
+screenshot) are local-only. The App Store Connect API key for distribution has
+its own credential broker family with no read-back route, entered only
+through the local-only `/api/desktop/app-store-connect-key/` routes from a
+desktop window or `octant apple key`. The Current Release Boundary admits
+distribution since 2026-10-28, so key entry is open on a Mac, and each
+upload, submission, and release is a local person's confirmed act under the
+distribution rules of that specification. A person in the Apple workbench (through
+the local-only `/api/apple/distribution-preparations` and
+`/api/apple/distribution`), or the thread's agent, can ask to upload its app: the host reads the exact build and App Store signature, a person at
+the Mac confirms that build, and only then is the project archived unsigned,
+signed by `xcodebuild -exportArchive`, and uploaded with `xcrun altool`, using
+a key file the credential broker writes for that one upload and removes; the
+server never reads the key. The same person, or the agent when the person asks, can submit
+the version App Store Connect holds for the project for App Review, or release
+a version approved and waiting for a manual release: the host reads the
+version from App Store Connect (local-only `/api/apple/distribution-versions`),
+a person at the Mac confirms that exact version, and only then is it submitted
+or released through `/api/apple/distribution`. Each App Store Connect API
+request carries a token the credential broker signs (see "App Store Connect
+request signing" under [security and authority](#security-and-authority)).
 
 On an approval-gated thread, **Allow input** is the confirmation that opens
 that destination; clicks, typing, Home, and Lock never raise it
@@ -5004,8 +5029,12 @@ the model at another size.
   `refused`) in its message and, for the first three, in the journaled
   `unroutable` decision. A failure that was not retried, or that happened after
   output streamed, never moves the turn.
-- **Session.** `NativeHarnessSessionStore` journals one session per thread:
-  routing decisions, turn records, context reductions, advisor interventions,
+- **Session.** `NativeHarnessSessionStore` journals one session per thread.
+  Turn start and settlement are recorded for every provider so a crash or host
+  restart can expose [conversation recovery](design/workspace.md#continuing-after-a-restart).
+  The same server admission holds a recovered session until a person resumes it;
+  recording lifecycle facts does not enable harness tools, routing, or advisor
+  calls for another provider. The store also keeps routing decisions, turn records, context reductions, advisor interventions,
   the steering notes a person typed (queued, handed to the lead inside a tool
   result, dropped at the turn's end — so a restart keeps an undelivered one).
   A client mints each note's id, and a queue of an id among the thread's
@@ -6614,11 +6643,14 @@ protocol on macOS, and admission (trust at a digest, a provider added off from
 a local window, host-run Verify tools, and the process stopped whenever the
 driver stops being effective) are built, as is moving an instance to a newly
 trusted digest of its driver with its records cleared, and a crash-limit hold
-journaled at the digest that crashed, which a restart does not lift. Publisher signatures
-are not. Only a macOS host admits one. The author kit
-(`@octant/provider-sdk/outside-driver`, `outside-driver-serve`, and
-`outside-driver-conformance`) and an example loopback driver package live in
-the provider SDK; its conformance evidence is advisory and enables nothing.
+journaled at the digest that crashed, which a restart does not lift. Publisher
+signatures are built too: a signature file is verified at inspection, the key is
+pinned per package name and source at first trust, and a version by another key
+is held until the person re-trusts the new publisher at a local window. Only a
+macOS host admits one. The author kit (`@octant/provider-sdk/outside-driver`,
+`outside-driver-serve`, `outside-driver-conformance`, and `outside-driver-sign`)
+and an example loopback driver package live in the provider SDK; its
+conformance evidence is advisory and enables nothing.
 
 The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a
@@ -8567,6 +8599,21 @@ find-identity` and `codesign`, through a port with no network; `codesign`
   signs nothing without the secret key. Removing the endpoint, or changing its
   region, portal, account, or role, ends the portal session and deletes the
   grant before the change is journaled.
+- **App Store Connect request signing.** The credential broker signs App
+  Store Connect API tokens itself
+  ([`appStoreConnectKeySource.ts`](../packages/host-runtime/src/appStoreConnectKeySource.ts)):
+  an ES256 JSON Web Token with the key ID in its header and the issuer ID, the
+  `appstoreconnect-v1` audience, and an expiry fifteen minutes after issue in
+  its claims, signed with the platform's crypto. The server's sign request
+  names the App Store Connect credential reference and nothing else, so a
+  caller cannot choose the claims, lifetime, or key; the answer is that one
+  token, which the server sends in one step's requests and never keeps. The
+  key comes from the broker's own App Store Connect family or, when the
+  person saved a 1Password secret reference in its place, from the person's
+  `op read` at the moment the broker signs a token or writes an upload's key
+  file, held for that one operation. `op` missing, signed out, or declined
+  refuses the step as `key-source-unavailable`, with no retry. The reference
+  stays in the broker's store and is never journaled.
 - **Artifact replica membership.** Each replica entry carries a detached
   Ed25519 signature from the device signing key the writing host holds for its
   replica instance, in a credential namespace of its own that provider
@@ -9108,7 +9155,12 @@ owning specification documents its authority, privacy, and release
 boundaries. The authorization covers design and implementation; creating an
 account, spending money, submitting to a store, deploying a hosted service, or
 weakening an invariant in this document each still needs a separate explicit
-maintainer action. The earlier holds and their start gates
+maintainer action. App Store distribution of a person's own apps was admitted
+on 2026-10-28 ([Apple devices, decision 7](design/apple-devices.md#maintainer-decisions)):
+Octant may upload a person's build, submit a version for App Review, and
+release an approved version, each only when a local person confirms that exact
+build or version; admitting it creates no account and submits nothing on its
+own. The earlier holds and their start gates
 remain as rationale in [release-boundary holds](release-boundary-holds.md).
 The connector / OAuth marketplace hold was lifted on 2026-10-20 under the
 [Connectors and user-added MCP servers](#extensions-and-skills) rules: a

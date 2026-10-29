@@ -429,6 +429,18 @@
   color: var(--oct-warn-fg);
 }
 
+/* An outside driver's publisher keys, and the actions that change its pin. */
+.extcard > .extensions-settings__publisher {
+  grid-column: 2 / -1;
+  display: grid;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-3);
+}
+
+.extensions-settings__publisher > button {
+  justify-self: start;
+}
+
 /* A failure is one sentence in the warning colour: "code: message". */
 .extensions-settings__failure {
   grid-column: 2 / -1;

@@ -13,6 +13,7 @@ import {
   decodeNativeHarnessFollowUpSet,
   decodeNativeHarnessToolArguments,
   decodeNativeHarnessSession,
+  decodeNativeHarnessSessionCommand,
   decodeNativeHarnessToolResultBounds,
   decodeNativeHarnessTurnRecord,
 } from "./nativeHarness";
@@ -29,6 +30,22 @@ const lead = {
 };
 
 describe("native harness tools", () => {
+  it("requires an explicit opt-in to continue a restart-interrupted session", () => {
+    const command = {
+      kind: "resume-native-harness-session",
+      sessionId: session,
+      expectedVersion: 4,
+    };
+    expect(decodeNativeHarnessSessionCommand(command)).toEqual(command);
+    expect(decodeNativeHarnessSessionCommand({ ...command, continueInterrupted: true })).toEqual({
+      ...command,
+      continueInterrupted: true,
+    });
+    expect(() =>
+      decodeNativeHarnessSessionCommand({ ...command, continueInterrupted: false }),
+    ).toThrow();
+  });
+
   it("offers the nine working tools, the three harness reads, delegation, and the goal tools", () => {
     expect(NATIVE_HARNESS_TOOL_NAMES.length).toBe(16);
     expect(NATIVE_HARNESS_TOOL_NAMES).toContain("journal-lookup");

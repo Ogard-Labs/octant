@@ -420,6 +420,7 @@ describe("comment markers on table rows", () => {
   function comments(onOpen = vi.fn()) {
     return {
       openCounts: new Map([["vendors", 2]]),
+      openNodeCounts: new Map(),
       openRowCounts: new Map([["vendors", new Map([["globex", 2]])]]),
       onOpen,
     };

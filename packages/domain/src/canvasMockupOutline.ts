@@ -32,6 +32,20 @@ export const CANVAS_MOCKUP_COMPONENT_NAME: Readonly<Record<CanvasMockupComponent
   nav: "Navigation",
   modal: "Modal",
   toast: "Toast",
+  search: "Search",
+  breadcrumb: "Breadcrumb",
+  pagination: "Pagination",
+  stepper: "Stepper",
+  progress: "Progress",
+  slider: "Slider",
+  menu: "Menu",
+  footer: "Footer",
+  hero: "Hero",
+  media: "Media",
+  map: "Map",
+  chat: "Chat",
+  "chat-message": "Chat message",
+  instance: "Component",
 };
 
 export const CANVAS_MOCKUP_DEVICE_NAME: Readonly<Record<CanvasMockupDevice, string>> = {
@@ -87,15 +101,14 @@ export function canvasMockupNodeReading(node: CanvasMockupNode, callout?: number
   return parts.join(", ");
 }
 
-/**
- * The block's frames, each a tree built from the parent chain. A parent the
- * block does not hold puts the node at the top level rather than dropping it;
- * the domain policy refuses such a block before it is stored.
- */
-export function canvasMockupFrames(block: CanvasMockupBlock): ReadonlyArray<CanvasMockupFrame> {
-  const ids = new Set(block.nodes.map((node) => String(node.nodeId)));
+/** The top-level branches of a node list, each a tree built from the parent chain. */
+function mockupTree(
+  nodes: ReadonlyArray<CanvasMockupNode>,
+  place: (node: CanvasMockupNode) => ReadonlyArray<CanvasMockupBranch> | undefined,
+): ReadonlyArray<CanvasMockupBranch> {
+  const ids = new Set(nodes.map((node) => String(node.nodeId)));
   const byParent = new Map<string, CanvasMockupNode[]>();
-  for (const node of block.nodes) {
+  for (const node of nodes) {
     const parent =
       node.parentId !== undefined && ids.has(String(node.parentId)) ? String(node.parentId) : "";
     const list = byParent.get(parent) ?? [];
@@ -107,9 +120,33 @@ export function canvasMockupFrames(block: CanvasMockupBlock): ReadonlyArray<Canv
       .filter((node) => !seen.has(String(node.nodeId)))
       .map((node) => ({
         node,
-        children: build(String(node.nodeId), new Set([...seen, String(node.nodeId)])),
+        children:
+          place(node) ?? build(String(node.nodeId), new Set([...seen, String(node.nodeId)])),
       }));
-  const roots = build("", new Set());
+  return build("", new Set());
+}
+
+/**
+ * The block's frames, each a tree built from the parent chain. A parent the
+ * block does not hold puts the node at the top level rather than dropping it;
+ * the domain policy refuses such a block before it is stored. An instance's
+ * children are the definition it places, built the same way, so every surface
+ * that walks the frames (the board, the outline, the generated page, the
+ * exports) draws the placed subtree; a definition never holds an instance, so
+ * the expansion is one level deep.
+ */
+export function canvasMockupFrames(block: CanvasMockupBlock): ReadonlyArray<CanvasMockupFrame> {
+  const definitions = new Map(
+    (block.definitions ?? []).map((definition) => [
+      String(definition.defId),
+      mockupTree(definition.nodes, () => undefined),
+    ]),
+  );
+  const roots = mockupTree(block.nodes, (node) =>
+    node.component === "instance" && node.defId !== undefined
+      ? (definitions.get(String(node.defId)) ?? [])
+      : undefined,
+  );
   if (block.variants === undefined) return [{ key: "screen", label: undefined, roots }];
   return block.variants.map((variant) => ({
     key: String(variant.variantId),

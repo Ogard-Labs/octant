@@ -11,6 +11,12 @@ export interface MobileNotificationPermissionPort {
    * storage for notifications.
    */
   readonly getNotificationPublicKey: (hostId: string) => Promise<string | undefined>;
+  /**
+   * Removes the notifications this phone shows for one computer and forgets
+   * its notification key, so nothing that computer sealed can be opened
+   * again. Runs when the computer is removed, revoked, or signed out of.
+   */
+  readonly forgetHost: (hostId: string) => Promise<void>;
   readonly platform: "ios" | "android";
 }
 
@@ -33,5 +39,6 @@ export function createUnavailableNotificationPermissionPort(
     async getNotificationPublicKey() {
       return undefined;
     },
+    async forgetHost() {},
   };
 }

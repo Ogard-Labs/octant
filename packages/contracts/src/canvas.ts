@@ -118,6 +118,22 @@ export const CANVAS_MAX_DESIGN_MARKUP_LENGTH = 65_536;
 // Speaker or screen notes are prose a presenter reads, not markup: a page of
 // text per frame.
 export const CANVAS_MAX_DESIGN_NOTES_LENGTH = 2_000;
+// A flow places screens, not copies, so its budgets are small references: as
+// many screens as a design may hold frames, and four links per screen.
+export const CANVAS_MAX_FLOW_SCREENS = 24;
+export const CANVAS_MAX_FLOW_EDGES = 96;
+// An edge label says what the transition is ("Run search"), not a sentence.
+export const CANVAS_MAX_FLOW_LABEL_LENGTH = 80;
+// A reusable component is a small fixed subtree: few definitions, each small,
+// and their nodes count against the block's own node budget as well.
+export const CANVAS_MAX_MOCKUP_DEFINITIONS = 8;
+export const CANVAS_MAX_MOCKUP_DEFINITION_NODES = 24;
+// A deck is an ordered set of references, so its budget is small: as many
+// slides as a design may hold frames.
+export const CANVAS_MAX_DECK_SLIDES = 24;
+// A flow's callouts are the author's shortest notes, like a mockup's.
+export const CANVAS_MAX_FLOW_ANNOTATIONS = 12;
+export const CANVAS_MAX_FLOW_ANNOTATION_LENGTH = 240;
 // A diagram node's detail is a subtitle under its label, not a paragraph.
 export const CANVAS_MAX_DIAGRAM_DETAIL_LENGTH = 120;
 // A group inside a group inside a group: deeper boundaries stop reading as
@@ -253,6 +269,14 @@ export const CANVAS_THREAD_OWNED_SCHEMA_VERSION = 20;
 export const CANVAS_DESIGN_FIELDS_SCHEMA_VERSION = 21;
 // A chart's own title and subtitle, and a point's callout note and emphasis.
 export const CANVAS_CHART_CALLOUTS_SCHEMA_VERSION = 22;
+// The flow block, which places mockup and design screens on a board with
+// labeled edges between them.
+export const CANVAS_FLOW_SCHEMA_VERSION = 23;
+// The deck block, which presents the document's own screens and data blocks
+// as one ordered set of slides.
+export const CANVAS_DECK_SCHEMA_VERSION = 25;
+// Flow annotations: numbered callouts pinned to a flow's screens.
+export const CANVAS_FLOW_ANNOTATIONS_SCHEMA_VERSION = 26;
 // The metric's sparkline, goodDirection, and caption arrived with the bar list.
 export const CANVAS_METRIC_TREND_SCHEMA_VERSION = 7;
 
@@ -553,6 +577,8 @@ export const CanvasBlockKind = Schema.Literal(
   "dashboard",
   "tabs",
   "columns",
+  "flow",
+  "deck",
 );
 export type CanvasBlockKind = typeof CanvasBlockKind.Type;
 
@@ -1986,9 +2012,31 @@ export const CANVAS_MOCKUP_CATALOG_COMPONENTS = [
   "modal",
   "toast",
 ] as const;
+// The library wave: controls a screen's chrome needs (search, breadcrumb,
+// pagination, stepper, progress, slider, menu), its editorial shapes (hero,
+// footer, media, map), and a conversation (chat, chat-message). Plus what a
+// block may hold beside them: declared images and reusable definitions.
+export const CANVAS_MOCKUP_LIBRARY_SCHEMA_VERSION = 24;
+export const CANVAS_MOCKUP_LIBRARY_COMPONENTS = [
+  "search",
+  "breadcrumb",
+  "pagination",
+  "stepper",
+  "progress",
+  "slider",
+  "menu",
+  "footer",
+  "hero",
+  "media",
+  "map",
+  "chat",
+  "chat-message",
+  "instance",
+] as const;
 export const CanvasMockupComponent = Schema.Literal(
   ...CANVAS_MOCKUP_LEGACY_COMPONENTS,
   ...CANVAS_MOCKUP_CATALOG_COMPONENTS,
+  ...CANVAS_MOCKUP_LIBRARY_COMPONENTS,
 );
 export type CanvasMockupComponent = typeof CanvasMockupComponent.Type;
 
@@ -2080,6 +2128,7 @@ const CanvasMockupFrameEdge = Schema.Int.pipe(
  * can name its rows. Each optional field belongs to the components the domain
  * policy names; none of them carries markup, a style, or an image source.
  */
+
 export const CanvasMockupNode = Schema.Struct({
   nodeId: CanvasMockupNodeId,
   component: CanvasMockupComponent,
@@ -2112,6 +2161,10 @@ export const CanvasMockupNode = Schema.Struct({
       Schema.lessThanOrEqualTo(CANVAS_MAX_MOCKUP_GRID_COLUMNS),
     ),
   ),
+  /** A progress bar's or slider's reading, or a stepper's current step, 0 to 100. */
+  progress: Schema.optional(Schema.Int.pipe(Schema.nonNegative(), Schema.lessThanOrEqualTo(100))),
+  /** The reusable definition an instance places. */
+  defId: Schema.optional(boundedToken("CanvasMockupDefId")),
 }).annotations(strict);
 export type CanvasMockupNode = typeof CanvasMockupNode.Type;
 
@@ -2131,6 +2184,17 @@ export const CanvasMockupAnnotation = Schema.Struct({
   note: boundedNonEmptyText(CANVAS_MAX_MOCKUP_NOTE_LENGTH),
 }).annotations(strict);
 export type CanvasMockupAnnotation = typeof CanvasMockupAnnotation.Type;
+
+/** One reusable local component: a fixed subtree placed by instances. */
+export const CanvasMockupDefinition = Schema.Struct({
+  defId: boundedToken("CanvasMockupDefId"),
+  label: CanvasMockupText,
+  nodes: Schema.Array(CanvasMockupNode).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(CANVAS_MAX_MOCKUP_DEFINITION_NODES),
+  ),
+}).annotations(strict);
+export type CanvasMockupDefinition = typeof CanvasMockupDefinition.Type;
 
 export const CanvasMockupBlock = Schema.Struct({
   ...CanvasBlockFields,
@@ -2153,6 +2217,10 @@ export const CanvasMockupBlock = Schema.Struct({
   nodes: Schema.Array(CanvasMockupNode).pipe(Schema.maxItems(CANVAS_MAX_MOCKUP_NODES)),
   annotations: Schema.optional(
     Schema.Array(CanvasMockupAnnotation).pipe(Schema.maxItems(CANVAS_MAX_MOCKUP_ANNOTATIONS)),
+  ),
+  /** Local components this block's instances place. */
+  definitions: Schema.optional(
+    Schema.Array(CanvasMockupDefinition).pipe(Schema.maxItems(CANVAS_MAX_MOCKUP_DEFINITIONS)),
   ),
 }).annotations(strict);
 export type CanvasMockupBlock = typeof CanvasMockupBlock.Type;
@@ -2418,6 +2486,181 @@ export const CanvasDesignAssetsOutcome = Schema.Union(
   }).annotations(strict),
 );
 export type CanvasDesignAssetsOutcome = typeof CanvasDesignAssetsOutcome.Type;
+
+// ── Flow ──────────────────────────────────────────────────────────────────────
+//
+// A flow composes screens the document already holds into one board: each
+// screen is a reference (a mockup variant, or one frame of a design that runs
+// no script), and the edges are the transitions between them. The block owns
+// the graph alone — the mockup or design keeps the screen's content — so the
+// board is cheap inside the block budget and a revision to a screen shows on
+// every flow that names it.
+
+/**
+ * Whether a mockup uses anything the library wave added: one of its
+ * components, a node's progress reading or definition reference, or reusable
+ * definitions. Reads loose fields so the domain's declared-version check can
+ * ask the same question of a document that did not decode.
+ */
+export function canvasMockupUsesLibrary(block: {
+  readonly kind?: unknown;
+  readonly nodes?: unknown;
+  readonly definitions?: unknown;
+}): boolean {
+  if (block.kind !== "mockup") return false;
+  if (block.definitions !== undefined) return true;
+  const library = new Set<string>(CANVAS_MOCKUP_LIBRARY_COMPONENTS);
+  const nodes: ReadonlyArray<unknown> = Array.isArray(block.nodes) ? block.nodes : [];
+  return nodes.some(
+    (node) =>
+      typeof node === "object" &&
+      node !== null &&
+      (("component" in node && typeof node.component === "string" && library.has(node.component)) ||
+        ("defId" in node && node.defId !== undefined) ||
+        ("progress" in node && node.progress !== undefined)),
+  );
+}
+
+/**
+ * The mockup components a flow edge may start from. A hotspot is a control a
+ * person could tap, so the interactive list is closed: naming one is data the
+ * renderer can draw as a link without a script, and a text or image node is
+ * refused rather than guessed at.
+ */
+export const CANVAS_FLOW_HOTSPOT_COMPONENTS = [
+  "button",
+  "list-row",
+  "nav",
+  "tabs",
+  "select",
+  "checkbox",
+  "toggle",
+  "search",
+  "menu",
+  "pagination",
+  "stepper",
+  "slider",
+] as const;
+export type CanvasFlowHotspotComponent = (typeof CANVAS_FLOW_HOTSPOT_COMPONENTS)[number];
+export const CanvasFlowHotspotComponent = Schema.Literal(...CANVAS_FLOW_HOTSPOT_COMPONENTS);
+
+/**
+ * One screen on the board: a mockup block at one variant (absent is its
+ * single frame), or one frame of a design that runs no script. `x` and `y`
+ * are a journaled placement, set by a person's drag through the layout-revise
+ * path, and `positioned` says the placement is authoritative.
+ */
+export const CanvasFlowScreen = Schema.Struct({
+  screenId: CanvasNodeId,
+  blockId: CanvasBlockId,
+  /** One variant of a mockup; absent is its single frame. */
+  variantId: Schema.optional(CanvasMockupVariantId),
+  /** One frame of a design that runs no script; required when the block is a design. */
+  frameId: Schema.optional(CanvasDesignFrameId),
+  x: Schema.optional(FiniteNumber),
+  y: Schema.optional(FiniteNumber),
+  positioned: Schema.optional(Schema.Literal(true)),
+}).annotations(strict);
+export type CanvasFlowScreen = typeof CanvasFlowScreen.Type;
+
+/**
+ * One transition between two screens of the same flow. `fromNodeId` names the
+ * hotspot the person taps, a node of the from-screen's mockup from the
+ * interactive list; absent is a screen-level link, and a design screen has no
+ * hotspots, so an edge from one always omits it.
+ */
+/** A numbered callout pinned to a flow screen; its number is its place in the list, and a comment on it anchors to the screen's node. */
+export const CanvasFlowAnnotation = Schema.Struct({
+  nodeId: CanvasNodeId,
+  note: boundedNonEmptyText(CANVAS_MAX_FLOW_ANNOTATION_LENGTH),
+}).annotations(strict);
+export type CanvasFlowAnnotation = typeof CanvasFlowAnnotation.Type;
+
+export const CanvasFlowEdge = Schema.Struct({
+  edgeId: CanvasEdgeId,
+  fromScreenId: CanvasNodeId,
+  toScreenId: CanvasNodeId,
+  fromNodeId: Schema.optional(CanvasNodeId),
+  label: Schema.optional(boundedNonEmptyText(CANVAS_MAX_FLOW_LABEL_LENGTH)),
+  tone: Schema.optional(CanvasDiagramTone),
+}).annotations(strict);
+export type CanvasFlowEdge = typeof CanvasFlowEdge.Type;
+
+/**
+ * A flow block: the screens of one app or site, connected. The layout is
+ * `auto` until a person drags a screen, which journals `manual` positions,
+ * exactly as a diagram board does.
+ */
+export const CanvasFlowBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("flow"),
+  title: CanvasLabel,
+  layout: Schema.optional(CanvasDiagramLayoutKind),
+  screens: Schema.Array(CanvasFlowScreen).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(CANVAS_MAX_FLOW_SCREENS),
+  ),
+  edges: Schema.Array(CanvasFlowEdge).pipe(Schema.maxItems(CANVAS_MAX_FLOW_EDGES)),
+  annotations: Schema.optional(
+    Schema.Array(CanvasFlowAnnotation).pipe(Schema.maxItems(CANVAS_MAX_FLOW_ANNOTATIONS)),
+  ),
+}).annotations(strict);
+export type CanvasFlowBlock = typeof CanvasFlowBlock.Type;
+
+/** Whether a flow carries callouts, which arrived at the annotations version. */
+export function canvasFlowUsesAnnotations(block: {
+  readonly kind?: unknown;
+  readonly annotations?: unknown;
+}): boolean {
+  return block.kind === "flow" && Array.isArray(block.annotations) && block.annotations.length > 0;
+}
+
+// ── Deck ──────────────────────────────────────────────────────────────────────
+//
+// A deck presents what the document already holds, in the order the author
+// chooses: a design's frame, a mockup screen, or a data block, each with the
+// presenter's own notes. It references rather than copies, so a slide keeps
+// its block's one definition, comments, and identity, and Present walks the
+// set across blocks.
+
+/** The block kinds a slide may show. */
+export const CANVAS_DECK_SLIDE_KINDS = [
+  "design",
+  "mockup",
+  "chart",
+  "table",
+  "metric",
+  "progress",
+  "status",
+] as const;
+export type CanvasDeckSlideKind = (typeof CANVAS_DECK_SLIDE_KINDS)[number];
+
+/**
+ * One slide: a block the document holds, with the frames and variants named
+ * where the block has them, and the presenter's own notes, which never
+ * leave the host.
+ */
+export const CanvasDeckSlide = Schema.Struct({
+  slideId: CanvasNodeId,
+  blockId: CanvasBlockId,
+  /** A design slide names the frame it shows; required for a design. */
+  frameId: Schema.optional(CanvasDesignFrameId),
+  /** A mockup slide names the variant it shows; required when the mockup declares variants. */
+  variantId: Schema.optional(CanvasMockupVariantId),
+  notes: Schema.optional(boundedNonEmptyText(CANVAS_MAX_DESIGN_NOTES_LENGTH)),
+}).annotations(strict);
+export type CanvasDeckSlide = typeof CanvasDeckSlide.Type;
+
+export const CanvasDeckBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("deck"),
+  title: CanvasLabel,
+  slides: Schema.Array(CanvasDeckSlide).pipe(
+    Schema.minItems(2),
+    Schema.maxItems(CANVAS_MAX_DECK_SLIDES),
+  ),
+}).annotations(strict);
+export type CanvasDeckBlock = typeof CanvasDeckBlock.Type;
 
 /**
  * Where the host serves a running design's page. A reader never names a
@@ -2713,6 +2956,8 @@ export const CanvasBlock = Schema.Union(
   CanvasActionBlock,
   CanvasTabsBlock,
   CanvasColumnsBlock,
+  CanvasFlowBlock,
+  CanvasDeckBlock,
 );
 export type CanvasBlock = typeof CanvasBlock.Type;
 
@@ -2726,6 +2971,207 @@ export type CanvasBlock = typeof CanvasBlock.Type;
 // copies it.
 export const CanvasPresentation = Schema.Literal("inline", "sidebar");
 export type CanvasPresentation = typeof CanvasPresentation.Type;
+
+/**
+ * The loose shape the version gates read: enough of a definition to ask
+ * whether it carries a gated kind or hint, without requiring it to decode.
+ */
+interface CanvasVersionGateInput {
+  readonly schemaVersion: number;
+  readonly presentation?: unknown;
+  readonly provenance: unknown;
+  readonly blocks: ReadonlyArray<Record<string, unknown>>;
+}
+
+/** One version floor: what a document must not carry before the version that introduced it. */
+interface CanvasVersionGate {
+  /** The Canvas schema version that introduced the gated thing. */
+  readonly since: number;
+  /** Whether the document carries the gated thing. */
+  readonly carries: (definition: CanvasVersionGateInput) => boolean;
+  /** What the floor requires, as the author reads it. */
+  readonly requirement: string;
+}
+
+const ofKind =
+  (kind: string) =>
+  (definition: CanvasVersionGateInput): boolean =>
+    definition.blocks.some((block) => block.kind === kind);
+
+/**
+ * Every version floor the definition schema holds, in the order they shipped.
+ * `carries` reads loose shapes, so the check asks the same question of a
+ * document that did not decode.
+ */
+const CANVAS_VERSION_GATES: readonly CanvasVersionGate[] = [
+  {
+    since: CANVAS_MOCKUP_SCHEMA_VERSION,
+    carries: ofKind("mockup"),
+    requirement: `Mockup blocks require Canvas schema version ${String(CANVAS_MOCKUP_SCHEMA_VERSION)} or newer.`,
+  },
+  {
+    since: CANVAS_THREAD_OWNED_SCHEMA_VERSION,
+    carries: (definition) =>
+      typeof definition.provenance === "object" &&
+      definition.provenance !== null &&
+      canvasProvenanceIsThreadOwned(definition.provenance),
+    requirement: `A Canvas owned by its thread requires Canvas schema version ${String(CANVAS_THREAD_OWNED_SCHEMA_VERSION)}.`,
+  },
+  {
+    since: CANVAS_PRESENTATION_SCHEMA_VERSION,
+    carries: (definition) => definition.presentation !== undefined,
+    requirement: `A thread presentation requires Canvas schema version ${String(CANVAS_PRESENTATION_SCHEMA_VERSION)}.`,
+  },
+  {
+    since: CANVAS_TREEMAP_SCHEMA_VERSION,
+    carries: ofKind("treemap"),
+    requirement: `Treemap blocks require Canvas schema version ${String(CANVAS_TREEMAP_SCHEMA_VERSION)}.`,
+  },
+  {
+    since: CANVAS_HEATMAP_SCHEMA_VERSION,
+    carries: ofKind("heatmap"),
+    requirement: `Heatmap blocks require Canvas schema version ${String(CANVAS_HEATMAP_SCHEMA_VERSION)}.`,
+  },
+  {
+    since: CANVAS_BAR_LIST_SCHEMA_VERSION,
+    carries: ofKind("bar-list"),
+    requirement: `Bar-list blocks require Canvas schema version ${String(CANVAS_BAR_LIST_SCHEMA_VERSION)}.`,
+  },
+  {
+    since: CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION,
+    carries: (definition) =>
+      definition.blocks.some(
+        (block) => block.kind === "er" || block.kind === "swimlane" || block.kind === "mindmap",
+      ),
+    requirement: `Entity-relationship, swimlane, and mind map blocks require Canvas schema version ${String(CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION)}.`,
+  },
+  {
+    since: CANVAS_METRIC_TREND_SCHEMA_VERSION,
+    carries: (definition) => definition.blocks.some(canvasMetricUsesTrendFields),
+    requirement: `A metric sparkline, goodDirection, or caption requires Canvas schema version ${String(CANVAS_METRIC_TREND_SCHEMA_VERSION)}.`,
+  },
+  {
+    since: CANVAS_DESIGN_SCHEMA_VERSION,
+    carries: ofKind("design"),
+    requirement: `Design blocks require Canvas schema version ${String(CANVAS_DESIGN_SCHEMA_VERSION)}.`,
+  },
+  {
+    since: CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION,
+    carries: ofKind("comparison-matrix"),
+    requirement: `Comparison matrix blocks require Canvas schema version ${String(CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION)}.`,
+  },
+  {
+    since: CANVAS_MATH_SCHEMA_VERSION,
+    carries: ofKind("math"),
+    requirement: `Math blocks require Canvas schema version ${String(CANVAS_MATH_SCHEMA_VERSION)}.`,
+  },
+  {
+    since: CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION,
+    carries: (definition) => definition.blocks.some(canvasMockupUsesCatalog),
+    requirement: `A mockup's catalog components, devices, fidelity, variants, callouts, or more than ${String(CANVAS_MOCKUP_LEGACY_MAX_NODES)} nodes require Canvas schema version ${String(CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION)}.`,
+  },
+  {
+    since: CANVAS_TABLE_ROW_ID_SCHEMA_VERSION,
+    carries: (definition) => definition.blocks.some(canvasTableUsesRowIds),
+    requirement: `A table row id requires Canvas schema version ${String(CANVAS_TABLE_ROW_ID_SCHEMA_VERSION)}.`,
+  },
+  {
+    since: CANVAS_FLOW_CHARTS_SCHEMA_VERSION,
+    carries: (definition) => definition.blocks.some(canvasChartUsesFlowTypes),
+    requirement: `Funnel, radar, and sankey charts require Canvas schema version ${String(CANVAS_FLOW_CHARTS_SCHEMA_VERSION)}.`,
+  },
+  {
+    since: CANVAS_DASHBOARD_SCHEMA_VERSION,
+    carries: ofKind("dashboard"),
+    requirement: `Dashboard blocks require Canvas schema version ${String(CANVAS_DASHBOARD_SCHEMA_VERSION)}.`,
+  },
+  {
+    since: CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION,
+    carries: (definition) => definition.blocks.some(canvasDesignUsesDocumentFields),
+    requirement: `A design document size or theme requires Canvas schema version ${String(CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION)}.`,
+  },
+  {
+    since: CANVAS_DESIGN_ASSET_SCHEMA_VERSION,
+    carries: (definition) => definition.blocks.some(canvasDesignUsesAssets),
+    requirement: `Design assets require Canvas schema version ${String(CANVAS_DESIGN_ASSET_SCHEMA_VERSION)}.`,
+  },
+  {
+    since: CANVAS_DESIGN_RUNNING_SCHEMA_VERSION,
+    carries: (definition) => definition.blocks.some(canvasDesignRunsScript),
+    requirement: `A design that runs script requires Canvas schema version ${String(CANVAS_DESIGN_RUNNING_SCHEMA_VERSION)}.`,
+  },
+  {
+    since: CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION,
+    carries: (definition) => definition.blocks.some(isCanvasLayoutGroup),
+    requirement: `Tabs and columns require Canvas schema version ${String(CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION)}.`,
+  },
+  {
+    since: CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION,
+    carries: (definition) =>
+      definition.blocks.some(
+        (block) => canvasDiagramUsesStyles(block) || canvasPlanUsesGantt(block),
+      ),
+    requirement: `Diagram edge styles and tones, group tones, and the plan's Gantt view require Canvas schema version ${String(CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION)}.`,
+  },
+  {
+    since: CANVAS_DESIGN_FIELDS_SCHEMA_VERSION,
+    carries: (definition) =>
+      definition.blocks.some(
+        (block) => canvasDesignUsesDesignFields(block) || canvasDiagramUsesRichFields(block),
+      ),
+    requirement: `Frame notes, brand tokens, captured-page assets, and diagram icons, details, and nested groups require Canvas schema version ${String(CANVAS_DESIGN_FIELDS_SCHEMA_VERSION)}.`,
+  },
+  {
+    since: CANVAS_CHART_CALLOUTS_SCHEMA_VERSION,
+    carries: (definition) => definition.blocks.some(canvasChartUsesCallouts),
+    requirement: `A chart title, subtitle, point note, or point emphasis requires Canvas schema version ${String(CANVAS_CHART_CALLOUTS_SCHEMA_VERSION)}.`,
+  },
+  {
+    since: CANVAS_FLOW_SCHEMA_VERSION,
+    carries: ofKind("flow"),
+    requirement: `Flow blocks require Canvas schema version ${String(CANVAS_FLOW_SCHEMA_VERSION)}.`,
+  },
+  {
+    since: CANVAS_MOCKUP_LIBRARY_SCHEMA_VERSION,
+    carries: (definition) => definition.blocks.some(canvasMockupUsesLibrary),
+    requirement: `The mockup library requires Canvas schema version ${String(CANVAS_MOCKUP_LIBRARY_SCHEMA_VERSION)}.`,
+  },
+  {
+    since: CANVAS_DECK_SCHEMA_VERSION,
+    carries: ofKind("deck"),
+    requirement: `A deck block requires Canvas schema version ${String(CANVAS_DECK_SCHEMA_VERSION)}.`,
+  },
+  {
+    since: CANVAS_FLOW_ANNOTATIONS_SCHEMA_VERSION,
+    carries: (definition) => definition.blocks.some(canvasFlowUsesAnnotations),
+    requirement: `Flow callouts require Canvas schema version ${String(CANVAS_FLOW_ANNOTATIONS_SCHEMA_VERSION)}.`,
+  },
+];
+
+/**
+ * Whether a document carries nothing a later floor introduced than it
+ * declares. The decode filter below and the domain's declared-version check
+ * both ask this one question, so a new gate is one row in the table.
+ */
+export function canvasCarriesNoLaterFloor(definition: CanvasVersionGateInput): boolean {
+  return CANVAS_VERSION_GATES.every(
+    (gate) => definition.schemaVersion >= gate.since || !gate.carries(definition),
+  );
+}
+
+/** The floor a document failed, as the author reads it; the first failing floor wins. */
+export function canvasLaterFloorMessage(actual: unknown): string {
+  if (typeof actual === "object" && actual !== null) {
+    const candidate = actual as CanvasVersionGateInput;
+    if (typeof candidate.schemaVersion === "number" && Array.isArray(candidate.blocks)) {
+      const failed = CANVAS_VERSION_GATES.find(
+        (gate) => candidate.schemaVersion < gate.since && gate.carries(candidate),
+      );
+      if (failed !== undefined) return failed.requirement;
+    }
+  }
+  return "A block or field in this Canvas requires a newer Canvas schema version than the document declares.";
+}
 
 export const CanvasDefinition = Schema.Struct({
   schemaVersion: CanvasSchemaVersion,
@@ -2744,230 +3190,17 @@ export const CanvasDefinition = Schema.Struct({
 })
   .annotations(strict)
   .pipe(
-    // Version-gated blocks and hints: a mockup is admitted from version 3, the
-    // thread presentation from version 4, a treemap from version 5, a heatmap
-    // from version 6, a bar list and the metric trend fields from version 7, a
-    // design from version 9, a comparison matrix from version 10, math from
-    // version 11, the mockup catalog from version 12, table row ids from
-    // version 13, the funnel, radar, and sankey charts from version 14, the
-    // dashboard from version 15, a design document or theme from version 16,
-    // design assets from version 17, a design that runs script from version
-    // 18, the tabs and columns layout groups, diagram styles, and the
-    // Gantt view from version 19, a Chat Canvas owned by its thread from
-    // version 20, and frame notes, brand tokens, captured-page assets, and the
-    // richer diagram fields from version 21. A rolled-back runtime that never learned a
-    // kind or hint must see a document carrying it as a declared future
-    // version, not as a document that failed to decode. Each keeps its own
-    // floor so an earlier document stays valid.
-    Schema.filter(
-      (definition) =>
-        definition.schemaVersion >= CANVAS_MOCKUP_SCHEMA_VERSION ||
-        !definition.blocks.some((block) => block.kind === "mockup"),
-      {
-        message: () =>
-          `Mockup blocks require Canvas schema version ${String(CANVAS_MOCKUP_SCHEMA_VERSION)} or newer.`,
-      },
-    ),
-    Schema.filter(
-      (definition) =>
-        definition.schemaVersion >= CANVAS_THREAD_OWNED_SCHEMA_VERSION ||
-        !canvasProvenanceIsThreadOwned(definition.provenance),
-      {
-        message: () =>
-          `A Canvas owned by its thread requires Canvas schema version ${String(CANVAS_THREAD_OWNED_SCHEMA_VERSION)}.`,
-      },
-    ),
-    Schema.filter(
-      (definition) =>
-        definition.schemaVersion >= CANVAS_PRESENTATION_SCHEMA_VERSION ||
-        definition.presentation === undefined,
-      {
-        message: () =>
-          `A thread presentation requires Canvas schema version ${String(CANVAS_PRESENTATION_SCHEMA_VERSION)}.`,
-      },
-    ),
-    Schema.filter(
-      (definition) =>
-        definition.schemaVersion >= CANVAS_TREEMAP_SCHEMA_VERSION ||
-        !definition.blocks.some((block) => block.kind === "treemap"),
-      {
-        message: () =>
-          `Treemap blocks require Canvas schema version ${String(CANVAS_TREEMAP_SCHEMA_VERSION)}.`,
-      },
-    ),
-    Schema.filter(
-      (definition) =>
-        definition.schemaVersion >= CANVAS_HEATMAP_SCHEMA_VERSION ||
-        !definition.blocks.some((block) => block.kind === "heatmap"),
-      {
-        message: () =>
-          `Heatmap blocks require Canvas schema version ${String(CANVAS_HEATMAP_SCHEMA_VERSION)}.`,
-      },
-    ),
-    Schema.filter(
-      (definition) =>
-        definition.schemaVersion >= CANVAS_BAR_LIST_SCHEMA_VERSION ||
-        !definition.blocks.some((block) => block.kind === "bar-list"),
-      {
-        message: () =>
-          `Bar-list blocks require Canvas schema version ${String(CANVAS_BAR_LIST_SCHEMA_VERSION)}.`,
-      },
-    ),
-    // The entity-relationship, swimlane, and mind map kinds shipped together,
-    // so one floor admits them all.
-    Schema.filter(
-      (definition) =>
-        definition.schemaVersion >= CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION ||
-        !definition.blocks.some(
-          (block) => block.kind === "er" || block.kind === "swimlane" || block.kind === "mindmap",
-        ),
-      {
-        message: () =>
-          `Entity-relationship, swimlane, and mind map blocks require Canvas schema version ${String(CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION)}.`,
-      },
-    ),
-    Schema.filter(
-      (definition) =>
-        definition.schemaVersion >= CANVAS_METRIC_TREND_SCHEMA_VERSION ||
-        !definition.blocks.some(canvasMetricUsesTrendFields),
-      {
-        message: () =>
-          `A metric sparkline, goodDirection, or caption requires Canvas schema version ${String(CANVAS_METRIC_TREND_SCHEMA_VERSION)}.`,
-      },
-    ),
-    Schema.filter(
-      (definition) =>
-        definition.schemaVersion >= CANVAS_DESIGN_SCHEMA_VERSION ||
-        !definition.blocks.some((block) => block.kind === "design"),
-      {
-        message: () =>
-          `Design blocks require Canvas schema version ${String(CANVAS_DESIGN_SCHEMA_VERSION)}.`,
-      },
-    ),
-    Schema.filter(
-      (definition) =>
-        definition.schemaVersion >= CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION ||
-        !definition.blocks.some((block) => block.kind === "comparison-matrix"),
-      {
-        message: () =>
-          `Comparison matrix blocks require Canvas schema version ${String(CANVAS_COMPARISON_MATRIX_SCHEMA_VERSION)}.`,
-      },
-    ),
-    Schema.filter(
-      (definition) =>
-        definition.schemaVersion >= CANVAS_MATH_SCHEMA_VERSION ||
-        !definition.blocks.some((block) => block.kind === "math"),
-      {
-        message: () =>
-          `Math blocks require Canvas schema version ${String(CANVAS_MATH_SCHEMA_VERSION)}.`,
-      },
-    ),
-    Schema.filter(
-      (definition) =>
-        definition.schemaVersion >= CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION ||
-        !definition.blocks.some(canvasMockupUsesCatalog),
-      {
-        message: () =>
-          `A mockup's catalog components, devices, fidelity, variants, callouts, or more than ${String(CANVAS_MOCKUP_LEGACY_MAX_NODES)} nodes require Canvas schema version ${String(CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION)}.`,
-      },
-    ),
-    Schema.filter(
-      (definition) =>
-        definition.schemaVersion >= CANVAS_TABLE_ROW_ID_SCHEMA_VERSION ||
-        !definition.blocks.some(canvasTableUsesRowIds),
-      {
-        message: () =>
-          `A table row id requires Canvas schema version ${String(CANVAS_TABLE_ROW_ID_SCHEMA_VERSION)}.`,
-      },
-    ),
-    Schema.filter(
-      (definition) =>
-        definition.schemaVersion >= CANVAS_FLOW_CHARTS_SCHEMA_VERSION ||
-        !definition.blocks.some(canvasChartUsesFlowTypes),
-      {
-        message: () =>
-          `Funnel, radar, and sankey charts require Canvas schema version ${String(CANVAS_FLOW_CHARTS_SCHEMA_VERSION)}.`,
-      },
-    ),
-    Schema.filter(
-      (definition) =>
-        definition.schemaVersion >= CANVAS_DASHBOARD_SCHEMA_VERSION ||
-        !definition.blocks.some((block) => block.kind === "dashboard"),
-      {
-        message: () =>
-          `Dashboard blocks require Canvas schema version ${String(CANVAS_DASHBOARD_SCHEMA_VERSION)}.`,
-      },
-    ),
-    Schema.filter(
-      (definition) =>
-        definition.schemaVersion >= CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION ||
-        !definition.blocks.some(canvasDesignUsesDocumentFields),
-      {
-        message: () =>
-          `A design document size or theme requires Canvas schema version ${String(CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION)}.`,
-      },
-    ),
-    Schema.filter(
-      (definition) =>
-        definition.schemaVersion >= CANVAS_DESIGN_ASSET_SCHEMA_VERSION ||
-        !definition.blocks.some(canvasDesignUsesAssets),
-      {
-        message: () =>
-          `Design assets require Canvas schema version ${String(CANVAS_DESIGN_ASSET_SCHEMA_VERSION)}.`,
-      },
-    ),
-    Schema.filter(
-      (definition) =>
-        definition.schemaVersion >= CANVAS_DESIGN_RUNNING_SCHEMA_VERSION ||
-        !definition.blocks.some(canvasDesignRunsScript),
-      {
-        message: () =>
-          `A design that runs script requires Canvas schema version ${String(CANVAS_DESIGN_RUNNING_SCHEMA_VERSION)}.`,
-      },
-    ),
-    Schema.filter(
-      (definition) =>
-        definition.schemaVersion >= CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION ||
-        !definition.blocks.some(isCanvasLayoutGroup),
-      {
-        message: () =>
-          `Tabs and columns require Canvas schema version ${String(CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION)}.`,
-      },
-    ),
-    Schema.filter(
-      (definition) =>
-        definition.schemaVersion >= CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION ||
-        !definition.blocks.some(
-          (block) => canvasDiagramUsesStyles(block) || canvasPlanUsesGantt(block),
-        ),
-      {
-        message: () =>
-          `Diagram edge styles and tones, group tones, and the plan's Gantt view require Canvas schema version ${String(CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION)}.`,
-      },
-    ),
-  )
-  // `pipe` takes at most twenty combinators, so the newest floor chains on.
-  .pipe(
-    Schema.filter(
-      (definition) =>
-        definition.schemaVersion >= CANVAS_DESIGN_FIELDS_SCHEMA_VERSION ||
-        !definition.blocks.some(
-          (block) => canvasDesignUsesDesignFields(block) || canvasDiagramUsesRichFields(block),
-        ),
-      {
-        message: () =>
-          `Frame notes, brand tokens, captured-page assets, and diagram icons, details, and nested groups require Canvas schema version ${String(CANVAS_DESIGN_FIELDS_SCHEMA_VERSION)}.`,
-      },
-    ),
-    Schema.filter(
-      (definition) =>
-        definition.schemaVersion >= CANVAS_CHART_CALLOUTS_SCHEMA_VERSION ||
-        !definition.blocks.some(canvasChartUsesCallouts),
-      {
-        message: () =>
-          `A chart title, subtitle, point note, or point emphasis requires Canvas schema version ${String(CANVAS_CHART_CALLOUTS_SCHEMA_VERSION)}.`,
-      },
-    ),
+    // Version-gated blocks and hints: a rolled-back runtime that never
+    // learned a kind or hint must see a document carrying it as a declared
+    // future version, not as a document that failed to decode. Each gate
+    // keeps its own floor so an earlier document stays valid. The gates are
+    // data, not a pipe of filters: the chain of `Schema.filter` steps once
+    // crossed Effect's inference-depth cliff (a definition's type degraded to
+    // unknown in downstream typechecks), and a table cannot — a new floor is
+    // a new row.
+    Schema.filter((definition) => canvasCarriesNoLaterFloor(definition), {
+      message: (issue) => canvasLaterFloorMessage(issue.actual),
+    }),
   );
 export type CanvasDefinition = typeof CanvasDefinition.Type;
 

@@ -2095,6 +2095,289 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it("asks a person at the Mac to confirm the agent's upload under Full access, naming the exact build", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const provider = providerConnection(queue);
+    const authority = decodeToolActionAuthority({
+      hostId: "90000000-0000-4000-8000-000000000001",
+      mode: "code",
+      projectId: thread().projectId,
+      providerInstanceId: thread().providerInstanceId,
+      extension: { kind: "core" },
+    });
+    const build = {
+      bundleIdentifier: "sh.octant.Fixture",
+      version: "2.0.1",
+      buildNumber: "77",
+      signing: { teamId: "A1B2C3D4E5", identity: "3".repeat(40) },
+      profileId: "90000000-0000-4000-8000-0000000000aa",
+    };
+    const received: unknown[] = [];
+    const request = vi.fn(async (_windowId: WindowId, sent: unknown) => {
+      received.push(sent);
+      return undefined;
+    });
+    const fixture = runtimeFixture({
+      provider: providerDriver(provider),
+      approvalValidator: false,
+      supportsAppManagedTools: true,
+      appleToolchain: {
+        resolveAuthority: () => authority,
+        discover: vi.fn(),
+        execute: vi.fn(),
+        snapshot: vi.fn(),
+        requestPaneOpen: vi.fn(async () => undefined),
+        readScreenshot: vi.fn(),
+        inputGrantIsOpen: () => false,
+        devices: {
+          request,
+          check: vi.fn(async () => ({
+            kind: "refused" as const,
+            reason: "confirmation-required" as const,
+          })),
+          readScreenshot: vi.fn(),
+          readConsole: vi.fn(),
+          prepareUpload: vi.fn(async () => ({ kind: "prepared" as const, upload: build })),
+        },
+      } as never,
+    });
+    fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
+    try {
+      const operation = operationId(96);
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "tool-request",
+            requestId: "apple-upload",
+            toolName: "octant_apple",
+            inputJson: JSON.stringify({
+              operation: "upload",
+              projectPath: "Fixture.xcodeproj",
+              teamId: "A1B2C3D4E5",
+            }),
+          }),
+        ),
+      );
+      let approval: Extract<OperationFrame["event"], { kind: "approval-requested" }> | undefined;
+      await vi.waitFor(async () => {
+        const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 30);
+        approval = frames
+          .map((frame) => frame.event)
+          .find((event) => event.kind === "approval-requested");
+        expect(approval).toBeDefined();
+      });
+      if (approval === undefined) throw new Error("Expected an upload confirmation");
+      expect(approval.summary).toContain(
+        "Upload sh.octant.Fixture 2.0.1 (77) to App Store Connect?",
+      );
+      expect(approval.summary).toContain("Team: A1B2C3D4E5");
+      expect(approval.localPersonOnly).toBe(true);
+
+      // A paired device's answer, or one no window vouched for, uploads nothing.
+      const remote = await fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(97),
+        threadId,
+        checkoutId,
+        approvalId: approval.approvalId,
+        decision: "approved",
+      });
+      expect(JSON.stringify(remote)).toContain("Only a person at the Mac");
+      expect(request).not.toHaveBeenCalled();
+
+      await fixture.runtime.execute(
+        windowId,
+        {
+          kind: "answer-provider-approval",
+          operationId: operationId(98),
+          threadId,
+          checkoutId,
+          approvalId: approval.approvalId,
+          decision: "approved",
+        },
+        { initiator: "user" },
+      );
+      await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
+      const sent = received[0] as Parameters<
+        NonNullable<typeof fixture.runtime.validateAppleDistributionUpload>
+      >[1];
+      expect(sent).toMatchObject({ kind: "upload", upload: build, approval: { kind: "approved" } });
+      // A receipt for this build does not cover another build number.
+      await expect(
+        fixture.runtime.validateAppleDistributionUpload?.(windowId, {
+          ...sent,
+          upload: { ...sent.upload, buildNumber: "78" } as never,
+        }),
+      ).resolves.toBe(false);
+      await expect(fixture.runtime.validateAppleDistributionUpload?.(windowId, sent)).resolves.toBe(
+        true,
+      );
+      await expect(fixture.runtime.validateAppleDistributionUpload?.(windowId, sent)).resolves.toBe(
+        false,
+      );
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
+  it("asks a person at the Mac to confirm the agent's release under Full access, naming the exact version", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const provider = providerConnection(queue);
+    const authority = decodeToolActionAuthority({
+      hostId: "90000000-0000-4000-8000-000000000001",
+      mode: "code",
+      projectId: thread().projectId,
+      providerInstanceId: thread().providerInstanceId,
+      extension: { kind: "core" },
+    });
+    const storeVersion = {
+      bundleIdentifier: "sh.octant.Fixture",
+      version: "2.0.1",
+      buildNumber: "77",
+      platform: "ios" as const,
+    };
+    const received: unknown[] = [];
+    const request = vi.fn(async (_windowId: WindowId, sent: unknown) => {
+      received.push(sent);
+      return undefined;
+    });
+    const fixture = runtimeFixture({
+      provider: providerDriver(provider),
+      approvalValidator: false,
+      supportsAppManagedTools: true,
+      appleToolchain: {
+        resolveAuthority: () => authority,
+        discover: vi.fn(),
+        execute: vi.fn(),
+        snapshot: vi.fn(),
+        requestPaneOpen: vi.fn(async () => undefined),
+        readScreenshot: vi.fn(),
+        inputGrantIsOpen: () => false,
+        devices: {
+          request,
+          check: vi.fn(async () => ({
+            kind: "refused" as const,
+            reason: "confirmation-required" as const,
+          })),
+          readScreenshot: vi.fn(),
+          readConsole: vi.fn(),
+          prepareStoreVersion: vi.fn(async () => ({
+            kind: "prepared" as const,
+            storeVersion,
+            ready: "release-version" as const,
+            state: "PENDING_DEVELOPER_RELEASE",
+          })),
+        },
+      } as never,
+    });
+    fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
+    try {
+      const operation = operationId(196);
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "tool-request",
+            requestId: "apple-release",
+            toolName: "octant_apple",
+            inputJson: JSON.stringify({
+              operation: "release-version",
+              projectPath: "Fixture.xcodeproj",
+            }),
+          }),
+        ),
+      );
+      let approval: Extract<OperationFrame["event"], { kind: "approval-requested" }> | undefined;
+      await vi.waitFor(async () => {
+        const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 30);
+        approval = frames
+          .map((frame) => frame.event)
+          .find((event) => event.kind === "approval-requested");
+        expect(approval).toBeDefined();
+      });
+      if (approval === undefined) throw new Error("Expected a release confirmation");
+      expect(approval.summary).toContain("Release sh.octant.Fixture 2.0.1 (77) on the App Store?");
+      expect(approval.summary).toContain("publishing it to the App Store");
+      expect(approval.localPersonOnly).toBe(true);
+
+      // A paired device's answer, or one no window vouched for, releases nothing.
+      const remote = await fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(197),
+        threadId,
+        checkoutId,
+        approvalId: approval.approvalId,
+        decision: "approved",
+      });
+      expect(JSON.stringify(remote)).toContain("Only a person at the Mac");
+      expect(request).not.toHaveBeenCalled();
+
+      await fixture.runtime.execute(
+        windowId,
+        {
+          kind: "answer-provider-approval",
+          operationId: operationId(198),
+          threadId,
+          checkoutId,
+          approvalId: approval.approvalId,
+          decision: "approved",
+        },
+        { initiator: "user" },
+      );
+      await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
+      const sent = received[0] as Parameters<
+        NonNullable<typeof fixture.runtime.validateAppleDistributionVersion>
+      >[1];
+      expect(sent).toMatchObject({
+        kind: "release-version",
+        storeVersion,
+        approval: { kind: "approved" },
+      });
+      // A receipt for this version does not cover another version, nor a submission.
+      await expect(
+        fixture.runtime.validateAppleDistributionVersion?.(windowId, {
+          ...sent,
+          storeVersion: { ...storeVersion, version: "2.0.2" } as never,
+        }),
+      ).resolves.toBe(false);
+      await expect(
+        fixture.runtime.validateAppleDistributionVersion?.(windowId, {
+          ...sent,
+          kind: "submit-for-review",
+        }),
+      ).resolves.toBe(false);
+      await expect(
+        fixture.runtime.validateAppleDistributionVersion?.(windowId, sent),
+      ).resolves.toBe(true);
+      await expect(
+        fixture.runtime.validateAppleDistributionVersion?.(windowId, sent),
+      ).resolves.toBe(false);
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it.each([
     ["full-access", "plan"],
     ["auto-accept-edits", "plan"],

@@ -2298,6 +2298,337 @@
   color: var(--oct-danger-fg);
 }
 
+/* A flow board draws real screens, so its nodes are HTML inside the board's
+   coordinate space: a mockup reflows at the node's width, a design frame is
+   scaled to it. The label sits under the screen, and a focusable screen the
+   person can drag carries the keyboard's focus ring. */
+/* A focusable screen keeps the workspace's one neutral keyboard focus edge:
+   no surface repaints it (the visual-language contract), so focus shows the
+   browser's own outline, as a diagram node's does. */
+.canvas-flow-board__screen {
+  display: grid;
+  justify-items: stretch;
+  gap: 4px;
+  border-radius: var(--oct-radius-sm);
+}
+
+.canvas-flow-board__screen .canvas-mockup__frame,
+.canvas-flow-board__design-frame {
+  border-radius: var(--oct-radius-sm);
+  overflow: hidden;
+}
+
+.canvas-flow-board__design-frame {
+  position: relative;
+  border: 1px solid var(--oct-border);
+  background: var(--oct-surface);
+}
+
+.canvas-flow-board__design-frame .canvas-design__page {
+  position: absolute;
+  inset: 0;
+  transform-origin: top left;
+  border: 0;
+}
+
+.canvas-flow-board__screen-label {
+  font-size: var(--oct-text-xs);
+  color: var(--oct-fg-2);
+  text-align: center;
+}
+
+.canvas-flow-board__edge {
+  stroke-width: 1.5;
+}
+
+.canvas-flow-board__outline {
+  font-size: var(--oct-text-xs);
+  color: var(--oct-muted);
+}
+
+/* A screen the person can drag says so with the cursor, as a diagram node
+   does; a shared snapshot or paired browser keeps the reading cursor. */
+.canvas-flow-board[data-editable="true"] .canvas-flow-board__screen {
+  cursor: move;
+}
+
+.canvas-deck__header {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin-bottom: var(--oct-space-2);
+}
+
+.canvas-deck__title {
+  margin: 0;
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}
+
+.canvas-deck__meta {
+  font-size: var(--oct-text-xs);
+  color: var(--oct-muted);
+  margin-right: auto;
+}
+
+.canvas-deck__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--oct-space-1);
+}
+
+.canvas-deck__slide {
+  display: flex;
+  gap: var(--oct-space-2);
+  align-items: baseline;
+  padding: var(--oct-space-1) var(--oct-space-2);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+}
+
+.canvas-deck__index {
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  color: var(--oct-meta);
+}
+
+.canvas-deck__notes {
+  font-size: var(--oct-text-xs);
+  color: var(--oct-muted);
+  margin-left: auto;
+}
+
+.canvas-deck-player__body {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--oct-space-2);
+  min-height: 60vh;
+}
+
+.canvas-deck-player__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.canvas-deck-player__position {
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  color: var(--oct-meta);
+  margin-right: auto;
+}
+
+.canvas-deck-player__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.canvas-deck-player__stage {
+  display: grid;
+  place-items: center;
+  gap: var(--oct-space-2);
+  overflow: auto;
+}
+
+.canvas-deck-player__mockup {
+  max-width: min(100%, 420px);
+}
+
+.canvas-deck-player__data {
+  width: min(100%, 720px);
+}
+
+.canvas-deck-player__notes {
+  margin: 0;
+  padding: var(--oct-space-2);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  font-size: var(--oct-text-sm);
+  color: var(--oct-fg-2);
+}
+
+.canvas-flow-board__callout {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-fg);
+  color: var(--oct-bg);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  justify-self: end;
+}
+
+.canvas-flow-board__callouts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--oct-space-1);
+}
+
+.canvas-flow-board__callout-note {
+  display: flex;
+  gap: var(--oct-space-2);
+  align-items: baseline;
+  font-size: var(--oct-text-xs);
+  color: var(--oct-fg-2);
+}
+
+.canvas-flow-board__callout-note .canvas-flow-board__callout {
+  justify-self: unset;
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.canvas-flow-board__callout-target {
+  color: var(--oct-fg);
+}
+
+/* The click-through player keeps the design player's anatomy: a bar, a stage
+   that scales the current screen to fit, and a Go to list for the
+   transitions that start from the screen itself rather than a control. */
+.canvas-flow-player__body {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--oct-space-2);
+  min-height: 60vh;
+}
+
+.canvas-flow-player__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.canvas-flow-player__title {
+  font-weight: var(--oct-weight-medium);
+}
+
+.canvas-flow-player__hint {
+  font-size: var(--oct-text-xs);
+  color: var(--oct-muted);
+  margin-right: auto;
+}
+
+.canvas-flow-player__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.canvas-flow-player__stage {
+  display: grid;
+  justify-content: center;
+  align-content: center;
+  justify-items: center;
+  gap: var(--oct-space-3);
+  overflow: hidden;
+}
+
+.canvas-flow-player__screen {
+  display: grid;
+  overflow: hidden;
+}
+
+.canvas-flow-player__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+}
+
+.canvas-mockup__search {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  padding: 4px 8px;
+  width: 100%;
+  min-height: 22px;
+}
+
+.canvas-mockup__progress {
+  display: grid;
+  gap: 4px;
+}
+
+.canvas-mockup__progress-track,
+.canvas-mockup__slider-track {
+  position: relative;
+  display: block;
+  height: 4px;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-fill-2);
+}
+
+.canvas-mockup__progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--oct-radius-pill);
+  background: currentColor;
+  opacity: 0.7;
+}
+
+.canvas-mockup__slider-knob {
+  position: absolute;
+  top: -4px;
+  width: 12px;
+  height: 12px;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-surface);
+  border: 1px solid currentColor;
+}
+
+.canvas-mockup__hero {
+  display: grid;
+  gap: 4px;
+  text-align: center;
+  padding: var(--oct-space-3);
+}
+
+.canvas-mockup__hero-title {
+  font-size: var(--oct-text-lg);
+  font-weight: var(--oct-weight-medium);
+}
+
+.canvas-mockup__hero-lede,
+.canvas-mockup__media {
+  color: var(--oct-fg-2);
+}
+
+.canvas-mockup__media {
+  display: grid;
+  place-items: center;
+  min-height: 48px;
+  border: 1px dashed var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+}
+
+.canvas-mockup__bubble {
+  display: inline-block;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  padding: 4px 8px;
+  margin-top: 4px;
+}
+
+.canvas-mockup__node--chat-message {
+  justify-items: start;
+}
+
+/* A hotspot is the one live control in a drawing that is otherwise inert. It
+   wears the OctantButton's own look: the adapter's variant is its style, and
+   no surface repaints it. */
+.canvas-mockup__hotspot {
+  justify-self: start;
+}
+
 .canvas-block__diagram-edge {
   fill: none;
   stroke: var(--oct-chart-axis);

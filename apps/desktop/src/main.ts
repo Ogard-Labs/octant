@@ -242,6 +242,11 @@ import {
   type HubAdministrationControlRuntime,
 } from "./hubAdministrationControls";
 import {
+  AppStoreConnectKeyControlFailure,
+  sendAppStoreConnectKeyOperation,
+  type AppStoreConnectKeyControlRuntime,
+} from "./appStoreConnectKeyControls";
+import {
   installPairedComputerIpcHandlers,
   type PageStoragePort,
   PairedComputerPins,
@@ -627,6 +632,37 @@ export function installSshTargetIpcHandlers(options: {
         error instanceof SshTargetControlFailure
           ? error.message
           : "Octant SSH target controls are unavailable.",
+      );
+    }
+  });
+}
+
+/**
+ * App Store Connect key entry: an owned window's request goes to the host's
+ * local key route it names, with that window's own capability. The key passes
+ * through and is neither kept nor logged here.
+ */
+export function installAppStoreConnectKeyIpcHandlers(options: {
+  readonly handle: (
+    channel: string,
+    handler: (event: unknown, ...args: readonly unknown[]) => unknown,
+  ) => void;
+  readonly runtimeFor: (event: unknown) => AppStoreConnectKeyControlRuntime;
+}): void {
+  options.handle(IPC_CHANNELS.appStoreConnectKeyRequest, async (event, operation, body) => {
+    let runtime: AppStoreConnectKeyControlRuntime;
+    try {
+      runtime = options.runtimeFor(event);
+    } catch {
+      throw new Error("Octant rejected an unauthorized App Store Connect key request.");
+    }
+    try {
+      return await sendAppStoreConnectKeyOperation(runtime, operation, body);
+    } catch (error) {
+      throw new Error(
+        error instanceof AppStoreConnectKeyControlFailure
+          ? error.message
+          : "Octant could not reach the host.",
       );
     }
   });
@@ -1663,6 +1699,10 @@ async function startDesktopCredentialBroker(): Promise<CredentialBroker | undefi
     backend.canvasPublicShareSecrets,
     backend.mcpServerCredentials,
     backend.desktopProviderCredentials,
+    backend.appStoreConnectKeys,
+    // The host's per-upload key folders; the broker writes the App Store
+    // Connect key only into one of them, for one upload.
+    join(desktopDataDirectory, "apple-runtime", "distribution-keys"),
   );
 }
 
@@ -3026,6 +3066,21 @@ function installIpcHandlers(): void {
       const context = ownedWindowContext(event as IpcMainInvokeEvent);
       if (activeServerUrl === undefined) {
         throw new HubAdministrationControlFailure("Octant hub controls are unavailable.");
+      }
+      return {
+        serverUrl: activeServerUrl,
+        desktopBridgeSecret,
+        windowCapability: context.capability,
+        fetch: globalThis.fetch,
+      };
+    },
+  });
+  installAppStoreConnectKeyIpcHandlers({
+    handle: (channel, handler) => ipcMain.handle(channel, handler),
+    runtimeFor: (event) => {
+      const context = ownedWindowContext(event as IpcMainInvokeEvent);
+      if (activeServerUrl === undefined) {
+        throw new AppStoreConnectKeyControlFailure("Octant could not reach the host.");
       }
       return {
         serverUrl: activeServerUrl,

@@ -169,6 +169,10 @@ describe("node extension process port", () => {
     expect(profile).toContain('(allow file-read* (literal "/dev/urandom"))');
     // Of the host's configuration, only the link naming its time zone.
     expect(profile).toContain('(allow file-read* (literal "/private/etc/localtime"))');
+    // The root link `/etc` itself, which the runtime opens that link through,
+    // and nothing beneath it.
+    expect(profile).toContain('(allow file-read* (literal "/etc"))');
+    expect(profile).not.toContain('(subpath "/etc")');
     // The builder gives every launch the public TLS files; a driver has no
     // network, so its profile takes them away again, after that grant.
     const rules = profile.split("\n");
@@ -177,10 +181,10 @@ describe("node extension process port", () => {
       rules.indexOf('(allow file-read* (subpath "/private/etc/ssl/certs"))'),
     );
     expect(readsReopeningAfterDeny(profile, "/private/etc/ssl")).toEqual([]);
-    // `/System` is read whole, and the data volume beneath it spells the
-    // person's files a second way (`/System/Volumes/Data/Users/...`), so that
-    // volume is denied after every grant, `/System`'s included.
+    // The data volume spells the person's files a second way
+    // (`/System/Volumes/Data/Users/...`), so it is denied after every grant.
     expect(readsReopeningAfterDeny(profile, "/System/Volumes/Data")).toEqual([]);
+    expect(profile).not.toContain('(subpath "/System")');
     // Every folder the driver may read, and nothing more: its package, its
     // runtime's own folder, the system roots a runtime reads to start, and
     // its temporary folder. The macOS escape tests measure that a driver
@@ -191,7 +195,6 @@ describe("node extension process port", () => {
         ...new Set([
           ...[packageRoot, temporaryDirectory].flatMap((path) => [path, realpathSync(path)]),
           runtimeFolder,
-          "/System",
           "/usr/lib",
           "/usr/share",
           "/private/var/db/timezone",
@@ -265,7 +268,6 @@ describe("node extension process port", () => {
         ...new Set([
           ...[packageRoot, temporaryDirectory].flatMap((path) => [path, realpathSync(path)]),
           "/Applications/Octant.app",
-          "/System",
           "/usr/lib",
           "/usr/share",
           "/private/var/db/timezone",

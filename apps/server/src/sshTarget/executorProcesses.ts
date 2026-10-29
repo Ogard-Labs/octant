@@ -14,6 +14,7 @@ import {
   type SshPlacedProcessRefusalReason,
 } from "@octant/contracts/ssh-executor-protocol";
 import { proxiedLaunchEnvironment } from "../process/proxiedNetworkEgress";
+import type { EgressProxyEndpoint } from "../process/threadEgressPolicy";
 import {
   makeProcessConfinementLive,
   type ProcessConfinementPort,
@@ -171,9 +172,7 @@ export class ExecutorProcesses {
   ): Promise<StartReply | SshExecutorRefusedReply> {
     const environment = this.#environment;
     const session = environment.sessionDirectory;
-    // Runtimes are placed on Linux targets only, until a macOS target's
-    // proxied forwarder is settled.
-    if (environment.platform !== "linux" || session === undefined) {
+    if (session === undefined) {
       return refusedStart("unavailable");
     }
     const resolved = await environment.resolveRoot(request.root);
@@ -202,18 +201,17 @@ export class ExecutorProcesses {
 
     const directory = join(session, "processes", String(request.stream));
     const temporaryDirectory = join(directory, "tmp");
-    let proxyPath: string | undefined;
+    let endpoint: EgressProxyEndpoint | undefined;
     let child: ChildProcess;
     try {
       mkdirSync(temporaryDirectory, { recursive: true, mode: 0o700 });
-      proxyPath = await this.#egress.open(session, launch);
+      endpoint = await this.#egress.open(session, launch, request.egressToken);
       // The session can end while the forwarder starts listening.
-      if (proxyPath === undefined || this.#abandoned) {
-        if (proxyPath !== undefined) this.#egress.close(launch);
+      if (endpoint === undefined || this.#abandoned) {
+        if (endpoint !== undefined) this.#egress.close(launch);
         rmSync(directory, { recursive: true, force: true });
         return refusedStart("unavailable");
       }
-      const endpoint = { kind: "unix-socket" as const, path: proxyPath };
       const confinement =
         environment.confinement ??
         makeProcessConfinementLive({
@@ -252,7 +250,7 @@ export class ExecutorProcesses {
         },
       });
     } catch {
-      if (proxyPath !== undefined) this.#egress.close(launch);
+      if (endpoint !== undefined) this.#egress.close(launch);
       rmSync(directory, { recursive: true, force: true });
       return refusedStart("unavailable");
     }

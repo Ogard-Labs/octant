@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { CanvasBlock } from "./canvas";
 import {
   CANVAS_SHARE_DESIGN_FIELDS_SCHEMA_VERSION,
+  CANVAS_SHARE_FLOW_SCHEMA_VERSION,
   CANVAS_SHARE_FRAMES_SCHEMA_VERSION,
   CanvasStaticExportBlock,
   decodeCanvasStaticExportDocument,
@@ -734,6 +735,7 @@ describe("Canvas share contracts", () => {
     // know, so a shared chart leaves as its readings.
     const refusedKinds = new Set(["action"]);
     const flattened = new Set([
+      "deck.slides[].notes",
       "table.rows[].id",
       "table.rows[].cells",
       "chart.title",
@@ -806,7 +808,7 @@ describe("Canvas share contracts", () => {
     ).toThrow();
     // And a version this runtime has not learned is still a future version.
     expect(() =>
-      decodeCanvasStaticExportDocument({ ...document, schemaVersion: 12, blocks: [] }),
+      decodeCanvasStaticExportDocument({ ...document, schemaVersion: 16, blocks: [] }),
     ).toThrow();
   });
 
@@ -844,6 +846,42 @@ describe("Canvas share contracts", () => {
         decodeCanvasStaticExportDocument({ ...document, schemaVersion: 10, blocks: [block] }),
       ).toThrow();
     }
+  });
+
+  it("carries a flow from share version 12 and refuses it under an earlier one", () => {
+    const flow = {
+      blockId: "app-flow",
+      schemaVersion: 23,
+      kind: "flow",
+      title: "Search flow",
+      layout: "manual",
+      screens: [
+        { screenId: "search", blockId: "search-mockup", x: 40, y: 40, positioned: true },
+        { screenId: "results", blockId: "site-design", frameId: "results" },
+      ],
+      edges: [
+        {
+          edgeId: "run-search",
+          fromScreenId: "search",
+          toScreenId: "results",
+          fromNodeId: "search-button",
+          label: "Run search",
+          tone: "accent",
+        },
+      ],
+    };
+    expect(CANVAS_SHARE_FLOW_SCHEMA_VERSION).toBe(12);
+    const shared = decodeCanvasStaticExportDocument({
+      ...document,
+      schemaVersion: 12,
+      blocks: [flow],
+    });
+    expect(shared.blocks).toEqual([flow]);
+    // A viewer that only knows version 11 never placed a screen on a board, so
+    // a version 11 document may not hand it a flow.
+    expect(() =>
+      decodeCanvasStaticExportDocument({ ...document, schemaVersion: 11, blocks: [flow] }),
+    ).toThrow();
   });
 
   it("rejects secret-bearing export text and credential query URLs at decode time", () => {

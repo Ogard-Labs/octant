@@ -28,9 +28,11 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // design document size and workspace theme, version 17 the design's declared
 // image assets, version 18 the design that runs script, version 19 the
 // tabs and columns layout groups, version 20 a Chat Canvas that belongs
-// to its thread and to no Project, and version 21 the design frame notes,
+// to its thread and to no Project, version 21 the design frame notes,
 // brand tokens, and captured-page assets with the richer diagram node and
-// group fields. A version-gated
+// group fields, version 22 a chart's title, subtitle, and point callouts,
+// and version 23 the flow block, which places mockup and design screens on
+// a board. A version-gated
 // kind or hint is only valid inside a document declaring the version that
 // introduced it, so a rolled-back older
 // runtime refuses it as a declared future version instead of reading it as
@@ -42,12 +44,12 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // flow-chart-carrying v14, dashboard-carrying v15,
 // design-document-carrying v16, design-asset-carrying v17,
 // running-design-carrying v18, layout-group-carrying v19, thread-owned v20,
-// and design-field-carrying v21 documents)
+// design-field-carrying v21, and chart-callout-carrying v22, flow-carrying v23, library-carrying v24, and deck-carrying v25 documents)
 // remains decodable so a host does not lose its history at the bump. The
 // literal set names each earlier version explicitly and ends at the current
 // one, so a future bump cannot silently drop an intermediate version from the
 // set that decodes.
-export const CANVAS_SCHEMA_VERSION = 22 as const;
+export const CANVAS_SCHEMA_VERSION = 26 as const;
 export const CanvasSchemaVersion = Schema.Literal(
   1,
   2,
@@ -70,6 +72,10 @@ export const CanvasSchemaVersion = Schema.Literal(
   19,
   20,
   21,
+  22,
+  23,
+  24,
+  25,
   CANVAS_SCHEMA_VERSION,
 );
 export type CanvasSchemaVersion = typeof CanvasSchemaVersion.Type;
