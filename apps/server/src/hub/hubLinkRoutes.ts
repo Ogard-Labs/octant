@@ -10,10 +10,12 @@ import {
   decodeHubGuestAdmissionRequest,
   decodeHubJoinRequest,
   decodeHubLeaveRequest,
+  decodeHubStandInHandback,
   decodeSignedHubRoster,
   encodeSignedHubRoster,
 } from "@octant/contracts";
-import { HUB_LINK_HEADER, HubLinkVerifier } from "./hubLink";
+import type { FailoverService } from "./failoverService";
+import { HUB_LINK_HEADER, HUB_PEER_KEY_HEADER, HubLinkVerifier } from "./hubLink";
 import type { HubService } from "./hubService";
 import type { SpokeLinkService } from "./spokeLinkService";
 
@@ -22,6 +24,12 @@ export const HUB_LINK_ROUTES = {
   leave: "/api/hub/leave",
   roster: "/api/hub/roster",
   status: "/api/hub/status",
+  /** The hub asks a spoke whether its person ticked Standby, when the person names it a standby. */
+  standby: "/api/hub/standby",
+  /** A member asks the hub, or a standby that is standing in, whether it is there. */
+  heartbeat: "/api/hub/heartbeat",
+  /** A standby that stood in hands its membership changes back to the hub. */
+  handback: "/api/hub/handback",
   /** A guest reads the current signed roster from the hub. */
   guestRoster: "/api/hub/guest-roster",
   /** A guest asks a spoke to admit it as a paired device. */
@@ -46,8 +54,21 @@ const NO_STORE = { "cache-control": "no-store" } as const;
 export interface HubLinkRouteOptions {
   readonly hub: HubService;
   readonly spoke: SpokeLinkService;
+  readonly failover: FailoverService;
   readonly now?: () => number;
 }
+
+/** Refusals that mean the sender is not who a spoke trusts, as opposed to a grant it did not give. */
+const SENDER_REFUSAL_STATUS: ReadonlySet<string> = new Set([
+  "missing",
+  "malformed",
+  "stale",
+  "unknown-sender",
+  "signature-invalid",
+  "replayed",
+  "not-a-spoke",
+  "hub-revoked",
+]);
 
 export function createHubLinkRouteHandler(
   options: HubLinkRouteOptions,
@@ -60,17 +81,20 @@ export function createHubLinkRouteHandler(
       : undefined;
     if (route === undefined) return undefined;
     const expectedMethod =
-      route === HUB_LINK_ROUTES.roster
+      route === HUB_LINK_ROUTES.roster || route === HUB_LINK_ROUTES.standby
         ? "PUT"
-        : route === HUB_LINK_ROUTES.status || route === HUB_LINK_ROUTES.guestRoster
+        : route === HUB_LINK_ROUTES.status ||
+            route === HUB_LINK_ROUTES.guestRoster ||
+            route === HUB_LINK_ROUTES.heartbeat
           ? "GET"
           : "POST";
     if (request.method !== expectedMethod || url.search !== "") return refused(405, "invalid");
     const body = await readBody(request);
     if (body === undefined) return refused(413, "invalid");
     const header = request.headers.get(HUB_LINK_HEADER);
+    const presentedKey = request.headers.get(HUB_PEER_KEY_HEADER);
 
-    if (route === HUB_LINK_ROUTES.roster || route === HUB_LINK_ROUTES.status) {
+    if (route === HUB_LINK_ROUTES.status || route === HUB_LINK_ROUTES.standby) {
       const authenticated = options.spoke.authenticateHub({
         header,
         method: request.method,
@@ -78,25 +102,81 @@ export function createHubLinkRouteHandler(
         body,
       });
       if (authenticated.status === "refused") return refused(401, authenticated.kind);
-      const item = route === HUB_LINK_ROUTES.roster ? "roster" : "status";
-      const allowed = options.spoke.hubMayUse(item);
+      // The hub asks whether this spoke's person ticked Standby before it names
+      // the spoke one; the answer is the grant, nothing more.
+      const allowed = options.spoke.hubMayUse(
+        route === HUB_LINK_ROUTES.status ? "status" : "standby",
+      );
       if (allowed.status === "refused") return refused(403, allowed.kind);
-      if (route === HUB_LINK_ROUTES.status) {
-        const status = options.spoke.readStatus();
-        return status === undefined
-          ? refused(403, "not-a-spoke")
-          : Response.json({ status }, { headers: NO_STORE });
+      if (route === HUB_LINK_ROUTES.standby) {
+        return Response.json({ status: "accepted" }, { headers: NO_STORE });
       }
+      const status = options.spoke.readStatus();
+      return status === undefined
+        ? refused(403, "not-a-spoke")
+        : Response.json({ status }, { headers: NO_STORE });
+    }
+
+    if (route === HUB_LINK_ROUTES.roster) {
+      const sender = options.spoke.authenticateRosterSender({
+        header,
+        publicKey: presentedKey,
+        method: request.method,
+        path: route,
+        body,
+      });
+      if (sender.status === "refused") {
+        return refused(SENDER_REFUSAL_STATUS.has(sender.kind) ? 401 : 403, sender.kind);
+      }
+      const allowed = options.spoke.hubMayUse("roster");
+      if (allowed.status === "refused") return refused(403, allowed.kind);
       let candidate;
       try {
         candidate = decodeSignedHubRoster(JSON.parse(body));
       } catch {
         return refused(400, "invalid");
       }
-      const receipt = options.spoke.receiveRoster(candidate);
+      // The roster must be signed by the very member that sent it.
+      const signer = candidate.signedBy;
+      if (
+        sender.status === "hub"
+          ? signer.kind !== "hub"
+          : signer.kind !== "standby" || String(signer.memberId) !== String(sender.memberId)
+      ) {
+        return refused(403, "signer-not-sender");
+      }
+      // A standby's roster is accepted only while this spoke cannot reach the hub.
+      const receipt =
+        sender.status === "standby" && presentedKey !== null
+          ? options.spoke.receiveRoster(candidate, {
+              publicKey: presentedKey,
+              hubReachable: !(await options.failover.hubUnreachable()),
+            })
+          : options.spoke.receiveRoster(candidate);
       return receipt.status === "accepted"
         ? Response.json(receipt, { headers: NO_STORE })
         : refused(409, receipt.kind);
+    }
+
+    if (route === HUB_LINK_ROUTES.heartbeat) {
+      const hubOn = options.hub.status().enabled;
+      if (!hubOn && !options.failover.standingIn()) return refused(403, "hub-role-off");
+      const verified = memberVerifier.verify({
+        header,
+        method: request.method,
+        path: route,
+        body,
+        recipientMemberId: options.hub.hubMemberId(),
+        publicKeyFor: (sender) =>
+          hubOn
+            ? options.hub.memberKey(sender, presentedKey ?? undefined)
+            : options.failover.memberKey(sender, presentedKey ?? undefined),
+      });
+      if (verified.status === "refused") return refused(401, verified.kind);
+      const answer = hubOn ? options.hub.heartbeat() : options.failover.heartbeat();
+      return answer === undefined
+        ? refused(403, "hub-role-off")
+        : Response.json(answer, { headers: NO_STORE });
     }
 
     if (route === HUB_LINK_ROUTES.guest) {
@@ -121,8 +201,11 @@ export function createHubLinkRouteHandler(
         : refused(GUEST_REFUSAL_STATUS.has(admitted.kind) ? 401 : 403, admitted.kind);
     }
 
-    // The hub's side: a member completing its join or leaving.
-    if (!options.hub.status().enabled) return refused(403, "hub-role-off");
+    // The hub's side: a member completing its join or leaving. A standby that
+    // is standing in answers a join too; nothing else of the hub's is its to serve.
+    const hubOn = options.hub.status().enabled;
+    const standsIn = !hubOn && route === HUB_LINK_ROUTES.join && options.failover.standingIn();
+    if (!hubOn && !standsIn) return refused(403, "hub-role-off");
     if (route === HUB_LINK_ROUTES.guestRoster) {
       const verified = memberVerifier.verify({
         header,
@@ -157,7 +240,9 @@ export function createHubLinkRouteHandler(
           sender === String(joining.member.memberId) ? joining.identityPublicKey : undefined,
       });
       if (verified.status === "refused") return refused(401, verified.kind);
-      const joined = options.hub.acceptJoin(joining);
+      const joined = standsIn
+        ? options.failover.acceptJoin(joining)
+        : options.hub.acceptJoin(joining);
       return joined.status === "joined"
         ? Response.json(
             {
@@ -174,9 +259,21 @@ export function createHubLinkRouteHandler(
       path: route,
       body,
       recipientMemberId: options.hub.hubMemberId(),
-      publicKeyFor: (sender) => options.hub.memberKey(sender),
+      publicKeyFor: (sender) => options.hub.memberKey(sender, presentedKey ?? undefined),
     });
     if (verified.status === "refused") return refused(401, verified.kind);
+    if (route === HUB_LINK_ROUTES.handback) {
+      let handback;
+      try {
+        handback = decodeHubStandInHandback(JSON.parse(body));
+      } catch {
+        return refused(400, "invalid");
+      }
+      const merged = await options.hub.receiveHandback(verified.senderMemberId, handback);
+      return merged.status === "merged"
+        ? Response.json({ roster: encodeSignedHubRoster(merged.roster) }, { headers: NO_STORE })
+        : refused(403, merged.kind);
+    }
     let leaving;
     try {
       leaving = decodeHubLeaveRequest(JSON.parse(body));

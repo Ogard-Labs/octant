@@ -687,12 +687,18 @@ export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
     "/api/code/language/read",
     "Language services' diagnostics and definition reads, served by the host since 2026-10-26 ahead of the editor that calls them (docs/design/language-services.md, delivery plan slice 3). Remove once the Code editor shows diagnostics and jumps to definitions.",
   ],
-  ...["/api/hub/join", "/api/hub/leave", "/api/hub/roster", "/api/hub/status"].map(
-    (endpoint): [string, string] => [
-      endpoint,
-      "Member-to-member request that a hub or spoke signs and sends over the private listener from apps/server (hubService.ts, spokeLinkService.ts), which builds the path itself; no window or device calls it. Remove when the checker counts apps/server as a caller of its own listener's routes.",
-    ],
-  ),
+  ...[
+    "/api/hub/join",
+    "/api/hub/leave",
+    "/api/hub/roster",
+    "/api/hub/status",
+    "/api/hub/standby",
+    "/api/hub/heartbeat",
+    "/api/hub/handback",
+  ].map((endpoint): [string, string] => [
+    endpoint,
+    "Member-to-member request that a hub, standby, or spoke signs and sends over the private listener from apps/server (hubService.ts, spokeLinkService.ts, failoverService.ts), which builds the path itself; no window or device calls it. Remove when the checker counts apps/server as a caller of its own listener's routes.",
+  ]),
   ...["/api/hub/guest", "/api/hub/guest-roster"].map((endpoint): [string, string] => [
     endpoint,
     "Served to a guest's signed request from the phone app, which builds the path inside the guest client in packages/client-runtime (hubGuestClient.ts); no window script names it. Remove when the checker counts packages/client-runtime as a caller of a host route.",

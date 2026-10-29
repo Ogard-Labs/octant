@@ -35,6 +35,13 @@ export const HubMembershipChange = Schema.Literal(
   "alert-dismissed",
   "confirm-new-members-changed",
   "join-code-minted",
+  "standby-order-changed",
+  "stand-in-started",
+  "stand-in-ended",
+  "stand-in-merged",
+  "stand-in-refused",
+  "hub-promoted",
+  "new-hub-accepted",
 );
 export type HubMembershipChange = typeof HubMembershipChange.Type;
 
@@ -47,6 +54,8 @@ export const HubMembershipChangedPayload = Schema.Struct({
   change: HubMembershipChange,
   actingPrincipal: AuditActingPrincipal,
   memberId: Schema.optional(HubMemberId),
+  /** The members a change names together, such as the standby order in its order. */
+  memberIds: Schema.optional(Schema.Array(HubMemberId).pipe(Schema.maxItems(256))),
   sequence: Schema.optional(Schema.Int.pipe(Schema.positive())),
   items: Schema.optional(Schema.Array(HubGrantItem)),
 }).annotations(strict);
@@ -97,6 +106,15 @@ export type HubIdentityFacts = typeof HubIdentityFacts.Type;
 export const HubJoinResponse = Schema.Struct({
   hub: HubIdentityFacts,
   roster: SignedHubRoster,
+  /**
+   * Present when a standby that is standing in answered instead of the hub. Then
+   * `hub` is the hub the standby holds, `roster` is the standby-signed update,
+   * and the hub-signed roster that names the standby travels beside it with the
+   * hub's origin, so the new member can reach the hub when it returns.
+   */
+  standIn: Schema.optional(
+    Schema.Struct({ hubOrigin: bounded(300), hubRoster: SignedHubRoster }).annotations(strict),
+  ),
 }).annotations(strict);
 export type HubJoinResponse = typeof HubJoinResponse.Type;
 export const decodeHubJoinResponse = Schema.decodeUnknownSync(HubJoinResponse);
@@ -140,3 +158,81 @@ export const HubGuestAdmissionResponse = Schema.Struct({
 }).annotations(strict);
 export type HubGuestAdmissionResponse = typeof HubGuestAdmissionResponse.Type;
 export const decodeHubGuestAdmissionResponse = Schema.decodeUnknownSync(HubGuestAdmissionResponse);
+
+const uniqueIds = <A>(items: ReadonlyArray<A>) => new Set(items.map(String)).size === items.length;
+
+/** The standby hubs the person names on the hub, in the order members try them. Empty clears them. */
+export const HubStandbyOrderRequest = Schema.Struct({
+  memberIds: Schema.Array(HubMemberId).pipe(
+    Schema.maxItems(16),
+    Schema.filter(uniqueIds, { message: () => "Entries must not repeat." }),
+  ),
+}).annotations(strict);
+export type HubStandbyOrderRequest = typeof HubStandbyOrderRequest.Type;
+export const decodeHubStandbyOrderRequest = Schema.decodeUnknownSync(HubStandbyOrderRequest);
+
+/** The person's confirmation, in the standby's own window, that it becomes the hub for good. */
+export const HubPromoteRequest = Schema.Struct({ confirmed: Schema.Literal(true) }).annotations(
+  strict,
+);
+export type HubPromoteRequest = typeof HubPromoteRequest.Type;
+export const decodeHubPromoteRequest = Schema.decodeUnknownSync(HubPromoteRequest);
+
+/** A spoke's person accepting the named standby that was promoted to hub. */
+export const HubAcceptNewHubRequest = Schema.Struct({ hubMemberId: HubMemberId }).annotations(
+  strict,
+);
+export type HubAcceptNewHubRequest = typeof HubAcceptNewHubRequest.Type;
+export const decodeHubAcceptNewHubRequest = Schema.decodeUnknownSync(HubAcceptNewHubRequest);
+
+/** A member of the roster named by id: removing one while a standby stands in. */
+export const HubMemberReference = Schema.Struct({ memberId: HubMemberId }).annotations(strict);
+export type HubMemberReference = typeof HubMemberReference.Type;
+export const decodeHubMemberReference = Schema.decodeUnknownSync(HubMemberReference);
+
+/**
+ * What a member learns when it asks the hub, or a standby that is standing in,
+ * whether it is there. The hub answers with its latest roster; a standby that
+ * is standing in says so and signs with its own identity key, which it presents.
+ */
+export const HubHeartbeatResponse = Schema.Struct({
+  standingIn: Schema.Boolean,
+  roster: SignedHubRoster,
+  /** The answering hub's identity facts, so a spoke that accepts a promoted hub can pin it. */
+  hub: Schema.optional(HubIdentityFacts),
+  /** The identity key of a standby that signed `roster`; a member checks its fingerprint against the roster. */
+  signerPublicKey: Schema.optional(base64Url(512)),
+}).annotations(strict);
+export type HubHeartbeatResponse = typeof HubHeartbeatResponse.Type;
+export const decodeHubHeartbeatResponse = Schema.decodeUnknownSync(HubHeartbeatResponse);
+
+/** A member a standby added while standing in, with what the hub needs to hold it. */
+export const StandInAddedMember = Schema.Struct({
+  member: RosterMember,
+  identityPublicKey: base64Url(512),
+  listenerOrigin: bounded(300),
+}).annotations(strict);
+export type StandInAddedMember = typeof StandInAddedMember.Type;
+
+/**
+ * What a standby hands back to the hub when it steps down. `wakeTimes` is the
+ * place the wake times it holds will travel; none exist until the wake service
+ * does, so it is empty.
+ */
+export const HubStandInHandback = Schema.Struct({
+  baseSequence: Schema.Int.pipe(Schema.positive()),
+  sequence: Schema.Int.pipe(Schema.positive()),
+  added: Schema.Array(StandInAddedMember).pipe(Schema.maxItems(64)),
+  removed: Schema.Array(HubMemberId).pipe(Schema.maxItems(256)),
+  wakeTimes: Schema.Tuple(),
+}).annotations(strict);
+export type HubStandInHandback = typeof HubStandInHandback.Type;
+export const decodeHubStandInHandback = Schema.decodeUnknownSync(HubStandInHandback);
+
+export const HubStandInHandbackResponse = Schema.Struct({ roster: SignedHubRoster }).annotations(
+  strict,
+);
+export type HubStandInHandbackResponse = typeof HubStandInHandbackResponse.Type;
+export const decodeHubStandInHandbackResponse = Schema.decodeUnknownSync(
+  HubStandInHandbackResponse,
+);

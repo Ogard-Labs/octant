@@ -225,6 +225,38 @@ export type StandInMembershipChanges = {
   readonly removed: ReadonlyArray<HubMemberId>;
 };
 
+export type StandInHandbackDecision =
+  | { readonly status: "valid" }
+  | { readonly status: "refused"; readonly kind: "handback-invalid" };
+
+/**
+ * Whether the hub may merge a standby's hand-back. The hub signs the merged
+ * roster, so every member takes it as the hub's own word: a standby must not
+ * be able to change through it what members refuse from a standby. It may
+ * remove spokes and guests, never the hub, a standby (the sender included), or
+ * a member of the standby order, and it may add only spokes the hub's roster
+ * does not already hold as the hub or a standby. One entry that breaks this
+ * refuses the whole hand-back.
+ */
+export function decideStandInHandback(input: {
+  readonly hub: HubRoster;
+  readonly senderMemberId: HubMemberId;
+  readonly standby: StandInMembershipChanges;
+}): StandInHandbackDecision {
+  const { hub, standby } = input;
+  const protectedId = (id: HubMemberId): boolean =>
+    sameId(id, input.senderMemberId) ||
+    includesId(hub.standbyOrder, id) ||
+    hub.members.some(
+      (member) =>
+        sameId(member.memberId, id) && (member.role === "hub" || member.role === "standby-hub"),
+    );
+  const invalid =
+    standby.removed.some(protectedId) ||
+    standby.added.some((member) => member.role !== "spoke" || protectedId(member.memberId));
+  return invalid ? { status: "refused", kind: "handback-invalid" } : { status: "valid" };
+}
+
 /**
  * The roster the hub signs next when a standby stands down. `hub` is the
  * hub's roster now, `hubRemovedSinceBase` every member the hub removed since
@@ -255,6 +287,94 @@ export function mergeStandInMembership(input: {
     ),
     failoverAfterSeconds: hub.failoverAfterSeconds,
   };
+}
+
+export type StandbyOrdering =
+  | { readonly status: "ordered"; readonly roster: HubRoster }
+  | {
+      readonly status: "refused";
+      readonly kind: "duplicate-member" | "unknown-member" | "not-a-spoke";
+    };
+
+/**
+ * The roster the hub signs when the person names standby hubs. Only a spoke
+ * can be a standby: the hub is already the hub and a guest runs nothing a
+ * standby would. Members named take the standby role in the order given, and
+ * a former standby not named returns to being a spoke. Whether a named spoke
+ * ticked Standby is that spoke's answer, not the roster's.
+ */
+export function orderStandbys(input: {
+  readonly roster: HubRoster;
+  readonly memberIds: ReadonlyArray<HubMemberId>;
+}): StandbyOrdering {
+  const { roster, memberIds } = input;
+  if (new Set(memberIds.map(String)).size !== memberIds.length) {
+    return { status: "refused", kind: "duplicate-member" };
+  }
+  for (const id of memberIds) {
+    const member = roster.members.find((entry) => sameId(entry.memberId, id));
+    if (member === undefined) return { status: "refused", kind: "unknown-member" };
+    if (member.role !== "spoke" && member.role !== "standby-hub") {
+      return { status: "refused", kind: "not-a-spoke" };
+    }
+  }
+  return {
+    status: "ordered",
+    roster: {
+      ...roster,
+      sequence: roster.sequence + 1,
+      members: roster.members.map((member) => {
+        if (member.role !== "spoke" && member.role !== "standby-hub") return member;
+        return {
+          ...member,
+          role: includesId(memberIds, member.memberId) ? "standby-hub" : "spoke",
+        };
+      }),
+      standbyOrder: memberIds,
+    },
+  };
+}
+
+export type StandInDecision =
+  | { readonly status: "stand-in" }
+  | {
+      readonly status: "refused";
+      readonly kind:
+        | "already-standing-in"
+        | "no-hub-roster"
+        | "not-a-named-standby"
+        | "standby-not-granted"
+        | "hub-seen-recently";
+    };
+
+/**
+ * Whether a standby starts acting as hub. It must be named in the latest
+ * hub-signed roster (nobody else stands in), its own hub grant must tick
+ * Standby, and it must have seen no hub for the whole failover time.
+ */
+export function decideStandIn(input: {
+  readonly anchor: SignedHubRoster | undefined;
+  readonly selfMemberId: HubMemberId;
+  readonly grant: HubGrant | undefined;
+  readonly silentForMs: number;
+  readonly failoverAfterMs: number;
+  readonly standingIn: boolean;
+}): StandInDecision {
+  if (input.standingIn) return { status: "refused", kind: "already-standing-in" };
+  if (input.anchor === undefined) return { status: "refused", kind: "no-hub-roster" };
+  const named =
+    includesId(input.anchor.roster.standbyOrder, input.selfMemberId) &&
+    input.anchor.roster.members.some(
+      (member) => sameId(member.memberId, input.selfMemberId) && member.role === "standby-hub",
+    );
+  if (!named) return { status: "refused", kind: "not-a-named-standby" };
+  if (authorizeHubRequest({ grant: input.grant, item: "standby" }).status === "refused") {
+    return { status: "refused", kind: "standby-not-granted" };
+  }
+  if (input.silentForMs < input.failoverAfterMs) {
+    return { status: "refused", kind: "hub-seen-recently" };
+  }
+  return { status: "stand-in" };
 }
 
 export type HeldGrantReconciliation = {

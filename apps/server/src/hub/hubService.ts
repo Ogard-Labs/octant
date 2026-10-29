@@ -10,21 +10,30 @@ import {
   NO_LISTENER_PIN,
   encodeSignedHubRoster,
   type AuditActingPrincipal,
+  type HubHeartbeatResponse,
   type HubJoinRequest,
   type HubJoinResponse,
   type HubMembershipChangedPayload,
+  type HubStandInHandback,
   type OwnerCandidate,
   type OwnerListEntry,
   type RosterMember,
   type SignedHubRoster,
 } from "@octant/contracts";
 import type { StableHostId } from "@octant/contracts/remote-access";
-import { buildPairingCode, hubRosterSigningPayload } from "@octant/domain";
+import {
+  buildPairingCode,
+  hubRosterSigningPayload,
+  decideStandInHandback,
+  mergeStandInMembership,
+  orderStandbys,
+} from "@octant/domain";
 import { Schema } from "effect";
 import type { PrivateListenerHostStatus } from "../remote/privateListenerLifecycleController";
 import type { HostSigningPort } from "../remote/remoteProtocolService";
 import { listenerPinFromDigest, publicKeyFingerprint } from "./hubCrypto";
 import { sendHubLinkRequest } from "./hubLink";
+import { memberOrigin } from "./memberOrigin";
 import type { HostOwnerRecord, HubSideState, HubStatePort } from "./hubStateStore";
 import {
   addOwnerRecords,
@@ -81,7 +90,7 @@ export interface HubServiceOptions {
 const hubMemberId = (identity: HubHostIdentity) => decodeMemberId(String(identity.hostId));
 
 /** The port a member's listener origin names, which the hub states in the roster instead of trusting a claim. */
-function listenerPortOf(origin: string | undefined): { readonly listenerPort?: number } {
+export function listenerPortOf(origin: string | undefined): { readonly listenerPort?: number } {
   if (origin === undefined) return {};
   const port = new URL(origin).port;
   return port === "" ? {} : { listenerPort: Number(port) };
@@ -131,6 +140,43 @@ export type RemoveOutcome =
       readonly kind: "hub-role-off" | "not-a-member" | "cannot-remove-the-hub";
     };
 
+export type StandbyOrderOutcome =
+  | { readonly status: "ordered"; readonly roster: SignedHubRoster }
+  | {
+      readonly status: "refused";
+      readonly kind:
+        | "hub-role-off"
+        | "duplicate-member"
+        | "unknown-member"
+        | "not-a-spoke"
+        | "member-unreachable"
+        | "standby-not-granted";
+      readonly memberId?: string;
+    };
+
+export type HandbackOutcome =
+  | { readonly status: "merged"; readonly roster: SignedHubRoster }
+  | {
+      readonly status: "refused";
+      readonly kind: "hub-role-off" | "not-a-named-standby" | "invalid-member" | "handback-invalid";
+    };
+
+export type PromoteOutcome =
+  | { readonly status: "promoted"; readonly roster: SignedHubRoster }
+  | {
+      readonly status: "refused";
+      readonly kind:
+        | "already-hub"
+        | "not-a-spoke"
+        | "not-a-named-standby"
+        | "listener-not-running"
+        | "listener-not-private"
+        | "listener-has-no-pin";
+    };
+
+/** The most removals the hub remembers for merging a standby's changes back. */
+const MAX_REMEMBERED_REMOVALS = 256;
+
 export class HubService {
   readonly #options: HubServiceOptions;
 
@@ -147,11 +193,53 @@ export class HubService {
     };
   }
 
-  /** The key the hub trusts for a member's requests: the one the member joined with. */
-  memberKey(memberId: string): string | undefined {
+  /**
+   * The key the hub trusts for a member's requests: the one the member joined
+   * with. A member this hub holds no key for, such as one a promoted standby
+   * carried over, may present its key; it is trusted only if its fingerprint is
+   * the one the hub's own signed roster lists for that member.
+   */
+  memberKey(memberId: string, presentedKey?: string): string | undefined {
     const hub = this.#options.state.load().hub;
     if (hub?.enabled !== true) return undefined;
-    return hub.members.find((member) => String(member.memberId) === memberId)?.identityPublicKey;
+    const recorded = hub.members.find((member) => String(member.memberId) === memberId);
+    if (recorded !== undefined) return recorded.identityPublicKey;
+    const listed = hub.roster?.roster.members.find(
+      (member) => String(member.memberId) === memberId,
+    );
+    return listed !== undefined &&
+      listed.role !== "hub" &&
+      presentedKey !== undefined &&
+      publicKeyFingerprint(presentedKey) === listed.identityKeyFingerprint
+      ? presentedKey
+      : undefined;
+  }
+
+  /**
+   * What the hub answers a member that asks whether it is there: its latest
+   * roster, and the identity facts a spoke pins when it accepts a promoted hub.
+   */
+  heartbeat(): HubHeartbeatResponse | undefined {
+    const hub = this.#options.state.load().hub;
+    if (hub?.enabled !== true || hub.roster === undefined) return undefined;
+    const reading = readPrivateListener(this.#options.listener());
+    const identity = this.#options.identity();
+    return {
+      standingIn: false,
+      roster: hub.roster,
+      ...(reading.status === "refused"
+        ? {}
+        : {
+            hub: {
+              memberId: hubMemberId(identity),
+              name: identity.displayName,
+              identityPublicKey: identity.signing.hostPublicKey,
+              identityKeyFingerprint: identity.signing.hostKeyFingerprint,
+              rosterSigningPublicKey: this.#options.rosterKey.signer().publicKey,
+              listenerPin: reading.pinDigest,
+            },
+          }),
+    };
   }
 
   /**
@@ -291,7 +379,10 @@ export class HubService {
       owners: hub.owners ?? [],
       // A failed lookup counts as inactive, so owner powers fail closed.
       inactiveDeviceMemberIds: hub.members
-        .filter((member) => pairing?.deviceActive(member.deviceId) !== true)
+        .filter(
+          (member) =>
+            member.deviceId === undefined || pairing?.deviceActive(member.deviceId) !== true,
+        )
         .map((member) => String(member.memberId)),
     };
   }
@@ -487,7 +578,7 @@ export class HubService {
         memberId: member.memberId,
       });
     }
-    void this.#publish(signed, hub, [String(member.memberId)]);
+    void this.#publish(signed, hub, roster.members, []);
     const identity = this.#options.identity();
     return {
       status: "joined",
@@ -519,16 +610,289 @@ export class HubService {
    * member's device.
    */
   async receiveLeave(memberId: string): Promise<RemoveOutcome> {
-    const record = this.#options.state
-      .load()
-      .hub?.members.find((member) => String(member.memberId) === memberId);
-    if (record === undefined) return { status: "refused", kind: "not-a-member" };
+    const hub = this.#options.state.load().hub;
+    const record = hub?.members.find((member) => String(member.memberId) === memberId);
+    const listed = hub?.roster?.roster.members.find(
+      (member) => String(member.memberId) === memberId,
+    );
+    if (record === undefined && listed === undefined) {
+      return { status: "refused", kind: "not-a-member" };
+    }
     return this.#drop(
       memberId,
       "member-left",
-      { kind: "remote-device", deviceId: decodeDeviceId(record.deviceId) },
+      record?.deviceId === undefined
+        ? { kind: "peer", memberId: decodeMemberId(memberId) }
+        : { kind: "remote-device", deviceId: decodeDeviceId(record.deviceId) },
       false,
     );
+  }
+
+  /**
+   * Names the standby hubs, in order. Each named spoke is asked, over a signed
+   * request, whether its person ticked Standby; the order changes only if every
+   * one says yes. The order is the hub's alone: a standby that stands in cannot
+   * change it (decision H10).
+   */
+  async setStandbyOrder(
+    memberIds: ReadonlyArray<HubMemberId>,
+    principal: AuditActingPrincipal,
+  ): Promise<StandbyOrderOutcome> {
+    const before = this.#options.state.load().hub;
+    if (before?.enabled !== true || before.roster === undefined) {
+      return { status: "refused", kind: "hub-role-off" };
+    }
+    const checked = orderStandbys({ roster: before.roster.roster, memberIds });
+    if (checked.status === "refused") return checked;
+    const identity = this.#options.identity();
+    for (const id of memberIds) {
+      const member = before.roster.roster.members.find(
+        (entry) => String(entry.memberId) === String(id),
+      );
+      const origin =
+        before.members.find((record) => String(record.memberId) === String(id))?.listenerOrigin ??
+        (member === undefined ? undefined : memberOrigin(member));
+      if (member === undefined || origin === undefined) {
+        return { status: "refused", kind: "member-unreachable", memberId: String(id) };
+      }
+      const answer = await sendHubLinkRequest({
+        transport: this.#options.transport,
+        target: { origin, pin: listenerPinFromDigest(member.listenerPin) },
+        signHostPayload: identity.signing.signHostPayload,
+        senderMemberId: String(hubMemberId(identity)),
+        recipientMemberId: String(id),
+        method: "PUT",
+        path: "/api/hub/standby",
+        body: "{}",
+        now: this.#options.now(),
+      });
+      if (answer.status === "unreachable") {
+        return { status: "refused", kind: "member-unreachable", memberId: String(id) };
+      }
+      if (answer.response.status === 403) {
+        return { status: "refused", kind: "standby-not-granted", memberId: String(id) };
+      }
+      if (!answer.response.ok) {
+        return { status: "refused", kind: "member-unreachable", memberId: String(id) };
+      }
+    }
+    // The roster is read again: members may have joined or left while the
+    // spokes were being asked, and their changes must not be overwritten.
+    const current = this.#options.state.load();
+    const hub = current.hub;
+    if (hub?.enabled !== true || hub.roster === undefined) {
+      return { status: "refused", kind: "hub-role-off" };
+    }
+    const ordering = orderStandbys({ roster: hub.roster.roster, memberIds });
+    if (ordering.status === "refused") return ordering;
+    const signed = this.#sign(ordering.roster);
+    this.#options.state.save({ ...current, hub: { ...hub, roster: signed } });
+    this.#options.record({
+      change: "standby-order-changed",
+      actingPrincipal: principal,
+      memberIds,
+      sequence: signed.roster.sequence,
+    });
+    await this.#publish(signed, hub, signed.roster.members, []);
+    return { status: "ordered", roster: signed };
+  }
+
+  /**
+   * A standby that stood in hands back the membership changes it made. The
+   * hub's next signed roster includes them, and a member either side removed
+   * stays removed. Only a standby the hub's roster names is heard, so a spoke
+   * that was never named cannot add or remove anyone this way.
+   */
+  async receiveHandback(
+    senderMemberId: string,
+    handback: HubStandInHandback,
+  ): Promise<HandbackOutcome> {
+    const current = this.#options.state.load();
+    const hub = current.hub;
+    if (hub?.enabled !== true || hub.roster === undefined) {
+      return { status: "refused", kind: "hub-role-off" };
+    }
+    const roster = hub.roster.roster;
+    const sender = roster.members.find((member) => String(member.memberId) === senderMemberId);
+    if (
+      sender?.role !== "standby-hub" ||
+      !roster.standbyOrder.some((id) => String(id) === senderMemberId)
+    ) {
+      return { status: "refused", kind: "not-a-named-standby" };
+    }
+    // The hub signs the merge, so a standby that names the hub or a standby in
+    // its removals, or adds anything but a spoke, is refused whole.
+    const decision = decideStandInHandback({
+      hub: roster,
+      senderMemberId: sender.memberId,
+      standby: {
+        sequence: handback.sequence,
+        added: handback.added.map((entry) => entry.member),
+        removed: handback.removed,
+      },
+    });
+    if (decision.status === "refused") {
+      this.#options.record({
+        change: "stand-in-refused",
+        actingPrincipal: { kind: "hub", memberId: sender.memberId },
+        memberId: sender.memberId,
+        sequence: roster.sequence,
+      });
+      return decision;
+    }
+    // The roster states what the hub checked: a standby's claim of an owner
+    // mark, an unlock key, or a port the origin does not carry is not kept.
+    const added: Array<{
+      readonly member: RosterMember;
+      readonly origin: string;
+      readonly key: string;
+    }> = [];
+    for (const entry of handback.added) {
+      if (
+        entry.member.role !== "spoke" ||
+        publicKeyFingerprint(entry.identityPublicKey) !== entry.member.identityKeyFingerprint ||
+        !originIsPrivate(entry.listenerOrigin)
+      ) {
+        return { status: "refused", kind: "invalid-member" };
+      }
+      const { listenerPort: _port, ownerUnlockPublicKey: _unlock, ...claimed } = entry.member;
+      added.push({
+        member: { ...claimed, owner: false, ...listenerPortOf(entry.listenerOrigin) },
+        origin: entry.listenerOrigin,
+        key: entry.identityPublicKey,
+      });
+    }
+    const merged = mergeStandInMembership({
+      hub: roster,
+      hubRemovedSinceBase: (hub.removals ?? [])
+        .filter((removal) => removal.sequence > handback.baseSequence)
+        .map((removal) => removal.memberId),
+      standby: {
+        sequence: handback.sequence,
+        added: added.map((entry) => entry.member),
+        removed: handback.removed,
+      },
+    });
+    const kept = (memberId: string) =>
+      merged.members.some((member) => String(member.memberId) === memberId);
+    const dropped = roster.members.filter((member) => !kept(String(member.memberId)));
+    for (const member of dropped) {
+      this.#revokeMemberDevice(
+        hub.members.find((record) => String(record.memberId) === String(member.memberId))?.deviceId,
+      );
+    }
+    const known = new Set(hub.members.map((record) => String(record.memberId)));
+    const signed = this.#sign(merged);
+    const nextHub: HubSideState = {
+      ...hub,
+      roster: signed,
+      members: [
+        ...hub.members.filter((record) => kept(String(record.memberId))),
+        ...added
+          .filter(
+            (entry) =>
+              kept(String(entry.member.memberId)) && !known.has(String(entry.member.memberId)),
+          )
+          .map((entry) => ({
+            memberId: entry.member.memberId,
+            identityPublicKey: entry.key,
+            listenerOrigin: entry.origin,
+          })),
+      ],
+      ...(hub.owners === undefined
+        ? {}
+        : { owners: hub.owners.filter((owner) => kept(String(owner.memberId))) }),
+      removals: [
+        ...(hub.removals ?? []),
+        ...dropped.map((member) => ({
+          memberId: member.memberId,
+          sequence: signed.roster.sequence,
+        })),
+      ].slice(-MAX_REMEMBERED_REMOVALS),
+    };
+    this.#options.state.save({ ...current, hub: nextHub });
+    this.#options.record({
+      change: "stand-in-merged",
+      actingPrincipal: { kind: "hub", memberId: sender.memberId },
+      memberId: sender.memberId,
+      sequence: signed.roster.sequence,
+    });
+    // Members that were removed are told by the roster that no longer lists them.
+    await this.#publish(signed, nextHub, [...roster.members, ...added.map((e) => e.member)], []);
+    return { status: "merged", roster: signed };
+  }
+
+  /**
+   * Replaces the hub for good: a named standby, on its own host and at the
+   * person's confirmation, becomes the hub. The old hub leaves the roster, the
+   * standbys are cleared, and the roster is signed with this host's own key. No
+   * member follows by itself: each spoke's person accepts the new hub in their
+   * own window (decision H11).
+   */
+  promote(principal: AuditActingPrincipal): PromoteOutcome {
+    const current = this.#options.state.load();
+    if (current.hub?.enabled === true) return { status: "refused", kind: "already-hub" };
+    const link = current.link;
+    if (link === undefined || link.removed === true) {
+      return { status: "refused", kind: "not-a-spoke" };
+    }
+    const selfId = String(link.selfMemberId);
+    const anchor = link.roster.signedBy.kind === "hub" ? link.roster : link.hubSignedRoster;
+    const named =
+      anchor !== undefined &&
+      anchor.roster.standbyOrder.some((id) => String(id) === selfId) &&
+      anchor.roster.members.some(
+        (member) => String(member.memberId) === selfId && member.role === "standby-hub",
+      );
+    if (!named) return { status: "refused", kind: "not-a-named-standby" };
+    const reading = readPrivateListener(this.#options.listener());
+    if (reading.status === "refused") return { status: "refused", kind: reading.kind };
+    const held = link.roster.roster;
+    const others = held.members
+      .filter((member) => member.role !== "hub" && String(member.memberId) !== selfId)
+      .map(
+        (member): RosterMember =>
+          member.role === "standby-hub" ? { ...member, role: "spoke" } : member,
+      );
+    const roster = this.#sign({
+      sequence: held.sequence + 1,
+      members: [this.#hubMember(this.#options.identity(), reading), ...others],
+      standbyOrder: [],
+      failoverAfterSeconds: held.failoverAfterSeconds,
+    });
+    // Guests this host admitted as a spoke are not a hub's to keep: each guest
+    // knocks again on the spokes that accept it.
+    for (const guest of link.guestDevices ?? []) this.#revokeMemberDevice(guest.deviceId);
+    const owners = (link.owners ?? []).filter((owner) =>
+      others.some((member) => String(member.memberId) === String(owner.memberId)),
+    );
+    const { link: _link, ...rest } = current;
+    this.#options.state.save({
+      ...rest,
+      hub: {
+        enabled: true,
+        roster,
+        members: (link.standIn?.added ?? [])
+          .filter((entry) =>
+            others.some((member) => String(member.memberId) === String(entry.member.memberId)),
+          )
+          .map((entry) => ({
+            memberId: entry.member.memberId,
+            identityPublicKey: entry.identityPublicKey,
+            deviceId: entry.deviceId,
+            listenerOrigin: entry.listenerOrigin,
+          })),
+        joinTickets: [],
+        ...(owners.length === 0 ? {} : { owners }),
+      },
+    });
+    this.#options.record({
+      change: "hub-promoted",
+      actingPrincipal: principal,
+      memberId: link.selfMemberId,
+      sequence: roster.roster.sequence,
+    });
+    return { status: "promoted", roster };
   }
 
   async #drop(
@@ -546,18 +910,13 @@ export class HubService {
     const entry = roster.members.find((member) => String(member.memberId) === memberId);
     const record = hub.members.find((member) => String(member.memberId) === memberId);
     if (entry === undefined) return { status: "refused", kind: "not-a-member" };
-    if (entry.role === "hub" || record === undefined) {
-      return { status: "refused", kind: "cannot-remove-the-hub" };
-    }
-    try {
-      this.#options.pairing()?.revokeDevice(record.deviceId);
-    } catch {
-      // A device already revoked, or one the host no longer holds, leaves nothing to revoke.
-    }
+    if (entry.role === "hub") return { status: "refused", kind: "cannot-remove-the-hub" };
+    this.#revokeMemberDevice(record?.deviceId);
+    const members = roster.members.filter((member) => String(member.memberId) !== memberId);
     const signed = this.#sign({
       ...roster,
       sequence: roster.sequence + 1,
-      members: roster.members.filter((member) => String(member.memberId) !== memberId),
+      members,
       standbyOrder: roster.standbyOrder.filter((id) => String(id) !== memberId),
     });
     this.#options.state.save({
@@ -568,6 +927,10 @@ export class HubService {
         members: hub.members.filter((member) => String(member.memberId) !== memberId),
         // A removed member loses its owner powers here with the roster entry.
         ...(hub.owners === undefined ? {} : { owners: withoutOwner(hub.owners, memberId) }),
+        removals: [
+          ...(hub.removals ?? []),
+          { memberId: entry.memberId, sequence: signed.roster.sequence },
+        ].slice(-MAX_REMEMBERED_REMOVALS),
       },
     });
     this.#options.record({
@@ -578,33 +941,46 @@ export class HubService {
     });
     // The removed member learns of its removal from the roster that no longer
     // lists it, so it is told too. A member that left already knows.
-    await this.#publish(signed, hub, tellMember ? [] : [memberId]);
+    await this.#publish(signed, hub, roster.members, tellMember ? [] : [memberId]);
     return { status: "removed", sequence: signed.roster.sequence };
   }
 
-  /** Sends the roster to every member that holds a listener the hub can reach. Failures are not retried here. */
+  #revokeMemberDevice(deviceId: string | undefined): void {
+    if (deviceId === undefined) return;
+    try {
+      this.#options.pairing()?.revokeDevice(deviceId);
+    } catch {
+      // A device already revoked, or one the host no longer holds, leaves nothing to revoke.
+    }
+  }
+
+  /**
+   * Sends the roster to the listed members that run a listener the hub can
+   * reach, standbys included. A member's origin is the one it joined with, or
+   * the one its roster entry names when the hub never held it. Failures are not
+   * retried here: a member catches up on its next heartbeat.
+   */
   async #publish(
     signed: SignedHubRoster,
     hub: HubSideState,
+    recipients: ReadonlyArray<RosterMember>,
     skip: ReadonlyArray<string>,
   ): Promise<void> {
     const identity = this.#options.identity();
     const body = JSON.stringify(encodeSignedHubRoster(signed));
-    const pins = new Map(
-      (hub.roster?.roster.members ?? []).map((member) => [
-        String(member.memberId),
-        member.listenerPin,
-      ]),
+    const targets = recipients.filter(
+      (member) =>
+        member.role !== "hub" && member.role !== "guest" && !skip.includes(String(member.memberId)),
     );
-    const targets = hub.members.filter((member) => !skip.includes(String(member.memberId)));
     await Promise.allSettled(
       targets.map(async (member) => {
-        const pin = pins.get(String(member.memberId));
-        // A guest runs no listener; it reads the roster from the hub.
-        if (pin === undefined || member.listenerOrigin === undefined) return;
+        const origin =
+          hub.members.find((record) => String(record.memberId) === String(member.memberId))
+            ?.listenerOrigin ?? memberOrigin(member);
+        if (origin === undefined) return;
         await sendHubLinkRequest({
           transport: this.#options.transport,
-          target: { origin: member.listenerOrigin, pin: listenerPinFromDigest(pin) },
+          target: { origin, pin: listenerPinFromDigest(member.listenerPin) },
           signHostPayload: identity.signing.signHostPayload,
           senderMemberId: String(hubMemberId(identity)),
           recipientMemberId: String(member.memberId),

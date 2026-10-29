@@ -9,6 +9,7 @@ import {
   HubMemberId as HubMemberIdSchema,
   NewMemberAlertId,
   UtcTimestamp,
+  decodeHubHeartbeatResponse,
   decodeHubJoinResponse,
   type AuditActingPrincipal,
   type HubGrant,
@@ -16,6 +17,7 @@ import {
   type HeldMember,
   type HubGuestAdmissionRequest,
   type HubJoinRequest,
+  type HubJoinResponse,
   type HubMemberId,
   type HubPrincipal,
   type PeerPrincipal,
@@ -47,10 +49,11 @@ import {
 import { Schema } from "effect";
 import type { PrivateListenerHostStatus } from "../remote/privateListenerLifecycleController";
 import { listenerPinFromDigest, publicKeyFingerprint, verifySignature } from "./hubCrypto";
-import { HubLinkVerifier, sendHubLinkRequest } from "./hubLink";
+import { HUB_PEER_KEY_HEADER, HubLinkVerifier, sendHubLinkRequest } from "./hubLink";
 import { openHubPairing, type HubPairingRefusal, type HubPairingSession } from "./hubPairing";
 import type { HubHostIdentity } from "./hubService";
-import type { HostOwnerRecord, HubLinkState, HubStatePort } from "./hubStateStore";
+import type { HostOwnerRecord, HubLinkState, HubState, HubStatePort } from "./hubStateStore";
+import { memberOrigin } from "./memberOrigin";
 import {
   addOwnerRecords,
   ownerEntries,
@@ -63,7 +66,7 @@ import {
 } from "./ownerRecords";
 import { verifyOwnerAssertion } from "./ownerUnlock";
 import type { HubTransport } from "./pinnedHubTransport";
-import { readPrivateListener } from "./privateListenerReading";
+import { originIsPrivate, readPrivateListener } from "./privateListenerReading";
 
 const decodeMemberId = Schema.decodeUnknownSync(HubMemberIdSchema);
 const decodeAlertId = Schema.decodeUnknownSync(NewMemberAlertId);
@@ -182,7 +185,8 @@ export interface SpokeLinkOptions {
       | "new-member-confirmed"
       | "new-member-removed"
       | "alert-dismissed"
-      | "confirm-new-members-changed";
+      | "confirm-new-members-changed"
+      | "new-hub-accepted";
     readonly actingPrincipal: AuditActingPrincipal;
     readonly memberId?: HubMemberId;
     readonly sequence?: number;
@@ -243,6 +247,17 @@ export type SpokeLinkStatus =
       readonly awaitingConfirmation: ReadonlyArray<string>;
       readonly heldMembers: ReadonlyArray<HeldMember>;
       readonly alerts: ReadonlyArray<NewMemberAlert>;
+      /** `standby` means the held roster is one a standby signed while the hub was unreachable. */
+      readonly rosterSignedBy: "hub" | "standby";
+      /** The latest hub-signed roster this computer holds names it a standby, so its own window may promote it. */
+      readonly namedStandby: boolean;
+      /** Set while this host, a named standby, stands in for a hub it cannot reach. */
+      readonly standIn?: {
+        readonly startedAt: number;
+        readonly baseSequence: number;
+        readonly added: number;
+        readonly removed: number;
+      };
     };
 
 export type SpokeOwnerContext = {
@@ -328,9 +343,34 @@ export type RosterReceipt =
         | Extract<RosterReplacement, { readonly status: "refused" }>["kind"]
         | "no-hub-grant"
         | "item-not-granted"
+        | "standby-not-granted"
         | "not-a-spoke"
         | "hub-revoked";
     };
+
+/** Who sent a roster: the hub, or a named standby that presents the identity key its roster entry fingerprints. */
+export type RosterSenderOutcome =
+  | { readonly status: "hub"; readonly principal: HubPrincipal }
+  | { readonly status: "standby"; readonly memberId: HubMemberId }
+  | {
+      readonly status: "refused";
+      readonly kind:
+        | "not-a-spoke"
+        | "hub-revoked"
+        | "missing"
+        | "malformed"
+        | "stale"
+        | "unknown-sender"
+        | "signature-invalid"
+        | "replayed"
+        | "not-a-named-standby"
+        | "key-mismatch";
+    };
+
+/** The latest hub-signed roster this spoke holds: the one it holds, or the one that named the standby that signed it. */
+export function hubSignedAnchor(link: HubLinkState): SignedHubRoster | undefined {
+  return link.roster.signedBy.kind === "hub" ? link.roster : link.hubSignedRoster;
+}
 
 interface PendingJoin {
   readonly session: HubPairingSession;
@@ -370,6 +410,24 @@ export class SpokeLinkService {
         .map((grant) => String(grant.memberId)),
       heldMembers: this.heldMembers(),
       alerts: link.alerts ?? [],
+      rosterSignedBy: link.roster.signedBy.kind,
+      namedStandby:
+        link.removed !== true &&
+        (hubSignedAnchor(link)?.roster.members.some(
+          (member) =>
+            member.role === "standby-hub" && String(member.memberId) === String(link.selfMemberId),
+        ) ??
+          false),
+      ...(link.standIn === undefined
+        ? {}
+        : {
+            standIn: {
+              startedAt: link.standIn.startedAt,
+              baseSequence: link.standIn.baseSequence,
+              added: link.standIn.added.length,
+              removed: link.standIn.removed.length,
+            },
+          }),
     };
   }
 
@@ -727,6 +785,15 @@ export class SpokeLinkService {
     } catch {
       return { status: "refused", kind: "hub-answer-invalid" };
     }
+    if (response.standIn !== undefined) {
+      return this.#finishJoinThroughStandby({
+        response,
+        standIn: response.standIn,
+        standby: session.hub,
+        selfMemberId,
+        principal,
+      });
+    }
     // The hub is who its hello proved it to be, and the roster is signed by the
     // key the hub announced and lists this host. Anything else is not a join.
     const rosterSigned = verifySignature({
@@ -783,6 +850,210 @@ export class SpokeLinkService {
     return { status: "joined", rosterSequence: response.roster.roster.sequence, grant };
   }
 
+  /**
+   * A join answered by a standby that is standing in. The person compared codes
+   * with the standby, so this host trusts it the way it would trust a hub it
+   * joined: the standby's own key signs the update, and the hub-signed roster
+   * that names the standby comes along with the hub's keys and origin, so this
+   * host can reach the hub when it returns.
+   */
+  #finishJoinThroughStandby(input: {
+    readonly response: HubJoinResponse;
+    readonly standIn: NonNullable<HubJoinResponse["standIn"]>;
+    readonly standby: {
+      readonly hostId: string;
+      readonly hostKeyFingerprint: string;
+      readonly hostPublicKey: string;
+    };
+    readonly selfMemberId: HubMemberId;
+    readonly principal: AuditActingPrincipal;
+  }): JoinFinishOutcome {
+    const { response, standIn, standby, selfMemberId } = input;
+    const hubRoster = standIn.hubRoster;
+    const update = response.roster;
+    const hubEntry = hubRoster.roster.members.find(
+      (member) =>
+        member.role === "hub" && String(member.memberId) === String(response.hub.memberId),
+    );
+    const standbyEntry = hubRoster.roster.members.find(
+      (member) => member.role === "standby-hub" && String(member.memberId) === standby.hostId,
+    );
+    const valid =
+      hubEntry !== undefined &&
+      standbyEntry !== undefined &&
+      standbyEntry.identityKeyFingerprint === standby.hostKeyFingerprint &&
+      hubRoster.roster.standbyOrder.some((id) => String(id) === standby.hostId) &&
+      hubRoster.signedBy.kind === "hub" &&
+      verifySignature({
+        payload: hubRosterSigningPayload(hubRoster.roster),
+        signature: hubRoster.signature,
+        publicKey: response.hub.rosterSigningPublicKey,
+      }) &&
+      publicKeyFingerprint(response.hub.identityPublicKey) ===
+        response.hub.identityKeyFingerprint &&
+      response.hub.identityKeyFingerprint === hubEntry.identityKeyFingerprint &&
+      response.hub.listenerPin === hubEntry.listenerPin &&
+      originIsPrivate(standIn.hubOrigin) &&
+      update.signedBy.kind === "standby" &&
+      String(update.signedBy.memberId) === standby.hostId &&
+      update.roster.sequence > hubRoster.roster.sequence &&
+      verifySignature({
+        payload: hubRosterSigningPayload(update.roster),
+        signature: update.signature,
+        publicKey: standby.hostPublicKey,
+      }) &&
+      update.roster.members.some((member) => String(member.memberId) === String(selfMemberId));
+    if (!valid) return { status: "refused", kind: "hub-answer-invalid" };
+    const grant = defaultHubGrant();
+    const state = this.#options.state.load();
+    this.#options.state.save({
+      ...state,
+      link: {
+        selfMemberId,
+        hubMemberId: response.hub.memberId,
+        hubName: response.hub.name,
+        hubOrigin: standIn.hubOrigin,
+        hubListenerPin: response.hub.listenerPin,
+        hubIdentityPublicKey: response.hub.identityPublicKey,
+        rosterSigningPublicKey: response.hub.rosterSigningPublicKey,
+        grant,
+        roster: update,
+        hubSignedRoster: hubRoster,
+        peerGrants: introduceGuests({
+          spokeId: selfMemberId,
+          roster: update.roster,
+          grants: [],
+          introduce: grant.items.includes("introduce"),
+          confirmNewMembers: false,
+        }).grants,
+      },
+    });
+    this.#options.record({
+      change: "joined-hub",
+      actingPrincipal: input.principal,
+      memberId: response.hub.memberId,
+      sequence: update.roster.sequence,
+      items: grant.items,
+    });
+    return { status: "joined", rosterSequence: update.roster.sequence, grant };
+  }
+
+  /**
+   * The person's acceptance, in this spoke's own window, of a standby that was
+   * promoted to hub for good. The named standby is asked over a connection held
+   * to the pin its roster entry lists; it must answer as a hub with the key its
+   * entry fingerprints and a roster that lists this spoke. Nothing a remote
+   * request says can do this: only the window reaches it (decision H11).
+   */
+  async acceptNewHub(
+    hubMemberId: string,
+    principal: AuditActingPrincipal,
+  ): Promise<
+    | { readonly status: "accepted"; readonly sequence: number }
+    | {
+        readonly status: "refused";
+        readonly kind:
+          | "not-a-spoke"
+          | "hub-revoked"
+          | "not-a-named-standby"
+          | "hub-unreachable"
+          | "hub-answer-invalid"
+          | "roster-not-newer";
+      }
+  > {
+    const state = this.#options.state.load();
+    const link = state.link;
+    if (link === undefined) return { status: "refused", kind: "not-a-spoke" };
+    if (link.removed === true) return { status: "refused", kind: "hub-revoked" };
+    const anchor = hubSignedAnchor(link);
+    const target = anchor?.roster.members.find(
+      (member) => member.role === "standby-hub" && String(member.memberId) === hubMemberId,
+    );
+    const origin = target === undefined ? undefined : memberOrigin(target);
+    if (target === undefined || origin === undefined) {
+      return { status: "refused", kind: "not-a-named-standby" };
+    }
+    const identity = this.#options.identity();
+    const answer = await sendHubLinkRequest({
+      transport: this.#options.transport,
+      target: { origin, pin: listenerPinFromDigest(target.listenerPin) },
+      signHostPayload: identity.signing.signHostPayload,
+      senderMemberId: String(link.selfMemberId),
+      recipientMemberId: hubMemberId,
+      method: "GET",
+      path: "/api/hub/heartbeat",
+      headers: { [HUB_PEER_KEY_HEADER]: identity.signing.hostPublicKey },
+      now: this.#options.now(),
+    });
+    if (answer.status === "unreachable") return { status: "refused", kind: "hub-unreachable" };
+    let heartbeat;
+    try {
+      heartbeat = decodeHubHeartbeatResponse(await answer.response.json());
+    } catch {
+      return { status: "refused", kind: "hub-answer-invalid" };
+    }
+    const facts = heartbeat.hub;
+    const roster = heartbeat.roster;
+    const valid =
+      !heartbeat.standingIn &&
+      facts !== undefined &&
+      String(facts.memberId) === hubMemberId &&
+      facts.identityKeyFingerprint === target.identityKeyFingerprint &&
+      publicKeyFingerprint(facts.identityPublicKey) === facts.identityKeyFingerprint &&
+      facts.listenerPin === target.listenerPin &&
+      roster.signedBy.kind === "hub" &&
+      String(roster.signedBy.memberId) === hubMemberId &&
+      verifySignature({
+        payload: hubRosterSigningPayload(roster.roster),
+        signature: roster.signature,
+        publicKey: facts.rosterSigningPublicKey,
+      }) &&
+      roster.roster.members.some((member) => String(member.memberId) === String(link.selfMemberId));
+    if (!valid) return { status: "refused", kind: "hub-answer-invalid" };
+    // The state is read again: the person may have left, or narrowed the grant,
+    // while the new hub was being asked, and an install on the state read
+    // before the await would undo that.
+    const latest = this.#options.state.load();
+    const current = latest.link;
+    if (
+      current === undefined ||
+      current.leaving === true ||
+      String(current.hubMemberId) !== String(link.hubMemberId) ||
+      String(current.selfMemberId) !== String(link.selfMemberId)
+    ) {
+      return { status: "refused", kind: "not-a-spoke" };
+    }
+    if (current.removed === true) return { status: "refused", kind: "hub-revoked" };
+    if (roster.roster.sequence <= current.roster.roster.sequence) {
+      return { status: "refused", kind: "roster-not-newer" };
+    }
+    const { hubSignedRoster: _anchor, standIn: _standIn, ...rest } = current;
+    const switched = this.#installRoster(
+      latest,
+      {
+        ...rest,
+        hubMemberId: facts.memberId,
+        hubName: facts.name,
+        hubOrigin: origin,
+        hubListenerPin: facts.listenerPin,
+        hubIdentityPublicKey: facts.identityPublicKey,
+        rosterSigningPublicKey: facts.rosterSigningPublicKey,
+        // The old hub's roster is no longer the one that names a hub.
+        roster: current.roster,
+      },
+      roster,
+      undefined,
+    );
+    if (switched.status === "refused") return { status: "refused", kind: "hub-answer-invalid" };
+    this.#options.record({
+      change: "new-hub-accepted",
+      actingPrincipal: principal,
+      memberId: facts.memberId,
+      sequence: roster.roster.sequence,
+    });
+    return { status: "accepted", sequence: roster.roster.sequence };
+  }
+
   /** Only this host changes what its hub may do. */
   setGrant(
     grant: HubGrant,
@@ -835,6 +1106,8 @@ export class SpokeLinkService {
         method: "POST",
         path: "/api/hub/leave",
         body,
+        // A hub that never held this key (a promoted standby) checks it against the roster.
+        headers: { [HUB_PEER_KEY_HEADER]: identity.signing.hostPublicKey },
         now: this.#options.now(),
       });
       hubNotified = answer.status === "answered" && answer.response.ok;
@@ -886,6 +1159,53 @@ export class SpokeLinkService {
     });
     if (verified.status === "refused") return { status: "refused", kind: verified.kind };
     return { status: "hub", principal: { kind: "hub", memberId: link.hubMemberId } };
+  }
+
+  /**
+   * Resolves the sender of a roster: the hub, signed with the key recorded when
+   * this spoke joined, or a standby the latest hub-signed roster names, signed
+   * with the identity key it presents and the roster fingerprints. Whether this
+   * spoke lets that sender use its grant is checked separately.
+   */
+  authenticateRosterSender(input: {
+    readonly header: string | null;
+    readonly publicKey: string | null;
+    readonly method: string;
+    readonly path: string;
+    readonly body: string;
+  }): RosterSenderOutcome {
+    const link = this.#options.state.load().link;
+    if (link === undefined) return { status: "refused", kind: "not-a-spoke" };
+    if (link.removed === true) return { status: "refused", kind: "hub-revoked" };
+    if (input.header === null) return { status: "refused", kind: "missing" };
+    const claimed = input.header.split(".")[1];
+    if (claimed === undefined) return { status: "refused", kind: "malformed" };
+    if (claimed === String(link.hubMemberId)) return this.authenticateHub(input);
+    const anchor = hubSignedAnchor(link);
+    const entry = anchor?.roster.members.find(
+      (member) => String(member.memberId) === claimed && member.role === "standby-hub",
+    );
+    if (
+      anchor === undefined ||
+      entry === undefined ||
+      !anchor.roster.standbyOrder.some((id) => String(id) === claimed)
+    ) {
+      return { status: "refused", kind: "not-a-named-standby" };
+    }
+    if (input.publicKey === null) return { status: "refused", kind: "unknown-sender" };
+    if (publicKeyFingerprint(input.publicKey) !== entry.identityKeyFingerprint) {
+      return { status: "refused", kind: "key-mismatch" };
+    }
+    const verified = this.#verifier.verify({
+      header: input.header,
+      method: input.method,
+      path: input.path,
+      body: input.body,
+      recipientMemberId: String(link.selfMemberId),
+      publicKeyFor: (sender) => (sender === claimed ? (input.publicKey ?? undefined) : undefined),
+    });
+    if (verified.status === "refused") return { status: "refused", kind: verified.kind };
+    return { status: "standby", memberId: entry.memberId };
   }
 
   /**
@@ -991,27 +1311,70 @@ export class SpokeLinkService {
    * A newer one ends the grants this spoke gave to any member it no longer
    * lists, and one that no longer lists this spoke revokes the hub principal.
    */
-  receiveRoster(candidate: SignedHubRoster): RosterReceipt {
+  receiveRoster(
+    candidate: SignedHubRoster,
+    standby?: { readonly publicKey: string; readonly hubReachable: boolean },
+  ): RosterReceipt {
     const state = this.#options.state.load();
     const link = state.link;
     if (link === undefined) return { status: "refused", kind: "not-a-spoke" };
     if (link.removed === true) return { status: "refused", kind: "hub-revoked" };
+    // Every way a roster arrives (the hub's push, a standby's push, the hub's
+    // heartbeat answer, a hand-back) ends here, so the Roster item is judged
+    // once, not per caller.
+    const rosterGrant = authorizeHubRequest({ grant: link.grant, item: "roster" });
+    if (rosterGrant.status === "refused") return rosterGrant;
+    const anchor = hubSignedAnchor(link);
+    // A standby acts here only where this spoke's person ticked Standby.
+    if (
+      candidate.signedBy.kind === "standby" &&
+      authorizeHubRequest({ grant: link.grant, item: "standby" }).status === "refused"
+    ) {
+      return { status: "refused", kind: "standby-not-granted" };
+    }
+    const signer = candidate.signedBy;
+    const standbyEntry =
+      signer.kind === "standby"
+        ? anchor?.roster.members.find(
+            (member) => String(member.memberId) === String(signer.memberId),
+          )
+        : undefined;
+    const signatureVerified =
+      candidate.signedBy.kind === "hub"
+        ? verifySignature({
+            payload: hubRosterSigningPayload(candidate.roster),
+            signature: candidate.signature,
+            publicKey: link.rosterSigningPublicKey,
+          })
+        : standby !== undefined &&
+          standbyEntry !== undefined &&
+          publicKeyFingerprint(standby.publicKey) === standbyEntry.identityKeyFingerprint &&
+          verifySignature({
+            payload: hubRosterSigningPayload(candidate.roster),
+            signature: candidate.signature,
+            publicKey: standby.publicKey,
+          });
     const decision = decideRosterReplacement({
-      held: {
-        latest: link.roster,
-        ...(link.roster.signedBy.kind === "hub" ? { latestHubSigned: link.roster } : {}),
-      },
+      held: { latest: link.roster, ...(anchor === undefined ? {} : { latestHubSigned: anchor }) },
       candidate,
-      signatureVerified:
-        candidate.signedBy.kind === "hub" &&
-        verifySignature({
-          payload: hubRosterSigningPayload(candidate.roster),
-          signature: candidate.signature,
-          publicKey: link.rosterSigningPublicKey,
-        }),
-      hubReachable: true,
+      signatureVerified,
+      hubReachable: standby?.hubReachable ?? true,
     });
     if (decision.status === "refused") return decision;
+    return this.#installRoster(state, link, candidate, anchor);
+  }
+
+  /**
+   * Takes a roster that was already judged acceptable: the grants this spoke
+   * gave a dropped member end, new members are introduced and alerted, and a
+   * roster that no longer lists this spoke revokes the hub principal.
+   */
+  #installRoster(
+    state: HubState,
+    link: HubLinkState,
+    candidate: SignedHubRoster,
+    anchor: SignedHubRoster | undefined,
+  ): RosterReceipt {
     const { kept } = reconcileHeldGrants({
       grants: link.peerGrants,
       held: link.roster.roster,
@@ -1067,9 +1430,21 @@ export class SpokeLinkService {
     // grant it gave ends, with the guest devices. Its threads, Projects, and
     // credentials stay.
     const droppedDevices = guestDevices.filter((entry) => !listsSelf || !listed(entry.memberId));
+    // A standby-signed roster is judged against the hub-signed one that named
+    // the standby, so that one stays held; a hub-signed roster replaces it.
+    const { hubSignedRoster: _previousAnchor, ...base } = link;
+    const anchored =
+      candidate.signedBy.kind === "standby" && anchor !== undefined
+        ? { hubSignedRoster: anchor }
+        : {};
+    const signerPrincipal: AuditActingPrincipal = {
+      kind: "hub",
+      memberId: candidate.signedBy.memberId,
+    };
     const next: HubLinkState = listsSelf
       ? {
-          ...link,
+          ...base,
+          ...anchored,
           roster: candidate,
           peerGrants: introduced.grants,
           guestDevices: guestDevices.filter((entry) => listed(entry.memberId)),
@@ -1081,7 +1456,8 @@ export class SpokeLinkService {
             : { owners: link.owners.filter((owner) => listed(owner.memberId)) }),
         }
       : {
-          ...link,
+          ...base,
+          ...anchored,
           roster: candidate,
           peerGrants: [],
           guestDevices: [],
@@ -1093,15 +1469,15 @@ export class SpokeLinkService {
     for (const alert of raised) {
       this.#options.record({
         change: "new-member-alerted",
-        actingPrincipal: { kind: "hub", memberId: link.hubMemberId },
+        actingPrincipal: signerPrincipal,
         memberId: alert.memberId,
         sequence: candidate.roster.sequence,
       });
     }
     this.#options.record({
       change: "roster-accepted",
-      actingPrincipal: { kind: "hub", memberId: link.hubMemberId },
-      memberId: link.hubMemberId,
+      actingPrincipal: signerPrincipal,
+      memberId: candidate.signedBy.memberId,
       sequence: candidate.roster.sequence,
     });
     return { status: "accepted", sequence: candidate.roster.sequence, removed: !listsSelf };

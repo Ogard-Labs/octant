@@ -23,6 +23,13 @@ export type HubCliCommand =
   | { readonly action: "grant"; readonly items?: ReadonlyArray<HubGrantItem> }
   | { readonly action: "leave" }
   | { readonly action: "remove"; readonly member: string }
+  /** Shows the standby order, or sets it to the members given, or clears it. */
+  | { readonly action: "standby"; readonly members: ReadonlyArray<string>; readonly clear: boolean }
+  | { readonly action: "promote"; readonly confirm: boolean }
+  /** On a spoke: accept the named standby that was promoted to hub. */
+  | { readonly action: "accept-hub"; readonly member: string }
+  | { readonly action: "stand-in"; readonly step: "join-code" }
+  | { readonly action: "stand-in"; readonly step: "remove"; readonly member: string }
   | {
       readonly action: "certificate";
       readonly mode: "status" | "disable" | "enable";
@@ -37,6 +44,10 @@ const HUB_SIDE_ACTIONS: ReadonlySet<HubCliCommand["action"]> = new Set([
   "join-code",
   "remove",
   "certificate",
+  "standby",
+  "promote",
+  "accept-hub",
+  "stand-in",
 ]);
 
 const JOIN_APPROVAL_WINDOW_MS = 5 * 60_000;
@@ -83,6 +94,30 @@ export function resolveHubCliCommand(
       const [member] = rest;
       if (member === undefined || rest.length !== 1 || !only()) return undefined;
       return { action, member };
+    }
+    case "standby": {
+      if (!only("clear") || !isSwitch(flags.clear)) return undefined;
+      const clear = flags.clear === true;
+      // Clearing names no one; naming someone is not clearing.
+      if (clear && rest.length !== 0) return undefined;
+      return { action, members: rest, clear };
+    }
+    case "promote":
+      if (rest.length !== 0 || !only("confirm") || !isSwitch(flags.confirm)) return undefined;
+      return { action, confirm: flags.confirm === true };
+    case "accept-hub": {
+      const [member] = rest;
+      if (member === undefined || rest.length !== 1 || !only()) return undefined;
+      return { action, member };
+    }
+    case "stand-in": {
+      const [step, member] = rest;
+      if (!only()) return undefined;
+      if (step === "join-code" && rest.length === 1) return { action, step };
+      if (step === "remove" && member !== undefined && rest.length === 2) {
+        return { action, step, member };
+      }
+      return undefined;
     }
     case "certificate": {
       if (rest.length !== 0 || !only("enable", "disable", "status", "acknowledge-transparency")) {
@@ -188,6 +223,16 @@ export async function runHubCliCommand(input: Input): Promise<number> {
       return await runLeave(input);
     case "remove":
       return await runRemove(input, command.member);
+    case "standby":
+      return await runStandby(input, command.members, command.clear);
+    case "promote":
+      return await runPromote(input, command.confirm);
+    case "accept-hub":
+      return await runAcceptHub(input, command.member);
+    case "stand-in":
+      return command.step === "join-code"
+        ? await runStandInJoinCode(input)
+        : await runStandInRemove(input, command.member);
     case "certificate":
       return await runCertificate(input, command.mode, command.acknowledgeTransparency);
   }
@@ -254,6 +299,7 @@ async function runStatus(input: Input): Promise<number> {
       `  ${member.memberId}  ${member.role}${member.owner ? " (owner)" : ""}  ${member.name}\n`,
     );
   }
+  if (status.hubEnabled && status.standbyOrder.length > 0) writeStandbyOrder(input, status);
   if (status.link === undefined) {
     input.stdout.write("This computer has not joined a hub.\n");
     return 0;
@@ -261,6 +307,17 @@ async function runStatus(input: Input): Promise<number> {
   input.stdout.write(
     `Joined ${status.link.hubName}${status.link.membership === "removed" ? " (the hub removed this computer)" : ""}\n`,
   );
+  if (status.link.standIn !== undefined) {
+    input.stdout.write(
+      `This computer is standing in for the hub since ${new Date(status.link.standIn.startedAt).toISOString()} ` +
+        `(added ${status.link.standIn.added}, removed ${status.link.standIn.removed}). ` +
+        "It hands those changes back when the hub answers.\n",
+    );
+  } else if (status.link.followsStandby && status.link.membership === "member") {
+    input.stdout.write(
+      "The hub is unreachable: this computer follows the standby that is standing in.\n",
+    );
+  }
   writeGrant(input, status.link.grant);
   return 0;
 }
@@ -524,27 +581,152 @@ async function runLeave(input: Input): Promise<number> {
   return 0;
 }
 
-async function runRemove(input: Input, member: string): Promise<number> {
-  const status = await readStatus(input, "Octant refused to read the hub members.");
-  if (status === undefined) return 1;
-  const byId = status.members.filter((entry) => entry.memberId === member);
+/** A member by id or by name; writes why and answers undefined when the reference names none or several. */
+function resolveMember(
+  input: Input,
+  pool: ReadonlyArray<HubMemberOutput>,
+  reference: string,
+): HubMemberOutput | undefined {
+  const byId = pool.filter((entry) => entry.memberId === reference);
   const matches =
     byId.length > 0
       ? byId
-      : status.members.filter((entry) => entry.name.toLowerCase() === member.toLowerCase());
+      : pool.filter((entry) => entry.name.toLowerCase() === reference.toLowerCase());
   const [target] = matches;
   if (target === undefined) {
     input.stderr.write(
-      `No hub member is called ${member}. List them with \`octant hub status\`.\n`,
+      `No hub member is called ${reference}. List them with \`octant hub status\`.\n`,
     );
-    return 1;
+    return undefined;
   }
   if (matches.length > 1) {
     input.stderr.write(
-      `More than one member is called ${member}. Use the member id from \`octant hub status\`.\n`,
+      `More than one member is called ${reference}. Use the member id from \`octant hub status\`.\n`,
     );
+    return undefined;
+  }
+  return target;
+}
+
+async function runStandby(
+  input: Input,
+  references: ReadonlyArray<string>,
+  clear: boolean,
+): Promise<number> {
+  const status = await readStatus(input, "Octant refused to read the hub members.");
+  if (status === undefined) return 1;
+  if (references.length === 0 && !clear) {
+    writeStandbyOrder(input, status);
+    return 0;
+  }
+  const memberIds: string[] = [];
+  for (const reference of references) {
+    const target = resolveMember(input, status.members, reference);
+    if (target === undefined) return 1;
+    memberIds.push(target.memberId);
+  }
+  const response = await post(input, "/api/desktop/hub/standby-order", { memberIds });
+  if (!isOk(response, "ordered")) {
+    return refusal(input, response, "Octant refused to set the standby order.");
+  }
+  input.stdout.write(
+    memberIds.length === 0
+      ? "No standby hub is named now.\n"
+      : "Standby order set. Each named computer's person ticked Standby, and members try them in this order.\n",
+  );
+  return 0;
+}
+
+const PROMOTE_NOTE =
+  "This makes this computer the hub for good. The old hub leaves the roster, and each computer still has to accept this one from its own window. Run again with --confirm to do it.";
+
+async function runPromote(input: Input, confirm: boolean): Promise<number> {
+  let confirmed = confirm;
+  if (!confirmed && input.ask !== undefined) {
+    const answer = await input.ask(
+      "Make this computer the hub for good? The old hub leaves the roster. Type promote to confirm: ",
+    );
+    confirmed = answer?.trim().toLowerCase() === "promote";
+  }
+  if (!confirmed) {
+    input.stderr.write(`${PROMOTE_NOTE}\n`);
     return 1;
   }
+  const response = await post(input, "/api/desktop/hub/promote", { confirmed: true });
+  if (!isOk(response, "promoted")) {
+    return refusal(input, response, "Octant refused to make this computer the hub.");
+  }
+  input.stdout.write(
+    "This computer is now the hub. On each other computer, run `octant hub accept-hub <this computer>`.\n",
+  );
+  return 0;
+}
+
+async function runAcceptHub(input: Input, reference: string): Promise<number> {
+  const status = await readStatus(input, "Octant refused to read the hub members.");
+  if (status === undefined) return 1;
+  const target = resolveMember(input, status.heldMembers, reference);
+  if (target === undefined) return 1;
+  const response = await post(input, "/api/desktop/hub/accept-new-hub", {
+    hubMemberId: target.memberId,
+  });
+  if (!isOk(response, "accepted")) {
+    return refusal(input, response, "Octant refused to accept that hub.");
+  }
+  input.stdout.write(`${target.name} is now this computer's hub.\n`);
+  return 0;
+}
+
+async function runStandInJoinCode(input: Input): Promise<number> {
+  const response = await post(input, "/api/desktop/hub/stand-in/join-codes");
+  if (!isOk(response, "minted")) {
+    return refusal(input, response, "Octant refused to make a join code.");
+  }
+  const code = field(response.body, "code");
+  if (typeof code !== "string") {
+    input.stderr.write("Octant returned an unusable join code.\n");
+    return 1;
+  }
+  input.stdout.write(renderTerminalQr(code, { color: input.stdout.isTTY === true }));
+  input.stdout.write(
+    `Join code ${code}\nThis computer is standing in for the hub. On the other computer, run \`octant hub join <code>\`, compare the short code, then approve here.\n`,
+  );
+  return 0;
+}
+
+async function runStandInRemove(input: Input, reference: string): Promise<number> {
+  const status = await readStatus(input, "Octant refused to read the hub members.");
+  if (status === undefined) return 1;
+  const target = resolveMember(input, status.heldMembers, reference);
+  if (target === undefined) return 1;
+  const response = await post(input, "/api/desktop/hub/stand-in/members/remove", {
+    memberId: target.memberId,
+  });
+  if (!isOk(response, "removed")) {
+    return refusal(input, response, "Octant refused to remove that member.");
+  }
+  input.stdout.write(`Removed ${target.name}. The hub takes the removal back when it returns.\n`);
+  return 0;
+}
+
+function writeStandbyOrder(input: Input, status: HubStatusOutput): void {
+  const order = status.standbyOrder;
+  if (order.length === 0) {
+    input.stdout.write("No standby hub is named.\n");
+    return;
+  }
+  input.stdout.write("Standby order:\n");
+  order.forEach((memberId, index) => {
+    const name = status.heldMembers.find((entry) => entry.memberId === memberId)?.name ?? memberId;
+    input.stdout.write(`  ${index + 1}. ${name}  ${memberId}\n`);
+  });
+}
+
+async function runRemove(input: Input, member: string): Promise<number> {
+  const status = await readStatus(input, "Octant refused to read the hub members.");
+  if (status === undefined) return 1;
+  const target = resolveMember(input, status.members, member);
+  if (target === undefined) return 1;
   const response = await post(input, "/api/desktop/hub/members/remove", {
     memberId: target.memberId,
   });
@@ -597,6 +779,17 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
     "The remote listener could not restart with that certificate, so it was dropped and the listener is using its own again.",
   "could-not-remove":
     "The remote listener could not restart without the Tailscale certificate, so it is still on. Try turning it off again.",
+  "standby-not-granted":
+    "That computer's person has not ticked Standby in its hub grant (`octant hub grant --items ...,standby` there).",
+  "member-unreachable": "Octant could not reach that computer to ask it.",
+  "unknown-member": "That is not a member of this hub.",
+  "duplicate-member": "A computer can be named only once.",
+  "not-a-named-standby": "The hub has not named this computer a standby.",
+  "already-hub": "This computer is already the hub.",
+  "not-standing-in": "This computer is not standing in for the hub.",
+  "cannot-remove-hub-or-standby":
+    "A standby that stands in cannot remove the hub or a standby; the hub's window changes those.",
+  "roster-not-newer": "That hub's roster is not newer than the one this computer holds.",
 };
 
 /** The server's refusal as a sentence plus its own word for it, so nothing is hidden. */
@@ -635,10 +828,21 @@ interface GrantOutput {
 interface HubStatusOutput {
   readonly hubEnabled: boolean;
   readonly members: ReadonlyArray<HubMemberOutput>;
+  /** The members of the roster this computer holds, as the hub or as a member of one. */
+  readonly heldMembers: ReadonlyArray<HubMemberOutput>;
+  /** The standby hubs the latest roster this computer holds names, in order. */
+  readonly standbyOrder: ReadonlyArray<string>;
   readonly link?: {
     readonly membership: "member" | "removed";
     readonly hubName: string;
     readonly grant: GrantOutput;
+    /** The held roster was signed by a standby while the hub was unreachable. */
+    readonly followsStandby: boolean;
+    readonly standIn?: {
+      readonly startedAt: number;
+      readonly added: number;
+      readonly removed: number;
+    };
   };
 }
 
@@ -655,9 +859,50 @@ async function readStatus(input: Input, fallback: string): Promise<HubStatusOutp
     input.stderr.write("Octant returned an unusable hub status.\n");
     return undefined;
   }
-  const rosterMembers = field(field(field(hub, "roster"), "roster"), "members");
+  const members = rosterMembersOf(field(field(hub, "roster"), "roster"));
+  const membership = field(spoke, "membership");
+  const hubName = field(field(spoke, "hub"), "name");
+  const grant = grantOf(field(spoke, "grant"));
+  // A computer is the hub or a member of one, so one roster is the one it holds.
+  const heldRoster = enabled
+    ? field(field(hub, "roster"), "roster")
+    : field(field(spoke, "roster"), "roster");
+  const heldMembers = rosterMembersOf(heldRoster);
+  const standbyOrder = stringList(field(heldRoster, "standbyOrder"));
+  if (
+    (membership === "member" || membership === "removed") &&
+    typeof hubName === "string" &&
+    grant !== undefined
+  ) {
+    const standIn = field(spoke, "standIn");
+    const startedAt = field(standIn, "startedAt");
+    const added = field(standIn, "added");
+    const removed = field(standIn, "removed");
+    return {
+      hubEnabled: enabled,
+      members,
+      heldMembers,
+      standbyOrder,
+      link: {
+        membership,
+        hubName,
+        grant,
+        followsStandby: field(spoke, "rosterSignedBy") === "standby",
+        ...(typeof startedAt === "number" &&
+        typeof added === "number" &&
+        typeof removed === "number"
+          ? { standIn: { startedAt, added, removed } }
+          : {}),
+      },
+    };
+  }
+  return { hubEnabled: enabled, members, heldMembers, standbyOrder };
+}
+
+function rosterMembersOf(roster: unknown): ReadonlyArray<HubMemberOutput> {
+  const entries = field(roster, "members");
   const members: HubMemberOutput[] = [];
-  for (const entry of Array.isArray(rosterMembers) ? rosterMembers : []) {
+  for (const entry of Array.isArray(entries) ? entries : []) {
     const memberId = field(entry, "memberId");
     const name = field(entry, "name");
     const role = field(entry, "role");
@@ -665,17 +910,13 @@ async function readStatus(input: Input, fallback: string): Promise<HubStatusOutp
       members.push({ memberId, name, role, owner: field(entry, "owner") === true });
     }
   }
-  const membership = field(spoke, "membership");
-  const hubName = field(field(spoke, "hub"), "name");
-  const grant = grantOf(field(spoke, "grant"));
-  if (
-    (membership === "member" || membership === "removed") &&
-    typeof hubName === "string" &&
-    grant !== undefined
-  ) {
-    return { hubEnabled: enabled, members, link: { membership, hubName, grant } };
-  }
-  return { hubEnabled: enabled, members };
+  return members;
+}
+
+function stringList(value: unknown): ReadonlyArray<string> {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
 }
 
 function grantOf(value: unknown): GrantOutput | undefined {

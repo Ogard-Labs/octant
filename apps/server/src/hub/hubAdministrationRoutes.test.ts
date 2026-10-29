@@ -44,6 +44,7 @@ async function setup(
     windowAuthorityStore: authority,
     hub: host.hub,
     spoke: host.spoke,
+    failover: host.failover,
     certificate: new TailscaleCertificateService({
       setting: createTailscaleCertificateSetting(host.directory),
       daemon: unreachableTailscaleDaemon,
@@ -396,5 +397,93 @@ describe("who may administer the hub role", () => {
     expect(await held?.json()).toEqual({ members: [] });
     expect(unauthenticated?.status).toBe(401);
     expect(posted?.status).toBe(400);
+  });
+});
+
+describe("who may set the standby order, promote a standby, and accept a new hub", () => {
+  const failoverRoutes = [
+    HUB_ADMINISTRATION_ROUTES.standbyOrder,
+    HUB_ADMINISTRATION_ROUTES.promote,
+    HUB_ADMINISTRATION_ROUTES.acceptNewHub,
+    HUB_ADMINISTRATION_ROUTES.standInJoinCode,
+    HUB_ADMINISTRATION_ROUTES.standInRemove,
+  ] as const;
+  const memberId = "44444444-4444-4444-8444-444444444444";
+  const bodies: Record<(typeof failoverRoutes)[number], unknown> = {
+    [HUB_ADMINISTRATION_ROUTES.standbyOrder]: { memberIds: [memberId] },
+    [HUB_ADMINISTRATION_ROUTES.promote]: { confirmed: true },
+    [HUB_ADMINISTRATION_ROUTES.acceptNewHub]: { hubMemberId: memberId },
+    [HUB_ADMINISTRATION_ROUTES.standInJoinCode]: undefined,
+    [HUB_ADMINISTRATION_ROUTES.standInRemove]: { memberId },
+  };
+
+  it("refuses a remote device, a hub, a peer, and a standby on every one of them", async () => {
+    const { host, handle } = await setup();
+    host.hub.enable({ kind: "local-window" });
+    const recorded = host.records.length;
+    // A member of any kind signs its request with its identity key and carries no window.
+    const signed = (path: string) =>
+      signHubLinkRequest({
+        signHostPayload: host.signHostPayload,
+        senderMemberId: host.hostId,
+        recipientMemberId: host.hostId,
+        method: "POST",
+        path,
+        body: JSON.stringify(bodies[path as (typeof failoverRoutes)[number]] ?? ""),
+        now: Date.now(),
+      });
+
+    for (const path of failoverRoutes) {
+      const body = bodies[path];
+      const asDevice = await handle(
+        new Request(`http://127.0.0.1${path}`, {
+          method: "POST",
+          headers: { cookie: "octant-remote-session=abc", "x-octant-csrf": "x" },
+        }),
+      );
+      const asMember = await handle(
+        new Request(`http://127.0.0.1${path}`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            [HUB_LINK_HEADER]: signed(path),
+          },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        }),
+      );
+      const overTheListener = await handle(
+        new Request(`https://100.101.102.103:8443${path}`, {
+          method: "POST",
+          headers: { "x-octant-desktop-secret": secret, "x-octant-window-capability": capability },
+        }),
+      );
+      expect(asDevice?.status, path).toBe(401);
+      expect(asMember?.status, path).toBe(401);
+      expect(overTheListener?.status, path).toBe(401);
+    }
+    expect(host.records).toHaveLength(recorded);
+  });
+
+  it("turns a window's order away while the hub role is off and needs the confirmation to promote", async () => {
+    const { host, handle } = await setup();
+
+    const order = await handle(
+      post(HUB_ADMINISTRATION_ROUTES.standbyOrder, { memberIds: [memberId] }),
+    );
+    const unconfirmed = await handle(post(HUB_ADMINISTRATION_ROUTES.promote, {}));
+    const denied = await handle(post(HUB_ADMINISTRATION_ROUTES.promote, { confirmed: false }));
+    const promoted = await handle(post(HUB_ADMINISTRATION_ROUTES.promote, { confirmed: true }));
+    const repeated = await handle(
+      post(HUB_ADMINISTRATION_ROUTES.standbyOrder, { memberIds: [memberId, memberId] }),
+    );
+
+    expect(order?.status).toBe(409);
+    expect(await order?.json()).toMatchObject({ status: "refused", kind: "hub-role-off" });
+    expect(unconfirmed?.status).toBe(400);
+    expect(denied?.status).toBe(400);
+    expect(promoted?.status).toBe(409);
+    expect(await promoted?.json()).toMatchObject({ status: "refused", kind: "not-a-spoke" });
+    expect(repeated?.status).toBe(400);
+    expect(host.hub.status().enabled).toBe(false);
   });
 });

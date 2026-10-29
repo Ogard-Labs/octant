@@ -295,7 +295,7 @@ spoke. Only the spoke can change it.
 | Owners    | Let your owner devices act here after a fresh unlock. On by default.                      |
 | Status    | Read this computer's resources, thread titles and states, and waiting approvals.          |
 | Wake      | Hold this computer's routine wake times and wake it.                                      |
-| Standby   | Let a standby hub you named use this grant.                                               |
+| Standby   | Let a standby hub you named take over the roster while the hub is down.                   |
 | Push      | Send this computer's phone notifications through the hub.                                 |
 | Provision | Offer settings as proposals that you apply.                                               |
 | Act       | Act here as a paired device would, in Projects you name.                                  |
@@ -304,9 +304,10 @@ Ticking an item records your choice. In this release the hub can use only
 Roster and Status. Owners works for your own owner devices (see
 [Owner devices](#owner-devices)). Introduce makes this computer accept the other
 spokes and your phones as full members (see
-[Delegate work to another computer](#delegate-work-to-another-computer)). The
-other items do nothing yet, because the features behind them are not available
-yet.
+[Delegate work to another computer](#delegate-work-to-another-computer)).
+Standby lets a standby hub you named act here while the hub is down (see
+[If the hub goes down](#if-the-hub-goes-down)). The other items do nothing yet,
+because the features behind them are not available yet.
 
 Whatever you tick, the computer keeps its files, sign-ins, sandbox, and every
 approval.
@@ -349,6 +350,61 @@ request or one that names a provider profile is refused. An agent's helper
 request does not carry a target computer yet: you start, read, and cancel a
 delegation through the local administration channel on the asking computer.
 
+## If the hub goes down
+
+You can name one or more spokes as **standby hubs**. A standby keeps the hub's
+list of members current, and takes over that list while the hub is away. It is
+off until you name one.
+
+**Name a standby.** On the computer that is the hub, open **Settings → Remote
+access → Standby hubs**, add the computer, put the standbys in the order you
+want, and choose **Save the standby order**. Or run
+`octant hub standby <name or id> ...`, and `octant hub standby --clear` to name
+none. `octant hub standby` on its own shows the order. Only the hub's own window
+changes the order. A standby can never change it, and cannot promote itself.
+
+The computer you name must have **Standby** ticked in its own hub grant (see
+[The hub grant](#the-hub-grant)). Octant asks it when you save, and refuses the
+order if its person has not ticked it. A standby acts on a computer only where
+that computer ticked Standby.
+
+**What happens when the hub is away.**
+
+- A computer that cannot reach the hub for five minutes tries the first
+  standby, then the next.
+- A standby that has seen no hub for those five minutes starts standing in. It
+  tells the members, and shows **Standing in for the hub** in its Settings and in
+  `octant hub status`.
+- A computer takes a roster from a standby only while it cannot reach the hub,
+  only from a standby the hub named, and only if its own hub grant ticked
+  Standby. A standby cannot change the standby order in it.
+- While it stands in, the standby can add and remove members. For a new
+  computer, run `octant hub stand-in join-code` on the standby, join as usual
+  with that code, and compare the short code. To remove a member, run
+  `octant hub stand-in remove <name or id>`. A standby that is standing in cannot
+  remove the hub or another standby.
+- Approvals and window powers on every computer keep working, because they never
+  went through the hub.
+
+**When the hub comes back.** The standby sees it, hands its additions and
+removals back, and stops standing in. The hub signs a new list that includes
+them. If a member was removed on either side, it stays removed. Members return
+to the hub. If the network was split and both were reachable, the only duplicated
+work is a repeated roster; neither can start work on a computer, because each
+computer decides for itself.
+
+**If the hub is lost for good.** On the standby's own window, choose **Make this
+computer the hub…** under **Join a hub**, and confirm. Or run
+`octant hub promote --confirm` on it. The old hub leaves the list and the
+standby order is cleared. Nothing follows by itself: on each other computer,
+run `octant hub accept-hub <name of the new hub>` in its own window. A computer
+asks the new hub over the connection it already trusted for that standby, and
+accepts it only if it answers as that standby with a list that includes the
+computer. Phones that joined as guests join the new hub again with a new code.
+
+Not available yet: waking sleeping computers, which a standby will take over
+with the wake times when that feature arrives.
+
 ## Leave a hub and remove a device
 
 **Leave** is done on the spoke. In **Settings → Remote access → Join a hub**,
@@ -370,14 +426,15 @@ with `octant hub status`.
 | Lose the phone                          | In a window on the hub or a spoke, or on another owner device, remove the phone: as a member on the hub, and as an owner on each computer. Join a new phone with an owner code. |
 | Lose every owner device                 | Sit at any computer, or reach the hub over SSH on the private network. Run `octant hub join-code --owner`. The device that joins with that code is an owner.                    |
 | An alert shows a member you did not add | Choose **Remove** in the alert, in a window or on an owner device, then check the hub.                                                                                          |
+| The hub is down                         | Members switch to the standby you named after five minutes. Nothing to do. When the hub is back, they return. See [If the hub goes down](#if-the-hub-goes-down).                |
+| The hub is lost for good                | On the standby's own window, make it the hub. On each other computer, accept it in its own window.                                                                              |
 
 A thief who has the phone but not your face, finger, or passcode has only the
 powers of an ordinary member until you remove it.
 
-These are not available yet: a standby hub that takes over when the hub is
-down, sign-in copy between computers, and posture changes from an owner device.
-If the hub is down or lost, each computer keeps working on its own. Join the
-computers to a new hub from each one.
+These are not available yet: sign-in copy between computers and posture changes
+from an owner device. With no standby, a computer whose hub is down or lost keeps
+working on its own. Join the computers to a new hub from each one.
 
 ## Next steps
 
