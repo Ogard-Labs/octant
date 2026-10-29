@@ -595,6 +595,8 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
     "The certificate Tailscale sent did not check out (bad key, expired, wrong name, or unreadable), so nothing was installed.",
   "could-not-apply":
     "The remote listener could not restart with that certificate, so it was dropped and the listener is using its own again.",
+  "could-not-remove":
+    "The remote listener could not restart without the Tailscale certificate, so it is still on. Try turning it off again.",
 };
 
 /** The server's refusal as a sentence plus its own word for it, so nothing is hidden. */

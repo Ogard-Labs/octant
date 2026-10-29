@@ -46,8 +46,15 @@ export interface TailscaleCertificateSink {
     | { readonly status: "installed" }
     | { readonly status: "refused"; readonly kind: "invalid-certificate" | "could-not-apply" }
   >;
-  /** Goes back to the one certificate the listener made. */
-  readonly remove: () => Promise<void>;
+  /**
+   * Goes back to the one certificate the listener made. Refused when the
+   * listener could not restart without the tailnet certificate; it then still
+   * serves it.
+   */
+  readonly remove: () => Promise<
+    | { readonly status: "removed" }
+    | { readonly status: "refused"; readonly kind: "could-not-apply" }
+  >;
   /** Whether a certificate is being served now; the host forgets it when it restarts. */
   readonly holdsCertificate: () => boolean;
 }
@@ -76,7 +83,10 @@ export function createListenerCertificateSink(
         : { status: "refused", kind: applied.kind };
     },
     remove: async () => {
-      await listener.setTailnetCertificate(undefined);
+      const applied = await listener.setTailnetCertificate(undefined);
+      return applied.status === "applied"
+        ? { status: "removed" }
+        : { status: "refused", kind: "could-not-apply" };
     },
     holdsCertificate: () => listener.tailnetCertificateName() !== undefined,
   };
@@ -135,7 +145,8 @@ export type TailscaleCertificateRefusal =
   | "https-not-enabled"
   | "name-not-served"
   | "invalid-certificate"
-  | "could-not-apply";
+  | "could-not-apply"
+  | "could-not-remove";
 
 export type TailscaleCertificateStatus = {
   readonly enabled: boolean;
@@ -208,8 +219,12 @@ export class TailscaleCertificateService {
 
   async disable(): Promise<TailscaleCertificateOutcome> {
     this.#turnedOff += 1;
+    // Saved as off only once the listener serves its own certificate again:
+    // while the tailnet one is still served, the setting stays on so the
+    // person can turn it off again and renewal keeps the certificate current.
+    const removed = await this.#options.sink.remove();
+    if (removed.status === "refused") return { status: "refused", kind: "could-not-remove" };
     this.#options.setting.save({ enabled: false });
-    await this.#options.sink.remove();
     return { status: "disabled" };
   }
 

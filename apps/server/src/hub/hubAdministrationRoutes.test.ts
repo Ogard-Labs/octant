@@ -46,7 +46,7 @@ async function setup(listenerStatus?: Parameters<typeof startHubTestHost>[0]["li
       daemon: unreachableTailscaleDaemon,
       sink: {
         install: async () => ({ status: "refused", kind: "could-not-apply" }),
-        remove: async () => undefined,
+        remove: async () => ({ status: "removed" }),
         holdsCertificate: () => false,
       },
       listener: () => host.listener,
