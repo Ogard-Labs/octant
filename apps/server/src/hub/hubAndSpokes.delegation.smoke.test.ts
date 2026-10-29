@@ -332,7 +332,9 @@ describe("a spoke delegating work to another spoke", () => {
       requestId: delegated.requestId,
       framedText: completed.framedText,
     });
-    expect(parent.ingested).toHaveLength(1);
+    // Handing the text on again marks the parent again; the result stays one record.
+    expect(parent.ingested).toHaveLength(2);
+    expect(a.delegationRecords.map((entry) => entry.change)).toEqual(["sent", "result-recorded"]);
   });
 
   it("still returns the framed result to a later read after the background poll recorded it", async () => {
@@ -348,8 +350,50 @@ describe("a spoke delegating work to another spoke", () => {
     expect(later.result?.finalMessage).toBe("The notes raise three open questions.");
     expect(later.framedText).toContain('origin="tool-result"');
     expect(later.framedText).toContain("The notes raise three open questions.");
-    expect(parent.ingested).toHaveLength(1);
+    expect(parent.ingested).toHaveLength(2);
     expect(a.delegationRecords.map((entry) => entry.change)).toEqual(["sent", "result-recorded"]);
+  });
+
+  it("marks the parent as having read outside content again when a later read hands the kept text on after a person cleared the mark", async () => {
+    const { a, b, child, parent } = await threeHosts();
+    const delegated = await a.delegating.delegate(startCommand(b), { windowId: "window-a" });
+    if (delegated.status !== "delegated") throw new Error(JSON.stringify(delegated));
+    child.finish("The notes raise three open questions.");
+    await a.delegating.refresh(String(delegated.requestId));
+    // A person clears the parent's mark here; the next ingestion records it anew.
+    parent.ingested.length = 0;
+
+    const later = await a.delegating.refresh(String(delegated.requestId));
+
+    if (later.status !== "already-recorded") throw new Error(JSON.stringify(later));
+    expect(later.framedText).toContain("The notes raise three open questions.");
+    expect(parent.ingested).toEqual([
+      expect.objectContaining({
+        threadId: PARENT_THREAD,
+        contentReference: `delegation-result:${String(delegated.requestId)}`,
+      }),
+    ]);
+  });
+
+  it("returns no kept text when the parent cannot be marked again on a later read", async () => {
+    let refuse = false;
+    const base = parentRules();
+    const { a, b, child } = await threeHosts({
+      parent: {
+        ...base,
+        port: { ...base.port, ingest: (input) => (refuse ? "refused" : base.port.ingest(input)) },
+      },
+    });
+    const delegated = await a.delegating.delegate(startCommand(b), { windowId: "window-a" });
+    if (delegated.status !== "delegated") throw new Error(JSON.stringify(delegated));
+    child.finish("Secret result text.");
+    await a.delegating.refresh(String(delegated.requestId));
+    refuse = true;
+
+    const later = await a.delegating.refresh(String(delegated.requestId));
+
+    expect(later).toEqual({ status: "target-unreachable" });
+    expect(JSON.stringify(later)).not.toContain("Secret result text.");
   });
 
   it("records a hostile result as data: framed, marked, and followed by nothing", async () => {

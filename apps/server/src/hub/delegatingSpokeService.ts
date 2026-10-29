@@ -332,6 +332,11 @@ export class DelegatingSpokeService {
     const sent = this.#find(requestId);
     if (sent === undefined) return { status: "unknown-request" };
     if (sent.resultRecorded === true) {
+      // A person may have cleared the parent's mark since the result was kept,
+      // so handing the text on again marks the parent again, or hands on nothing.
+      if (sent.result !== undefined && this.#markParent(sent) === "refused") {
+        return { status: "target-unreachable" };
+      }
       return {
         status: "already-recorded",
         requestId: sent.requestId,
@@ -540,14 +545,7 @@ export class DelegatingSpokeService {
     // The result is data from another computer. It is framed as data and the
     // parent thread is marked as having read outside content before any of it
     // is handed on; if the mark cannot be written, nothing is handed on.
-    const sourceLabel = peerSourceLabel(String(target.memberId));
-    const ingested = this.#options.parent.ingest({
-      threadId: sent.parent.threadId,
-      sourceLabel,
-      contentReference: `delegation-result:${String(sent.requestId)}`,
-      correlationId: (this.#options.uuid ?? randomUUID)(),
-    });
-    if (ingested === "refused") return { status: "target-unreachable" };
+    if (this.#markParent(sent) === "refused") return { status: "target-unreachable" };
     const framed = frameResult(result, String(target.memberId));
     // The background poll reaches here with nobody to hand the text to, so the
     // result is kept with the delegation before it counts as recorded.
@@ -565,6 +563,15 @@ export class DelegatingSpokeService {
       result,
       framedText: framed.text,
     };
+  }
+
+  #markParent(sent: SentDelegation): ReturnType<DelegatingParentPort["ingest"]> {
+    return this.#options.parent.ingest({
+      threadId: sent.parent.threadId,
+      sourceLabel: peerSourceLabel(String(sent.targetMemberId)),
+      contentReference: `delegation-result:${String(sent.requestId)}`,
+      correlationId: (this.#options.uuid ?? randomUUID)(),
+    });
   }
 
   #find(requestId: string): SentDelegation | undefined {
