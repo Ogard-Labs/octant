@@ -718,10 +718,16 @@ are and how to reach them.
   joins: it reads the standby's join code and compares codes, and it receives
   the hub-signed roster that names the standby along with the update. A
   standby never changes the standby order or promotes itself
-  ([decision H10](#decisions)).
+  ([decision H10](#decisions)). A member installs a roster, whoever signed it
+  and however it arrives (a push, the hub's heartbeat answer, a hand-back),
+  only where its person ticked Roster. Where Roster is off, a heartbeat still
+  shows the hub is reachable, but nothing it carries is installed.
 - **Switching back.** When the hub is reachable again, the standby steps down
   and hands back the wake times and membership changes it made, and members
-  return to the hub. The hub's next signed roster includes those changes; when
+  return to the hub. From the moment the hand-back is built until the hub has
+  taken it, the standby refuses joins and removals (`handing-back`), so none
+  is lost when the stand-in ends; if the hub does not take the hand-back, the
+  standby unfreezes and tries again at the next look. The hub's next signed roster includes those changes; when
   a member was both added and removed in the meantime, removal wins. If
   both are reachable at once to different members (a split network), the only
   duplicated work is a second wake nudge or a delayed notification: neither

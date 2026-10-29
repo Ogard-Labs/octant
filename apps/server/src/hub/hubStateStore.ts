@@ -107,6 +107,12 @@ export const StandInState = Schema.Struct({
   added: Schema.Array(StandInAddedRecord),
   removed: Schema.Array(HubMemberId),
   joinTickets: Schema.Array(Schema.UUID),
+  /**
+   * Set while a hand-back to the returned hub is in flight. Membership is
+   * frozen then, so every change made is in the hand-back and none can be lost
+   * when the stand-in ends.
+   */
+  handingBack: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type StandInState = typeof StandInState.Type;
 

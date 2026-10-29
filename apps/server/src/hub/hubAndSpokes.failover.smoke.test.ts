@@ -378,6 +378,118 @@ describe("a hub that stops and comes back", () => {
   });
 });
 
+describe("a hand-back in flight", () => {
+  /** A standby standing in for a stopped hub, with its hand-back held until the test lets it go or lose it. */
+  async function standInWithHeldHandback() {
+    const network = new HubTestNetwork();
+    const hub = await start(network, "Mac mini", 103);
+    const held: { release: () => void; lose: boolean; seen: number } = {
+      release: () => undefined,
+      lose: false,
+      seen: 0,
+    };
+    let gate = Promise.resolve();
+    const standby = await startHubTestHost({
+      name: "Standby",
+      address: "100.101.102.104",
+      network,
+      cleanups,
+      failoverAfterMs: FAILOVER_AFTER_MS,
+      failoverTransport: (transport) => (target) => {
+        const fetchTo = transport(target);
+        return async (url, init) => {
+          if (init?.method !== "POST" || !url.endsWith("/api/hub/handback")) {
+            return fetchTo(url, init);
+          }
+          held.seen += 1;
+          await gate;
+          if (held.lose) throw new Error("The hub did not answer.");
+          return fetchTo(url, init);
+        };
+      },
+    });
+    const early = await start(network, "Desk", 106);
+    const late = await start(network, "Phone", 107);
+    const enabled = hub.hub.enable(window);
+    if (enabled.status !== "enabled") throw new Error(enabled.status);
+    await join(hub, standby);
+    standby.spoke.setGrant(standbyGrant, window);
+    const ordered = await hub.hub.setStandbyOrder([decodeMemberId(standby.hostId)], window);
+    if (ordered.status !== "ordered") throw new Error(JSON.stringify(ordered));
+    await standby.failover.tick();
+    network.stop(hub.address);
+    await pause(FAILOVER_AFTER_MS + 40);
+    await standby.failover.tick();
+    expect(standby.failover.standingIn()).toBe(true);
+
+    // Two computers pair with the standby; one finishes before the hub returns.
+    const pair = async (member: HubTestHost) => {
+      const minted = standby.failover.mintJoinCode();
+      if (minted.status !== "minted") throw new Error(minted.status);
+      const started = await member.spoke.startJoin({ code: minted.code });
+      if (started.status !== "awaiting-approval") throw new Error(JSON.stringify(started));
+      const pending = standby.administration.listPendingPairings().at(-1);
+      if (pending === undefined) throw new Error("The standby shows no pairing to approve.");
+      standby.administration.approvePairing({ ticketId: pending.ticketId });
+    };
+    await pair(early);
+    const finishedEarly = await early.spoke.finishJoin(window);
+    if (finishedEarly.status !== "joined") throw new Error(JSON.stringify(finishedEarly));
+    await pair(late);
+
+    // The hub answers again; the hand-back starts and waits on the gate.
+    gate = new Promise<void>((resolve) => {
+      held.release = resolve;
+    });
+    network.start(hub.address);
+    const stepping = standby.failover.tick();
+    await vi.waitFor(() => expect(held.seen).toBe(1));
+    return { hub, standby, early, late, held, stepping };
+  }
+
+  it("refuses a join that finishes meanwhile and hands back the one made before it", async () => {
+    const { hub, standby, early, late, held, stepping } = await standInWithHeldHandback();
+
+    const refused = await late.spoke.finishJoin(window);
+    held.release();
+    await stepping;
+
+    expect(refused.status).not.toBe("joined");
+    expect(standby.failover.standingIn()).toBe(false);
+    expect(names(hub.hub.status().roster ?? roster(standby))).toEqual([
+      "Mac mini",
+      "Standby",
+      "Desk",
+    ]);
+    expect(hub.hub.memberKey(early.hostId)).toBeDefined();
+    expect(hub.hub.memberKey(late.hostId)).toBeUndefined();
+  });
+
+  it("refuses a removal that comes meanwhile and keeps the member", async () => {
+    const { hub, standby, early, held, stepping } = await standInWithHeldHandback();
+
+    const refused = await standby.failover.removeMember(early.hostId, window);
+    held.release();
+    await stepping;
+
+    expect(refused).toEqual({ status: "refused", kind: "handing-back" });
+    expect(hub.hub.memberKey(early.hostId)).toBeDefined();
+  });
+
+  it("lets the standby change membership again when the hand-back is lost", async () => {
+    const { standby, early, held, stepping } = await standInWithHeldHandback();
+    held.lose = true;
+
+    held.release();
+    await stepping;
+
+    expect(standby.failover.standingIn()).toBe(true);
+    expect(await standby.failover.removeMember(early.hostId, window)).toMatchObject({
+      status: "removed",
+    });
+  });
+});
+
 describe("replacing the hub for good", () => {
   it("makes a named standby the hub from its own window and lets each spoke accept it from theirs", async () => {
     const { hub, standby, member } = await startFamily();

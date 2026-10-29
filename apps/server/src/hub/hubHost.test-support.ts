@@ -158,6 +158,8 @@ export async function startHubTestHost(input: {
   readonly productDispatch?: RemoteProductDispatch;
   /** The clock the spoke role reads, so a test can let a device's inactivity window pass. */
   readonly now?: () => number;
+  /** Wraps the transport this host's failover side sends through, so a test can hold a hand-back in flight. */
+  readonly failoverTransport?: (transport: HubTransport) => HubTransport;
   /** The failover time in milliseconds; absent, the roster's own. A test cannot wait five minutes. */
   readonly failoverAfterMs?: number;
 }): Promise<HubTestHost> {
@@ -298,7 +300,7 @@ export async function startHubTestHost(input: {
     identity: () => identity,
     listener: () => listener,
     pairing: hubPairing,
-    transport,
+    transport: input.failoverTransport?.(transport) ?? transport,
     spoke,
     record: (change) => records.push(change),
     now: Date.now,
