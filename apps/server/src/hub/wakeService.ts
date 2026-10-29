@@ -59,7 +59,7 @@ export type WakeReportOutcome =
   | { readonly status: "recorded"; readonly count: number }
   | {
       readonly status: "refused";
-      readonly kind: "wake-service-off" | "not-a-spoke" | "not-coordinating";
+      readonly kind: "wake-service-off" | "not-a-spoke" | "not-coordinating" | "handing-back";
     };
 
 export type WakeCopyOutcome =
@@ -199,6 +199,9 @@ export class WakeService {
     if (sender === undefined || !isSpokeLike(sender)) {
       return { status: "refused", kind: "not-a-spoke" };
     }
+    // The hand-back already holds the reports it will carry, and the stand-in ends right
+    // after. A report filed now would be dropped, so the spoke is asked to send it again.
+    if (link.standIn.handingBack === true) return { status: "refused", kind: "handing-back" };
     // An empty report stays on file while standing in: it is what overrides the copy.
     const reports = [
       ...(link.standIn.wakeReports ?? []).filter(

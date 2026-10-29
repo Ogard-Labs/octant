@@ -565,11 +565,11 @@ describe("a spoke deciding what a nudge is worth", () => {
 const decodeNudgeId = Schema.decodeUnknownSync(WakeRoutineId);
 
 describe("the wake service in a failover", () => {
-  async function startFamily() {
+  async function startFamily(standbyExtra: Partial<Parameters<typeof startHubTestHost>[0]> = {}) {
     const network = new HubTestNetwork();
     const clock = makeClock();
     const hub = await start(network, clock, "Mac mini", 103);
-    const standby = await start(network, clock, "Standby", 104);
+    const standby = await start(network, clock, "Standby", 104, standbyExtra);
     const member = await start(network, clock, "Laptop", 105);
     const enabled = hub.hub.enable(window);
     if (enabled.status !== "enabled") throw new Error(enabled.status);
@@ -640,6 +640,75 @@ describe("the wake service in a failover", () => {
     expect(hub.records.map((record) => record.change)).toEqual(
       expect.arrayContaining(["stand-in-merged", "wake-times-merged"]),
     );
+  });
+
+  it("asks a spoke to report again while the standby hands back, and the hub then holds the times it kept", async () => {
+    let release: () => void = () => undefined;
+    let gate = Promise.resolve();
+    let handbacks = 0;
+    const { network, clock, hub, standby, member } = await startFamily({
+      failoverTransport: (transport) => (target) => {
+        const fetchTo = transport(target);
+        return async (url, init) => {
+          if (init?.method !== "POST" || !url.endsWith("/api/hub/handback")) {
+            return fetchTo(url, init);
+          }
+          handbacks += 1;
+          await gate;
+          return fetchTo(url, init);
+        };
+      },
+    });
+    standby.spoke.setGrant(standbyGrant, window);
+    member.spoke.setGrant(wakeAndStandbyGrant, window);
+    const ordered = await hub.hub.setStandbyOrder([decodeMemberId(standby.hostId)], window);
+    if (ordered.status !== "ordered") throw new Error(JSON.stringify(ordered));
+    member.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 10 * MINUTE),
+    });
+    expect(await member.spokeWake.report()).toEqual({ status: "sent", count: 1 });
+    await vi.waitFor(() => expect(standby.state.load().link?.wakeCopy).toHaveLength(1));
+    await standby.failover.tick();
+    await member.failover.tick();
+    network.stop(hub.address);
+    await pause(FAILOVER_AFTER_MS + 40);
+    await standby.failover.tick();
+    expect(standby.failover.standingIn()).toBe(true);
+    await vi.waitFor(() =>
+      expect(member.spoke.status()).toMatchObject({ rosterSignedBy: "standby" }),
+    );
+
+    // The hub answers again and the hand-back starts, then waits on the gate.
+    gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    network.start(hub.address);
+    const stepping = standby.failover.tick();
+    await vi.waitFor(() => expect(handbacks).toBe(1));
+
+    member.routines.push({
+      id: "automation-b",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 30 * MINUTE),
+    });
+    expect(await member.spokeWake.report()).toEqual({
+      status: "declined",
+      kind: "handing-back",
+    });
+    expect(standby.state.load().link?.standIn?.wakeReports ?? []).toEqual([]);
+
+    release();
+    await stepping;
+    expect(standby.failover.standingIn()).toBe(false);
+
+    // The spoke still has the times to send, so it reports them to the hub it follows next.
+    await member.failover.tick();
+    await vi.waitFor(async () =>
+      expect(await member.spokeWake.report()).toEqual({ status: "sent", count: 2 }),
+    );
+    expect(hub.state.load().hub?.wake?.spokes[0]?.times).toHaveLength(2);
   });
 
   it("refuses a standby's nudge from a spoke that did not tick Standby, and while the hub is reachable", async () => {
