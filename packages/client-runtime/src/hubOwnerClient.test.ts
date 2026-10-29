@@ -660,7 +660,8 @@ describe("copying an API-key sign-in between two hosts", () => {
       source: clientFor(source.transport, sourceUnlock.signer),
       sourceMemberId: SOURCE,
       targetMemberId: TARGET,
-      credentialName: "provider-1",
+      sourceCredentialName: "provider-1",
+      targetCredentialName: "provider-9",
     });
 
     expect(result).toEqual({ status: "done", body: { status: "copied" } });
@@ -673,8 +674,13 @@ describe("copying an API-key sign-in between two hosts", () => {
     const sent = source.requests.find((request) => request.path.endsWith("/credentials/copy"));
     expect(JSON.parse(sent?.body ?? "")).toEqual({
       targetMemberId: TARGET,
-      credentialName: "provider-1",
+      sourceCredentialName: "provider-1",
       ticketId: TICKET,
+    });
+    const asked = target.requests.find((request) => request.path.endsWith("/credentials/receive"));
+    expect(JSON.parse(asked?.body ?? "")).toEqual({
+      sourceMemberId: SOURCE,
+      targetCredentialName: "provider-9",
     });
   });
 
@@ -691,7 +697,8 @@ describe("copying an API-key sign-in between two hosts", () => {
       source: clientFor(source.transport, sourceUnlock.signer),
       sourceMemberId: SOURCE,
       targetMemberId: TARGET,
-      credentialName: "provider-1",
+      sourceCredentialName: "provider-1",
+      targetCredentialName: "provider-9",
     });
 
     expect(result).toEqual({ status: "refused", kind: "not-a-spoke-member" });

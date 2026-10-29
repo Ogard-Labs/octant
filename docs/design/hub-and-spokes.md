@@ -993,13 +993,16 @@ maintainer's hardware, or names the maintainer gate.
      device is not built. The routes are proved against a fake host.
    - **A sign-in copy is two unlocks on two hosts.** Each host keeps its own owner
      list, so the owner device unlocks on the receiving host first, which makes
-     a one-time ticket (two minutes) naming the sending host and the sign-in,
-     then on the sending host, which reads the key from its broker and hands it
-     over the pinned link against that ticket. It runs between spokes only: the
-     hub is neither source nor target. Only an API key or bearer token on a
-     provider row that exists under the same name on both hosts is copied; the
-     receiving host never replaces a key already stored, a pool of several keys is
-     refused, and a subscription sign-in is refused as `subscription-sign-in`.
+     a one-time ticket (two minutes) naming the sending host and the receiving
+     host's own provider row, then on the sending host, which reads the key from
+     its own provider row and hands it over the pinned link against that ticket.
+     Provider rows get a fresh id on every host, so the owner names the row on
+     each side and the ticket, not the sender, decides where the key lands. It
+     runs between spokes only: the hub is neither source nor target. Only an API
+     key or bearer token on a provider row is copied; the receiving host never
+     replaces a key already stored (two copies redeemed together store once, and
+     the second is answered `already-stored`), a pool of several keys is refused,
+     and a subscription sign-in is refused as `subscription-sign-in`.
      Both hosts journal the names and the owner device, never the value, and the
      key is never returned to the owner device. The hub's view of copies and
      Remove everywhere are not built.

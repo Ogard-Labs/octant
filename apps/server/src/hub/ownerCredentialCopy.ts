@@ -93,7 +93,8 @@ export type TicketOutcome =
 interface Ticket {
   readonly ownerMemberId: string;
   readonly sourceMemberId: string;
-  readonly credentialName: string;
+  /** This host's provider row that will hold the key; the sending host's row id is its own business. */
+  readonly targetCredentialName: string;
   readonly expiresAt: number;
 }
 
@@ -129,7 +130,7 @@ export class OwnerCredentialCopyService {
   issueTicket(input: {
     readonly ownerMemberId: string;
     readonly sourceMemberId: string;
-    readonly credentialName: string;
+    readonly targetCredentialName: string;
     readonly principal: AuditActingPrincipal;
   }): TicketOutcome {
     const now = this.#options.now();
@@ -145,14 +146,14 @@ export class OwnerCredentialCopyService {
     this.#tickets.set(ticketId, {
       ownerMemberId: input.ownerMemberId,
       sourceMemberId: input.sourceMemberId,
-      credentialName: input.credentialName,
+      targetCredentialName: input.targetCredentialName,
       expiresAt,
     });
     this.#options.record({
       change: "credential-ticket-issued",
       actingPrincipal: input.principal,
       memberId: source.member.memberId,
-      credentialName: input.credentialName,
+      credentialName: input.targetCredentialName,
     });
     return { status: "issued", ticketId, expiresAt };
   }
@@ -160,7 +161,7 @@ export class OwnerCredentialCopyService {
   /** The sending host's half: read the key from this broker and hand it to the receiving host against its ticket. */
   async send(input: {
     readonly targetMemberId: string;
-    readonly credentialName: string;
+    readonly sourceCredentialName: string;
     readonly ticketId: string;
     readonly principal: AuditActingPrincipal;
   }): Promise<CredentialCopyOutcome> {
@@ -169,7 +170,7 @@ export class OwnerCredentialCopyService {
         change: "credential-copy-refused",
         actingPrincipal: input.principal,
         memberId: decodeMemberId(input.targetMemberId),
-        credentialName: input.credentialName,
+        credentialName: input.sourceCredentialName,
         credentialReason: kind,
       });
       return { status: "refused", kind };
@@ -180,7 +181,7 @@ export class OwnerCredentialCopyService {
     const origin = memberOrigin(target.member);
     if (origin === undefined) return refuse("target-unreachable");
 
-    const read = await this.#options.broker.read(input.credentialName);
+    const read = await this.#options.broker.read(input.sourceCredentialName);
     if (read.status === "refused") return refuse(read.kind);
 
     const identity = this.#options.identity();
@@ -194,7 +195,6 @@ export class OwnerCredentialCopyService {
       path: PEER_CREDENTIAL_ROUTE,
       body: JSON.stringify({
         ticketId: input.ticketId,
-        credentialName: input.credentialName,
         value: read.value,
       }),
       headers: { [HUB_PEER_KEY_HEADER]: identity.signing.hostPublicKey },
@@ -207,7 +207,7 @@ export class OwnerCredentialCopyService {
         change: "credential-copy-sent",
         actingPrincipal: input.principal,
         memberId: target.member.memberId,
-        credentialName: input.credentialName,
+        credentialName: input.sourceCredentialName,
       });
       return { status: "ok" };
     }
@@ -248,29 +248,24 @@ export class OwnerCredentialCopyService {
         change: "credential-copy-refused",
         actingPrincipal: principal ?? authenticated.principal,
         memberId: authenticated.peer.member.memberId,
-        credentialName: transfer.credentialName,
+        ...(ticket === undefined ? {} : { credentialName: ticket.targetCredentialName }),
         credentialReason: kind,
       });
       return { status: "refused", kind };
     };
     if (ticket === undefined || principal === undefined) return refuse("no-such-ticket");
     if (this.#options.now() > ticket.expiresAt) return refuse("ticket-expired");
-    if (
-      ticket.sourceMemberId !== sourceMemberId ||
-      ticket.credentialName !== transfer.credentialName
-    ) {
-      return refuse("ticket-mismatch");
-    }
+    if (ticket.sourceMemberId !== sourceMemberId) return refuse("ticket-mismatch");
     if (!this.#options.ownerIsCurrent(ticket.ownerMemberId)) {
       return refuse("owner-no-longer-listed");
     }
-    const stored = await this.#options.broker.store(transfer.credentialName, transfer.value);
+    const stored = await this.#options.broker.store(ticket.targetCredentialName, transfer.value);
     if (stored.status === "refused") return refuse(stored.kind);
     this.#options.record({
       change: "credential-copy-received",
       actingPrincipal: principal,
       memberId: authenticated.peer.member.memberId,
-      credentialName: transfer.credentialName,
+      credentialName: ticket.targetCredentialName,
     });
     return { status: "ok" };
   }

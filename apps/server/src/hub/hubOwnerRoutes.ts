@@ -477,7 +477,7 @@ export function createHubOwnerRouteHandler(
           options.credentials.issueTicket({
             ownerMemberId: String(input.senderMemberId),
             sourceMemberId: String(asked.sourceMemberId),
-            credentialName: asked.credentialName,
+            targetCredentialName: asked.targetCredentialName,
             principal,
           }),
         );
@@ -486,7 +486,7 @@ export function createHubOwnerRouteHandler(
         const asked = decodeOwnerCredentialCopyRequest(json());
         const result = await options.credentials.send({
           targetMemberId: String(asked.targetMemberId),
-          credentialName: asked.credentialName,
+          sourceCredentialName: asked.sourceCredentialName,
           ticketId: asked.ticketId,
           principal,
         });

@@ -19,6 +19,20 @@ export function createProviderCredentialCopyBroker(options: {
     readonly readStored: (providerInstanceId: string) => Promise<string>;
   };
 }): CredentialCopyBroker {
+  // The check for an existing key and the write are one step per credential, so
+  // two copies redeemed together cannot both pass the check; the second finds
+  // the first's key and answers already-stored.
+  const storing = new Map<string, Promise<unknown>>();
+  const serialized = <T>(name: string, run: () => Promise<T>): Promise<T> => {
+    const turn = (storing.get(name) ?? Promise.resolve()).then(run, run);
+    const tail = turn.catch(() => undefined);
+    storing.set(name, tail);
+    void tail.then(() => {
+      if (storing.get(name) === tail) storing.delete(name);
+    });
+    return turn;
+  };
+
   const find = (name: string): ProviderInstance | undefined =>
     options.readProviderInstances().find((instance) => String(instance.id) === name);
 
@@ -42,27 +56,29 @@ export function createProviderCredentialCopyBroker(options: {
         return { status: "refused", kind: "unavailable" };
       }
     },
-    async store(name, value): Promise<CredentialStoreResult> {
-      const instance = find(name);
-      if (instance === undefined) return { status: "refused", kind: "no-such-provider" };
-      if (!usesStoredKey(instance)) return { status: "refused", kind: "subscription-sign-in" };
-      try {
-        // A copy never replaces a key the person typed here.
-        if (await options.credentials.has(name)) {
-          return { status: "refused", kind: "already-stored" };
+    store(name, value): Promise<CredentialStoreResult> {
+      return serialized(name, async (): Promise<CredentialStoreResult> => {
+        const instance = find(name);
+        if (instance === undefined) return { status: "refused", kind: "no-such-provider" };
+        if (!usesStoredKey(instance)) return { status: "refused", kind: "subscription-sign-in" };
+        try {
+          // A copy never replaces a key the person typed here, or one copied a moment ago.
+          if (await options.credentials.has(name)) {
+            return { status: "refused", kind: "already-stored" };
+          }
+          await options.credentials.set(name, value);
+          // Settings can remove or reconfigure the row while the key is written;
+          // a key must not outlive the endpoint it was entered for.
+          const current = find(name);
+          if (current === undefined || current.version !== instance.version) {
+            await options.credentials.delete(name);
+            return { status: "refused", kind: "no-such-provider" };
+          }
+          return { status: "stored" };
+        } catch {
+          return { status: "refused", kind: "unavailable" };
         }
-        await options.credentials.set(name, value);
-        // Settings can remove or reconfigure the row while the key is written;
-        // a key must not outlive the endpoint it was entered for.
-        const current = find(name);
-        if (current === undefined || current.version !== instance.version) {
-          await options.credentials.delete(name);
-          return { status: "refused", kind: "no-such-provider" };
-        }
-        return { status: "stored" };
-      } catch {
-        return { status: "refused", kind: "unavailable" };
-      }
+      });
     },
   };
 }

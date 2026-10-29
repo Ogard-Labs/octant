@@ -184,12 +184,12 @@ export interface OwnerAdministrationClient {
   /** The receiving host's half of a sign-in copy; see `copyApiKeySignIn`. */
   readonly receiveCredential: (input: {
     readonly sourceMemberId: string;
-    readonly credentialName: string;
+    readonly targetCredentialName: string;
   }) => Promise<OwnerActionResult>;
   /** The sending host's half of a sign-in copy; see `copyApiKeySignIn`. */
   readonly sendCredential: (input: {
     readonly targetMemberId: string;
-    readonly credentialName: string;
+    readonly sourceCredentialName: string;
     readonly ticketId: string;
   }) => Promise<OwnerActionResult>;
   /** Applies a provisioning proposal this spoke holds, through the same path its window uses. */
@@ -500,25 +500,28 @@ const SESSION_ENDED: ReadonlySet<string> = new Set([
  * Copies an API-key sign-in from one of the person's computers to another. The
  * person unlocks on each: first the computer that will receive the key, which
  * makes a one-time ticket, then the computer that holds it, which sends the key
- * straight to the first. The key never passes through this device.
+ * straight to the first. The key never passes through this device. Provider
+ * rows have a different id on each computer, so the person names the row on
+ * each side.
  */
 export async function copyApiKeySignIn(input: {
   readonly source: Pick<OwnerAdministrationClient, "sendCredential">;
   readonly target: Pick<OwnerAdministrationClient, "receiveCredential">;
   readonly sourceMemberId: string;
   readonly targetMemberId: string;
-  readonly credentialName: string;
+  readonly sourceCredentialName: string;
+  readonly targetCredentialName: string;
 }): Promise<OwnerActionResult> {
   const ticket = await input.target.receiveCredential({
     sourceMemberId: input.sourceMemberId,
-    credentialName: input.credentialName,
+    targetCredentialName: input.targetCredentialName,
   });
   if (ticket.status !== "done") return ticket;
   const ticketId = stringField(ticket.body, "ticketId");
   if (ticketId === undefined) return { status: "refused", kind: "invalid-answer" };
   return input.source.sendCredential({
     targetMemberId: input.targetMemberId,
-    credentialName: input.credentialName,
+    sourceCredentialName: input.sourceCredentialName,
     ticketId,
   });
 }
