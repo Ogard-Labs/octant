@@ -541,8 +541,13 @@ export class FailoverService {
         listenerOrigin,
       })),
       removed: standIn.removed,
-      // Slice 8 fills this: no wake times exist to hand back yet.
-      wakeTimes: [],
+      // What spokes reported to this standby while it stood in; the hub keeps the
+      // spokes it still lists and ignores the rest.
+      wakeTimes: (standIn.wakeReports ?? []).map(({ memberId, times, hardwareAddress }) => ({
+        memberId,
+        times,
+        ...(hardwareAddress === undefined ? {} : { hardwareAddress }),
+      })),
     };
     const identity = this.#options.identity();
     const answer = await sendHubLinkRequest({

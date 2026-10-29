@@ -339,6 +339,9 @@ describe("the hub-link routes the private listener serves", () => {
       [REMOTE_HUB_LINK_ROUTE_IDS.standby, "PUT", HUB_LINK_ROUTES.standby],
       [REMOTE_HUB_LINK_ROUTE_IDS.heartbeat, "GET", HUB_LINK_ROUTES.heartbeat],
       [REMOTE_HUB_LINK_ROUTE_IDS.handback, "POST", HUB_LINK_ROUTES.handback],
+      [REMOTE_HUB_LINK_ROUTE_IDS.wakeTimes, "POST", HUB_LINK_ROUTES.wakeTimes],
+      [REMOTE_HUB_LINK_ROUTE_IDS.wakeNudge, "POST", HUB_LINK_ROUTES.wakeNudge],
+      [REMOTE_HUB_LINK_ROUTE_IDS.wakeCopy, "PUT", HUB_LINK_ROUTES.wakeCopy],
       [REMOTE_HUB_LINK_ROUTE_IDS.delegate, "POST", PEER_DELEGATION_ROUTES.create],
       [REMOTE_HUB_LINK_ROUTE_IDS.delegationStatus, "POST", PEER_DELEGATION_ROUTES.status],
       [REMOTE_HUB_LINK_ROUTE_IDS.delegationCancel, "POST", PEER_DELEGATION_ROUTES.cancel],
@@ -395,6 +398,8 @@ describe("the hub-link routes the private listener serves", () => {
       "/api/desktop/hub/accept-new-hub",
       "/api/desktop/hub/stand-in/join-codes",
       "/api/desktop/hub/stand-in/members/remove",
+      "/api/desktop/hub/wake",
+      "/api/desktop/hub/wake/hardware-address",
     ]) {
       const decision = policy.inspect(
         new Request(`https://100.101.102.103:8443${path}`, {

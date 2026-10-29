@@ -11,6 +11,9 @@ import {
   decodeHubJoinRequest,
   decodeHubLeaveRequest,
   decodeHubStandInHandback,
+  decodeHubWakeCopy,
+  decodeHubWakeNudge,
+  decodeHubWakeReport,
   decodeSignedHubRoster,
   encodeSignedHubRoster,
 } from "@octant/contracts";
@@ -18,6 +21,8 @@ import type { FailoverService } from "./failoverService";
 import { HUB_LINK_HEADER, HUB_PEER_KEY_HEADER, HubLinkVerifier } from "./hubLink";
 import type { HubService } from "./hubService";
 import type { SpokeLinkService } from "./spokeLinkService";
+import type { SpokeWakeService } from "./spokeWakeService";
+import type { WakeService } from "./wakeService";
 
 export const HUB_LINK_ROUTES = {
   join: "/api/hub/join",
@@ -34,6 +39,12 @@ export const HUB_LINK_ROUTES = {
   guestRoster: "/api/hub/guest-roster",
   /** A guest asks a spoke to admit it as a paired device. */
   guest: "/api/hub/guest",
+  /** A spoke whose hub grant ticks Wake tells the hub, or a standing-in standby, its routines' next times. */
+  wakeTimes: "/api/hub/wake-times",
+  /** The hub, or a standing-in standby, nudges a spoke shortly before one of its routines is due. */
+  wakeNudge: "/api/hub/wake-nudge",
+  /** The hub hands a standby the wake times it holds. */
+  wakeCopy: "/api/hub/wake-copy",
 } as const;
 
 type RouteValue = (typeof HUB_LINK_ROUTES)[keyof typeof HUB_LINK_ROUTES];
@@ -55,6 +66,8 @@ export interface HubLinkRouteOptions {
   readonly hub: HubService;
   readonly spoke: SpokeLinkService;
   readonly failover: FailoverService;
+  readonly wake: WakeService;
+  readonly spokeWake: SpokeWakeService;
   readonly now?: () => number;
 }
 
@@ -81,7 +94,9 @@ export function createHubLinkRouteHandler(
       : undefined;
     if (route === undefined) return undefined;
     const expectedMethod =
-      route === HUB_LINK_ROUTES.roster || route === HUB_LINK_ROUTES.standby
+      route === HUB_LINK_ROUTES.roster ||
+      route === HUB_LINK_ROUTES.standby ||
+      route === HUB_LINK_ROUTES.wakeCopy
         ? "PUT"
         : route === HUB_LINK_ROUTES.status ||
             route === HUB_LINK_ROUTES.guestRoster ||
@@ -156,6 +171,87 @@ export function createHubLinkRouteHandler(
       return receipt.status === "accepted"
         ? Response.json(receipt, { headers: NO_STORE })
         : refused(409, receipt.kind);
+    }
+
+    if (route === HUB_LINK_ROUTES.wakeNudge) {
+      const sender = options.spoke.authenticateRosterSender({
+        header,
+        publicKey: presentedKey,
+        method: request.method,
+        path: route,
+        body,
+      });
+      if (sender.status === "refused") {
+        return refused(SENDER_REFUSAL_STATUS.has(sender.kind) ? 401 : 403, sender.kind);
+      }
+      let nudge;
+      try {
+        nudge = decodeHubWakeNudge(JSON.parse(body));
+      } catch {
+        return refused(400, "invalid");
+      }
+      // Only the hub, or a named standby, reaches this far; the spoke's own grant
+      // and its own routines decide what the nudge is worth.
+      const result = await options.spokeWake.receiveNudge(
+        sender.status === "hub"
+          ? { kind: "hub", memberId: sender.principal.memberId }
+          : { kind: "standby", memberId: sender.memberId },
+        nudge,
+      );
+      return result.status === "refused"
+        ? refused(403, result.kind)
+        : Response.json(result, { headers: NO_STORE });
+    }
+
+    if (route === HUB_LINK_ROUTES.wakeCopy) {
+      const authenticated = options.spoke.authenticateHub({
+        header,
+        method: request.method,
+        path: route,
+        body,
+      });
+      if (authenticated.status === "refused") return refused(401, authenticated.kind);
+      // A copy of the wake times is what a standby holds, so only a spoke whose person ticked Standby takes one.
+      const allowed = options.spoke.hubMayUse("standby");
+      if (allowed.status === "refused") return refused(403, allowed.kind);
+      let copy;
+      try {
+        copy = decodeHubWakeCopy(JSON.parse(body));
+      } catch {
+        return refused(400, "invalid");
+      }
+      const held = options.wake.receiveCopy(copy);
+      return held.status === "recorded"
+        ? Response.json(held, { headers: NO_STORE })
+        : refused(403, held.kind);
+    }
+
+    if (route === HUB_LINK_ROUTES.wakeTimes) {
+      const hubOn = options.hub.status().enabled;
+      if (!hubOn && !options.failover.standingIn()) return refused(403, "hub-role-off");
+      const verified = memberVerifier.verify({
+        header,
+        method: request.method,
+        path: route,
+        body,
+        recipientMemberId: options.hub.hubMemberId(),
+        publicKeyFor: (sender) =>
+          hubOn
+            ? options.hub.memberKey(sender, presentedKey ?? undefined)
+            : options.failover.memberKey(sender, presentedKey ?? undefined),
+      });
+      if (verified.status === "refused") return refused(401, verified.kind);
+      let report;
+      try {
+        report = decodeHubWakeReport(JSON.parse(body));
+      } catch {
+        return refused(400, "invalid");
+      }
+      // The report is filed under the member whose key signed it; the body names no one.
+      const recorded = await options.wake.receiveReport(verified.senderMemberId, report);
+      return recorded.status === "recorded"
+        ? Response.json(recorded, { headers: NO_STORE })
+        : refused(403, recorded.kind);
     }
 
     if (route === HUB_LINK_ROUTES.heartbeat) {
@@ -270,6 +366,10 @@ export function createHubLinkRouteHandler(
         return refused(400, "invalid");
       }
       const merged = await options.hub.receiveHandback(verified.senderMemberId, handback);
+      // The wake times the standby gathered are taken once the roster merge accepted it.
+      if (merged.status === "merged") {
+        options.wake.mergeHandback(verified.senderMemberId, handback.wakeTimes);
+      }
       return merged.status === "merged"
         ? Response.json({ roster: encodeSignedHubRoster(merged.roster) }, { headers: NO_STORE })
         : refused(403, merged.kind);

@@ -60,7 +60,7 @@ describe("hub membership wire contracts", () => {
     expect(() => decodeHubMembershipChangedPayload({ change: "member-removed" })).toThrow();
   });
 
-  it("decodes the failover requests and refuses a repeated standby, an unconfirmed promotion, and wake times that do not exist yet", () => {
+  it("decodes the failover requests and refuses a repeated standby, an unconfirmed promotion, and malformed wake times", () => {
     expect(decodeHubStandbyOrderRequest({ memberIds: [id] }).memberIds).toEqual([id]);
     expect(decodeHubStandbyOrderRequest({ memberIds: [] }).memberIds).toEqual([]);
     expect(() => decodeHubStandbyOrderRequest({ memberIds: [id, id] })).toThrow();
@@ -73,6 +73,19 @@ describe("hub membership wire contracts", () => {
     const handback = { baseSequence: 3, sequence: 5, added: [], removed: [id], wakeTimes: [] };
     expect(decodeHubStandInHandback(handback).removed).toEqual([id]);
     expect(() => decodeHubStandInHandback({ ...handback, wakeTimes: [{}] })).toThrow();
+    const carried = {
+      memberId: id,
+      times: [{ routineId: "r".repeat(22), nextAt: "2026-10-29T08:00:00.000Z" }],
+    };
+    expect(decodeHubStandInHandback({ ...handback, wakeTimes: [carried] }).wakeTimes).toEqual([
+      carried,
+    ]);
+    expect(() =>
+      decodeHubStandInHandback({
+        ...handback,
+        wakeTimes: [{ ...carried, times: [...carried.times, ...carried.times] }],
+      }),
+    ).toThrow();
     expect(() => decodeHubStandInHandback({ ...handback, sequence: 0 })).toThrow();
 
     expect(

@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { AuditActingPrincipal } from "./auditEvents";
 import { HubGrantItem, HubMemberId, RosterMember, SignedHubRoster } from "./hubAndSpokes";
+import { HubWakeSpokeTimes } from "./hubWake";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const digest = Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/));
@@ -41,8 +42,29 @@ export const HubMembershipChange = Schema.Literal(
   "stand-in-merged",
   "hub-promoted",
   "new-hub-accepted",
+  "wake-switch-changed",
+  "wake-times-reported",
+  "wake-times-merged",
+  "wake-nudge-sent",
+  "wake-nudge-refused",
+  "wake-unreachable",
 );
 export type HubMembershipChange = typeof HubMembershipChange.Type;
+
+/**
+ * Why a wake nudge came to nothing. The journal keeps this word and never a
+ * routine's id, name, Project, or schedule.
+ */
+export const HubWakeReason = Schema.Literal(
+  "unknown-routine",
+  "too-early",
+  "time-mismatch",
+  "wake-not-granted",
+  "standby-not-granted",
+  "hub-reachable",
+  "answer-refused",
+);
+export type HubWakeReason = typeof HubWakeReason.Type;
 
 /**
  * What the journal keeps of a membership change: who petitioned, what changed,
@@ -57,6 +79,10 @@ export const HubMembershipChangedPayload = Schema.Struct({
   memberIds: Schema.optional(Schema.Array(HubMemberId).pipe(Schema.maxItems(256))),
   sequence: Schema.optional(Schema.Int.pipe(Schema.positive())),
   items: Schema.optional(Schema.Array(HubGrantItem)),
+  /** For a wake change: how many routine times a report or a merge carried. */
+  wakeCount: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  /** For a wake change: why a nudge came to nothing. */
+  wakeReason: Schema.optional(HubWakeReason),
 }).annotations(strict);
 export type HubMembershipChangedPayload = typeof HubMembershipChangedPayload.Type;
 export const decodeHubMembershipChangedPayload = Schema.decodeUnknownSync(
@@ -214,16 +240,16 @@ export const StandInAddedMember = Schema.Struct({
 export type StandInAddedMember = typeof StandInAddedMember.Type;
 
 /**
- * What a standby hands back to the hub when it steps down. `wakeTimes` is the
- * place the wake times it holds will travel; none exist until the wake service
- * does, so it is empty.
+ * What a standby hands back to the hub when it steps down. `wakeTimes` are the
+ * routine times spokes reported to it while it stood in; the hub takes them
+ * for the spokes it still lists.
  */
 export const HubStandInHandback = Schema.Struct({
   baseSequence: Schema.Int.pipe(Schema.positive()),
   sequence: Schema.Int.pipe(Schema.positive()),
   added: Schema.Array(StandInAddedMember).pipe(Schema.maxItems(64)),
   removed: Schema.Array(HubMemberId).pipe(Schema.maxItems(256)),
-  wakeTimes: Schema.Tuple(),
+  wakeTimes: Schema.Array(HubWakeSpokeTimes).pipe(Schema.maxItems(256)),
 }).annotations(strict);
 export type HubStandInHandback = typeof HubStandInHandback.Type;
 export const decodeHubStandInHandback = Schema.decodeUnknownSync(HubStandInHandback);

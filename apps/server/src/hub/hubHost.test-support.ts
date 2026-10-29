@@ -45,6 +45,8 @@ import { PeerDelegationService, type PeerDelegationHost } from "./peerDelegation
 import { createPinnedHubTransport, type HubNetwork, type HubTransport } from "./pinnedHubTransport";
 import { createRosterSigningKeyStore } from "./rosterSigningKey";
 import { deviceLifecycleAt, SpokeLinkService } from "./spokeLinkService";
+import { SpokeWakeService, type WakeRoutineView } from "./spokeWakeService";
+import { WakeService } from "./wakeService";
 
 function deviceIsActive(
   administration: Pick<LocalDeviceAdministrationPort, "listDevices">,
@@ -123,6 +125,16 @@ export interface HubTestHost {
   readonly hub: HubService;
   readonly spoke: SpokeLinkService;
   readonly failover: FailoverService;
+  /** The hub side of the wake service, and what a standing-in standby wakes with. */
+  readonly wake: WakeService;
+  /** This host's side of the wake service as a spoke. */
+  readonly spokeWake: SpokeWakeService;
+  /** The magic packets this host's wake service sent, as the fake socket saw them. */
+  readonly magicPackets: Uint8Array[];
+  /** This host's routines as the wake service may read them: a test edits it to schedule, disable, or remove one. */
+  readonly routines: WakeRoutineView[];
+  /** How many times a nudge woke this host's own scheduler. */
+  readonly schedulerPokes: { count: number };
   readonly state: HubStatePort;
   readonly records: HubMembershipChangedPayload[];
   /** This host's delegations, sent and received, as the delegation routes keep them. */
@@ -160,6 +172,18 @@ export async function startHubTestHost(input: {
   readonly now?: () => number;
   /** The failover time in milliseconds; absent, the roster's own. A test cannot wait five minutes. */
   readonly failoverAfterMs?: number;
+  /**
+   * The clock the wake service, the spoke's wake reports, and the member-link
+   * checks read, so a test can move to just before a routine is due. Every
+   * host in one test shares it.
+   */
+  readonly wakeClock?: () => number;
+  /** How long before an occurrence the hub starts waking; absent, the service's own. */
+  readonly wakeLeadMs?: number;
+  /** Makes the fake socket report that it could not send. */
+  readonly wakeSocketFails?: boolean;
+  /** Wraps the transport this host's wake reports go through, so a test can read the bodies sent. */
+  readonly wakeTransport?: (transport: HubTransport) => HubTransport;
 }): Promise<HubTestHost> {
   const directory = mkdtempSync(join(tmpdir(), "octant-hub-"));
   input.cleanups.push(() => rmSync(directory, { recursive: true, force: true }));
@@ -287,7 +311,7 @@ export async function startHubTestHost(input: {
     },
     record: (change) => records.push(change),
     serverBuildVersion: "0.1.0",
-    now: input.now ?? Date.now,
+    now: input.now ?? input.wakeClock ?? Date.now,
   });
   // Moves this host's clock for the owner routes only, so a challenge can
   // outlive its minute without the test waiting for it.
@@ -306,7 +330,51 @@ export async function startHubTestHost(input: {
       ? {}
       : { failoverAfterMs: () => input.failoverAfterMs }),
   });
-  const hubLinkRoutes = createHubLinkRouteHandler({ hub, spoke, failover });
+  const wakeNow = input.wakeClock ?? Date.now;
+  const magicPackets: Uint8Array[] = [];
+  const wake = new WakeService({
+    state,
+    identity: () => identity,
+    transport,
+    wakeOnLan: {
+      broadcast: async (packet) => {
+        if (input.wakeSocketFails === true) return false;
+        magicPackets.push(packet);
+        return true;
+      },
+    },
+    record: (change) => records.push(change),
+    now: wakeNow,
+    ...(input.wakeLeadMs === undefined ? {} : { leadMs: input.wakeLeadMs }),
+  });
+  const routines: WakeRoutineView[] = [];
+  const schedulerPokes = { count: 0 };
+  let routineSerial = 0;
+  const spokeWake = new SpokeWakeService({
+    state,
+    identity: () => identity,
+    transport: input.wakeTransport?.(transport) ?? transport,
+    spoke,
+    routines: () => routines,
+    scheduler: {
+      poke: () => {
+        schedulerPokes.count += 1;
+      },
+    },
+    hubUnreachable: () => failover.hubUnreachable(),
+    record: (change) => records.push(change),
+    now: wakeNow,
+    // Distinct, well-formed ids so a test can tell routines apart without reading the map.
+    newRoutineId: () => `routine${String((routineSerial += 1)).padStart(16, "0")}`,
+  });
+  const hubLinkRoutes = createHubLinkRouteHandler({
+    hub,
+    spoke,
+    failover,
+    wake,
+    spokeWake,
+    ...(input.wakeClock === undefined ? {} : { now: input.wakeClock }),
+  });
   const hubOwnerRoutes = createHubOwnerRouteHandler({
     hub,
     spoke,
@@ -413,6 +481,11 @@ export async function startHubTestHost(input: {
     hub,
     spoke,
     failover,
+    wake,
+    spokeWake,
+    magicPackets,
+    routines,
+    schedulerPokes,
     state,
     records,
     delegationState,

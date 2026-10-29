@@ -1190,6 +1190,7 @@ export function startOctantServer(
       threadExportService,
       agentMessageService,
       authenticatedProductDispatch,
+      automationScheduler,
       browserCaptureStore,
       canvasRoutes,
       chatAttachmentStore,

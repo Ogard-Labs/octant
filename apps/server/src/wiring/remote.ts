@@ -70,6 +70,9 @@ import {
   createListenerCertificateSink,
 } from "../hub/tailscaleCertificate";
 import { createTailscaleCliDaemon, execTailscale } from "../hub/tailscaleCliDaemon";
+import { SpokeWakeService } from "../hub/spokeWakeService";
+import { createUdpWakeOnLanPort } from "../hub/wakeOnLan";
+import { WakeService } from "../hub/wakeService";
 import { createPrivateListenerLifecycleController } from "../remote/privateListenerLifecycleController";
 import {
   resolvePrivateListenerHostIdentity,
@@ -103,6 +106,9 @@ import type { RoutesWiring } from "./routes";
 
 /** How often a hub member looks for the hub; the failover time itself is the hub's setting in the roster. */
 const FAILOVER_LOOK_MS = 15_000;
+/** How often the hub looks for an occurrence to wake a spoke for, and a spoke for a changed routine time to report. */
+const WAKE_LOOK_MS = 15_000;
+const WAKE_REPORT_MS = 30_000;
 const CERTIFICATE_CHECK_MS = 24 * 60 * 60 * 1_000;
 const STARTUP_CERTIFICATE_CHECK_MS = 60 * 1_000;
 
@@ -141,7 +147,7 @@ export type RemoteDependencies = Pick<
     | "workTurnService"
   > &
   Pick<CanvasWiring, "canvasRoutes" | "canvasPublicShareService"> &
-  Pick<AutomationWiring, "pushNotificationTokenStore"> &
+  Pick<AutomationWiring, "automationScheduler" | "pushNotificationTokenStore"> &
   Pick<RoutesWiring, "authenticatedProductDispatch"> &
   Pick<FoundationsWiring, "workThreadProjection"> &
   Pick<FoundationsWiring, "providerRuntimeRegistry"> &
@@ -165,6 +171,7 @@ export function wireRemote(deps: RemoteDependencies) {
     agentMessageService,
     agentRunAdmission,
     authenticatedProductDispatch,
+    automationScheduler,
     browserCaptureStore,
     nativeHarnessSessions,
     canvasPublicShareService,
@@ -444,6 +451,35 @@ export function wireRemote(deps: RemoteDependencies) {
     now: Date.now,
   });
   setInterval(() => void failoverService.tick().catch(() => undefined), FAILOVER_LOOK_MS).unref();
+  // The wake service is off until the person turns it on in the hub's window; its
+  // looks do nothing while it is off. A spoke reports only if its hub grant ticks Wake.
+  const wakeService = new WakeService({
+    state: hubStateStore,
+    identity: resolveHubIdentity,
+    transport: hubTransport,
+    wakeOnLan: createUdpWakeOnLanPort(),
+    record: recordHubMembership,
+    now: Date.now,
+  });
+  setInterval(() => void wakeService.tick().catch(() => undefined), WAKE_LOOK_MS).unref();
+  const spokeWakeService = new SpokeWakeService({
+    state: hubStateStore,
+    identity: resolveHubIdentity,
+    transport: hubTransport,
+    spoke: spokeLinkService,
+    // Only whether a routine is enabled and when it is next due leaves the automation projection.
+    routines: () =>
+      persistence.automationProjection.listDefinitions().map((definition) => ({
+        id: String(definition.id),
+        enabled: definition.lifecycle === "enabled",
+        nextDueAt: definition.nextDueAt,
+      })),
+    scheduler: automationScheduler,
+    hubUnreachable: () => failoverService.hubUnreachable(),
+    record: recordHubMembership,
+    now: Date.now,
+  });
+  setInterval(() => void spokeWakeService.tick().catch(() => undefined), WAKE_REPORT_MS).unref();
   const tailscaleCertificate = new TailscaleCertificateService({
     setting: createTailscaleCertificateSetting(providerDataDirectory),
     daemon: createTailscaleCliDaemon({
@@ -468,6 +504,8 @@ export function wireRemote(deps: RemoteDependencies) {
     hub: hubService,
     spoke: spokeLinkService,
     failover: failoverService,
+    wake: wakeService,
+    spokeWake: spokeWakeService,
     certificate: tailscaleCertificate,
     maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
   });
@@ -475,6 +513,8 @@ export function wireRemote(deps: RemoteDependencies) {
     hub: hubService,
     spoke: spokeLinkService,
     failover: failoverService,
+    wake: wakeService,
+    spokeWake: spokeWakeService,
   });
   // Delegation between spokes: the receiving side starts an ordinary Work
   // thread under this host's own scope, and the sending side checks this host's
