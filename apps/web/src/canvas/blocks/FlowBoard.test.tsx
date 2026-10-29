@@ -168,3 +168,44 @@ describe("flow board", () => {
     expect(height).toBeGreaterThan(width ?? 0);
   });
 });
+
+describe("flow click-through Play", () => {
+  it("opens on the first screen and navigates by a tapped hotspot, then goes Back", async () => {
+    const user = userEvent.setup();
+    render(<FlowBoard block={flow} blocks={[searchMockup, resultsMockup]} />);
+    await user.click(screen.getByRole("button", { name: "Play" }));
+    const player = screen.getByRole("dialog", { name: "Playing Search flow" });
+    expect(within(player).getByRole("tree", { name: "Search" })).toBeInTheDocument();
+    // The hotspot the edge named is the one live control in the drawing.
+    const go = await within(player).findByRole("button", { name: "Go" });
+    await user.click(go);
+    expect(within(player).getByRole("tree", { name: "Results" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Go back" }));
+    expect(within(player).getByRole("tree", { name: "Search" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("reaches a hotspot with the keyboard and lists a screen-level transition as Go to", async () => {
+    const screenLevelFlow = {
+      ...flow,
+      edges: [{ edgeId: "open", fromScreenId: "s1", toScreenId: "s2", label: "Open results" }],
+    } as never;
+    const user = userEvent.setup();
+    render(<FlowBoard block={screenLevelFlow} blocks={[searchMockup, resultsMockup]} />);
+    await user.click(screen.getByRole("button", { name: "Play" }));
+    const player = screen.getByRole("dialog", { name: "Playing Search flow" });
+    // A transition without a hotspot waits in the Go to list.
+    const open = within(player).getByRole("button", { name: "Open results →" });
+    open.focus();
+    await user.keyboard("{Enter}");
+    expect(within(player).getByRole("tree", { name: "Results" })).toBeInTheDocument();
+  });
+
+  it("keeps every control inert outside Play", () => {
+    render(<FlowBoard block={flow} blocks={[searchMockup, resultsMockup]} />);
+    const board = screen.getByRole("group", { name: "Flow board" });
+    // The board's screens hold no live hotspot; only Play itself is a button.
+    expect(within(board).queryAllByRole("button", { name: "Go" })).toHaveLength(0);
+  });
+});

@@ -2352,6 +2352,65 @@
   cursor: move;
 }
 
+/* The click-through player keeps the design player's anatomy: a bar, a stage
+   that scales the current screen to fit, and a Go to list for the
+   transitions that start from the screen itself rather than a control. */
+.canvas-flow-player__body {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--oct-space-2);
+  min-height: 60vh;
+}
+
+.canvas-flow-player__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.canvas-flow-player__title {
+  font-weight: var(--oct-weight-medium);
+}
+
+.canvas-flow-player__hint {
+  font-size: var(--oct-text-xs);
+  color: var(--oct-muted);
+  margin-right: auto;
+}
+
+.canvas-flow-player__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.canvas-flow-player__stage {
+  display: grid;
+  justify-content: center;
+  align-content: center;
+  justify-items: center;
+  gap: var(--oct-space-3);
+  overflow: hidden;
+}
+
+.canvas-flow-player__screen {
+  display: grid;
+  overflow: hidden;
+}
+
+.canvas-flow-player__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+}
+
+/* A hotspot is the one live control in a drawing that is otherwise inert. It
+   wears the OctantButton's own look: the adapter's variant is its style, and
+   no surface repaints it. */
+.canvas-mockup__hotspot {
+  justify-self: start;
+}
+
 .canvas-block__diagram-edge {
   fill: none;
   stroke: var(--oct-chart-axis);

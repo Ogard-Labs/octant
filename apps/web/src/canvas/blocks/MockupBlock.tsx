@@ -26,6 +26,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
+import { OctantButton } from "../../ui/base/OctantButton";
 import type {
   CanvasMockupBlock,
   CanvasMockupComponent,
@@ -83,6 +84,13 @@ const CONTAINERS: ReadonlySet<CanvasMockupComponent> = new Set([
 export type Callouts = ReadonlyMap<string, number>;
 
 /**
+ * The nodes a surface makes navigable, by node id: what running its control
+ * does. Only a click-through surface passes this; the document's drawing
+ * never does, so every control stays inert there.
+ */
+export type MockupHotspots = ReadonlyMap<string, () => void>;
+
+/**
  * One frame of a mockup: the device chrome and the screen tree of a single
  * variant. The block's own board draws one per variant; a flow board draws
  * the one variant a flow screen names, from the same piece.
@@ -92,12 +100,15 @@ export function MockupFrame({
   frame,
   callouts,
   deviceDetail,
+  hotspots,
 }: {
   readonly block: CanvasMockupBlock;
   readonly frame: CanvasMockupFrame;
   readonly callouts: Callouts;
   /** The block's device detail, computed once by the surface that owns the block. */
   readonly deviceDetail: string;
+  /** The flow's named controls, made navigable on a click-through surface. */
+  readonly hotspots?: MockupHotspots;
 }) {
   return (
     <div className="canvas-mockup__frame" data-device={block.device} style={frameStyle(block)}>
@@ -115,7 +126,12 @@ export function MockupFrame({
           }
         >
           {frame.roots.map((branch) => (
-            <MockupItem key={String(branch.node.nodeId)} branch={branch} callouts={callouts} />
+            <MockupItem
+              branch={branch}
+              callouts={callouts}
+              key={String(branch.node.nodeId)}
+              {...(hotspots === undefined ? {} : { hotspots })}
+            />
           ))}
         </ul>
       </div>
@@ -229,11 +245,14 @@ function MockupOutline({
 function MockupItem({
   branch,
   callouts,
+  hotspots,
 }: {
   readonly branch: CanvasMockupBranch;
   readonly callouts: Callouts;
+  readonly hotspots?: MockupHotspots;
 }) {
   const { node } = branch;
+  const hotspot = hotspots?.get(String(node.nodeId));
   const callout = callouts.get(String(node.nodeId));
   const common = {
     role: "treeitem",
@@ -250,7 +269,11 @@ function MockupItem({
             <CalloutMark number={callout} />
           </span>
         )}
-        <WindowBody branches={branch.children} callouts={callouts} />
+        <WindowBody
+          branches={branch.children}
+          callouts={callouts}
+          {...(hotspots === undefined ? {} : { hotspots })}
+        />
       </li>
     );
   }
@@ -262,7 +285,11 @@ function MockupItem({
             <CalloutMark number={callout} />
             <span className="canvas-mockup__modal-title">{node.label}</span>
           </span>
-          <MockupGroup branches={branch.children} callouts={callouts} />
+          <MockupGroup
+            branches={branch.children}
+            callouts={callouts}
+            {...(hotspots === undefined ? {} : { hotspots })}
+          />
         </div>
       </li>
     );
@@ -282,13 +309,29 @@ function MockupItem({
       {...common}
       style={style}
     >
-      {CONTAINERS.has(node.component) && callout === undefined ? null : (
-        <span className="canvas-mockup__face" aria-hidden="true">
+      {hotspot === undefined ? (
+        CONTAINERS.has(node.component) && callout === undefined ? null : (
+          <span className="canvas-mockup__face" aria-hidden="true">
+            <CalloutMark number={callout} />
+            {CONTAINERS.has(node.component) ? null : <Face branch={branch} />}
+          </span>
+        )
+      ) : (
+        <OctantButton
+          className="canvas-mockup__hotspot"
+          onClick={hotspot}
+          type="button"
+          variant="secondary"
+        >
           <CalloutMark number={callout} />
-          {CONTAINERS.has(node.component) ? null : <Face branch={branch} />}
-        </span>
+          {node.label}
+        </OctantButton>
       )}
-      <MockupGroup branches={panel} callouts={callouts} />
+      <MockupGroup
+        branches={panel}
+        callouts={callouts}
+        {...(hotspots === undefined ? {} : { hotspots })}
+      />
     </li>
   );
 }
@@ -301,9 +344,11 @@ function CalloutMark({ number }: { readonly number: number | undefined }) {
 function WindowBody({
   branches,
   callouts,
+  hotspots,
 }: {
   readonly branches: ReadonlyArray<CanvasMockupBranch>;
   readonly callouts: Callouts;
+  readonly hotspots?: MockupHotspots;
 }) {
   const header = branches.filter((branch) => branch.node.component === "header");
   const sidebar = branches.filter((branch) => branch.node.component === "sidebar");
@@ -314,17 +359,29 @@ function WindowBody({
     <>
       {header.length === 0 ? null : (
         <div className="canvas-mockup__header-slot">
-          <MockupGroup branches={header} callouts={callouts} />
+          <MockupGroup
+            branches={header}
+            callouts={callouts}
+            {...(hotspots === undefined ? {} : { hotspots })}
+          />
         </div>
       )}
       <div className="canvas-mockup__columns">
         {sidebar.length === 0 ? null : (
           <div className="canvas-mockup__sidebar-slot">
-            <MockupGroup branches={sidebar} callouts={callouts} />
+            <MockupGroup
+              branches={sidebar}
+              callouts={callouts}
+              {...(hotspots === undefined ? {} : { hotspots })}
+            />
           </div>
         )}
         <div className="canvas-mockup__main">
-          <MockupGroup branches={main} callouts={callouts} />
+          <MockupGroup
+            branches={main}
+            callouts={callouts}
+            {...(hotspots === undefined ? {} : { hotspots })}
+          />
         </div>
       </div>
     </>
@@ -334,15 +391,22 @@ function WindowBody({
 function MockupGroup({
   branches,
   callouts,
+  hotspots,
 }: {
   readonly branches: ReadonlyArray<CanvasMockupBranch>;
   readonly callouts: Callouts;
+  readonly hotspots?: MockupHotspots;
 }) {
   if (branches.length === 0) return null;
   return (
     <ul role="group">
       {branches.map((branch) => (
-        <MockupItem key={String(branch.node.nodeId)} branch={branch} callouts={callouts} />
+        <MockupItem
+          branch={branch}
+          callouts={callouts}
+          key={String(branch.node.nodeId)}
+          {...(hotspots === undefined ? {} : { hotspots })}
+        />
       ))}
     </ul>
   );

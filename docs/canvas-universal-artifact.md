@@ -407,7 +407,7 @@ links across the exported pages. Supersedes D-6.
 | Slice | What it delivers                                                                                                                                                                                                       | Requirement IDs                        | Status                                 |
 | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | -------------------------------------- |
 | 1     | `flow` block: schema 23, policies, pure layout, board drawing (mockup frames and design frames as live nodes), comment anchors, reading order, MD/HTML/SVG export parity, share v12, preview warnings, journaled drags | FR-1, FR-3, NFR-1, NFR-2, NFR-3, NFR-5 | In review (#1830); rendered QA pending |
-| 2     | Click-through Play over the flow; flow HTML export as one linked, script-free page set                                                                                                                                 | FR-2, FR-7 (flow part), NFR-4, NFR-6   | Planned                                |
+| 2     | Click-through Play over the flow; flow HTML export as one linked, script-free page set (D-9: one self-contained site)                                                                                                  | FR-2, FR-7 (flow part), NFR-4, NFR-6   | In review (#1832); rendered QA pending |
 | 3     | Mockup catalog: new components, image fills, reusable definitions — schema 24, share v13                                                                                                                               | FR-4, FR-5, FR-6, NFR-5                | Planned                                |
 | 4     | Per-variant mockup HTML and TSX export; describe guidance and recipes for everything above                                                                                                                             | FR-7 (rest), FR-9                      | Planned                                |
 | 5     | `deck` block: schema 25, share v14, player integration, deck recipes                                                                                                                                                   | FR-8, FR-9                             | Planned                                |
@@ -685,6 +685,75 @@ version, and everything ships in one app build. Rollback is reverting the
 commit; stored version-23 documents are refused by the rolled-back runtime as
 future versions, which is the designed behavior.
 
+### Slice 2: click-through Play and the flow site export
+
+FR-2, FR-7 (flow part), NFR-4, NFR-6. Q-3 holds: Play runs in the app only;
+shares and public links keep drawing the board read-only.
+
+#### Shape (D-9)
+
+**Play in-app.** `FlowBoard` gains a Play control beside its zoom controls,
+and a `FlowPlayer` dialog mirroring `DesignPlayer`: the same dialog bar
+(title, live position hint, Restart, Fullscreen, Close), a stage that scales
+the current screen to fit, and Esc to leave. The current screen is the
+mockup's or design's own drawing — no new frame surface. A mockup screen's
+hotspot nodes (the interactive components its edges name) render as real
+buttons that navigate to their target screen; every other part stays inert.
+Screen-level edges (no hotspot, and every edge from a design screen) draw as
+an explicit "Go to" link list under the screen, so a transition always has a
+place to tap. Back steps a history stack; navigation is view state only and
+journals nothing.
+
+**The flow site (D-9).** The HTML export renders a flow as one interactive,
+self-contained section set inside the exported document — not one file per
+screen: screens are `:target`-navigated sections exactly as a design's
+frames link inside one page (`display: none`, `:target`, and a
+`body:not(:has(:target))` start rule, the pattern `designDocument.ts`
+already ships), hotspot nodes are real `<a href="#screen">` anchors, and
+screen-level edges join the link list. The Markdown export keeps slice 1's
+graph reading. This supersedes the plan's "one file per screen" wording: the
+click-through outcome is identical, the file stays self-contained like the
+Save-as-HTML form, and the export contract (text body vs. drawn pictures)
+changes nothing. A per-file page set stays Later if a destination needs it.
+
+**The mockup page generator.** `canvasMockupHtml` in `packages/domain`
+(`canvasMockupHtml.ts`): a pure function rendering one variant of a mockup
+block as semantic, inert HTML (section/nav/h*/p/ul/li/button[disabled]
+per the closed catalog), with the hotspot nodes a caller names rendered as
+anchors to the caller's targets. Deterministic, byte-identical on reruns,
+no script, a small neutral inline stylesheet, the light scheme. Slice 4
+reuses it for the per-variant export and the TSX form.
+
+**Design screens in the site and the player.** A design screen keeps its
+own page: in the export the section holds the sandboxed `srcdoc` frame the
+HTML export already writes (via `renderCanvasDesignExportFrames`); in the
+player it is the live scaled `FrameView`. Its own internal fragment links
+work as they do in any design; cross-screen edges come from the link list.
+
+#### Tests
+
+| Criterion                                                  | Test                                                                                                         | Location                                              |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------- |
+| FR-2 hotspot click navigates; keyboard path; back and exit | FlowPlayer renders, hotspot button navigates by pointer and Enter, Back returns, Esc closes                  | `apps/web/src/canvas/blocks/FlowBoard.test.tsx`       |
+| FR-2 screen-level edges navigate                           | A "Go to" link under a screen with a hotspot-less edge navigates                                             | `apps/web/src/canvas/blocks/FlowBoard.test.tsx`       |
+| NFR-4 inert elsewhere                                      | The board's screens stay inert outside Play                                                                  | `apps/web/src/canvas/blocks/FlowBoard.test.tsx`       |
+| FR-7 deterministic script-free site                        | The flow site has no `<script>`, hotspot anchors match edges, reruns byte-identical, `:target` rules present | `packages/domain/src/canvasFlowSite.test.ts`          |
+| Generator honesty                                          | Each component renders semantically; a hotspot node becomes an anchor to its target                          | `packages/domain/src/canvasMockupHtml.test.ts`        |
+| Export wiring                                              | The HTML export carries the site; Markdown keeps the reading                                                 | `apps/server/src/canvas/artifactDocumentRender` tests |
+
+### D-9: The flow site is one self-contained HTML section set, and Play is the renderer (Accepted, 2026-10-28)
+
+Context: the plan said "one HTML page set," and the export contract offers
+one text body or browser-drawn picture files. Options: (a) a new multi-file
+export format (contract change across targets, cards, and placements);
+(b) one self-contained document whose screens navigate by `:target`, the
+pattern the design frames already ship. Choice: (b), Henrik's plan wording
+notwithstanding — same click-through outcome, zero contract surface, and the
+file matches the Save-as-HTML form people already paste elsewhere.
+Consequences: a per-file page set stays Later; Play is typed link data
+executed by the renderer (D-2) so no script, ticket, or prototype host is
+involved anywhere in this slice.
+
 ## 10. Verification
 
 | Acceptance criterion                                                                                            | Test                                                                                                                                                                                                                                                                                                                  | Result | Change      |
@@ -700,6 +769,11 @@ future versions, which is the designed behavior.
 | FR-1 rendered board: screens and edges draw, drag journals, keyboard nudge works, placed mockup not drawn twice | `apps/web/src/canvas/blocks/FlowBoard.test.tsx` (5 tests); canvas suite 422 pass                                                                                                                                                                                                                                      | Pass   | This change |
 | NFR-2 workspace typecheck; fmt, lint, style, paths, wiring, ui, decisions, diff checks                          | `bun run typecheck` (0 errors) + repo checks                                                                                                                                                                                                                                                                          | Pass   | This change |
 | Whole-suite regression across the workspace                                                                     | Per-package suites: contracts 2327, web 6762, server-canvas 627, theme/host-runtime/client-runtime/plugin-host/plugin-api/provider-sdk/cli/docs/mobile all pass; domain and server carry only failures verified identical on clean main (10 pairing, 6 lease/purge/extension/ssh, 1 flaky long scheduler integration) | Pass   | This change |
+| FR-2 Play opens on the first screen; a tapped hotspot navigates; Back returns; Close leaves                     | "flow click-through Play" (3 tests), `apps/web/src/canvas/blocks/FlowBoard.test.tsx`                                                                                                                                                                                                                                  | Pass   | Slice 2     |
+| FR-2 a screen-level transition waits in the Go to list and is keyboard-operable                                 | "reaches a hotspot with the keyboard and lists a screen-level transition as Go to", same file                                                                                                                                                                                                                         | Pass   | Slice 2     |
+| NFR-4 every control stays inert outside Play                                                                    | "keeps every control inert outside Play", same file                                                                                                                                                                                                                                                                   | Pass   | Slice 2     |
+| FR-7/NFR-6 the flow site is script-free, anchors match hotspots, reruns byte-identical, `:target` navigates     | `packages/domain/src/canvasFlowSite.test.ts` (6 tests)                                                                                                                                                                                                                                                                | Pass   | Slice 2     |
+| FR-7 the HTML export carries the site; Markdown keeps the graph reading; design markup flagged only when placed | "renders a flow as a script-free site whose transitions are real anchors", `apps/server/src/canvas/artifactDocumentRender.test.ts`                                                                                                                                                                                    | Pass   | Slice 2     |
 
 ## 11. Codebase deltas and change log
 
@@ -748,3 +822,11 @@ governs over any number written earlier.
   cliff and two fixture typings from earlier runs; the cache was cleared by
   an environment restart and both were fixed at the source, and the delta is
   recorded above.
+- 2026-10-28: Slice 2 implemented: click-through Play (the design player's
+  anatomy over flow screens, hotspots as the one live control, a Go to list
+  for hotspot-less transitions, view state only) and the flow site export
+  (`canvasMockupHtml` and `canvasFlowSite` in the domain, a `site` piece in
+  the HTML export; Markdown keeps the graph reading). Two ui-contract
+  refusals shaped the hotspot: a generated page's button keeps the adapter's
+  look, and no surface repaints OctantButton, so the in-app hotspot wears
+  the secondary variant as-is. Delivered for review as #1832.

@@ -1135,7 +1135,7 @@ function RunningFrame({
  * window that may not, a gesture the browser did not count) leaves the page as
  * it was.
  */
-function useFullscreen<T extends HTMLElement>() {
+export function useFullscreen<T extends HTMLElement>() {
   const ref = useRef<T>(null);
   const [active, setActive] = useState(false);
   useEffect(() => {
@@ -1151,7 +1151,7 @@ function useFullscreen<T extends HTMLElement>() {
   return { ref, active, toggle, available: document.fullscreenEnabled === true };
 }
 
-function FullscreenButton({
+export function FullscreenButton({
   fullscreen,
 }: {
   readonly fullscreen: Pick<ReturnType<typeof useFullscreen>, "active" | "available" | "toggle">;
@@ -1284,7 +1284,7 @@ function useFramesNearView(
  * callback ref, because the player's stage mounts inside a dialog after the
  * component that asks for it.
  */
-function useSize(): readonly [
+export function useSize(): readonly [
   (element: HTMLElement | null) => void,
   { readonly width: number; readonly height: number } | undefined,
 ] {
