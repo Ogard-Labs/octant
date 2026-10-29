@@ -27,7 +27,11 @@ import {
   type ProviderProbeResult,
   type ProviderRuntimeEvent,
 } from "@octant/contracts";
-import { decodeCanvasBlock, type CanvasDesignBlock } from "@octant/contracts/canvas";
+import {
+  CANVAS_SCHEMA_VERSION,
+  decodeCanvasBlock,
+  type CanvasDesignBlock,
+} from "@octant/contracts/canvas";
 import { cartPrototypeExampleBlock, searchSpecExampleBlock } from "@octant/domain";
 import { resolveHostRuntimePaths } from "@octant/host-runtime";
 import { Effect, Queue, Schema, Stream } from "effect";
@@ -65,6 +69,8 @@ export const CANVAS_FIXTURE_NAMES = [
   "static-design",
   "running-design-document",
   "running-design-phone",
+  "app-flow",
+  "data-deck",
 ] as const;
 export type CanvasFixtureName = (typeof CANVAS_FIXTURE_NAMES)[number];
 
@@ -142,6 +148,71 @@ const runningDocumentDesign = designBlock({
   size: "document",
 });
 
+/** The flow fixture's screen: a phone wireframe the flow connects. */
+const searchScreen = decodeCanvasBlock({
+  blockId: "search-screen",
+  schemaVersion: CANVAS_SCHEMA_VERSION,
+  kind: "mockup",
+  device: "phone",
+  title: "Search",
+  nodes: [
+    { nodeId: "window", component: "window", label: "Search" },
+    { nodeId: "field", parentId: "window", component: "search", label: "Search ada" },
+    { nodeId: "go", parentId: "window", component: "button", label: "Go" },
+    { nodeId: "results", parentId: "window", component: "list", label: "Results" },
+  ],
+});
+
+/** The flow fixture: two screens and the transition between them. */
+const searchFlow = decodeCanvasBlock({
+  blockId: "search-flow",
+  schemaVersion: CANVAS_SCHEMA_VERSION,
+  kind: "flow",
+  title: "Search flow",
+  screens: [
+    { screenId: "search", blockId: "search-screen" },
+    { screenId: "results", blockId: "results-screen" },
+  ],
+  edges: [
+    { edgeId: "go", fromScreenId: "search", toScreenId: "results", fromNodeId: "go", label: "Go" },
+  ],
+});
+
+/** The flow fixture's second screen. */
+const resultsScreen = decodeCanvasBlock({
+  blockId: "results-screen",
+  schemaVersion: CANVAS_SCHEMA_VERSION,
+  kind: "mockup",
+  device: "phone",
+  title: "Results",
+  nodes: [
+    { nodeId: "window", component: "window", label: "Results" },
+    { nodeId: "row", parentId: "window", component: "list-row", label: "Ada Lovelace, 1821" },
+    { nodeId: "back", parentId: "window", component: "button", label: "Back" },
+  ],
+});
+
+/** The deck fixture: the flow's screens beside the document's own numbers. */
+const launchDeck = decodeCanvasBlock({
+  blockId: "launch-deck",
+  schemaVersion: CANVAS_SCHEMA_VERSION,
+  kind: "deck",
+  title: "Launch review",
+  slides: [
+    { slideId: "one", blockId: "search-screen", notes: "The search screen as shipped." },
+    { slideId: "two", blockId: "deck-metric", notes: "Where the signups stand." },
+  ],
+});
+
+const deckMetric = decodeCanvasBlock({
+  blockId: "deck-metric",
+  schemaVersion: 1,
+  kind: "metric",
+  label: "Weekly signups",
+  value: 1284,
+  delta: 0.12,
+});
+
 /**
  * An agent may only ask for an inline Canvas made of reading blocks or one
  * document-size design that runs nothing; a prototype that runs is always drawn
@@ -207,6 +278,20 @@ const FIXTURES: Readonly<Record<CanvasFixtureName, CanvasFixture>> = {
     reply: "The prototype is ready. Expand it in the thread and press Run to start it.",
     presentation: "sidebar",
     blocks: [runningDocumentDesign],
+  },
+  "app-flow": {
+    title: "Search flow",
+    prompt: "Wire the search screens together as a flow I can click through.",
+    reply: "The flow is a Canvas beside this thread. Press Play on its board to walk it.",
+    presentation: "sidebar",
+    blocks: [searchScreen, resultsScreen, searchFlow],
+  },
+  "data-deck": {
+    title: "Launch review deck",
+    prompt: "Present the search screen with our signup number, as slides.",
+    reply: "The deck is a Canvas beside this thread. Press Present to walk its two slides.",
+    presentation: "sidebar",
+    blocks: [searchScreen, deckMetric, launchDeck],
   },
   "running-design-phone": {
     title: "Cart prototype (phone size)",

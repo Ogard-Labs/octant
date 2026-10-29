@@ -856,3 +856,9 @@ governs over any number written earlier.
   a deck shows those numbers as slides of their own. Delivered for review as
   #1841. All five slices are now in
   review; rendered QA remains named-pending across the stack.
+- 2026-10-28: The Canvas schema version gates became one table in the
+  contract, read by both the definition decode filter and the domain's
+  declared-version check; the policy's supported versions are the contract's
+  own literal list. Share version gates stay a separate filter on the share
+  document. The `app-flow` and `data-deck` seed fixtures were added. Delivered
+  for review as #1843.
