@@ -8,7 +8,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import { CanvasDocument } from "../CanvasDocument";
 import { canvasFixture } from "../test-fixtures";
-import { FlowBoard } from "./FlowBoard";
+import { FlowBoard, flowDesignHotspotTarget } from "./FlowBoard";
 import type { DiagramBoardLayoutRuntime } from "./DiagramBoard";
 
 const base = { schemaVersion: canvasFixture.schemaVersion };
@@ -207,5 +207,137 @@ describe("flow click-through Play", () => {
     const board = screen.getByRole("group", { name: "Flow board" });
     // The board's screens hold no live hotspot; only Play itself is a button.
     expect(within(board).queryAllByRole("button", { name: "Go" })).toHaveLength(0);
+  });
+});
+
+describe("design hotspots in a flow", () => {
+  it("reads the screen a design frame's own anchor names", () => {
+    expect(flowDesignHotspotTarget("#octant-flow:results")).toBe("results");
+    expect(flowDesignHotspotTarget("#octant-flow:two-words.v2")).toBe("two-words.v2");
+    expect(flowDesignHotspotTarget("#other")).toBeUndefined();
+    expect(flowDesignHotspotTarget("")).toBeUndefined();
+  });
+
+  it("draws a played design screen same-origin so its anchors can be followed", async () => {
+    const design = decodeCanvasBlock({
+      ...base,
+      blockId: "site",
+      kind: "design",
+      title: "Site",
+      size: "phone",
+      frames: [
+        { frameId: "home", title: "Home", html: '<a id="go" href="#octant-flow:s2">Go</a>' },
+      ],
+    });
+    const designFlow = decodeCanvasBlock({
+      ...base,
+      blockId: "app-flow",
+      kind: "flow",
+      title: "Site flow",
+      screens: [
+        { screenId: "s1", blockId: "site", frameId: "home" },
+        { screenId: "s2", blockId: "results" },
+      ],
+      edges: [{ edgeId: "go", fromScreenId: "s1", toScreenId: "s2", fromNodeId: "go" }],
+    });
+    if (designFlow.kind !== "flow") throw new Error("expected a flow");
+    const user = userEvent.setup();
+    render(<FlowBoard block={designFlow} blocks={[design, resultsMockup]} />);
+    await user.click(screen.getByRole("button", { name: "Play" }));
+    const player = screen.getByRole("dialog", { name: "Playing Site flow" });
+    // The player's frame is the same-origin one; the board's thumbnail behind
+    // it stays unsandboxed-origin, as the document drawing always is.
+    const frame = within(player).getByTitle("Home, design screen");
+    expect(frame).toHaveAttribute("sandbox", "allow-same-origin");
+  });
+});
+
+describe("following a design screen's anchors in Play", () => {
+  const design = decodeCanvasBlock({
+    ...base,
+    blockId: "site",
+    kind: "design",
+    title: "Site",
+    size: "phone",
+    frames: [{ frameId: "home", title: "Home", html: '<a id="go" href="#octant-flow:s2">Go</a>' }],
+  });
+  const designFlow = decodeCanvasBlock({
+    ...base,
+    blockId: "app-flow",
+    kind: "flow",
+    title: "Site flow",
+    screens: [
+      { screenId: "s1", blockId: "site", frameId: "home" },
+      { screenId: "s2", blockId: "results" },
+      { screenId: "s3", blockId: "search" },
+    ],
+    edges: [{ edgeId: "go", fromScreenId: "s1", toScreenId: "s2", fromNodeId: "go" }],
+  });
+  if (designFlow.kind !== "flow") throw new Error("expected a flow");
+  const playedFlow: CanvasFlowBlock = designFlow;
+
+  async function play() {
+    const user = userEvent.setup();
+    render(<FlowBoard block={playedFlow} blocks={[design, searchMockup, resultsMockup]} />);
+    await user.click(screen.getByRole("button", { name: "Play" }));
+    const player = screen.getByRole("dialog", { name: "Playing Site flow" });
+    const frame = within(player).getByTitle<HTMLIFrameElement>("Home, design screen");
+    return { player, frame };
+  }
+
+  function navigateFrame(frame: HTMLIFrameElement, hash: string) {
+    const window = frame.contentWindow;
+    if (window === null) throw new Error("expected the frame's window");
+    window.location.hash = hash;
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  }
+
+  it("moves to the screen the anchor's edge declares, after the frame loads", async () => {
+    const { player, frame } = await play();
+    // The page load replaces the window's listeners in a browser; the player
+    // attaches again on load.
+    fireEvent.load(frame);
+    navigateFrame(frame, "#octant-flow:s2");
+    await waitFor(() =>
+      expect(within(player).getByRole("tree", { name: "Results" })).toBeInTheDocument(),
+    );
+  });
+
+  it("ignores an anchor naming a screen no edge from this one reaches", async () => {
+    const { player, frame } = await play();
+    navigateFrame(frame, "#octant-flow:s3");
+    expect(within(player).queryByRole("tree", { name: "Search" })).not.toBeInTheDocument();
+    expect(within(player).getByTitle("Home, design screen")).toBeInTheDocument();
+  });
+
+  it("lists the design screen's transition in Go to as well", async () => {
+    const { player } = await play();
+    expect(within(player).getByRole("button", { name: "Continue →" })).toBeInTheDocument();
+  });
+});
+
+describe("flow callouts", () => {
+  it("numbers a callout on its screen and lists the note with the screen's label", () => {
+    const annotatedFlow = decodeCanvasBlock({
+      ...base,
+      blockId: "app-flow",
+      kind: "flow",
+      title: "Search flow",
+      screens: [
+        { screenId: "s1", blockId: "search" },
+        { screenId: "s2", blockId: "results" },
+      ],
+      edges: [],
+      annotations: [{ nodeId: "s1", note: "Start here; the field is sticky." }],
+    });
+    if (annotatedFlow.kind !== "flow") throw new Error("expected a flow");
+    render(<FlowBoard block={annotatedFlow} blocks={[searchMockup, resultsMockup]} />);
+    const board = screen.getByRole("group", { name: "Flow board" });
+    // The badge draws on the screen's node: exactly one, beside the note's list.
+    expect(screen.getAllByText("1")).toHaveLength(2);
+    // The note lists under the board, numbered, with the screen's label.
+    const notes = within(board).getByLabelText("Callouts on Search flow");
+    expect(within(notes).getByText(/Start here/)).toBeInTheDocument();
+    expect(within(notes).getByText("Search")).toBeInTheDocument();
   });
 });

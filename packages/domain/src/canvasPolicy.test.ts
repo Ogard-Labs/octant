@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CANVAS_DECK_SCHEMA_VERSION,
   CANVAS_FLOW_SCHEMA_VERSION,
   CANVAS_MAX_BLOCKS,
   CANVAS_MAX_DASHBOARD_CELLS,
@@ -4302,7 +4303,7 @@ describe("deck slides", () => {
   });
 
   it("refuses a deck in a document that declares the version before it", () => {
-    const earlier = CANVAS_SCHEMA_VERSION - 1;
+    const earlier = CANVAS_DECK_SCHEMA_VERSION - 1;
     expectPolicyCode(
       () =>
         validateCanvasDefinition({
@@ -4315,6 +4316,188 @@ describe("deck slides", () => {
                 { slideId: "a", blockId: "signups" },
                 { slideId: "b", blockId: "signups" },
               ]),
+              schemaVersion: earlier,
+            },
+          ],
+        }),
+      "unsupported-schema-version",
+    );
+  });
+});
+
+describe("flow design hotspots", () => {
+  const wireframe = (blockId: string) => ({
+    blockId,
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "mockup" as const,
+    device: "phone" as const,
+    title: blockId,
+    nodes: [{ nodeId: "window", component: "window", label: blockId }],
+  });
+  const designScreen = {
+    blockId: "site",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "design" as const,
+    title: "Site",
+    size: "desktop" as const,
+    frames: [
+      {
+        frameId: "home",
+        title: "Home",
+        html: '<a id="go" href="#octant-flow:s2">Go</a><p data-id="other" id="note">id="fake"</p>',
+      },
+    ],
+  };
+  const flowOverDesign = (fromNodeId: string | undefined) => ({
+    blockId: "app-flow",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "flow" as const,
+    title: "Search flow",
+    screens: [{ screenId: "s1", blockId: "site", frameId: "home" }],
+    edges:
+      fromNodeId === undefined
+        ? []
+        : [{ edgeId: "go", fromScreenId: "s1", toScreenId: "s1", fromNodeId }],
+  });
+
+  it("accepts a hotspot that names an anchor the design frame holds", () => {
+    const withTarget = {
+      ...flowOverDesign("go"),
+      screens: [
+        { screenId: "s1", blockId: "site", frameId: "home" },
+        { screenId: "s2", blockId: "screen" },
+      ],
+      edges: [{ edgeId: "go", fromScreenId: "s1", toScreenId: "s2", fromNodeId: "go" }],
+    };
+    expect(() =>
+      validateCanvasDefinition(withBlocks([designScreen, wireframe("screen"), withTarget])),
+    ).not.toThrow();
+  });
+
+  it("refuses an anchor that is not a link to the edge's own target", () => {
+    const edgeTo = (fromNodeId: string) =>
+      validateCanvasDefinition(
+        withBlocks([
+          designScreen,
+          wireframe("screen"),
+          wireframe("other-screen"),
+          {
+            ...flowOverDesign(fromNodeId),
+            screens: [
+              { screenId: "s1", blockId: "site", frameId: "home" },
+              { screenId: "s2", blockId: "screen" },
+              { screenId: "s3", blockId: "other-screen" },
+            ],
+            edges: [{ edgeId: "go", fromScreenId: "s1", toScreenId: "s3", fromNodeId }],
+          },
+        ]),
+      );
+    // The anchor links to s2, so an edge to s3 from it is refused.
+    expectPolicyCode(() => edgeTo("go"), "flow-hotspot-refused");
+    // An element that only carries the id, or text that reads like one, is not a link.
+    expectPolicyCode(() => edgeTo("note"), "flow-hotspot-refused");
+    expectPolicyCode(() => edgeTo("fake"), "flow-hotspot-refused");
+    expectPolicyCode(() => edgeTo("other"), "flow-hotspot-refused");
+  });
+
+  it("refuses a hotspot naming an anchor the frame does not hold", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            designScreen,
+            wireframe("screen"),
+            {
+              ...flowOverDesign("gone"),
+              screens: [
+                { screenId: "s1", blockId: "site", frameId: "home" },
+                { screenId: "s2", blockId: "screen" },
+              ],
+              edges: [{ edgeId: "go", fromScreenId: "s1", toScreenId: "s2", fromNodeId: "gone" }],
+            },
+          ]),
+        ),
+      "flow-hotspot-refused",
+    );
+  });
+});
+
+describe("flow callouts", () => {
+  const wire = (blockId: string) => ({
+    blockId,
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "mockup" as const,
+    device: "phone" as const,
+    title: blockId,
+    nodes: [{ nodeId: "window", component: "window", label: blockId }],
+  });
+  const annotatedFlow = (annotations: ReadonlyArray<unknown>) => ({
+    blockId: "app-flow",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "flow" as const,
+    title: "Search flow",
+    screens: [{ screenId: "s1", blockId: "screen" }],
+    edges: [],
+    annotations,
+  });
+
+  it("pins a callout to a screen the flow holds", () => {
+    expect(() =>
+      validateCanvasDefinition(
+        withBlocks([wire("screen"), annotatedFlow([{ nodeId: "s1", note: "Start here." }])]),
+      ),
+    ).not.toThrow();
+  });
+
+  it("refuses a callout on a missing screen, two on one screen, and too many", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([wire("screen"), annotatedFlow([{ nodeId: "gone", note: "No." }])]),
+        ),
+      "dangling-flow-annotation",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            wire("screen"),
+            annotatedFlow([
+              { nodeId: "s1", note: "One." },
+              { nodeId: "s1", note: "Two." },
+            ]),
+          ]),
+        ),
+      "duplicate-flow-annotation",
+    );
+    // The schema's own maxItems refuses a thirteenth callout at decode, so the
+    // guard behind it never sees one; the decode refusal is the budget.
+    expect(() =>
+      validateCanvasDefinition(
+        withBlocks([
+          wire("screen"),
+          annotatedFlow(
+            Array.from({ length: 13 }, (_, index) => ({
+              nodeId: "s1",
+              note: `Note ${String(index)}`,
+            })),
+          ),
+        ]),
+      ),
+    ).toThrow();
+  });
+
+  it("refuses a callout in a document that declares the version before it", () => {
+    const earlier = CANVAS_SCHEMA_VERSION - 1;
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: earlier,
+          blocks: [
+            { ...wire("screen"), schemaVersion: earlier },
+            {
+              ...annotatedFlow([{ nodeId: "s1", note: "Start here." }]),
               schemaVersion: earlier,
             },
           ],

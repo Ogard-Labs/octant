@@ -548,11 +548,13 @@ export function DesignFrameView({
   frameId,
   scale,
   assetRuntime,
+  sandboxOverride,
 }: {
   readonly block: CanvasDesignBlock;
   readonly frameId: string;
   readonly scale: number;
   readonly assetRuntime?: DesignAssetRuntime;
+  readonly sandboxOverride?: "" | "allow-same-origin";
 }) {
   const size = block.size === "document" ? "desktop" : block.size;
   const theme = useWorkspaceFrameTheme(designFrameTheme(block) === "workspace");
@@ -568,6 +570,7 @@ export function DesignFrameView({
       scale={scale}
       frame={{ theme, assetUrls }}
       title={`${frame.title}, design screen`}
+      {...(sandboxOverride === undefined ? {} : { sandboxOverride })}
     />
   );
 }
@@ -582,6 +585,7 @@ function FrameView({
   title,
   still = false,
   beneath = false,
+  sandboxOverride,
 }: {
   readonly block: CanvasDesignBlock;
   readonly size: CanvasDesignDeviceSize;
@@ -597,6 +601,8 @@ function FrameView({
    * revealed, so a step would still wait on rendering.
    */
   readonly beneath?: boolean;
+  /** Widens the sandbox for a surface that reads the page (a flow's Play follows the frame's own anchors). */
+  readonly sandboxOverride?: "" | "allow-same-origin";
 }) {
   const viewport = CANVAS_DESIGN_VIEWPORT[size];
   // Keyed by the ids, not the array, so a parent's new array of the same ids
@@ -621,7 +627,7 @@ function FrameView({
       }
       onLoad={themed ? (event) => installFrameFonts(event.currentTarget) : undefined}
       referrerPolicy="no-referrer"
-      sandbox={designFrameSandbox(block)}
+      sandbox={sandboxOverride ?? designFrameSandbox(block)}
       srcDoc={srcDoc}
       style={{
         width: viewport.width,

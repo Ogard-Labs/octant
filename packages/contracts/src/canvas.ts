@@ -131,6 +131,9 @@ export const CANVAS_MAX_MOCKUP_DEFINITION_NODES = 24;
 // A deck is an ordered set of references, so its budget is small: as many
 // slides as a design may hold frames.
 export const CANVAS_MAX_DECK_SLIDES = 24;
+// A flow's callouts are the author's shortest notes, like a mockup's.
+export const CANVAS_MAX_FLOW_ANNOTATIONS = 12;
+export const CANVAS_MAX_FLOW_ANNOTATION_LENGTH = 240;
 // A diagram node's detail is a subtitle under its label, not a paragraph.
 export const CANVAS_MAX_DIAGRAM_DETAIL_LENGTH = 120;
 // A group inside a group inside a group: deeper boundaries stop reading as
@@ -272,6 +275,8 @@ export const CANVAS_FLOW_SCHEMA_VERSION = 23;
 // The deck block, which presents the document's own screens and data blocks
 // as one ordered set of slides.
 export const CANVAS_DECK_SCHEMA_VERSION = 25;
+// Flow annotations: numbered callouts pinned to a flow's screens.
+export const CANVAS_FLOW_ANNOTATIONS_SCHEMA_VERSION = 26;
 // The metric's sparkline, goodDirection, and caption arrived with the bar list.
 export const CANVAS_METRIC_TREND_SCHEMA_VERSION = 7;
 
@@ -2564,6 +2569,13 @@ export type CanvasFlowScreen = typeof CanvasFlowScreen.Type;
  * interactive list; absent is a screen-level link, and a design screen has no
  * hotspots, so an edge from one always omits it.
  */
+/** A numbered callout pinned to a flow screen; its number is its place in the list, and a comment on it anchors to the screen's node. */
+export const CanvasFlowAnnotation = Schema.Struct({
+  nodeId: CanvasNodeId,
+  note: boundedNonEmptyText(CANVAS_MAX_FLOW_ANNOTATION_LENGTH),
+}).annotations(strict);
+export type CanvasFlowAnnotation = typeof CanvasFlowAnnotation.Type;
+
 export const CanvasFlowEdge = Schema.Struct({
   edgeId: CanvasEdgeId,
   fromScreenId: CanvasNodeId,
@@ -2589,8 +2601,19 @@ export const CanvasFlowBlock = Schema.Struct({
     Schema.maxItems(CANVAS_MAX_FLOW_SCREENS),
   ),
   edges: Schema.Array(CanvasFlowEdge).pipe(Schema.maxItems(CANVAS_MAX_FLOW_EDGES)),
+  annotations: Schema.optional(
+    Schema.Array(CanvasFlowAnnotation).pipe(Schema.maxItems(CANVAS_MAX_FLOW_ANNOTATIONS)),
+  ),
 }).annotations(strict);
 export type CanvasFlowBlock = typeof CanvasFlowBlock.Type;
+
+/** Whether a flow carries callouts, which arrived at the annotations version. */
+export function canvasFlowUsesAnnotations(block: {
+  readonly kind?: unknown;
+  readonly annotations?: unknown;
+}): boolean {
+  return block.kind === "flow" && Array.isArray(block.annotations) && block.annotations.length > 0;
+}
 
 // ── Deck ──────────────────────────────────────────────────────────────────────
 //
@@ -3117,6 +3140,11 @@ const CANVAS_VERSION_GATES: readonly CanvasVersionGate[] = [
     since: CANVAS_DECK_SCHEMA_VERSION,
     carries: ofKind("deck"),
     requirement: `A deck block requires Canvas schema version ${String(CANVAS_DECK_SCHEMA_VERSION)}.`,
+  },
+  {
+    since: CANVAS_FLOW_ANNOTATIONS_SCHEMA_VERSION,
+    carries: (definition) => definition.blocks.some(canvasFlowUsesAnnotations),
+    requirement: `Flow callouts require Canvas schema version ${String(CANVAS_FLOW_ANNOTATIONS_SCHEMA_VERSION)}.`,
   },
 ];
 

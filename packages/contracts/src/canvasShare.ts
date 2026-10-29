@@ -9,6 +9,8 @@ import {
   CANVAS_MAX_FLOW_EDGES,
   CANVAS_MAX_FLOW_LABEL_LENGTH,
   CANVAS_MAX_DECK_SLIDES,
+  CANVAS_MAX_FLOW_ANNOTATIONS,
+  CANVAS_MAX_FLOW_ANNOTATION_LENGTH,
   CANVAS_MAX_FLOW_SCREENS,
   CANVAS_MAX_HEATMAP_CELLS,
   CANVAS_MAX_HEATMAP_COLUMNS,
@@ -38,6 +40,7 @@ import {
   CanvasDesignSize,
   CanvasDesignTheme,
   CanvasDiagramLayoutKind,
+  canvasFlowUsesAnnotations,
   canvasMockupUsesLibrary,
   CanvasHeatmapDate,
   CanvasHeatmapScale,
@@ -140,8 +143,10 @@ export const CANVAS_SHARE_FLOW_SCHEMA_VERSION = 12;
 export const CANVAS_SHARE_MOCKUP_LIBRARY_SCHEMA_VERSION = 13;
 // Version 14 carries the deck block: its slides are references to blocks the
 // same share holds, and its notes are the presenter's, which never leave.
+// Version 15 carries a flow's callouts.
 export const CANVAS_SHARE_DECK_SCHEMA_VERSION = 14;
-export const CANVAS_SHARE_SCHEMA_VERSION = 14 as const;
+export const CANVAS_SHARE_FLOW_ANNOTATIONS_SCHEMA_VERSION = 15;
+export const CANVAS_SHARE_SCHEMA_VERSION = 15 as const;
 // The newest Canvas block version a share at this version names. Canvas
 // version 13 added only the table row id, which a share drops, so share
 // version 6 named a block authored at 13 as 12. Version 14 adds chart types a
@@ -158,7 +163,7 @@ export const CANVAS_SHARE_SCHEMA_VERSION = 14 as const;
 // whole, so share version 12 names blocks up to 23. A later Canvas bump that
 // adds something a share
 // carries bumps the share version again.
-export const CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION = 25 as const;
+export const CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION = 26 as const;
 export const CanvasShareSchemaVersion = Schema.Literal(
   1,
   2,
@@ -173,6 +178,7 @@ export const CanvasShareSchemaVersion = Schema.Literal(
   11,
   12,
   13,
+  14,
   CANVAS_SHARE_SCHEMA_VERSION,
 );
 export type CanvasShareSchemaVersion = typeof CanvasShareSchemaVersion.Type;
@@ -1053,6 +1059,14 @@ export const CanvasStaticExportBlock = Schema.Union(
     kind: Schema.Literal("flow"),
     title: ExportLabel,
     layout: CanvasDiagramLayoutKind,
+    annotations: Schema.optional(
+      Schema.Array(
+        Schema.Struct({
+          nodeId: boundedToken("CanvasNodeId"),
+          note: boundedNonEmptyText(CANVAS_MAX_FLOW_ANNOTATION_LENGTH),
+        }).annotations(strict),
+      ).pipe(Schema.maxItems(CANVAS_MAX_FLOW_ANNOTATIONS)),
+    ),
     screens: Schema.Array(
       Schema.Struct({
         screenId: boundedToken("CanvasNodeId"),
@@ -1193,10 +1207,12 @@ export const CanvasStaticExportDocument = Schema.Struct({
         (document.schemaVersion >= CANVAS_SHARE_MOCKUP_LIBRARY_SCHEMA_VERSION ||
           !document.blocks.some((block) => canvasMockupUsesLibrary(block))) &&
         (document.schemaVersion >= CANVAS_SHARE_DECK_SCHEMA_VERSION ||
-          !document.blocks.some((block) => block.kind === "deck")),
+          !document.blocks.some((block) => block.kind === "deck")) &&
+        (document.schemaVersion >= CANVAS_SHARE_FLOW_ANNOTATIONS_SCHEMA_VERSION ||
+          !document.blocks.some((block) => canvasFlowUsesAnnotations(block))),
       {
         message: () =>
-          "Flow blocks require Canvas share version 12, the mockup library requires Canvas share version 13, and a deck block requires Canvas share version 14.",
+          "Flow blocks require Canvas share version 12, the mockup library requires Canvas share version 13, a deck block requires Canvas share version 14, and flow callouts require Canvas share version 15.",
       },
     ),
   );

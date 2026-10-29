@@ -225,7 +225,8 @@ Canvas owned by its thread (a chat provenance with no Project) at version
 `title`, `subtitle`, and point `note` and `emphasis` at version 22, the
 `flow` block at version 23, the mockup library at version 24 (its new
 components, a node's `progress` and `defId` fields, and a block's
-`definitions`), and the `deck` block at version 25, so a document that
+`definitions`), the `deck` block at version 25, and flow callouts at
+version 26, so a document that
 declares an earlier version and carries one is refused as a declared future
 version. Version 20 adds no block or field a share carries, so a share names a
 block authored at 20 as 19 under share version 10. Version 21 adds the
@@ -663,8 +664,18 @@ prototype tier and keeps its own Play. Up to 96 `edges` carry `fromScreenId`,
 (the diagram tones), and optionally `fromNodeId`: the hotspot the person taps,
 a node of the from-screen's mockup from the closed interactive list (button,
 list-row, nav, tabs, select, checkbox, toggle), so a link is data the
-renderer can draw without a script; an edge from a design screen carries no
-hotspot, and an inert mockup part is refused (`flow-hotspot-refused`). The
+renderer can draw without a script, and an inert mockup part is refused
+(`flow-hotspot-refused`). An edge from a design screen may name as its
+hotspot the `id` of an anchor in that frame's own markup, written
+`<a id="<fromNodeId>" href="#octant-flow:<toScreenId>">`; the policy reads the
+frame's anchors attribute by attribute and refuses an edge whose anchor is
+missing or links anywhere but the edge's own target, so the declared edge
+stays the authority. In Play a design screen is drawn same-origin (it still
+runs nothing; see the HTML frames threat model) so the player can read the
+page's hash and follow only an anchor a declared edge from that screen
+names; every edge leaving a design screen is also listed in Go to. The
+exported site lists those edges as links under the screen, because a
+sandboxed frame there cannot reach out without script. The
 domain policy names each refusal (`dangling-flow-screen`,
 `flow-screen-kind-refused`, `flow-screen-variant-missing`,
 `flow-screen-frame-missing`, `flow-screen-design-refused`,
@@ -692,7 +703,11 @@ screens — and which marks the flow `layout: "manual"` with the screen's
 the board but does not move screens. Comments anchor to a flow's screens and
 edges through the existing node and edge anchors, so a comment on a screen
 stays on it through a revision and reads as no longer on the canvas when the
-screen is gone. `preview` warns about a `flow-unreachable-screen`: a screen
+screen is gone. A flow may also carry up to twelve numbered `annotations`
+(Canvas schema version 26, share version 15) pinned to its screens, drawn as
+callouts on the board nodes and listed with the screen's label under the
+outline, like a mockup's callouts; the policy refuses one on a screen the
+flow does not hold, two on one screen, and a past-budget list. `preview` warns about a `flow-unreachable-screen`: a screen
 no transition reaches and not the flow's first, computed from the document,
 so the warning returns whether or not a browser drew the picture. Design
 screens on the board are drawn frames, so the design-frame overflow and
@@ -819,9 +834,9 @@ with share version 8, and tabs, columns, a diagram's edge styles and tones,
 its group tones, and a plan's `gantt` view with share version 9, and a
 design's frames with share version 10, and a brand and the richer diagram
 fields with share version 11 (frame notes never leave), the flow block
-with share version 12, the mockup library with share version 13, and the
-deck block with share version 14 (a deck's presenter notes stay behind, as a
-design's frame notes do), so a share
+with share version 12, the mockup library with share version 13, the deck
+block with share version 14 (a deck's presenter notes stay behind, as a
+design's frame notes do), and flow callouts with share version 15, so a share
 that declares an older version
 and carries one is refused as a future version.
 A `tabs` block has 2 to 12 panes, each a short label and the block ids it

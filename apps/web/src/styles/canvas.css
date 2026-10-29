@@ -2450,6 +2450,46 @@
   color: var(--oct-fg-2);
 }
 
+.canvas-flow-board__callout {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-fg);
+  color: var(--oct-bg);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  justify-self: end;
+}
+
+.canvas-flow-board__callouts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--oct-space-1);
+}
+
+.canvas-flow-board__callout-note {
+  display: flex;
+  gap: var(--oct-space-2);
+  align-items: baseline;
+  font-size: var(--oct-text-xs);
+  color: var(--oct-fg-2);
+}
+
+.canvas-flow-board__callout-note .canvas-flow-board__callout {
+  justify-self: unset;
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.canvas-flow-board__callout-target {
+  color: var(--oct-fg);
+}
+
 /* The click-through player keeps the design player's anatomy: a bar, a stage
    that scales the current screen to fit, and a Go to list for the
    transitions that start from the screen itself rather than a control. */
