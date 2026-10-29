@@ -269,6 +269,51 @@ describe("Canvas share policy", () => {
     );
   });
 
+  it("shares a mockup with its library components and definitions at share version 13, refused by version 12", () => {
+    const library = {
+      blockId: "inbox",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "mockup",
+      device: "phone",
+      title: "Inbox",
+      definitions: [
+        {
+          defId: "row",
+          label: "Row",
+          nodes: [{ nodeId: "r1", component: "list-row", label: "One" }],
+        },
+      ],
+      nodes: [
+        { nodeId: "window", component: "window", label: "Inbox" },
+        { nodeId: "load", parentId: "window", component: "progress", label: "Sync", progress: 40 },
+        { nodeId: "first", parentId: "window", component: "instance", label: "Row", defId: "row" },
+      ],
+    };
+    const receipt = buildCanvasStaticExportReceipt({
+      request,
+      current: decodeCanvasVersion({
+        ...current,
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        definition: {
+          ...current.definition,
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          blocks: [library],
+        },
+      }),
+      context,
+    });
+    expect(receipt.document.schemaVersion).toBe(CANVAS_SHARE_SCHEMA_VERSION);
+    expect(receipt.document.blocks).toEqual([
+      {
+        ...library,
+        schemaVersion: Math.min(library.schemaVersion, CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION),
+      },
+    ]);
+    expect(() =>
+      decodeCanvasStaticExportDocument({ ...receipt.document, schemaVersion: 12 }),
+    ).toThrow();
+  });
+
   it("shares a dashboard with the blocks it places, so a reader draws the same grid", () => {
     const blocks = [...opsDashboardExample];
     const receipt = buildCanvasStaticExportReceipt({
@@ -438,7 +483,7 @@ describe("Canvas share policy", () => {
     expect(JSON.stringify(shared.document)).not.toContain("screens/home.png");
   });
 
-  it("shares a validated brand and richer diagram fields at share version 12, and leaves presenter notes and a captured page behind", () => {
+  it("shares a validated brand and richer diagram fields at share version 13, and leaves presenter notes and a captured page behind", () => {
     const captureId = "66666666-6666-4666-8666-666666666666";
     const design = {
       ...onboardingFlowExample,
@@ -478,8 +523,8 @@ describe("Canvas share policy", () => {
       });
     const receipt = share([design, diagram]);
     expect(receipt.document.schemaVersion).toBe(CANVAS_SHARE_SCHEMA_VERSION);
-    expect(CANVAS_SHARE_SCHEMA_VERSION).toBe(12);
-    expect(CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION).toBe(23);
+    expect(CANVAS_SHARE_SCHEMA_VERSION).toBe(13);
+    expect(CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION).toBe(24);
     const { assets: _assets, ...withoutAssets } = design;
     expect(receipt.document.blocks).toEqual([
       {

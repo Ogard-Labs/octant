@@ -78,6 +78,8 @@ const CONTAINERS: ReadonlySet<CanvasMockupComponent> = new Set([
   "row",
   "grid",
   "nav",
+  "chat",
+  "instance",
 ]);
 
 /** Callout numbers by node id: a callout's number is its place in the list. */
@@ -430,6 +432,76 @@ function initials(label: string): string {
 function Face({ branch }: { readonly branch: CanvasMockupBranch }) {
   const { node, children } = branch;
   switch (node.component) {
+    case "search":
+      return (
+        <span className="canvas-mockup__search">
+          <Glyph icon="search" />
+          <span className="canvas-mockup__label">{node.value ?? node.label}</span>
+        </span>
+      );
+    case "breadcrumb":
+    case "pagination":
+      return <span className="canvas-mockup__label">{node.label}</span>;
+    case "stepper":
+    case "progress":
+      return (
+        <span className="canvas-mockup__progress">
+          <span className="canvas-mockup__label">{node.label}</span>
+          <span className="canvas-mockup__progress-track">
+            <span
+              className="canvas-mockup__progress-fill"
+              style={{ width: `${String(node.progress ?? 0)}%` }}
+            />
+          </span>
+        </span>
+      );
+    case "slider":
+      return (
+        <span className="canvas-mockup__progress">
+          <span className="canvas-mockup__label">{node.label}</span>
+          <span className="canvas-mockup__slider-track">
+            <span
+              className="canvas-mockup__slider-knob"
+              style={{ left: `${String(node.progress ?? 0)}%` }}
+            />
+          </span>
+        </span>
+      );
+    case "menu":
+      return (
+        <span className="canvas-mockup__field">
+          <span className="canvas-mockup__label">{node.label}</span>
+          <ChevronDown className="canvas-mockup__glyph" size={14} strokeWidth={1.75} />
+        </span>
+      );
+    case "footer":
+      return <span className="canvas-mockup__label">{node.label}</span>;
+    case "hero":
+      return (
+        <span className="canvas-mockup__hero">
+          <span className="canvas-mockup__hero-title">{node.label}</span>
+          {node.value === undefined ? null : (
+            <span className="canvas-mockup__hero-lede">{node.value}</span>
+          )}
+        </span>
+      );
+    case "media":
+    case "map":
+      return (
+        <span className="canvas-mockup__media">
+          <span className="canvas-mockup__label">{node.label}</span>
+        </span>
+      );
+    case "chat":
+      return <span className="canvas-mockup__label">{node.label}</span>;
+    case "chat-message":
+      return (
+        <span className="canvas-mockup__bubble">
+          <span className="canvas-mockup__label">{node.label}</span>
+        </span>
+      );
+    case "instance":
+      return <span className="canvas-mockup__label">{node.label}</span>;
     case "form-field":
       return (
         <span className="canvas-mockup__field">

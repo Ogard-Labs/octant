@@ -27,6 +27,9 @@ import {
   CANVAS_MOCKUP_LEGACY_MAX_DEPTH,
   CANVAS_MOCKUP_LEGACY_MAX_NODES,
   CANVAS_MAX_MOCKUP_NODES,
+  CANVAS_MAX_MOCKUP_DEFINITIONS,
+  CANVAS_MAX_MOCKUP_DEFINITION_NODES,
+  CANVAS_MOCKUP_LIBRARY_SCHEMA_VERSION,
   CANVAS_MAX_MOCKUP_TEXT_LENGTH,
   CANVAS_MAX_PAYLOAD_BYTES,
   CANVAS_MAX_SERIES,
@@ -58,6 +61,7 @@ import {
   CANVAS_MAX_FLOW_SCREENS,
   CANVAS_FLOW_HOTSPOT_COMPONENTS,
   canvasChartUsesCallouts,
+  canvasMockupUsesLibrary,
   CANVAS_MAX_DIAGRAM_GROUP_DEPTH,
   canvasProvenanceIsThreadOwned,
   canvasDesignUsesDesignFields,
@@ -131,6 +135,7 @@ const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [
   CANVAS_DESIGN_FIELDS_SCHEMA_VERSION,
   CANVAS_CHART_CALLOUTS_SCHEMA_VERSION,
   CANVAS_FLOW_SCHEMA_VERSION,
+  CANVAS_MOCKUP_LIBRARY_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
 ];
 // A block kind that a document may only carry from the version that
@@ -283,6 +288,11 @@ export type CanvasPolicyRejectionCode =
   | "dangling-flow-edge"
   | "flow-edge-self"
   | "flow-hotspot-refused"
+  | "mockup-definitions-budget-exceeded"
+  | "duplicate-mockup-definition"
+  | "dangling-mockup-definition"
+  | "mockup-definition-nested"
+  | "mockup-definition-shape"
   | "block-placed-twice";
 
 export class CanvasPolicyRejected extends Error {
@@ -552,6 +562,8 @@ function declaredSchemaRejection(input: unknown): CanvasPolicyRejectionCode | un
               canvasDiagramUsesRichFields(block as Record<string, unknown>))) ||
           (declared < CANVAS_CHART_CALLOUTS_SCHEMA_VERSION &&
             canvasChartUsesCallouts(block as Record<string, unknown>)) ||
+          (declared < CANVAS_MOCKUP_LIBRARY_SCHEMA_VERSION &&
+            canvasMockupUsesLibrary(block as Record<string, unknown>)) ||
           (declared < CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION &&
             (canvasDiagramUsesStyles(block as Record<string, unknown>) ||
               canvasPlanUsesGantt(block as Record<string, unknown>)))),
@@ -1869,13 +1881,159 @@ const MOCKUP_FIELD_COMPONENTS: ReadonlyArray<{
   readonly components: ReadonlyArray<CanvasMockupComponent>;
 }> = [
   { field: "on", components: ["toggle", "checkbox", "list-row"] },
-  { field: "value", components: ["form-field", "select"] },
+  { field: "value", components: ["form-field", "select", "search", "hero"] },
   { field: "tone", components: ["button", "badge", "toast"] },
   { field: "icon", components: ["icon", "button", "list-row"] },
   { field: "columns", components: ["table"] },
   { field: "rows", components: ["table"] },
   { field: "gridColumns", components: ["grid"] },
 ];
+
+/**
+ * What the mockup library added: a field belongs to the components that read
+ * it (a progress reading to progress, slider, and stepper; a defId to an
+ * instance), and a reusable definition is a small fixed subtree placed by
+ * instances. A definition is unique and within its budgets, its nodes count
+ * against the block's own node budget, it has exactly one top-level node (the
+ * one an instance places), every parent it names is its own node, and it
+ * never holds an instance, so a placed tree is acyclic by construction. Node
+ * ids are unique across the screen and every definition, so a callout, a
+ * comment, or a flow hotspot names exactly one node. An instance draws its
+ * definition and nothing else, so it names one and holds no children.
+ */
+function validateMockupLibrary(block: Extract<CanvasBlock, { readonly kind: "mockup" }>): void {
+  const name = `Canvas mockup ${block.blockId}`;
+  const progressComponents = new Set(["progress", "slider", "stepper"]);
+  const checkFields = (node: CanvasMockupNode, where: string): void => {
+    const id = String(node.nodeId);
+    if (node.progress !== undefined && !progressComponents.has(node.component)) {
+      reject(
+        "mockup-field-refused",
+        `${where} gives ${node.component} ${id} a progress reading; only progress, slider, and stepper take one.`,
+      );
+    }
+    if (node.defId !== undefined && node.component !== "instance") {
+      reject(
+        "mockup-field-refused",
+        `${where} gives ${node.component} ${id} a definition reference; only an instance takes one.`,
+      );
+    }
+  };
+  for (const node of block.nodes) checkFields(node, name);
+
+  const defIds = new Set<string>();
+  const nodeIds = new Set(block.nodes.map((node) => String(node.nodeId)));
+  let definitionNodes = 0;
+  const definitions = block.definitions ?? [];
+  if (definitions.length > CANVAS_MAX_MOCKUP_DEFINITIONS) {
+    reject(
+      "mockup-definitions-budget-exceeded",
+      `${name} declares more than ${String(CANVAS_MAX_MOCKUP_DEFINITIONS)} reusable components.`,
+    );
+  }
+  for (const definition of definitions) {
+    const defId = String(definition.defId);
+    const where = `${name} component ${defId}`;
+    if (defIds.has(defId)) {
+      reject("duplicate-mockup-definition", `${name} declares component ${defId} twice.`);
+    }
+    defIds.add(defId);
+    if (definition.nodes.length > CANVAS_MAX_MOCKUP_DEFINITION_NODES) {
+      reject(
+        "mockup-definitions-budget-exceeded",
+        `${where} holds more than ${String(CANVAS_MAX_MOCKUP_DEFINITION_NODES)} nodes.`,
+      );
+    }
+    definitionNodes += definition.nodes.length;
+    const parents = new Map<string, string | undefined>();
+    for (const node of definition.nodes) {
+      const id = String(node.nodeId);
+      if (nodeIds.has(id)) {
+        reject(
+          "duplicate-node-id",
+          `${where} reuses node id ${id}; every node of a mockup, on its screen or in a component, has its own id.`,
+        );
+      }
+      nodeIds.add(id);
+      parents.set(id, node.parentId === undefined ? undefined : String(node.parentId));
+      if (node.component === "instance") {
+        reject(
+          "mockup-definition-nested",
+          `${where} places an instance; a reusable component holds a plain subtree.`,
+        );
+      }
+      if (node.variantId !== undefined) {
+        reject(
+          "mockup-field-refused",
+          `${where} gives ${id} a variant; a component follows the variant of the screen that places it.`,
+        );
+      }
+      if (
+        node.label.length > CANVAS_MAX_MOCKUP_TEXT_LENGTH ||
+        (node.value !== undefined && node.value.length > CANVAS_MAX_MOCKUP_TEXT_LENGTH)
+      ) {
+        reject(
+          "mockup-text-budget-exceeded",
+          `${where} has text longer than ${CANVAS_MAX_MOCKUP_TEXT_LENGTH} characters.`,
+        );
+      }
+      for (const rule of MOCKUP_FIELD_COMPONENTS) {
+        if (node[rule.field] !== undefined && !rule.components.includes(node.component)) {
+          reject(
+            "mockup-field-refused",
+            `${where} gives ${node.component} ${id} the ${rule.field} field; only ${rule.components.join(", ")} draw it.`,
+          );
+        }
+      }
+      checkFields(node, where);
+    }
+    if ([...parents.values()].filter((parent) => parent === undefined).length !== 1) {
+      reject(
+        "mockup-definition-shape",
+        `${where} needs exactly one top-level node: the one an instance places.`,
+      );
+    }
+    for (const [id, parentId] of parents) {
+      if (parentId !== undefined && !parents.has(parentId)) {
+        reject(
+          "dangling-mockup-parent",
+          `${where} nests ${id} under a node the component does not hold.`,
+        );
+      }
+      const seen = new Set<string>([id]);
+      for (let current = parentId; current !== undefined; current = parents.get(current)) {
+        if (seen.has(current)) {
+          reject("mockup-nesting-cycle", `${where} nests a node inside itself.`);
+        }
+        seen.add(current);
+      }
+    }
+  }
+  if (block.nodes.length + definitionNodes > CANVAS_MAX_MOCKUP_NODES) {
+    reject(
+      "mockup-node-budget-exceeded",
+      `${name} holds more than ${String(CANVAS_MAX_MOCKUP_NODES)} nodes across its screen and its components.`,
+    );
+  }
+  for (const node of block.nodes) {
+    if (node.component !== "instance") continue;
+    const id = String(node.nodeId);
+    if (node.defId === undefined || !defIds.has(String(node.defId))) {
+      reject(
+        "dangling-mockup-definition",
+        node.defId === undefined
+          ? `${name} instance ${id} names no component to place.`
+          : `${name} places component ${String(node.defId)}, which the block does not define.`,
+      );
+    }
+    if (block.nodes.some((child) => String(child.parentId) === id)) {
+      reject(
+        "mockup-definition-shape",
+        `${name} instance ${id} holds children; an instance draws its component and nothing else.`,
+      );
+    }
+  }
+}
 
 /**
  * A mockup's nodes name their parent. A chain longer than the depth limit, a
@@ -1890,6 +2048,7 @@ function validateMockup(
   declared: number,
 ): void {
   const catalog = declared >= CANVAS_MOCKUP_CATALOG_SCHEMA_VERSION;
+  validateMockupLibrary(block);
   const maxDepth = catalog ? CANVAS_MAX_MOCKUP_DEPTH : CANVAS_MOCKUP_LEGACY_MAX_DEPTH;
   const maxNodes = catalog ? CANVAS_MAX_MOCKUP_NODES : CANVAS_MOCKUP_LEGACY_MAX_NODES;
   const name = `Canvas mockup ${block.blockId}`;

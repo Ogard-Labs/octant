@@ -366,7 +366,14 @@ toast — and those controls are inert. The wireframe fidelity uses neutral ink,
 hairline, and surface, never a hue; a tone is drawn as emphasis (a filled or
 heavier outline). The styled fidelity draws the same tree with the active
 theme's accent, status roles, and surfaces, so it follows light, dark, and an
-imported theme. Variants sit side by side and wrap below 260px each. Numbered
+imported theme. Variants sit side by side and wrap below 260px each. The library wave reads
+in the same neutral ink: a search is a field with the search glyph, a
+progress and a slider a track (the slider's knob at its reading, never a
+hue), a stepper a labelled track, pagination and a breadcrumb their labels, a
+menu its label and a chevron, a footer its label, a hero a centred title and
+lede, media and map a dashed placeholder box, a chat thread bubbles, and an
+instance the subtree its definition holds. In forced colours every track is system ink
+and the image box keeps the system frame. Numbered
 callouts are ink marks on their node with the notes listed under the frame. In
 forced colours every hairline is the system frame and a filled mark is system
 text. A design is the author's own screens or slides: Octant draws

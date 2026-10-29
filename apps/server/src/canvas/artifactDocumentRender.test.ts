@@ -1413,12 +1413,20 @@ describe("a destination export near the approval card's limit", () => {
     const secret = "token sk-proj-abcdefghij0123456789";
     const mockup = {
       blockId: "search",
-      schemaVersion: 23,
+      schemaVersion: 24,
       kind: "mockup",
       device: "phone",
       title: "/Users/someone/private/plan.md",
+      definitions: [
+        {
+          defId: "row",
+          label: "Row",
+          nodes: [{ nodeId: "row-text", component: "text", label: secret }],
+        },
+      ],
       nodes: [
         { nodeId: "window", component: "window", label: "Search" },
+        { nodeId: "placed", parentId: "window", component: "instance", label: "Row", defId: "row" },
         { nodeId: "key", parentId: "window", component: "form-field", label: "Key", value: secret },
         { nodeId: "go", parentId: "window", component: "button", label: secret },
       ],

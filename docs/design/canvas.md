@@ -222,8 +222,10 @@ version 16, a design's image `assets` at version 17, a design's
 diagram styles, and the plan's `gantt` view at version 19, and a Chat
 Canvas owned by its thread (a chat provenance with no Project) at version
 20, the design and diagram fields below at version 21, a chart's
-`title`, `subtitle`, and point `note` and `emphasis` at version 22, and the
-`flow` block at version 23, so a document that
+`title`, `subtitle`, and point `note` and `emphasis` at version 22, the
+`flow` block at version 23, and the mockup library at version 24 (its new
+components, a node's `progress` and `defId` fields, and a block's
+`definitions`), so a document that
 declares an earlier version and carries one is refused as a declared future
 version. Version 20 adds no block or field a share carries, so a share names a
 block authored at 20 as 19 under share version 10. Version 21 adds the
@@ -619,6 +621,28 @@ callouts, the preview SVG draws a frame per variant, and a share carries the
 block whole. The catalog arrives with Canvas schema version 12 and share
 version 6.
 
+The mockup library (Canvas schema version 24, share version 13) adds search,
+breadcrumb, pagination, stepper, progress, slider, menu, footer, hero, media,
+map, chat, chat message, and instance. `progress` (0 to 100) belongs to
+progress, slider, and stepper; `value` also belongs to search (its query) and
+hero (its lede). Media and map draw the same dashed placeholder box as an image
+placeholder: a mockup holds no image, and a screen that needs one is a design.
+Up to eight reusable `definitions` each hold a fixed subtree of at most 24
+nodes with exactly one top-level node; an `instance` names one by `defId`,
+holds no children of its own, and draws that subtree wherever it is placed,
+on the board, in the outline, in the generated page, and in every export,
+because the tree builder expands it. A definition never holds an instance, so
+expansion is one level deep, and its nodes count against the block's node
+budget. Node ids are unique across the screen and every definition, and a
+callout, a comment, or a flow hotspot names a screen node, never a
+definition's. The policy refuses a repeated or dangling definition
+(`duplicate-mockup-definition`, `dangling-mockup-definition`), a definition
+holding an instance (`mockup-definition-nested`), a definition without exactly
+one top-level node or an instance with children (`mockup-definition-shape`),
+a definition parent it does not hold, a definition node with a variant, and
+the definitions budget. A flow hotspot may also be a search, menu, pagination,
+stepper, or slider.
+
 ## Flow blocks
 
 A `flow` block (Canvas schema version 23) composes screens the document already
@@ -743,8 +767,8 @@ with share version 7 (whose blocks may name Canvas version 14), the dashboard
 with share version 8, and tabs, columns, a diagram's edge styles and tones,
 its group tones, and a plan's `gantt` view with share version 9, and a
 design's frames with share version 10, and a brand and the richer diagram
-fields with share version 11 (frame notes never leave), and the flow block
-with share version 12, so a share
+fields with share version 11 (frame notes never leave), the flow block
+with share version 12, and the mockup library with share version 13, so a share
 that declares an older version
 and carries one is refused as a future version.
 A `tabs` block has 2 to 12 panes, each a short label and the block ids it

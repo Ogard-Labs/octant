@@ -2404,6 +2404,86 @@
   gap: var(--oct-space-2);
 }
 
+.canvas-mockup__search {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  padding: 4px 8px;
+  width: 100%;
+  min-height: 22px;
+}
+
+.canvas-mockup__progress {
+  display: grid;
+  gap: 4px;
+}
+
+.canvas-mockup__progress-track,
+.canvas-mockup__slider-track {
+  position: relative;
+  display: block;
+  height: 4px;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-fill-2);
+}
+
+.canvas-mockup__progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--oct-radius-pill);
+  background: currentColor;
+  opacity: 0.7;
+}
+
+.canvas-mockup__slider-knob {
+  position: absolute;
+  top: -4px;
+  width: 12px;
+  height: 12px;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-surface);
+  border: 1px solid currentColor;
+}
+
+.canvas-mockup__hero {
+  display: grid;
+  gap: 4px;
+  text-align: center;
+  padding: var(--oct-space-3);
+}
+
+.canvas-mockup__hero-title {
+  font-size: var(--oct-text-lg);
+  font-weight: var(--oct-weight-medium);
+}
+
+.canvas-mockup__hero-lede,
+.canvas-mockup__media {
+  color: var(--oct-fg-2);
+}
+
+.canvas-mockup__media {
+  display: grid;
+  place-items: center;
+  min-height: 48px;
+  border: 1px dashed var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+}
+
+.canvas-mockup__bubble {
+  display: inline-block;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  padding: 4px 8px;
+  margin-top: 4px;
+}
+
+.canvas-mockup__node--chat-message {
+  justify-items: start;
+}
+
 /* A hotspot is the one live control in a drawing that is otherwise inert. It
    wears the OctantButton's own look: the adapter's variant is its style, and
    no surface repaints it. */

@@ -124,6 +124,10 @@ export const CANVAS_MAX_FLOW_SCREENS = 24;
 export const CANVAS_MAX_FLOW_EDGES = 96;
 // An edge label says what the transition is ("Run search"), not a sentence.
 export const CANVAS_MAX_FLOW_LABEL_LENGTH = 80;
+// A reusable component is a small fixed subtree: few definitions, each small,
+// and their nodes count against the block's own node budget as well.
+export const CANVAS_MAX_MOCKUP_DEFINITIONS = 8;
+export const CANVAS_MAX_MOCKUP_DEFINITION_NODES = 24;
 // A diagram node's detail is a subtitle under its label, not a paragraph.
 export const CANVAS_MAX_DIAGRAM_DETAIL_LENGTH = 120;
 // A group inside a group inside a group: deeper boundaries stop reading as
@@ -1996,9 +2000,31 @@ export const CANVAS_MOCKUP_CATALOG_COMPONENTS = [
   "modal",
   "toast",
 ] as const;
+// The library wave: controls a screen's chrome needs (search, breadcrumb,
+// pagination, stepper, progress, slider, menu), its editorial shapes (hero,
+// footer, media, map), and a conversation (chat, chat-message). Plus what a
+// block may hold beside them: declared images and reusable definitions.
+export const CANVAS_MOCKUP_LIBRARY_SCHEMA_VERSION = 24;
+export const CANVAS_MOCKUP_LIBRARY_COMPONENTS = [
+  "search",
+  "breadcrumb",
+  "pagination",
+  "stepper",
+  "progress",
+  "slider",
+  "menu",
+  "footer",
+  "hero",
+  "media",
+  "map",
+  "chat",
+  "chat-message",
+  "instance",
+] as const;
 export const CanvasMockupComponent = Schema.Literal(
   ...CANVAS_MOCKUP_LEGACY_COMPONENTS,
   ...CANVAS_MOCKUP_CATALOG_COMPONENTS,
+  ...CANVAS_MOCKUP_LIBRARY_COMPONENTS,
 );
 export type CanvasMockupComponent = typeof CanvasMockupComponent.Type;
 
@@ -2090,6 +2116,7 @@ const CanvasMockupFrameEdge = Schema.Int.pipe(
  * can name its rows. Each optional field belongs to the components the domain
  * policy names; none of them carries markup, a style, or an image source.
  */
+
 export const CanvasMockupNode = Schema.Struct({
   nodeId: CanvasMockupNodeId,
   component: CanvasMockupComponent,
@@ -2122,6 +2149,10 @@ export const CanvasMockupNode = Schema.Struct({
       Schema.lessThanOrEqualTo(CANVAS_MAX_MOCKUP_GRID_COLUMNS),
     ),
   ),
+  /** A progress bar's or slider's reading, or a stepper's current step, 0 to 100. */
+  progress: Schema.optional(Schema.Int.pipe(Schema.nonNegative(), Schema.lessThanOrEqualTo(100))),
+  /** The reusable definition an instance places. */
+  defId: Schema.optional(boundedToken("CanvasMockupDefId")),
 }).annotations(strict);
 export type CanvasMockupNode = typeof CanvasMockupNode.Type;
 
@@ -2141,6 +2172,17 @@ export const CanvasMockupAnnotation = Schema.Struct({
   note: boundedNonEmptyText(CANVAS_MAX_MOCKUP_NOTE_LENGTH),
 }).annotations(strict);
 export type CanvasMockupAnnotation = typeof CanvasMockupAnnotation.Type;
+
+/** One reusable local component: a fixed subtree placed by instances. */
+export const CanvasMockupDefinition = Schema.Struct({
+  defId: boundedToken("CanvasMockupDefId"),
+  label: CanvasMockupText,
+  nodes: Schema.Array(CanvasMockupNode).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(CANVAS_MAX_MOCKUP_DEFINITION_NODES),
+  ),
+}).annotations(strict);
+export type CanvasMockupDefinition = typeof CanvasMockupDefinition.Type;
 
 export const CanvasMockupBlock = Schema.Struct({
   ...CanvasBlockFields,
@@ -2163,6 +2205,10 @@ export const CanvasMockupBlock = Schema.Struct({
   nodes: Schema.Array(CanvasMockupNode).pipe(Schema.maxItems(CANVAS_MAX_MOCKUP_NODES)),
   annotations: Schema.optional(
     Schema.Array(CanvasMockupAnnotation).pipe(Schema.maxItems(CANVAS_MAX_MOCKUP_ANNOTATIONS)),
+  ),
+  /** Local components this block's instances place. */
+  definitions: Schema.optional(
+    Schema.Array(CanvasMockupDefinition).pipe(Schema.maxItems(CANVAS_MAX_MOCKUP_DEFINITIONS)),
   ),
 }).annotations(strict);
 export type CanvasMockupBlock = typeof CanvasMockupBlock.Type;
@@ -2439,6 +2485,31 @@ export type CanvasDesignAssetsOutcome = typeof CanvasDesignAssetsOutcome.Type;
 // every flow that names it.
 
 /**
+ * Whether a mockup uses anything the library wave added: one of its
+ * components, a node's progress reading or definition reference, or reusable
+ * definitions. Reads loose fields so the domain's declared-version check can
+ * ask the same question of a document that did not decode.
+ */
+export function canvasMockupUsesLibrary(block: {
+  readonly kind?: unknown;
+  readonly nodes?: unknown;
+  readonly definitions?: unknown;
+}): boolean {
+  if (block.kind !== "mockup") return false;
+  if (block.definitions !== undefined) return true;
+  const library = new Set<string>(CANVAS_MOCKUP_LIBRARY_COMPONENTS);
+  const nodes: ReadonlyArray<unknown> = Array.isArray(block.nodes) ? block.nodes : [];
+  return nodes.some(
+    (node) =>
+      typeof node === "object" &&
+      node !== null &&
+      (("component" in node && typeof node.component === "string" && library.has(node.component)) ||
+        ("defId" in node && node.defId !== undefined) ||
+        ("progress" in node && node.progress !== undefined)),
+  );
+}
+
+/**
  * The mockup components a flow edge may start from. A hotspot is a control a
  * person could tap, so the interactive list is closed: naming one is data the
  * renderer can draw as a link without a script, and a text or image node is
@@ -2452,6 +2523,11 @@ export const CANVAS_FLOW_HOTSPOT_COMPONENTS = [
   "select",
   "checkbox",
   "toggle",
+  "search",
+  "menu",
+  "pagination",
+  "stepper",
+  "slider",
 ] as const;
 export type CanvasFlowHotspotComponent = (typeof CANVAS_FLOW_HOTSPOT_COMPONENTS)[number];
 export const CanvasFlowHotspotComponent = Schema.Literal(...CANVAS_FLOW_HOTSPOT_COMPONENTS);
@@ -3021,10 +3097,12 @@ export const CanvasDefinition = Schema.Struct({
         (definition.schemaVersion >= CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION ||
           !definition.blocks.some(isCanvasLayoutGroup)) &&
         (definition.schemaVersion >= CANVAS_FLOW_SCHEMA_VERSION ||
-          !definition.blocks.some((block) => block.kind === "flow")),
+          !definition.blocks.some((block) => block.kind === "flow")) &&
+        (definition.schemaVersion >= CANVAS_MOCKUP_LIBRARY_SCHEMA_VERSION ||
+          !definition.blocks.some(canvasMockupUsesLibrary)),
       {
         message: () =>
-          `Tabs and columns require Canvas schema version ${String(CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION)}, and a flow block requires Canvas schema version ${String(CANVAS_FLOW_SCHEMA_VERSION)}.`,
+          `Tabs and columns require Canvas schema version ${String(CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION)}, a flow block requires Canvas schema version ${String(CANVAS_FLOW_SCHEMA_VERSION)}, and the mockup library requires Canvas schema version ${String(CANVAS_MOCKUP_LIBRARY_SCHEMA_VERSION)}.`,
       },
     ),
     Schema.filter(

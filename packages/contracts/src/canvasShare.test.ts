@@ -807,7 +807,7 @@ describe("Canvas share contracts", () => {
     ).toThrow();
     // And a version this runtime has not learned is still a future version.
     expect(() =>
-      decodeCanvasStaticExportDocument({ ...document, schemaVersion: 13, blocks: [] }),
+      decodeCanvasStaticExportDocument({ ...document, schemaVersion: 14, blocks: [] }),
     ).toThrow();
   });
 

@@ -178,6 +178,39 @@ describe("mockup page generator", () => {
     }
   });
 
+  it("draws a placed component's subtree at every instance, and the library components inert", () => {
+    const decoded = decodeCanvasBlock({
+      blockId: "inbox",
+      schemaVersion: 24,
+      kind: "mockup",
+      device: "phone",
+      title: "Inbox",
+      definitions: [
+        {
+          defId: "row",
+          label: "Message row",
+          nodes: [
+            { nodeId: "row-card", component: "card", label: "Message" },
+            { nodeId: "row-text", parentId: "row-card", component: "text", label: "From Ada" },
+          ],
+        },
+      ],
+      nodes: [
+        { nodeId: "window", component: "window", label: "Inbox" },
+        { nodeId: "hero", parentId: "window", component: "hero", label: "Hello", value: "Lede" },
+        { nodeId: "load", parentId: "window", component: "progress", label: "Sync", progress: 40 },
+        { nodeId: "first", parentId: "window", component: "instance", label: "Row", defId: "row" },
+        { nodeId: "second", parentId: "window", component: "instance", label: "Row", defId: "row" },
+      ],
+    });
+    if (decoded.kind !== "mockup") throw new Error("expected a mockup");
+    const page = canvasMockupHtml(decoded);
+    expect(page.split("From Ada")).toHaveLength(3);
+    expect(page).toContain('<p class="oct-mockup-hero-title">Hello</p><p>Lede</p>');
+    expect(page).toContain('<progress value="40" max="100"></progress>');
+    expect(page).not.toContain("<script");
+  });
+
   it("renders the catalog semantically and inert, with values and states", () => {
     const page = canvasMockupHtml(search);
     expect(page).toContain("<h2>Search</h2>");

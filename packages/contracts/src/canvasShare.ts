@@ -37,6 +37,7 @@ import {
   CanvasDesignSize,
   CanvasDesignTheme,
   CanvasDiagramLayoutKind,
+  canvasMockupUsesLibrary,
   CanvasHeatmapDate,
   CanvasHeatmapScale,
   CanvasId,
@@ -130,11 +131,13 @@ export const CANVAS_SHARE_FRAMES_SCHEMA_VERSION = 10;
 // accepts notes so a version-11 document stays decodable if that changes.
 export const CANVAS_SHARE_DESIGN_FIELDS_SCHEMA_VERSION = 11;
 // Version 12 carries the flow block, which places mockup and design screens
-// the same share holds. A chart's callouts stay stripped as before: the
-// public share service refuses a share format it does not know, and this bump
-// is what teaches it the flow.
+// the same share holds. Version 13 carries the mockup library: its new
+// components, the progress field, and reusable definitions. A chart's
+// callouts stay stripped as before: the public share service refuses a share
+// format it does not know, and each bump is what teaches it.
 export const CANVAS_SHARE_FLOW_SCHEMA_VERSION = 12;
-export const CANVAS_SHARE_SCHEMA_VERSION = 12 as const;
+export const CANVAS_SHARE_MOCKUP_LIBRARY_SCHEMA_VERSION = 13;
+export const CANVAS_SHARE_SCHEMA_VERSION = 13 as const;
 // The newest Canvas block version a share at this version names. Canvas
 // version 13 added only the table row id, which a share drops, so share
 // version 6 named a block authored at 13 as 12. Version 14 adds chart types a
@@ -151,7 +154,7 @@ export const CANVAS_SHARE_SCHEMA_VERSION = 12 as const;
 // whole, so share version 12 names blocks up to 23. A later Canvas bump that
 // adds something a share
 // carries bumps the share version again.
-export const CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION = 23 as const;
+export const CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION = 24 as const;
 export const CanvasShareSchemaVersion = Schema.Literal(
   1,
   2,
@@ -164,6 +167,7 @@ export const CanvasShareSchemaVersion = Schema.Literal(
   9,
   10,
   11,
+  12,
   CANVAS_SHARE_SCHEMA_VERSION,
 );
 export type CanvasShareSchemaVersion = typeof CanvasShareSchemaVersion.Type;
@@ -1164,9 +1168,14 @@ export const CanvasStaticExportDocument = Schema.Struct({
     ),
     Schema.filter(
       (document) =>
-        document.schemaVersion >= CANVAS_SHARE_FLOW_SCHEMA_VERSION ||
-        !document.blocks.some((block) => block.kind === "flow"),
-      { message: () => "Flow blocks require Canvas share version 12." },
+        (document.schemaVersion >= CANVAS_SHARE_FLOW_SCHEMA_VERSION ||
+          !document.blocks.some((block) => block.kind === "flow")) &&
+        (document.schemaVersion >= CANVAS_SHARE_MOCKUP_LIBRARY_SCHEMA_VERSION ||
+          !document.blocks.some((block) => canvasMockupUsesLibrary(block))),
+      {
+        message: () =>
+          "Flow blocks require Canvas share version 12, and the mockup library requires Canvas share version 13.",
+      },
     ),
   );
 export type CanvasStaticExportDocument = typeof CanvasStaticExportDocument.Type;
