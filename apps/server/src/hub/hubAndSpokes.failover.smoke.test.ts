@@ -584,6 +584,74 @@ describe("replacing the hub for good", () => {
     expect(names(standby.hub.status().roster ?? promoted.roster)).toEqual(["Standby"]);
   });
 
+  /** A promoted standby and a member whose check of the new hub waits until the test lets it through. */
+  async function promotedWithHeldAcceptance() {
+    const network = new HubTestNetwork();
+    const hub = await start(network, "Mac mini", 103);
+    const standby = await start(network, "Standby", 104);
+    const gate: { release: () => void; promise: Promise<void> } = {
+      release: () => undefined,
+      promise: Promise.resolve(),
+    };
+    let armed = false;
+    const member = await startHubTestHost({
+      name: "Laptop",
+      address: "100.101.102.105",
+      network,
+      cleanups,
+      failoverAfterMs: FAILOVER_AFTER_MS,
+      spokeTransport: (transport) => (target) => {
+        const fetchTo = transport(target);
+        return async (url, init) => {
+          if (armed && url.endsWith("/api/hub/heartbeat")) await gate.promise;
+          return fetchTo(url, init);
+        };
+      },
+    });
+    const enabled = hub.hub.enable(window);
+    if (enabled.status !== "enabled") throw new Error(enabled.status);
+    await join(hub, standby);
+    await join(hub, member);
+    standby.spoke.setGrant(standbyGrant, window);
+    await hub.hub.setStandbyOrder([decodeMemberId(standby.hostId)], window);
+    const promoted = standby.hub.promote(window);
+    if (promoted.status !== "promoted") throw new Error(JSON.stringify(promoted));
+    const hold = () => {
+      armed = true;
+      gate.promise = new Promise<void>((resolve) => {
+        gate.release = resolve;
+      });
+    };
+    return { standby, member, hold, release: () => gate.release() };
+  }
+
+  it("leaves no link when the person leaves while the new hub is being checked", async () => {
+    const { standby, member, hold, release } = await promotedWithHeldAcceptance();
+    hold();
+    const accepting = member.spoke.acceptNewHub(standby.hostId, window);
+
+    expect(await member.spoke.leave(window)).toMatchObject({ status: "left" });
+    release();
+
+    expect(await accepting).toEqual({ status: "refused", kind: "not-a-spoke" });
+    expect(member.spoke.status()).toEqual({ membership: "none" });
+    expect(member.state.load().link).toBeUndefined();
+  });
+
+  it("keeps a grant the person narrowed while the new hub is being checked", async () => {
+    const { standby, member, hold, release } = await promotedWithHeldAcceptance();
+    member.spoke.setGrant(standbyGrant, window);
+    hold();
+    const accepting = member.spoke.acceptNewHub(standby.hostId, window);
+    const narrowed: HubGrant = { items: ["roster"], actProjects: [] };
+
+    member.spoke.setGrant(narrowed, window);
+    release();
+
+    expect((await accepting).status).toBe("accepted");
+    expect(member.state.load().link?.grant).toEqual(narrowed);
+  });
+
   it("refuses to promote a spoke the hub did not name, and a spoke to accept a member that is not a named standby", async () => {
     const { standby, member } = await startFamily();
 

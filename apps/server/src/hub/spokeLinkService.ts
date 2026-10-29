@@ -1010,12 +1010,26 @@ export class SpokeLinkService {
       }) &&
       roster.roster.members.some((member) => String(member.memberId) === String(link.selfMemberId));
     if (!valid) return { status: "refused", kind: "hub-answer-invalid" };
-    if (roster.roster.sequence <= link.roster.roster.sequence) {
+    // The state is read again: the person may have left, or narrowed the grant,
+    // while the new hub was being asked, and an install on the state read
+    // before the await would undo that.
+    const latest = this.#options.state.load();
+    const current = latest.link;
+    if (
+      current === undefined ||
+      current.leaving === true ||
+      String(current.hubMemberId) !== String(link.hubMemberId) ||
+      String(current.selfMemberId) !== String(link.selfMemberId)
+    ) {
+      return { status: "refused", kind: "not-a-spoke" };
+    }
+    if (current.removed === true) return { status: "refused", kind: "hub-revoked" };
+    if (roster.roster.sequence <= current.roster.roster.sequence) {
       return { status: "refused", kind: "roster-not-newer" };
     }
-    const { hubSignedRoster: _anchor, standIn: _standIn, ...rest } = link;
+    const { hubSignedRoster: _anchor, standIn: _standIn, ...rest } = current;
     const switched = this.#installRoster(
-      state,
+      latest,
       {
         ...rest,
         hubMemberId: facts.memberId,
@@ -1025,7 +1039,7 @@ export class SpokeLinkService {
         hubIdentityPublicKey: facts.identityPublicKey,
         rosterSigningPublicKey: facts.rosterSigningPublicKey,
         // The old hub's roster is no longer the one that names a hub.
-        roster: link.roster,
+        roster: current.roster,
       },
       roster,
       undefined,
