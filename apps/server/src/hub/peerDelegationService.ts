@@ -31,6 +31,10 @@ import type { PeerRequestOutcome } from "./spokeLinkService";
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 const MAX_SUMMARY = 8_192;
 const MAX_FINAL_MESSAGE = 65_536;
+// The status route allows 131,072 response bytes. Together these two take 98,304
+// of them, leaving the rest for the artifact references and the envelope.
+const MAX_SUMMARY_BYTES = 24_576;
+const MAX_FINAL_MESSAGE_BYTES = 73_728;
 const NO_FINAL_MESSAGE = "The child finished without a final message.";
 
 /** What this host's own Project, thread, and provider machinery does for a delegation. */
@@ -140,10 +144,37 @@ function clip(text: string, maxLength: number): string {
   return text.length <= maxLength ? text : `${text.slice(0, maxLength - 1).trimEnd()}…`;
 }
 
+const encodedBytes = (text: string): number => Buffer.byteLength(JSON.stringify(text)) - 2;
+
+/**
+ * Clips to a character count and then to a JSON-encoded byte budget, on a
+ * character boundary. The status route's response budget is in bytes: CJK text
+ * takes three per character and an emoji four, so a character cap alone can
+ * overflow it and `limitResponse()` would cut the body into invalid JSON.
+ */
+function clipToBytes(text: string, maxLength: number, maxBytes: number): string {
+  const clipped = clip(text, maxLength);
+  if (encodedBytes(clipped) <= maxBytes) return clipped;
+  let low = 0;
+  let high = clipped.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (encodedBytes(`${clipped.slice(0, middle).trimEnd()}…`) <= maxBytes) low = middle;
+    else high = middle - 1;
+  }
+  // Never end on half of a surrogate pair.
+  const last = clipped.charCodeAt(low - 1);
+  const end = last >= 0xd800 && last <= 0xdbff ? low - 1 : low;
+  return `${clipped.slice(0, end).trimEnd()}…`;
+}
+
 export class PeerDelegationService {
   readonly #options: PeerDelegationServiceOptions;
-  /** Request ids being started now, so a repeat that arrives mid-start cannot start a second thread. */
-  readonly #starting = new Set<string>();
+  /** Starts in flight by request id, so a repeat that arrives mid-start awaits the first instead of starting a second thread. */
+  readonly #starting = new Map<
+    string,
+    { readonly senderMemberId: string; readonly outcome: Promise<DelegationReceipt> }
+  >();
 
   constructor(options: PeerDelegationServiceOptions) {
     this.#options = options;
@@ -171,7 +202,15 @@ export class PeerDelegationService {
         ? { status: "accepted", requestId: existing.requestId, authority: existing.authority }
         : refusal("request-id-in-use");
     }
-    if (this.#starting.has(requestKey)) return refusal("request-id-in-use");
+    const inFlight = this.#starting.get(requestKey);
+    if (inFlight !== undefined) {
+      // A repeat mid-start (the sender's timeout was shorter than the start) gets
+      // the original start's outcome, so it never sees a refusal for a child that
+      // is about to exist. Another sender cannot claim or probe the id.
+      return inFlight.senderMemberId === String(principal.memberId)
+        ? inFlight.outcome
+        : refusal("request-id-in-use");
+    }
 
     const project = this.#options.host.projectAuthority(request.projectId);
     if (project === undefined) return refusal("project-unavailable");
@@ -186,41 +225,51 @@ export class PeerDelegationService {
       return { ...refusal("above-granted-authority"), allowedPosture: clamp.authority.posture };
     }
 
-    this.#starting.add(requestKey);
+    const outcome = this.#start(request, peer.member.name, principal, clamp.authority);
+    this.#starting.set(requestKey, { senderMemberId: String(principal.memberId), outcome });
     try {
-      const started = await this.#options.host.startThread({
-        requestId: request.requestId,
-        senderName: peer.member.name,
-        projectId: request.projectId,
-        task: request.task,
-        authority: clamp.authority,
-      });
-      if (started.status === "refused") return refusal(started.kind);
-      const received: ReceivedDelegation = {
-        requestId: request.requestId,
-        senderMemberId: principal.memberId,
-        projectId: request.projectId,
-        delegatedFrom: request.delegatedFrom,
-        threadId: started.threadId,
-        turnId: started.turnId,
-        authority: clamp.authority,
-        receivedAt: decodeTimestamp(new Date(this.#options.now()).toISOString()),
-      };
-      const current = this.#options.state.load();
-      this.#options.state.save({ ...current, received: [...current.received, received] });
-      this.#options.record({
-        change: "received",
-        actingPrincipal: principal,
-        requestId: request.requestId,
-        memberId: principal.memberId,
-        projectId: request.projectId,
-        delegatedFrom: request.delegatedFrom,
-        threadId: started.threadId,
-      });
-      return { status: "accepted", requestId: request.requestId, authority: clamp.authority };
+      return await outcome;
     } finally {
       this.#starting.delete(requestKey);
     }
+  }
+
+  async #start(
+    request: ReturnType<typeof decodeDelegationRequest>,
+    senderName: string,
+    principal: PeerPrincipal,
+    authority: DelegatedAuthority,
+  ): Promise<DelegationReceipt> {
+    const started = await this.#options.host.startThread({
+      requestId: request.requestId,
+      senderName,
+      projectId: request.projectId,
+      task: request.task,
+      authority,
+    });
+    if (started.status === "refused") return refusal(started.kind);
+    const received: ReceivedDelegation = {
+      requestId: request.requestId,
+      senderMemberId: principal.memberId,
+      projectId: request.projectId,
+      delegatedFrom: request.delegatedFrom,
+      threadId: started.threadId,
+      turnId: started.turnId,
+      authority,
+      receivedAt: decodeTimestamp(new Date(this.#options.now()).toISOString()),
+    };
+    const current = this.#options.state.load();
+    this.#options.state.save({ ...current, received: [...current.received, received] });
+    this.#options.record({
+      change: "received",
+      actingPrincipal: principal,
+      requestId: request.requestId,
+      memberId: principal.memberId,
+      projectId: request.projectId,
+      delegatedFrom: request.delegatedFrom,
+      threadId: started.threadId,
+    });
+    return { status: "accepted", requestId: request.requestId, authority };
   }
 
   async status(signed: SignedRequest): Promise<DelegationStatusReceipt> {
@@ -302,10 +351,14 @@ export class PeerDelegationService {
     selfMemberId: HubMemberId,
     reading: ChildReading,
   ): DelegationResult {
-    const finalMessage = clip(reading.finalMessage?.trim() || NO_FINAL_MESSAGE, MAX_FINAL_MESSAGE);
+    const finalMessage = clipToBytes(
+      reading.finalMessage?.trim() || NO_FINAL_MESSAGE,
+      MAX_FINAL_MESSAGE,
+      MAX_FINAL_MESSAGE_BYTES,
+    );
     return {
       requestId: delegation.requestId,
-      summary: clip(reading.summary?.trim() || finalMessage, MAX_SUMMARY),
+      summary: clipToBytes(reading.summary?.trim() || finalMessage, MAX_SUMMARY, MAX_SUMMARY_BYTES),
       finalMessage,
       artifacts: reading.artifacts,
       provenance: {

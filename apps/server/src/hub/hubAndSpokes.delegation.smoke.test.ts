@@ -443,6 +443,52 @@ describe("a spoke delegating work to another spoke", () => {
     expect(again?.status).toBe(201);
     expect(child.started).toHaveLength(1);
   });
+
+  it("returns a long non-ASCII final message clipped to fit the status response, still readable by the delegating spoke", async () => {
+    const { a, b, child } = await threeHosts();
+    const delegated = await a.delegating.delegate(startCommand(b), { windowId: "window-a" });
+    if (delegated.status !== "delegated") throw new Error(JSON.stringify(delegated));
+    child.finish(`${"漢".repeat(60_000)}${"😀".repeat(5_000)}`);
+
+    const completed = await a.delegating.refresh(String(delegated.requestId));
+
+    if (completed.status !== "completed") throw new Error(JSON.stringify(completed));
+    expect(completed.result.finalMessage.isWellFormed()).toBe(true);
+    expect(completed.result.finalMessage.startsWith("漢")).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(completed.result))).toBeLessThan(131_072);
+  });
+
+  it("answers a repeat that arrives while the first is still starting with the same acceptance and one child", async () => {
+    const child = fakeChildHost();
+    const startThread = child.host.startThread;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const slow: PeerDelegationHost = {
+      ...child.host,
+      startThread: async (input) => {
+        const result = await startThread(input);
+        await gate;
+        return result;
+      },
+    };
+    const { a, b } = await threeHosts({ child: { ...child, host: slow } });
+    const body = requestBody(a);
+
+    const first = b.hubLink(signedDelegation({ signer: a, recipient: b, body }));
+    await vi.waitFor(() => expect(child.started).toHaveLength(1));
+    const again = b.hubLink(signedDelegation({ signer: a, recipient: b, body }));
+    // The repeat must reach the receiving spoke while the first start is still held.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    release();
+
+    const [firstAnswer, againAnswer] = await Promise.all([first, again]);
+    expect(firstAnswer?.status).toBe(201);
+    expect(againAnswer?.status).toBe(201);
+    expect(await againAnswer?.json()).toEqual(await firstAnswer?.json());
+    expect(child.started).toHaveLength(1);
+  });
 });
 
 /**
@@ -551,6 +597,29 @@ describe("a delegation whose answer never reached the delegating spoke", () => {
     expect(delegated.status).toBe("refused-by-target");
     expect(child.started).toHaveLength(0);
     expect(a.delegationState.load().sent).toEqual([]);
+  });
+
+  it("keeps the request pending when the target says the id is in use, since its start may still succeed", async () => {
+    const busy: Parameters<typeof startHubTestHost>[0]["delegatingTransport"] = (inner) => {
+      return (target) => {
+        const send = inner(target);
+        return async (url, init) => {
+          if (!url.endsWith(PEER_DELEGATION_ROUTES.create)) return send(url, init);
+          return new Response(JSON.stringify({ status: "refused", kind: "request-id-in-use" }), {
+            status: 409,
+            headers: { "content-type": "application/json" },
+          });
+        };
+      };
+    };
+    const { a, b } = await threeHosts({ aTransport: busy });
+
+    const delegated = await a.delegating.delegate(startCommand(b), { windowId: "window-a" });
+
+    expect(delegated.status).toBe("pending-acceptance");
+    expect(a.delegationState.load().sent).toEqual([
+      expect.objectContaining({ state: "awaiting-acceptance" }),
+    ]);
   });
 
   it("asks the target to interrupt a child whose acceptance was lost", async () => {

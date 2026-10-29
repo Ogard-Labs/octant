@@ -250,6 +250,9 @@ export class DelegatingSpokeService {
       // A body that is not the target's own refusal (a proxy's error page) does
       // not say the target declined.
       if (refusal.reason === "unreadable") return pending;
+      // Only this host's own earlier send can hold the id, so the target is
+      // still starting that child; it may yet be accepted.
+      if (refusal.reason === "request-id-in-use") return pending;
       this.#remove(requestId);
       return { status: "refused-by-target", ...refusal };
     }
