@@ -26,6 +26,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
+import { OctantButton } from "../../ui/base/OctantButton";
 import type {
   CanvasMockupBlock,
   CanvasMockupComponent,
@@ -38,6 +39,7 @@ import {
   canvasMockupFrames,
   canvasMockupNodeReading,
   type CanvasMockupBranch,
+  type CanvasMockupFrame,
 } from "@octant/domain";
 
 // The bundled icon set: each meaning in the contract maps to one glyph here.
@@ -76,10 +78,68 @@ const CONTAINERS: ReadonlySet<CanvasMockupComponent> = new Set([
   "row",
   "grid",
   "nav",
+  "chat",
+  "instance",
 ]);
 
 /** Callout numbers by node id: a callout's number is its place in the list. */
-type Callouts = ReadonlyMap<string, number>;
+export type Callouts = ReadonlyMap<string, number>;
+
+/**
+ * The nodes a surface makes navigable, by node id: what running its control
+ * does. Only a click-through surface passes this; the document's drawing
+ * never does, so every control stays inert there.
+ */
+export type MockupHotspots = ReadonlyMap<string, () => void>;
+
+/**
+ * One frame of a mockup: the device chrome and the screen tree of a single
+ * variant. The block's own board draws one per variant; a flow board draws
+ * the one variant a flow screen names, from the same piece.
+ */
+export function MockupFrame({
+  block,
+  frame,
+  callouts,
+  deviceDetail,
+  hotspots,
+}: {
+  readonly block: CanvasMockupBlock;
+  readonly frame: CanvasMockupFrame;
+  readonly callouts: Callouts;
+  /** The block's device detail, computed once by the surface that owns the block. */
+  readonly deviceDetail: string;
+  /** The flow's named controls, made navigable on a click-through surface. */
+  readonly hotspots?: MockupHotspots;
+}) {
+  return (
+    <div className="canvas-mockup__frame" data-device={block.device} style={frameStyle(block)}>
+      <div className="canvas-mockup__chrome" aria-hidden="true">
+        <span className="canvas-mockup__chrome-dots" />
+        <span className="canvas-mockup__chrome-title">{block.title}</span>
+        <span className="canvas-mockup__chrome-device">{deviceDetail}</span>
+      </div>
+      <div className="canvas-mockup__screen">
+        <ul
+          className="canvas-mockup__tree"
+          role="tree"
+          aria-label={
+            frame.label === undefined ? block.title : `${frame.label ?? ""}: ${block.title}`
+          }
+        >
+          {frame.roots.map((branch) => (
+            <MockupItem
+              branch={branch}
+              callouts={callouts}
+              key={String(branch.node.nodeId)}
+              {...(hotspots === undefined ? {} : { hotspots })}
+            />
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
 
 function spoken(node: CanvasMockupNode, callouts: Callouts): string {
   return canvasMockupNodeReading(node, callouts.get(String(node.nodeId)));
@@ -118,34 +178,12 @@ export function MockupBlock({ block }: { readonly block: CanvasMockupBlock }) {
               {frame.label === undefined ? null : (
                 <figcaption className="canvas-mockup__variant-label">{frame.label}</figcaption>
               )}
-              <div
-                className="canvas-mockup__frame"
-                data-device={block.device}
-                style={frameStyle(block)}
-              >
-                <div className="canvas-mockup__chrome" aria-hidden="true">
-                  <span className="canvas-mockup__chrome-dots" />
-                  <span className="canvas-mockup__chrome-title">{block.title}</span>
-                  <span className="canvas-mockup__chrome-device">{deviceDetail}</span>
-                </div>
-                <div className="canvas-mockup__screen">
-                  <ul
-                    className="canvas-mockup__tree"
-                    role="tree"
-                    aria-label={
-                      frame.label === undefined ? block.title : `${frame.label}: ${block.title}`
-                    }
-                  >
-                    {frame.roots.map((branch) => (
-                      <MockupItem
-                        key={String(branch.node.nodeId)}
-                        branch={branch}
-                        callouts={callouts}
-                      />
-                    ))}
-                  </ul>
-                </div>
-              </div>
+              <MockupFrame
+                block={block}
+                frame={frame}
+                callouts={callouts}
+                deviceDetail={deviceDetail}
+              />
             </figure>
           ))}
         </div>
@@ -209,11 +247,14 @@ function MockupOutline({
 function MockupItem({
   branch,
   callouts,
+  hotspots,
 }: {
   readonly branch: CanvasMockupBranch;
   readonly callouts: Callouts;
+  readonly hotspots?: MockupHotspots;
 }) {
   const { node } = branch;
+  const hotspot = hotspots?.get(String(node.nodeId));
   const callout = callouts.get(String(node.nodeId));
   const common = {
     role: "treeitem",
@@ -230,7 +271,11 @@ function MockupItem({
             <CalloutMark number={callout} />
           </span>
         )}
-        <WindowBody branches={branch.children} callouts={callouts} />
+        <WindowBody
+          branches={branch.children}
+          callouts={callouts}
+          {...(hotspots === undefined ? {} : { hotspots })}
+        />
       </li>
     );
   }
@@ -242,7 +287,11 @@ function MockupItem({
             <CalloutMark number={callout} />
             <span className="canvas-mockup__modal-title">{node.label}</span>
           </span>
-          <MockupGroup branches={branch.children} callouts={callouts} />
+          <MockupGroup
+            branches={branch.children}
+            callouts={callouts}
+            {...(hotspots === undefined ? {} : { hotspots })}
+          />
         </div>
       </li>
     );
@@ -262,13 +311,29 @@ function MockupItem({
       {...common}
       style={style}
     >
-      {CONTAINERS.has(node.component) && callout === undefined ? null : (
-        <span className="canvas-mockup__face" aria-hidden="true">
+      {hotspot === undefined ? (
+        CONTAINERS.has(node.component) && callout === undefined ? null : (
+          <span className="canvas-mockup__face" aria-hidden="true">
+            <CalloutMark number={callout} />
+            {CONTAINERS.has(node.component) ? null : <Face branch={branch} />}
+          </span>
+        )
+      ) : (
+        <OctantButton
+          className="canvas-mockup__hotspot"
+          onClick={hotspot}
+          type="button"
+          variant="secondary"
+        >
           <CalloutMark number={callout} />
-          {CONTAINERS.has(node.component) ? null : <Face branch={branch} />}
-        </span>
+          {node.label}
+        </OctantButton>
       )}
-      <MockupGroup branches={panel} callouts={callouts} />
+      <MockupGroup
+        branches={panel}
+        callouts={callouts}
+        {...(hotspots === undefined ? {} : { hotspots })}
+      />
     </li>
   );
 }
@@ -281,9 +346,11 @@ function CalloutMark({ number }: { readonly number: number | undefined }) {
 function WindowBody({
   branches,
   callouts,
+  hotspots,
 }: {
   readonly branches: ReadonlyArray<CanvasMockupBranch>;
   readonly callouts: Callouts;
+  readonly hotspots?: MockupHotspots;
 }) {
   const header = branches.filter((branch) => branch.node.component === "header");
   const sidebar = branches.filter((branch) => branch.node.component === "sidebar");
@@ -294,17 +361,29 @@ function WindowBody({
     <>
       {header.length === 0 ? null : (
         <div className="canvas-mockup__header-slot">
-          <MockupGroup branches={header} callouts={callouts} />
+          <MockupGroup
+            branches={header}
+            callouts={callouts}
+            {...(hotspots === undefined ? {} : { hotspots })}
+          />
         </div>
       )}
       <div className="canvas-mockup__columns">
         {sidebar.length === 0 ? null : (
           <div className="canvas-mockup__sidebar-slot">
-            <MockupGroup branches={sidebar} callouts={callouts} />
+            <MockupGroup
+              branches={sidebar}
+              callouts={callouts}
+              {...(hotspots === undefined ? {} : { hotspots })}
+            />
           </div>
         )}
         <div className="canvas-mockup__main">
-          <MockupGroup branches={main} callouts={callouts} />
+          <MockupGroup
+            branches={main}
+            callouts={callouts}
+            {...(hotspots === undefined ? {} : { hotspots })}
+          />
         </div>
       </div>
     </>
@@ -314,15 +393,22 @@ function WindowBody({
 function MockupGroup({
   branches,
   callouts,
+  hotspots,
 }: {
   readonly branches: ReadonlyArray<CanvasMockupBranch>;
   readonly callouts: Callouts;
+  readonly hotspots?: MockupHotspots;
 }) {
   if (branches.length === 0) return null;
   return (
     <ul role="group">
       {branches.map((branch) => (
-        <MockupItem key={String(branch.node.nodeId)} branch={branch} callouts={callouts} />
+        <MockupItem
+          branch={branch}
+          callouts={callouts}
+          key={String(branch.node.nodeId)}
+          {...(hotspots === undefined ? {} : { hotspots })}
+        />
       ))}
     </ul>
   );
@@ -346,6 +432,76 @@ function initials(label: string): string {
 function Face({ branch }: { readonly branch: CanvasMockupBranch }) {
   const { node, children } = branch;
   switch (node.component) {
+    case "search":
+      return (
+        <span className="canvas-mockup__search">
+          <Glyph icon="search" />
+          <span className="canvas-mockup__label">{node.value ?? node.label}</span>
+        </span>
+      );
+    case "breadcrumb":
+    case "pagination":
+      return <span className="canvas-mockup__label">{node.label}</span>;
+    case "stepper":
+    case "progress":
+      return (
+        <span className="canvas-mockup__progress">
+          <span className="canvas-mockup__label">{node.label}</span>
+          <span className="canvas-mockup__progress-track">
+            <span
+              className="canvas-mockup__progress-fill"
+              style={{ width: `${String(node.progress ?? 0)}%` }}
+            />
+          </span>
+        </span>
+      );
+    case "slider":
+      return (
+        <span className="canvas-mockup__progress">
+          <span className="canvas-mockup__label">{node.label}</span>
+          <span className="canvas-mockup__slider-track">
+            <span
+              className="canvas-mockup__slider-knob"
+              style={{ left: `${String(node.progress ?? 0)}%` }}
+            />
+          </span>
+        </span>
+      );
+    case "menu":
+      return (
+        <span className="canvas-mockup__field">
+          <span className="canvas-mockup__label">{node.label}</span>
+          <ChevronDown className="canvas-mockup__glyph" size={14} strokeWidth={1.75} />
+        </span>
+      );
+    case "footer":
+      return <span className="canvas-mockup__label">{node.label}</span>;
+    case "hero":
+      return (
+        <span className="canvas-mockup__hero">
+          <span className="canvas-mockup__hero-title">{node.label}</span>
+          {node.value === undefined ? null : (
+            <span className="canvas-mockup__hero-lede">{node.value}</span>
+          )}
+        </span>
+      );
+    case "media":
+    case "map":
+      return (
+        <span className="canvas-mockup__media">
+          <span className="canvas-mockup__label">{node.label}</span>
+        </span>
+      );
+    case "chat":
+      return <span className="canvas-mockup__label">{node.label}</span>;
+    case "chat-message":
+      return (
+        <span className="canvas-mockup__bubble">
+          <span className="canvas-mockup__label">{node.label}</span>
+        </span>
+      );
+    case "instance":
+      return <span className="canvas-mockup__label">{node.label}</span>;
     case "form-field":
       return (
         <span className="canvas-mockup__field">

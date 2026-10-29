@@ -23,6 +23,8 @@ export function canvasBlockLabel(block: CanvasDefinition["blocks"][number]): str
       return block.layout === "display" ? (block.caption ?? "Formula") : "Math";
     case "mockup":
     case "design":
+    case "flow":
+    case "deck":
       return block.title;
     case "plan":
     case "dashboard":

@@ -7,6 +7,8 @@ import { canvasBlockLabel } from "./canvasBlockLabel";
 import { CanvasBlockRenderer } from "./blocks/CanvasBlock";
 import { CanvasLayoutGroup } from "./blocks/LayoutGroups";
 import { DashboardBlock } from "./blocks/DashboardBlock";
+import { FlowBoard } from "./blocks/FlowBoard";
+import { DeckBlock } from "./blocks/DeckBlock";
 import type { DiagramBoardLayoutRuntime } from "./blocks/DiagramBoard";
 import type { PlanTaskRuntime } from "./blocks/PlanBlock";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -127,12 +129,49 @@ export function CanvasDocument({
     </section>
   );
 
+  const flowSection = (item: Extract<ReadingItem, { readonly kind: "flow" }>) => (
+    <section key={item.flow.blockId} className="canvas-block" data-block-kind="flow">
+      <FlowBoard
+        block={item.flow}
+        blocks={definition.blocks}
+        {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
+        {...(designAssetRuntime === undefined ? {} : { designAssetRuntime })}
+      />
+      {comments === undefined ? null : (
+        <CommentMarker
+          count={comments.openCounts.get(String(item.flow.blockId)) ?? 0}
+          label={canvasBlockLabel(item.flow)}
+          onOpen={() => comments.onOpen(String(item.flow.blockId))}
+        />
+      )}
+    </section>
+  );
+
+  const deckSection = (item: Extract<ReadingItem, { readonly kind: "deck" }>) => (
+    <section key={item.deck.blockId} className="canvas-block" data-block-kind="deck">
+      <DeckBlock
+        block={item.deck}
+        blocks={definition.blocks}
+        {...(designAssetRuntime === undefined ? {} : { designAssetRuntime })}
+      />
+      {comments === undefined ? null : (
+        <CommentMarker
+          count={comments.openCounts.get(String(item.deck.blockId)) ?? 0}
+          label={canvasBlockLabel(item.deck)}
+          onOpen={() => comments.onOpen(String(item.deck.blockId))}
+        />
+      )}
+    </section>
+  );
+
   // A tab pane or a column draws its children through the same flow as the
   // document, so a dashboard in a pane is the same grid it is at the top.
   const flow = (items: ReadonlyArray<ReadingItem>): ReactNode =>
     runsOfMetrics(items).map((run) => {
       const first = run[0];
       if (first?.kind === "dashboard") return dashboardSection(first);
+      if (first?.kind === "flow") return flowSection(first);
+      if (first?.kind === "deck") return deckSection(first);
       if (first?.kind === "group") {
         // The group is a block a comment can anchor to, so it carries its own
         // marker just as a dashboard does; its children keep theirs.
