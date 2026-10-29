@@ -626,7 +626,9 @@ naming the target Project, the task, and a narrowed authority. B then:
 A delegated thread on B belongs to B: it appears in B's sidebar and board, and
 only a person can mark it Done there. A's thread shows the remote child's
 state as read through B, and cancelling the parent asks B to interrupt the
-child. A guest never receives delegated work.
+child. B answers for the turn the request started: a follow-up a person runs on
+that thread is neither the result A receives nor something A can interrupt. A
+guest never receives delegated work.
 
 **Credentials.** No credential crosses with a delegation. The work on B uses
 B's own provider sign-ins and B's own Git and SSH identities, including any an
