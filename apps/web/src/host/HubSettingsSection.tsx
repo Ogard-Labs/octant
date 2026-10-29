@@ -22,8 +22,10 @@ import { OctantTextarea } from "../ui/base/OctantTextarea";
 import {
   NewMemberChecks,
   OwnerDevices,
+  type HeldMemberRow,
   type NewMemberAlertRow,
   type OwnerCandidateRow,
+  type OwnerKeyMismatchRow,
   type OwnerRow,
 } from "./HubOwnerPanels";
 import { PairingCodeQr } from "./PairingCodeQr";
@@ -121,6 +123,10 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
   "cannot-own-the-hub": "The hub cannot be an owner.",
   "cannot-own-itself": "A computer cannot list itself as an owner.",
   "unlock-key-invalid": "That is not a valid unlock key, so nothing was added.",
+  "no-unlock-key-listed":
+    "The roster lists no unlock key for that device. Join the hub again with an owner code.",
+  "unlock-key-mismatch":
+    "The roster lists a different unlock key for that device, so nothing was added.",
   "already-owner": "That device is already an owner here.",
   "not-an-owner": "That device is not an owner here.",
   "not-awaiting-confirmation": "That member is not waiting for confirmation.",
@@ -149,18 +155,21 @@ interface Grant {
 interface HubStatus {
   readonly enabled: boolean;
   readonly members: ReadonlyArray<Member>;
-  /** The hub's own owner list. */
+  /** The hub's own owner list, and the roster members that list an unlock key but are not on it. */
   readonly owners: ReadonlyArray<OwnerRow>;
+  readonly ownerCandidates: ReadonlyArray<OwnerCandidateRow>;
   readonly link?: {
     readonly membership: "member" | "removed";
     readonly hubName: string;
     readonly grant: Grant;
     /** The hub's roster as this computer holds it, each with whether this computer accepted it. */
     readonly roster: ReadonlyArray<Member & { readonly accepted: boolean }>;
-    /** This computer's own owner list, Confirm new members, the members it holds for it, and its alerts. */
+    /** This computer's own owner list, the roster entries to confirm or that changed, Confirm new members, the members it holds for it, and its alerts. */
     readonly owners: ReadonlyArray<OwnerRow>;
+    readonly ownerCandidates: ReadonlyArray<OwnerCandidateRow>;
+    readonly ownerKeyMismatches: ReadonlyArray<OwnerKeyMismatchRow>;
     readonly confirmNewMembers: boolean;
-    readonly awaitingConfirmation: ReadonlyArray<string>;
+    readonly heldMembers: ReadonlyArray<HeldMemberRow>;
     readonly alerts: ReadonlyArray<NewMemberAlertRow>;
   };
 }
@@ -410,7 +419,7 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
     await refresh();
   };
 
-  const addOwner = async (candidate: OwnerCandidateRow, unlockPublicKey: string) => {
+  const addOwner = async (candidate: OwnerCandidateRow) => {
     const reply = await act(
       "owners-add",
       {
@@ -418,7 +427,7 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
           {
             memberId: candidate.memberId,
             identityKeyFingerprint: candidate.identityKeyFingerprint,
-            unlockPublicKey,
+            unlockKeyFingerprint: candidate.unlockKeyFingerprint,
           },
         ],
       },
@@ -620,26 +629,6 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
 
   const timeLeft = minted === undefined ? undefined : Math.max(0, minted.expiresAt - clock());
 
-  // A device could be an owner of this host once it is on the roster this host holds and is not the hub.
-  const couldBeOwner = (
-    members: ReadonlyArray<Member>,
-    owners: ReadonlyArray<OwnerRow>,
-    onlyMarked: boolean,
-  ): ReadonlyArray<OwnerCandidateRow> =>
-    members
-      .filter(
-        (member) =>
-          member.role !== "hub" &&
-          member.role !== "standby-hub" &&
-          (!onlyMarked || member.owner) &&
-          !owners.some((owner) => owner.memberId === member.memberId),
-      )
-      .map(({ memberId, name, identityKeyFingerprint }) => ({
-        memberId,
-        name,
-        identityKeyFingerprint,
-      }));
-
   return (
     <>
       <SettingsSection title="Hub">
@@ -823,12 +812,13 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
         <SettingsSection title="Owner devices">
           <p className="settings-section-line">
             An owner device can act on this hub with a window's powers after a fresh unlock. A
-            device that joins with an owner code is listed here. Add or remove others from this
-            window.
+            device that joins with an owner code is listed here. Remove one from this window, and
+            add it back later if you wish.
           </p>
           <OwnerDevices
             busy={busy}
-            candidates={couldBeOwner(status.members, status.owners, false)}
+            candidates={status.ownerCandidates}
+            mismatches={[]}
             onAdd={addOwner}
             onRemove={removeOwner}
             owners={status.owners}
@@ -842,12 +832,14 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
             {linked.grant.items.includes("owners") ? (
               <>
                 <p className="settings-section-line">
-                  The hub lists these devices as your owners. An owner here is confirmed by you, in
-                  this window: the hub cannot add one.
+                  The hub lists the unlock key of a device that joined with an owner code. An owner
+                  here is confirmed by you, in this window, by name and fingerprint: the hub cannot
+                  add one.
                 </p>
                 <OwnerDevices
                   busy={busy}
-                  candidates={couldBeOwner(linked.roster, linked.owners, true)}
+                  candidates={linked.ownerCandidates}
+                  mismatches={linked.ownerKeyMismatches}
                   onAdd={addOwner}
                   onRemove={removeOwner}
                   owners={linked.owners}
@@ -862,13 +854,7 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
           <SettingsSection title="New members">
             <NewMemberChecks
               alerts={linked.alerts}
-              awaiting={couldBeOwner(
-                linked.roster.filter((member) =>
-                  linked.awaitingConfirmation.includes(member.memberId),
-                ),
-                [],
-                false,
-              )}
+              awaiting={linked.heldMembers}
               busy={busy}
               confirmNewMembers={linked.confirmNewMembers}
               onConfirm={(memberId, name) => void confirmMember(memberId, name)}
@@ -1083,26 +1069,92 @@ function readStatus(body: unknown): HubStatus | undefined {
     const roster = readMembers(field(field(field(spoke, "roster"), "roster"), "members")).map(
       (member) => ({ ...member, accepted: accepted.has(member.memberId) }),
     );
-    const awaiting = field(spoke, "awaitingConfirmation");
     return {
       enabled,
       members,
       owners: readOwners(field(hub, "owners")),
+      ownerCandidates: readOwnerCandidates(field(hub, "ownerCandidates")),
       link: {
         membership,
         hubName,
         grant,
         roster,
         owners: readOwners(field(spoke, "owners")),
+        ownerCandidates: readOwnerCandidates(field(spoke, "ownerCandidates")),
+        ownerKeyMismatches: readKeyMismatches(field(spoke, "ownerKeyMismatches")),
         confirmNewMembers: field(spoke, "confirmNewMembers") === true,
-        awaitingConfirmation: Array.isArray(awaiting)
-          ? awaiting.filter((id): id is string => typeof id === "string")
-          : [],
+        heldMembers: readHeldMembers(field(spoke, "heldMembers")),
         alerts: readAlerts(field(spoke, "alerts")),
       },
     };
   }
-  return { enabled, members, owners: readOwners(field(hub, "owners")) };
+  return {
+    enabled,
+    members,
+    owners: readOwners(field(hub, "owners")),
+    ownerCandidates: readOwnerCandidates(field(hub, "ownerCandidates")),
+  };
+}
+
+function readOwnerCandidates(rows: unknown): OwnerCandidateRow[] {
+  const candidates: OwnerCandidateRow[] = [];
+  for (const entry of Array.isArray(rows) ? rows : []) {
+    const memberId = field(entry, "memberId");
+    const name = field(entry, "name");
+    const identity = field(entry, "identityKeyFingerprint");
+    const unlock = field(entry, "unlockKeyFingerprint");
+    if (
+      typeof memberId === "string" &&
+      typeof name === "string" &&
+      typeof identity === "string" &&
+      typeof unlock === "string"
+    ) {
+      candidates.push({
+        memberId,
+        name,
+        identityKeyFingerprint: identity,
+        unlockKeyFingerprint: unlock,
+      });
+    }
+  }
+  return candidates;
+}
+
+function readKeyMismatches(rows: unknown): OwnerKeyMismatchRow[] {
+  const mismatches: OwnerKeyMismatchRow[] = [];
+  for (const entry of Array.isArray(rows) ? rows : []) {
+    const memberId = field(entry, "memberId");
+    const name = field(entry, "name");
+    const held = field(entry, "heldUnlockKeyFingerprint");
+    const listed = field(entry, "rosterUnlockKeyFingerprint");
+    if (
+      typeof memberId === "string" &&
+      typeof name === "string" &&
+      typeof held === "string" &&
+      typeof listed === "string"
+    ) {
+      mismatches.push({
+        memberId,
+        name,
+        heldUnlockKeyFingerprint: held,
+        rosterUnlockKeyFingerprint: listed,
+      });
+    }
+  }
+  return mismatches;
+}
+
+function readHeldMembers(rows: unknown): HeldMemberRow[] {
+  const held: HeldMemberRow[] = [];
+  for (const entry of Array.isArray(rows) ? rows : []) {
+    const memberId = field(entry, "memberId");
+    const name = field(entry, "name");
+    const identity = field(entry, "identityKeyFingerprint");
+    if (typeof memberId === "string" && typeof name === "string" && typeof identity === "string") {
+      held.push({ memberId, name, identityKeyFingerprint: identity });
+    }
+  }
+  return held;
 }
 
 function readMembers(rows: unknown): Member[] {

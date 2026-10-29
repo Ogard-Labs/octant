@@ -13,6 +13,7 @@ import {
   type AuditActingPrincipal,
   type HubGrant,
   type HubGrantItem,
+  type HeldMember,
   type HubGuestAdmissionRequest,
   type HubJoinRequest,
   type HubMemberId,
@@ -50,9 +51,13 @@ import {
   addOwnerRecords,
   ownerEntries,
   ownerListView,
+  readRosterOwners,
   withoutOwner,
+  type OwnerCandidateView,
   type OwnerChange,
+  type OwnerKeyMismatch,
 } from "./ownerRecords";
+import { verifyOwnerAssertion } from "./ownerUnlock";
 import type { HubTransport } from "./pinnedHubTransport";
 import { readPrivateListener } from "./privateListenerReading";
 
@@ -95,6 +100,24 @@ export type GuestAdmission =
         | "listener-has-no-pin"
         | "devices-unavailable";
     };
+
+/** A raw key signs the confirmation text; a passkey answers it as a WebAuthn challenge, as for an unlock. */
+function confirmationSignatureHolds(
+  confirmation: NewMemberConfirmation,
+  unlockPublicKey: string,
+): boolean {
+  const payload = newMemberConfirmationSigningPayload(confirmation);
+  if ("authenticatorData" in confirmation) {
+    return (
+      verifyOwnerAssertion({ payload, assertion: confirmation, unlockPublicKey }).status === "fresh"
+    );
+  }
+  return verifySignature({
+    payload,
+    signature: confirmation.signature,
+    publicKey: unlockPublicKey,
+  });
+}
 
 const publicKeyPem = (publicKey: string): string => {
   const body = Buffer.from(publicKey, "base64url").toString("base64");
@@ -174,9 +197,14 @@ export type SpokeLinkStatus =
       readonly acceptedMemberIds: ReadonlyArray<string>;
       /** This host's own owner list, by name and fingerprint. */
       readonly owners: ReadonlyArray<OwnerListEntry>;
+      /** Roster members that list an unlock key and are not on the owner list: a window confirms each by name and both fingerprints. */
+      readonly ownerCandidates: ReadonlyArray<OwnerCandidateView>;
+      /** Owners whose roster entry lists a different unlock key than the one this host confirmed; the list is unchanged. */
+      readonly ownerKeyMismatches: ReadonlyArray<OwnerKeyMismatch>;
       readonly confirmNewMembers: boolean;
       /** Members this host holds status-only until a window or an owner's signed unlock confirms them. */
       readonly awaitingConfirmation: ReadonlyArray<string>;
+      readonly heldMembers: ReadonlyArray<HeldMember>;
       readonly alerts: ReadonlyArray<NewMemberAlert>;
     };
 
@@ -261,12 +289,52 @@ export class SpokeLinkService {
       roster: link.roster,
       acceptedMemberIds: link.peerGrants.map((grant) => String(grant.memberId)),
       owners: ownerListView(link.owners ?? []),
+      ...(link.removed === true
+        ? { ownerCandidates: [], ownerKeyMismatches: [] }
+        : this.#rosterOwners(link)),
       confirmNewMembers: link.confirmNewMembers === true,
       awaitingConfirmation: link.peerGrants
         .filter(holdsOnlyStatusGrant)
         .map((grant) => String(grant.memberId)),
+      heldMembers: this.heldMembers(),
       alerts: link.alerts ?? [],
     };
+  }
+
+  /**
+   * The members this host holds status-only under Confirm new members: the ones
+   * its window, or an owner device with a fresh unlock, may confirm.
+   */
+  heldMembers(): ReadonlyArray<HeldMember> {
+    const link = this.#options.state.load().link;
+    if (link === undefined || link.removed === true) return [];
+    return link.roster.roster.members
+      .filter((member) =>
+        link.peerGrants.some(
+          (grant) =>
+            String(grant.memberId) === String(member.memberId) && holdsOnlyStatusGrant(grant),
+        ),
+      )
+      .map(({ memberId, name, role, identityKeyFingerprint }) => ({
+        memberId,
+        name,
+        role,
+        identityKeyFingerprint,
+      }));
+  }
+
+  /** Owners the held roster lists a key for: ones to confirm, and ones whose listed key changed since this host confirmed them. */
+  #rosterOwners(link: HubLinkState): {
+    readonly ownerCandidates: ReadonlyArray<OwnerCandidateView>;
+    readonly ownerKeyMismatches: ReadonlyArray<OwnerKeyMismatch>;
+  } {
+    const read = readRosterOwners({
+      roster: link.roster.roster,
+      selfMemberId: String(link.selfMemberId),
+      owners: link.owners ?? [],
+      rejectedMemberIds: link.rejectedMemberIds ?? [],
+    });
+    return { ownerCandidates: read.candidates, ownerKeyMismatches: read.mismatches };
   }
 
   /** What the owner routes check a request against; absent when this host is not a member of a hub. */
@@ -373,12 +441,7 @@ export class SpokeLinkService {
       (entry) => String(entry.memberId) === String(confirmation.confirmedBy),
     );
     const signatureVerified =
-      owner !== undefined &&
-      verifySignature({
-        payload: newMemberConfirmationSigningPayload(confirmation),
-        signature: confirmation.signature,
-        publicKey: owner.unlockPublicKey,
-      });
+      owner !== undefined && confirmationSignatureHolds(confirmation, owner.unlockPublicKey);
     return this.#confirm(String(confirmation.memberId), principal, (member) =>
       admitNewMember({
         spokeId: link?.selfMemberId ?? confirmation.spokeId,

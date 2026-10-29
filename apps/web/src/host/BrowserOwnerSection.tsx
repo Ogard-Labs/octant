@@ -30,8 +30,9 @@ const DONE: Readonly<Record<OwnerAlertAction, string>> = {
 
 /**
  * New-member alerts for a browser that joined the hub as an owner. Each action
- * asks for the passkey first. A passkey signs a challenge, not text, so it
- * cannot sign a confirmation: Confirm answers that plainly instead of failing.
+ * asks for the passkey first. Confirm appears only for a member the computer
+ * holds under Confirm new members, and asks for the passkey twice: once to
+ * answer the confirmation, once to answer the action that carries it.
  */
 export function BrowserOwnerSection(props: BrowserOwnerSectionProps) {
   const offered = browserOwnerOffered({
@@ -90,19 +91,25 @@ export function BrowserOwnerSection(props: BrowserOwnerSectionProps) {
                 ]}
               />
               <div className="setrow-control">
-                {(["remove", "confirm", "dismiss"] as const).map((action) => (
-                  <OctantButton
-                    aria-label={`${action === "remove" ? "Remove" : action === "confirm" ? "Confirm" : "Dismiss"} ${row.alert.name}`}
-                    disabled={busy}
-                    key={action}
-                    onClick={() => void act(row, action)}
-                    size="sm"
-                    type="button"
-                    variant={action === "confirm" ? "default" : "secondary"}
-                  >
-                    {action === "remove" ? "Remove" : action === "confirm" ? "Confirm" : "Dismiss"}
-                  </OctantButton>
-                ))}
+                {(["remove", "confirm", "dismiss"] as const)
+                  .filter((action) => action !== "confirm" || row.held)
+                  .map((action) => (
+                    <OctantButton
+                      aria-label={`${action === "remove" ? "Remove" : action === "confirm" ? "Confirm" : "Dismiss"} ${row.alert.name}`}
+                      disabled={busy}
+                      key={action}
+                      onClick={() => void act(row, action)}
+                      size="sm"
+                      type="button"
+                      variant={action === "confirm" ? "default" : "secondary"}
+                    >
+                      {action === "remove"
+                        ? "Remove"
+                        : action === "confirm"
+                          ? "Confirm"
+                          : "Dismiss"}
+                    </OctantButton>
+                  ))}
               </div>
             </li>
           ))}

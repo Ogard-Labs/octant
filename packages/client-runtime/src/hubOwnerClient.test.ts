@@ -13,7 +13,6 @@ import { base64UrlDecode, base64UrlEncode, hex, sha256 } from "./hubLinkSigning"
 import {
   createOwnerClient,
   describeOwnerRefusal,
-  type OwnerUnlockAssertion,
   type OwnerUnlockSigner,
   type UnlockAttempt,
 } from "./hubOwnerClient";
@@ -44,25 +43,62 @@ async function p256() {
 async function rawSigner(keys: CryptoKeyPair, answer?: UnlockAttempt<never>) {
   const publicKey = base64UrlEncode(await crypto.subtle.exportKey("spki", keys.publicKey));
   const calls: string[] = [];
+  const sessions = { opened: 0, closed: 0 };
   const signer: OwnerUnlockSigner = {
     shape: "raw",
     publicKey,
-    sign: async (text) => {
-      calls.push(text);
+    open: async () => {
+      sessions.opened += 1;
       if (answer !== undefined) return answer;
       return {
         status: "signed",
-        value: base64UrlEncode(
-          await crypto.subtle.sign(
-            { name: "ECDSA", hash: "SHA-256" },
-            keys.privateKey,
-            encoder.encode(text),
-          ),
-        ),
+        value: {
+          sign: async (text) => {
+            calls.push(text);
+            return base64UrlEncode(
+              await crypto.subtle.sign(
+                { name: "ECDSA", hash: "SHA-256" },
+                keys.privateKey,
+                encoder.encode(text),
+              ),
+            );
+          },
+          close: () => {
+            sessions.closed += 1;
+          },
+        },
       };
     },
   };
-  return { signer, publicKey, calls };
+  return { signer, publicKey, calls, sessions };
+}
+
+/** A passkey that signs the challenge it is handed, as an authenticator would. */
+async function passkeySigner(keys: CryptoKeyPair) {
+  const publicKey = base64UrlEncode(await crypto.subtle.exportKey("spki", keys.publicKey));
+  const challenges: string[] = [];
+  const signer: OwnerUnlockSigner = {
+    shape: "webauthn",
+    publicKey,
+    assert: async (challenge) => {
+      challenges.push(challenge);
+      return {
+        status: "signed",
+        value: {
+          authenticatorData: "YXV0aA",
+          clientDataJson: "Y2xpZW50",
+          signature: base64UrlEncode(
+            await crypto.subtle.sign(
+              { name: "ECDSA", hash: "SHA-256" },
+              keys.privateKey,
+              encoder.encode(challenge),
+            ),
+          ),
+        },
+      };
+    },
+  };
+  return { signer, publicKey, challenges };
 }
 
 interface Recorded {
@@ -206,6 +242,7 @@ describe("owner client", () => {
     await client.removeFromAlert(ALERT_ID);
 
     expect(unlock.calls).toHaveLength(2);
+    expect(unlock.sessions).toEqual({ opened: 2, closed: 2 });
     expect(host.requests.filter((request) => request.path.endsWith("/challenge"))).toHaveLength(2);
   });
 
@@ -219,7 +256,7 @@ describe("owner client", () => {
       status: "not-unlocked",
       reason: "cancelled",
     });
-    expect(host.requests.map((request) => request.path)).toEqual(["/api/hub/owner/challenge"]);
+    expect(host.requests).toEqual([]);
   });
 
   it("reports a refused replay in plain words", async () => {
@@ -289,22 +326,87 @@ describe("owner client", () => {
     expect(unlock.calls).toHaveLength(2);
   });
 
-  it("cannot confirm a member with a passkey, which signs a challenge and not text", async () => {
+  it("authenticates the person once to confirm a member, signs both with that one key, and then closes it", async () => {
     const keys = await p256();
+    const unlock = await rawSigner(keys);
     const host = fakeHost({ unlockPublicKey: keys.publicKey });
-    const assertion: OwnerUnlockAssertion = {
-      authenticatorData: "AA",
-      clientDataJson: "AA",
-      signature: "AA",
-    };
-    const client = await ownerFixture(host, {
-      shape: "webauthn",
-      publicKey: "AAAA",
-      assert: async () => ({ status: "signed", value: assertion }),
-    });
+    const client = await ownerFixture(host, unlock.signer);
 
-    expect(await client.confirmNewMember(alert)).toEqual({ status: "unsupported" });
-    expect(host.requests).toEqual([]);
+    const result = await client.confirmNewMember(alert);
+
+    expect(result.status).toBe("done");
+    expect(unlock.sessions).toEqual({ opened: 1, closed: 1 });
+    expect(unlock.calls).toHaveLength(2);
+    expect(host.requests.map((request) => request.path)).toEqual([
+      "/api/hub/owner/challenge",
+      "/api/hub/owner/confirm-member",
+    ]);
+  });
+
+  it("closes the key even when the host refuses the confirmation", async () => {
+    const keys = await p256();
+    const unlock = await rawSigner(keys);
+    const host = fakeHost({
+      unlockPublicKey: keys.publicKey,
+      answers: {
+        "/api/hub/owner/confirm-member": Response.json(
+          { status: "refused", kind: "confirmation-invalid" },
+          { status: 409 },
+        ),
+      },
+    });
+    const client = await ownerFixture(host, unlock.signer);
+
+    expect(await client.confirmNewMember(alert)).toEqual({
+      status: "refused",
+      kind: "confirmation-invalid",
+    });
+    expect(unlock.sessions).toEqual({ opened: 1, closed: 1 });
+  });
+
+  it("confirms a member with a passkey that answers the confirmation text as its challenge", async () => {
+    const keys = await p256();
+    const passkey = await passkeySigner(keys);
+    const host = fakeHost({ unlockPublicKey: keys.publicKey });
+    const client = await ownerFixture(host, passkey.signer);
+
+    await client.confirmNewMember(alert);
+
+    const sent = JSON.parse(host.requests.at(-1)?.body ?? "{}") as Record<string, string>;
+    expect(sent).toMatchObject({
+      memberId: MEMBER_ID,
+      confirmedBy: OWNER_ID,
+      authenticatorData: "YXV0aA",
+      clientDataJson: "Y2xpZW50",
+    });
+    const unsigned = decodeNewMemberConfirmation(sent);
+    expect(passkey.challenges[0]).toBe(
+      base64UrlEncode(await sha256(newMemberConfirmationSigningPayload(unsigned))),
+    );
+    // The passkey signs one challenge per prompt: the confirmation, then the action.
+    expect(passkey.challenges).toHaveLength(2);
+  });
+
+  it("lists the members the host holds without asking for an unlock", async () => {
+    const keys = await p256();
+    const unlock = await rawSigner(keys);
+    const held = {
+      memberId: MEMBER_ID,
+      name: "Unknown tablet",
+      role: "spoke",
+      identityKeyFingerprint: "c".repeat(64),
+    };
+    const host = fakeHost({
+      unlockPublicKey: keys.publicKey,
+      answers: {
+        "/api/hub/owner/held-members": Response.json({ members: [held, { nonsense: true }] }),
+      },
+    });
+    const client = await ownerFixture(host, unlock.signer);
+
+    expect(await client.heldMembers()).toEqual({ status: "read", members: [held] });
+    expect(unlock.sessions.opened).toBe(0);
+    expect(host.requests[0]?.method).toBe("GET");
   });
 
   it("hands a passkey the SHA-256 of the unlock text as its challenge", async () => {

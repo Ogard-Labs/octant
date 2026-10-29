@@ -706,6 +706,10 @@ export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
     "Served to a guest's signed request from the phone app, which builds the path inside the guest client in packages/client-runtime (hubGuestClient.ts); no window script names it. Remove when the checker counts packages/client-runtime as a caller of a host route.",
   ]),
   [
+    "/api/desktop/hub/members/held",
+    "Lists the members this host holds under Confirm new members. The window reads the same list from the hub status read (apps/web HubSettingsSection), because the desktop bridge's operation list (apps/desktop hubAdministrationControls.ts) does not name this route yet. Remove once the bridge forwards it.",
+  ],
+  [
     "/api/v1/shares",
     "Served by the public Canvas share service (the octant-webapp repository) and called by the host's share-service port in apps/server, which builds the address from the configured service URL; no window or device calls it. Remove when the checker counts apps/server as a caller of an external service's routes.",
   ],

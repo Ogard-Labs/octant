@@ -63,7 +63,9 @@ export const decodeHubMembershipChangedPayload = Schema.decodeUnknownSync(
 export const HubJoinRequest = Schema.Struct({
   ticketId: Schema.UUID,
   ticketProof: bounded(256),
-  member: RosterMember.pipe(Schema.omit("role", "owner")).annotations(strict),
+  member: RosterMember.pipe(Schema.omit("role", "owner", "ownerUnlockPublicKey")).annotations(
+    strict,
+  ),
   identityPublicKey: base64Url(512),
   /** Absent for a guest, which runs no listener. */
   listenerOrigin: Schema.optional(bounded(300)),

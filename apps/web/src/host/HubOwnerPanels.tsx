@@ -1,11 +1,8 @@
-import { unlockKeyFingerprint } from "@octant/client-runtime";
-import { useEffect, useId, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { SettingRow, SettingsFactList, SettingsState } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
-import { OctantField, OctantFieldLabel } from "../ui/base/OctantField";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
-import { OctantTextarea } from "../ui/base/OctantTextarea";
 
 /** An owner as this host lists it: names and fingerprints, never keys. */
 export interface OwnerRow {
@@ -15,8 +12,24 @@ export interface OwnerRow {
   readonly unlockKeyFingerprint: string;
 }
 
-/** A roster member that could be added to this host's owner list. */
+/** A roster member that lists an unlock key and is not on this host's owner list yet. */
 export interface OwnerCandidateRow {
+  readonly memberId: string;
+  readonly name: string;
+  readonly identityKeyFingerprint: string;
+  readonly unlockKeyFingerprint: string;
+}
+
+/** An owner whose roster entry now lists a different unlock key than the one this host confirmed. */
+export interface OwnerKeyMismatchRow {
+  readonly memberId: string;
+  readonly name: string;
+  readonly heldUnlockKeyFingerprint: string;
+  readonly rosterUnlockKeyFingerprint: string;
+}
+
+/** A member this host holds status-only under Confirm new members. */
+export interface HeldMemberRow {
   readonly memberId: string;
   readonly name: string;
   readonly identityKeyFingerprint: string;
@@ -32,51 +45,25 @@ export interface NewMemberAlertRow {
 
 const fingerprint = (value: string) => <code className="oct-meta--mono">{value}</code>;
 
-/** The unlock key text's fingerprint, or undefined while the text is not a key code. */
-function useUnlockKeyFingerprint(text: string): string | undefined {
-  const [value, setValue] = useState<string>();
-  useEffect(() => {
-    let current = true;
-    const trimmed = text.trim();
-    if (!/^[A-Za-z0-9_-]{16,512}$/.test(trimmed)) {
-      setValue(undefined);
-      return;
-    }
-    unlockKeyFingerprint(trimmed).then(
-      (digest) => {
-        if (current) setValue(digest);
-      },
-      () => {
-        if (current) setValue(undefined);
-      },
-    );
-    return () => {
-      current = false;
-    };
-  }, [text]);
-  return value;
-}
-
 /**
  * This host's own owner list. Adding an owner is the person's act at this
- * window: they compare the device's name and the fingerprints this window shows
- * with the ones on the device, then confirm. No owner is added from the hub's
- * roster mark alone.
+ * window: the signed roster lists the device's unlock key, and the person
+ * compares the device's name and both fingerprints with the ones on the device,
+ * then confirms. The roster alone adds nobody, and a key that changed after the
+ * person confirmed is only shown, never applied.
  */
 export function OwnerDevices(props: {
   readonly owners: ReadonlyArray<OwnerRow>;
   readonly candidates: ReadonlyArray<OwnerCandidateRow>;
+  readonly mismatches: ReadonlyArray<OwnerKeyMismatchRow>;
   readonly busy: boolean;
-  readonly onAdd: (candidate: OwnerCandidateRow, unlockPublicKey: string) => Promise<void>;
+  readonly onAdd: (candidate: OwnerCandidateRow) => Promise<void>;
   readonly onRemove: (owner: OwnerRow) => Promise<void>;
 }) {
   const [reviewing, setReviewing] = useState<OwnerCandidateRow>();
   const [removing, setRemoving] = useState<OwnerRow>();
-  const [keyText, setKeyText] = useState("");
-  const keyId = useId();
   const reviewOpener = useRef<HTMLButtonElement>(null);
   const removeOpener = useRef<HTMLButtonElement>(null);
-  const keyFingerprint = useUnlockKeyFingerprint(keyText);
 
   return (
     <div className="settings-panel__stack">
@@ -108,34 +95,39 @@ export function OwnerDevices(props: {
           ))}
         </ul>
       )}
+      {props.mismatches.length === 0 ? null : (
+        <ul aria-label="Owners whose unlock key changed" className="setgroup">
+          {props.mismatches.map((mismatch) => (
+            <li className="setrow" key={mismatch.memberId}>
+              <span className="setrow-label">{mismatch.name}'s unlock key changed</span>
+              <p className="setrow-hint">
+                The roster now lists unlock key {fingerprint(mismatch.rosterUnlockKeyFingerprint)}.
+                This computer keeps the key you confirmed,{" "}
+                {fingerprint(mismatch.heldUnlockKeyFingerprint)}. If the change is yours, remove{" "}
+                {mismatch.name} as an owner and confirm it again.
+              </p>
+            </li>
+          ))}
+        </ul>
+      )}
       {props.candidates.length === 0 ? null : (
         <>
-          <OctantField>
-            <OctantFieldLabel htmlFor={keyId}>Unlock key from the device</OctantFieldLabel>
-            <OctantTextarea
-              autoComplete="off"
-              id={keyId}
-              onChange={(event) => setKeyText(event.target.value)}
-              rows={2}
-              spellCheck={false}
-              value={keyText}
-            />
-          </OctantField>
           <p className="settings-section-line">
-            The device shows its unlock key and the fingerprint of it. Paste the key here, choose
-            the device, and check that both fingerprints match what the device shows.
+            The hub's roster lists these devices with an unlock key. Check that the name and both
+            fingerprints match what the device shows, then add it.
           </p>
           <ul aria-label="Devices that could be owners" className="setgroup">
             {props.candidates.map((candidate) => (
               <li className="setrow" key={candidate.memberId}>
                 <span className="setrow-label">{candidate.name}</span>
                 <p className="setrow-hint">
-                  Device key {fingerprint(candidate.identityKeyFingerprint)}
+                  Device key {fingerprint(candidate.identityKeyFingerprint)} · unlock key{" "}
+                  {fingerprint(candidate.unlockKeyFingerprint)}
                 </p>
                 <div className="setrow-control">
                   <OctantButton
                     aria-label={`Add ${candidate.name} as an owner`}
-                    disabled={props.busy || keyFingerprint === undefined}
+                    disabled={props.busy}
                     onClick={() => setReviewing(candidate)}
                     ref={reviewing?.memberId === candidate.memberId ? reviewOpener : undefined}
                     size="sm"
@@ -150,7 +142,7 @@ export function OwnerDevices(props: {
           </ul>
         </>
       )}
-      {reviewing === undefined || keyFingerprint === undefined ? null : (
+      {reviewing === undefined ? null : (
         <OctantConfirmDialog
           cancelLabel="Not now"
           confirmLabel={`Add ${reviewing.name}`}
@@ -159,7 +151,7 @@ export function OwnerDevices(props: {
               facts={[
                 { label: "Device", value: reviewing.name },
                 { label: "Device key", value: fingerprint(reviewing.identityKeyFingerprint) },
-                { label: "Unlock key", value: fingerprint(keyFingerprint) },
+                { label: "Unlock key", value: fingerprint(reviewing.unlockKeyFingerprint) },
               ]}
             />
           }
@@ -167,7 +159,7 @@ export function OwnerDevices(props: {
           onConfirm={() => {
             const candidate = reviewing;
             setReviewing(undefined);
-            void props.onAdd(candidate, keyText.trim()).then(() => setKeyText(""));
+            void props.onAdd(candidate);
           }}
           restoreFocus={reviewOpener}
           title={`Add ${reviewing.name} as an owner of this computer?`}
@@ -200,7 +192,8 @@ export function OwnerDevices(props: {
 /** Confirm new members, the members held for it, and the alerts newer rosters raised. */
 export function NewMemberChecks(props: {
   readonly confirmNewMembers: boolean;
-  readonly awaiting: ReadonlyArray<OwnerCandidateRow>;
+  /** The members this host holds under Confirm new members; Confirm shows for these and no others. */
+  readonly awaiting: ReadonlyArray<HeldMemberRow>;
   readonly alerts: ReadonlyArray<NewMemberAlertRow>;
   readonly busy: boolean;
   readonly onSetConfirmNewMembers: (enabled: boolean) => void;

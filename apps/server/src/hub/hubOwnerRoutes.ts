@@ -42,6 +42,7 @@ export const HUB_OWNER_ROUTE_PREFIX = "/api/hub/owner";
 export const HUB_OWNER_ROUTES = {
   challenge: `${HUB_OWNER_ROUTE_PREFIX}/challenge`,
   alerts: `${HUB_OWNER_ROUTE_PREFIX}/alerts`,
+  heldMembers: `${HUB_OWNER_ROUTE_PREFIX}/held-members`,
   alertDismiss: `${HUB_OWNER_ROUTE_PREFIX}/alerts/dismiss`,
   alertRemove: `${HUB_OWNER_ROUTE_PREFIX}/alerts/remove`,
   grant: `${HUB_OWNER_ROUTE_PREFIX}/grant`,
@@ -58,10 +59,16 @@ export const HUB_OWNER_ROUTES = {
 type OwnerRoute = (typeof HUB_OWNER_ROUTES)[keyof typeof HUB_OWNER_ROUTES];
 const OWNER_ROUTES: ReadonlySet<string> = new Set(Object.values(HUB_OWNER_ROUTES));
 
+/** Reads: they change nothing, so they ask for no unlock. */
+const READ_ROUTES: ReadonlySet<string> = new Set([
+  HUB_OWNER_ROUTES.alerts,
+  HUB_OWNER_ROUTES.heldMembers,
+]);
+
 /** The routes an unlock can be asked for: every one that changes something. */
 const UNLOCKED_ROUTES: ReadonlySet<string> = new Set(
   Object.values(HUB_OWNER_ROUTES).filter(
-    (route) => route !== HUB_OWNER_ROUTES.challenge && route !== HUB_OWNER_ROUTES.alerts,
+    (route) => route !== HUB_OWNER_ROUTES.challenge && !READ_ROUTES.has(route),
   ),
 );
 
@@ -125,7 +132,7 @@ export function createHubOwnerRouteHandler(
     const url = new URL(request.url);
     if (!OWNER_ROUTES.has(url.pathname)) return undefined;
     const route = url.pathname as OwnerRoute;
-    const expectedMethod = route === HUB_OWNER_ROUTES.alerts ? "GET" : "POST";
+    const expectedMethod = READ_ROUTES.has(route) ? "GET" : "POST";
     if (request.method !== expectedMethod || url.search !== "") return refused(405, "invalid");
     const body = await readBody(request);
     if (body === undefined) return refused(413, "invalid");
@@ -240,6 +247,10 @@ export function createHubOwnerRouteHandler(
           ? refused(403, "not-a-spoke")
           : Response.json({ alerts: status.alerts }, { headers: NO_STORE });
       }
+      case HUB_OWNER_ROUTES.heldMembers:
+        return options.spoke.status().membership === "none"
+          ? refused(403, "not-a-spoke")
+          : Response.json({ members: options.spoke.heldMembers() }, { headers: NO_STORE });
       case HUB_OWNER_ROUTES.alertDismiss:
         return outcome(
           options.spoke.dismissAlert(String(decodeOwnerAlertRequest(json()).alertId), principal),

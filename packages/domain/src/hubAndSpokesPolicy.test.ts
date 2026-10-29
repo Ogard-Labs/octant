@@ -746,4 +746,16 @@ describe("the text a roster signature covers", () => {
       hubRosterSigningPayload(roster(3, [...baseMembers.slice(0, 3), member(4, "spoke")])),
     ).not.toBe(hubRosterSigningPayload(body));
   });
+
+  it("covers an owner's unlock key when a member carries one, and nothing extra when it does not", () => {
+    const body = roster(3, baseMembers);
+    const [first, ...rest] = baseMembers;
+    if (first === undefined) throw new Error("No members.");
+    const withKey = roster(3, [{ ...first, ownerUnlockPublicKey: "a_b-c" }, ...rest]);
+    const otherKey = roster(3, [{ ...first, ownerUnlockPublicKey: "d_e-f" }, ...rest]);
+
+    expect(hubRosterSigningPayload(withKey)).not.toBe(hubRosterSigningPayload(body));
+    expect(hubRosterSigningPayload(withKey)).not.toBe(hubRosterSigningPayload(otherKey));
+    expect(hubRosterSigningPayload(body)).not.toContain("ownerUnlockPublicKey");
+  });
 });

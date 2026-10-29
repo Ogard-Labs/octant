@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { decodeAuditActingPrincipal } from "./auditEvents";
+import { decodeNewMemberConfirmation } from "./hubAndSpokes";
 import { decodeHubJoinRequest } from "./hubMembership";
 import {
   decodeOwnerAdditionRequest,
@@ -50,13 +51,57 @@ describe("owner unlock contracts", () => {
     ).toThrow();
   });
 
-  it("requires at least one owner to add and refuses an unlock key that is not base64url", () => {
-    const candidate = { memberId: uuid, identityKeyFingerprint: digest, unlockPublicKey: "a_b-c" };
+  it("requires at least one owner to add and refuses a key sent by hand", () => {
+    const candidate = {
+      memberId: uuid,
+      identityKeyFingerprint: digest,
+      unlockKeyFingerprint: digest,
+    };
 
     expect(decodeOwnerAdditionRequest({ owners: [candidate] }).owners).toHaveLength(1);
     expect(() => decodeOwnerAdditionRequest({ owners: [] })).toThrow();
     expect(() =>
-      decodeOwnerAdditionRequest({ owners: [{ ...candidate, unlockPublicKey: "not base64+/=" }] }),
+      decodeOwnerAdditionRequest({ owners: [{ ...candidate, unlockPublicKey: "a_b-c" }] }),
+    ).toThrow();
+  });
+
+  it("decodes a confirmation signed as raw text or as a passkey assertion, and refuses a mix", () => {
+    const fields = {
+      spokeId: uuid,
+      memberId: uuid,
+      identityKeyFingerprint: digest,
+      confirmedBy: uuid,
+      unlockKeyFingerprint: digest,
+      confirmedAt: "2026-10-29T10:00:00.000Z",
+      signature: "c2ln",
+    };
+
+    expect(decodeNewMemberConfirmation(fields).signature).toBe("c2ln");
+    expect(
+      decodeNewMemberConfirmation({ ...fields, authenticatorData: "YQ", clientDataJson: "YQ" })
+        .signature,
+    ).toBe("c2ln");
+    expect(() => decodeNewMemberConfirmation({ ...fields, authenticatorData: "YQ" })).toThrow();
+  });
+
+  it("refuses a join request that claims to carry an unlock key on its roster entry", () => {
+    const member = {
+      memberId: uuid,
+      name: "Phone",
+      identityKeyFingerprint: digest,
+      listenerPin: digest,
+      privateNames: [],
+      addresses: [],
+      ownerUnlockPublicKey: "d_e-f",
+    };
+
+    expect(() =>
+      decodeHubJoinRequest({
+        ticketId: uuid,
+        ticketProof: "proof",
+        member,
+        identityPublicKey: "a_b-c",
+      }),
     ).toThrow();
   });
 

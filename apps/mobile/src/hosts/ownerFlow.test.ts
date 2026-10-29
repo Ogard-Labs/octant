@@ -139,6 +139,18 @@ async function world(
         });
       }
       if (path === "/api/hub/owner/alerts") return Response.json({ alerts: [alert] });
+      if (path === "/api/hub/owner/held-members") {
+        return Response.json({
+          members: [
+            {
+              memberId: String(alert.memberId),
+              name: alert.name,
+              role: alert.role,
+              identityKeyFingerprint: alert.identityKeyFingerprint,
+            },
+          ],
+        });
+      }
       return Response.json({ status: "removed", alertId: String(alert.alertId) });
     }) as typeof globalThis.fetch,
   });
@@ -161,10 +173,29 @@ describe("a phone that is an owner of its hub", () => {
 
     expect(result.status).toBe("done");
     expect(w.order).toEqual([
-      "/api/hub/owner/challenge",
       "unlock-asked",
       "key-read",
+      "/api/hub/owner/challenge",
       "/api/hub/owner/alerts/remove",
+    ]);
+  });
+
+  it("asks the person once to confirm a member, however many signatures the confirmation needs", async () => {
+    const w = await world();
+    const [spoke] = await ownerSpokesOf({ ...w, state: joinedState(true) });
+    if (spoke === undefined) throw new Error("expected an owner client");
+    w.order.length = 0;
+
+    const result = await runOwnerAlertAction(spoke, alert, "confirm");
+
+    expect(result.status).toBe("done");
+    expect(w.order.filter((entry) => entry === "unlock-asked")).toHaveLength(1);
+    expect(w.order.filter((entry) => entry === "key-read")).toHaveLength(1);
+    expect(w.order).toEqual([
+      "unlock-asked",
+      "key-read",
+      "/api/hub/owner/challenge",
+      "/api/hub/owner/confirm-member",
     ]);
   });
 
@@ -176,7 +207,7 @@ describe("a phone that is an owner of its hub", () => {
 
     const result = await runOwnerAlertAction(spoke, alert, "remove");
 
-    expect(w.order).toEqual(["/api/hub/owner/challenge", "unlock-asked"]);
+    expect(w.order).toEqual(["unlock-asked"]);
     expect(ownerActionNotice(result, "Removed.")).toEqual({
       tone: "problem",
       message: "Nothing changed. The unlock was cancelled.",
@@ -189,10 +220,26 @@ describe("a phone that is an owner of its hub", () => {
 
     const reading = await readOwnerAlerts(spokes);
 
-    expect(reading.rows.map((row) => [row.spoke.name, row.alert.name])).toEqual([
-      ["member 2", "Unknown tablet"],
+    expect(reading.rows.map((row) => [row.spoke.name, row.alert.name, row.held])).toEqual([
+      ["member 2", "Unknown tablet", true],
     ]);
     expect(reading.unanswered).toEqual(["member 3"]);
+  });
+
+  it("marks an alert as confirmable only when that computer holds the member", async () => {
+    const w = await world();
+    const spokes = await ownerSpokesOf({ ...w, state: joinedState(true) });
+    const silent = spokes.map((spoke) => ({
+      ...spoke,
+      client: {
+        ...spoke.client,
+        heldMembers: async () => ({ status: "read" as const, members: [] }),
+      },
+    }));
+
+    const reading = await readOwnerAlerts(silent);
+
+    expect(reading.rows.map((row) => row.held)).toEqual([false, false]);
   });
 
   it("tells the person a used unlock was refused and to unlock again", () => {

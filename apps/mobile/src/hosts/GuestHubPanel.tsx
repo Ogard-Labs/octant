@@ -288,14 +288,11 @@ export function GuestHubPanel(props: GuestHubPanelProps) {
           {phase.unlock === undefined ? null : (
             <View testID="mobile-guest-hub-unlock-key">
               <Text style={styles.help}>
-                To make this phone an owner on a computer, open that computer's Settings, Hub, and
-                confirm this key by its fingerprint.
+                The hub passes this phone's unlock key to each computer. Its person confirms the
+                phone there by name and fingerprint, so there is nothing to copy.
               </Text>
               <Text selectable style={styles.mono}>
                 {phase.unlock.fingerprint}
-              </Text>
-              <Text selectable style={styles.mono}>
-                {phase.unlock.publicKey}
               </Text>
             </View>
           )}

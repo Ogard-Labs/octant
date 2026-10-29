@@ -6,15 +6,18 @@ import {
   type RosterMember,
   type SignedHubRoster,
 } from "@octant/contracts";
-import { hubRosterSigningPayload } from "@octant/domain";
+import { buildPairingCode, hubRosterSigningPayload } from "@octant/domain";
 import {
   acceptGuestRoster,
   admitGuestOnSpoke,
   createGuestSigner,
   guestSpokeTargets,
+  joinHubAsGuest,
   type GuestHubRecord,
 } from "./hubGuestClient";
 import type { PinnedListenerTransportPort } from "./appPairingCode";
+import { HOST_KEY, signTestHostHello } from "./remoteConnectionFixtures";
+import { createInMemoryDeviceKeyStore } from "./remotePairingClient";
 
 const id = (suffix: string) => `00000000-0000-4000-8000-${suffix.padStart(12, "0")}` as HubMemberId;
 const hubId = id("1");
@@ -237,6 +240,97 @@ describe("the members a guest connects to", () => {
     };
 
     expect(guestSpokeTargets(record)).toEqual([]);
+  });
+});
+
+describe("a guest joining with an owner code", () => {
+  const ORIGIN = "https://100.101.102.103:8443";
+  const HUB_HOST_ID = "11111111-1111-4111-8111-111111111111";
+  const PIN = `sha256-${Buffer.alloc(32, 9).toString("base64url")}`;
+
+  /** A hub that approves the pairing at once and records the join request the guest sends. */
+  async function joinBody(ownerUnlockPublicKey?: string): Promise<Record<string, unknown>> {
+    const built = buildPairingCode({
+      origin: ORIGIN,
+      ticketId: "3f6c1d2e-8a4b-4c5d-9e6f-7a8b9c0d1e2f",
+      ticketProof: Buffer.alloc(32, 7).toString("base64url"),
+      pin: PIN,
+    });
+    if (built.status !== "built") throw new Error(built.reason);
+    let sent: Record<string, unknown> | undefined;
+    const transport: PinnedListenerTransportPort = () => ({
+      status: "available",
+      fetch: async (input, init) => {
+        const url = new URL(typeof input === "string" ? input : input.toString());
+        if (url.pathname === "/api/remote/hello") {
+          return Response.json(
+            signTestHostHello(HOST_KEY, {
+              productId: "octant",
+              hostId: HUB_HOST_ID,
+              displayName: "Mac mini",
+              serverBuildVersion: "0.1.0",
+              supportedProtocolRange: { min: 1, max: 1 },
+              authenticationProtocolVersions: [1],
+              securityFloor: 1,
+              remoteOrigin: ORIGIN,
+              nonce: "host-nonce-1234567890",
+              clientNonce: url.searchParams.get("clientNonce") ?? "",
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            }),
+          );
+        }
+        if (url.pathname === "/api/remote/pairing") {
+          const body = JSON.parse(String(init?.body)) as Record<string, string>;
+          return Response.json({
+            kind: "pending",
+            ticketId: body.ticketId,
+            hostId: HUB_HOST_ID,
+            deviceLabel: body.deviceLabel,
+            deviceKeyFingerprint: body.deviceKeyFingerprint,
+            origin: ORIGIN,
+            sourceClass: "tailscale",
+            comparisonCode: "123456",
+            claimedAt: new Date().toISOString(),
+            expiresAt: new Date(Date.now() + 300_000).toISOString(),
+          });
+        }
+        if (url.pathname === "/api/hub/join") {
+          sent = JSON.parse(String(init?.body)) as Record<string, unknown>;
+          return Response.json({ status: "refused", kind: "not-approved" }, { status: 403 });
+        }
+        return Response.json({
+          status: "approved",
+          deviceId: "00000000-0000-4000-8000-000000000002",
+          credentialGeneration: 1,
+        });
+      },
+    });
+
+    const started = await joinHubAsGuest({
+      code: built.code,
+      deviceLabel: "Phone",
+      transport,
+      webBuildVersion: "0.1.0",
+      deviceKeyStore: createInMemoryDeviceKeyStore(),
+      ...(ownerUnlockPublicKey === undefined ? {} : { ownerUnlockPublicKey }),
+    });
+    if (started.status !== "awaiting-approval") throw new Error(JSON.stringify(started));
+    await started.finish();
+    if (sent === undefined) throw new Error("The guest sent no join request.");
+    return sent;
+  }
+
+  it("sends the unlock key it made so the hub can record it as an owner's", async () => {
+    const body = await joinBody("MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE");
+
+    expect(body).toMatchObject({
+      asGuest: true,
+      ownerUnlockPublicKey: "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE",
+    });
+  });
+
+  it("sends no unlock key when the person did not choose an owner code", async () => {
+    expect(await joinBody()).not.toHaveProperty("ownerUnlockPublicKey");
   });
 });
 

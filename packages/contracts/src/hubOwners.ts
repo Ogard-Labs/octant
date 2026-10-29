@@ -56,11 +56,16 @@ export const OwnerChallenge = Schema.Struct({
 export type OwnerChallenge = typeof OwnerChallenge.Type;
 export const decodeOwnerChallenge = Schema.decodeUnknownSync(OwnerChallenge);
 
-/** One device to add to a host's owner list; the host reads the identity fingerprint from its own roster and compares. */
+/**
+ * One device to add to a host's owner list. The person confirmed its name and
+ * both fingerprints; the host copies the unlock key from the roster entry it
+ * holds, after checking both fingerprints against it. A key sent by hand is not
+ * accepted.
+ */
 export const OwnerCandidate = Schema.Struct({
   memberId: HubMemberId,
   identityKeyFingerprint: digest,
-  unlockPublicKey: base64Url(512),
+  unlockKeyFingerprint: digest,
 }).annotations(strict);
 export type OwnerCandidate = typeof OwnerCandidate.Type;
 
@@ -112,6 +117,15 @@ export const NewMemberAlert = Schema.Struct({
   raisedAt: UtcTimestamp,
 }).annotations(strict);
 export type NewMemberAlert = typeof NewMemberAlert.Type;
+
+/** A member a host holds status-only under Confirm new members until an owner or its window confirms it. */
+export const HeldMember = Schema.Struct({
+  memberId: HubMemberId,
+  name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  role: HubMemberRole,
+  identityKeyFingerprint: digest,
+}).annotations(strict);
+export type HeldMember = typeof HeldMember.Type;
 
 export const OwnerAlertRequest = Schema.Struct({ alertId: NewMemberAlertId }).annotations(strict);
 export const decodeOwnerAlertRequest = Schema.decodeUnknownSync(OwnerAlertRequest);

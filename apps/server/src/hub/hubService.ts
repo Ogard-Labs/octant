@@ -30,7 +30,9 @@ import {
   addOwnerRecords,
   isUnlockPublicKey,
   ownerListView,
+  readRosterOwners,
   withoutOwner,
+  type OwnerCandidateView,
   type OwnerChange,
 } from "./ownerRecords";
 import type { HubTransport } from "./pinnedHubTransport";
@@ -286,6 +288,17 @@ export class HubService {
     return ownerListView(this.#options.state.load().hub?.owners ?? []);
   }
 
+  /** Roster members that list an unlock key but are not owners here, for the person to confirm. */
+  ownerCandidates(): ReadonlyArray<OwnerCandidateView> {
+    const hub = this.#options.state.load().hub;
+    if (hub?.roster === undefined) return [];
+    return readRosterOwners({
+      roster: hub.roster.roster,
+      selfMemberId: this.hubMemberId(),
+      owners: hub.owners ?? [],
+    }).candidates;
+  }
+
   /**
    * Adds devices to this hub's owner list. Only a window on this host, or an
    * owner already on the list with a fresh unlock, reaches this; the caller
@@ -385,6 +398,15 @@ export class HubService {
     // The roster states what the hub checked, not what the member claimed: a
     // guest has no listener, no names, no addresses, and no owner mark.
     const { listenerPort: _claimedPort, ...claimed } = request.member;
+    // Only an owner code adds the joiner to this hub's owner list, with the
+    // unlock key it presented; the roster's owner mark alone never does. The
+    // roster entry then carries that key, signed by the hub, so a spoke's
+    // person can confirm it by fingerprint instead of pasting it.
+    const presented = ticket.owner ? request.ownerUnlockPublicKey : undefined;
+    if (presented !== undefined && !isUnlockPublicKey(presented)) {
+      return { status: "refused", kind: "unlock-key-invalid" };
+    }
+    const listedKey = presented === undefined ? {} : { ownerUnlockPublicKey: presented };
     const member: RosterMember = asGuest
       ? {
           ...claimed,
@@ -393,19 +415,15 @@ export class HubService {
           privateNames: [],
           addresses: [],
           owner: false,
+          ...listedKey,
         }
       : {
           ...claimed,
           role: "spoke",
           ...listenerPortOf(request.listenerOrigin),
           owner: ticket.owner,
+          ...listedKey,
         };
-    // Only an owner code adds the joiner to this hub's owner list, with the
-    // unlock key it presented; the roster's owner mark alone never does.
-    const presented = ticket.owner ? request.ownerUnlockPublicKey : undefined;
-    if (presented !== undefined && !isUnlockPublicKey(presented)) {
-      return { status: "refused", kind: "unlock-key-invalid" };
-    }
     const owners: ReadonlyArray<HostOwnerRecord> =
       presented === undefined
         ? (hub.owners ?? [])

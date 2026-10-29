@@ -42,6 +42,8 @@ export const HUB_ADMINISTRATION_ROUTES = {
   ownersRemove: "/api/desktop/hub/owners/remove",
   confirmNewMembers: "/api/desktop/hub/confirm-new-members",
   confirmMember: "/api/desktop/hub/members/confirm",
+  /** GET: the members this host holds status-only under Confirm new members. */
+  heldMembers: "/api/desktop/hub/members/held",
   alertDismiss: "/api/desktop/hub/alerts/dismiss",
   alertRemove: "/api/desktop/hub/alerts/remove",
   /** The `*.ts.net` certificate for the web app: GET reads it, POST turns it on or off or renews it. */
@@ -97,9 +99,20 @@ export function createHubAdministrationRouteHandler(
     if (route === HUB_ADMINISTRATION_ROUTES.status) {
       if (request.method !== "GET") return failure("invalid", 400);
       return Response.json({
-        hub: { ...options.hub.status(), owners: options.hub.listOwners() },
+        hub: {
+          ...options.hub.status(),
+          owners: options.hub.listOwners(),
+          ownerCandidates: options.hub.ownerCandidates(),
+        },
         spoke: options.spoke.status(),
       });
+    }
+    if (route === HUB_ADMINISTRATION_ROUTES.heldMembers) {
+      if (request.method !== "GET") return failure("invalid", 400);
+      return Response.json(
+        { members: options.spoke.heldMembers() },
+        { headers: { "cache-control": "no-store" } },
+      );
     }
     if (route === HUB_ADMINISTRATION_ROUTES.certificate && request.method === "GET") {
       return Response.json(options.certificate.status(), {

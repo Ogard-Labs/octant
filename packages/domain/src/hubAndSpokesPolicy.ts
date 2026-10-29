@@ -429,6 +429,11 @@ export function hubRosterSigningPayload(roster: HubRoster): string {
       // keeps the bytes it was signed over.
       ...(member.listenerPort === undefined ? {} : { listenerPort: member.listenerPort }),
       owner: member.owner,
+      // Written only when present, so the key is covered by the hub's signature
+      // and a roster without one keeps the bytes it was signed over.
+      ...(member.ownerUnlockPublicKey === undefined
+        ? {}
+        : { ownerUnlockPublicKey: member.ownerUnlockPublicKey }),
     })),
     standbyOrder: roster.standbyOrder,
     failoverAfterSeconds: roster.failoverAfterSeconds,

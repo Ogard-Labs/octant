@@ -8,7 +8,7 @@
 import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HubMemberId, type HubGrant, type NewMemberConfirmation } from "@octant/contracts";
-import { newMemberConfirmationSigningPayload } from "@octant/domain";
+import { hubRosterSigningPayload, newMemberConfirmationSigningPayload } from "@octant/domain";
 import {
   admitGuestOnSpoke,
   createInMemoryDeviceKeyStore,
@@ -25,6 +25,7 @@ import {
   type SoftwareAuthenticator,
 } from "./hubOwner.test-support";
 import { createPinnedHubTransport } from "./pinnedHubTransport";
+import { createRosterSigningKeyStore } from "./rosterSigningKey";
 
 const cleanups: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
@@ -94,7 +95,7 @@ function listAsOwner(spoke: HubTestHost, phone: HubTestHost, authenticator: Soft
       {
         memberId: decodeMemberId(phone.hostId),
         identityKeyFingerprint: publicKeyFingerprint(phone.hostPublicKey),
-        unlockPublicKey: authenticator.publicKey,
+        unlockKeyFingerprint: authenticator.fingerprint,
       },
     ],
     window,
@@ -381,13 +382,13 @@ describe("owner devices administering a spoke", () => {
     const { network, hub, spoke, phone, authenticator } = await startOwnerWorld();
     listAsOwner(spoke, phone, authenticator);
     const tablet = await startTablet(network);
-    await joinHub(hub, tablet, { owner: false });
+    const tabletKey = softwareAuthenticator();
+    await joinHub(hub, tablet, { owner: true, unlockPublicKey: tabletKey.publicKey });
     await vi.waitFor(() => {
       const held = spoke.spoke.status();
       if (held.membership !== "member") throw new Error("Not a member.");
       expect(held.roster.roster.members.map((member) => member.name)).toContain("Tablet");
     });
-    const tabletKey = softwareAuthenticator();
 
     const added = await ownerCall({
       device: phone,
@@ -399,7 +400,7 @@ describe("owner devices administering a spoke", () => {
           {
             memberId: tablet.hostId,
             identityKeyFingerprint: publicKeyFingerprint(tablet.hostPublicKey),
-            unlockPublicKey: tabletKey.publicKey,
+            unlockKeyFingerprint: tabletKey.fingerprint,
           },
         ],
       },
@@ -436,7 +437,7 @@ describe("owner devices administering a spoke", () => {
     ]);
   });
 
-  it("refuses to list the hub, a stranger's key, or a different fingerprint as an owner", async () => {
+  it("refuses to list the hub, a different device key, or a different unlock key as an owner", async () => {
     const { hub, spoke, phone, authenticator } = await startOwnerWorld();
 
     const hubAsOwner = spoke.spoke.addOwners(
@@ -444,7 +445,7 @@ describe("owner devices administering a spoke", () => {
         {
           memberId: decodeMemberId(hub.hostId),
           identityKeyFingerprint: publicKeyFingerprint(hub.hostPublicKey),
-          unlockPublicKey: authenticator.publicKey,
+          unlockKeyFingerprint: authenticator.fingerprint,
         },
       ],
       window,
@@ -454,17 +455,17 @@ describe("owner devices administering a spoke", () => {
         {
           memberId: decodeMemberId(phone.hostId),
           identityKeyFingerprint: publicKeyFingerprint(authenticator.publicKey),
-          unlockPublicKey: authenticator.publicKey,
+          unlockKeyFingerprint: authenticator.fingerprint,
         },
       ],
       window,
     );
-    const notAKey = spoke.spoke.addOwners(
+    const otherUnlockKey = spoke.spoke.addOwners(
       [
         {
           memberId: decodeMemberId(phone.hostId),
           identityKeyFingerprint: publicKeyFingerprint(phone.hostPublicKey),
-          unlockPublicKey: "AAAA",
+          unlockKeyFingerprint: softwareAuthenticator().fingerprint,
         },
       ],
       window,
@@ -472,8 +473,32 @@ describe("owner devices administering a spoke", () => {
 
     expect(hubAsOwner).toMatchObject({ status: "refused", kind: "cannot-own-the-hub" });
     expect(wrongFingerprint).toMatchObject({ status: "refused", kind: "identity-mismatch" });
-    expect(notAKey).toMatchObject({ status: "refused", kind: "unlock-key-invalid" });
+    expect(otherUnlockKey).toMatchObject({ status: "refused", kind: "unlock-key-mismatch" });
     expect(spoke.spoke.status()).toMatchObject({ owners: [] });
+  });
+
+  it("refuses to list a member whose roster entry carries no unlock key", async () => {
+    const { network, hub, spoke } = await startOwnerWorld();
+    const tablet = await startTablet(network);
+    await joinHub(hub, tablet, { owner: false });
+    await vi.waitFor(() => {
+      const held = spoke.spoke.status();
+      if (held.membership !== "member") throw new Error("Not a member.");
+      expect(held.roster.roster.members.map((member) => member.name)).toContain("Tablet");
+    });
+
+    const listed = spoke.spoke.addOwners(
+      [
+        {
+          memberId: decodeMemberId(tablet.hostId),
+          identityKeyFingerprint: publicKeyFingerprint(tablet.hostPublicKey),
+          unlockKeyFingerprint: softwareAuthenticator().fingerprint,
+        },
+      ],
+      window,
+    );
+
+    expect(listed).toMatchObject({ status: "refused", kind: "no-unlock-key-listed" });
   });
 
   it("lets the owner device leave the hub from the spoke, and nobody else", async () => {
@@ -503,7 +528,127 @@ describe("owner devices administering a spoke", () => {
   });
 });
 
+describe("owner keys carried by the roster", () => {
+  it("carries the owner's unlock key on its roster entry and adds nobody on the spoke until the window confirms it", async () => {
+    const { network, spoke, phone, authenticator } = await startOwnerWorld();
+    const held = spoke.spoke.status();
+    if (held.membership !== "member") throw new Error("Not a member.");
+    expect(held.roster.roster.members.find((member) => member.name === "Phone")).toMatchObject({
+      owner: true,
+      ownerUnlockPublicKey: authenticator.publicKey,
+    });
+
+    // Listed in the signed roster, the phone is a candidate and nothing more.
+    expect(held.owners).toEqual([]);
+    expect(held.ownerCandidates).toEqual([
+      {
+        memberId: phone.hostId,
+        name: "Phone",
+        identityKeyFingerprint: publicKeyFingerprint(phone.hostPublicKey),
+        unlockKeyFingerprint: authenticator.fingerprint,
+      },
+    ]);
+    const beforeConfirm = await ownerCall({
+      device: phone,
+      network,
+      target: spoke,
+      route: HUB_OWNER_ROUTES.grant,
+      body: GRANT_WITH_STATUS,
+      unlock: { authenticator, shape: "raw" },
+    });
+    expect(beforeConfirm.json).toEqual({ status: "refused", kind: "not-an-owner" });
+
+    expect(listAsOwner(spoke, phone, authenticator).status).toBe("changed");
+    const afterConfirm = await ownerCall({
+      device: phone,
+      network,
+      target: spoke,
+      route: HUB_OWNER_ROUTES.grant,
+      body: GRANT_WITH_STATUS,
+      unlock: { authenticator, shape: "raw" },
+    });
+
+    expect(afterConfirm.status).toBe(200);
+    const listed = spoke.spoke.status();
+    expect(listed.membership === "member" && listed.ownerCandidates).toEqual([]);
+  });
+
+  it("keeps the key the spoke confirmed when a later roster lists another, and shows the mismatch", async () => {
+    const { network, hub, spoke, phone, authenticator } = await startOwnerWorld();
+    listAsOwner(spoke, phone, authenticator);
+    const swapped = softwareAuthenticator();
+    const held = spoke.spoke.status();
+    if (held.membership !== "member") throw new Error("Not a member.");
+    const roster = {
+      ...held.roster.roster,
+      sequence: held.roster.roster.sequence + 1,
+      members: held.roster.roster.members.map((member) =>
+        member.name === "Phone" ? { ...member, ownerUnlockPublicKey: swapped.publicKey } : member,
+      ),
+    };
+
+    const received = spoke.spoke.receiveRoster({
+      roster,
+      signedBy: { kind: "hub", memberId: decodeMemberId(hub.hostId) },
+      signature: createRosterSigningKeyStore(hub.directory)
+        .signer()
+        .sign(hubRosterSigningPayload(roster)),
+    });
+
+    expect(received.status).toBe("accepted");
+    const after = spoke.spoke.status();
+    if (after.membership !== "member") throw new Error("Not a member.");
+    expect(after.owners.map((owner) => [owner.name, owner.unlockKeyFingerprint])).toEqual([
+      ["Phone", authenticator.fingerprint],
+    ]);
+    expect(after.ownerKeyMismatches).toEqual([
+      {
+        memberId: phone.hostId,
+        name: "Phone",
+        heldUnlockKeyFingerprint: authenticator.fingerprint,
+        rosterUnlockKeyFingerprint: swapped.fingerprint,
+      },
+    ]);
+    expect(after.ownerCandidates).toEqual([]);
+    // The key the spoke confirmed still opens the owner's actions; the swapped one does not.
+    const withHeld = await ownerCall({
+      device: phone,
+      network,
+      target: spoke,
+      route: HUB_OWNER_ROUTES.grant,
+      body: GRANT_WITH_STATUS,
+      unlock: { authenticator, shape: "raw" },
+    });
+    const withSwapped = await ownerCall({
+      device: phone,
+      network,
+      target: spoke,
+      route: HUB_OWNER_ROUTES.grant,
+      body: GRANT_WITHOUT_OWNERS,
+      unlock: { authenticator: swapped, shape: "raw" },
+    });
+    expect(withHeld.status).toBe(200);
+    expect(withSwapped.json).toEqual({ status: "refused", kind: "unlock-signature-invalid" });
+  });
+});
+
 describe("owner devices administering a hub", () => {
+  it("registers the unlock key an owner presents at join as the hub's first owner", async () => {
+    const { hub, phone, authenticator } = await startOwnerWorld();
+
+    expect(hub.hub.listOwners()).toEqual([
+      {
+        memberId: phone.hostId,
+        name: "Phone",
+        identityKeyFingerprint: publicKeyFingerprint(phone.hostPublicKey),
+        unlockKeyFingerprint: authenticator.fingerprint,
+      },
+    ]);
+    expect(
+      hub.records.filter((entry) => entry.change === "owner-added").map((entry) => entry.memberId),
+    ).toEqual([phone.hostId]);
+  });
+
   it("lets the first owner make join codes and remove members with a fresh unlock, and refuses it without one", async () => {
     const { network, hub, spoke, phone, authenticator } = await startOwnerWorld();
     expect(hub.hub.listOwners().map((owner) => owner.name)).toEqual(["Phone"]);
@@ -750,6 +895,86 @@ describe("Confirm new members on a spoke", () => {
         .filter((entry) => entry.change === "new-member-confirmed")
         .map((entry) => entry.actingPrincipal),
     ).toEqual([{ kind: "owner-unlock", memberId: phone.hostId }]);
+  });
+
+  it("confirms a held member when a passkey answers the confirmation as a WebAuthn assertion, and refuses another key or an unverified person", async () => {
+    const { network, hub, spoke, phone, authenticator } = await startOwnerWorld();
+    listAsOwner(spoke, phone, authenticator);
+    spoke.spoke.setConfirmNewMembers(true, window);
+    const guest = await joinGuest(hub, network, spoke, "Pocket");
+    const fingerprint =
+      guest.record.roster.roster.members.find((member) => member.name === "Pocket")
+        ?.identityKeyFingerprint ?? "";
+    const passkeyConfirmation = (signer: SoftwareAuthenticator, flags?: number) => {
+      const unsigned = {
+        spokeId: decodeMemberId(spoke.hostId),
+        memberId: decodeMemberId(guest.memberId),
+        identityKeyFingerprint: fingerprint,
+        confirmedBy: decodeMemberId(phone.hostId),
+        unlockKeyFingerprint: authenticator.fingerprint,
+        confirmedAt: new Date().toISOString() as NewMemberConfirmation["confirmedAt"],
+      };
+      return {
+        ...unsigned,
+        ...signer.assert(newMemberConfirmationSigningPayload(unsigned), flags),
+      };
+    };
+    const confirm = (confirmation: NewMemberConfirmation) =>
+      ownerCall({
+        device: phone,
+        network,
+        target: spoke,
+        route: HUB_OWNER_ROUTES.confirmMember,
+        body: confirmation,
+        unlock: { authenticator, shape: "webauthn" },
+      });
+
+    const otherKey = await confirm(passkeyConfirmation(softwareAuthenticator()));
+    const unverified = await confirm(passkeyConfirmation(authenticator, 0x01));
+    expect(otherKey.json).toMatchObject({ status: "refused", kind: "confirmation-invalid" });
+    expect(unverified.json).toMatchObject({ status: "refused", kind: "confirmation-invalid" });
+    expect(await guest.knock()).toMatchObject({ kind: "guest-not-confirmed" });
+
+    const confirmed = await confirm(passkeyConfirmation(authenticator));
+
+    expect(confirmed.json).toMatchObject({ status: "confirmed", memberId: guest.memberId });
+    expect((await guest.knock()).status).toBe("admitted");
+  });
+
+  it("lists the members it holds for an owner device without an unlock, and not for the hub", async () => {
+    const { network, hub, spoke, phone, authenticator } = await startOwnerWorld();
+    listAsOwner(spoke, phone, authenticator);
+    spoke.spoke.setConfirmNewMembers(true, window);
+    const read = (device: HubTestHost) =>
+      ownerCall({
+        device,
+        network,
+        target: spoke,
+        route: HUB_OWNER_ROUTES.heldMembers,
+        method: "GET",
+      });
+    expect((await read(phone)).json).toEqual({ members: [] });
+
+    const guest = await joinGuest(hub, network, spoke, "Pocket");
+    const held = await read(phone);
+    const fromHub = await read(hub);
+
+    expect(held.status).toBe(200);
+    expect(held.json).toEqual({
+      members: [
+        {
+          memberId: guest.memberId,
+          name: "Pocket",
+          role: "guest",
+          identityKeyFingerprint:
+            guest.record.roster.roster.members.find((member) => member.name === "Pocket")
+              ?.identityKeyFingerprint ?? "",
+        },
+      ],
+    });
+    expect(fromHub.json).toEqual({ status: "refused", kind: "hub-principal" });
+    spoke.spoke.confirmMemberFromWindow(guest.memberId, window);
+    expect((await read(phone)).json).toEqual({ members: [] });
   });
 
   it("lets a window on the spoke confirm a held guest, which then gets a device", async () => {

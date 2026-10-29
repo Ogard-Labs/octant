@@ -155,18 +155,20 @@ export function OwnerAlertsPanel(props: OwnerAlertsPanelProps) {
             {row.alert.identityKeyFingerprint}
           </Text>
           <View style={styles.actions}>
-            {(["remove", "confirm", "dismiss"] as const).map((action) => (
-              <Pressable
-                accessibilityRole="button"
-                disabled={busy}
-                key={action}
-                onPress={() => void act(row, action)}
-                style={styles.button}
-                testID={`mobile-owner-alert-${action}`}
-              >
-                <Text style={styles.buttonLabel}>{ACTION_LABEL[action]}</Text>
-              </Pressable>
-            ))}
+            {(["remove", "confirm", "dismiss"] as const)
+              .filter((action) => action !== "confirm" || row.held)
+              .map((action) => (
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={busy}
+                  key={action}
+                  onPress={() => void act(row, action)}
+                  style={styles.button}
+                  testID={`mobile-owner-alert-${action}`}
+                >
+                  <Text style={styles.buttonLabel}>{ACTION_LABEL[action]}</Text>
+                </Pressable>
+              ))}
           </View>
         </View>
       ))}

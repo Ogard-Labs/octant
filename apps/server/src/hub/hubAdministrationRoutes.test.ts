@@ -293,7 +293,7 @@ describe("who may administer the hub role", () => {
     const candidate = {
       memberId: "44444444-4444-4444-8444-444444444444",
       identityKeyFingerprint: "a".repeat(64),
-      unlockPublicKey: "AAAA",
+      unlockKeyFingerprint: "b".repeat(64),
     };
 
     const unknown = await handle(
@@ -339,5 +339,26 @@ describe("who may administer the hub role", () => {
       expect(response?.status).toBe(409);
       expect(await response?.json()).toMatchObject({ status: "refused", kind: "not-a-spoke" });
     }
+  });
+
+  it("lists no held members on a host that is not a spoke, and only reads them with a window", async () => {
+    const { handle } = await setup();
+    const read = (headers: Record<string, string>) =>
+      new Request(`http://127.0.0.1${HUB_ADMINISTRATION_ROUTES.heldMembers}`, { headers });
+    const window = {
+      "x-octant-desktop-secret": secret,
+      "x-octant-window-capability": capability,
+    };
+
+    const held = await handle(read(window));
+    const unauthenticated = await handle(
+      read({ ...window, "x-octant-window-capability": "B".repeat(43) }),
+    );
+    const posted = await handle(post(HUB_ADMINISTRATION_ROUTES.heldMembers));
+
+    expect(held?.status).toBe(200);
+    expect(await held?.json()).toEqual({ members: [] });
+    expect(unauthenticated?.status).toBe(401);
+    expect(posted?.status).toBe(400);
   });
 });

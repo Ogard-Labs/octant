@@ -83,28 +83,45 @@ describe("phone unlock key", () => {
     expect((await key.ensure()).publicKey).toBe(first.publicKey);
   });
 
-  it("signs only after the person passes the system prompt, then reads the store", async () => {
+  it("opens the key only after the person passes the system prompt, then reads the store", async () => {
     const { key, order } = fixture();
     const made = await key.ensure();
     const signer = await key.signer();
     if (signer?.shape !== "raw") throw new Error("expected a raw signer");
 
-    const signed = await signer.sign("unlock text");
+    const opened = await signer.open();
 
     expect(order).toEqual(["presence", "vault"]);
-    expect(signed.status).toBe("signed");
-    if (signed.status !== "signed") return;
-    expect(await verifies(made.publicKey, "unlock text", signed.value)).toBe(true);
+    expect(opened.status).toBe("signed");
+    if (opened.status !== "signed") return;
+    const signature = await opened.value.sign("unlock text");
+    expect(await verifies(made.publicKey, "unlock text", signature)).toBe(true);
   });
 
-  it("asks again for each signature", async () => {
+  it("asks the person once for an action however many texts it signs, and signs nothing once closed", async () => {
     const { key, counts } = fixture();
     await key.ensure();
     const signer = await key.signer();
     if (signer?.shape !== "raw") throw new Error("expected a raw signer");
 
-    await signer.sign("one");
-    await signer.sign("two");
+    const opened = await signer.open();
+    if (opened.status !== "signed") throw new Error("expected an open key");
+    await opened.value.sign("confirmation");
+    await opened.value.sign("unlock text");
+    opened.value.close();
+
+    expect(counts).toEqual({ authenticate: 1, vaultRead: 1 });
+    await expect(opened.value.sign("again")).rejects.toThrow();
+  });
+
+  it("asks again when the next action opens the key", async () => {
+    const { key, counts } = fixture();
+    await key.ensure();
+    const signer = await key.signer();
+    if (signer?.shape !== "raw") throw new Error("expected a raw signer");
+
+    await signer.open();
+    await signer.open();
 
     expect(counts).toEqual({ authenticate: 2, vaultRead: 2 });
   });
@@ -115,7 +132,7 @@ describe("phone unlock key", () => {
     const signer = await key.signer();
     if (signer?.shape !== "raw") throw new Error("expected a raw signer");
 
-    expect(await signer.sign("unlock text")).toEqual({ status: "cancelled" });
+    expect(await signer.open()).toEqual({ status: "cancelled" });
     expect(counts.vaultRead).toBe(0);
   });
 
@@ -125,7 +142,7 @@ describe("phone unlock key", () => {
     const signer = await key.signer();
     if (signer?.shape !== "raw") throw new Error("expected a raw signer");
 
-    expect(await signer.sign("unlock text")).toEqual({ status: "unavailable" });
+    expect(await signer.open()).toEqual({ status: "unavailable" });
     expect(counts.vaultRead).toBe(0);
   });
 
@@ -135,7 +152,7 @@ describe("phone unlock key", () => {
     const signer = await key.signer();
     if (signer?.shape !== "raw") throw new Error("expected a raw signer");
 
-    expect(await signer.sign("unlock text")).toEqual({ status: "cancelled" });
+    expect(await signer.open()).toEqual({ status: "cancelled" });
   });
 
   it("offers no signer until a key exists and none after the key is forgotten", async () => {

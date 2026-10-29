@@ -150,7 +150,7 @@ describe("browser owner availability", () => {
 });
 
 /** A host that issues one challenge and records the proof the action carries. */
-function browserSpoke(credentials: PasskeyCredentials) {
+function browserSpoke(credentials: PasskeyCredentials, options: { held?: boolean } = {}) {
   const proofs: unknown[] = [];
   const paths: string[] = [];
   let challenge: { nonce: string; expiresAt: number; path: string; bodyHash: string } | undefined;
@@ -171,6 +171,21 @@ function browserSpoke(credentials: PasskeyCredentials) {
               raisedAt: "2026-10-29T10:00:00.000Z",
             },
           ],
+        });
+      }
+      if (path === "/api/hub/owner/held-members") {
+        return Response.json({
+          members:
+            options.held === false
+              ? []
+              : [
+                  {
+                    memberId: MEMBER_ID,
+                    name: "Unknown tablet",
+                    role: "spoke",
+                    identityKeyFingerprint: "c".repeat(64),
+                  },
+                ],
         });
       }
       if (path === "/api/hub/owner/challenge") {
@@ -269,10 +284,10 @@ describe("BrowserOwnerSection", () => {
     expect(paths).not.toContain("/api/hub/owner/alerts/remove");
   });
 
-  it("says a passkey cannot confirm a member instead of failing", async () => {
+  it("confirms a held member with the passkey, once for the confirmation and once for the action", async () => {
     const user = userEvent.setup();
-    const { credentials } = fakePasskeys();
-    const { spoke, paths } = browserSpoke(credentials);
+    const { credentials, gets } = fakePasskeys();
+    const { spoke, paths, proofs } = browserSpoke(credentials);
     render(
       <BrowserOwnerSection
         credentials={credentials}
@@ -283,7 +298,23 @@ describe("BrowserOwnerSection", () => {
 
     await user.click(await screen.findByRole("button", { name: "Confirm Unknown tablet" }));
 
-    expect(await screen.findByText(/cannot sign a confirmation/i)).toBeVisible();
-    expect(paths).not.toContain("/api/hub/owner/challenge");
+    await waitFor(() => expect(proofs).toHaveLength(1));
+    expect(gets).toHaveLength(2);
+    expect(paths).toContain("/api/hub/owner/confirm-member");
+  });
+
+  it("offers Confirm only for a member the computer holds under Confirm new members", async () => {
+    const { credentials } = fakePasskeys();
+    const { spoke } = browserSpoke(credentials, { held: false });
+    render(
+      <BrowserOwnerSection
+        credentials={credentials}
+        hubAdministration={undefined}
+        spokes={[spoke]}
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: "Remove Unknown tablet" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Confirm Unknown tablet" })).toBeNull();
   });
 });

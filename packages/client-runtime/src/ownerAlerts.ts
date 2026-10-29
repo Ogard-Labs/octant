@@ -15,6 +15,8 @@ export interface OwnerSpoke {
 export interface OwnerAlertRow {
   readonly spoke: { readonly memberId: string; readonly name: string };
   readonly alert: NewMemberAlert;
+  /** Whether that computer holds the member under Confirm new members; Confirm applies only then. */
+  readonly held: boolean;
 }
 
 export interface OwnerAlertReading {
@@ -27,17 +29,26 @@ export async function readOwnerAlerts(
   spokes: ReadonlyArray<OwnerSpoke>,
 ): Promise<OwnerAlertReading> {
   const answers = await Promise.all(
-    spokes.map(async (spoke) => ({ spoke, answer: await spoke.client.alerts() })),
+    spokes.map(async (spoke) => ({
+      spoke,
+      answer: await spoke.client.alerts(),
+      held: await spoke.client.heldMembers(),
+    })),
   );
   return {
-    rows: answers.flatMap(({ spoke, answer }) =>
-      answer.status === "read"
+    rows: answers.flatMap(({ spoke, answer, held }) => {
+      // A computer that did not say what it holds shows no Confirm.
+      const heldIds = new Set(
+        held.status === "read" ? held.members.map((member) => String(member.memberId)) : [],
+      );
+      return answer.status === "read"
         ? answer.alerts.map((alert) => ({
             spoke: { memberId: spoke.memberId, name: spoke.name },
             alert,
+            held: heldIds.has(String(alert.memberId)),
           }))
-        : [],
-    ),
+        : [];
+    }),
     unanswered: answers
       .filter(({ answer }) => answer.status !== "read")
       .map(({ spoke }) => spoke.name),
@@ -77,12 +88,6 @@ export function ownerActionNotice(result: OwnerActionResult, done: string): Owne
           result.reason === "cancelled"
             ? "Nothing changed. The unlock was cancelled."
             : "Nothing changed. This device could not ask for your unlock.",
-      };
-    case "unsupported":
-      return {
-        tone: "problem",
-        message:
-          "This unlock key cannot sign a confirmation. Confirm in that computer's own window or on your phone.",
       };
     case "unreachable":
       return {

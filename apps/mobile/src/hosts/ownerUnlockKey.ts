@@ -4,13 +4,15 @@
 // is also asked through the system prompt before the store is read at all, so
 // a signature never comes from a key read for another reason. It is a narrower
 // form than a Secure Enclave or Keystore key: the store protects the stored
-// bytes, but the key is not bound to hardware and is briefly in memory while it
-// signs. The private key is never returned, logged, or sent.
+// bytes, but the key is not bound to hardware and is in memory while an action
+// is open, until the session is closed. The private key is never returned,
+// logged, or sent.
 
 import {
   base64UrlEncode,
   unlockKeyFingerprint,
   type OwnerUnlockSigner,
+  type RawUnlockSession,
   type UnlockAttempt,
 } from "@octant/client-runtime";
 import type { BiometricAuthenticator } from "../security/BiometricGate";
@@ -55,7 +57,7 @@ export interface PhoneUnlockKey {
   /** The key's public half, made on first use. Never asks the person. */
   readonly ensure: () => Promise<UnlockKeyIdentity>;
   readonly existing: () => Promise<UnlockKeyIdentity | undefined>;
-  /** A raw-shape signer that asks the person before every signature; absent until a key exists. */
+  /** A raw-shape signer that asks the person each time the key is opened for an action; absent until a key exists. */
   readonly signer: () => Promise<OwnerUnlockSigner | undefined>;
   readonly forget: () => Promise<void>;
 }
@@ -86,7 +88,9 @@ export function createPhoneUnlockKey(ports: PhoneUnlockKeyPorts): PhoneUnlockKey
     return publicKey === null || publicKey === "" ? undefined : identityOf(publicKey);
   };
 
-  const sign = async (text: string): Promise<UnlockAttempt<string>> => {
+  // One authentication and one read of the store open the key for one action;
+  // `close` drops it, so a confirmation and the proof for its action never ask twice.
+  const open = async (): Promise<UnlockAttempt<RawUnlockSession>> => {
     // The system prompt comes first, and the store is read only after it passes.
     const present = await ports.presence
       .authenticate({ reason: "approve", promptMessage: PROMPT })
@@ -97,19 +101,30 @@ export function createPhoneUnlockKey(ports: PhoneUnlockKeyPorts): PhoneUnlockKey
     if (read.status === "refused") return { status: "cancelled" };
     if (read.status === "missing") return { status: "unavailable" };
     try {
-      const privateKey = await subtle.importKey(
+      let privateKey: CryptoKey | undefined = await subtle.importKey(
         "pkcs8",
         fromBase64(read.pkcs8),
         KEY_ALGORITHM,
         false,
         ["sign"],
       );
-      const signature = await subtle.sign(
-        { name: "ECDSA", hash: "SHA-256" },
-        privateKey,
-        new TextEncoder().encode(text),
-      );
-      return { status: "signed", value: base64UrlEncode(signature) };
+      return {
+        status: "signed",
+        value: {
+          sign: async (text) => {
+            if (privateKey === undefined) throw new Error("The unlock key was closed.");
+            const signature = await subtle.sign(
+              { name: "ECDSA", hash: "SHA-256" },
+              privateKey,
+              new TextEncoder().encode(text),
+            );
+            return base64UrlEncode(signature);
+          },
+          close: () => {
+            privateKey = undefined;
+          },
+        },
+      };
     } catch {
       return { status: "unavailable" };
     }
@@ -133,7 +148,7 @@ export function createPhoneUnlockKey(ports: PhoneUnlockKeyPorts): PhoneUnlockKey
       return {
         shape: "raw",
         publicKey: held.publicKey,
-        sign,
+        open,
       };
     },
     async forget() {

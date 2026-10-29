@@ -206,8 +206,9 @@ do at a computer's window, for example remove a member or change who else is an
 owner. It can do this only right after you prove you are there.
 
 **Each computer keeps its own owner list.** The hub's roster shows which
-members are owners, but a roster mark never makes anyone an owner on a
-computer. A computer lists only the owners you added to it.
+members are owners and carries each owner's unlock key. But the roster never
+makes anyone an owner on a computer. A computer lists only the owners you
+confirmed on it.
 
 **How a device becomes an owner**
 
@@ -217,10 +218,13 @@ computer. A computer lists only the owners you added to it.
   owner code**, before it joins. Turn it on for an owner code.
 - On a spoke: when the spoke joins with **Owners** ticked, open **Settings →
   Remote access** on that spoke. Under **Owner devices** it lists the hub's owner
-  devices by name and key fingerprint. Paste the device's unlock key (the device
-  shows it), check that both fingerprints match what the device
-  shows, and choose **Add**. The hub cannot add an owner to a spoke.
+  devices by name, device key fingerprint, and unlock key fingerprint. You paste
+  nothing. Check that the name and both fingerprints match what the device shows,
+  and choose **Add**. The hub cannot add an owner to a spoke.
 - Later: add or remove owners in that computer's own window the same way.
+- If the roster later lists a different unlock key for an owner you already
+  added, the spoke keeps the key you confirmed and shows a warning. To accept the
+  new key, remove that owner and add it again.
 
 **The unlock.** Every change an owner device makes asks you to unlock first, with
 Face ID, a fingerprint, your passcode, or a passkey. One unlock covers one
@@ -231,7 +235,8 @@ screen says so in plain words. If you cancel the unlock, nothing changes.
 **Phone.** The phone makes an unlock key when it joins with an owner code. Its
 private half is kept only in the phone's secure storage and opens only after you
 unlock. This is a narrower protection than a hardware key: the key is not bound
-to the phone's secure chip, and it is in memory for a moment while it signs.
+to the phone's secure chip, and it is in memory while one action runs. Confirming
+a member asks you once. The phone drops the key when the action ends.
 
 **Browser.** A browser on your tailnet that joined as an owner uses a passkey as
 its unlock key, one passkey for each computer address it uses. A browser without
@@ -247,7 +252,7 @@ unlock. Joining a spoke to a hub still happens on that spoke.
 Under **Settings → Remote access → New members**, a spoke has **Confirm new
 members**. It is off by default. With it on, a member the hub adds later can only
 read status on that spoke until you confirm it, in that spoke's window or on an
-owner device.
+owner device. **Confirm** shows only for a member the spoke is holding this way.
 
 Every spoke also keeps an alert for each member a newer roster adds, whether or
 not Confirm new members is on. The hub cannot hide or write one. An alert shows
@@ -258,8 +263,8 @@ alerts under **Owner alerts**, with **Remove**, **Confirm**, and **Dismiss**, ea
 asking for the unlock first. If you did not add the member, choose **Remove**,
 then check the hub: a member nobody added may mean the hub is not safe.
 
-Confirming a member signs a note with the unlock key, so a passkey cannot
-confirm yet. Confirm in the spoke's window or on a phone instead.
+Confirming a member signs a note with the unlock key. A passkey can sign it too.
+A passkey asks twice: once for the note, once for the action. A phone asks once.
 
 **Not checked on real hardware.** The owner features are built and tested with
 software keys. A phone with Face ID or a fingerprint, a real passkey, and

@@ -8,13 +8,17 @@
 // A platform supplies a pinned transport, the identity key it joined with, and
 // an unlock signer that signs only after the person proves presence (Face ID,
 // the device passcode, or a passkey with user verification). Nothing here holds
-// or exports a private key.
+// or exports a private key. A raw key is opened once for an action: the person
+// authenticates once, the key signs everything that action needs (the
+// confirmation and the proof for it), and the session is closed afterwards. A
+// passkey signs one challenge per prompt, so a confirmation asks it twice.
 
 import {
   OWNER_IDENTITY_KEY_HEADER,
   OWNER_UNLOCK_HEADER,
   decodeNewMemberConfirmation,
   decodeOwnerChallenge,
+  type HeldMember,
   type NewMemberAlert,
   type NewMemberConfirmation,
   type OwnerChallenge,
@@ -34,6 +38,7 @@ import {
 const OWNER_ROUTES = {
   challenge: "/api/hub/owner/challenge",
   alerts: "/api/hub/owner/alerts",
+  heldMembers: "/api/hub/owner/held-members",
   alertDismiss: "/api/hub/owner/alerts/dismiss",
   alertRemove: "/api/hub/owner/alerts/remove",
   confirmNewMembers: "/api/hub/owner/confirm-new-members",
@@ -58,17 +63,24 @@ export interface OwnerUnlockAssertion {
   readonly signature: string;
 }
 
+/** A raw key, opened after one authentication. `close` drops the key from memory. */
+export interface RawUnlockSession {
+  /** ES256 over the text (IEEE-P1363, base64url). May throw when the platform cannot sign. */
+  readonly sign: (text: string) => Promise<string>;
+  readonly close: () => void;
+}
+
 /**
- * The key that answers a host's challenge. `raw` signs the unlock text with
- * ES256 (IEEE-P1363, base64url); `webauthn` is a passkey that signs the
- * SHA-256 of the text, handed over as base64url.
+ * The key that answers a host's challenge. `raw` is opened once, after the
+ * person authenticates, and signs the unlock text with ES256; `webauthn` is a
+ * passkey that signs the SHA-256 of the text, handed over as base64url.
  */
 export type OwnerUnlockSigner =
   | {
       readonly shape: "raw";
       /** SubjectPublicKeyInfo, base64url: what the host recorded for this owner. */
       readonly publicKey: string;
-      readonly sign: (text: string) => Promise<UnlockAttempt<string>>;
+      readonly open: () => Promise<UnlockAttempt<RawUnlockSession>>;
     }
   | {
       readonly shape: "webauthn";
@@ -87,12 +99,15 @@ export type OwnerActionResult =
   | { readonly status: "done"; readonly body: unknown }
   | { readonly status: "refused"; readonly kind: string }
   | { readonly status: "not-unlocked"; readonly reason: "cancelled" | "unavailable" }
-  /** The unlock key signs in a shape the action cannot use (a passkey cannot sign a confirmation). */
-  | { readonly status: "unsupported" }
   | { readonly status: "unreachable" };
 
 export type OwnerAlertsResult =
   | { readonly status: "read"; readonly alerts: ReadonlyArray<NewMemberAlert> }
+  | { readonly status: "refused"; readonly kind: string }
+  | { readonly status: "unreachable" };
+
+export type OwnerHeldMembersResult =
+  | { readonly status: "read"; readonly members: ReadonlyArray<HeldMember> }
   | { readonly status: "refused"; readonly kind: string }
   | { readonly status: "unreachable" };
 
@@ -107,11 +122,22 @@ export interface OwnerClientOptions {
 export interface OwnerClient {
   /** New-member alerts this host raised. A read; it asks for no unlock. */
   readonly alerts: () => Promise<OwnerAlertsResult>;
+  /** The members the host holds under Confirm new members: the only ones Confirm applies to. A read; it asks for no unlock. */
+  readonly heldMembers: () => Promise<OwnerHeldMembersResult>;
   readonly dismissAlert: (alertId: string) => Promise<OwnerActionResult>;
   readonly removeFromAlert: (alertId: string) => Promise<OwnerActionResult>;
   readonly setConfirmNewMembers: (enabled: boolean) => Promise<OwnerActionResult>;
   /** Confirms the member an alert names: the unlock key signs the confirmation, then the action. */
   readonly confirmNewMember: (alert: NewMemberAlert) => Promise<OwnerActionResult>;
+}
+
+/** What a signer answers for one text: a raw signature, or a passkey's assertion. */
+type Signed = { readonly signature: string } | OwnerUnlockAssertion;
+
+/** An unlocked signer for one action. `close` ends the session. */
+interface ActionSigner {
+  readonly sign: (text: string) => Promise<UnlockAttempt<Signed>>;
+  readonly close: () => void;
 }
 
 const encoder = new TextEncoder();
@@ -172,8 +198,54 @@ export function createOwnerClient(options: OwnerClientOptions): OwnerClient {
     kind: stringField(answer.json, "kind") ?? "refused",
   });
 
-  /** Asks for a challenge for this one action, has the person's key sign it, and sends the action. */
-  const act = async (path: string, body: string): Promise<OwnerActionResult> => {
+  /** Asks the person once for a raw key; a passkey is asked per text, when it signs. */
+  const openSigner = async (): Promise<UnlockAttempt<ActionSigner>> => {
+    if (unlock.shape === "webauthn") {
+      return {
+        status: "signed",
+        value: {
+          sign: async (text) => unlock.assert(base64UrlEncode(await sha256(text))),
+          close: () => undefined,
+        },
+      };
+    }
+    const opened = await unlock.open();
+    if (opened.status !== "signed") return opened;
+    const session = opened.value;
+    return {
+      status: "signed",
+      value: {
+        sign: async (text) => {
+          try {
+            return { status: "signed", value: { signature: await session.sign(text) } };
+          } catch {
+            return { status: "unavailable" };
+          }
+        },
+        close: session.close,
+      },
+    };
+  };
+
+  /** Runs one action with a signer the person unlocked, and always closes it. */
+  const unlocked = async (
+    use: (signer: ActionSigner) => Promise<OwnerActionResult>,
+  ): Promise<OwnerActionResult> => {
+    const opened = await openSigner();
+    if (opened.status !== "signed") return { status: "not-unlocked", reason: opened.status };
+    try {
+      return await use(opened.value);
+    } finally {
+      opened.value.close();
+    }
+  };
+
+  /** Asks for a challenge for this one action, has the unlocked key sign it, and sends the action. */
+  const act = async (
+    path: string,
+    body: string,
+    signer: ActionSigner,
+  ): Promise<OwnerActionResult> => {
     const bodyHash = hex(await sha256(body));
     const asked = await send({
       method: "POST",
@@ -200,16 +272,13 @@ export function createOwnerClient(options: OwnerClientOptions): OwnerClient {
       bodyHash,
       expiresAt: challenge.expiresAt,
     });
-    let proof: Record<string, string>;
-    if (unlock.shape === "raw") {
-      const signed = await unlock.sign(text);
-      if (signed.status !== "signed") return { status: "not-unlocked", reason: signed.status };
-      proof = { shape: "raw", challengeId: challenge.challengeId, signature: signed.value };
-    } else {
-      const signed = await unlock.assert(base64UrlEncode(await sha256(text)));
-      if (signed.status !== "signed") return { status: "not-unlocked", reason: signed.status };
-      proof = { shape: "webauthn", challengeId: challenge.challengeId, ...signed.value };
-    }
+    const signed = await signer.sign(text);
+    if (signed.status !== "signed") return { status: "not-unlocked", reason: signed.status };
+    const proof = {
+      shape: unlock.shape,
+      challengeId: challenge.challengeId,
+      ...signed.value,
+    };
     const answered = await send({
       method: "POST",
       path,
@@ -230,37 +299,53 @@ export function createOwnerClient(options: OwnerClientOptions): OwnerClient {
       if (!answer.ok) return refusal(answer);
       return { status: "read", alerts: readAlerts((answer.json as { alerts?: unknown })?.alerts) };
     },
-    dismissAlert: (alertId) => act(OWNER_ROUTES.alertDismiss, JSON.stringify({ alertId })),
-    removeFromAlert: (alertId) => act(OWNER_ROUTES.alertRemove, JSON.stringify({ alertId })),
-    setConfirmNewMembers: (enabled) =>
-      act(OWNER_ROUTES.confirmNewMembers, JSON.stringify({ enabled })),
-    async confirmNewMember(alert) {
-      // The confirmation is its own signature by the unlock key, over the member
-      // and key it names, so the spoke can check it against the owner's recorded
-      // key. Only a raw key can make it: a passkey signs a challenge, not text.
-      if (unlock.shape !== "raw") return { status: "unsupported" };
-      // Decoding with a stand-in signature brands the ids and checks the shape.
-      let unsigned: NewMemberConfirmation;
-      try {
-        unsigned = decodeNewMemberConfirmation({
-          spokeId: target.memberId,
-          memberId: String(alert.memberId),
-          identityKeyFingerprint: alert.identityKeyFingerprint,
-          confirmedBy: identity.memberId,
-          unlockKeyFingerprint: await unlockKeyFingerprint(unlock.publicKey),
-          confirmedAt: new Date(now()).toISOString(),
-          signature: "A",
-        });
-      } catch {
-        return { status: "refused", kind: "confirmation-invalid" };
-      }
-      const signed = await unlock.sign(newMemberConfirmationSigningPayload(unsigned));
-      if (signed.status !== "signed") return { status: "not-unlocked", reason: signed.status };
-      return act(
-        OWNER_ROUTES.confirmMember,
-        JSON.stringify({ ...unsigned, signature: signed.value }),
-      );
+    async heldMembers() {
+      const answer = await send({ method: "GET", path: OWNER_ROUTES.heldMembers, body: "" });
+      if (answer === undefined) return { status: "unreachable" };
+      if (!answer.ok) return refusal(answer);
+      return {
+        status: "read",
+        members: readHeldMembers((answer.json as { members?: unknown } | undefined)?.members),
+      };
     },
+    dismissAlert: (alertId) =>
+      unlocked((signer) => act(OWNER_ROUTES.alertDismiss, JSON.stringify({ alertId }), signer)),
+    removeFromAlert: (alertId) =>
+      unlocked((signer) => act(OWNER_ROUTES.alertRemove, JSON.stringify({ alertId }), signer)),
+    setConfirmNewMembers: (enabled) =>
+      unlocked((signer) =>
+        act(OWNER_ROUTES.confirmNewMembers, JSON.stringify({ enabled }), signer),
+      ),
+    confirmNewMember: (alert) =>
+      unlocked(async (signer) => {
+        // The confirmation is its own signature by the unlock key, over the
+        // member and key it names, so the spoke can check it against the key it
+        // recorded for this owner. The same unlocked key then answers the
+        // host's challenge for the action that carries it.
+        // Decoding with a stand-in signature brands the ids and checks the shape.
+        let unsigned: Omit<NewMemberConfirmation, "signature">;
+        try {
+          const { signature: _standIn, ...fields } = decodeNewMemberConfirmation({
+            spokeId: target.memberId,
+            memberId: String(alert.memberId),
+            identityKeyFingerprint: alert.identityKeyFingerprint,
+            confirmedBy: identity.memberId,
+            unlockKeyFingerprint: await unlockKeyFingerprint(unlock.publicKey),
+            confirmedAt: new Date(now()).toISOString(),
+            signature: "A",
+          });
+          unsigned = fields;
+        } catch {
+          return { status: "refused", kind: "confirmation-invalid" };
+        }
+        const signed = await signer.sign(newMemberConfirmationSigningPayload(unsigned));
+        if (signed.status !== "signed") return { status: "not-unlocked", reason: signed.status };
+        return act(
+          OWNER_ROUTES.confirmMember,
+          JSON.stringify({ ...unsigned, ...signed.value }),
+          signer,
+        );
+      }),
   };
 }
 
@@ -276,6 +361,18 @@ function readAlerts(value: unknown): ReadonlyArray<NewMemberAlert> {
       stringField(entry, "alertId") !== undefined &&
       stringField(entry, "memberId") !== undefined &&
       stringField(entry, "name") !== undefined &&
+      stringField(entry, "identityKeyFingerprint") !== undefined
+    );
+  });
+}
+
+function readHeldMembers(value: unknown): ReadonlyArray<HeldMember> {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is HeldMember => {
+    return (
+      stringField(entry, "memberId") !== undefined &&
+      stringField(entry, "name") !== undefined &&
+      stringField(entry, "role") !== undefined &&
       stringField(entry, "identityKeyFingerprint") !== undefined
     );
   });

@@ -120,7 +120,11 @@ export class OwnerUnlockService {
         ? { status: "fresh" }
         : { status: "refused", kind: "signature-invalid" };
     }
-    return verifyAssertion({ payload, proof: input.proof, unlockPublicKey: input.unlockPublicKey });
+    return verifyOwnerAssertion({
+      payload,
+      assertion: input.proof,
+      unlockPublicKey: input.unlockPublicKey,
+    });
   }
 
   #forgetExpired(now: number): void {
@@ -130,14 +134,23 @@ export class OwnerUnlockService {
   }
 }
 
-function verifyAssertion(input: {
+/**
+ * Whether a passkey's assertion answers `payload`: its challenge is the SHA-256
+ * of the text, the person was present and verified, and the key the host
+ * recorded signed it. Unlocks and confirmations share this rule.
+ */
+export function verifyOwnerAssertion(input: {
   readonly payload: string;
-  readonly proof: Extract<OwnerUnlockProof, { readonly shape: "webauthn" }>;
+  readonly assertion: {
+    readonly authenticatorData: string;
+    readonly clientDataJson: string;
+    readonly signature: string;
+  };
   readonly unlockPublicKey: string;
 }): OwnerUnlockVerification {
   const invalid = { status: "refused", kind: "signature-invalid" } as const;
-  const authenticatorData = Buffer.from(input.proof.authenticatorData, "base64url");
-  const clientDataBytes = Buffer.from(input.proof.clientDataJson, "base64url");
+  const authenticatorData = Buffer.from(input.assertion.authenticatorData, "base64url");
+  const clientDataBytes = Buffer.from(input.assertion.clientDataJson, "base64url");
   let clientData: unknown;
   try {
     clientData = JSON.parse(clientDataBytes.toString("utf8"));
@@ -170,7 +183,7 @@ function verifyAssertion(input: {
       "sha256",
       signed,
       { key, dsaEncoding: "der" },
-      Buffer.from(input.proof.signature, "base64url"),
+      Buffer.from(input.assertion.signature, "base64url"),
     )
       ? { status: "fresh" }
       : invalid;
