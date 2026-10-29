@@ -584,6 +584,69 @@ describe("replacing the hub for good", () => {
     expect(names(standby.hub.status().roster ?? promoted.roster)).toEqual(["Standby"]);
   });
 
+  /** A promoted standby, a laptop that ticked Standby, and a tablet that did not, with the old hub stopped. */
+  async function promotedWithTwoMembers() {
+    const { network, hub, standby, member: laptop } = await startFamily();
+    const tablet = await start(network, "Tablet", 106);
+    await join(hub, tablet);
+    standby.spoke.setGrant(standbyGrant, window);
+    laptop.spoke.setGrant(standbyGrant, window);
+    await hub.hub.setStandbyOrder([decodeMemberId(standby.hostId)], window);
+    await laptop.failover.tick();
+    await tablet.failover.tick();
+    const promoted = standby.hub.promote(window);
+    if (promoted.status !== "promoted") throw new Error(JSON.stringify(promoted));
+    return { network, hub, standby, laptop, tablet, promoted };
+  }
+
+  it("is followed without a person by a spoke that ticked Standby, and awaited by one that did not", async () => {
+    const { network, hub, standby, laptop, tablet, promoted } = await promotedWithTwoMembers();
+    const grantBefore = laptop.state.load().link?.grant;
+    network.stop(hub.address);
+    await pause(FAILOVER_AFTER_MS + 40);
+
+    await laptop.failover.tick();
+    await tablet.failover.tick();
+
+    const followed = laptop.spoke.status();
+    if (followed.membership !== "member") throw new Error("Laptop is not a member.");
+    expect(String(followed.hub.memberId)).toBe(standby.hostId);
+    expect(followed.roster.roster.sequence).toBe(promoted.roster.roster.sequence);
+    expect(laptop.state.load().link?.grant).toEqual(grantBefore);
+    expect(laptop.records.at(-1)).toMatchObject({
+      change: "new-hub-accepted",
+      followReason: "standby-granted-hub-silent",
+      actingPrincipal: { kind: "hub", memberId: standby.hostId },
+    });
+    const waiting = tablet.spoke.status();
+    if (waiting.membership !== "member") throw new Error("Tablet is not a member.");
+    expect(waiting.hub.name).toBe("Mac mini");
+    expect(tablet.records.some((entry) => entry.change === "new-hub-accepted")).toBe(false);
+
+    expect((await tablet.spoke.acceptNewHub(standby.hostId, window)).status).toBe("accepted");
+    expect(tablet.records.at(-1)).toMatchObject({
+      change: "new-hub-accepted",
+      actingPrincipal: { kind: "local-window" },
+    });
+  });
+
+  it("is not followed while the old hub can still be reached", async () => {
+    const { standby, laptop } = await promotedWithTwoMembers();
+
+    expect(
+      await laptop.spoke.followPromotedHub({
+        silentForMs: 0,
+        failoverAfterMs: FAILOVER_AFTER_MS,
+      }),
+    ).toEqual({ status: "refused", kind: "hub-seen-recently" });
+    await laptop.failover.tick();
+
+    const held = laptop.spoke.status();
+    if (held.membership !== "member") throw new Error("Laptop is not a member.");
+    expect(held.hub.name).toBe("Mac mini");
+    expect(String(held.hub.memberId)).not.toBe(standby.hostId);
+  });
+
   /** A promoted standby and a member whose check of the new hub waits until the test lets it through. */
   async function promotedWithHeldAcceptance() {
     const network = new HubTestNetwork();
