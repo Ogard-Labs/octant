@@ -23,6 +23,8 @@ import type { MobileHostRegistry, MobileHostRegistryStorage } from "./HostRegist
 export interface GuestSpokeHost {
   readonly memberId: string;
   readonly hostId: string;
+  /** The device the spoke made for this phone; a different one on reopening means the spoke let the old one go. */
+  readonly deviceId?: string;
 }
 
 /** A spoke on the roster that refused this phone; it stays listed, with no action. */
@@ -74,6 +76,28 @@ export interface GuestSpokeDependencies {
   readonly registry: Pick<MobileHostRegistry, "upsert">;
   /** Takes a host off the phone and deletes what the phone holds for it. */
   readonly removeHost: (hostId: string) => Promise<unknown>;
+  /** Waits before asking a spoke again; the phone uses a real timer, tests an instant one. */
+  readonly retryDelay?: (milliseconds: number) => Promise<void>;
+}
+
+// The hub publishes a new roster without waiting for the spokes, so the first
+// ask can reach a spoke that has not heard of this phone yet.
+const ROSTER_RETRY_DELAYS_MS = [500, 1500, 4000] as const;
+
+const wait = (milliseconds: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+
+async function admitGuestWithRetry(
+  input: Parameters<typeof admitGuestOnSpoke>[0],
+  retryDelay: (milliseconds: number) => Promise<void>,
+): ReturnType<typeof admitGuestOnSpoke> {
+  let admission = await admitGuestOnSpoke(input);
+  for (const delay of ROSTER_RETRY_DELAYS_MS) {
+    if (admission.status !== "refused" || admission.kind !== "not-in-roster") break;
+    await retryDelay(delay);
+    admission = await admitGuestOnSpoke(input);
+  }
+  return admission;
 }
 
 /**
@@ -106,21 +130,35 @@ export async function connectGuestSpokes(
 
   const notAccepted = new Map<string, GuestSpokeRefusal>();
   for (const target of targets) {
-    if (held.has(target.memberId)) continue;
-    const admission = await admitGuestOnSpoke({
-      target,
-      signer: input.signer,
-      deviceLabel: input.deviceLabel,
-      transport: input.transport,
-    });
+    // A saved spoke is asked again: one that left and rejoined while the phone
+    // was away revoked its device and now answers with a new one.
+    const saved = held.get(target.memberId);
+    const admission = await admitGuestWithRetry(
+      {
+        target,
+        signer: input.signer,
+        deviceLabel: input.deviceLabel,
+        transport: input.transport,
+      },
+      input.retryDelay ?? wait,
+    );
     if (admission.status === "refused") {
+      if (saved !== undefined) {
+        await input.removeHost(saved.hostId);
+        held.delete(target.memberId);
+      }
       notAccepted.set(target.memberId, { memberId: target.memberId, name: target.name });
       continue;
     }
     if (admission.status === "unreachable") {
       const before = refusedBefore.get(target.memberId);
-      if (before !== undefined) notAccepted.set(target.memberId, before);
+      if (before !== undefined && saved === undefined) notAccepted.set(target.memberId, before);
       continue;
+    }
+    if (saved !== undefined) {
+      if (saved.deviceId === admission.deviceId) continue;
+      await input.removeHost(saved.hostId);
+      held.delete(target.memberId);
     }
     const member = input.record.roster.roster.members.find(
       (entry) => String(entry.memberId) === target.memberId,
@@ -158,7 +196,11 @@ export async function connectGuestSpokes(
       if (keyId !== undefined) await input.deviceKeyStore.remove(keyId).catch(() => undefined);
       continue;
     }
-    held.set(target.memberId, { memberId: target.memberId, hostId: target.memberId });
+    held.set(target.memberId, {
+      memberId: target.memberId,
+      hostId: target.memberId,
+      deviceId: admission.deviceId,
+    });
   }
 
   return {
