@@ -1190,6 +1190,7 @@ export function startOctantServer(
       debugConfigurationApprovals,
       debugService,
       languageServerApprovals,
+      nativeHarnessSessions,
       onWorkTurnCancelled,
       options,
       persistence,

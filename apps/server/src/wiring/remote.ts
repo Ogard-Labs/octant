@@ -84,6 +84,8 @@ import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
 import type { AgentRunsWiring } from "./agentRuns";
+import type { HarnessStateWiring } from "./harnessState";
+import { checkDelegationParent } from "../hub/delegationParentCheck";
 import type { IntegrationsWiring } from "./integrations";
 import type { ComputerUseWiring } from "./computerUse";
 import type { CodeWiring } from "./code";
@@ -104,6 +106,7 @@ export type RemoteDependencies = Pick<
 > &
   Pick<AuthorityWiring, "browserCaptureStore" | "windowAuthorityStore"> &
   Pick<AgentRunsWiring, "agentRunAdmission" | "externalContentIngestionStore"> &
+  Pick<HarnessStateWiring, "nativeHarnessSessions"> &
   Pick<IntegrationsWiring, "agentMessageService" | "toolEgressRules"> &
   Pick<ComputerUseWiring, "webAssets"> &
   Pick<CodeWiring, "codeAttachments" | "codeProjectAccess" | "workAttachments"> &
@@ -157,6 +160,7 @@ export function wireRemote(deps: RemoteDependencies) {
     agentRunAdmission,
     authenticatedProductDispatch,
     browserCaptureStore,
+    nativeHarnessSessions,
     canvasPublicShareService,
     canvasRoutes,
     chatAttachmentStore,
@@ -484,37 +488,22 @@ export function wireRemote(deps: RemoteDependencies) {
     target: (memberId) => spokeLinkService.memberTarget(memberId),
     transport: hubTransport,
     parent: {
-      check: ({ mode, threadId, windowId }) => {
-        if (agentRunAdmission.settings.current().creationPosture !== "automatic") {
-          return { status: "refused", kind: "subagents-off" };
-        }
-        const parent = agentRunAdmission.authorizeCreation({
-          parentThreadId: decodeAgentRunParentThreadId(threadId),
-          windowId,
-        });
-        if (parent === undefined) return { status: "refused", kind: "parent-unavailable" };
-        if (parent.parentMode !== mode) return { status: "refused", kind: "parent-mode-mismatch" };
-        if (!parent.parentAuthority.subagents || !parent.liveAuthority.subagents) {
-          return { status: "refused", kind: "subagents-not-allowed" };
-        }
-        // A thread that read outside content cannot start helpers, and a
-        // delegated result is outside content.
-        if (
-          readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested
-        ) {
-          return { status: "refused", kind: "parent-tainted" };
-        }
-        const policy = parent.liveAuthority.executionPolicy;
-        return {
-          status: "allowed",
-          ceiling:
-            policy === "full-access"
-              ? "full-access"
-              : policy === "plan"
-                ? "plan"
-                : "approval-gated",
-        };
-      },
+      check: (input) =>
+        checkDelegationParent(
+          {
+            creationPosture: () => agentRunAdmission.settings.current().creationPosture,
+            authorizeCreation: ({ threadId, windowId }) =>
+              agentRunAdmission.authorizeCreation({
+                parentThreadId: decodeAgentRunParentThreadId(threadId),
+                windowId,
+              }),
+            externalContentIngested: (threadId) =>
+              readThreadExternalContentTaint(persistence.connection, threadId)
+                .externalContentIngested,
+            sessionStatus: (threadId) => nativeHarnessSessions.read(threadId)?.session.status,
+          },
+          input,
+        ),
       ingest: ({ threadId, sourceLabel, contentReference, correlationId }) => {
         const recorded = externalContentIngestionStore.record({
           threadId,
