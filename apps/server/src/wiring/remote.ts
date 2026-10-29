@@ -55,7 +55,8 @@ import { createHubLinkRouteHandler } from "../hub/hubLinkRoutes";
 import { createHubOwnerRouteHandler } from "../hub/hubOwnerRoutes";
 import { OwnerUnlockService } from "../hub/ownerUnlock";
 import { createHubMembershipJournal } from "../hub/hubMembershipJournal";
-import { HubService } from "../hub/hubService";
+import { FailoverService } from "../hub/failoverService";
+import { HubService, type HubPairingPort } from "../hub/hubService";
 import { createHubStateStore } from "../hub/hubStateStore";
 import { createPinnedHubTransport } from "../hub/pinnedHubTransport";
 import { createRosterSigningKeyStore } from "../hub/rosterSigningKey";
@@ -97,6 +98,8 @@ import type { CanvasWiring } from "./canvas";
 import type { AutomationWiring } from "./automation";
 import type { RoutesWiring } from "./routes";
 
+/** How often a hub member looks for the hub; the failover time itself is the hub's setting in the roster. */
+const FAILOVER_LOOK_MS = 15_000;
 const CERTIFICATE_CHECK_MS = 24 * 60 * 60 * 1_000;
 const STARTUP_CERTIFICATE_CHECK_MS = 60 * 1_000;
 
@@ -370,32 +373,33 @@ export function wireRemote(deps: RemoteDependencies) {
     uuid: randomUUID,
     clock: () => new Date().toISOString(),
   });
+  const hubPairing = (): HubPairingPort | undefined => {
+    const gateway = currentRemoteGateway;
+    const administration = gateway?.localDeviceAdministration();
+    if (gateway === undefined || administration === undefined) return undefined;
+    return {
+      createTicket: (sourceClass) => {
+        const ticket = administration.createPairingTicket({ sourceClass });
+        return {
+          ticketId: String(ticket.ticketId),
+          ticketProof: ticket.ticketProof,
+          expiresAt: ticket.expiresAt,
+        };
+      },
+      approvedDeviceFor: (ticket) => gateway.approvedPairingDevice(ticket),
+      revokeDevice: (deviceId) => {
+        administration.revokeDevice({ deviceId });
+      },
+      deviceKeyFingerprint: (deviceId) => gateway.pairedDeviceKeyFingerprint(deviceId),
+      deviceActive: (deviceId) => deviceIsActive(administration, deviceId),
+    };
+  };
   const hubService = new HubService({
     state: hubStateStore,
     rosterKey: createRosterSigningKeyStore(providerDataDirectory),
     identity: resolveHubIdentity,
     listener: () => privateListenerController.status(),
-    pairing: () => {
-      const gateway = currentRemoteGateway;
-      const administration = gateway?.localDeviceAdministration();
-      if (gateway === undefined || administration === undefined) return undefined;
-      return {
-        createTicket: (sourceClass) => {
-          const ticket = administration.createPairingTicket({ sourceClass });
-          return {
-            ticketId: String(ticket.ticketId),
-            ticketProof: ticket.ticketProof,
-            expiresAt: ticket.expiresAt,
-          };
-        },
-        approvedDeviceFor: (ticket) => gateway.approvedPairingDevice(ticket),
-        revokeDevice: (deviceId) => {
-          administration.revokeDevice({ deviceId });
-        },
-        deviceKeyFingerprint: (deviceId) => gateway.pairedDeviceKeyFingerprint(deviceId),
-        deviceActive: (deviceId) => deviceIsActive(administration, deviceId),
-      };
-    },
+    pairing: hubPairing,
     transport: hubTransport,
     record: recordHubMembership,
     now: Date.now,
@@ -421,6 +425,20 @@ export function wireRemote(deps: RemoteDependencies) {
     serverBuildVersion: version,
     now: Date.now,
   });
+  // A member that cannot reach the hub for the failover time tries the standbys,
+  // and a named standby that sees no hub starts standing in. Off for a host that
+  // is not a hub member: the look does nothing without a link.
+  const failoverService = new FailoverService({
+    state: hubStateStore,
+    identity: resolveHubIdentity,
+    listener: () => privateListenerController.status(),
+    pairing: hubPairing,
+    transport: hubTransport,
+    spoke: spokeLinkService,
+    record: recordHubMembership,
+    now: Date.now,
+  });
+  setInterval(() => void failoverService.tick().catch(() => undefined), FAILOVER_LOOK_MS).unref();
   const tailscaleCertificate = new TailscaleCertificateService({
     setting: createTailscaleCertificateSetting(providerDataDirectory),
     daemon: createTailscaleCliDaemon({
@@ -444,10 +462,15 @@ export function wireRemote(deps: RemoteDependencies) {
     windowAuthorityStore,
     hub: hubService,
     spoke: spokeLinkService,
+    failover: failoverService,
     certificate: tailscaleCertificate,
     maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
   });
-  const hubLinkRoutes = createHubLinkRouteHandler({ hub: hubService, spoke: spokeLinkService });
+  const hubLinkRoutes = createHubLinkRouteHandler({
+    hub: hubService,
+    spoke: spokeLinkService,
+    failover: failoverService,
+  });
   // Delegation between spokes: the receiving side starts an ordinary Work
   // thread under this host's own scope, and the sending side checks this host's
   // rules for the parent thread before it asks another member.

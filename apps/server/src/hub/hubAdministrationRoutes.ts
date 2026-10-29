@@ -11,7 +11,11 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
   decodeConfirmNewMembersRequest,
+  decodeHubAcceptNewHubRequest,
   decodeHubGrant,
+  decodeHubMemberReference,
+  decodeHubPromoteRequest,
+  decodeHubStandbyOrderRequest,
   decodeOwnerAdditionRequest,
   decodeOwnerAlertRequest,
   decodeOwnerMemberRequest,
@@ -20,6 +24,7 @@ import {
 } from "@octant/contracts";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
+import type { FailoverService } from "./failoverService";
 import type { HubService } from "./hubService";
 import type { SpokeLinkService } from "./spokeLinkService";
 import type { TailscaleCertificateService } from "./tailscaleCertificate";
@@ -48,6 +53,16 @@ export const HUB_ADMINISTRATION_ROUTES = {
   alertRemove: "/api/desktop/hub/alerts/remove",
   /** The `*.ts.net` certificate for the web app: GET reads it, POST turns it on or off or renews it. */
   certificate: "/api/desktop/hub/certificate",
+  /** The hub's window names the standby hubs in order. A standby never reaches this route for itself. */
+  standbyOrder: "/api/desktop/hub/standby-order",
+  /** A standby's own window, confirmed by the person, makes that host the hub for good. */
+  promote: "/api/desktop/hub/promote",
+  /** A spoke's own window accepts the standby that was promoted to hub. */
+  acceptNewHub: "/api/desktop/hub/accept-new-hub",
+  /** A standing-in standby's window makes a join code for a new member. */
+  standInJoinCode: "/api/desktop/hub/stand-in/join-codes",
+  /** A standing-in standby's window removes a member. */
+  standInRemove: "/api/desktop/hub/stand-in/members/remove",
 } as const;
 
 type RouteValue = (typeof HUB_ADMINISTRATION_ROUTES)[keyof typeof HUB_ADMINISTRATION_ROUTES];
@@ -57,6 +72,7 @@ export interface HubAdministrationRouteOptions {
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly hub: HubService;
   readonly spoke: SpokeLinkService;
+  readonly failover: FailoverService;
   readonly certificate: TailscaleCertificateService;
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
@@ -105,6 +121,7 @@ export function createHubAdministrationRouteHandler(
           ownerCandidates: options.hub.ownerCandidates(),
         },
         spoke: options.spoke.status(),
+        failover: options.failover.status(),
       });
     }
     if (route === HUB_ADMINISTRATION_ROUTES.heldMembers) {
@@ -212,6 +229,31 @@ export function createHubAdministrationRouteHandler(
         case HUB_ADMINISTRATION_ROUTES.leave: {
           requireNoBody(body.text);
           return outcome(await options.spoke.leave(WINDOW_PRINCIPAL));
+        }
+        case HUB_ADMINISTRATION_ROUTES.standbyOrder: {
+          const value = decodeHubStandbyOrderRequest(parseJson(request, body.text));
+          return outcome(await options.hub.setStandbyOrder(value.memberIds, WINDOW_PRINCIPAL));
+        }
+        case HUB_ADMINISTRATION_ROUTES.promote: {
+          // The literal `confirmed: true` is the person's confirmation in this window.
+          decodeHubPromoteRequest(parseJson(request, body.text));
+          return outcome(options.hub.promote(WINDOW_PRINCIPAL));
+        }
+        case HUB_ADMINISTRATION_ROUTES.acceptNewHub: {
+          const value = decodeHubAcceptNewHubRequest(parseJson(request, body.text));
+          return outcome(
+            await options.spoke.acceptNewHub(String(value.hubMemberId), WINDOW_PRINCIPAL),
+          );
+        }
+        case HUB_ADMINISTRATION_ROUTES.standInJoinCode: {
+          requireNoBody(body.text);
+          return outcome(options.failover.mintJoinCode());
+        }
+        case HUB_ADMINISTRATION_ROUTES.standInRemove: {
+          const value = decodeHubMemberReference(parseJson(request, body.text));
+          return outcome(
+            await options.failover.removeMember(String(value.memberId), WINDOW_PRINCIPAL),
+          );
         }
         case HUB_ADMINISTRATION_ROUTES.certificate: {
           const value = parseJson(request, body.text);

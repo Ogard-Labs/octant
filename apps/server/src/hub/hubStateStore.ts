@@ -12,6 +12,7 @@ import {
   HubMemberId,
   NewMemberAlert,
   PeerGrant,
+  RosterMember,
   SignedHubRoster,
 } from "@octant/contracts";
 import { Schema } from "effect";
@@ -29,7 +30,12 @@ const key = Schema.NonEmptyTrimmedString.pipe(
 export const HubMemberRecord = Schema.Struct({
   memberId: HubMemberId,
   identityPublicKey: key,
-  deviceId: Schema.UUID,
+  /**
+   * The paired device this hub made for the member. Absent for a member that a
+   * standby added while it stood in: it paired with the standby, so this hub
+   * holds no device to revoke and the member holds no owner powers here.
+   */
+  deviceId: Schema.optional(Schema.UUID),
   /** Absent for a guest, which runs no listener the hub could reach. */
   listenerOrigin: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(300))),
 }).annotations(strict);
@@ -64,8 +70,45 @@ export const HubSideState = Schema.Struct({
   joinTickets: Schema.Array(HubJoinTicketRecord),
   /** The hub's own owner list. A roster's owner mark never adds to it. */
   owners: Schema.optional(Schema.Array(HostOwnerRecord)),
+  /**
+   * The members this hub removed, with the roster sequence of each removal. A
+   * standby that stood in hands back its changes against a base sequence, and
+   * the removals after it are what keep a member out when the other side kept it.
+   */
+  removals: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        memberId: HubMemberId,
+        sequence: Schema.Int.pipe(Schema.positive()),
+      }).annotations(strict),
+    ),
+  ),
 }).annotations(strict);
 export type HubSideState = typeof HubSideState.Type;
+
+/** A member a standby added while standing in, kept until the hub takes it back. */
+export const StandInAddedRecord = Schema.Struct({
+  member: RosterMember,
+  identityPublicKey: key,
+  listenerOrigin: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(300)),
+  /** The paired device the standby made for the member. */
+  deviceId: Schema.UUID,
+}).annotations(strict);
+export type StandInAddedRecord = typeof StandInAddedRecord.Type;
+
+/**
+ * What a standby keeps while it stands in for an unreachable hub: the hub-signed
+ * sequence it stood in on, the membership changes it made, and the join codes it
+ * made. Members and join codes are never netted, so the hub sees every change.
+ */
+export const StandInState = Schema.Struct({
+  startedAt: Schema.Int,
+  baseSequence: Schema.Int.pipe(Schema.positive()),
+  added: Schema.Array(StandInAddedRecord),
+  removed: Schema.Array(HubMemberId),
+  joinTickets: Schema.Array(Schema.UUID),
+}).annotations(strict);
+export type StandInState = typeof StandInState.Type;
 
 export const GuestDeviceRecord = Schema.Struct({
   memberId: HubMemberId,
@@ -100,6 +143,13 @@ export const HubLinkState = Schema.Struct({
   rejectedMemberIds: Schema.optional(Schema.Array(HubMemberId)),
   /** Set while Leave waits on the hub, so no guest is admitted after the devices to revoke were read. */
   leaving: Schema.optional(Schema.Literal(true)),
+  /**
+   * The latest hub-signed roster, kept while `roster` is one a standby signed.
+   * It is what names the standbys, so a standby-signed roster is judged against it.
+   */
+  hubSignedRoster: Schema.optional(SignedHubRoster),
+  /** Present while this host, a named standby, stands in for a hub it cannot reach. */
+  standIn: Schema.optional(StandInState),
 }).annotations(strict);
 export type HubLinkState = typeof HubLinkState.Type;
 

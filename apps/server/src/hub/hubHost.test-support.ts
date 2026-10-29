@@ -34,11 +34,12 @@ import {
 import { createSelfMadeListenerCertificateStore } from "../remote/selfMadeListenerCertificate";
 import { DelegatingSpokeService, type DelegatingParentPort } from "./delegatingSpokeService";
 import { createDelegationStateStore, type DelegationStatePort } from "./delegationStateStore";
+import { FailoverService } from "./failoverService";
 import { createHubLinkRouteHandler } from "./hubLinkRoutes";
 import { createHubOwnerRouteHandler } from "./hubOwnerRoutes";
 import { OwnerUnlockService } from "./ownerUnlock";
 import { createHubStateStore, type HubStatePort } from "./hubStateStore";
-import { HubService, type HubHostIdentity } from "./hubService";
+import { HubService, type HubHostIdentity, type HubPairingPort } from "./hubService";
 import { createPeerDelegationRouteHandler } from "./peerDelegationRoutes";
 import { PeerDelegationService, type PeerDelegationHost } from "./peerDelegationService";
 import { createPinnedHubTransport, type HubNetwork, type HubTransport } from "./pinnedHubTransport";
@@ -75,10 +76,20 @@ const NO_PARENT: DelegatingParentPort = {
 /** Maps each host's private address to the loopback port its listener really serves on. */
 export class HubTestNetwork {
   readonly #ports = new Map<string, number>();
+  readonly #stopped = new Set<string>();
   readonly dialled: string[] = [];
 
   register(address: string, port: number): void {
     this.#ports.set(address, port);
+  }
+
+  /** Makes a host unreachable to every other host, as a stopped machine is; its own state stays. */
+  stop(address: string): void {
+    this.#stopped.add(address);
+  }
+
+  start(address: string): void {
+    this.#stopped.delete(address);
   }
 
   readonly network: HubNetwork = {
@@ -86,7 +97,7 @@ export class HubTestNetwork {
     dial: (address) =>
       new Promise<Socket>((resolve, reject) => {
         const port = this.#ports.get(address);
-        if (port === undefined) {
+        if (port === undefined || this.#stopped.has(address)) {
           reject(new Error(`No test host at ${address}.`));
           return;
         }
@@ -111,6 +122,7 @@ export interface HubTestHost {
   readonly gateway: RemoteGateway;
   readonly hub: HubService;
   readonly spoke: SpokeLinkService;
+  readonly failover: FailoverService;
   readonly state: HubStatePort;
   readonly records: HubMembershipChangedPayload[];
   /** This host's delegations, sent and received, as the delegation routes keep them. */
@@ -144,6 +156,8 @@ export async function startHubTestHost(input: {
   readonly delegatingTransport?: (transport: HubTransport) => HubTransport;
   /** The authenticated product surface; the tests that prove a member reaches none of it pass a spy. */
   readonly productDispatch?: RemoteProductDispatch;
+  /** The failover time in milliseconds; absent, the roster's own. A test cannot wait five minutes. */
+  readonly failoverAfterMs?: number;
 }): Promise<HubTestHost> {
   const directory = mkdtempSync(join(tmpdir(), "octant-hub-"));
   input.cleanups.push(() => rmSync(directory, { recursive: true, force: true }));
@@ -219,32 +233,33 @@ export async function startHubTestHost(input: {
   const records: HubMembershipChangedPayload[] = [];
   const transport = createPinnedHubTransport(input.network.network);
   let gateway: RemoteGateway | undefined;
+  const hubPairing = (): HubPairingPort | undefined => {
+    const administration = gateway?.localDeviceAdministration();
+    if (gateway === undefined || administration === undefined) return undefined;
+    const current = gateway;
+    return {
+      createTicket: (sourceClass) => {
+        const ticket = administration.createPairingTicket({ sourceClass });
+        return {
+          ticketId: String(ticket.ticketId),
+          ticketProof: ticket.ticketProof,
+          expiresAt: ticket.expiresAt,
+        };
+      },
+      approvedDeviceFor: (ticket) => current.approvedPairingDevice(ticket),
+      revokeDevice: (deviceId) => {
+        administration.revokeDevice({ deviceId });
+      },
+      deviceKeyFingerprint: (deviceId) => current.pairedDeviceKeyFingerprint(deviceId),
+      deviceActive: (deviceId) => deviceIsActive(administration, deviceId),
+    };
+  };
   const hub = new HubService({
     state,
     rosterKey: createRosterSigningKeyStore(directory),
     identity: () => identity,
     listener: () => listener,
-    pairing: () => {
-      const administration = gateway?.localDeviceAdministration();
-      if (gateway === undefined || administration === undefined) return undefined;
-      const current = gateway;
-      return {
-        createTicket: (sourceClass) => {
-          const ticket = administration.createPairingTicket({ sourceClass });
-          return {
-            ticketId: String(ticket.ticketId),
-            ticketProof: ticket.ticketProof,
-            expiresAt: ticket.expiresAt,
-          };
-        },
-        approvedDeviceFor: (ticket) => current.approvedPairingDevice(ticket),
-        revokeDevice: (deviceId) => {
-          administration.revokeDevice({ deviceId });
-        },
-        deviceKeyFingerprint: (deviceId) => current.pairedDeviceKeyFingerprint(deviceId),
-        deviceActive: (deviceId) => deviceIsActive(administration, deviceId),
-      };
-    },
+    pairing: hubPairing,
     transport,
     record: (change) => records.push(change),
     now: Date.now,
@@ -274,7 +289,20 @@ export async function startHubTestHost(input: {
   // outlive its minute without the test waiting for it.
   const clock = { offset: 0 };
   const ownerNow = () => Date.now() + clock.offset;
-  const hubLinkRoutes = createHubLinkRouteHandler({ hub, spoke });
+  const failover = new FailoverService({
+    state,
+    identity: () => identity,
+    listener: () => listener,
+    pairing: hubPairing,
+    transport,
+    spoke,
+    record: (change) => records.push(change),
+    now: Date.now,
+    ...(input.failoverAfterMs === undefined
+      ? {}
+      : { failoverAfterMs: () => input.failoverAfterMs }),
+  });
+  const hubLinkRoutes = createHubLinkRouteHandler({ hub, spoke, failover });
   const hubOwnerRoutes = createHubOwnerRouteHandler({
     hub,
     spoke,
@@ -380,6 +408,7 @@ export async function startHubTestHost(input: {
     gateway,
     hub,
     spoke,
+    failover,
     state,
     records,
     delegationState,

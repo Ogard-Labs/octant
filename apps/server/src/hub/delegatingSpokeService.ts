@@ -11,7 +11,6 @@
 import { randomUUID } from "node:crypto";
 import {
   DelegationRequestId as DelegationRequestIdSchema,
-  NO_LISTENER_PIN,
   UtcTimestamp,
   WorkThreadId as WorkThreadIdSchema,
   decodeCodeThreadId,
@@ -41,6 +40,7 @@ import {
 import { FRESHNESS_WINDOW_MS, HUB_PEER_KEY_HEADER, sendHubLinkRequest } from "./hubLink";
 import { listenerPinFromDigest } from "./hubCrypto";
 import type { HubHostIdentity } from "./hubService";
+import { memberOrigin } from "./memberOrigin";
 import type { HubTransport } from "./pinnedHubTransport";
 import { PEER_DELEGATION_ROUTES } from "./peerDelegationRoutes";
 import type { MemberTarget } from "./spokeLinkService";
@@ -688,14 +688,7 @@ function delegationResultBody(result: DelegationResult): string {
   return `Summary:\n${result.summary}\n\nFinal message:\n${result.finalMessage}${artifacts}`;
 }
 
-/** A member's listener origin from the roster entry that lists it; a guest has none. */
-export function memberOrigin(member: RosterMember): string | undefined {
-  if (member.listenerPin === NO_LISTENER_PIN) return undefined;
-  const host = member.addresses[0] ?? member.privateNames[0];
-  if (host === undefined) return undefined;
-  const bracketed = host.includes(":") ? `[${host}]` : host;
-  return `https://${bracketed}${member.listenerPort === undefined ? "" : `:${member.listenerPort}`}`;
-}
+export { memberOrigin };
 
 /**
  * A refusal with no readable reason, or a status that says "try again" (a

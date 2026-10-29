@@ -19,12 +19,14 @@ import {
   authorizePeer,
   clampDelegation,
   decideRosterReplacement,
+  decideStandIn,
   defaultHubGrant,
   delegationPostureWithin,
   honorOwner,
   hubRosterSigningPayload,
   mergeStandInMembership,
   newMemberConfirmationSigningPayload,
+  orderStandbys,
   OWNER_UNLOCK_LIFETIME_MS,
   ownerUnlockSigningPayload,
   reconcileHeldGrants,
@@ -400,6 +402,70 @@ describe("mergeStandInMembership", () => {
       standby: { sequence: 6, added: [], removed: [memberId(2)] },
     });
     expect(merged.standbyOrder).toEqual([]);
+  });
+});
+
+describe("orderStandbys", () => {
+  const base = roster(5, baseMembers, [2]);
+  const roles = (ordered: HubRoster) => ordered.members.map((entry) => entry.role);
+
+  it("gives the named spokes the standby role in order and returns the others to spoke", () => {
+    const result = orderStandbys({ roster: base, memberIds: [memberId(3)] });
+    if (result.status !== "ordered") throw new Error(result.kind);
+    expect(result.roster.standbyOrder).toEqual([memberId(3)]);
+    expect(roles(result.roster)).toEqual(["hub", "spoke", "standby-hub", "guest"]);
+    expect(result.roster.sequence).toBe(6);
+  });
+
+  it("clears the standbys when none are named", () => {
+    const result = orderStandbys({ roster: base, memberIds: [] });
+    if (result.status !== "ordered") throw new Error(result.kind);
+    expect(result.roster.standbyOrder).toEqual([]);
+    expect(roles(result.roster)).toEqual(["hub", "spoke", "spoke", "guest"]);
+  });
+
+  it("refuses the hub, a guest, an unknown member, and a repeated member", () => {
+    const kindFor = (ids: ReadonlyArray<HubMemberId>) => {
+      const result = orderStandbys({ roster: base, memberIds: ids });
+      return result.status === "refused" ? result.kind : result.status;
+    };
+    expect(kindFor([memberId(1)])).toBe("not-a-spoke");
+    expect(kindFor([memberId(4)])).toBe("not-a-spoke");
+    expect(kindFor([memberId(9)])).toBe("unknown-member");
+    expect(kindFor([memberId(3), memberId(3)])).toBe("duplicate-member");
+  });
+});
+
+describe("decideStandIn", () => {
+  const anchor = signed(roster(5, baseMembers, [2]));
+  const decide = (overrides: Partial<Parameters<typeof decideStandIn>[0]> = {}) =>
+    decideStandIn({
+      anchor,
+      selfMemberId: memberId(2),
+      grant: { items: ["roster", "standby"], actProjects: [] },
+      silentForMs: 300_000,
+      failoverAfterMs: 300_000,
+      standingIn: false,
+      ...overrides,
+    });
+  const kind = (result: ReturnType<typeof decideStandIn>) =>
+    result.status === "refused" ? result.kind : result.status;
+
+  it("stands in for a named standby that ticked Standby after the whole failover time", () => {
+    expect(kind(decide())).toBe("stand-in");
+  });
+
+  it("does not stand in for a spoke the hub did not name", () => {
+    expect(kind(decide({ selfMemberId: memberId(3) }))).toBe("not-a-named-standby");
+  });
+
+  it("does not stand in without the Standby tick, before the time, or twice", () => {
+    expect(kind(decide({ grant: { items: ["roster"], actProjects: [] } }))).toBe(
+      "standby-not-granted",
+    );
+    expect(kind(decide({ silentForMs: 299_999 }))).toBe("hub-seen-recently");
+    expect(kind(decide({ standingIn: true }))).toBe("already-standing-in");
+    expect(kind(decide({ anchor: undefined }))).toBe("no-hub-roster");
   });
 });
 
