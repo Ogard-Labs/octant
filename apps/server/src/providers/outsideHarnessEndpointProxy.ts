@@ -202,6 +202,8 @@ interface PendingCall {
   readonly reject: (failure: ProviderFailure) => void;
   readonly onEvent: ((event: OutsideDriverStreamEvent) => void) | undefined;
   readonly timer: ReturnType<typeof setTimeout>;
+  /** The brokered calls made for this call, closed when the host settles it early. */
+  readonly brokered: Set<AbortController>;
 }
 
 type BrokeredRequest = (
@@ -221,6 +223,12 @@ class OutsideDriverLink {
   readonly #onStopped: (failure: ProviderFailure) => void;
   readonly #pending = new Map<number, PendingCall>();
   readonly #http = new Map<number, AbortController>();
+  /**
+   * The ids of the sends the host issued, kept so a brokered call can be told
+   * from one that names a probe or a call the host never made. One small
+   * integer per send.
+   */
+  readonly #sends = new Set<number>();
   #nextId = 1;
   #stopped: ProviderFailure | undefined;
 
@@ -255,19 +263,30 @@ class OutsideDriverLink {
   ): { readonly id: number; readonly settled: Promise<unknown> } {
     const id = this.#nextId;
     this.#nextId += 1;
+    if (method === OUTSIDE_DRIVER_METHODS.sessionSend) this.#sends.add(id);
     const settled = new Promise<unknown>((resolve, reject) => {
       if (this.#stopped !== undefined) {
         reject(this.#stopped);
         return;
       }
       const timer = setTimeout(() => {
-        if (!this.#pending.delete(id)) return;
+        const pending = this.#pending.get(id);
+        if (pending === undefined) return;
+        this.#pending.delete(id);
         if (method === OUTSIDE_DRIVER_METHODS.sessionSend) {
           this.notify(OUTSIDE_DRIVER_METHODS.sessionCancel, { requestId: id });
         }
+        closeBrokered(pending);
         reject(notAnswered());
       }, options.timeoutMs);
-      this.#pending.set(id, { method, resolve, reject, onEvent: options.onEvent, timer });
+      this.#pending.set(id, {
+        method,
+        resolve,
+        reject,
+        onEvent: options.onEvent,
+        timer,
+        brokered: new Set(),
+      });
       this.#write({ jsonrpc: "2.0", id, method, params });
     });
     return { id, settled };
@@ -288,6 +307,7 @@ class OutsideDriverLink {
     clearTimeout(pending.timer);
     pending.reject(interrupted());
     this.notify(OUTSIDE_DRIVER_METHODS.sessionCancel, { requestId: id });
+    closeBrokered(pending);
   }
 
   /** Stops the driver: every pending call and brokered request ends with `failure`. */
@@ -352,14 +372,27 @@ class OutsideDriverLink {
 
   #serveHttp(httpId: OutsideDriverMessageId, params: OutsideDriverHttpRequestParams): void {
     if (this.#http.has(httpId)) return this.#violate();
+    // Only a send the host issued can own a call; one it already settled is
+    // refused before anything goes upstream, because the driver cannot see
+    // the cancel before it asks.
+    if (params.requestId !== undefined && !this.#sends.has(params.requestId)) {
+      return this.#violate();
+    }
     if (this.#http.size >= this.#limits.httpConcurrency) {
       this.#refuseHttp(httpId, failure("rate-limited", "Too many provider requests are open."));
       return;
     }
+    const owner = params.requestId === undefined ? undefined : this.#pending.get(params.requestId);
+    if (params.requestId !== undefined && owner === undefined) {
+      this.#refuseHttp(httpId, interrupted());
+      return;
+    }
     const controller = new AbortController();
     this.#http.set(httpId, controller);
+    owner?.brokered.add(controller);
     void this.#relayHttp(httpId, params, controller).finally(() => {
       if (this.#http.get(httpId) === controller) this.#http.delete(httpId);
+      owner?.brokered.delete(controller);
     });
   }
 
@@ -413,6 +446,8 @@ class OutsideDriverLink {
         }
         const text = decoder.decode(read.value, { stream: true });
         for (let offset = 0; offset < text.length; offset += chunkCharacters) {
+          // The end that follows an abort is the last line for this call.
+          if (signal.aborted) return interrupted();
           this.notify(OUTSIDE_DRIVER_METHODS.httpChunk, {
             httpId,
             data: text.slice(offset, offset + chunkCharacters),
@@ -420,9 +455,12 @@ class OutsideDriverLink {
         }
       }
       const rest = decoder.decode();
+      if (signal.aborted) return interrupted();
       if (rest.length > 0) this.notify(OUTSIDE_DRIVER_METHODS.httpChunk, { httpId, data: rest });
       return undefined;
     } catch {
+      // An aborted fetch errors its body before the abort listener answers.
+      if (signal.aborted) return interrupted();
       return failure("unavailable", "The provider response could not be read.");
     } finally {
       reader.cancel().catch(() => undefined);
@@ -436,6 +474,12 @@ class OutsideDriverLink {
       error: { code: -32000, message: refusal.message, data: { category: refusal.category } },
     });
   }
+}
+
+/** Aborts every brokered call a settled call opened. */
+function closeBrokered(pending: PendingCall): void {
+  for (const controller of pending.brokered) controller.abort();
+  pending.brokered.clear();
 }
 
 async function readWithin(

@@ -47,7 +47,11 @@ export interface OutsideDriverBrokeredResponse {
 export interface OutsideDriverHost {
   /** What the host sent in `initialize`; undefined before the handshake. */
   readonly configuration: OutsideDriverConfiguration | undefined;
-  /** Asks the host to make one request to the configured origin. */
+  /**
+   * Asks the host to make one request to the configured origin. From a send's
+   * `turn.host`, the request is tied to that send: when the send is cancelled
+   * the call settles as `interrupted` and its body reader throws.
+   */
   readonly http: (
     request: typeof OutsideDriverHttpRequestParams.Encoded,
   ) => Promise<OutsideDriverBrokeredResponse>;
