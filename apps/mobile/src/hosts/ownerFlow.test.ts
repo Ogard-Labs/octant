@@ -87,6 +87,7 @@ async function world(
   const deviceKeyStore: RemoteDeviceKeyStore = {
     set: async () => "paired-key",
     get: async (): Promise<RemoteDeviceKeyPair | undefined> => keyPair,
+    copyKey: async () => "copied-key",
     updateMetadata: async () => {},
     removeOtherApprovedForOrigin: async () => {},
     findByOrigin: async () => undefined,
