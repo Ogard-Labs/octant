@@ -370,6 +370,7 @@ export function wireRemote(deps: RemoteDependencies) {
             (await hubLinkRoutes(request)) ??
             (await peerDelegationRoutes(request)) ??
             hubOwnerRoutes(request)),
+        hubWebOrigin: services.hubWebOrigin ?? (() => spokeLinkService.hubWebOrigin()),
         remoteServerGrants: services.remoteServerGrants ?? remoteServerGrantGatewayPort,
         serve: options.remoteServe ?? serve,
         config,

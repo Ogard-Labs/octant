@@ -5,6 +5,7 @@ import {
   type GuestJoinFinish,
   type GuestJoinRefusal,
   type GuestJoinStart,
+  type GuestSpokeAdmission,
   type OwnerSpoke,
   type RemoteDeviceKeyStore,
 } from "@octant/client-runtime";
@@ -24,6 +25,8 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { createBrowserHostRegistryStorage } from "./browserHostRegistryStorage";
 import {
+  admitBrowserOnSpoke,
+  browserMemberLinks,
   browserOwnerSpokes,
   browserPageTransport,
   createBrowserGuestStore,
@@ -43,6 +46,25 @@ const JOIN_REFUSAL: Readonly<Record<GuestJoinRefusal, string>> = {
   "device-key-lost": "This browser lost the key it paired with. Try again.",
   "hub-unreachable": "Couldn't reach the hub. Check that you are on the same private network.",
 };
+
+/** What the person is told after asking a computer on the hub to know this browser. */
+function describeAdmission(answer: GuestSpokeAdmission, name: string): string {
+  switch (answer.status) {
+    case "admitted":
+      return `${name} knows this browser now.`;
+    case "unreachable":
+      return `Couldn't reach ${name}. Check that you are on the tailnet and its Tailscale certificate is on.`;
+    case "refused":
+      switch (answer.kind) {
+        case "guest-not-accepted":
+          return `${name} has not accepted this browser. Introduce has to be on in its hub grant.`;
+        case "guest-not-confirmed":
+          return `${name} is holding this browser until a person confirms it there.`;
+        default:
+          return `${name} refused this browser (${answer.kind}).`;
+      }
+  }
+}
 
 const NO_PASSKEY_COPY =
   "This browser can't make a passkey here (it needs a secure page and a fingerprint, face, or device-passcode check), so it can join only as a plain guest.";
@@ -111,6 +133,7 @@ export function BrowserHubSection(props: BrowserHubSectionProps) {
   const [code, setCode] = useState("");
   const [deviceLabel, setDeviceLabel] = useState("Octant browser");
   const [asOwner, setAsOwner] = useState(false);
+  const [reach, setReach] = useState<Readonly<Record<string, string>>>({});
 
   useEffect(() => {
     if (props.credentials !== undefined) {
@@ -260,6 +283,15 @@ export function BrowserHubSection(props: BrowserHubSectionProps) {
     await store.clear();
     setState(undefined);
     setSpokes([]);
+    setReach({});
+  };
+
+  const members = state === undefined ? [] : browserMemberLinks(state.record, pageOrigin);
+
+  const connect = async (memberId: string, name: string) => {
+    if (state === undefined) return;
+    const answer = await admitBrowserOnSpoke({ state, deviceKeyStore, pageOrigin, memberId });
+    setReach((held) => ({ ...held, [memberId]: describeAdmission(answer, name) }));
   };
 
   return (
@@ -378,6 +410,42 @@ export function BrowserHubSection(props: BrowserHubSectionProps) {
             <SettingsState kind="empty">
               Remove this browser on the hub too, so the hub stops listing it.
             </SettingsState>
+            <ul aria-label="Computers on the hub" className="setgroup">
+              {members.map((entry) => (
+                <li className="setrow" key={entry.memberId}>
+                  <span className="setrow-label">{entry.name}</span>
+                  <div className="setrow-control">
+                    {entry.here ? (
+                      <span>This page</span>
+                    ) : entry.webOrigin === undefined ? (
+                      <span>
+                        No web app to open. It needs a Tailscale name and its Tailscale certificate.
+                      </span>
+                    ) : (
+                      <>
+                        <a href={entry.webOrigin} rel="noopener noreferrer" target="_blank">
+                          Open {entry.name}
+                        </a>
+                        {entry.role === "spoke" ? (
+                          <OctantButton
+                            aria-label={`Connect this browser to ${entry.name}`}
+                            onClick={() => void connect(entry.memberId, entry.name)}
+                            size="sm"
+                            type="button"
+                            variant="secondary"
+                          >
+                            Connect
+                          </OctantButton>
+                        ) : null}
+                      </>
+                    )}
+                  </div>
+                  {reach[entry.memberId] === undefined ? null : (
+                    <p className="settings-section-line">{reach[entry.memberId]}</p>
+                  )}
+                </li>
+              ))}
+            </ul>
           </div>
         )}
       </SettingsSection>

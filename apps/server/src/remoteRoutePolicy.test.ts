@@ -386,6 +386,92 @@ describe("remote route policy", () => {
     expect(fixture.authenticatedProduct).not.toHaveBeenCalled();
   });
 
+  describe("a browser on the hub's own web app page", () => {
+    const hubPage = "https://hub.tail1.ts.net";
+
+    const fromHubPage = (
+      path: string,
+      method: string,
+      extra: Record<string, string> = {},
+    ): Request =>
+      request(path, {
+        method,
+        headers: { origin: hubPage, "sec-fetch-site": "cross-site", ...extra },
+      });
+
+    const fixtureFor = (hubWebOrigin: () => string | undefined) =>
+      handler({ policy: policy({ hubWebOrigin }) });
+
+    it("may preflight and make the signed requests that admit it and read alerts, and nothing else", async () => {
+      const fixture = fixtureFor(() => hubPage);
+
+      const preflight = await fixture.route(
+        fromHubPage("/api/hub/guest", "OPTIONS", {
+          "access-control-request-method": "POST",
+          "access-control-request-headers": "content-type, x-octant-hub-link",
+        }),
+      );
+      const admit = await fixture.route(
+        fromHubPage("/api/hub/guest", "POST", {
+          "content-type": "application/json",
+          "x-octant-hub-link": "v1.signed",
+        }),
+      );
+      const readAlerts = await fixture.route(
+        fromHubPage("/api/hub/owner/alerts", "GET", { "x-octant-hub-link": "v1.signed" }),
+      );
+
+      expect(preflight.status).toBe(204);
+      expect(preflight.headers.get("access-control-allow-origin")).toBe(hubPage);
+      expect(preflight.headers.get("access-control-allow-credentials")).toBeNull();
+      expect(admit.status).toBe(200);
+      expect(admit.headers.get("access-control-allow-origin")).toBe(hubPage);
+      expect(readAlerts.status).toBe(200);
+      expect(readAlerts.headers.get("access-control-allow-origin")).toBe(hubPage);
+    });
+
+    it("is refused every request that changes something, which an unlock must answer", async () => {
+      const fixture = fixtureFor(() => hubPage);
+
+      for (const path of [
+        "/api/hub/owner/confirm-member",
+        "/api/hub/owner/alerts/dismiss",
+        "/api/hub/owner/members/remove",
+        "/api/hub/owner/challenge",
+      ]) {
+        const preflight = await fixture.route(
+          fromHubPage(path, "OPTIONS", { "access-control-request-method": "POST" }),
+        );
+        const post = await fixture.route(
+          fromHubPage(path, "POST", { "content-type": "application/json" }),
+        );
+        expect([path, preflight.status]).toEqual([path, 403]);
+        expect([path, post.status]).toEqual([path, 403]);
+      }
+      expect(
+        (
+          await fixture.route(
+            fromHubPage("/api/hub/roster", "PUT", { "content-type": "application/json" }),
+          )
+        ).status,
+      ).toBe(403);
+    });
+
+    it("is refused when the host holds no hub page origin, or the page is some other origin", async () => {
+      const none = handler();
+      const nothingNamed = fixtureFor(() => undefined);
+      const other = fixtureFor(() => "https://other.tail1.ts.net");
+
+      for (const fixture of [none, nothingNamed, other]) {
+        const response = await fixture.route(
+          fromHubPage("/api/hub/owner/alerts", "GET", { "x-octant-hub-link": "v1.signed" }),
+        );
+        expect(response.status).toBe(403);
+        expect(response.headers.get("access-control-allow-origin")).toBeNull();
+      }
+    });
+  });
+
   it("routes the exact challenge/session boundary as bounded pre-auth POST routes", async () => {
     const fixture = handler();
     for (const path of ["/api/remote/auth/challenge", "/api/remote/auth/session"]) {

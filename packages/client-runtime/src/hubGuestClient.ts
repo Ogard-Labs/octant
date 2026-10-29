@@ -21,6 +21,7 @@ import {
   classifyRemoteListenerAddress,
   decideRosterReplacement,
   hubRosterSigningPayload,
+  rosterMemberWebOrigin,
   type RosterReplacement,
 } from "@octant/domain";
 import {
@@ -457,6 +458,12 @@ export interface GuestSpokeTarget {
   readonly origin: string;
   /** The member listener's certificate pin, `sha256-` and base64url. */
   readonly pin: string;
+  /**
+   * Where a browser reaches this member's own web app, under its own
+   * certificate check: the member's Tailscale name, from the signed roster.
+   * Absent for a member that lists none.
+   */
+  readonly webOrigin?: string;
 }
 
 /**
@@ -476,6 +483,7 @@ export function guestSpokeTargets(record: GuestHubRecord): ReadonlyArray<GuestSp
     if (host === undefined) return [];
     const hostname = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
     const port = member.listenerPort === undefined ? "" : `:${member.listenerPort}`;
+    const webOrigin = rosterMemberWebOrigin(member);
     return [
       {
         memberId: String(member.memberId),
@@ -483,6 +491,7 @@ export function guestSpokeTargets(record: GuestHubRecord): ReadonlyArray<GuestSp
         role: member.role,
         origin: `https://${hostname}${port}`,
         pin: listenerPinFromSha256(bytesFromHex(member.listenerPin)),
+        ...(webOrigin === undefined ? {} : { webOrigin }),
       },
     ];
   });
@@ -504,11 +513,24 @@ export async function admitGuestOnSpoke(input: {
   readonly signer: GuestSigner;
   readonly deviceLabel: string;
   readonly transport: PinnedListenerTransportPort;
+  /**
+   * A browser cannot check a pin: `web-origin` reaches the spoke at its own web
+   * app origin under the browser's certificate check, and a spoke that lists no
+   * Tailscale name is unreachable that way.
+   */
+  readonly via?: "pinned-listener" | "web-origin";
   readonly now?: () => number;
 }): Promise<GuestSpokeAdmission> {
+  const origin = input.via === "web-origin" ? input.target.webOrigin : input.target.origin;
+  if (origin === undefined) return { status: "unreachable" };
   const transport = input.transport({
-    origin: input.target.origin,
-    trust: { current: { kind: "pinned", pin: input.target.pin } },
+    origin,
+    trust: {
+      current:
+        input.via === "web-origin"
+          ? { kind: "platform" }
+          : { kind: "pinned", pin: input.target.pin },
+    },
   });
   if (transport.status === "unavailable") return { status: "unreachable" };
   const body = JSON.stringify({
@@ -518,24 +540,21 @@ export async function admitGuestOnSpoke(input: {
   });
   let response: Response;
   try {
-    response = await transport.fetch(
-      new URL(HUB_GUEST_ROUTES.guest, input.target.origin).toString(),
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          [HUB_LINK_HEADER]: await linkHeader({
-            signer: input.signer,
-            recipientMemberId: input.target.memberId,
-            method: "POST",
-            path: HUB_GUEST_ROUTES.guest,
-            body,
-            now: (input.now ?? Date.now)(),
-          }),
-        },
-        body,
+    response = await transport.fetch(new URL(HUB_GUEST_ROUTES.guest, origin).toString(), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        [HUB_LINK_HEADER]: await linkHeader({
+          signer: input.signer,
+          recipientMemberId: input.target.memberId,
+          method: "POST",
+          path: HUB_GUEST_ROUTES.guest,
+          body,
+          now: (input.now ?? Date.now)(),
+        }),
       },
-    );
+      body,
+    });
   } catch {
     return { status: "unreachable" };
   }

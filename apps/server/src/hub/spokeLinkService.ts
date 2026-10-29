@@ -42,6 +42,7 @@ import {
   introduceGuests,
   newMemberConfirmationSigningPayload,
   reconcileHeldGrants,
+  rosterMemberWebOrigin,
   type AuthorizedPeer,
   type NewMemberAdmission,
   type RosterReplacement,
@@ -465,6 +466,20 @@ export class SpokeLinkService {
       rejectedMemberIds: link.rejectedMemberIds ?? [],
     });
     return { ownerCandidates: read.candidates, ownerKeyMismatches: read.mismatches };
+  }
+
+  /**
+   * The origin the hub's own web app is served at, from the roster this spoke
+   * holds. A browser guest on that page may make the few signed requests the
+   * route policy lists to this spoke directly; no other origin may.
+   */
+  hubWebOrigin(): string | undefined {
+    const link = this.#options.state.load().link;
+    if (link === undefined || link.removed === true || link.leaving === true) return undefined;
+    const hub = link.roster.roster.members.find(
+      (member) => String(member.memberId) === String(link.hubMemberId),
+    );
+    return hub === undefined ? undefined : rosterMemberWebOrigin(hub);
   }
 
   /** What the owner routes check a request against; absent when this host is not a member of a hub. */

@@ -252,10 +252,18 @@ it can join only as a plain guest. If you cancel the passkey, nothing is sent to
 the hub. **Leave the hub** forgets the hub on this browser; remove the browser on
 the hub too.
 
-A browser can reach only the address that served its page, so it cannot read a
-spoke's alerts from the hub's page, and it does not yet reach the other computers
-on the hub. Owner alerts show in a browser only on a computer's own address, and
-none of that has been tried yet.
+A browser reaches only the address that served its page and the tailnet names the
+hub's roster lists for its computers, and it checks each one's certificate itself.
+After you join, the hub's page lists the computers on the hub. A computer that has
+a tailnet name and its Tailscale certificate on gets an **Open** link to its own
+web app and a **Connect** button, which asks that computer directly (not through
+the hub) to know this browser. A computer you have not set to accept new guests
+refuses it, and says so.
+
+A browser that joined as an owner also sees each computer's new-member alerts on
+the hub's page. To confirm, dismiss, or remove, open that computer's own page,
+because a passkey works for only one address. None of this has been tried against
+a real hub yet.
 
 An agent, a routine, the hub, a standby hub, and another computer can never
 unlock. Joining a spoke to a hub still happens on that spoke.

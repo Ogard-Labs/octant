@@ -71,6 +71,12 @@ export function BrowserOwnerSection(props: BrowserOwnerSectionProps) {
           {notice.message}
         </SettingsState>
       )}
+      {reading === undefined || reading.unanswered.length === 0 ? null : (
+        <SettingsState kind="empty">
+          Couldn't read alerts from {reading.unanswered.join(", ")}. This browser may not be an
+          owner there yet, or that computer is out of reach.
+        </SettingsState>
+      )}
       {reading === undefined || reading.rows.length === 0 ? (
         <SettingsState kind="empty">No new members to look at.</SettingsState>
       ) : (
@@ -91,7 +97,14 @@ export function BrowserOwnerSection(props: BrowserOwnerSectionProps) {
                 ]}
               />
               <div className="setrow-control">
+                {row.spoke.openAt === undefined ? null : (
+                  // A passkey belongs to one origin, so acting happens on that computer's own web app.
+                  <a href={row.spoke.openAt} rel="noopener noreferrer" target="_blank">
+                    Open {row.spoke.name} to act
+                  </a>
+                )}
                 {(["remove", "confirm", "dismiss"] as const)
+                  .filter(() => row.spoke.openAt === undefined)
                   .filter((action) => (action === "confirm" ? row.held : row.alert !== undefined))
                   .map((action) => (
                     <OctantButton
