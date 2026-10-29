@@ -565,7 +565,9 @@ export class WakeService {
     const roster = hub.roster.roster;
     // The revision is taken and saved before anything is awaited, so copies are numbered in
     // the order they were made however late each one arrives.
-    const revision = (hub.wake?.copyRevision ?? 0) + 1;
+    // It is also never below the wall clock in milliseconds, so it keeps rising even when the
+    // saved number was lost (state restored from a backup, or a hub rebuilt from scratch).
+    const revision = Math.max((hub.wake?.copyRevision ?? 0) + 1, this.#options.now());
     const wake: HubWakeState = {
       enabled: hub.wake?.enabled === true,
       spokes: hub.wake?.spokes ?? [],
