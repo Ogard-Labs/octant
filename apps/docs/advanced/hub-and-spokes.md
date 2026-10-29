@@ -294,14 +294,15 @@ spoke. Only the spoke can change it.
 | Introduce | Introduce other members to this computer. Each becomes a full member here. On by default. |
 | Owners    | Let your owner devices act here after a fresh unlock. On by default.                      |
 | Status    | Read this computer's resources, thread titles and states, and waiting approvals.          |
-| Wake      | Hold this computer's routine wake times and wake it.                                      |
+| Wake      | Hold this computer's routine times and wake it before one is due.                         |
 | Standby   | Let a standby hub you named take over the roster while the hub is down.                   |
 | Push      | Send this computer's phone notifications through the hub.                                 |
 | Provision | Offer settings as proposals that you apply.                                               |
 | Act       | Act here as a paired device would, in Projects you name.                                  |
 
 Ticking an item records your choice. In this release the hub can use only
-Roster and Status. Owners works for your own owner devices (see
+Roster, Status, and Wake. Wake works only once you turn on the hub's wake service
+(see [Wake a sleeping computer](#wake-a-sleeping-computer)). Owners works for your own owner devices (see
 [Owner devices](#owner-devices)). Introduce makes this computer accept the other
 spokes and your phones as full members (see
 [Delegate work to another computer](#delegate-work-to-another-computer)).
@@ -402,8 +403,57 @@ asks the new hub over the connection it already trusted for that standby, and
 accepts it only if it answers as that standby with a list that includes the
 computer. Phones that joined as guests join the new hub again with a new code.
 
-Not available yet: waking sleeping computers, which a standby will take over
-with the wake times when that feature arrives.
+A standby also holds a copy of the wake times (see
+[Wake a sleeping computer](#wake-a-sleeping-computer)). While it stands in, it
+wakes the computers that ticked both **Wake** and **Standby**, takes their new
+routine times, and hands those back to the hub with the rest.
+
+## Wake a sleeping computer
+
+Routines run only while their computer is awake. The hub can wake a computer
+just before one of its routines is due. This is off until you turn it on, and a
+computer takes part only if its own person ticked **Wake**.
+
+**Turn it on (the hub).** On the computer that is the hub, open **Settings →
+Remote access → Wake service** and switch it on, or run `octant hub wake on`.
+`octant hub wake off` turns it off and the hub forgets every time it held. Only
+the hub's own window changes this.
+
+**Take part (a spoke).** Tick **Wake** in the spoke's hub grant (see
+[The hub grant](#the-hub-grant)). The spoke then tells the hub, for each enabled
+routine, when it next runs, under a random id the spoke made up. That is all:
+never the routine's prompt, Project, profile, name, or schedule. The spoke sends
+a new list when a time changes, and a routine you pause or delete drops out of
+it. Unticking Wake withdraws the list.
+
+**Wake-on-LAN (optional).** If you also want the hub to send a Wake-on-LAN magic
+packet on your home network, enter the computer's hardware (MAC) address under
+**Settings → Remote access → Join a hub**, on that computer. The address goes to
+the hub only while Wake is ticked, and only if you entered it. Without it the hub
+sends only the message over your private network, which reaches a computer that
+is awake but idle. On a Mac, turn on **Wake for network access** in Energy
+settings for the packet to work.
+
+**What happens.**
+
+- A couple of minutes before a routine is due, the hub wakes the computer: the
+  magic packet if you entered an address, and a signed message to its listener.
+- The message names only the random id and the time. The computer acts on it
+  only if the id is one of its routines, the time is that routine's own next
+  time, and its grant still ticks Wake. Otherwise it does nothing and says why.
+- When it believes the message, the computer only makes sure its own scheduler is
+  awake. The scheduler runs the routine at its time under that routine's own
+  rules, and a missed time follows the routine's missed-run setting. The hub
+  never tells a computer to run anything.
+- If neither the packet nor the message gets through, the hub records the time as
+  unreachable. The computer settles it when it is back, under its missed-run
+  setting.
+
+`octant hub status` and the hub's **Wake service** section show, for each
+computer, how many wakes are ahead and how the last one went.
+
+A machine that is powered off, away from home, or not set to wake cannot be
+woken. A real Wake-on-LAN wake of a sleeping Mac has not been tried yet.
 
 ## Leave a hub and remove a device
 
