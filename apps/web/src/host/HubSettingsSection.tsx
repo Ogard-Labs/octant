@@ -586,24 +586,28 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
           {status === undefined || status.members.length === 0 ? (
             <SettingsState kind="empty">No device has joined this hub yet.</SettingsState>
           ) : (
-            <ul aria-label="Hub members" className="settings-panel__stack">
+            <ul aria-label="Hub members" className="setgroup">
               {status.members.map((member) => (
-                <li className="host-settings__controls" key={member.memberId}>
-                  <span>{member.name}</span>
-                  <span className="oct-meta">
+                <li className="setrow" key={member.memberId}>
+                  <span className="setrow-label">{member.name}</span>
+                  <p className="setrow-hint">
                     {member.role}
                     {member.owner ? " · owner" : ""}
-                  </span>
-                  <OctantButton
-                    aria-label={`Remove ${member.name}`}
-                    onClick={() => setRemoving(member)}
-                    ref={removing?.memberId === member.memberId ? removeOpener : undefined}
-                    size="sm"
-                    type="button"
-                    variant="secondary"
-                  >
-                    Remove…
-                  </OctantButton>
+                  </p>
+                  {member.role === "hub" ? null : (
+                    <div className="setrow-control">
+                      <OctantButton
+                        aria-label={`Remove ${member.name}`}
+                        onClick={() => setRemoving(member)}
+                        ref={removing?.memberId === member.memberId ? removeOpener : undefined}
+                        size="sm"
+                        type="button"
+                        variant="secondary"
+                      >
+                        Remove…
+                      </OctantButton>
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>
@@ -693,39 +697,33 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
               </p>
             </div>
           ) : (
-            <div className="setgroup">
-              <SettingRow
-                description="Paste a join code from a hub's Add a device screen. The hub must be reachable over Tailscale or the same LAN, and this computer needs its own remote listener on."
-                htmlFor={codeId}
-                label="Join code"
-                scope="host"
-                settingId="hub-join"
-              >
-                <div className="settings-panel__stack">
-                  <OctantField>
-                    <OctantFieldLabel htmlFor={codeId}>Join code</OctantFieldLabel>
-                    <OctantTextarea
-                      autoComplete="off"
-                      id={codeId}
-                      onChange={(event) => setJoinCode(event.target.value)}
-                      rows={3}
-                      spellCheck={false}
-                      value={joinCode}
-                    />
-                  </OctantField>
-                  <div className="host-settings__controls">
-                    <OctantButton
-                      disabled={busy || joinCode.trim() === ""}
-                      onClick={() => void startJoin()}
-                      size="sm"
-                      type="button"
-                      variant="default"
-                    >
-                      Join the hub
-                    </OctantButton>
-                  </div>
-                </div>
-              </SettingRow>
+            <div className="settings-panel__stack">
+              <OctantField>
+                <OctantFieldLabel htmlFor={codeId}>Join code</OctantFieldLabel>
+                <OctantTextarea
+                  autoComplete="off"
+                  id={codeId}
+                  onChange={(event) => setJoinCode(event.target.value)}
+                  rows={3}
+                  spellCheck={false}
+                  value={joinCode}
+                />
+              </OctantField>
+              <p className="settings-section-line">
+                Paste a join code from a hub's Add a device screen. The hub must be reachable over
+                Tailscale or the same LAN, and this computer needs its own remote listener on.
+              </p>
+              <div className="host-settings__controls">
+                <OctantButton
+                  disabled={busy || joinCode.trim() === ""}
+                  onClick={() => void startJoin()}
+                  size="sm"
+                  type="button"
+                  variant="default"
+                >
+                  Join the hub
+                </OctantButton>
+              </div>
             </div>
           )}
         </SettingsSection>

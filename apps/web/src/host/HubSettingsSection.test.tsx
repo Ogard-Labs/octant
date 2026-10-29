@@ -156,6 +156,7 @@ describe("HubSettingsSection", () => {
       remove: { status: 200, body: { status: "removed", sequence: 3 } },
     });
     await user.click(await screen.findByRole("button", { name: "Remove Work laptop" }));
+    expect(screen.queryByRole("button", { name: "Remove Mac mini" })).toBeNull();
     expect(calls.some((call) => call.operation === "remove")).toBe(false);
     const dialog = await screen.findByRole("dialog", { name: "Remove Work laptop from this hub?" });
     await user.click(within(dialog).getByRole("button", { name: "Remove Work laptop" }));
@@ -196,6 +197,7 @@ describe("HubSettingsSection", () => {
         body: { status: "changed", grant: { items: ["roster", "introduce"], actProjects: [] } },
       },
     });
+    expect(await screen.findAllByText("Join code")).toHaveLength(1);
     await user.type(await screen.findByLabelText("Join code"), "octant-join-abc123");
     await user.click(screen.getByRole("button", { name: "Join the hub" }));
     expect(await screen.findByText("719203")).toBeVisible();
