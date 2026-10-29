@@ -121,8 +121,8 @@ export interface ToolEgressProxyOptions {
    * Opens a connection to an address the proxy already checked. It receives
    * an address, never a name, so nothing resolves again at connect time. The
    * connection must allow half-open closes and emit `connect` once it is
-   * open. A command on an SSH target gets one the target opens, carried over
-   * the session as a stream, rather than a socket of this host's.
+   * open. A caller may dial its own, such as a stream the host carries, rather
+   * than a socket of this host's.
    */
   readonly connect?: (destination: { readonly address: string; readonly port: number }) => Duplex;
   readonly limits?: Partial<ToolEgressProxyLimits>;
@@ -135,7 +135,7 @@ export interface ToolEgressProxyOptions {
   /**
    * What decides each request. `tool-rules` (the default) is a harness
    * command's: the thread's and Project's rules. `public-destinations` is a
-   * provider runtime's on an SSH target: any public name, no rule, nothing
+   * provider runtime's: any public name, no rule, nothing
    * proposed; resolution and the private-address check still refuse every
    * loopback, private, and link-local answer.
    */

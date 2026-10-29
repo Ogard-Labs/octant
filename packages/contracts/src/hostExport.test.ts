@@ -1,9 +1,5 @@
 import { CANVAS_SCHEMA_VERSION } from "./canvasIdentity";
-import {
-  decodeHostExportBundle,
-  decodeHostExportCanvas,
-  decodeHostExportSshTarget,
-} from "./hostExport";
+import { decodeHostExportBundle, decodeHostExportCanvas, decodeHostExportPage } from "./hostExport";
 import { describe, expect, it } from "vitest";
 
 const generatedAt = "2026-08-19T12:00:00.000Z";
@@ -76,7 +72,6 @@ describe("host export bundle", () => {
       projectMemory: [],
       canvases: [],
       settings: { chatEnabled: true, workEnabled: false, themeMode: "dark" },
-      sshTargets: [],
       usage: [],
       retention: { windows: [], tombstones: [] },
       omissions: [
@@ -90,19 +85,12 @@ describe("host export bundle", () => {
     expect(() => decodeHostExportBundle({ ...bundle, apiKey: "secret" })).toThrow();
   });
 
-  it("carries an SSH target without any field that could hold its destination or host key", () => {
-    const sshTarget = {
-      targetId: "30000000-0000-4000-8000-000000000001",
-      registeredAt: generatedAt,
-      projectIds: [],
-    };
-    expect(decodeHostExportSshTarget(sshTarget).targetId).toBe(sshTarget.targetId);
-    for (const extra of [
-      { destination: "build@devbox" },
-      { hostKey: { algorithm: "ssh-ed25519", publicKey: "AAAA" } },
-      { executorPath: "/opt/octant/bin/octant" },
-    ]) {
-      expect(() => decodeHostExportSshTarget({ ...sshTarget, ...extra })).toThrow();
-    }
+  it("still reads the SSH targets page an earlier export carries", () => {
+    expect(
+      decodeHostExportPage({
+        kind: "ssh-targets",
+        sshTargets: [{ targetId: "30000000-0000-4000-8000-000000000001", projectIds: [] }],
+      }).kind,
+    ).toBe("ssh-targets");
   });
 });

@@ -2,7 +2,6 @@ import {
   HOST_EXPORT_FORMAT,
   decodeHostExportUsageRow,
   type HostExportPage,
-  type HostExportSshTarget,
   type HostExportUsageRow,
 } from "@octant/contracts/host-export";
 import { decodeUtcTimestamp, type UtcTimestamp } from "@octant/contracts/events";
@@ -88,11 +87,6 @@ export interface HostExportServiceOptions {
     }) => HostExportCursorPage<unknown> | Promise<HostExportCursorPage<unknown>>;
   };
   readonly readSettings: () => HostExportSettingsSource | Promise<HostExportSettingsSource>;
-  /**
-   * SSH targets, already shaped without destination, host key, or executor
-   * path. A host holds a handful, so the list is resident and paged here.
-   */
-  readonly sshTargets: () => ReadonlyArray<HostExportSshTarget>;
   readonly usage: {
     readonly list: (input: {
       readonly scope: "projects" | "unfiled";
@@ -184,7 +178,6 @@ export class HostExportService {
     unrepresentable += canvasDropped;
     const settings = projectHostExportSettings(await this.#options.readSettings());
     if (!(yield* this.#emit({ kind: "settings", settings }))) return;
-    if (!(yield* this.#sshTargetPages(limit))) return;
     const usageDropped = yield* this.#usagePages(limit);
     if (usageDropped === undefined) return;
     unrepresentable += usageDropped;
@@ -318,19 +311,6 @@ export class HostExportService {
     return dropped;
   }
 
-  *#sshTargetPages(limit: number): Generator<HostExportPage, boolean> {
-    const targets = this.#options.sshTargets();
-    let cursor: string | undefined;
-    for (;;) {
-      const page = pageHostExportSlice(targets, cursor, limit);
-      if (page.items.length === 0) break;
-      if (!(yield* this.#emit({ kind: "ssh-targets", sshTargets: page.items }))) return false;
-      if (page.nextCursor === undefined) break;
-      cursor = page.nextCursor;
-    }
-    return true;
-  }
-
   async *#retentionPages(limit: number): AsyncGenerator<HostExportPage, boolean> {
     let cursor: string | undefined;
     for (;;) {
@@ -375,13 +355,11 @@ export class HostExportService {
               ? page.canvases.length
               : page.kind === "usage"
                 ? page.usage.length
-                : page.kind === "ssh-targets"
-                  ? page.sshTargets.length
-                  : page.kind === "retention-windows"
-                    ? page.windows.length
-                    : page.kind === "retention-tombstones"
-                      ? page.tombstones.length
-                      : 1;
+                : page.kind === "retention-windows"
+                  ? page.windows.length
+                  : page.kind === "retention-tombstones"
+                    ? page.tombstones.length
+                    : 1;
     this.#observeResident?.(page.kind, count);
     if (threadExportContainsForbiddenKey(page)) {
       yield { kind: "refused", reason: "unrepresentable" };
@@ -403,7 +381,6 @@ export interface HostExportLiveDependencies {
   readonly listCanvases: () => ReadonlyArray<unknown>;
   readonly readSettings: () => HostExportSettingsSource;
   readonly listProjectIds: () => ReadonlyArray<string>;
-  readonly listSshTargets: () => ReadonlyArray<HostExportSshTarget>;
 }
 
 /**
@@ -447,7 +424,6 @@ export function createLiveHostExportService(input: HostExportLiveDependencies): 
         pageHostExportSlice(input.listCanvases(), cursor, limitOf(limit)),
     },
     readSettings: () => input.readSettings(),
-    sshTargets: () => input.listSshTargets(),
     usage: {
       list: ({ scope, afterSequence, limit }) => {
         const projectScope: UsageProjectScope =

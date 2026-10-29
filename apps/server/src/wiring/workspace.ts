@@ -31,11 +31,7 @@ import { ProjectRootPort } from "../projectRootPort";
 import { WorkProjectStatusFiles } from "../work/workProjectStatusFiles";
 import { WorkProjectStatusReader } from "../work/workProjectStatusReader";
 import { createShellRouteHandler } from "../shellRoutes";
-import {
-  OCTANT_LOCAL_ACTOR_ID,
-  ShellService,
-  type RemoteCodeProjectBindings,
-} from "../shellService";
+import { OCTANT_LOCAL_ACTOR_ID, ShellService } from "../shellService";
 import { notMeasuredProvider, SpendCeilingService } from "../spendCeilingService";
 import { requireJournalHydration } from "../persistence/journalHydration";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
@@ -50,14 +46,7 @@ export type WorkspaceDependencies = Pick<ServerStart, "options" | "persistence">
   Pick<AgentRunsWiring, "spendCeilingHolder"> &
   Pick<IntegrationsWiring, "githubCapabilityService" | "githubIntegrationIsEffective"> &
   Pick<FoundationsWiring, "providerRuntimeRegistry" | "workThreadProjection"> &
-  Pick<ComputerUseWiring, "desktopRecipeKeys" | "offeredDesktopProviders"> & {
-    /**
-     * Remote-bound Code Projects, read when a window binds. SSH targets are
-     * wired after the workspace, so this reads through to their store once
-     * it exists.
-     */
-    readonly remoteCodeProjects: RemoteCodeProjectBindings;
-  };
+  Pick<ComputerUseWiring, "desktopRecipeKeys" | "offeredDesktopProviders">;
 
 export function wireWorkspace(deps: WorkspaceDependencies) {
   const {
@@ -70,7 +59,6 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
     options,
     persistence,
     providerRuntimeRegistry,
-    remoteCodeProjects,
     spendCeilingHolder,
     windowAuthorityStore,
     workThreadProjection,
@@ -155,7 +143,6 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
     const shellService = new ShellService({
       persistence,
       readWorkThread: (threadId) => workThreadProjection.read(threadId),
-      remoteCodeProjects,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });

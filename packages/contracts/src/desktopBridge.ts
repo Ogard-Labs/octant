@@ -357,23 +357,3 @@ export type PairedComputerAnswer =
     }
   | { readonly status: "refused"; readonly message: string }
   | { readonly status: "unreachable"; readonly message: string };
-
-/**
- * The local administration of SSH targets a desktop window reaches through
- * its main process: each operation is one of the host's own local routes,
- * sent with this window's authority, and the host's answer comes back as it
- * was given for the caller to decode. A paired browser never has it.
- */
-export type SshTargetOperation =
-  | "list"
-  | "probe-host-key"
-  | "register"
-  | "repin"
-  | "connect"
-  | "remove"
-  | "projects"
-  | "bind"
-  | "worktrees"
-  | "create-worktree"
-  | "remove-worktree"
-  | "terminal";

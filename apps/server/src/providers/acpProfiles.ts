@@ -96,15 +96,6 @@ export interface AcpProcessProfile {
   /** Project-root entries the agent may neither read nor write. */
   readonly forbiddenRootEntries?: ReadonlyArray<string>;
   readonly confinement: AcpConfinementStrategy;
-  /**
-   * How the agent runs on a remote target the host reaches, such as an SSH
-   * target. A placed launch carries only a program, its arguments, its
-   * account state, its guards, and its denied root entries, so a profile
-   * states this only when that is its whole launch; `acpRemotePlacement`
-   * refuses one that would leave a variable, a managed file, a host read, or
-   * a denial in its sign-in folder behind. Absent: the agent is never placed.
-   */
-  readonly remote?: { readonly args: ReadonlyArray<string> };
 }
 
 /**
@@ -1019,11 +1010,6 @@ const copilotProfile: AcpProviderProfile = {
       environment: (path) => ({ COPILOT_HOME: path }),
     },
     confinement: { kind: "deny-default-seatbelt" },
-    // On an SSH target its whole launch carries over: the guard as a fixed
-    // variable, the Project entries above denied in its capsule, its sign-in
-    // folder as account state, and HOME and XDG_CONFIG_HOME as the runtime
-    // home's own.
-    remote: { args: ["--acp"] },
   },
 };
 

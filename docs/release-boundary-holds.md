@@ -13,7 +13,7 @@ store distribution), a ciphertext-only hosted relay, a full LSP / extension
 host / debugger companion, Apple physical devices and then TestFlight and App
 Store distribution of a person's own apps, enterprise directory OAuth and
 cloud-IAM provider identity, disposable Linux desktops for headless hosts,
-remote SSH development environments, third-party provider-driver plugins, and
+third-party provider-driver plugins, and
 the EU/GDPR compliance package (pending legal review).
 
 They are authorized post-preview work, not part of the technical preview, and

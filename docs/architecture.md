@@ -889,42 +889,16 @@ Code settings. The renderer preserves its proposed branch as delivery intent wit
 claiming a checked-out branch; detached Git checkouts remain refused. Git-dependent
 actions continue to report unavailable for plain folders.
 
-A Code Project bound to a folder on a machine this host reaches over SSH is a
-design accepted on 2026-10-26. Its admission policy, the executor, the SSH
-transport, host-key pinning from a local window or the local CLI, Linux
-confinement attestation, binding a remote root with Files, Git status, and
-diff reads through the executor, and the native harness's file tools,
-commands, and egress for a remote-bound Project's turn are built. A Code
-thread can be created in a remote-bound Project through the Code commands, on
-a `remote-root` checkout no local Files, Git, terminal, test, or checkpoint
-path resolves, and the Code turn runtime runs its turns on the native harness
-with that remote tool set alone, or on an ACP agent placed on the target whose
-client file and terminal requests run as those same calls; every other
-provider is refused before anything launches, other Code operations on the
-thread are refused, and Full access is not offered there yet. A restart
-interrupts a remote turn it cut off and withdraws the approvals and
-questions it left pending, a remote thread's session is not compacted, and
-a target is not removed while a thread on it holds a turn. A local desktop window lists such Projects
-in the Code sidebar and the composer and starts their threads: a Code draft
-in one binds the window to it with no folder of this host (`boundRoot` null),
-so root-backed surfaces fail closed, and only the thread's own view opens; a
-paired device reaches them under the Project's authority. A person's
-terminals and managed worktrees on a remote-bound Project are built, from a
-local window (Settings › SSH targets) or the local CLI, under the same
-admission. The provider-sdk seam for placing a
-runtime on a target, its conformance, and the executor's confined runtime
-launches with their own proxy on this host are built, and the ACP driver
-declares placement for a profile whose whole launch can be stated on a
-target (its fixed variables and the Project entries it denies included), at
-the runtime path the person set for it there; GitHub Copilot's profile is the
-first that can, and a local window's composer offers it for a remote Project
-where the target's status lists it placeable and its path is set there. SSH
-targets, their runtime paths, their
-attestation digests, remote bindings, managed worktrees, remote terminals'
-starts and ends, and a placed runtime's egress are journaled. Its
-admission, confinement attestation,
-transport, and how it differs from a paired host are owned by
-[Remote SSH environments](design/remote-ssh-environments.md).
+Code threads do not run on another machine over SSH (maintainer decision,
+2026-10-29): an agent that needs a remote machine reaches it with its own
+`ssh`, and Octant on another computer is a hub-and-spoke member
+([Hub and spokes](design/hub-and-spokes.md)). A journal written by a build that
+could bind a Project to an SSH target still replays: its thirteen event names
+(`ssh-target.*`, `ssh-remote-*`, `provider-runtime-egress.*`) are retired, and
+a thread left on a `remote-root` checkout keeps its history but refuses every
+operation, because its Project is no longer in the catalog and no window opens
+it. A restart interrupts such a thread's turn that was still running and
+withdraws the approvals and questions it left pending.
 
 An authorized repository test remains cancellable while the host rediscovers its
 command definition. Cancellation during discovery prevents process launch; runtime
@@ -2403,8 +2377,7 @@ flowchart LR
   can also take one `octant.host-export/1` cut of what this host holds: a thread bundle for
   every thread of every mode, Projects, Project memory, every Canvas (one a
   Chat thread owns outside every Project names no Project), a
-  non-secret settings summary, SSH targets without their destination, host
-  key, or executor path, usage export rows, and retention windows
+  non-secret settings summary, usage export rows, and retention windows
   with purge tombstones. That call is a host-control read on the loopback
   route chain. A remote principal and a paired device are refused, and the
   remote forward list does not carry the path. The same forbidden-key walk
@@ -2615,12 +2588,7 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   `start`, `resume`, `send`, `interrupt`, `stop`, `answerApproval`,
   `answerUserInput`, and `answerTool`, with optional current-turn `steer`. Every driver passes
   the shared conformance harness (chat, child-agent, and context-facts
-  suites) before it is selectable. An acquisition may carry a host-supplied
-  remote placement, which reaches only a driver that declares
-  `remotePlacement` and only through `acquireProviderConnection`, and names
-  the runtime path the person set on the target, the only one the driver may
-  launch; every other driver reports it unsupported and launches nothing
-  ([Provider runtimes on a target](design/remote-ssh-environments.md#provider-runtimes-on-a-target)).
+  suites) before it is selectable.
 - **Probe scheduling.** Operations on one provider instance run one at a time.
   A probe asked for while another probe of that instance is running joins it
   and shares its result, unless an enable or configuration change queued after
@@ -3714,13 +3682,8 @@ server checks it before any side effect:
   - A harness session that is paused (by the advisor, by the person, or for
     recovery) refuses `thread-paused` in every mode, through the same harness
     admission every Chat, Work and Code turn asks before it starts.
-- A Code thread whose root is on an SSH target refuses `runs-on-ssh-target`
-  before any other fact but the principal and the mode. Its runtime starts
-  on the target only through the placement a turn binds on the target's
-  session, and a compaction binds none, so opening its session would start a
-  runtime on this host against the target's path; the Code runtime's
-  compaction session also opens nothing for a remote root
-  ([Remote SSH environments](design/remote-ssh-environments.md#remote-bound-code-threads)).
+- The Code runtime's compaction session opens nothing for a `remote-root`
+  checkout, a folder on another machine that no build runs threads in any more.
 - The summarizer is always the thread's own provider instance and model. The
   command carries no summarizer choice, and the domain's
   `cross-vendor-opt-in-required` refusal stays the guard on the host path.
@@ -3992,7 +3955,7 @@ watched has ended.
   Rebuild, and its `compact-range` remedy runs the same command, labelled
   Compact session; choosing a range is not offered.
 - A permanent refusal (`runtime-cannot-compact`,
-  `runtime-version-unsupported`, `runs-on-ssh-target`, and `remote-client`,
+  `runtime-version-unsupported`, and `remote-client`,
   which no window on a paired device can change) hides the button, and the inspector leaves the
   `compact-range` remedy out; every other refusal (`turn-running`,
   `compaction-running`, `provider-unavailable`, `no-session`,
@@ -5491,24 +5454,6 @@ listener per confined launch:
   connection byte-for-byte to the Unix socket, then runs the command and exits
   with it. The forwarder holds no policy; the token and every decision stay
   with the host proxy.
-- **Commands on an SSH target.** A command of a Project bound to a remote
-  root runs in the same capsule on the target, whose forwarder's socket is
-  the executor's, in its owner-only runtime directory. Each connection the
-  command makes there crosses the SSH session as a stream to this host's
-  proxy for that launch, which decides and journals it exactly as for a local
-  command; the proxy's lookup and connection are made by the target, so the
-  name resolves with the target's resolver and the connection leaves from
-  the target, while the private check and every decision stay here
-  ([Native harness on a target](design/remote-ssh-environments.md#native-harness-on-a-target)).
-- **Provider runtimes on an SSH target.** A runtime placed on a target runs
-  on `proxied` in every posture, Plan included, through a proxy of its own
-  on this host that decides under the runtime rule
-  (`decideProviderRuntimeEgress`): any public name, with no thread or Project
-  rule and nothing proposed, and the same private-address check, so the
-  target's own network and a cloud machine's metadata service stay out of
-  reach. Its records are the `provider-runtime-egress` aggregate and taint no
-  thread
-  ([Runtime placement](design/remote-ssh-environments.md#runtime-placement)).
 - **Environment.** The launch environment adds `HTTPS_PROXY`, `HTTP_PROXY`,
   and `ALL_PROXY` (and their lowercase forms) set to
   `http://octant:<token>@127.0.0.1:<port>`, empty `NO_PROXY`/`no_proxy`, and
@@ -5766,7 +5711,7 @@ where it was or narrows it:
   together with the runtime's directory, so no command can rewrite it. It
   listens on `127.0.0.1:3128` in the private namespace and exits 125 without
   running the command when it cannot listen. A process-denied (Plan) proxied
-  launch, which only a Plan runtime on an SSH target makes, keeps the
+  launch keeps the
   forwarder outside the process-deny filter: the forwarder starts a nested
   Bubblewrap that keeps every mount of the capsule, takes a pid namespace and
   `/proc` of its own (so the command cannot see or trace the forwarder), and
@@ -7053,8 +6998,7 @@ mechanisms are:
   forwarder's nested capsule starts its own Bubblewrap unprivileged
   (Bubblewrap sets `no_new_privs` and mounts the bound program `nosuid`) with
   `--unshare-user`, so it gets a user namespace or fails closed; host-local
-  desktops and SSH executor launches use the restricted capsule, and SSH
-  admission already requires working unprivileged user namespaces.
+  desktops use the restricted capsule.
   The capsule binds `/etc` and `/sys` read-only because
   workloads read them: resolver and `nsswitch` files, TLS roots, `passwd`,
   the dynamic linker cache, `alternatives` links, and login shell startup
@@ -7590,10 +7534,7 @@ find-identity` and `codesign`, through a port with no network; `codesign`
   that value is refined once the driver probes or runs. A refinement that
   upgrades a declaration (`unavailable` to `supported` after a reply reports
   usage) is the degraded form: the capability exists but is not promised before
-  it is seen. Placement on an SSH target is not a capability and has no row:
-  it is the driver's own `ProviderDriver.remotePlacement` declaration, never a
-  probe. The ACP driver makes it only for a profile whose whole launch can be
-  stated on a target, which among shipped profiles is GitHub Copilot's.
+  it is seen.
 
   | Capability               | Claude Code                                                                       | Codex                                                     | OpenCode                                                                 | Pi                                                                                      | ACP agents                                                                    | Ollama                                                           | Harness endpoints                                                                 | Outside harness endpoints                                        | Oh My Pi                              |
   | ------------------------ | --------------------------------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------- |
@@ -9158,7 +9099,7 @@ and voice, public store distribution), a ciphertext-only hosted relay, a full
 LSP / extension host / debugger companion, Apple physical devices and then
 TestFlight and App Store distribution of a person's own apps, enterprise
 directory OAuth and cloud-IAM provider identity, disposable Linux desktops for
-headless hosts, remote SSH development environments, third-party
+headless hosts, third-party
 provider-driver plugins, and the EU/GDPR compliance package (pending legal
 review). On 2026-10-28 the maintainer added a hub-and-spoke topology under the
 same terms ([Hub and spokes](design/hub-and-spokes.md)), including a

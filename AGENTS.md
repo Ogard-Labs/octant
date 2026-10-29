@@ -422,9 +422,8 @@ redacted push, capture and voice, public store distribution), a
 ciphertext-only hosted relay, a full LSP / extension host / debugger
 companion, Apple physical devices and then TestFlight and App Store
 distribution of a person's own apps, enterprise directory OAuth and cloud-IAM
-provider identity, disposable Linux desktops for headless hosts, remote SSH
-development environments, third-party provider-driver plugins, and the EU/GDPR
-compliance package (pending legal review). A hub-and-spoke topology on a
+provider identity, disposable Linux desktops for headless hosts, third-party
+provider-driver plugins, and the EU/GDPR compliance package (pending legal review). A hub-and-spoke topology on a
 person's own devices, where one Octant server (running without the desktop app
 and serving the web app over a private network such as Tailscale) enrolls the
 person's other computers and phones, introduces them to each other, fails over

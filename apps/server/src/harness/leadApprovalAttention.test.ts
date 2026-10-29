@@ -64,7 +64,7 @@ function openStores(
   connection: SqliteConnection,
   options: {
     readonly timeoutMs?: number;
-    readonly runsOnSshTarget?: (threadId: string) => boolean;
+    readonly runsInRemoteFolder?: (threadId: string) => boolean;
   } = {},
 ) {
   const sessions = new NativeHarnessSessionStore({
@@ -77,7 +77,9 @@ function openStores(
     uuid,
     actor,
     clock: () => now,
-    ...(options.runsOnSshTarget === undefined ? {} : { runsOnSshTarget: options.runsOnSshTarget }),
+    ...(options.runsInRemoteFolder === undefined
+      ? {}
+      : { runsInRemoteFolder: options.runsInRemoteFolder }),
   });
   const approvals = new NativeHarnessApprovalStore({
     sessions,
@@ -216,7 +218,7 @@ describe("a pending harness approval across a host restart", () => {
     expect(awaitsLeadApproval(after, thread)).toBe(false);
   });
 
-  it("withdraws what a lead on an SSH target left parked, so no answer reaches its ended turn", () => {
+  it("withdraws what a lead in a remote folder left parked, so no answer reaches its ended turn", () => {
     const before = fixture();
     void before.ask({ mode: "code" });
     // A local Code thread restarted beside it keeps its lead's approval for
@@ -242,8 +244,8 @@ describe("a pending harness approval across a host restart", () => {
           NATIVE_HARNESS_SESSION_EVENT_NAMES.questionSettled,
         ) as { readonly count: number };
 
-    const onTarget = { runsOnSshTarget: (id: string) => id === thread };
-    const after = openStores(before.connection, onTarget);
+    const inRemoteFolder = { runsInRemoteFolder: (id: string) => id === thread };
+    const after = openStores(before.connection, inRemoteFolder);
     expect(after.sessions.read(thread)?.approvals?.[0]?.status).toBe("expired");
     expect(after.sessions.read(thread)?.questions[0]?.status).toBe("expired");
     expect(settledEvents().count).toBe(2);
@@ -256,7 +258,7 @@ describe("a pending harness approval across a host restart", () => {
     expect(leadApprovalFor(after, otherThread)).toMatchObject({ lostInRestart: true });
 
     // Replayed again, the withdrawal is already in the journal: nothing more is settled.
-    const again = openStores(before.connection, onTarget);
+    const again = openStores(before.connection, inRemoteFolder);
     expect(again.sessions.read(thread)?.approvals?.[0]?.status).toBe("expired");
     expect(settledEvents().count).toBe(2);
   });

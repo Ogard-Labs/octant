@@ -87,11 +87,6 @@ import {
 import { createPrivateListenerAdministrationRouteHandler } from "../remote/privateListenerAdministrationRoutes";
 import { createPrivateListenerSetting } from "../remote/privateListenerSetting";
 import { createSelfMadeListenerCertificateStore } from "../remote/selfMadeListenerCertificate";
-import { createSshTargetAdministrationRouteHandler } from "../sshTarget/sshTargetAdministrationRoutes";
-import { targetHoldsRunningTurn } from "../sshTarget/sshRemoteCodeThreads";
-import { SshRemoteProjectService } from "../sshTarget/sshRemoteProjectService";
-import { SshRemoteTerminalService } from "../sshTarget/sshRemoteTerminalService";
-import type { SshTargetsWiring } from "./sshTargets";
 import { boundHostRuntimeDiagnostics, type HostRuntimeDiagnostics } from "@octant/host-runtime";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
@@ -168,7 +163,6 @@ export type RemoteDependencies = Pick<
   Pick<RoutesWiring, "authenticatedProductDispatch"> &
   Pick<FoundationsWiring, "workThreadProjection"> &
   Pick<FoundationsWiring, "providerRuntimeRegistry"> &
-  Pick<SshTargetsWiring, "sshTargetConnections" | "sshTargetStore"> &
   Pick<CodeRuntimeWiring, "codeOperationRuntime">;
 
 const decodeAgentRunParentThreadId = Schema.decodeUnknownSync(AgentRunParentThreadId);
@@ -781,40 +775,6 @@ export function wireRemote(deps: RemoteDependencies) {
     setting: privateListenerSetting,
     maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
   });
-  // SSH targets are administered from this machine alone, like the listener:
-  // the routes sit on the loopback chain beside it, never in product dispatch.
-  const { sshTargetStore, sshTargetConnections } = deps;
-  const sshRemoteProjects = new SshRemoteProjectService({
-    store: sshTargetStore,
-    connections: sshTargetConnections,
-    uuid: randomUUID,
-    clock: () => new Date().toISOString(),
-  });
-  const sshRemoteTerminals = new SshRemoteTerminalService({
-    projects: sshRemoteProjects,
-    connections: sshTargetConnections,
-    store: sshTargetStore,
-  });
-  // A restart ended every session, and every remote shell with it.
-  sshRemoteTerminals.reconcile();
-  const sshTargetAdministrationRoutes = createSshTargetAdministrationRouteHandler({
-    desktopBridgeSecret: options.desktopBridgeSecret,
-    windowAuthorityStore,
-    connections: sshTargetConnections,
-    projects: sshRemoteProjects,
-    terminals: sshRemoteTerminals,
-    threadRunsOnTarget: (targetId) =>
-      targetHoldsRunningTurn(
-        {
-          projects: () => sshTargetStore.listProjects(),
-          threads: () => persistence.readCodeThreads(),
-          turnInProgress: (threadId) =>
-            deps.codeOperationRuntime?.turnInProgress?.(threadId) === true,
-        },
-        String(targetId),
-      ),
-    maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
-  });
   // One diagnostics composer is shared by the owner control socket (through
   // the returned server shape) and the authenticated local host-control
   // routes, so the web Settings host card and `octant server status`
@@ -998,16 +958,7 @@ export function wireRemote(deps: RemoteDependencies) {
           lifecycle: project.lifecycle,
           ...(project.type === "chat" ? {} : { canonicalRoot: project.binding.canonicalRoot }),
         })),
-        // A remote-bound Code Project is exported as any Project is: its
-        // identity, never its folder.
-        ...sshTargetStore.listProjects().map((project) => ({
-          projectId: project.id,
-          name: project.name,
-          type: "code" as const,
-          lifecycle: "active" as const,
-        })),
       ],
-      listSshTargets: () => sshTargetStore.exportTargets(),
       listProjectIds: () => persistence.readProjects().map((project) => String(project.id)),
       readProjectMemory: (projectId) => persistence.readProjectMemory(decodeProjectId(projectId)),
       listCanvases: () =>
@@ -1044,8 +995,6 @@ export function wireRemote(deps: RemoteDependencies) {
     privateListenerSetting,
     providerCredentialRoutes,
     remoteHost,
-    sshRemoteTerminals,
-    sshTargetAdministrationRoutes,
   };
 }
 

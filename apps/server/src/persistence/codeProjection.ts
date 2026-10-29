@@ -887,12 +887,12 @@ export function readCodeThreadView(
 }
 
 /**
- * Why a remote-bound thread's turn stopped across a restart. Its command died
- * with the target's session and nothing was queued, as when the session ends
- * while this host runs.
+ * Why a turn that ran in a folder on another machine stopped across a
+ * restart. No build runs such turns any more, so one still reading as running
+ * is settled rather than left waiting for a session that cannot return.
  */
 const REMOTE_TURN_ENDED_BY_RESTART =
-  "Octant restarted, which ended the SSH target's session (target-disconnected). Nothing was queued; connect the target again, then send the message again.";
+  "Octant restarted, and threads in a folder on a remote machine are no longer supported. Nothing was queued.";
 
 /**
  * The head of a turn's operation journal while its latest state still reads
@@ -978,11 +978,9 @@ export function reconcileCodeRestart(input: {
     });
   }
 
-  // A remote-bound thread's turn ran on an SSH target, and a restart ends
-  // the session it was bound to, so it is a disconnect: the turn stops as
-  // interrupted, as a lost session stops it, rather than wait for a resume
-  // that could bind only to a session the person connects and that attests
-  // anew. Done before the waits below, which would otherwise keep it waiting.
+  // A turn of a thread in a folder on another machine, from a build that could
+  // run one, stops as interrupted: its session cannot return. Done before the
+  // waits below, which would otherwise keep it waiting.
   const remoteTurns = input.connection
     .prepare(
       "SELECT * FROM code_runtime_projection WHERE work_kind = 'provider-turn' AND state IN ('running', 'waiting')",

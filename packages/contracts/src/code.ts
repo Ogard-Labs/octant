@@ -152,10 +152,10 @@ export const CodeCheckoutIdentity = Schema.Union(
     observedAt: UtcTimestamp,
   }).annotations(strict),
   /**
-   * A remote-bound Project's root on an SSH target. It is never a folder of
-   * this host: its identity digests the binding the target's executor
-   * resolved, it carries no head because this host reads no Git of it, and
-   * only a native-harness turn reaches it, through the target's executor.
+   * A folder on another machine, from the build that could bind a Project to
+   * an SSH target. Those bindings are gone, but their journaled checkouts
+   * still replay, so the kind stays decodable. It is never a folder of this
+   * host and carries no head.
    */
   Schema.Struct({
     id: CodeCheckoutId,

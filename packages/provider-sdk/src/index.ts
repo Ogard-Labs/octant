@@ -16,5 +16,3 @@ export * from "./cloudIamConformance";
 export * from "./childObservations";
 export * from "./imageGeneration";
 export * from "./imageGenerationConformance";
-export * from "./processPlacement";
-export * from "./processPlacementConformance";
