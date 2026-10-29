@@ -57,10 +57,21 @@ async function startListener(certificate: {
   const requestBytes: Buffer[] = [];
   const closedConnections: Array<Promise<void>> = [];
   const openSockets = new Set<Socket>();
-  const server = createTlsServer({ ...certificate }, (socket) => {
-    socket.on("data", (chunk: Buffer) => requestBytes.push(chunk));
-    socket.on("error", () => undefined);
-  });
+  const serverNames: string[] = [];
+  // The callback runs only for a client that sends a server name.
+  const server = createTlsServer(
+    {
+      ...certificate,
+      SNICallback: (name, done) => {
+        serverNames.push(name);
+        done(null);
+      },
+    },
+    (socket) => {
+      socket.on("data", (chunk: Buffer) => requestBytes.push(chunk));
+      socket.on("error", () => undefined);
+    },
+  );
   server.on("connection", (raw: Socket) => {
     openSockets.add(raw);
     closedConnections.push(
@@ -88,6 +99,7 @@ async function startListener(certificate: {
     port: address.port,
     rawByteCount: () => rawBytes.reduce((sum, count) => sum + count, 0),
     requestText: () => Buffer.concat(requestBytes).toString("utf8"),
+    serverNames: () => [...serverNames],
     allClosed: () => Promise.all(closedConnections),
   };
 }
@@ -149,6 +161,31 @@ describe("a listener connection under its stored trust", () => {
     await send(connection, "GET /api/remote/hello");
     await listener.allClosed();
     expect(listener.requestText()).toBe("GET /api/remote/hello");
+  });
+
+  it("sends no server name to a pinned origin, so the listener answers with its own certificate", async () => {
+    const listener = await startListener({ cert: SELF_MADE_CERT, key: SELF_MADE_KEY });
+
+    const connection = await secureOverLoopback(listener.port, pinned(SELF_MADE_PIN));
+
+    expect(connection.status).toBe("connected");
+    if (connection.status === "connected") connection.socket.destroy();
+    await listener.allClosed();
+    expect(listener.serverNames()).toEqual([]);
+  });
+
+  it("sends the origin's name to a platform-trusted origin, which checks the certificate against it", async () => {
+    const listener = await startListener({
+      cert: PLATFORM_TRUSTED_CERT,
+      key: PLATFORM_TRUSTED_KEY,
+    });
+
+    const connection = await secureOverLoopback(listener.port, platform);
+
+    expect(connection.status).toBe("connected");
+    if (connection.status === "connected") connection.socket.destroy();
+    await listener.allClosed();
+    expect(listener.serverNames()).toEqual([HOSTNAME]);
   });
 
   it("refuses a pinned origin that serves another key before any request byte leaves", async () => {
