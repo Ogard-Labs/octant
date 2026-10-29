@@ -81,10 +81,14 @@ export type HubWakeSpokeTimes = typeof HubWakeSpokeTimes.Type;
  * What the hub hands a standby so it can wake spokes while it stands in; empty
  * clears it. `enabled` is the hub's own wake switch: a standby that stands in
  * wakes spokes only while it was told the switch is on, so a copy from a hub
- * that predates the field counts as off.
+ * that predates the field counts as off. `revision` rises with every copy the
+ * hub makes: copies are sent without waiting for each other, so a standby keeps
+ * one only when it is newer than the one it holds. A copy without it is taken
+ * as it comes, which is what a hub that predates the field sends.
  */
 export const HubWakeCopy = Schema.Struct({
   enabled: Schema.optional(Schema.Boolean),
+  revision: Schema.optional(Schema.Int.pipe(Schema.positive())),
   spokes: Schema.Array(HubWakeSpokeTimes).pipe(Schema.maxItems(256)),
 }).annotations(strict);
 export type HubWakeCopy = typeof HubWakeCopy.Type;

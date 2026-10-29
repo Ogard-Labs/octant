@@ -884,6 +884,43 @@ describe("the wake service in a failover", () => {
     expect(nudges(member)).toBe(0);
   });
 
+  it("keeps the newer wake copy when an older one arrives late", async () => {
+    const { clock, hub, standby, member } = await startFamily();
+    standby.spoke.setGrant(standbyGrant, window);
+    member.spoke.setGrant(wakeAndStandbyGrant, window);
+    const ordered = await hub.hub.setStandbyOrder([decodeMemberId(standby.hostId)], window);
+    if (ordered.status !== "ordered") throw new Error(JSON.stringify(ordered));
+    member.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 10 * MINUTE),
+    });
+    expect(await member.spokeWake.report()).toEqual({ status: "sent", count: 1 });
+    await vi.waitFor(() => expect(standby.state.load().link?.wakeCopy).toHaveLength(1));
+    const revision = hub.state.load().hub?.wake?.copyRevision ?? 0;
+    expect(revision).toBeGreaterThan(0);
+    const send = (older: number) =>
+      signedRequest({
+        signer: hub,
+        recipient: standby,
+        clock,
+        method: "PUT",
+        path: HUB_LINK_ROUTES.wakeCopy,
+        body: { enabled: true, revision: older, spokes: [] },
+      });
+
+    const delayed = await send(revision - 1);
+    const repeated = await send(revision);
+
+    expect(delayed?.status).toBe(409);
+    expect(await delayed?.json()).toEqual({ status: "refused", kind: "stale-copy" });
+    expect(repeated?.status).toBe(409);
+    expect(standby.state.load().link?.wakeCopy).toHaveLength(1);
+    const newer = await send(revision + 1);
+    expect(newer?.status).toBe(200);
+    expect(standby.state.load().link?.wakeCopy).toEqual([]);
+  });
+
   it("refuses a standby's nudge from a spoke that did not tick Standby, and while the hub is reachable", async () => {
     const { clock, hub, standby, member } = await startFamily();
     standby.spoke.setGrant(standbyGrant, window);

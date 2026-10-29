@@ -221,9 +221,8 @@ export function createHubLinkRouteHandler(
         return refused(400, "invalid");
       }
       const held = options.wake.receiveCopy(copy);
-      return held.status === "recorded"
-        ? Response.json(held, { headers: NO_STORE })
-        : refused(403, held.kind);
+      if (held.status === "recorded") return Response.json(held, { headers: NO_STORE });
+      return refused(held.kind === "stale-copy" ? 409 : 403, held.kind);
     }
 
     if (route === HUB_LINK_ROUTES.wakeTimes) {
