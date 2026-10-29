@@ -409,7 +409,11 @@ export class FailoverService {
     return seconds === undefined ? DEFAULT_FAILOVER_AFTER_MS : seconds * 1_000;
   }
 
-  /** Whether the hub answered. A newer hub-signed roster in its answer is taken like a pushed one. */
+  /**
+   * Whether the hub answered. A newer hub-signed roster in its answer is taken
+   * like a pushed one, so a spoke whose person unticked Roster still reads
+   * reachability from the answer but installs nothing from it.
+   */
   async #probeHub(link: HubLinkState): Promise<boolean> {
     const answer = await this.#askHeartbeat({
       origin: link.hubOrigin,

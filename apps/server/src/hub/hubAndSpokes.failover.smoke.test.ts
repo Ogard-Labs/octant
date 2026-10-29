@@ -236,6 +236,35 @@ describe("a standby-signed roster", () => {
   });
 });
 
+describe("a roster carried by the hub's heartbeat", () => {
+  it("is installed where the person ticked Roster and left alone where they did not", async () => {
+    const network = new HubTestNetwork();
+    const hub = await start(network, "Mac mini", 103);
+    const ticked = await start(network, "Laptop", 105);
+    const unticked = await start(network, "Desk", 106);
+    const newcomer = await start(network, "Phone", 107);
+    const enabled = hub.hub.enable(window);
+    if (enabled.status !== "enabled") throw new Error(enabled.status);
+    await join(hub, ticked);
+    await join(hub, unticked);
+    unticked.spoke.setGrant({ items: ["introduce", "owners"], actProjects: [] }, window);
+    const before = roster(unticked);
+    // The hub's push to each member is dropped on the way, so only the heartbeat can carry the roster.
+    network.stop(ticked.address);
+    network.stop(unticked.address);
+    await join(hub, newcomer);
+    network.start(ticked.address);
+    network.start(unticked.address);
+
+    await unticked.failover.tick();
+    await ticked.failover.tick();
+
+    expect(roster(unticked)).toEqual(before);
+    expect(names(roster(unticked))).not.toContain("Phone");
+    expect(names(roster(ticked))).toContain("Phone");
+  });
+});
+
 describe("a hub that stops and comes back", () => {
   it("lets the members switch to the standby, which adds and removes members, and takes its changes back with removal winning", async () => {
     const network = new HubTestNetwork();

@@ -1305,6 +1305,11 @@ export class SpokeLinkService {
     const link = state.link;
     if (link === undefined) return { status: "refused", kind: "not-a-spoke" };
     if (link.removed === true) return { status: "refused", kind: "hub-revoked" };
+    // Every way a roster arrives (the hub's push, a standby's push, the hub's
+    // heartbeat answer, a hand-back) ends here, so the Roster item is judged
+    // once, not per caller.
+    const rosterGrant = authorizeHubRequest({ grant: link.grant, item: "roster" });
+    if (rosterGrant.status === "refused") return rosterGrant;
     const anchor = hubSignedAnchor(link);
     // A standby acts here only where this spoke's person ticked Standby.
     if (
