@@ -608,11 +608,11 @@ describe("native harness session store", () => {
     at += 1_000;
     expect(approvals.waiting()).toEqual([]);
     await expect(stale).resolves.toBe("expired");
-    expect(approvals.decide(threadId, idAt(0), "approve")).toBe("already-settled");
+    expect(approvals.decide(threadId, idAt(0), "approve")).toBe("withdrawn");
 
     const answeredLate = ask();
     at += 1_000;
-    expect(approvals.decide(threadId, idAt(1), "approve-always")).toBe("already-settled");
+    expect(approvals.decide(threadId, idAt(1), "approve-always")).toBe("withdrawn");
     await expect(answeredLate).resolves.toBe("expired");
 
     const shownLate = ask();
@@ -740,7 +740,7 @@ describe("native harness session store", () => {
     });
     expect(
       afterRestart.decide(threadId, String(restored.read(threadId)?.approvals?.[1]?.id), "approve"),
-    ).toBe("already-settled");
+    ).toBe("withdrawn");
     // The old process no longer exists after a restart; its waiters never run.
     vi.clearAllTimers();
     vi.useRealTimers();

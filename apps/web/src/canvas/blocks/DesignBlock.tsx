@@ -536,6 +536,45 @@ function writeNotesShown(shown: boolean): void {
  * stopped painting sandboxed frames that were `inert` or had
  * `pointer-events: none` until one that took the pointer appeared beside them.
  */
+/**
+ * One static frame of a design, drawn scaled inside a surface that is not the
+ * design's own board — a flow board's screen node. It resolves the design's
+ * declared images itself, so each screen asks the host as its own drawing
+ * does; a design that runs script never reaches a flow, so the frame is
+ * always the still picture.
+ */
+export function DesignFrameView({
+  block,
+  frameId,
+  scale,
+  assetRuntime,
+  sandboxOverride,
+}: {
+  readonly block: CanvasDesignBlock;
+  readonly frameId: string;
+  readonly scale: number;
+  readonly assetRuntime?: DesignAssetRuntime;
+  readonly sandboxOverride?: "" | "allow-same-origin";
+}) {
+  const size = block.size === "document" ? "desktop" : block.size;
+  const theme = useWorkspaceFrameTheme(designFrameTheme(block) === "workspace");
+  const assetUrls = useDesignAssetUrls(block, assetRuntime);
+  const frame = block.frames.find((candidate) => String(candidate.frameId) === frameId);
+  if (frame === undefined) return null;
+  return (
+    <FrameView
+      block={block}
+      frameIds={[frameId]}
+      size={size}
+      still
+      scale={scale}
+      frame={{ theme, assetUrls }}
+      title={`${frame.title}, design screen`}
+      {...(sandboxOverride === undefined ? {} : { sandboxOverride })}
+    />
+  );
+}
+
 function FrameView({
   block,
   size,
@@ -546,6 +585,7 @@ function FrameView({
   title,
   still = false,
   beneath = false,
+  sandboxOverride,
 }: {
   readonly block: CanvasDesignBlock;
   readonly size: CanvasDesignDeviceSize;
@@ -561,6 +601,8 @@ function FrameView({
    * revealed, so a step would still wait on rendering.
    */
   readonly beneath?: boolean;
+  /** Widens the sandbox for a surface that reads the page (a flow's Play follows the frame's own anchors). */
+  readonly sandboxOverride?: "" | "allow-same-origin";
 }) {
   const viewport = CANVAS_DESIGN_VIEWPORT[size];
   // Keyed by the ids, not the array, so a parent's new array of the same ids
@@ -585,7 +627,7 @@ function FrameView({
       }
       onLoad={themed ? (event) => installFrameFonts(event.currentTarget) : undefined}
       referrerPolicy="no-referrer"
-      sandbox={designFrameSandbox(block)}
+      sandbox={sandboxOverride ?? designFrameSandbox(block)}
       srcDoc={srcDoc}
       style={{
         width: viewport.width,
@@ -1099,7 +1141,7 @@ function RunningFrame({
  * window that may not, a gesture the browser did not count) leaves the page as
  * it was.
  */
-function useFullscreen<T extends HTMLElement>() {
+export function useFullscreen<T extends HTMLElement>() {
   const ref = useRef<T>(null);
   const [active, setActive] = useState(false);
   useEffect(() => {
@@ -1115,7 +1157,7 @@ function useFullscreen<T extends HTMLElement>() {
   return { ref, active, toggle, available: document.fullscreenEnabled === true };
 }
 
-function FullscreenButton({
+export function FullscreenButton({
   fullscreen,
 }: {
   readonly fullscreen: Pick<ReturnType<typeof useFullscreen>, "active" | "available" | "toggle">;
@@ -1248,7 +1290,7 @@ function useFramesNearView(
  * callback ref, because the player's stage mounts inside a dialog after the
  * component that asks for it.
  */
-function useSize(): readonly [
+export function useSize(): readonly [
   (element: HTMLElement | null) => void,
   { readonly width: number; readonly height: number } | undefined,
 ] {

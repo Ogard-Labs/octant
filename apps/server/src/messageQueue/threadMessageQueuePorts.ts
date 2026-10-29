@@ -69,6 +69,8 @@ export interface ThreadMessageQueuePortDependencies {
    * meanwhile, so a queued message waits it out as it waits out a running turn.
    */
   readonly compacting?: (scope: ThreadMessageQueueScope) => boolean;
+  /** An enqueued recovery cannot dispatch until the dead session has been settled. */
+  readonly recoveryRequired?: (threadId: string) => boolean;
   readonly attachments: Pick<ThreadMessageQueueModePort, "retain" | "commit" | "release"> & {
     readonly prepare: (input: ThreadMessageQueueResource) => Promise<boolean>;
   };
@@ -220,6 +222,7 @@ export function createThreadMessageQueuePort(
       status:
         facts.tail?.status === "active" ||
         ("executing" in facts && facts.executing) ||
+        deps.recoveryRequired?.(String(input.scope.threadId)) === true ||
         deps.compacting?.(input.scope) === true
           ? "busy"
           : "ready",

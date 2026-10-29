@@ -17,6 +17,7 @@ import {
   CODE_DEBUG_CONFIGURATION_AGGREGATE,
   CODE_DEBUG_EGRESS_AGGREGATE,
   CODE_DEBUG_SESSION_AGGREGATE,
+  decodeCodeDebugChildId,
   decodeCodeDebugConfiguration,
   decodeCodeDebugConfigurationDigest,
   decodeCodeDebugSessionId,
@@ -114,8 +115,24 @@ async function hostListener(): Promise<{
   return { port: address.port, connections: () => connections };
 }
 
-/** A person's folder holding one debug adapter for the fixture program. */
-function adapterFolder(root: string, mode: FakeDebugAdapterMode = "normal"): string {
+/**
+ * A person's folder holding one debug adapter for the fixture program. The
+ * children modes declare children, announced as each mode announces them,
+ * unless `declareChildren` is false.
+ */
+function adapterFolder(
+  root: string,
+  mode: FakeDebugAdapterMode = "normal",
+  options: { readonly declareChildren?: boolean } = {},
+): string {
+  const children =
+    options.declareChildren === false
+      ? {}
+      : mode === "children-event"
+        ? { childSessions: 1, childAnnouncement: { kind: "event", event: "fixtureAttach" } }
+        : mode === "children-start-debugging"
+          ? { childSessions: 1, childAnnouncement: { kind: "start-debugging" } }
+          : {};
   const folder = join(root, `fixture-adapter-${mode}`);
   mkdirSync(join(folder, "bin"), { recursive: true });
   writeFileSync(join(folder, "bin", "adapter"), fakeDebugAdapterScript(mode), { mode: 0o755 });
@@ -151,6 +168,7 @@ function adapterFolder(root: string, mode: FakeDebugAdapterMode = "normal"): str
               },
               importTypes: ["fixture"],
               debugPorts: 0,
+              ...children,
             },
           },
         ],
@@ -468,18 +486,26 @@ async function host(
       sessionId: CodeDebugSessionId,
       request: CodeDebugSessionRequest,
       principal?: PrincipalKind,
+      child?: number,
     ): Promise<CodeDebugSessionResult> =>
-      service.session(caller(principal), { ...scope(), sessionId, request }),
-    /** Waits until the session reports a state that `matches`. */
+      service.session(caller(principal), {
+        ...scope(),
+        sessionId,
+        ...(child === undefined ? {} : { child: decodeCodeDebugChildId(child) }),
+        request,
+      }),
+    /** Waits until the session, or one of its children, reports a state that `matches`. */
     waitFor: async (
       sessionId: CodeDebugSessionId,
       matches: (result: CodeDebugSessionResult) => boolean,
+      child?: number,
     ): Promise<CodeDebugSessionResult> => {
       const deadline = Date.now() + 20_000;
       for (;;) {
         const result = await service.session(caller(), {
           ...scope(),
           sessionId,
+          ...(child === undefined ? {} : { child: decodeCodeDebugChildId(child) }),
           request: { kind: "state" },
         });
         if (matches(result)) return result;
@@ -543,6 +569,16 @@ describe("debug adapters a person adds", () => {
     });
     // Installed but not reviewed and switched on, it is offered nowhere.
     expect(await test.configurations()).toMatchObject({ status: "listed", adapters: [] });
+  });
+
+  it("says in review that an adapter also debugs the program's children, and how it announces one", async () => {
+    const test = await host(passthrough);
+    const inspected = await test.inspect(adapterFolder(test.root, "children-event"));
+    if (inspected.kind !== "package-inspected") throw new Error(JSON.stringify(inspected));
+    expect(inspected.preview.review.components[0]?.debugAdapter).toMatchObject({
+      childSessions: 1,
+      childAnnouncement: { kind: "event", event: "fixtureAttach" },
+    });
   });
 
   it("refuses a package that ships another program besides its binary", async () => {
@@ -899,6 +935,191 @@ describe("a running debug session", () => {
   });
 });
 
+/** What the fixture adapter did with its children, in order. */
+function adapterLog(test: Host): ReadonlyArray<string> {
+  const path = join(test.checkout, "adapter-log.txt");
+  return existsSync(path) ? readFileSync(path, "utf8").trim().split("\n") : [];
+}
+
+/**
+ * Starts a children fixture under Full access, where the capsule shares the
+ * host's loopback on Linux too, so the passthrough launch reaches the child
+ * port on either platform. `env` is the configuration's environment, which
+ * tells the fixture what to announce.
+ */
+async function childrenSession(
+  test: Host,
+  env: Readonly<Record<string, string>> = {},
+): Promise<CodeDebugSessionId> {
+  test.windowGrant.fullAccess = true;
+  return startedSession(
+    test,
+    test.configuration({
+      env: Object.entries(env).map(([key, value]) => ({ key, value })),
+    }),
+  );
+}
+
+const childList = (result: CodeDebugSessionResult) =>
+  result.status === "state" ? (result.children ?? []) : [];
+
+describe("a debug session's child processes", () => {
+  it("attaches a child the adapter announces by its declared event, stops it at the window's breakpoint, and ends it before the session", async () => {
+    const test = await host(passthrough);
+    await test.install(adapterFolder(test.root, "children-event"));
+    await test.enable();
+    const sessionId = await childrenSession(test);
+    await test.waitFor(sessionId, (result) => childList(result).length === 1);
+    await test.waitFor(
+      sessionId,
+      (result) => result.status === "state" && result.state.status === "stopped",
+      1,
+    );
+    expect(childList(await test.ask(sessionId, { kind: "state" }))).toEqual([
+      { child: 1, name: "Child process 1", status: "stopped" },
+    ]);
+    const stack = await test.ask(
+      sessionId,
+      { kind: "stack-trace", programThreadId: 1 },
+      undefined,
+      1,
+    );
+    if (stack.status !== "stack") throw new Error(JSON.stringify(stack));
+    expect(stack.frames[0]).toMatchObject({
+      name: "child (src/main.js)",
+      location: { kind: "checkout", path: "src/main.js", line: 42 },
+    });
+    // The host sent `attach` with the announced configuration, its `connect` removed.
+    expect(adapterLog(test)).toContain("child 1 attached");
+
+    expect(await test.ask(sessionId, { kind: "stop" })).toEqual({
+      status: "ended",
+      endReason: "stopped",
+    });
+    const log = adapterLog(test);
+    expect(log.indexOf("child 1 disconnected")).toBeGreaterThan(-1);
+    expect(log.indexOf("child 1 disconnected")).toBeLessThan(log.indexOf("session disconnected"));
+    const ended = test.journal.sessions().at(-1);
+    expect(ended).toMatchObject({
+      eventName: "code.debug-session-ended@1",
+      payload: { endReason: "stopped", childSessions: 1 },
+    });
+    // Nothing of the child is journaled: no name, no value, no output.
+    const everything = JSON.stringify(test.journal.all());
+    expect(everything).not.toContain("Child process 1");
+    expect(everything).not.toContain("hunter2-session-value");
+  });
+
+  it("attaches a child announced by the standard startDebugging request, and stopping the child leaves the session running", async () => {
+    const test = await host(passthrough);
+    await test.install(adapterFolder(test.root, "children-start-debugging"));
+    await test.enable();
+    const sessionId = await childrenSession(test);
+    await test.waitFor(
+      sessionId,
+      (result) => result.status === "state" && result.state.status === "stopped",
+      1,
+    );
+    expect(Object.fromEntries(test.service.refusedAdapterRequests(sessionId))).toEqual({});
+    expect(await test.ask(sessionId, { kind: "stop" }, undefined, 1)).toEqual({
+      status: "ended",
+      endReason: "stopped",
+    });
+    expect(adapterLog(test)).toContain("child 1 disconnected");
+    expect(adapterLog(test)).not.toContain("session disconnected");
+    const state = await test.ask(sessionId, { kind: "state" });
+    expect(state).toMatchObject({ status: "state", children: [] });
+    expect(state.status === "state" && state.state.status).not.toBe("ended");
+    // A child that has ended reads as no session; the panel goes back to the program.
+    expect(await test.ask(sessionId, { kind: "threads" }, undefined, 1)).toEqual({
+      status: "refused",
+      reason: "no-session",
+    });
+  });
+
+  it("refuses an announcement that names another port or a host off loopback, and connects nowhere", async () => {
+    const listener = await hostListener();
+    const test = await host(passthrough);
+    await test.install(adapterFolder(test.root, "children-event"));
+    await test.enable();
+    const sessionId = await childrenSession(test, { FIXTURE_ANNOUNCE_PORT: String(listener.port) });
+    await stoppedAt(42)(test, sessionId);
+    expect(await test.ask(sessionId, { kind: "state" })).toMatchObject({
+      children: [],
+      undebuggedChildren: 1,
+    });
+    expect(listener.connections()).toBe(0);
+    expect(adapterLog(test)).not.toContain("child 1 attached");
+    await test.ask(sessionId, { kind: "stop" });
+
+    const offLoopback = await childrenSession(test, { FIXTURE_ANNOUNCE_HOST: "example.com" });
+    await stoppedAt(42)(test, offLoopback);
+    expect(await test.ask(offLoopback, { kind: "state" })).toMatchObject({
+      children: [],
+      undebuggedChildren: 1,
+    });
+    expect(adapterLog(test)).not.toContain("child 1 attached");
+  });
+
+  it("debugs at most eight children at once and thirty-two over a session, and the rest run undebugged", async () => {
+    const test = await host(passthrough);
+    await test.install(adapterFolder(test.root, "children-event"));
+    await test.enable();
+    const burst = await childrenSession(test, { FIXTURE_CHILDREN: "10" });
+    await test.waitFor(
+      burst,
+      (result) =>
+        childList(result).length === 8 &&
+        result.status === "state" &&
+        result.undebuggedChildren === 2,
+    );
+    await test.ask(burst, { kind: "stop" });
+
+    const serial = await childrenSession(test, {
+      FIXTURE_CHILDREN: "40",
+      FIXTURE_CHILD_GAP_MS: "300",
+      FIXTURE_CHILD_EXITS: "1",
+    });
+    await test.waitFor(
+      serial,
+      (result) => result.status === "state" && result.undebuggedChildren === 8,
+    );
+    await test.ask(serial, { kind: "stop" });
+    expect(test.journal.sessions().at(-1)).toMatchObject({
+      payload: { endReason: "stopped", childSessions: 32 },
+    });
+  }, 60_000);
+
+  it("drops an announcement from an adapter that declared no children", async () => {
+    const test = await host(passthrough);
+    await test.install(adapterFolder(test.root, "children-event", { declareChildren: false }));
+    await test.enable();
+    const undeclared = await childrenSession(test);
+    await stoppedAt(42)(test, undeclared);
+    const state = await test.ask(undeclared, { kind: "state" });
+    expect(state.status === "state" && state.children).toBeUndefined();
+    expect(adapterLog(test)).toContain("child 1 announced");
+    expect(adapterLog(test)).not.toContain("child 1 attached");
+    await test.ask(undeclared, { kind: "stop" });
+    expect(test.journal.sessions().at(-1)?.payload).not.toHaveProperty("childSessions");
+  });
+
+  it("drops an announcement the adapter makes while the session ends", async () => {
+    const test = await host(passthrough);
+    await test.install(adapterFolder(test.root, "children-event"));
+    await test.enable();
+    const sessionId = await childrenSession(test, {
+      FIXTURE_CHILDREN: "0",
+      FIXTURE_ANNOUNCE_ON_DISCONNECT: "1",
+    });
+    await stoppedAt(42)(test, sessionId);
+    await test.ask(sessionId, { kind: "stop" });
+    expect(adapterLog(test)).toContain("child 99 announced");
+    expect(adapterLog(test)).not.toContain("child 99 attached");
+    expect(test.journal.sessions().at(-1)).toMatchObject({ payload: { childSessions: 0 } });
+  });
+});
+
 describe("a debug session under confinement", () => {
   it.runIf(bubblewrap || seatbelt)(
     "stops at a breakpoint, shows its stack and variables, steps, continues, and exits, while its program cannot write outside the checkout or reach a host no rule allows",
@@ -1007,6 +1228,103 @@ describe("a debug session under confinement", () => {
       const everything = JSON.stringify(test.journal.all());
       expect(everything).not.toContain("hunter2-session-value");
       expect(everything).not.toContain("counted 42");
+    },
+    60_000,
+  );
+
+  it.runIf(bubblewrap)(
+    "connects a child through the relay socket it held before the adapter ran, not one the capsule swapped in",
+    async () => {
+      const outside = join(realpathSync(tmpdir()), `octant-outside-${randomUUID()}.sock`);
+      let reached = 0;
+      const listener = createServer((socket) => {
+        reached += 1;
+        socket.destroy();
+      });
+      listeners.push(listener);
+      markers.push(outside);
+      await new Promise<void>((resolve) => listener.listen(outside, resolve));
+      const test = await host(makeProcessConfinementLive());
+      await test.install(adapterFolder(test.root, "children-event"));
+      await test.enable();
+      const sessionId = await startedSession(
+        test,
+        test.configuration({ env: [{ key: "FIXTURE_SWAP_RELAY", value: outside }] }),
+      );
+      await test.waitFor(
+        sessionId,
+        (result) => result.status === "state" && result.state.status === "stopped",
+        1,
+      );
+      expect(adapterLog(test)).toEqual(
+        expect.arrayContaining(["relay swapped", "child 1 attached"]),
+      );
+      expect(reached).toBe(0);
+    },
+    60_000,
+  );
+
+  it.runIf(bubblewrap || seatbelt)(
+    "attaches a child in the session's capsule, which stops at a breakpoint, cannot write outside the checkout, and reaches no host its rules refuse",
+    async () => {
+      const listener = await hostListener();
+      const test = await host(makeProcessConfinementLive(), { hostPort: listener.port });
+      await test.install(adapterFolder(test.root, "children-event"));
+      await test.enable();
+      const sessionId = await startedSession(test);
+      await test.waitFor(
+        sessionId,
+        (result) =>
+          result.status === "state" &&
+          result.state.status === "stopped" &&
+          result.state.reason === "breakpoint",
+        1,
+      );
+      const stack = await test.ask(
+        sessionId,
+        { kind: "stack-trace", programThreadId: 1 },
+        undefined,
+        1,
+      );
+      if (stack.status !== "stack") throw new Error(JSON.stringify(stack));
+      expect(stack.frames[0]?.location).toMatchObject({
+        kind: "checkout",
+        path: "src/main.js",
+        line: 42,
+      });
+      expect(await test.ask(sessionId, { kind: "next", programThreadId: 1 }, undefined, 1)).toEqual(
+        {
+          status: "done",
+        },
+      );
+      await test.waitFor(
+        sessionId,
+        (result) =>
+          result.status === "state" &&
+          result.state.status === "stopped" &&
+          result.state.reason === "step",
+        1,
+      );
+      const attempts = await test.ask(
+        sessionId,
+        { kind: "variables", variablesReference: 1001 },
+        undefined,
+        1,
+      );
+      if (attempts.status !== "variables") throw new Error(JSON.stringify(attempts));
+      const outcome = Object.fromEntries(
+        attempts.variables.map((entry) => [entry.name, entry.value]),
+      );
+      expect(outcome.writeOutside).toMatch(/^refused /);
+      expect(outcome.reachHost).toMatch(/^refused /);
+      expect(outcome.proxyPublic).toBe("status 403");
+      expect(existsSync(test.outsideMarker)).toBe(false);
+      expect(listener.connections()).toBe(0);
+
+      await test.ask(sessionId, { kind: "stop" });
+      const log = adapterLog(test);
+      expect(log.indexOf("child 1 disconnected")).toBeLessThan(log.indexOf("session disconnected"));
+      expect(test.journal.sessions().at(-1)).toMatchObject({ payload: { childSessions: 1 } });
     },
     60_000,
   );

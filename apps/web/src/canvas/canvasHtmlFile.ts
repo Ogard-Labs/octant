@@ -19,8 +19,14 @@ export async function saveCanvasHtmlFile(
   request: CanvasHtmlFileRequest,
 ): Promise<string> {
   const result = await render(load, request);
+  if (result.kind === "ready-tsx") {
+    // A TSX module is source text, saved as text rather than as a page.
+    return download(result.tsx, result.fileName, "text/plain;charset=utf-8")
+      ? `Saved ${result.fileName}.`
+      : "This window cannot save files.";
+  }
   if (result.kind !== "ready") return result.message;
-  if (!download(result.html, result.fileName)) {
+  if (!download(result.html, result.fileName, "text/html;charset=utf-8")) {
     return "This window cannot save files. Use Copy HTML instead.";
   }
   return withNotes(`Saved ${result.fileName}.`, result);
@@ -31,6 +37,7 @@ export async function copyCanvasHtml(
   request: CanvasHtmlFileRequest,
 ): Promise<string> {
   const result = await render(load, request);
+  if (result.kind === "ready-tsx") return "Copy takes the HTML file; save the TSX file instead.";
   if (result.kind !== "ready") return result.message;
   const clipboard = globalThis.navigator?.clipboard;
   if (clipboard === undefined || typeof clipboard.writeText !== "function") {
@@ -75,9 +82,9 @@ function withNotes(
   return notes.join(" ");
 }
 
-function download(html: string, fileName: string): boolean {
+function download(contents: string, fileName: string, type: string): boolean {
   if (typeof URL.createObjectURL !== "function") return false;
-  const url = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
+  const url = URL.createObjectURL(new Blob([contents], { type }));
   try {
     const anchor = document.createElement("a");
     anchor.href = url;

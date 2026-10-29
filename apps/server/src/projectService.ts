@@ -810,7 +810,7 @@ export class ProjectService implements ProjectServiceApi {
       // The old key outlives the change only as long as a desktop made with
       // it may still need it for teardown.
       if (retiredKey !== undefined) {
-        void this.#desktopRecipeKeys?.retire(retiredKey).catch(() => undefined);
+        void this.#desktopRecipeKeys?.retire(retiredKey, project.id).catch(() => undefined);
       }
       const authoritative = this.#persistence.readProject(project.id);
       if (authoritative === undefined || authoritative.version !== project.version) {

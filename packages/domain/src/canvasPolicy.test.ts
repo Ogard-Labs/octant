@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  CANVAS_DECK_SCHEMA_VERSION,
+  CANVAS_FLOW_SCHEMA_VERSION,
   CANVAS_MAX_BLOCKS,
   CANVAS_MAX_DASHBOARD_CELLS,
   CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH,
@@ -3576,5 +3578,971 @@ describe("design fields and nested diagram groups", () => {
     for (const mode of ["work", "code"] as const) {
       expect(() => validateCanvasDefinition(codeOrChat(capture, mode))).not.toThrow();
     }
+  });
+});
+
+describe("flow screens and transitions", () => {
+  const flowMockup = (
+    blockId: string,
+    variants?: ReadonlyArray<{ variantId: string; label: string }>,
+  ) => ({
+    blockId,
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "mockup" as const,
+    device: "phone" as const,
+    title: blockId,
+    ...(variants === undefined ? {} : { variants }),
+    nodes: [
+      {
+        nodeId: "window",
+        component: "window",
+        label: blockId,
+        ...(variants === undefined ? {} : { variantId: variants[0]?.variantId }),
+      },
+      { nodeId: "search-button", parentId: "window", component: "button", label: "Search" },
+      { nodeId: "note", parentId: "window", component: "text", label: "A caption" },
+    ],
+  });
+
+  const flowDesign = {
+    blockId: "site",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "design" as const,
+    title: "Site",
+    size: "desktop" as const,
+    frames: [
+      { frameId: "home", title: "Home", html: "<h1>Home</h1>" },
+      { frameId: "results", title: "Results", html: "<h1>Results</h1>" },
+    ],
+  };
+
+  const flow = (screens: ReadonlyArray<unknown>, edges: ReadonlyArray<unknown> = []) => ({
+    blockId: "app-flow",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "flow" as const,
+    title: "Search flow",
+    screens,
+    edges,
+  });
+
+  it("places mockup and design screens and names each transition's hotspot", () => {
+    expect(() =>
+      validateCanvasDefinition(
+        withBlocks([
+          flowMockup("search"),
+          flowDesign,
+          flow(
+            [
+              { screenId: "s1", blockId: "search" },
+              { screenId: "s2", blockId: "site", frameId: "results" },
+            ],
+            [
+              {
+                edgeId: "run",
+                fromScreenId: "s1",
+                toScreenId: "s2",
+                fromNodeId: "search-button",
+                label: "Run search",
+              },
+            ],
+          ),
+        ]),
+      ),
+    ).not.toThrow();
+  });
+
+  it("refuses a screen the document lacks, one of the wrong kind, and a repeated screen", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([flowMockup("search"), flow([{ screenId: "s1", blockId: "missing" }])]),
+        ),
+      "dangling-flow-screen",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            {
+              blockId: "note",
+              schemaVersion: CANVAS_SCHEMA_VERSION,
+              kind: "rich-text",
+              text: "Hi",
+            },
+            flow([{ screenId: "s1", blockId: "note" }]),
+          ]),
+        ),
+      "flow-screen-kind-refused",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            flowMockup("search"),
+            flow([
+              { screenId: "s1", blockId: "search" },
+              { screenId: "s1", blockId: "search" },
+            ]),
+          ]),
+        ),
+      "duplicate-flow-screen",
+    );
+  });
+
+  it("refuses a design screen without its frame, a missing variant, and a design that runs script", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([flowDesign, flow([{ screenId: "s1", blockId: "site" }])]),
+        ),
+      "flow-screen-frame-missing",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            flowMockup("search"),
+            flow([{ screenId: "s1", blockId: "search", variantId: "empty" }]),
+          ]),
+        ),
+      "flow-screen-variant-missing",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            {
+              ...flowDesign,
+              blockId: "runner",
+              runsScript: true,
+              frames: [{ frameId: "app", title: "App", html: "<button>Go</button>" }],
+            },
+            flow([{ screenId: "s1", blockId: "runner", frameId: "app" }]),
+          ]),
+        ),
+      "flow-screen-design-refused",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            flowMockup("search", [
+              { variantId: "loaded", label: "Loaded" },
+              { variantId: "empty", label: "Empty" },
+            ]),
+            // A mockup that declares variants must be placed at one of them.
+            flow([{ screenId: "s1", blockId: "search" }]),
+          ]),
+        ),
+      "flow-screen-variant-missing",
+    );
+  });
+
+  it("refuses edges that dangle, loop, repeat, or name a hotspot the screen's mockup does not offer", () => {
+    const blocks = (edges: ReadonlyArray<unknown>) => [
+      flowMockup("search"),
+      flow(
+        [
+          { screenId: "s1", blockId: "search" },
+          { screenId: "s2", blockId: "search" },
+        ],
+        edges,
+      ),
+    ];
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks(blocks([{ edgeId: "e", fromScreenId: "s1", toScreenId: "s9" }])),
+        ),
+      "dangling-flow-edge",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks(blocks([{ edgeId: "e", fromScreenId: "s1", toScreenId: "s1" }])),
+        ),
+      "flow-edge-self",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks(
+            blocks([
+              { edgeId: "e", fromScreenId: "s1", toScreenId: "s2" },
+              { edgeId: "e", fromScreenId: "s2", toScreenId: "s1" },
+            ]),
+          ),
+        ),
+      "duplicate-flow-edge",
+    );
+    // A text node is not a control a person taps.
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks(
+            blocks([{ edgeId: "e", fromScreenId: "s1", toScreenId: "s2", fromNodeId: "note" }]),
+          ),
+        ),
+      "flow-hotspot-refused",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks(
+            blocks([{ edgeId: "e", fromScreenId: "s1", toScreenId: "s2", fromNodeId: "gone" }]),
+          ),
+        ),
+      "flow-hotspot-refused",
+    );
+  });
+
+  it("refuses a screen placed by both a flow and a tab, naming both placers", () => {
+    const brief = {
+      blockId: "brief",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "tabs" as const,
+      panes: [
+        { label: "Screens", blockIds: ["search"] },
+        { label: "Other", blockIds: ["note"] },
+      ],
+    };
+    let refusal: unknown;
+    try {
+      validateCanvasDefinition(
+        withBlocks([
+          flowMockup("search"),
+          brief,
+          { blockId: "note", schemaVersion: CANVAS_SCHEMA_VERSION, kind: "rich-text", text: "Hi" },
+          flow([{ screenId: "s1", blockId: "search" }]),
+        ]),
+      );
+    } catch (error) {
+      refusal = error;
+    }
+    expect(refusal).toBeInstanceOf(CanvasPolicyRejected);
+    const rejected = refusal as CanvasPolicyRejected;
+    expect(rejected.code).toBe("block-placed-twice");
+    expect(rejected.message).toContain("search");
+    expect(rejected.message).toContain("flow app-flow");
+    expect(rejected.message).toContain("tabs brief");
+  });
+
+  it("walks between two frames of one design and two variants of one mockup", () => {
+    expect(() =>
+      validateCanvasDefinition(
+        withBlocks([
+          flowMockup("form", [
+            { variantId: "empty", label: "Empty" },
+            { variantId: "filled", label: "Filled" },
+          ]),
+          flowDesign,
+          flow(
+            [
+              { screenId: "home", blockId: "site", frameId: "home" },
+              { screenId: "results", blockId: "site", frameId: "results" },
+              { screenId: "empty", blockId: "form", variantId: "empty" },
+              { screenId: "filled", blockId: "form", variantId: "filled" },
+            ],
+            [
+              { edgeId: "e1", fromScreenId: "home", toScreenId: "results" },
+              { edgeId: "e2", fromScreenId: "results", toScreenId: "empty" },
+              { edgeId: "e3", fromScreenId: "empty", toScreenId: "filled" },
+            ],
+          ),
+        ]),
+      ),
+    ).not.toThrow();
+  });
+
+  it("refuses a flow in a document that declares the version before it", () => {
+    const earlier = CANVAS_FLOW_SCHEMA_VERSION - 1;
+    const gated = flow([{ screenId: "s1", blockId: "search" }]);
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: earlier,
+          blocks: [
+            { ...flowMockup("search"), schemaVersion: earlier },
+            { ...gated, schemaVersion: earlier },
+          ],
+        }),
+      "unsupported-schema-version",
+    );
+  });
+});
+
+describe("mockup library", () => {
+  const libraryMockup = (overrides: Record<string, unknown> = {}) => ({
+    blockId: "screen",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "mockup" as const,
+    device: "phone" as const,
+    title: "Search",
+    nodes: [
+      { nodeId: "window", component: "window", label: "Search" },
+      { nodeId: "bar", parentId: "window", component: "progress", label: "Loading", progress: 40 },
+    ],
+    ...overrides,
+  });
+
+  it("accepts the library components with their own fields", () => {
+    expect(() => validateCanvasDefinition(withBlocks([libraryMockup()]))).not.toThrow();
+  });
+
+  it("refuses a field on the component that does not read it", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            libraryMockup({
+              nodes: [
+                { nodeId: "window", component: "window", label: "S" },
+                { nodeId: "t", parentId: "window", component: "text", label: "Hi", progress: 3 },
+              ],
+            }),
+          ]),
+        ),
+      "mockup-field-refused",
+    );
+  });
+
+  it("admits a search query and a hero lede as values, and refuses an image reference", () => {
+    expect(() =>
+      validateCanvasDefinition(
+        withBlocks([
+          libraryMockup({
+            nodes: [
+              { nodeId: "window", component: "window", label: "S" },
+              { nodeId: "q", parentId: "window", component: "search", label: "Find", value: "Ada" },
+              { nodeId: "h", parentId: "window", component: "hero", label: "Hi", value: "Lede" },
+            ],
+          }),
+        ]),
+      ),
+    ).not.toThrow();
+    // A mockup holds no image: the node field and the block's asset list are
+    // not part of the contract.
+    expect(() =>
+      validateCanvasDefinition(
+        withBlocks([
+          libraryMockup({
+            nodes: [{ nodeId: "window", component: "media", label: "S", assetId: "shot" }],
+          }),
+        ]),
+      ),
+    ).toThrow();
+  });
+
+  it("refuses a definition that reuses a node id, has no single top, or nests outside itself", () => {
+    const definition = (nodes: ReadonlyArray<Record<string, unknown>>) =>
+      validateCanvasDefinition(
+        withBlocks([
+          libraryMockup({
+            definitions: [{ defId: "row", label: "Row", nodes }],
+            nodes: [
+              { nodeId: "window", component: "window", label: "S" },
+              {
+                nodeId: "i1",
+                parentId: "window",
+                component: "instance",
+                label: "Row",
+                defId: "row",
+              },
+            ],
+          }),
+        ]),
+      );
+    expectPolicyCode(
+      () => definition([{ nodeId: "window", component: "list-row", label: "One" }]),
+      "duplicate-node-id",
+    );
+    expectPolicyCode(
+      () =>
+        definition([
+          { nodeId: "r1", component: "list-row", label: "One" },
+          { nodeId: "r2", component: "list-row", label: "Two" },
+        ]),
+      "mockup-definition-shape",
+    );
+    expectPolicyCode(
+      () =>
+        definition([
+          { nodeId: "r1", component: "card", label: "Card" },
+          { nodeId: "r2", parentId: "window", component: "text", label: "Out" },
+        ]),
+      "dangling-mockup-parent",
+    );
+    expectPolicyCode(
+      () =>
+        definition([
+          { nodeId: "r1", component: "card", label: "Card" },
+          { nodeId: "r2", parentId: "r1", component: "text", label: "Hi", value: "x" },
+        ]),
+      "mockup-field-refused",
+    );
+  });
+
+  it("refuses an instance that names no component or holds children of its own", () => {
+    const definitions = [
+      {
+        defId: "row",
+        label: "Row",
+        nodes: [{ nodeId: "r1", component: "list-row", label: "One" }],
+      },
+    ];
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            libraryMockup({
+              definitions,
+              nodes: [
+                { nodeId: "window", component: "window", label: "S" },
+                { nodeId: "i1", parentId: "window", component: "instance", label: "Row" },
+              ],
+            }),
+          ]),
+        ),
+      "dangling-mockup-definition",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            libraryMockup({
+              definitions,
+              nodes: [
+                { nodeId: "window", component: "window", label: "S" },
+                {
+                  nodeId: "i1",
+                  parentId: "window",
+                  component: "instance",
+                  label: "Row",
+                  defId: "row",
+                },
+                { nodeId: "extra", parentId: "i1", component: "text", label: "Extra" },
+              ],
+            }),
+          ]),
+        ),
+      "mockup-definition-shape",
+    );
+  });
+
+  it("pins a callout to a library component and to an instance, and refuses one naming a node only a definition holds", () => {
+    // A callout on an instance names a node the screen holds: the marker draws
+    // on every placement, and the comment it anchors stays on that instance.
+    expect(() =>
+      validateCanvasDefinition(
+        withBlocks([
+          libraryMockup({
+            definitions: [
+              {
+                defId: "row",
+                label: "Row",
+                nodes: [{ nodeId: "r1", component: "list-row", label: "One" }],
+              },
+            ],
+            nodes: [
+              { nodeId: "window", component: "window", label: "S" },
+              { nodeId: "go", parentId: "window", component: "search", label: "Search" },
+              {
+                nodeId: "i1",
+                parentId: "window",
+                component: "instance",
+                label: "Row",
+                defId: "row",
+              },
+            ],
+            annotations: [
+              { nodeId: "go", note: "Search as you type." },
+              { nodeId: "i1", note: "One placed row." },
+            ],
+          }),
+        ]),
+      ),
+    ).not.toThrow();
+    // A definition's own node is not on the screen, so a callout cannot pin
+    // to it: the callout would have no one place to draw.
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            libraryMockup({
+              definitions: [
+                {
+                  defId: "row",
+                  label: "Row",
+                  nodes: [{ nodeId: "r1", component: "list-row", label: "One" }],
+                },
+              ],
+              nodes: [{ nodeId: "window", component: "window", label: "S" }],
+              annotations: [{ nodeId: "r1", note: "Inside the definition." }],
+            }),
+          ]),
+        ),
+      "dangling-mockup-annotation",
+    );
+  });
+
+  it("places a reusable component by instance, and refuses a dangling, repeated, or nesting one", () => {
+    const withInstances = (overrides: Record<string, unknown>) =>
+      validateCanvasDefinition(withBlocks([libraryMockup(overrides)]));
+    expect(() =>
+      withInstances({
+        definitions: [
+          {
+            defId: "row",
+            label: "Row",
+            nodes: [{ nodeId: "r1", component: "list-row", label: "One" }],
+          },
+        ],
+        nodes: [
+          { nodeId: "window", component: "window", label: "S" },
+          { nodeId: "i1", parentId: "window", component: "instance", label: "Row", defId: "row" },
+        ],
+      }),
+    ).not.toThrow();
+    expectPolicyCode(
+      () =>
+        withInstances({
+          nodes: [
+            { nodeId: "window", component: "window", label: "S" },
+            {
+              nodeId: "i1",
+              parentId: "window",
+              component: "instance",
+              label: "Row",
+              defId: "gone" as never,
+            },
+          ],
+        }),
+      "dangling-mockup-definition",
+    );
+    expectPolicyCode(
+      () =>
+        withInstances({
+          definitions: [
+            {
+              defId: "row",
+              label: "Row",
+              nodes: [{ nodeId: "r1", component: "list-row", label: "One" }],
+            },
+            {
+              defId: "row",
+              label: "Row",
+              nodes: [{ nodeId: "r2", component: "list-row", label: "Two" }],
+            },
+          ],
+        }),
+      "duplicate-mockup-definition",
+    );
+    expectPolicyCode(
+      () =>
+        withInstances({
+          definitions: [
+            {
+              defId: "row",
+              label: "Row",
+              nodes: [{ nodeId: "r1", component: "instance", label: "Nested", defId: "row" }],
+            },
+          ],
+        }),
+      "mockup-definition-nested",
+    );
+  });
+});
+
+describe("deck slides", () => {
+  const mockupBlock = (blockId: string) => ({
+    blockId,
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "mockup" as const,
+    device: "phone" as const,
+    title: blockId,
+    nodes: [{ nodeId: "window", component: "window", label: blockId }],
+  });
+  const chart = {
+    blockId: "signups",
+    schemaVersion: 1,
+    kind: "chart",
+    chartType: "line",
+    series: [{ seriesId: "s", label: "Signups", points: [{ x: "Q1", y: 3 }] }],
+  };
+  const deck = (slides: ReadonlyArray<unknown>) => ({
+    blockId: "deck",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "deck" as const,
+    title: "Launch deck",
+    slides,
+  });
+
+  it("shows the document's own screens and data blocks, once each", () => {
+    expect(() =>
+      validateCanvasDefinition(
+        withBlocks([
+          chart,
+          mockupBlock("screen"),
+          deck([
+            { slideId: "a", blockId: "signups" },
+            { slideId: "b", blockId: "screen" },
+          ]),
+        ]),
+      ),
+    ).not.toThrow();
+  });
+
+  it("refuses a missing block, the wrong kind, a duplicate slide, and a block placed twice", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            chart,
+            mockupBlock("screen"),
+            deck([
+              { slideId: "a", blockId: "gone" },
+              { slideId: "b", blockId: "screen" },
+            ]),
+          ]),
+        ),
+      "dangling-deck-slide",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            {
+              blockId: "note",
+              schemaVersion: CANVAS_SCHEMA_VERSION,
+              kind: "rich-text",
+              text: "Hi",
+            },
+            chart,
+            deck([
+              { slideId: "a", blockId: "note" },
+              { slideId: "b", blockId: "signups" },
+            ]),
+          ]),
+        ),
+      "deck-slide-kind-refused",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            chart,
+            deck([
+              { slideId: "a", blockId: "signups" },
+              { slideId: "a", blockId: "signups" },
+            ]),
+          ]),
+        ),
+      "duplicate-deck-slide",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            chart,
+            mockupBlock("screen"),
+            deck([
+              { slideId: "a", blockId: "signups" },
+              { slideId: "b", blockId: "signups" },
+            ]),
+          ]),
+        ),
+      "duplicate-deck-slide",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            chart,
+            mockupBlock("screen"),
+            {
+              blockId: "board",
+              schemaVersion: CANVAS_SCHEMA_VERSION,
+              kind: "dashboard",
+              title: "Board",
+              cells: [{ blockId: "signups" }],
+            },
+            deck([
+              { slideId: "a", blockId: "signups" },
+              { slideId: "b", blockId: "screen" },
+            ]),
+          ]),
+        ),
+      "block-placed-twice",
+    );
+  });
+
+  it("shows several frames of one design as several slides", () => {
+    const design = {
+      blockId: "site",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "design" as const,
+      title: "Site",
+      size: "slide" as const,
+      frames: [
+        { frameId: "intro", title: "Intro", html: "<h1>Intro</h1>" },
+        { frameId: "plan", title: "Plan", html: "<h1>Plan</h1>" },
+      ],
+    };
+    expect(() =>
+      validateCanvasDefinition(
+        withBlocks([
+          design,
+          deck([
+            { slideId: "a", blockId: "site", frameId: "intro" },
+            { slideId: "b", blockId: "site", frameId: "plan" },
+          ]),
+        ]),
+      ),
+    ).not.toThrow();
+  });
+
+  it("refuses a deck in a document that declares the version before it", () => {
+    const earlier = CANVAS_DECK_SCHEMA_VERSION - 1;
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: earlier,
+          blocks: [
+            chart,
+            {
+              ...deck([
+                { slideId: "a", blockId: "signups" },
+                { slideId: "b", blockId: "signups" },
+              ]),
+              schemaVersion: earlier,
+            },
+          ],
+        }),
+      "unsupported-schema-version",
+    );
+  });
+});
+
+describe("flow design hotspots", () => {
+  const wireframe = (blockId: string) => ({
+    blockId,
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "mockup" as const,
+    device: "phone" as const,
+    title: blockId,
+    nodes: [{ nodeId: "window", component: "window", label: blockId }],
+  });
+  const designScreen = {
+    blockId: "site",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "design" as const,
+    title: "Site",
+    size: "desktop" as const,
+    frames: [
+      {
+        frameId: "home",
+        title: "Home",
+        html: '<a id="go" href="#octant-flow:s2">Go</a><p data-id="other" id="note">id="fake"</p>',
+      },
+    ],
+  };
+  const flowOverDesign = (fromNodeId: string | undefined) => ({
+    blockId: "app-flow",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "flow" as const,
+    title: "Search flow",
+    screens: [{ screenId: "s1", blockId: "site", frameId: "home" }],
+    edges:
+      fromNodeId === undefined
+        ? []
+        : [{ edgeId: "go", fromScreenId: "s1", toScreenId: "s1", fromNodeId }],
+  });
+
+  it("accepts a hotspot that names an anchor the design frame holds", () => {
+    const withTarget = {
+      ...flowOverDesign("go"),
+      screens: [
+        { screenId: "s1", blockId: "site", frameId: "home" },
+        { screenId: "s2", blockId: "screen" },
+      ],
+      edges: [{ edgeId: "go", fromScreenId: "s1", toScreenId: "s2", fromNodeId: "go" }],
+    };
+    expect(() =>
+      validateCanvasDefinition(withBlocks([designScreen, wireframe("screen"), withTarget])),
+    ).not.toThrow();
+  });
+
+  it("refuses an anchor that is not a link to the edge's own target", () => {
+    const edgeTo = (fromNodeId: string) =>
+      validateCanvasDefinition(
+        withBlocks([
+          designScreen,
+          wireframe("screen"),
+          wireframe("other-screen"),
+          {
+            ...flowOverDesign(fromNodeId),
+            screens: [
+              { screenId: "s1", blockId: "site", frameId: "home" },
+              { screenId: "s2", blockId: "screen" },
+              { screenId: "s3", blockId: "other-screen" },
+            ],
+            edges: [{ edgeId: "go", fromScreenId: "s1", toScreenId: "s3", fromNodeId }],
+          },
+        ]),
+      );
+    // The anchor links to s2, so an edge to s3 from it is refused.
+    expectPolicyCode(() => edgeTo("go"), "flow-hotspot-refused");
+    // An element that only carries the id, or text that reads like one, is not a link.
+    expectPolicyCode(() => edgeTo("note"), "flow-hotspot-refused");
+    expectPolicyCode(() => edgeTo("fake"), "flow-hotspot-refused");
+    expectPolicyCode(() => edgeTo("other"), "flow-hotspot-refused");
+  });
+
+  it("refuses a hotspot naming an anchor the frame does not hold", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            designScreen,
+            wireframe("screen"),
+            {
+              ...flowOverDesign("gone"),
+              screens: [
+                { screenId: "s1", blockId: "site", frameId: "home" },
+                { screenId: "s2", blockId: "screen" },
+              ],
+              edges: [{ edgeId: "go", fromScreenId: "s1", toScreenId: "s2", fromNodeId: "gone" }],
+            },
+          ]),
+        ),
+      "flow-hotspot-refused",
+    );
+  });
+});
+
+describe("flow callouts", () => {
+  const wire = (blockId: string) => ({
+    blockId,
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "mockup" as const,
+    device: "phone" as const,
+    title: blockId,
+    nodes: [{ nodeId: "window", component: "window", label: blockId }],
+  });
+  const annotatedFlow = (annotations: ReadonlyArray<unknown>) => ({
+    blockId: "app-flow",
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    kind: "flow" as const,
+    title: "Search flow",
+    screens: [{ screenId: "s1", blockId: "screen" }],
+    edges: [],
+    annotations,
+  });
+
+  it("pins a callout to a screen the flow holds", () => {
+    expect(() =>
+      validateCanvasDefinition(
+        withBlocks([wire("screen"), annotatedFlow([{ nodeId: "s1", note: "Start here." }])]),
+      ),
+    ).not.toThrow();
+  });
+
+  it("refuses a callout on a missing screen, two on one screen, and too many", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([wire("screen"), annotatedFlow([{ nodeId: "gone", note: "No." }])]),
+        ),
+      "dangling-flow-annotation",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            wire("screen"),
+            annotatedFlow([
+              { nodeId: "s1", note: "One." },
+              { nodeId: "s1", note: "Two." },
+            ]),
+          ]),
+        ),
+      "duplicate-flow-annotation",
+    );
+    // The schema's own maxItems refuses a thirteenth callout at decode, so the
+    // guard behind it never sees one; the decode refusal is the budget.
+    expect(() =>
+      validateCanvasDefinition(
+        withBlocks([
+          wire("screen"),
+          annotatedFlow(
+            Array.from({ length: 13 }, (_, index) => ({
+              nodeId: "s1",
+              note: `Note ${String(index)}`,
+            })),
+          ),
+        ]),
+      ),
+    ).toThrow();
+  });
+
+  it("refuses a callout in a document that declares the version before it", () => {
+    const earlier = CANVAS_SCHEMA_VERSION - 1;
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...baseDefinition,
+          schemaVersion: earlier,
+          blocks: [
+            { ...wire("screen"), schemaVersion: earlier },
+            {
+              ...annotatedFlow([{ nodeId: "s1", note: "Start here." }]),
+              schemaVersion: earlier,
+            },
+          ],
+        }),
+      "unsupported-schema-version",
+    );
+  });
+});
+
+describe("deck slide design tiers", () => {
+  it("refuses a deck slide that names a running design frame", () => {
+    const chart = {
+      blockId: "chart",
+      schemaVersion: 1,
+      kind: "chart",
+      chartType: "line",
+      series: [{ seriesId: "s", label: "Signups", points: [{ x: "Q1", y: 3 }] }],
+    };
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            chart,
+            {
+              blockId: "runner",
+              schemaVersion: CANVAS_SCHEMA_VERSION,
+              kind: "design" as const,
+              title: "Runner",
+              size: "phone" as const,
+              runsScript: true,
+              frames: [{ frameId: "app", title: "App", html: "<button>Go</button>" }],
+            },
+            {
+              blockId: "deck",
+              schemaVersion: CANVAS_SCHEMA_VERSION,
+              kind: "deck" as const,
+              title: "Launch deck",
+              slides: [
+                { slideId: "a", blockId: "runner", frameId: "app" },
+                { slideId: "b", blockId: "chart" },
+              ],
+            },
+          ]),
+        ),
+      "deck-slide-design-refused",
+    );
   });
 });

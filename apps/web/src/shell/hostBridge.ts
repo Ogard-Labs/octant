@@ -274,12 +274,26 @@ export function hubAdministrationOf(
   return request === undefined ? undefined : { hubAdministrationRequest: request };
 }
 
+export type AppStoreConnectKeyOperation = "status" | "set" | "remove";
+
+/**
+ * App Store Connect key entry in a desktop window. The desktop forwards each
+ * request to the host's local key route; the key is never read back.
+ */
+export interface AppStoreConnectKeyBridge {
+  readonly appStoreConnectKeyRequest: (
+    operation: AppStoreConnectKeyOperation,
+    body?: unknown,
+  ) => Promise<{ readonly status: number; readonly body: unknown }>;
+}
+
 export interface OctantHostBridge
   extends
     Partial<RemoteAccessAdministrationBridge>,
     Partial<PairedComputersBridge>,
     Partial<SshTargetAdministrationBridge>,
-    Partial<HubAdministrationBridge> {
+    Partial<HubAdministrationBridge>,
+    Partial<AppStoreConnectKeyBridge> {
   /**
    * Shows a server another paired computer granted this device, served by
    * the desktop's loopback forwarder, in Octant's browser or the default one.

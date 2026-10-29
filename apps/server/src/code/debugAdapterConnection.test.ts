@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEBUG_ADAPTER_FRAME_CAP_BYTES,
   DebugAdapterConnection,
+  type DebugAdapterConnectionOptions,
   type DebugAdapterRequestCommand,
   type DebugAdapterViolation,
 } from "./debugAdapterConnection";
@@ -12,7 +13,12 @@ function frame(message: Record<string, unknown>): Buffer {
   return Buffer.concat([Buffer.from(`Content-Length: ${body.byteLength}\r\n\r\n`), body]);
 }
 
-function connection() {
+function connection(
+  options: Pick<
+    DebugAdapterConnectionOptions,
+    "role" | "childAnnouncement" | "onChildAnnounced"
+  > = {},
+) {
   const fromAdapter = new PassThrough();
   const toAdapter = new PassThrough();
   const written: Array<Record<string, unknown>> = [];
@@ -38,6 +44,7 @@ function connection() {
     onViolation: (violation) => violations.push(violation),
     onEvent: (event, body) => events.push({ event, body }),
     onRefusedRequest: (command) => refused.push(command),
+    ...options,
   });
   return { subject, fromAdapter, written, events, refused, violations };
 }
@@ -47,7 +54,8 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
 describe("the debug adapter connection", () => {
   it("sends only requests on Octant's closed list", async () => {
     const test = connection();
-    // `attach`, `restart`, and memory reads are not on the list, whatever a caller passes.
+    // `attach` is not sent on the session's own connection, and `restart` and
+    // memory reads are not on the list, whatever a caller passes.
     for (const command of ["attach", "restart", "readMemory", "runInTerminal"]) {
       expect(
         await test.subject.request(command as DebugAdapterRequestCommand, { processId: 1 }),
@@ -112,5 +120,87 @@ describe("the debug adapter connection", () => {
     await settle();
     expect(test.written.map((message) => message.command)).toEqual(["evaluate", "cancel"]);
     expect(test.written[1]).toMatchObject({ arguments: { requestId: 1 } });
+  });
+
+  it("sends attach only on a child's connection, and launch only on the session's", async () => {
+    const child = connection({ role: "child" });
+    expect(await child.subject.request("launch", { program: "/bin/sh" })).toEqual({
+      status: "closed",
+    });
+    await settle();
+    expect(child.written).toEqual([]);
+    void child.subject.request("attach", { subProcessId: 7 });
+    await settle();
+    expect(child.written).toEqual([
+      { seq: 1, type: "request", command: "attach", arguments: { subProcessId: 7 } },
+    ]);
+  });
+
+  it("hands the session the child announcement its adapter declared, and refuses every other", async () => {
+    const announced: unknown[] = [];
+    const byEvent = connection({
+      childAnnouncement: { kind: "event", event: "debugpyAttach" },
+      onChildAnnounced: (configuration) => {
+        announced.push(configuration);
+        return "accepted";
+      },
+    });
+    byEvent.fromAdapter.write(
+      Buffer.concat([
+        frame({ seq: 1, type: "event", event: "debugpyAttach", body: { subProcessId: 7 } }),
+        frame({ seq: 2, type: "event", event: "otherAttach", body: { subProcessId: 8 } }),
+        // Declaring an event does not make `startDebugging` an announcement.
+        frame({
+          seq: 3,
+          type: "request",
+          command: "startDebugging",
+          arguments: { request: "attach", configuration: { subProcessId: 9 } },
+        }),
+      ]),
+    );
+    await settle();
+    expect(announced).toEqual([{ subProcessId: 7 }]);
+    expect(byEvent.events).toEqual([]);
+    expect(byEvent.refused).toEqual(["startDebugging"]);
+
+    let answer: "accepted" | "refused" = "accepted";
+    const byRequest = connection({
+      childAnnouncement: { kind: "start-debugging" },
+      onChildAnnounced: (configuration) => {
+        announced.push(configuration);
+        return answer;
+      },
+    });
+    const ask = (seq: number, request: string) =>
+      frame({
+        seq,
+        type: "request",
+        command: "startDebugging",
+        arguments: { request, configuration: { child: seq } },
+      });
+    byRequest.fromAdapter.write(ask(1, "attach"));
+    await settle();
+    answer = "refused";
+    byRequest.fromAdapter.write(Buffer.concat([ask(2, "attach"), ask(3, "launch")]));
+    await settle();
+    expect(announced.slice(1)).toEqual([{ child: 1 }, { child: 2 }]);
+    expect(byRequest.written).toEqual([
+      expect.objectContaining({ type: "response", request_seq: 1, success: true }),
+      expect.objectContaining({ type: "response", request_seq: 2, success: false }),
+      expect.objectContaining({ type: "response", request_seq: 3, success: false }),
+    ]);
+    expect(byRequest.refused).toEqual(["startDebugging", "startDebugging"]);
+
+    // A child's own connection announces nothing, whatever it sends.
+    const fromChild = connection({
+      role: "child",
+      childAnnouncement: { kind: "event", event: "debugpyAttach" },
+      onChildAnnounced: () => {
+        throw new Error("a child's connection announced a child");
+      },
+    });
+    fromChild.fromAdapter.write(frame({ seq: 1, type: "event", event: "debugpyAttach", body: {} }));
+    await settle();
+    expect(fromChild.events).toEqual([]);
   });
 });

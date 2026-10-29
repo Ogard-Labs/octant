@@ -192,6 +192,13 @@ export class ExtensionApiService {
           return await this.#stateUpdated(await this.#lifecycle.setPluginDesired(command), command);
         case "set-source-trust":
           return await this.#stateUpdated(await this.#lifecycle.setSourceTrust(command), command);
+        case "trust-new-publisher":
+          return await this.#stateUpdated(
+            await this.#lifecycle.trustNewPublisher(command),
+            command,
+          );
+        case "forget-publisher":
+          return await this.#stateUpdated(await this.#lifecycle.forgetPublisher(command), command);
         case "set-component-desired":
           return await this.#stateUpdated(
             await this.#lifecycle.setComponentDesired(command),
@@ -441,6 +448,12 @@ function previewDebugAdapter(
     launchArguments: declaration.launchArguments,
     importTypes: declaration.importTypes,
     debugPorts: declaration.debugPorts,
+    ...(declaration.childSessions === undefined
+      ? {}
+      : { childSessions: declaration.childSessions }),
+    ...(declaration.childAnnouncement === undefined
+      ? {}
+      : { childAnnouncement: declaration.childAnnouncement }),
     binary,
     binaryDigest: `sha256:${createHash("sha256").update(file.content).digest("hex")}`,
   });
