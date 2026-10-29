@@ -572,18 +572,36 @@ export class FailoverService {
       ),
     };
     const identity = this.#options.identity();
-    const answer = await sendHubLinkRequest({
-      transport: this.#options.transport,
-      target: { origin: link.hubOrigin, pin: listenerPinFromDigest(link.hubListenerPin) },
-      signHostPayload: identity.signing.signHostPayload,
-      senderMemberId: String(link.selfMemberId),
-      recipientMemberId: String(link.hubMemberId),
-      method: "POST",
-      path: "/api/hub/handback",
-      body: JSON.stringify(handback),
-      headers: { [HUB_PEER_KEY_HEADER]: identity.signing.hostPublicKey },
-      now: this.#options.now(),
-    });
+    const send = (body: HubStandInHandback) =>
+      sendHubLinkRequest({
+        transport: this.#options.transport,
+        target: { origin: link.hubOrigin, pin: listenerPinFromDigest(link.hubListenerPin) },
+        signHostPayload: identity.signing.signHostPayload,
+        senderMemberId: String(link.selfMemberId),
+        recipientMemberId: String(link.hubMemberId),
+        method: "POST",
+        path: "/api/hub/handback",
+        body: JSON.stringify(body),
+        headers: { [HUB_PEER_KEY_HEADER]: identity.signing.hostPublicKey },
+        now: this.#options.now(),
+      });
+    let answer = await send(handback);
+    // A gateway that finds the body too large will find it too large every time, and the
+    // membership changes ride in the same body. The wake times are rebuilt from the
+    // spokes' own reports, so they are the part to give up.
+    if (
+      answer.status === "answered" &&
+      answer.response.status === 413 &&
+      handback.wakeTimes.length > 0
+    ) {
+      this.#options.record({
+        change: "wake-times-dropped",
+        actingPrincipal: { kind: "hub", memberId: link.selfMemberId },
+        memberId: link.hubMemberId,
+        wakeCount: handback.wakeTimes.reduce((total, spoke) => total + spoke.times.length, 0),
+      });
+      answer = await send({ ...handback, wakeTimes: [] });
+    }
     // Still standing in until the hub has taken the changes: members can change
     // again, and the next look sends the hand-back again.
     if (answer.status === "unreachable") {

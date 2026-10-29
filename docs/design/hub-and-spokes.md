@@ -1069,6 +1069,15 @@ maintainer's hardware, or names the maintainer gate.
      on step-down it hands the reports back with the membership changes. The hub
      takes them only for spokes it still lists, only while its wake service is
      on, and a report replaces what it held for that spoke.
+   - **Copies are numbered, and the routes are sized for the largest.** The hub
+     sends copies without waiting for each other, so each carries a revision the
+     hub keeps rising; a standby keeps a copy only if its revision is newer than
+     the one it holds, and answers an older or equal one `stale-copy` (409). The
+     copy and hand-back routes accept a body of every allowed spoke at the
+     allowed number of times (about 8 MiB, plus 1 MiB for the membership changes
+     in a hand-back). If a gateway still answers a hand-back 413, the standby
+     journals `wake-times-dropped` and hands back the membership without wake
+     times; spokes report them again.
    - **Results.** The last result per spoke (nudged, ignored, refused,
      unreachable) is kept on the hub for Settings and `octant hub status`; a
      standing-in standby journals its results and does not keep them.

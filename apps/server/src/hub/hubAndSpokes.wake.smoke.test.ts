@@ -666,6 +666,61 @@ describe("the wake service in a failover", () => {
     );
   });
 
+  it("still hands membership back, without wake times, when the gateway refuses the hand-back as too large", async () => {
+    const attempts: Array<number> = [];
+    const { network, clock, hub, standby, member } = await startFamily({
+      failoverTransport: (transport) => (target) => {
+        const fetchTo = transport(target);
+        return async (url, init) => {
+          if (init?.method !== "POST" || !url.endsWith("/api/hub/handback")) {
+            return fetchTo(url, init);
+          }
+          const sent: { wakeTimes: ReadonlyArray<unknown> } = JSON.parse(String(init.body));
+          attempts.push(sent.wakeTimes.length);
+          return sent.wakeTimes.length === 0
+            ? fetchTo(url, init)
+            : new Response("{}", { status: 413 });
+        };
+      },
+    });
+    standby.spoke.setGrant(standbyGrant, window);
+    member.spoke.setGrant(wakeAndStandbyGrant, window);
+    const ordered = await hub.hub.setStandbyOrder([decodeMemberId(standby.hostId)], window);
+    if (ordered.status !== "ordered") throw new Error(JSON.stringify(ordered));
+    member.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 10 * MINUTE),
+    });
+    expect(await member.spokeWake.report()).toEqual({ status: "sent", count: 1 });
+    await vi.waitFor(() => expect(standby.state.load().link?.wakeCopy).toHaveLength(1));
+    await standby.failover.tick();
+    await member.failover.tick();
+    network.stop(hub.address);
+    await pause(FAILOVER_AFTER_MS + 40);
+    await standby.failover.tick();
+    expect(standby.failover.standingIn()).toBe(true);
+    await vi.waitFor(() =>
+      expect(member.spoke.status()).toMatchObject({ rosterSignedBy: "standby" }),
+    );
+    // A spoke reports to the standing-in standby, so the hand-back carries a time.
+    member.routines.push({
+      id: "automation-b",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 30 * MINUTE),
+    });
+    expect(await member.spokeWake.report()).toEqual({ status: "sent", count: 2 });
+    expect(standby.state.load().link?.standIn?.wakeReports).toHaveLength(1);
+
+    network.start(hub.address);
+    await standby.failover.tick();
+
+    expect(attempts).toEqual([1, 0]);
+    expect(standby.failover.standingIn()).toBe(false);
+    expect(standby.records.map((record) => record.change)).toContain("wake-times-dropped");
+    expect(hub.records.map((record) => record.change)).toContain("stand-in-merged");
+  });
+
   it("asks a spoke to report again while the standby hands back, and the hub then holds the times it kept", async () => {
     let release: () => void = () => undefined;
     let gate = Promise.resolve();

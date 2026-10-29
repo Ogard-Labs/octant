@@ -28,8 +28,12 @@ export const HubWakeTime = Schema.Struct({
 }).annotations(strict);
 export type HubWakeTime = typeof HubWakeTime.Type;
 
+/** How many routine times one spoke reports, and how many spokes a wake copy or a hand-back carries. */
+export const HUB_WAKE_MAX_TIMES_PER_SPOKE = 256;
+export const HUB_WAKE_MAX_SPOKES = 256;
+
 const wakeTimes = Schema.Array(HubWakeTime).pipe(
-  Schema.maxItems(256),
+  Schema.maxItems(HUB_WAKE_MAX_TIMES_PER_SPOKE),
   Schema.filter((times) => unique(times.map((time) => time.routineId)), uniqueMessage),
 );
 
@@ -89,7 +93,7 @@ export type HubWakeSpokeTimes = typeof HubWakeSpokeTimes.Type;
 export const HubWakeCopy = Schema.Struct({
   enabled: Schema.optional(Schema.Boolean),
   revision: Schema.optional(Schema.Int.pipe(Schema.positive())),
-  spokes: Schema.Array(HubWakeSpokeTimes).pipe(Schema.maxItems(256)),
+  spokes: Schema.Array(HubWakeSpokeTimes).pipe(Schema.maxItems(HUB_WAKE_MAX_SPOKES)),
 }).annotations(strict);
 export type HubWakeCopy = typeof HubWakeCopy.Type;
 export const decodeHubWakeCopy = Schema.decodeUnknownSync(HubWakeCopy);

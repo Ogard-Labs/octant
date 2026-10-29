@@ -2,9 +2,18 @@
 // on either. Host A is the hub, host B a spoke that joined it; A's identity key
 // signs the requests, as A's own server would.
 
+import { randomUUID } from "node:crypto";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HubMemberId, encodeSignedHubRoster, type SignedHubRoster } from "@octant/contracts";
+import {
+  HUB_WAKE_MAX_SPOKES,
+  HUB_WAKE_MAX_TIMES_PER_SPOKE,
+  HubMemberId,
+  decodeHubStandInHandback,
+  decodeHubWakeCopy,
+  encodeSignedHubRoster,
+  type SignedHubRoster,
+} from "@octant/contracts";
 import { hubRosterSigningPayload } from "@octant/domain";
 import { HUB_LINK_HEADER, signHubLinkRequest } from "./hubLink";
 import { HubTestNetwork, startHubTestHost, type HubTestHost } from "./hubHost.test-support";
@@ -323,6 +332,68 @@ describe("the hub principal on a spoke", () => {
     expect(b.spoke.peerGrantCount()).toBe(0);
     expect(b.spoke.status().membership).toBe("member");
   });
+});
+
+describe("the largest wake copy and hand-back the schemas allow", () => {
+  const worstSpokes = Array.from({ length: HUB_WAKE_MAX_SPOKES }, () => ({
+    memberId: randomUUID(),
+    hardwareAddress: "aa:bb:cc:dd:ee:ff",
+    times: Array.from({ length: HUB_WAKE_MAX_TIMES_PER_SPOKE }, (_, index) => ({
+      routineId: `${"a".repeat(60)}${String(index).padStart(4, "0")}`,
+      nextAt: "2026-10-29T10:00:00.000Z",
+    })),
+  }));
+  const copy = JSON.stringify(
+    decodeHubWakeCopy({ enabled: true, revision: Number.MAX_SAFE_INTEGER, spokes: worstSpokes }),
+  );
+  const handback = JSON.stringify(
+    decodeHubStandInHandback({
+      baseSequence: Number.MAX_SAFE_INTEGER,
+      sequence: Number.MAX_SAFE_INTEGER,
+      added: [],
+      removed: [],
+      wakeTimes: worstSpokes.map((spoke) => ({ ...spoke, reportedAt: 9_999_999_999_999 })),
+    }),
+  );
+
+  it("fits both under their route limits, which stay bounded", () => {
+    const policy = createRemoteRoutePolicy({ origin: "https://100.101.102.103:8443" });
+    const limitOf = (method: "POST" | "PUT", path: string) => {
+      const decision = policy.inspect(
+        new Request(`https://100.101.102.103:8443${path}`, {
+          method,
+          headers: {
+            host: LISTENER_HOST,
+            [HUB_LINK_HEADER]: "v1.x",
+            "content-type": "application/json",
+          },
+          body: "{}",
+        }),
+      );
+      if (decision.kind !== "allow") throw new Error(JSON.stringify(decision));
+      return decision.route?.maxBodyBytes ?? 0;
+    };
+
+    const handbackLimit = limitOf("POST", HUB_LINK_ROUTES.handback);
+    const copyLimit = limitOf("PUT", HUB_LINK_ROUTES.wakeCopy);
+
+    expect(Buffer.byteLength(handback)).toBeLessThanOrEqual(handbackLimit);
+    expect(Buffer.byteLength(copy)).toBeLessThanOrEqual(copyLimit);
+    expect(Math.max(handbackLimit, copyLimit)).toBeLessThanOrEqual(16 * 1_048_576);
+  });
+
+  it("is read by the member-link listener instead of answering 413", async () => {
+    const { a, b } = await joinedPair();
+    for (const [method, path, body] of [
+      ["PUT", HUB_LINK_ROUTES.wakeCopy, copy],
+      ["POST", HUB_LINK_ROUTES.handback, handback],
+    ] as const) {
+      const answer = await b.hubLink(
+        signedRequest({ signer: a, recipient: b, method, path, body }),
+      );
+      expect(answer?.status, path).not.toBe(413);
+    }
+  }, 60_000);
 });
 
 describe("the hub-link routes the private listener serves", () => {
