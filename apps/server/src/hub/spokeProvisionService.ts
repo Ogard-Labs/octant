@@ -133,7 +133,12 @@ export class SpokeProvisionService {
   view(): SpokeProvisionView {
     const link = this.#options.state.load().link;
     if (link === undefined || link.removed === true) {
-      return { offering: false, supportedKinds: this.#supportedKinds(), autoApply: [], proposals: [] };
+      return {
+        offering: false,
+        supportedKinds: this.#supportedKinds(),
+        autoApply: [],
+        proposals: [],
+      };
     }
     this.#settle();
     const provision = this.#options.state.load().link?.provision;
@@ -381,9 +386,7 @@ export class SpokeProvisionService {
     } catch {
       trusted = false;
     }
-    return trusted
-      ? { status: "ok", feed }
-      : { status: "failed", kind: "mirror-untrusted" };
+    return trusted ? { status: "ok", feed } : { status: "failed", kind: "mirror-untrusted" };
   }
 
   #granted(): boolean {

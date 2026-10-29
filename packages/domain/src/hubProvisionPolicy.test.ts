@@ -59,7 +59,11 @@ describe("taking a hub's offer as a proposal", () => {
   });
 
   it("refuses a mirrored feed it cannot check", () => {
-    const mirrored = decodeHubOfferBody({ kind: "update-channel", channel: "stable", mirror: true });
+    const mirrored = decodeHubOfferBody({
+      kind: "update-channel",
+      channel: "stable",
+      mirror: true,
+    });
     expect(admit({ offer: mirrored, canVerifyMirror: false })).toEqual({
       status: "refuse",
       kind: "mirror-unverifiable",

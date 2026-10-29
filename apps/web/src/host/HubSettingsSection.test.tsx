@@ -1004,6 +1004,171 @@ describe("HubSettingsSection wake service", () => {
   });
 });
 
+describe("HubSettingsSection offers", () => {
+  const OFFER = "55555555-5555-4555-8555-555555555555";
+  const hubWithOffers = (provision: unknown) => ({
+    hub: {
+      enabled: true,
+      roster: {
+        roster: {
+          standbyOrder: [],
+          members: [
+            { memberId: "m-1", name: "Mac mini", role: "hub", owner: false },
+            { memberId: "m-2", name: "Laptop", role: "spoke", owner: false },
+          ],
+        },
+      },
+    },
+    spoke: { membership: "none" },
+    provision,
+  });
+  const spokeProvision = (spoke: Record<string, unknown>) => ({
+    ...linkedStatus({ items: ["roster", "provision"] }),
+    provision: { hub: { enabled: false, offers: [] }, spoke },
+  });
+
+  it("is off until the window turns it on, and then says so", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderHub({
+      status: {
+        status: 200,
+        body: hubWithOffers({
+          hub: { enabled: false, offers: [] },
+          spoke: { offering: false, autoApply: [], proposals: [] },
+        }),
+      },
+      provision: { status: 200, body: { status: "changed", enabled: true } },
+    });
+
+    const toggle = await screen.findByRole("switch", { name: "Offers" });
+    expect(toggle).not.toBeChecked();
+    expect(calls.some((call) => call.operation === "provision")).toBe(false);
+    await user.click(toggle);
+
+    await waitFor(() =>
+      expect(calls.find((call) => call.operation === "provision")?.body).toEqual({ enabled: true }),
+    );
+    expect(await screen.findByText(/Offers are on/)).toBeVisible();
+  });
+
+  it("offers a channel, and lists each offer with how each spoke took it", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderHub({
+      status: {
+        status: 200,
+        body: hubWithOffers({
+          hub: {
+            enabled: true,
+            offers: [
+              {
+                offerId: OFFER,
+                kind: "plugin",
+                deliveries: [{ memberId: "m-2", result: "refused", reason: "kind-unsupported" }],
+              },
+            ],
+          },
+          spoke: { offering: false, autoApply: [], proposals: [] },
+        }),
+      },
+      "provision-offer": { status: 200, body: { status: "offered", offerId: OFFER, delivered: 1 } },
+    });
+
+    const list = await screen.findByRole("list", { name: "Offers the hub holds" });
+    expect(within(list).getByText("plugin")).toBeVisible();
+    expect(within(list).getByText("Laptop did not take it")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Offer the preview update channel" }));
+
+    await waitFor(() =>
+      expect(calls.find((call) => call.operation === "provision-offer")?.body).toEqual({
+        offer: { kind: "update-channel", channel: "preview" },
+      }),
+    );
+  });
+
+  it("shows a spoke its proposals with Apply and Dismiss, and offers no Apply for a routine", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderHub({
+      status: {
+        status: 200,
+        body: spokeProvision({
+          offering: true,
+          autoApply: ["plugin"],
+          proposals: [
+            {
+              offerId: OFFER,
+              offer: { kind: "plugin", catalogId: "octant", entryId: "review-helper" },
+              expiresAt: "2026-11-05T00:00:00.000Z",
+            },
+            {
+              offerId: "66666666-6666-4666-8666-666666666666",
+              offer: { kind: "routine", displayName: "Morning review" },
+              expiresAt: "2026-11-05T00:00:00.000Z",
+            },
+          ],
+        }),
+      },
+      "provision-apply": { status: 200, body: { status: "applied" } },
+    });
+
+    const list = await screen.findByRole("list", { name: "Proposals from the hub" });
+    expect(
+      within(list).getByText(
+        "Install review-helper from the octant catalog. It arrives untrusted and switched off.",
+      ),
+    ).toBeVisible();
+    expect(within(list).getAllByRole("button", { name: "Apply" })).toHaveLength(1);
+    expect(within(list).getAllByRole("button", { name: "Dismiss" })).toHaveLength(2);
+    await user.click(within(list).getByRole("button", { name: "Apply" }));
+
+    await waitFor(() =>
+      expect(calls.find((call) => call.operation === "provision-apply")?.body).toEqual({
+        offerId: OFFER,
+      }),
+    );
+    expect(await screen.findByText("Offer applied.")).toBeVisible();
+  });
+
+  it("switches applying on arrival per kind, with none for a routine or an endpoint", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderHub({
+      status: {
+        status: 200,
+        body: spokeProvision({ offering: true, autoApply: [], proposals: [] }),
+      },
+      "provision-auto-apply": { status: 200, body: { status: "changed" } },
+    });
+
+    const toggle = await screen.findByRole("switch", {
+      name: "Plugin install (untrusted and off)",
+    });
+    expect(toggle).not.toBeChecked();
+    expect(
+      screen.getAllByRole("switch").map((entry) => entry.getAttribute("aria-label") ?? ""),
+    ).not.toContain("Routine");
+    await user.click(toggle);
+
+    await waitFor(() =>
+      expect(calls.find((call) => call.operation === "provision-auto-apply")?.body).toEqual({
+        kind: "plugin",
+        enabled: true,
+      }),
+    );
+  });
+
+  it("shows a spoke that did not tick Provision no proposals at all", async () => {
+    renderHub({
+      status: {
+        status: 200,
+        body: spokeProvision({ offering: false, autoApply: [], proposals: [] }),
+      },
+    });
+
+    await screen.findByText("Hub");
+    expect(screen.queryByRole("list", { name: "Proposals from the hub" })).toBeNull();
+    expect(screen.queryByText("Offers from the hub")).toBeNull();
+  });
+});
+
 describe("HubSettingsSection push sender", () => {
   const hubWithPush = (push: unknown) => ({
     hub: {

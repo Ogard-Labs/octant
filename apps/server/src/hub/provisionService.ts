@@ -26,11 +26,7 @@ import { Schema } from "effect";
 import { listenerPinFromDigest } from "./hubCrypto";
 import { sendHubLinkRequest } from "./hubLink";
 import type { HubHostIdentity } from "./hubService";
-import type {
-  HubStatePort,
-  ProvisionDeliveryRecord,
-  ProvisionOfferRecord,
-} from "./hubStateStore";
+import type { HubStatePort, ProvisionDeliveryRecord, ProvisionOfferRecord } from "./hubStateStore";
 import { memberOrigin } from "./memberOrigin";
 import type { HubTransport } from "./pinnedHubTransport";
 
@@ -251,8 +247,8 @@ export class ProvisionService {
   }> {
     const memberId = decodeMemberId(String(member.memberId));
     const origin =
-      members.find((entry) => String(entry.memberId) === String(member.memberId))
-        ?.listenerOrigin ?? memberOrigin(member);
+      members.find((entry) => String(entry.memberId) === String(member.memberId))?.listenerOrigin ??
+      memberOrigin(member);
     if (origin === undefined) return { memberId, result: "unreachable" };
     const identity = this.#options.identity();
     const answer = await sendHubLinkRequest({

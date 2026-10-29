@@ -1,4 +1,11 @@
-import { HUB_GRANT_ITEMS, type HubGrantItem } from "@octant/contracts";
+import { readFile } from "node:fs/promises";
+import {
+  HUB_AUTO_APPLY_KINDS,
+  HUB_GRANT_ITEMS,
+  type AppReleaseRing,
+  type HubAutoApplyKind,
+  type HubGrantItem,
+} from "@octant/contracts";
 import { diskEncryptionWarning, type DiskEncryption } from "./diskEncryption";
 import {
   failureMessage,
@@ -32,6 +39,15 @@ export type HubCliCommand =
   | { readonly action: "wake"; readonly enabled: boolean }
   /** On the hub: turns the push sender on or off. It is off until a person turns it on. */
   | { readonly action: "push"; readonly enabled: boolean }
+  /** On the hub: turns offers on or off. They are off until a person turns them on. */
+  | { readonly action: "provision"; readonly enabled: boolean }
+  /** On the hub: offers every spoke one piece of configuration, which each holds as a proposal. */
+  | { readonly action: "offer"; readonly offer: OfferSource }
+  | { readonly action: "offer-withdraw"; readonly offerId: string }
+  /** On a spoke: applies or dismisses a proposal, and sets which kinds apply on arrival. */
+  | { readonly action: "apply"; readonly offerId: string; readonly projectId?: string }
+  | { readonly action: "dismiss"; readonly offerId: string }
+  | { readonly action: "auto-apply"; readonly kind: HubAutoApplyKind; readonly enabled: boolean }
   | { readonly action: "stand-in"; readonly step: "join-code" }
   | { readonly action: "stand-in"; readonly step: "remove"; readonly member: string }
   | {
@@ -40,6 +56,25 @@ export type HubCliCommand =
       /** Turning the certificate on needs the person to have read the transparency note. */
       readonly acknowledgeTransparency: boolean;
     };
+
+/**
+ * What `octant hub offer` is given: an update channel (with, if wanted, the file
+ * holding the signed feed document to mirror), a catalog plugin by reference, or
+ * a JSON file of the profile, endpoint row, or routine fields.
+ */
+export type OfferSource =
+  | {
+      readonly kind: "update-channel";
+      readonly channel: AppReleaseRing;
+      readonly mirrorFeedFile?: string;
+    }
+  | {
+      readonly kind: "plugin";
+      readonly catalogId: string;
+      readonly entryId: string;
+      readonly digest: string;
+    }
+  | { readonly kind: "agent-profile" | "model-endpoint" | "routine"; readonly file: string };
 
 /** What the hub role asks of the hub itself, as opposed to a computer that joins one. */
 const HUB_SIDE_ACTIONS: ReadonlySet<HubCliCommand["action"]> = new Set([
@@ -54,6 +89,9 @@ const HUB_SIDE_ACTIONS: ReadonlySet<HubCliCommand["action"]> = new Set([
   "stand-in",
   "wake",
   "push",
+  "provision",
+  "offer",
+  "offer-withdraw",
 ]);
 
 const JOIN_APPROVAL_WINDOW_MS = 5 * 60_000;
@@ -122,6 +160,63 @@ export function resolveHubCliCommand(
       if (rest.length !== 1 || !only() || (setting !== "on" && setting !== "off")) return undefined;
       return { action, enabled: setting === "on" };
     }
+    case "provision": {
+      const [setting] = rest;
+      if (rest.length !== 1 || !only() || (setting !== "on" && setting !== "off")) return undefined;
+      return { action, enabled: setting === "on" };
+    }
+    case "offer": {
+      const [kind, first, second, third] = rest;
+      if (kind === "update-channel") {
+        if (rest.length !== 2 || !only("mirror") || !isRing(first)) return undefined;
+        const mirror = flags.mirror;
+        if (mirror !== undefined && typeof mirror !== "string") return undefined;
+        return {
+          action,
+          offer: {
+            kind,
+            channel: first,
+            ...(mirror === undefined ? {} : { mirrorFeedFile: mirror }),
+          },
+        };
+      }
+      if (kind === "plugin") {
+        if (rest.length !== 4 || !only() || second === undefined || third === undefined) {
+          return undefined;
+        }
+        if (first === undefined) return undefined;
+        return { action, offer: { kind, catalogId: first, entryId: second, digest: third } };
+      }
+      if (kind === "agent-profile" || kind === "model-endpoint" || kind === "routine") {
+        if (rest.length !== 2 || !only() || first === undefined) return undefined;
+        return { action, offer: { kind, file: first } };
+      }
+      return undefined;
+    }
+    case "offer-withdraw": {
+      const [offerId] = rest;
+      if (offerId === undefined || rest.length !== 1 || !only()) return undefined;
+      return { action, offerId };
+    }
+    case "apply": {
+      const [offerId] = rest;
+      if (offerId === undefined || rest.length !== 1 || !only("project")) return undefined;
+      const project = flags.project;
+      if (project !== undefined && typeof project !== "string") return undefined;
+      return { action, offerId, ...(project === undefined ? {} : { projectId: project }) };
+    }
+    case "dismiss": {
+      const [offerId] = rest;
+      if (offerId === undefined || rest.length !== 1 || !only()) return undefined;
+      return { action, offerId };
+    }
+    case "auto-apply": {
+      const [kind, setting] = rest;
+      const known = HUB_AUTO_APPLY_KINDS.find((candidate) => candidate === kind);
+      if (known === undefined || rest.length !== 2 || !only()) return undefined;
+      if (setting !== "on" && setting !== "off") return undefined;
+      return { action, kind: known, enabled: setting === "on" };
+    }
     case "stand-in": {
       const [step, member] = rest;
       if (!only()) return undefined;
@@ -153,6 +248,10 @@ export function resolveHubCliCommand(
     default:
       return undefined;
   }
+}
+
+function isRing(value: string | undefined): value is AppReleaseRing {
+  return value === "stable" || value === "preview" || value === "candidate";
 }
 
 /** A switch is given bare or not at all; a value after it is a usage error. */
@@ -208,6 +307,8 @@ export interface RunHubCliCommandInput {
   readonly ask?: (question: string) => Promise<string | undefined>;
   readonly now?: () => number;
   readonly sleep?: (milliseconds: number) => Promise<void>;
+  /** Reads an offer's file; absent, the file system. */
+  readonly readFile?: (path: string) => Promise<string>;
 }
 
 type Input = RunHubCliCommandInput;
@@ -245,6 +346,18 @@ export async function runHubCliCommand(input: Input): Promise<number> {
       return await runWake(input, command.enabled);
     case "push":
       return await runPush(input, command.enabled);
+    case "provision":
+      return await runProvision(input, command.enabled);
+    case "offer":
+      return await runOffer(input, command.offer);
+    case "offer-withdraw":
+      return await runOfferWithdraw(input, command.offerId);
+    case "apply":
+      return await runApply(input, command.offerId, command.projectId);
+    case "dismiss":
+      return await runDismiss(input, command.offerId);
+    case "auto-apply":
+      return await runAutoApply(input, command.kind, command.enabled);
     case "stand-in":
       return command.step === "join-code"
         ? await runStandInJoinCode(input)
@@ -332,6 +445,152 @@ async function runPush(input: Input, enabled: boolean): Promise<number> {
   return 0;
 }
 
+async function runProvision(input: Input, enabled: boolean): Promise<number> {
+  const response = await post(input, "/api/desktop/hub/provision", { enabled });
+  if (!isOk(response, "changed")) {
+    return refusal(input, response, "Octant refused to change offers.");
+  }
+  input.stdout.write(
+    enabled
+      ? "Offers are on. A spoke holds an offer only if its person ticked Provision in its hub grant, and applies it only when that person says so.\n"
+      : "Offers are off, and the hub forgot the offers it held.\n",
+  );
+  return 0;
+}
+
+/** The offer's fields as the server's schema wants them; the server refuses anything it does not define. */
+async function offerBody(
+  input: Input,
+  offer: OfferSource,
+): Promise<{ readonly offer: unknown; readonly mirrorFeed?: unknown } | undefined> {
+  const read = input.readFile ?? ((path: string) => readFile(path, "utf8"));
+  try {
+    switch (offer.kind) {
+      case "update-channel":
+        return offer.mirrorFeedFile === undefined
+          ? { offer: { kind: offer.kind, channel: offer.channel } }
+          : {
+              offer: { kind: offer.kind, channel: offer.channel, mirror: true },
+              mirrorFeed: JSON.parse(await read(offer.mirrorFeedFile)),
+            };
+      case "plugin":
+        return {
+          offer: {
+            kind: offer.kind,
+            catalogId: offer.catalogId,
+            entryId: offer.entryId,
+            expectedDigest: offer.digest,
+          },
+        };
+      default: {
+        const fields: unknown = JSON.parse(await read(offer.file));
+        if (typeof fields !== "object" || fields === null || Array.isArray(fields)) {
+          throw new Error("not an object");
+        }
+        return { offer: { ...fields, kind: offer.kind } };
+      }
+    }
+  } catch {
+    input.stderr.write("Octant could not read that offer file as JSON.\n");
+    return undefined;
+  }
+}
+
+async function runOffer(input: Input, source: OfferSource): Promise<number> {
+  const body = await offerBody(input, source);
+  if (body === undefined) return 1;
+  const response = await post(input, "/api/desktop/hub/provision/offers", body);
+  if (!isOk(response, "offered"))
+    return refusal(input, response, "Octant refused to make that offer.");
+  const delivered = field(response.body, "delivered");
+  input.stdout.write(
+    `Offered ${String(field(response.body, "offerId"))}. ${typeof delivered === "number" ? delivered : 0} spoke(s) hold it as a proposal; see \`octant hub status\` for the rest.\n`,
+  );
+  return 0;
+}
+
+async function runOfferWithdraw(input: Input, offerId: string): Promise<number> {
+  const response = await post(input, "/api/desktop/hub/provision/offers/withdraw", { offerId });
+  if (!isOk(response, "withdrawn"))
+    return refusal(input, response, "Octant refused to withdraw that offer.");
+  input.stdout.write(
+    "The offer is withdrawn. Proposals a spoke already holds stay with its person.\n",
+  );
+  return 0;
+}
+
+async function runApply(
+  input: Input,
+  offerId: string,
+  projectId: string | undefined,
+): Promise<number> {
+  const response = await post(input, "/api/desktop/hub/provision/apply", {
+    offerId,
+    ...(projectId === undefined ? {} : { projectId }),
+  });
+  if (!isOk(response, "applied"))
+    return refusal(input, response, "Octant refused to apply that proposal.");
+  input.stdout.write("Applied. Nothing was trusted or switched on, and no key was added.\n");
+  return 0;
+}
+
+async function runDismiss(input: Input, offerId: string): Promise<number> {
+  const response = await post(input, "/api/desktop/hub/provision/dismiss", { offerId });
+  if (!isOk(response, "dismissed"))
+    return refusal(input, response, "Octant refused to dismiss that proposal.");
+  input.stdout.write("Dismissed.\n");
+  return 0;
+}
+
+async function runAutoApply(
+  input: Input,
+  kind: HubAutoApplyKind,
+  enabled: boolean,
+): Promise<number> {
+  const response = await post(input, "/api/desktop/hub/provision/auto-apply", { kind, enabled });
+  if (!isOk(response, "changed")) return refusal(input, response, "Octant refused to change that.");
+  input.stdout.write(
+    enabled
+      ? `A ${kind} offer now applies when it arrives, exactly as Apply would.\n`
+      : `A ${kind} offer now waits for you.\n`,
+  );
+  return 0;
+}
+
+function writeOffers(input: Input, status: HubStatusOutput): void {
+  const provision = status.provision?.hub;
+  if (provision === undefined) return;
+  input.stdout.write(`Offers ${provision.enabled ? "on" : "off"}\n`);
+  for (const offer of provision.offers) {
+    input.stdout.write(
+      `  ${offer.offerId}  ${offer.kind}${offer.mirrored ? " (mirrors a feed)" : ""}\n`,
+    );
+    for (const delivery of offer.deliveries) {
+      const name = status.members.find((member) => member.memberId === delivery.memberId)?.name;
+      input.stdout.write(
+        `    ${name ?? delivery.memberId}  ${delivery.result}${delivery.reason === undefined ? "" : ` (${delivery.reason})`}\n`,
+      );
+    }
+  }
+}
+
+function writeProposals(input: Input, status: HubStatusOutput): void {
+  const spoke = status.provision?.spoke;
+  if (spoke === undefined) return;
+  if (!spoke.offering) {
+    input.stdout.write(
+      "Offers: this computer holds none (Provision is not ticked in its hub grant).\n",
+    );
+    return;
+  }
+  input.stdout.write(
+    `Offers: applying on arrival ${spoke.autoApply.length === 0 ? "off for every kind" : spoke.autoApply.join(", ")}\n`,
+  );
+  for (const proposal of spoke.proposals) {
+    input.stdout.write(`  ${proposal.offerId}  ${proposal.kind}  until ${proposal.expiresAt}\n`);
+  }
+}
+
 function writePushSender(input: Input, status: HubStatusOutput): void {
   const push = status.push?.hub;
   if (push === undefined) return;
@@ -374,6 +633,7 @@ async function runStatus(input: Input): Promise<number> {
   if (status.hubEnabled && status.standbyOrder.length > 0) writeStandbyOrder(input, status);
   if (status.hubEnabled) writeWakeService(input, status);
   if (status.hubEnabled) writePushSender(input, status);
+  if (status.hubEnabled) writeOffers(input, status);
   if (status.link === undefined) {
     input.stdout.write("This computer has not joined a hub.\n");
     return 0;
@@ -409,6 +669,7 @@ async function runStatus(input: Input): Promise<number> {
         : "Push: this computer sends its own phone notifications (Push is not ticked in its hub grant).\n",
     );
   }
+  writeProposals(input, status);
   return 0;
 }
 
@@ -882,6 +1143,17 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
   "roster-not-newer": "That hub's roster is not newer than the one this computer holds.",
   "wake-service-off": "The wake service is off. Turn it on with `octant hub wake on`.",
   "push-service-off": "The push sender is off. Turn it on with `octant hub push on`.",
+  "provision-service-off": "Offers are off. Turn them on with `octant hub provision on`.",
+  "needs-person":
+    "That proposal needs you: a routine is applied with --project <project-id>, and a routine or an endpoint row never applies on its own.",
+  "unknown-offer": "This computer holds no such proposal or offer (it may have lapsed).",
+  "mirror-untrusted":
+    "The mirrored update feed did not carry a signature this build trusts, so nothing changed.",
+  "mirror-unreachable": "The hub could not be asked for the mirrored update feed.",
+  "mirror-unverifiable": "This build holds no release key to check a mirrored update feed with.",
+  "kind-unsupported": "This computer cannot apply that kind of offer.",
+  "channel-not-allowed": "This computer does not follow that release channel on an offer.",
+  "apply-failed": "The service that applies it refused, so the proposal stays.",
   "invalid-address": "That is not a hardware address (six hex pairs, such as aa:bb:cc:00:11:22).",
 };
 
@@ -952,6 +1224,30 @@ interface HubStatusOutput {
     };
     readonly spoke: { readonly handing: boolean };
   };
+  readonly provision?: {
+    readonly hub: {
+      readonly enabled: boolean;
+      readonly offers: ReadonlyArray<{
+        readonly offerId: string;
+        readonly kind: string;
+        readonly mirrored: boolean;
+        readonly deliveries: ReadonlyArray<{
+          readonly memberId: string;
+          readonly result: string;
+          readonly reason?: string;
+        }>;
+      }>;
+    };
+    readonly spoke: {
+      readonly offering: boolean;
+      readonly autoApply: ReadonlyArray<string>;
+      readonly proposals: ReadonlyArray<{
+        readonly offerId: string;
+        readonly kind: string;
+        readonly expiresAt: string;
+      }>;
+    };
+  };
   readonly link?: {
     readonly membership: "member" | "removed";
     readonly hubName: string;
@@ -991,6 +1287,7 @@ async function readStatus(input: Input, fallback: string): Promise<HubStatusOutp
   const standbyOrder = stringList(field(heldRoster, "standbyOrder"));
   const wake = wakeOf(field(response.body, "wake"));
   const push = pushOf(field(response.body, "push"));
+  const provision = provisionOf(field(response.body, "provision"));
   if (
     (membership === "member" || membership === "removed") &&
     typeof hubName === "string" &&
@@ -1007,6 +1304,7 @@ async function readStatus(input: Input, fallback: string): Promise<HubStatusOutp
       standbyOrder,
       ...(wake === undefined ? {} : { wake }),
       ...(push === undefined ? {} : { push }),
+      ...(provision === undefined ? {} : { provision }),
       link: {
         membership,
         hubName,
@@ -1027,6 +1325,54 @@ async function readStatus(input: Input, fallback: string): Promise<HubStatusOutp
     standbyOrder,
     ...(wake === undefined ? {} : { wake }),
     ...(push === undefined ? {} : { push }),
+    ...(provision === undefined ? {} : { provision }),
+  };
+}
+
+function provisionOf(value: unknown): HubStatusOutput["provision"] {
+  const hub = field(value, "hub");
+  const spoke = field(value, "spoke");
+  const enabled = field(hub, "enabled");
+  const rawOffers = field(hub, "offers");
+  const offering = field(spoke, "offering");
+  const rawProposals = field(spoke, "proposals");
+  if (
+    typeof enabled !== "boolean" ||
+    !Array.isArray(rawOffers) ||
+    typeof offering !== "boolean" ||
+    !Array.isArray(rawProposals)
+  ) {
+    return undefined;
+  }
+  const offers: Array<NonNullable<HubStatusOutput["provision"]>["hub"]["offers"][number]> = [];
+  for (const entry of rawOffers) {
+    const offerId = field(entry, "offerId");
+    const kind = field(entry, "kind");
+    const rawDeliveries = field(entry, "deliveries");
+    if (typeof offerId !== "string" || typeof kind !== "string" || !Array.isArray(rawDeliveries)) {
+      continue;
+    }
+    const deliveries = rawDeliveries.flatMap((delivery: unknown) => {
+      const memberId = field(delivery, "memberId");
+      const result = field(delivery, "result");
+      const reason = field(delivery, "reason");
+      return typeof memberId === "string" && typeof result === "string"
+        ? [{ memberId, result, ...(typeof reason === "string" ? { reason } : {}) }]
+        : [];
+    });
+    offers.push({ offerId, kind, mirrored: field(entry, "mirrored") === true, deliveries });
+  }
+  const proposals = rawProposals.flatMap((proposal: unknown) => {
+    const offerId = field(proposal, "offerId");
+    const kind = field(field(proposal, "offer"), "kind");
+    const expiresAt = field(proposal, "expiresAt");
+    return typeof offerId === "string" && typeof kind === "string" && typeof expiresAt === "string"
+      ? [{ offerId, kind, expiresAt }]
+      : [];
+  });
+  return {
+    hub: { enabled, offers },
+    spoke: { offering, autoApply: stringList(field(spoke, "autoApply")), proposals },
   };
 }
 

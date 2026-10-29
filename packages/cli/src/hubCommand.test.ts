@@ -73,6 +73,7 @@ async function fixture(
     readonly daemonInstalled?: boolean;
     readonly ask?: (question: string) => Promise<string | undefined>;
     readonly encryption?: "encrypted" | "not-encrypted" | "unknown";
+    readonly files?: Readonly<Record<string, string>>;
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "octant-hub-cli-"));
@@ -136,6 +137,11 @@ async function fixture(
       administrator: { run: administrator },
       diskEncryption: async () => options.encryption ?? "encrypted",
       ...(options.ask === undefined ? {} : { ask: options.ask }),
+      readFile: async (path) => {
+        const text = options.files?.[path];
+        if (text === undefined) throw new Error("No such file.");
+        return text;
+      },
       now: () => clock,
       sleep: async (milliseconds) => {
         clock += milliseconds;
@@ -592,6 +598,185 @@ describe("octant hub status, grant, leave and remove", () => {
     expect(await host.run({ action: "status" })).toBe(1);
 
     expect(host.errors()).toContain("Hub administration is unauthorized.");
+  });
+});
+
+describe("octant hub offer", () => {
+  const OFFER_ID = "55555555-5555-4555-8555-555555555555";
+  const SPOKE_ID = "44444444-4444-4444-8444-444444444444";
+
+  it("reads each kind of offer and refuses the rest", () => {
+    expect(resolveHubCliCommand(["provision", "on"], {})).toEqual({
+      action: "provision",
+      enabled: true,
+    });
+    expect(resolveHubCliCommand(["offer", "update-channel", "preview"], {})).toEqual({
+      action: "offer",
+      offer: { kind: "update-channel", channel: "preview" },
+    });
+    expect(
+      resolveHubCliCommand(["offer", "update-channel", "stable"], { mirror: "feed.json" }),
+    ).toEqual({
+      action: "offer",
+      offer: { kind: "update-channel", channel: "stable", mirrorFeedFile: "feed.json" },
+    });
+    expect(resolveHubCliCommand(["offer", "plugin", "octant", "review", "sha256:x"], {})).toEqual({
+      action: "offer",
+      offer: { kind: "plugin", catalogId: "octant", entryId: "review", digest: "sha256:x" },
+    });
+    expect(resolveHubCliCommand(["offer", "routine", "routine.json"], {})).toEqual({
+      action: "offer",
+      offer: { kind: "routine", file: "routine.json" },
+    });
+    expect(resolveHubCliCommand(["apply", OFFER_ID], { project: "p" })).toEqual({
+      action: "apply",
+      offerId: OFFER_ID,
+      projectId: "p",
+    });
+    expect(resolveHubCliCommand(["auto-apply", "plugin", "on"], {})).toEqual({
+      action: "auto-apply",
+      kind: "plugin",
+      enabled: true,
+    });
+    // A routine and an endpoint row cannot be set to apply on arrival.
+    expect(resolveHubCliCommand(["auto-apply", "routine", "on"], {})).toBeUndefined();
+    expect(resolveHubCliCommand(["auto-apply", "model-endpoint", "on"], {})).toBeUndefined();
+    expect(resolveHubCliCommand(["offer", "update-channel", "nightly"], {})).toBeUndefined();
+    expect(resolveHubCliCommand(["offer", "secret", "x"], {})).toBeUndefined();
+    expect(resolveHubCliCommand(["offer", "plugin", "a", "b"], {})).toBeUndefined();
+  });
+
+  it("sends an offer through the window-only route, with a mirrored feed read from its file", async () => {
+    const host = await fixture(() => ok({ status: "offered", offerId: OFFER_ID, delivered: 1 }), {
+      files: { "feed.json": '{"schemaVersion":1}' },
+    });
+
+    expect(
+      await host.run({
+        action: "offer",
+        offer: { kind: "update-channel", channel: "preview", mirrorFeedFile: "feed.json" },
+      }),
+    ).toBe(0);
+
+    expect(host.sent[0]).toMatchObject({
+      path: "/api/desktop/hub/provision/offers",
+      body: {
+        offer: { kind: "update-channel", channel: "preview", mirror: true },
+        mirrorFeed: { schemaVersion: 1 },
+      },
+    });
+    expect(host.text()).toContain(OFFER_ID);
+  });
+
+  it("puts the kind on the fields of a profile, endpoint, or routine file, and reports a file it cannot read", async () => {
+    const host = await fixture(() => ok({ status: "offered", offerId: OFFER_ID, delivered: 0 }), {
+      files: { "endpoint.json": '{"displayName":"Gateway"}', "bad.json": "[1]" },
+    });
+
+    await host.run({ action: "offer", offer: { kind: "model-endpoint", file: "endpoint.json" } });
+    expect(host.sent[0]).toMatchObject({
+      body: { offer: { kind: "model-endpoint", displayName: "Gateway" } },
+    });
+    expect(await host.run({ action: "offer", offer: { kind: "routine", file: "bad.json" } })).toBe(
+      1,
+    );
+    expect(await host.run({ action: "offer", offer: { kind: "routine", file: "none.json" } })).toBe(
+      1,
+    );
+    expect(host.sent).toHaveLength(1);
+    expect(host.errors()).toContain("could not read that offer file");
+  });
+
+  it("applies, dismisses, and sets applying on arrival through window-only routes", async () => {
+    const applied = await fixture(() => ok({ status: "applied" }));
+    expect(await applied.run({ action: "apply", offerId: OFFER_ID, projectId: "p" })).toBe(0);
+    expect(applied.sent[0]).toMatchObject({
+      path: "/api/desktop/hub/provision/apply",
+      body: { offerId: OFFER_ID, projectId: "p" },
+    });
+    const dismissed = await fixture(() => ok({ status: "dismissed" }));
+    expect(await dismissed.run({ action: "dismiss", offerId: OFFER_ID })).toBe(0);
+    const auto = await fixture(() => ok({ status: "changed" }));
+    expect(await auto.run({ action: "auto-apply", kind: "agent-profile", enabled: true })).toBe(0);
+    expect(auto.sent[0]).toMatchObject({
+      path: "/api/desktop/hub/provision/auto-apply",
+      body: { kind: "agent-profile", enabled: true },
+    });
+    const waiting = await fixture(() => ({
+      status: 409,
+      body: { status: "refused", kind: "needs-person" },
+    }));
+    expect(await waiting.run({ action: "apply", offerId: OFFER_ID })).toBe(1);
+    expect(waiting.errors()).toContain("needs-person");
+  });
+
+  it("shows the hub's offers and how each spoke took them, and a spoke's proposals", async () => {
+    const hub = await fixture(() =>
+      ok({
+        hub: {
+          enabled: true,
+          roster: {
+            roster: {
+              standbyOrder: [],
+              members: [{ memberId: SPOKE_ID, name: "Laptop", role: "spoke", owner: false }],
+            },
+          },
+        },
+        spoke: { membership: "none" },
+        provision: {
+          hub: {
+            enabled: true,
+            offers: [
+              {
+                offerId: OFFER_ID,
+                kind: "plugin",
+                mirrored: false,
+                deliveries: [{ memberId: SPOKE_ID, result: "refused", reason: "kind-unsupported" }],
+              },
+            ],
+          },
+          spoke: { offering: false, autoApply: [], proposals: [] },
+        },
+      }),
+    );
+
+    await hub.run({ action: "status" });
+
+    expect(hub.text()).toContain("Offers on");
+    expect(hub.text()).toContain(`${OFFER_ID}  plugin`);
+    expect(hub.text()).toContain("Laptop  refused (kind-unsupported)");
+
+    const spoke = await fixture(() =>
+      ok({
+        hub: { enabled: false },
+        spoke: {
+          membership: "member",
+          hub: { memberId: MEMBER, name: "Mac mini" },
+          grant: DEFAULT_GRANT,
+          roster: { roster: { standbyOrder: [], members: [] } },
+          rosterSignedBy: "hub",
+        },
+        provision: {
+          hub: { enabled: false, offers: [] },
+          spoke: {
+            offering: true,
+            autoApply: ["plugin"],
+            proposals: [
+              {
+                offerId: OFFER_ID,
+                offer: { kind: "routine" },
+                expiresAt: "2026-11-05T00:00:00.000Z",
+              },
+            ],
+          },
+        },
+      }),
+    );
+
+    await spoke.run({ action: "status" });
+
+    expect(spoke.text()).toContain("applying on arrival plugin");
+    expect(spoke.text()).toContain(`${OFFER_ID}  routine  until 2026-11-05T00:00:00.000Z`);
   });
 });
 

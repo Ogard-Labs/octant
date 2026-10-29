@@ -162,7 +162,11 @@ function feedSigner() {
     releasedAt: "2026-10-29T12:00:00.000Z",
   } as const;
   const signFeed = (body: typeof release, key: KeyObject): AppUpdateFeed => {
-    const signed = decodeFeed({ schemaVersion: 1, release: body, signature: "A".repeat(86) + "==" });
+    const signed = decodeFeed({
+      schemaVersion: 1,
+      release: body,
+      signature: "A".repeat(86) + "==",
+    });
     return {
       ...signed,
       signature: sign(null, canonicalReleaseBytes(signed.release), key).toString("base64"),
@@ -506,12 +510,13 @@ describe("a routine offer", () => {
 });
 
 describe("applying a kind on arrival", () => {
-  const cases: ReadonlyArray<readonly [string, "update-channel" | "plugin" | "agent-profile", HubOfferBody]> =
-    [
-      ["an update channel", "update-channel", channelOffer("preview")],
-      ["an untrusted plugin install", "plugin", pluginOffer],
-      ["a profile without secrets", "agent-profile", profileOffer],
-    ];
+  const cases: ReadonlyArray<
+    readonly [string, "update-channel" | "plugin" | "agent-profile", HubOfferBody]
+  > = [
+    ["an update channel", "update-channel", channelOffer("preview")],
+    ["an untrusted plugin install", "plugin", pluginOffer],
+    ["a profile without secrets", "agent-profile", profileOffer],
+  ];
 
   it.each(cases)(
     "does exactly what Apply does for %s, and nothing more",

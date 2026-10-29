@@ -13,8 +13,13 @@
 import {
   decodeConfirmNewMembersRequest,
   decodeHubGrant,
+  decodeHubAutoApplyRequest,
   decodeHubLeaveRequest,
+  decodeHubOfferRequest,
+  decodeHubOfferWithdrawRequest,
   decodeHubPromoteRequest,
+  decodeHubProposalDecisionRequest,
+  decodeHubProvisionSwitchRequest,
   decodeHubPushSwitchRequest,
   decodeHubStandbyOrderRequest,
   decodeHubWakeHardwareAddressRequest,
@@ -130,6 +135,36 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     method: "POST",
     path: "/api/desktop/hub/push",
     decodeBody: decodeHubPushSwitchRequest,
+  },
+  provision: {
+    method: "POST",
+    path: "/api/desktop/hub/provision",
+    decodeBody: decodeHubProvisionSwitchRequest,
+  },
+  "provision-offer": {
+    method: "POST",
+    path: "/api/desktop/hub/provision/offers",
+    decodeBody: decodeHubOfferRequest,
+  },
+  "provision-withdraw": {
+    method: "POST",
+    path: "/api/desktop/hub/provision/offers/withdraw",
+    decodeBody: decodeHubOfferWithdrawRequest,
+  },
+  "provision-apply": {
+    method: "POST",
+    path: "/api/desktop/hub/provision/apply",
+    decodeBody: decodeHubProposalDecisionRequest,
+  },
+  "provision-dismiss": {
+    method: "POST",
+    path: "/api/desktop/hub/provision/dismiss",
+    decodeBody: decodeHubProposalDecisionRequest,
+  },
+  "provision-auto-apply": {
+    method: "POST",
+    path: "/api/desktop/hub/provision/auto-apply",
+    decodeBody: decodeHubAutoApplyRequest,
   },
 } as const satisfies Readonly<Record<string, HubAdministrationRoute>>;
 
