@@ -663,6 +663,24 @@ describe("octant hub certificate", () => {
     expect(host.errors()).toContain("(https-not-enabled)");
   });
 
+  it.each([
+    ["invalid-certificate", "did not check out"],
+    ["could-not-apply", "could not restart with that certificate"],
+  ])("says why the certificate was not installed (%s)", async (kind, sentence) => {
+    const host = await fixture((request) =>
+      (request.body as { action?: string } | undefined)?.action === "enable"
+        ? ok({ status: "enabled" })
+        : { status: 409, body: { status: "refused", kind } },
+    );
+
+    expect(
+      await host.run({ action: "certificate", mode: "enable", acknowledgeTransparency: true }),
+    ).toBe(1);
+
+    expect(host.errors()).toContain(sentence);
+    expect(host.errors()).toContain(`(${kind})`);
+  });
+
   it("turns the certificate off and reports its state", async () => {
     const off = await fixture(() => ok({ status: "disabled" }));
     expect(

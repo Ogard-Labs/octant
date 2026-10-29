@@ -100,13 +100,16 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
   "hub-revoked": "The hub removed this computer.",
   "acknowledgement-required": "Read the certificate-transparency note and tick it first.",
   "not-a-tailnet-name": "The remote listener is not served at a Tailscale name (*.ts.net).",
+  "turned-off": "The Tailscale certificate is off.",
   "daemon-not-reachable":
     "Octant could not reach Tailscale. Check that it is installed and signed in.",
   "https-not-enabled":
     "HTTPS certificates are not turned on for this tailnet in the Tailscale admin console.",
   "name-not-served": "Tailscale does not serve a certificate for this computer's name.",
-  "nowhere-to-install":
-    "The remote listener cannot take a certificate Octant did not make without losing the pin that phones and other computers hold it to, so nothing was installed.",
+  "invalid-certificate":
+    "The certificate Tailscale sent did not check out (bad key, expired, wrong name, or unreadable), so nothing was installed.",
+  "could-not-apply":
+    "The remote listener could not restart with that certificate, so it was dropped and the listener is using its own again.",
 };
 
 interface Reply {

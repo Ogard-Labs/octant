@@ -313,4 +313,21 @@ describe("HubSettingsSection", () => {
 
     expect(await screen.findByText(/HTTPS certificates are not turned on/i)).toBeVisible();
   });
+
+  it.each([
+    ["invalid-certificate", /did not check out/i],
+    ["could-not-apply", /could not restart with that certificate/i],
+  ])("says why the certificate was not installed (%s)", async (kind, sentence) => {
+    const user = userEvent.setup();
+    renderHub({
+      status: { status: 200, body: statusBody({}) },
+      "certificate-status": { status: 200, body: { enabled: false } },
+      certificate: { status: 409, body: { status: "refused", kind } },
+    });
+
+    await user.click(await screen.findByRole("checkbox"));
+    await user.click(screen.getByRole("switch", { name: "Use a Tailscale certificate" }));
+
+    expect(await screen.findByText(sentence)).toBeVisible();
+  });
 });
