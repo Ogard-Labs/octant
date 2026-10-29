@@ -335,6 +335,27 @@ describe("what a spoke tells the hub", () => {
     expect(hub.wake.status().spokes).toEqual([]);
   });
 
+  it("is sent again on the spoke's next tick after the hub's wake service was turned off and on", async () => {
+    const { clock, hub, laptop } = await startPair();
+    laptop.spoke.setGrant(wakeGrant, window);
+    laptop.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 30 * MINUTE),
+    });
+    await laptop.spokeWake.tick();
+    expect(hub.wake.status().spokes).toHaveLength(1);
+
+    await hub.wake.setEnabled(false, window);
+    await hub.wake.setEnabled(true, window);
+    expect(hub.wake.status().spokes).toEqual([]);
+
+    // The routine did not change; the hub's answer to the spoke's look is what says the hub forgot.
+    await laptop.failover.tick();
+    await laptop.spokeWake.tick();
+    expect(hub.wake.status().spokes).toHaveLength(1);
+  });
+
   it("is filed under the member whose key signed it, and the body cannot name another", async () => {
     const { clock, hub, laptop } = await startPair();
     const times = [
@@ -565,10 +586,13 @@ describe("a spoke deciding what a nudge is worth", () => {
 const decodeNudgeId = Schema.decodeUnknownSync(WakeRoutineId);
 
 describe("the wake service in a failover", () => {
-  async function startFamily(standbyExtra: Partial<Parameters<typeof startHubTestHost>[0]> = {}) {
+  async function startFamily(
+    standbyExtra: Partial<Parameters<typeof startHubTestHost>[0]> = {},
+    hubExtra: Partial<Parameters<typeof startHubTestHost>[0]> = {},
+  ) {
     const network = new HubTestNetwork();
     const clock = makeClock();
-    const hub = await start(network, clock, "Mac mini", 103);
+    const hub = await start(network, clock, "Mac mini", 103, hubExtra);
     const standby = await start(network, clock, "Standby", 104, standbyExtra);
     const member = await start(network, clock, "Laptop", 105);
     const enabled = hub.hub.enable(window);
@@ -709,6 +733,155 @@ describe("the wake service in a failover", () => {
       expect(await member.spokeWake.report()).toEqual({ status: "sent", count: 2 }),
     );
     expect(hub.state.load().hub?.wake?.spokes[0]?.times).toHaveLength(2);
+  });
+
+  it("keeps the times a spoke reports straight to the hub while the hand-back's roster is still being sent", async () => {
+    let release: () => void = () => undefined;
+    let gate = Promise.resolve();
+    let armed = false;
+    let held = 0;
+    const { network, clock, hub, standby, member } = await startFamily(
+      {},
+      {
+        hubTransport: (transport) => (target) => {
+          const fetchTo = transport(target);
+          return async (url, init) => {
+            if (armed && init?.method === "PUT" && url.includes("100.101.102.104")) {
+              held += 1;
+              await gate;
+            }
+            return fetchTo(url, init);
+          };
+        },
+      },
+    );
+    standby.spoke.setGrant(standbyGrant, window);
+    member.spoke.setGrant(wakeAndStandbyGrant, window);
+    const ordered = await hub.hub.setStandbyOrder([decodeMemberId(standby.hostId)], window);
+    if (ordered.status !== "ordered") throw new Error(JSON.stringify(ordered));
+    member.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 10 * MINUTE),
+    });
+    expect(await member.spokeWake.report()).toEqual({ status: "sent", count: 1 });
+    await vi.waitFor(() => expect(standby.state.load().link?.wakeCopy).toHaveLength(1));
+    await standby.failover.tick();
+    await member.failover.tick();
+    network.stop(hub.address);
+    await pause(FAILOVER_AFTER_MS + 40);
+    await standby.failover.tick();
+    expect(standby.failover.standingIn()).toBe(true);
+    await vi.waitFor(() =>
+      expect(member.spoke.status()).toMatchObject({ rosterSignedBy: "standby" }),
+    );
+    member.routines.push({
+      id: "automation-b",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 30 * MINUTE),
+    });
+    expect(await member.spokeWake.report()).toEqual({ status: "sent", count: 2 });
+
+    // The hub returns and takes the hand-back; its roster reaches the spoke while the standby's copy is still held.
+    gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    armed = true;
+    network.start(hub.address);
+    const stepping = standby.failover.tick();
+    await vi.waitFor(() => expect(held).toBe(1));
+    await vi.waitFor(() => expect(member.spoke.status()).toMatchObject({ rosterSignedBy: "hub" }));
+
+    member.routines.push({
+      id: "automation-c",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 50 * MINUTE),
+    });
+    await vi.waitFor(async () =>
+      expect(await member.spokeWake.report()).toEqual({ status: "sent", count: 3 }),
+    );
+    release();
+    await stepping;
+
+    expect(hub.state.load().hub?.wake?.spokes[0]?.times).toHaveLength(3);
+  });
+
+  /** The hub stops, the standby stands in, and the member follows it. */
+  async function standIn(family: Awaited<ReturnType<typeof startFamily>>) {
+    const { network, hub, standby, member } = family;
+    await standby.failover.tick();
+    await member.failover.tick();
+    network.stop(hub.address);
+    await pause(FAILOVER_AFTER_MS + 40);
+    await standby.failover.tick();
+    expect(standby.failover.standingIn()).toBe(true);
+    await vi.waitFor(() =>
+      expect(member.spoke.status()).toMatchObject({ rosterSignedBy: "standby" }),
+    );
+  }
+
+  it("takes no report and sends no packet or nudge while standing in for a hub whose wake service is off", async () => {
+    const family = await startFamily();
+    const { clock, hub, standby, member } = family;
+    standby.spoke.setGrant(standbyGrant, window);
+    member.spoke.setGrant(wakeAndStandbyGrant, window);
+    const ordered = await hub.hub.setStandbyOrder([decodeMemberId(standby.hostId)], window);
+    if (ordered.status !== "ordered") throw new Error(JSON.stringify(ordered));
+    await hub.wake.setEnabled(false, window);
+    await standIn(family);
+
+    member.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 10 * MINUTE),
+    });
+    expect(member.spokeWake.setHardwareAddress("AA-BB-CC-00-11-22").status).toBe("changed");
+    expect(await member.spokeWake.report()).toEqual({
+      status: "declined",
+      kind: "wake-service-off",
+    });
+    expect(standby.state.load().link?.standIn?.wakeReports ?? []).toEqual([]);
+
+    clock.state.offset = 9 * MINUTE;
+    await standby.wake.tick();
+    expect(nudges(member)).toBe(0);
+    expect(standby.magicPackets).toEqual([]);
+  });
+
+  it("counts a wake copy that does not say the hub's switch is on as off when standing in", async () => {
+    const family = await startFamily();
+    const { clock, hub, standby, member } = family;
+    standby.spoke.setGrant(standbyGrant, window);
+    member.spoke.setGrant(wakeAndStandbyGrant, window);
+    const ordered = await hub.hub.setStandbyOrder([decodeMemberId(standby.hostId)], window);
+    if (ordered.status !== "ordered") throw new Error(JSON.stringify(ordered));
+    member.routines.push({
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 10 * MINUTE),
+    });
+    expect(await member.spokeWake.report()).toEqual({ status: "sent", count: 1 });
+    await vi.waitFor(() => expect(standby.state.load().link?.wakeCopy).toHaveLength(1));
+    // A copy from a hub that predates the switch carries the times and nothing about it.
+    const older = await signedRequest({
+      signer: hub,
+      recipient: standby,
+      clock,
+      method: "PUT",
+      path: HUB_LINK_ROUTES.wakeCopy,
+      body: {
+        spokes: (hub.state.load().hub?.wake?.spokes ?? []).map((spoke) => ({
+          memberId: spoke.memberId,
+          times: spoke.times,
+        })),
+      },
+    });
+    expect(older?.status).toBe(200);
+    await standIn(family);
+
+    clock.state.offset = 9 * MINUTE;
+    await standby.wake.tick();
+    expect(nudges(member)).toBe(0);
   });
 
   it("refuses a standby's nudge from a spoke that did not tick Standby, and while the hub is reachable", async () => {

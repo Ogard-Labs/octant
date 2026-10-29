@@ -12,6 +12,7 @@ import {
   HubMemberId,
   decodeHubWakeNudgeAnswer,
   type AuditActingPrincipal,
+  type HubHandbackWakeTimes,
   type HubMembershipChangedPayload,
   type HubWakeCopy,
   type HubWakeNudge,
@@ -56,7 +57,12 @@ export type WakeSwitchOutcome =
   | { readonly status: "refused"; readonly kind: "hub-role-off" };
 
 export type WakeReportOutcome =
-  | { readonly status: "recorded"; readonly count: number }
+  | {
+      readonly status: "recorded";
+      readonly count: number;
+      /** The hub's wake generation when it filed the report; absent from a standing-in standby. */
+      readonly generation?: number;
+    }
   | {
       readonly status: "refused";
       readonly kind: "wake-service-off" | "not-a-spoke" | "not-coordinating" | "handing-back";
@@ -124,9 +130,18 @@ export class WakeService {
     const state = this.#options.state.load();
     const hub = state.hub;
     if (hub?.enabled !== true) return { status: "refused", kind: "hub-role-off" };
+    // Turning it off forgets every time, and turning it on again starts empty too, so each
+    // change moves the generation: spokes that remember what they sent then send it again.
     this.#options.state.save({
       ...state,
-      hub: { ...hub, wake: { enabled, spokes: enabled ? (hub.wake?.spokes ?? []) : [] } },
+      hub: {
+        ...hub,
+        wake: {
+          enabled,
+          spokes: enabled ? (hub.wake?.spokes ?? []) : [],
+          generation: (hub.wake?.generation ?? 0) + 1,
+        },
+      },
     });
     this.#options.record({ change: "wake-switch-changed", actingPrincipal: principal });
     // Standbys hold a copy only while the service is on.
@@ -178,7 +193,7 @@ export class WakeService {
             ];
       this.#options.state.save({
         ...state,
-        hub: { ...hub, wake: { enabled: true, spokes: next } },
+        hub: { ...hub, wake: { ...hub.wake, enabled: true, spokes: next } },
       });
       this.#options.record({
         change: "wake-times-reported",
@@ -187,7 +202,11 @@ export class WakeService {
         wakeCount: report.times.length,
       });
       void this.#shareCopy();
-      return { status: "recorded", count: report.times.length };
+      return {
+        status: "recorded",
+        count: report.times.length,
+        generation: hub.wake.generation ?? 0,
+      };
     }
     const link = state.link;
     if (link === undefined || link.removed === true || link.standIn === undefined) {
@@ -202,6 +221,8 @@ export class WakeService {
     // The hand-back already holds the reports it will carry, and the stand-in ends right
     // after. A report filed now would be dropped, so the spoke is asked to send it again.
     if (link.standIn.handingBack === true) return { status: "refused", kind: "handing-back" };
+    // The hub's wake switch is its own: a standby that never heard it was on takes no report.
+    if (link.wakeCopyEnabled !== true) return { status: "refused", kind: "wake-service-off" };
     // An empty report stays on file while standing in: it is what overrides the copy.
     const reports = [
       ...(link.standIn.wakeReports ?? []).filter(
@@ -237,7 +258,10 @@ export class WakeService {
     if (link.removed === true) return { status: "refused", kind: "hub-revoked" };
     const now = this.#options.now();
     const held = copy.spokes.map((spoke) => ({ ...spoke, reportedAt: now }));
-    this.#options.state.save({ ...state, link: { ...link, wakeCopy: held } });
+    this.#options.state.save({
+      ...state,
+      link: { ...link, wakeCopy: held, wakeCopyEnabled: copy.enabled === true },
+    });
     const count = copy.spokes.reduce((total, spoke) => total + spoke.times.length, 0);
     this.#options.record({
       change: "wake-times-reported",
@@ -251,11 +275,13 @@ export class WakeService {
   /**
    * The times a standby gathered while it stood in, taken back by the hub after
    * the membership merge. Only spokes the hub still lists are kept, and a
-   * standby's report replaces what the hub held for that spoke.
+   * standby's report replaces what the hub held for that spoke only when it is
+   * newer: a spoke may have reported straight to the hub since. A report with no
+   * time counts as older than any the hub holds.
    */
   mergeHandback(
     senderMemberId: string,
-    handed: ReadonlyArray<HubWakeSpokeTimes>,
+    handed: ReadonlyArray<HubHandbackWakeTimes>,
   ): { readonly merged: number } {
     const state = this.#options.state.load();
     const hub = state.hub;
@@ -264,13 +290,18 @@ export class WakeService {
     }
     const roster = hub.roster.roster;
     const now = this.#options.now();
-    const accepted = handed.filter((spoke) =>
-      roster.members.some(
-        (member) => String(member.memberId) === String(spoke.memberId) && isSpokeLike(member),
-      ),
+    const previous = hub.wake.spokes;
+    const newerThanHeld = (spoke: HubHandbackWakeTimes) => {
+      const held = previous.find((record) => String(record.memberId) === String(spoke.memberId));
+      return held === undefined || (spoke.reportedAt ?? Number.NEGATIVE_INFINITY) > held.reportedAt;
+    };
+    const accepted = handed.filter(
+      (spoke) =>
+        roster.members.some(
+          (member) => String(member.memberId) === String(spoke.memberId) && isSpokeLike(member),
+        ) && newerThanHeld(spoke),
     );
     if (accepted.length === 0) return { merged: 0 };
-    const previous = hub.wake.spokes;
     const replaced = new Set(accepted.map((spoke) => String(spoke.memberId)));
     const next: WakeSpokeRecord[] = [
       ...previous.filter((spoke) => !replaced.has(String(spoke.memberId))),
@@ -278,14 +309,18 @@ export class WakeService {
         const lastResult = previous.find(
           (held) => String(held.memberId) === String(spoke.memberId),
         )?.lastResult;
+        const { reportedAt, ...carried } = spoke;
         return {
-          ...spoke,
-          reportedAt: now,
+          ...carried,
+          reportedAt: reportedAt ?? now,
           ...(lastResult === undefined ? {} : { lastResult }),
         };
       }),
     ];
-    this.#options.state.save({ ...state, hub: { ...hub, wake: { enabled: true, spokes: next } } });
+    this.#options.state.save({
+      ...state,
+      hub: { ...hub, wake: { ...hub.wake, enabled: true, spokes: next } },
+    });
     this.#options.record({
       change: "wake-times-merged",
       actingPrincipal: { kind: "hub", memberId: decodeMemberId(senderMemberId) },
@@ -325,6 +360,7 @@ export class WakeService {
     }
     const link = state.link;
     if (link === undefined || link.removed === true || link.standIn === undefined) return undefined;
+    if (link.wakeCopyEnabled !== true) return undefined;
     const reports = link.standIn.wakeReports ?? [];
     const copy = (link.wakeCopy ?? []).filter(
       (held) => !reports.some((report) => String(report.memberId) === String(held.memberId)),
@@ -511,6 +547,7 @@ export class WakeService {
     if (hub?.enabled !== true || hub.roster === undefined) return;
     const roster = hub.roster.roster;
     const copy: HubWakeCopy = {
+      enabled: hub.wake?.enabled === true,
       spokes: hub.wake?.enabled === true ? hub.wake.spokes.map(times) : [],
     };
     const body = JSON.stringify(copy);

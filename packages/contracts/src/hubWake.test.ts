@@ -50,6 +50,9 @@ describe("hub wake wire shapes", () => {
 
   it("decodes the copy a standby holds and the address a person enters or clears", () => {
     expect(decodeHubWakeCopy({ spokes: [] }).spokes).toEqual([]);
+    // A copy from a hub that predates the switch carries none, and a standby reads that as off.
+    expect(decodeHubWakeCopy({ spokes: [] }).enabled).toBeUndefined();
+    expect(decodeHubWakeCopy({ enabled: true, spokes: [] }).enabled).toBe(true);
     expect(decodeHubWakeHardwareAddressRequest({ address: null }).address).toBeNull();
     expect(() => decodeHubWakeHardwareAddressRequest({})).toThrow();
   });

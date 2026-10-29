@@ -227,6 +227,7 @@ export class HubService {
     return {
       standingIn: false,
       roster: hub.roster,
+      wakeGeneration: hub.wake?.generation ?? 0,
       ...(reading.status === "refused"
         ? {}
         : {
@@ -706,6 +707,12 @@ export class HubService {
   async receiveHandback(
     senderMemberId: string,
     handback: HubStandInHandback,
+    /**
+     * Runs once the merged roster is saved and before it is published. A spoke
+     * that gets the roster can report to the hub at once, so whatever the hub
+     * takes from the hand-back must be in place by then.
+     */
+    beforePublish: () => void = () => undefined,
   ): Promise<HandbackOutcome> {
     const current = this.#options.state.load();
     const hub = current.hub;
@@ -817,6 +824,7 @@ export class HubService {
       memberId: sender.memberId,
       sequence: signed.roster.sequence,
     });
+    beforePublish();
     // Members that were removed are told by the roster that no longer lists them.
     await this.#publish(signed, nextHub, [...roster.members, ...added.map((e) => e.member)], []);
     return { status: "merged", roster: signed };

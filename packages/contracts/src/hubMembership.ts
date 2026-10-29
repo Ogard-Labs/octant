@@ -236,6 +236,12 @@ export const HubHeartbeatResponse = Schema.Struct({
   hub: Schema.optional(HubIdentityFacts),
   /** The identity key of a standby that signed `roster`; a member checks its fingerprint against the roster. */
   signerPublicKey: Schema.optional(base64Url(512)),
+  /**
+   * Changes whenever the hub clears the wake times it holds (its wake switch
+   * turned off or on), so a spoke that remembers what it sent knows to send it
+   * again. Absent from a standby.
+   */
+  wakeGeneration: Schema.optional(Schema.Int),
 }).annotations(strict);
 export type HubHeartbeatResponse = typeof HubHeartbeatResponse.Type;
 export const decodeHubHeartbeatResponse = Schema.decodeUnknownSync(HubHeartbeatResponse);
@@ -249,6 +255,17 @@ export const StandInAddedMember = Schema.Struct({
 export type StandInAddedMember = typeof StandInAddedMember.Type;
 
 /**
+ * One spoke's times as a standby gathered them. `reportedAt` is when the spoke
+ * reported to the standby; the hub keeps whichever report is newer, and counts
+ * one without a time as older.
+ */
+export const HubHandbackWakeTimes = Schema.Struct({
+  ...HubWakeSpokeTimes.fields,
+  reportedAt: Schema.optional(Schema.Int),
+}).annotations(strict);
+export type HubHandbackWakeTimes = typeof HubHandbackWakeTimes.Type;
+
+/**
  * What a standby hands back to the hub when it steps down. `wakeTimes` are the
  * routine times spokes reported to it while it stood in; the hub takes them
  * for the spokes it still lists.
@@ -258,7 +275,7 @@ export const HubStandInHandback = Schema.Struct({
   sequence: Schema.Int.pipe(Schema.positive()),
   added: Schema.Array(StandInAddedMember).pipe(Schema.maxItems(64)),
   removed: Schema.Array(HubMemberId).pipe(Schema.maxItems(256)),
-  wakeTimes: Schema.Array(HubWakeSpokeTimes).pipe(Schema.maxItems(256)),
+  wakeTimes: Schema.Array(HubHandbackWakeTimes).pipe(Schema.maxItems(256)),
 }).annotations(strict);
 export type HubStandInHandback = typeof HubStandInHandback.Type;
 export const decodeHubStandInHandback = Schema.decodeUnknownSync(HubStandInHandback);

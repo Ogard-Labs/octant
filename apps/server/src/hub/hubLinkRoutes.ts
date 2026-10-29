@@ -460,11 +460,12 @@ export function createHubLinkRouteHandler(
       } catch {
         return refused(400, "invalid");
       }
-      const merged = await options.hub.receiveHandback(verified.senderMemberId, handback);
-      // The wake times the standby gathered are taken once the roster merge accepted it.
-      if (merged.status === "merged") {
+      // The wake times the standby gathered are taken once the roster merge accepted it, and
+      // before the roster reaches any spoke, so a report a spoke then sends the hub is not
+      // overwritten.
+      const merged = await options.hub.receiveHandback(verified.senderMemberId, handback, () => {
         options.wake.mergeHandback(verified.senderMemberId, handback.wakeTimes);
-      }
+      });
       return merged.status === "merged"
         ? Response.json({ roster: encodeSignedHubRoster(merged.roster) }, { headers: NO_STORE })
         : refused(403, merged.kind);

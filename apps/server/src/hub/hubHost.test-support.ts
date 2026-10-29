@@ -180,6 +180,8 @@ export async function startHubTestHost(input: {
   readonly parent?: DelegatingParentPort;
   /** Wraps the transport this host's delegating side sends through, so a test can lose an answer. */
   readonly delegatingTransport?: (transport: HubTransport) => HubTransport;
+  /** Wraps the transport this host's hub side sends through, so a test can hold a roster publication in flight. */
+  readonly hubTransport?: (transport: HubTransport) => HubTransport;
   /** The authenticated product surface; the tests that prove a member reaches none of it pass a spy. */
   readonly productDispatch?: RemoteProductDispatch;
   /** The clock the spoke role reads, so a test can let a device's inactivity window pass. */
@@ -308,7 +310,7 @@ export async function startHubTestHost(input: {
     identity: () => identity,
     listener: () => listener,
     pairing: hubPairing,
-    transport,
+    transport: input.hubTransport?.(transport) ?? transport,
     record: (change) => records.push(change),
     now: Date.now,
   });
@@ -348,6 +350,7 @@ export async function startHubTestHost(input: {
     spoke,
     record: (change) => records.push(change),
     now: Date.now,
+    noteHubWakeGeneration: (generation) => spokeWake.noteHubWakeGeneration(generation),
     ...(input.failoverAfterMs === undefined
       ? {}
       : { failoverAfterMs: () => input.failoverAfterMs }),
