@@ -166,13 +166,14 @@ export function createHubAdministrationRouteHandler(
         }
         case HUB_ADMINISTRATION_ROUTES.ownersAdd: {
           const added = decodeOwnerAdditionRequest(parseJson(request, body.text));
-          // A window decides who this host's owners are: the hub's list when it
-          // acts as hub, otherwise the spoke's, after the person confirmed the
-          // devices by name and fingerprint.
+          // A window decides who this host's owners are: the hub's list while the
+          // hub role is on, otherwise the spoke's, after the person confirmed the
+          // devices by name and fingerprint. A former hub keeps its roster, so
+          // the role, not the roster, picks the list.
           return outcome(
-            options.hub.ownerContext() === undefined
-              ? options.spoke.addOwners(added.owners, WINDOW_PRINCIPAL)
-              : options.hub.addOwners(added.owners, WINDOW_PRINCIPAL),
+            options.hub.status().enabled
+              ? options.hub.addOwners(added.owners, WINDOW_PRINCIPAL)
+              : options.spoke.addOwners(added.owners, WINDOW_PRINCIPAL),
           );
         }
         case HUB_ADMINISTRATION_ROUTES.ownersRemove: {
@@ -180,9 +181,9 @@ export function createHubAdministrationRouteHandler(
             decodeOwnerRemovalRequest(parseJson(request, body.text)).memberId,
           );
           return outcome(
-            options.hub.ownerContext() === undefined
-              ? options.spoke.removeOwner(memberId, WINDOW_PRINCIPAL)
-              : options.hub.removeOwner(memberId, WINDOW_PRINCIPAL),
+            options.hub.status().enabled
+              ? options.hub.removeOwner(memberId, WINDOW_PRINCIPAL)
+              : options.spoke.removeOwner(memberId, WINDOW_PRINCIPAL),
           );
         }
         case HUB_ADMINISTRATION_ROUTES.confirmNewMembers: {
