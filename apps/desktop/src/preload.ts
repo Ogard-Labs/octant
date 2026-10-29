@@ -1,5 +1,6 @@
 import type { NativeMenuRequest, NativeMenuOutcome } from "@octant/contracts/shell";
 import { decodeMenuBarOpenThread, type MenuBarOpenThread } from "./menuBar";
+import { isHubAdministrationOperation } from "./hubAdministrationControls";
 import { isSshTargetOperation } from "./sshTargetControls";
 import { contextBridge, ipcRenderer } from "electron";
 import type { CodeApprovalId, CodeOperationApprovalRequest } from "@octant/contracts";
@@ -908,6 +909,19 @@ export function createHostBridge(
       } | null;
       if (typeof answer?.status !== "number") {
         throw new Error("Octant SSH target controls are unavailable.");
+      }
+      return { status: answer.status, body: answer.body };
+    },
+    hubAdministrationRequest: async (operation: string, body?: unknown) => {
+      if (!isHubAdministrationOperation(operation)) {
+        throw new TypeError("Invalid hub request.");
+      }
+      const answer = (await ipc.invoke(IPC_CHANNELS.hubAdministrationRequest, operation, body)) as {
+        readonly status?: unknown;
+        readonly body?: unknown;
+      } | null;
+      if (typeof answer?.status !== "number") {
+        throw new Error("Octant hub controls are unavailable.");
       }
       return { status: answer.status, body: answer.body };
     },

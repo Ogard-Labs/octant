@@ -32,6 +32,7 @@ vi.mock("electron", () => ({
 import {
   installNativeMenuIpcHandlers,
   installProviderCredentialIpcHandlers,
+  installHubAdministrationIpcHandlers,
   installPrivateListenerIpcHandlers,
   installRemoteDeviceIpcHandlers,
   installHostIdentityIpcHandlers,
@@ -1292,6 +1293,37 @@ function readyStatus(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
+describe("hub administration IPC handlers", () => {
+  it("refuses a sender that is not a trusted local window and reaches the host for one that is", async () => {
+    const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
+    const fetch = vi.fn(async () => Response.json({ hub: {}, spoke: {} }));
+    installHubAdministrationIpcHandlers({
+      handle: (channel, handler) => {
+        handlers.set(channel, handler);
+      },
+      runtimeFor: (event) => {
+        if (event !== "owned") throw new Error("unauthorized");
+        return {
+          serverUrl: "http://127.0.0.1:4317",
+          desktopBridgeSecret: "bridge-secret",
+          windowCapability: "A".repeat(43),
+          fetch: fetch as unknown as typeof globalThis.fetch,
+        };
+      },
+    });
+
+    const handler = handlers.get("octant:hub-administration:request");
+    expect(handler).toBeTypeOf("function");
+    await expect(handler?.("foreign", "status")).rejects.toThrow(/unauthorized hub request/);
+    expect(fetch).not.toHaveBeenCalled();
+    await expect(handler?.("owned", "status")).resolves.toEqual({
+      status: 200,
+      body: { hub: {}, spoke: {} },
+    });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+});
 
 describe("private listener IPC handlers", () => {
   it("reconciles authoritative native status and rejects unauthorized callers", async () => {
