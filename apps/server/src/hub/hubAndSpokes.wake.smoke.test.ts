@@ -976,6 +976,34 @@ describe("the wake service in a failover", () => {
     expect(standby.state.load().link?.wakeCopy).toEqual([]);
   });
 
+  it("numbers the next wake copy above the last one after the hub role is turned off and on", async () => {
+    const { clock, hub, standby, member } = await startFamily();
+    standby.spoke.setGrant(standbyGrant, window);
+    member.spoke.setGrant(wakeAndStandbyGrant, window);
+    const ordered = await hub.hub.setStandbyOrder([decodeMemberId(standby.hostId)], window);
+    if (ordered.status !== "ordered") throw new Error(JSON.stringify(ordered));
+    const routine = {
+      id: "automation-a",
+      enabled: true,
+      nextDueAt: iso(clock.now() + 10 * MINUTE),
+    };
+    member.routines.push(routine);
+    expect(await member.spokeWake.report()).toEqual({ status: "sent", count: 1 });
+    await vi.waitFor(() => expect(standby.state.load().link?.wakeCopy).toHaveLength(1));
+    const before = hub.state.load().hub?.wake?.copyRevision ?? 0;
+
+    expect(hub.hub.disable(window).status).toBe("disabled");
+    expect(hub.hub.enable(window).status).toBe("enabled");
+    await hub.wake.setEnabled(true, window);
+    routine.nextDueAt = iso(clock.now() + 20 * MINUTE);
+    expect(await member.spokeWake.report()).toEqual({ status: "sent", count: 1 });
+
+    await vi.waitFor(() =>
+      expect(standby.state.load().link?.wakeCopy?.[0]?.times[0]?.nextAt).toBe(routine.nextDueAt),
+    );
+    expect(hub.state.load().hub?.wake?.copyRevision ?? 0).toBeGreaterThan(before);
+  });
+
   it("refuses a standby's nudge from a spoke that did not tick Standby, and while the hub is reachable", async () => {
     const { clock, hub, standby, member } = await startFamily();
     standby.spoke.setGrant(standbyGrant, window);

@@ -295,6 +295,11 @@ export class HubService {
         roster,
         members: hub?.members ?? [],
         joinTickets: [],
+        // The switch and held times start over, but the copy number must not: a standby
+        // that held a higher number would refuse every copy as stale until it caught up.
+        ...(hub?.wake?.copyRevision === undefined
+          ? {}
+          : { wake: { enabled: false, spokes: [], copyRevision: hub.wake.copyRevision } }),
         ...(hub?.owners === undefined ? {} : { owners: hub.owners }),
       },
     });
