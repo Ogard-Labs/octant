@@ -70,14 +70,36 @@ async function setup(answers: Readonly<Record<string, "admit" | "refuse" | "down
     "verify",
   ]);
   const signer = await createGuestSigner({ memberId: String(id("9")), keyPair });
+  // The phone's key store hands a persisted key back non-extractable and can
+  // only persist one it can export, so the paired key is restored that way.
+  const restored: RemoteDeviceKeyPair = {
+    publicKey: keyPair.publicKey,
+    privateKey: await crypto.subtle.importKey(
+      "pkcs8",
+      await crypto.subtle.exportKey("pkcs8", keyPair.privateKey),
+      { name: "ECDSA", namedCurve: "P-256" },
+      false,
+      ["sign"],
+    ),
+  };
   const stored = new Map<string, { origin: string; metadata?: unknown }>();
   const deviceKeyStore = {
     get: async (keyId: string): Promise<RemoteDeviceKeyPair | undefined> =>
-      keyId === "paired-key" ? keyPair : undefined,
-    set: vi.fn(async (_pair: RemoteDeviceKeyPair, options: { readonly origin: string }) => {
+      keyId === "paired-key" ? restored : undefined,
+    set: vi.fn(async (pair: RemoteDeviceKeyPair, options: { readonly origin: string }) => {
+      await crypto.subtle.exportKey("pkcs8", pair.privateKey);
       const keyId = `key-${stored.size + 1}`;
       stored.set(keyId, { origin: options.origin });
       return keyId;
+    }),
+    copyKey: vi.fn(async (sourceKeyId: string, options: { readonly origin: string }) => {
+      if (sourceKeyId !== "paired-key") return undefined;
+      const keyId = `key-${stored.size + 1}`;
+      stored.set(keyId, { origin: options.origin });
+      return keyId;
+    }),
+    remove: vi.fn(async (keyId: string) => {
+      stored.delete(keyId);
     }),
     updateMetadata: vi.fn(async (keyId: string, metadata: unknown) => {
       const held = stored.get(keyId);
@@ -183,6 +205,32 @@ describe("a phone that joined a hub as a guest", () => {
 
     expect(world.removed).toEqual([String(id("2"))]);
     expect(second.spokes.map((spoke) => spoke.memberId)).toEqual([String(id("3"))]);
+  });
+
+  it("remembers the hub it joined even when a spoke cannot be added, so the join is not retried", async () => {
+    const world = await setup({ "100.101.102.104": "admit" });
+    const store = createGuestHubStore(createInMemoryMobileHostRegistryStorage());
+    const finish = vi.fn(async () => ({
+      status: "joined" as const,
+      record: recordWith(laptop),
+      signer: world.signer,
+    }));
+
+    const joined = await finishGuestJoin({
+      ...world,
+      registry: {
+        upsert: async () => {
+          throw new Error("storage is full");
+        },
+      },
+      finish,
+      deviceLabel: "Phone",
+      store,
+    });
+
+    expect(joined).toMatchObject({ status: "joined", state: { spokes: [] } });
+    expect((await store.load())?.record.selfMemberId).toBe(String(id("9")));
+    expect(finish).toHaveBeenCalledTimes(1);
   });
 
   it("waits while the hub has not approved and remembers the hub once it has", async () => {

@@ -125,26 +125,39 @@ export async function connectGuestSpokes(
     const member = input.record.roster.roster.members.find(
       (entry) => String(entry.memberId) === target.memberId,
     );
-    const keyPair = await input.deviceKeyStore.get(input.record.deviceKeyId);
-    if (member === undefined || keyPair === undefined) continue;
+    if (member === undefined) continue;
     // The phone reaches the spoke with the key it paired with at the hub, held
     // to the pin the roster gave: the spoke admitted that key as a paired device.
+    // The key is copied inside the store, never read out: the phone's store hands
+    // a saved key back non-extractable and could not save it again.
     const hostId = decodeStableHostId(target.memberId);
-    const keyId = await input.deviceKeyStore.set(keyPair, { origin: target.origin, hostId });
-    await input.deviceKeyStore.updateMetadata(keyId, {
-      deviceId: admission.deviceId,
-      credentialGeneration: 1,
-      hostKeyFingerprint: member.identityKeyFingerprint,
-      listenerTrust: { current: { kind: "pinned", pin: target.pin } },
-    });
-    await input.registry.upsert({
-      hostId: target.memberId,
-      origin: target.origin,
-      label: target.name,
-      keyId,
-      credentialGeneration: 1,
-      hostKeyFingerprint: member.identityKeyFingerprint,
-    });
+    let keyId: string | undefined;
+    try {
+      keyId = await input.deviceKeyStore.copyKey(input.record.deviceKeyId, {
+        origin: target.origin,
+        hostId,
+      });
+      if (keyId === undefined) continue;
+      await input.deviceKeyStore.updateMetadata(keyId, {
+        deviceId: admission.deviceId,
+        credentialGeneration: 1,
+        hostKeyFingerprint: member.identityKeyFingerprint,
+        listenerTrust: { current: { kind: "pinned", pin: target.pin } },
+      });
+      await input.registry.upsert({
+        hostId: target.memberId,
+        origin: target.origin,
+        label: target.name,
+        keyId,
+        credentialGeneration: 1,
+        hostKeyFingerprint: member.identityKeyFingerprint,
+      });
+    } catch {
+      // One spoke that cannot be saved must not undo the others or the join:
+      // it is left out and admitted again the next time the app opens.
+      if (keyId !== undefined) await input.deviceKeyStore.remove(keyId).catch(() => undefined);
+      continue;
+    }
     held.set(target.memberId, { memberId: target.memberId, hostId: target.memberId });
   }
 
