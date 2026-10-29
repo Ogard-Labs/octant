@@ -6,7 +6,9 @@
 // directly at the address and pin the roster gives.
 
 import { generateKeyPairSync, sign as cryptoSign } from "node:crypto";
+import { createServer as createNetServer, type Socket } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { decodeStableHostId } from "@octant/contracts/remote-access";
 import { hubRosterSigningPayload } from "@octant/domain";
 import {
   acceptGuestRoster,
@@ -20,7 +22,9 @@ import {
 } from "@octant/client-runtime";
 import { HubTestNetwork, startHubTestHost, type HubTestHost } from "./hubHost.test-support";
 import { HUB_LINK_HEADER, signHubLinkRequest } from "./hubLink";
+import { publicKeyFingerprint } from "./hubCrypto";
 import { createPinnedHubTransport } from "./pinnedHubTransport";
+import { SpokeLinkService, type SpokeDevicePort } from "./spokeLinkService";
 
 const cleanups: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
@@ -260,6 +264,90 @@ describe("a guest joining a hub that has a spoke", () => {
       transport: guestTransport(network),
     });
     expect(refresh).toEqual({ status: "hub-refused", httpStatus: 401, kind: "unknown-sender" });
+  });
+
+  it("refuses a guest that arrives while the spoke is leaving and leaves no active guest device", async () => {
+    const { network, hub, spoke } = await startHubAndSpoke();
+    const { record, signer } = await joinGuest(hub, network, spoke);
+    const target = guestSpokeTargets(record).find((entry) => entry.role === "spoke");
+    if (target === undefined) throw new Error("The roster gave no spoke.");
+    // The hub accepts connections and never answers, so Leave waits on it.
+    const held: Socket[] = [];
+    const silent = createNetServer((socket) => held.push(socket));
+    await new Promise<void>((resolve) => silent.listen(0, "127.0.0.1", resolve));
+    cleanups.push(() => new Promise<void>((resolve) => silent.close(() => resolve())));
+    const silentAddress = silent.address();
+    if (silentAddress === null || typeof silentAddress === "string") throw new Error("No port.");
+    network.register(hub.address, silentAddress.port);
+
+    const leaving = spoke.spoke.leave(window);
+    const admitted = await admitGuestOnSpoke({
+      target,
+      signer,
+      deviceLabel: "Phone",
+      transport: guestTransport(network),
+    });
+    for (const socket of held) socket.destroy();
+
+    expect(admitted).toMatchObject({ status: "refused", kind: "hub-revoked" });
+    expect(await leaving).toEqual({ status: "left", hubNotified: false });
+    expect(
+      spoke.administration.listDevices().filter((device) => device.state === "active"),
+    ).toEqual([]);
+  });
+
+  it("keeps a left hub's guest devices to revoke while the device pairing is not running and revokes them once it is", async () => {
+    const { network, hub, spoke } = await startHubAndSpoke();
+    const { record, signer } = await joinGuest(hub, network, spoke);
+    const target = guestSpokeTargets(record).find((entry) => entry.role === "spoke");
+    if (target === undefined) throw new Error("The roster gave no spoke.");
+    await admitGuestOnSpoke({
+      target,
+      signer,
+      deviceLabel: "Phone",
+      transport: guestTransport(network),
+    });
+    const [phone] = spoke.administration.listDevices();
+    if (phone === undefined) throw new Error("The spoke holds no guest device.");
+    // The same spoke after a restart: its link is on disk, the gateway is not built.
+    let pairing: SpokeDevicePort | undefined;
+    const restarted = new SpokeLinkService({
+      state: spoke.state,
+      identity: () => ({
+        hostId: decodeStableHostId(spoke.hostId),
+        displayName: spoke.name,
+        signing: {
+          hostKeyFingerprint: publicKeyFingerprint(spoke.hostPublicKey),
+          hostPublicKey: spoke.hostPublicKey,
+          signHostPayload: spoke.signHostPayload,
+        },
+      }),
+      listener: () => spoke.listener,
+      transport: createPinnedHubTransport(network.network),
+      devices: () => pairing,
+      record: () => undefined,
+      serverBuildVersion: "0.1.0",
+      now: Date.now,
+    });
+
+    const left = await restarted.leave(window);
+
+    expect(left.status).toBe("left");
+    expect(spoke.administration.listDevices().map((device) => device.state)).toEqual(["active"]);
+    expect(spoke.state.load().pendingDeviceRevocations).toEqual([phone.deviceId]);
+
+    pairing = {
+      admitIntroducedDevice: () => {
+        throw new Error("No admission is expected.");
+      },
+      revokeDevice: (deviceId) => {
+        spoke.administration.revokeDevice({ deviceId });
+      },
+    };
+    restarted.settlePendingRevocations();
+
+    expect(spoke.administration.listDevices().map((device) => device.state)).toEqual(["revoked"]);
+    expect(spoke.state.load().pendingDeviceRevocations).toBeUndefined();
   });
 
   it("reads a newer roster from the hub and keeps the one it holds when nothing changed", async () => {
