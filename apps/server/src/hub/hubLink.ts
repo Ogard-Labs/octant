@@ -21,7 +21,7 @@ export const HUB_PEER_KEY_HEADER = "x-octant-hub-peer-key";
 /** How far a request's time may be from the receiver's clock. */
 export const FRESHNESS_WINDOW_MS = 120_000;
 const MAX_REMEMBERED_NONCES = 4_096;
-const REQUEST_TIMEOUT_MS = 8_000;
+export const HUB_LINK_REQUEST_TIMEOUT_MS = 8_000;
 
 function signedText(input: {
   readonly recipientMemberId: string;
@@ -179,7 +179,7 @@ export async function sendHubLinkRequest(input: {
         ...(input.body === undefined ? {} : { "content-type": "application/json" }),
       },
       ...(input.body === undefined ? {} : { body: input.body }),
-      signal: AbortSignal.timeout(input.timeoutMs ?? REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(input.timeoutMs ?? HUB_LINK_REQUEST_TIMEOUT_MS),
     });
     return { status: "answered", response };
   } catch {

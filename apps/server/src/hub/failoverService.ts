@@ -51,6 +51,8 @@ export interface FailoverOptions {
   readonly noteHubWakeGeneration?: (generation: number) => void;
   /** Replaces the failover time the hub's roster carries; tests cannot wait minutes. */
   readonly failoverAfterMs?: () => number | undefined;
+  /** How long a heartbeat waits before the hub counts as silent; absent, an ordinary hub-link request's. */
+  readonly linkTimeoutMs?: number;
 }
 
 export type StandInJoinCodeOutcome =
@@ -460,6 +462,9 @@ export class FailoverService {
       path: "/api/hub/heartbeat",
       headers: { [HUB_PEER_KEY_HEADER]: identity.signing.hostPublicKey },
       now: this.#options.now(),
+      ...(this.#options.linkTimeoutMs === undefined
+        ? {}
+        : { timeoutMs: this.#options.linkTimeoutMs }),
     });
     if (answer.status === "unreachable") return undefined;
     if (!answer.response.ok) return { heartbeat: undefined };

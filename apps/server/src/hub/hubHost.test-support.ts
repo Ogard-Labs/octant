@@ -208,6 +208,8 @@ export async function startHubTestHost(input: {
   readonly pushHandoffTransport?: (transport: HubTransport) => HubTransport;
   /** How many forwards one spoke may ask of this host in a minute; absent, the service's own. */
   readonly pushMaxPerMinute?: number;
+  /** How long one hub-link request waits before it counts as unreachable; absent, the service's own. A test cannot wait eight seconds. */
+  readonly hubLinkTimeoutMs?: number;
 }): Promise<HubTestHost> {
   const directory = mkdtempSync(join(tmpdir(), "octant-hub-"));
   input.cleanups.push(() => rmSync(directory, { recursive: true, force: true }));
@@ -350,6 +352,7 @@ export async function startHubTestHost(input: {
     spoke,
     record: (change) => records.push(change),
     now: Date.now,
+    ...(input.hubLinkTimeoutMs === undefined ? {} : { linkTimeoutMs: input.hubLinkTimeoutMs }),
     noteHubWakeGeneration: (generation) => spokeWake.noteHubWakeGeneration(generation),
     ...(input.failoverAfterMs === undefined
       ? {}
@@ -402,6 +405,7 @@ export async function startHubTestHost(input: {
     record: (change) => records.push(change),
     now: wakeNow,
     ...(input.pushMaxPerMinute === undefined ? {} : { maxPerMinute: input.pushMaxPerMinute }),
+    ...(input.hubLinkTimeoutMs === undefined ? {} : { linkTimeoutMs: input.hubLinkTimeoutMs }),
   });
   const spokePush = new SpokePushService({
     state,
@@ -411,6 +415,7 @@ export async function startHubTestHost(input: {
     hubUnreachable: () => failover.hubUnreachable(),
     record: (change) => records.push(change),
     now: wakeNow,
+    ...(input.hubLinkTimeoutMs === undefined ? {} : { linkTimeoutMs: input.hubLinkTimeoutMs }),
   });
   const pushDelivery = createHubPushDeliveryTransport({
     direct: createGatewayPushDeliveryTransport({

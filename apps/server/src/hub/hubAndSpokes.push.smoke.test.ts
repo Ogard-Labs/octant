@@ -27,6 +27,7 @@ import { signGatewayDelivery } from "../remote/gatewayPushDeliveryTransport";
 import { HubTestNetwork, startHubTestHost, type HubTestHost } from "./hubHost.test-support";
 import { HUB_LINK_HEADER, HUB_PEER_KEY_HEADER, signHubLinkRequest } from "./hubLink";
 import { HUB_LINK_ROUTES } from "./hubLinkRoutes";
+import type { HubTransport } from "./pinnedHubTransport";
 
 const cleanups: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
@@ -681,12 +682,18 @@ describe("how much one spoke may hand the hub", () => {
 });
 
 describe("push through a standby that stands in", () => {
-  async function startFamily(gateway: FakeGateway) {
+  async function startFamily(
+    gateway: FakeGateway,
+    extra: {
+      readonly standby?: Partial<Parameters<typeof startHubTestHost>[0]>;
+      readonly member?: Partial<Parameters<typeof startHubTestHost>[0]>;
+    } = {},
+  ) {
     const network = new HubTestNetwork();
     const clock = makeClock();
     const hub = await start(network, clock, "Mac mini", 103);
-    const standby = await start(network, clock, "Standby", 104);
-    const member = await start(network, clock, "Laptop", 105);
+    const standby = await start(network, clock, "Standby", 104, extra.standby);
+    const member = await start(network, clock, "Laptop", 105, extra.member);
     hub.hub.enable(window);
     await join(hub, standby);
     await join(hub, member);
@@ -748,6 +755,36 @@ describe("push through a standby that stands in", () => {
     await expect(member.pushDelivery.send(input)).resolves.toEqual({ kind: "delivered" });
     expect(forwards(hub)).toBe(2);
   });
+
+  it("forwards through a standing-in standby when the hub hangs instead of refusing, though the spoke's grant answer waits on a slow probe", async () => {
+    const gateway = await startGateway();
+    // The hub accepts the connection and never answers, so every probe of it runs to its timeout.
+    const hubHangs = { on: false };
+    const hanging = (transport: HubTransport): HubTransport => {
+      return (target) => {
+        const reach = transport(target);
+        return (url, init) =>
+          hubHangs.on && target.origin.includes("100.101.102.103")
+            ? new Promise<Response>((_resolve, reject) => {
+                init?.signal?.addEventListener("abort", () => reject(new Error("timed out")));
+              })
+            : reach(url, init);
+      };
+    };
+    const family = await startFamily(gateway, {
+      standby: { hubLinkTimeoutMs: 300 },
+      member: { hubLinkTimeoutMs: 300, failoverTransport: hanging },
+    });
+    const { hub, standby, member } = family;
+    await hub.push.setEnabled(true, window);
+    await standIn(family);
+    hubHangs.on = true;
+    const { input } = notificationFor(member, gateway);
+
+    await expect(member.pushDelivery.send(input)).resolves.toEqual({ kind: "delivered" });
+    expect(forwards(standby)).toBe(1);
+    expect(gateway.accepted).toHaveLength(1);
+  }, 40_000);
 
   it("refuses a standby that is not standing in, and one standing in while the hub's push switch is off", async () => {
     const gateway = await startGateway();

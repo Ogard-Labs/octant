@@ -31,7 +31,7 @@ import {
   refusalCode,
 } from "../remote/gatewayPushDeliveryTransport";
 import { listenerPinFromDigest } from "./hubCrypto";
-import { HUB_PEER_KEY_HEADER, sendHubLinkRequest } from "./hubLink";
+import { HUB_LINK_REQUEST_TIMEOUT_MS, HUB_PEER_KEY_HEADER, sendHubLinkRequest } from "./hubLink";
 import type { HubHostIdentity } from "./hubService";
 import type { HubStatePort, PushSpokeRecord } from "./hubStateStore";
 import { memberOrigin } from "./memberOrigin";
@@ -39,6 +39,20 @@ import type { HubTransport } from "./pinnedHubTransport";
 
 const decodeMemberId = Schema.decodeUnknownSync(HubMemberId);
 const DEFAULT_GATEWAY_TIMEOUT_MS = 10_000;
+/**
+ * A standing-in standby's grant question makes the spoke probe the hub before it
+ * answers (one link request), so the question waits that long plus this much. At
+ * the same length the standby's request timed out first and refused every forward.
+ */
+const NESTED_PROBE_MARGIN_MS = 4_000;
+
+/** How long the hub or a standby waits for a spoke's grant answer. */
+export const grantConfirmTimeoutMs = (linkTimeoutMs = HUB_LINK_REQUEST_TIMEOUT_MS) =>
+  linkTimeoutMs + NESTED_PROBE_MARGIN_MS;
+
+/** How long a spoke waits on the hub or standby: its grant question, the gateway call, and a margin. */
+export const handoffTimeoutMs = (linkTimeoutMs = HUB_LINK_REQUEST_TIMEOUT_MS) =>
+  grantConfirmTimeoutMs(linkTimeoutMs) + DEFAULT_GATEWAY_TIMEOUT_MS + NESTED_PROBE_MARGIN_MS;
 /** One spoke's notifications are a trickle; this is far above any real burst and far below a flood. */
 const DEFAULT_MAX_PER_MINUTE = 60;
 const RATE_WINDOW_MS = 60_000;
@@ -58,6 +72,8 @@ export interface PushServiceOptions {
   readonly now: () => number;
   readonly fetch?: typeof fetch;
   readonly gatewayTimeoutMs?: number;
+  /** The timeout of an ordinary hub-link request; the grant question waits longer. Tests cannot wait eight seconds. */
+  readonly linkTimeoutMs?: number;
   readonly maxPerMinute?: number;
 }
 
@@ -324,6 +340,7 @@ export class PushService {
       // A standby is known to the spoke by the fingerprint the roster lists for it.
       headers: { [HUB_PEER_KEY_HEADER]: identity.signing.hostPublicKey },
       now: this.#options.now(),
+      timeoutMs: grantConfirmTimeoutMs(this.#options.linkTimeoutMs),
     });
     if (answer.status === "unreachable") return { status: "refused", kind: "grant-unconfirmed" };
     if (!answer.response.ok) {
