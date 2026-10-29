@@ -14,6 +14,8 @@ import {
   decodeConfirmNewMembersRequest,
   decodeHubGrant,
   decodeHubLeaveRequest,
+  decodeHubPromoteRequest,
+  decodeHubStandbyOrderRequest,
   decodeOwnerAdditionRequest,
   decodeOwnerAlertRequest,
   decodeOwnerMemberRequest,
@@ -100,6 +102,16 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     path: "/api/desktop/hub/certificate",
     decodeBody: (value) =>
       Schema.decodeUnknownSync(CertificateBody)(value, { onExcessProperty: "error" }),
+  },
+  "standby-order": {
+    method: "POST",
+    path: "/api/desktop/hub/standby-order",
+    decodeBody: decodeHubStandbyOrderRequest,
+  },
+  promote: {
+    method: "POST",
+    path: "/api/desktop/hub/promote",
+    decodeBody: decodeHubPromoteRequest,
   },
 } as const satisfies Readonly<Record<string, HubAdministrationRoute>>;
 

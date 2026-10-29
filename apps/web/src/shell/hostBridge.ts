@@ -259,7 +259,9 @@ export type HubAdministrationOperation =
   | "alert-dismiss"
   | "alert-remove"
   | "certificate-status"
-  | "certificate";
+  | "certificate"
+  | "standby-order"
+  | "promote";
 
 /**
  * The loopback hub administration, which only a local window reaches. Absent

@@ -136,6 +136,31 @@ describe("hub administration controls", () => {
     expect(calls).toHaveLength(sent.length);
   });
 
+  it("sends the standby order and the promotion only with their decoded bodies", async () => {
+    const { calls, runtime: controls } = runtime(() => Response.json({ status: "ordered" }));
+
+    await sendHubAdministrationOperation(controls, "standby-order", { memberIds: [MEMBER_ID] });
+    await sendHubAdministrationOperation(controls, "promote", { confirmed: true });
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://127.0.0.1:4317/api/desktop/hub/standby-order",
+      "http://127.0.0.1:4317/api/desktop/hub/promote",
+    ]);
+
+    for (const [operation, body] of [
+      ["standby-order", { memberIds: [MEMBER_ID, MEMBER_ID] }],
+      ["standby-order", { memberIds: ["not-a-uuid"] }],
+      ["standby-order", undefined],
+      ["promote", {}],
+      ["promote", { confirmed: false }],
+      ["promote", undefined],
+    ] as const) {
+      expect(await sendHubAdministrationOperation(controls, operation, body)).toMatchObject({
+        status: 400,
+      });
+    }
+    expect(calls).toHaveLength(2);
+  });
+
   it("refuses an owner request that fails its schema, sending nothing", async () => {
     const { calls, runtime: controls } = runtime(() => Response.json({}));
     const owner = {

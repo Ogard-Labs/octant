@@ -31,11 +31,15 @@ confirms, or dismisses alerts, and a passkey owner can confirm too. The browser 
 written and tested with a faked authenticator, but no browser screen joins a hub
 yet, so nothing mounts them. Nothing here has been run on a real phone, a real
 passkey, or Android. Sign-in copy, posture routes, a Mac Touch ID unlock key,
-failover, the wake service, push, and provisioning are not built. Delegation is
+the wake service, push, and provisioning are not built. Delegation is
 built for Work Projects, read narrowly as the last item of the delivery plan's
-slice 6 records.
-The hub uses only the Roster and Status grant items, and the Owners item for
-owner devices. The maintainer
+slice 6 records. Failover is built (a named standby, member switching, stand-in,
+step-down with merge-back, and promotion), read narrowly as the last item of
+slice 7 records; it has run only between hosts on loopback, with the hub
+stopped by blocking its address, never on a real network or after a real
+reboot.
+The hub uses only the Roster and Status grant items, the Owners item for
+owner devices, and the Standby item for naming a standby. The maintainer
 asked for this design and authorized it as post-preview, design-first work on
 2026-10-28, and set its shape the same day: a running instance enabled as hub,
 members paired by QR or manual code over a private network such as Tailscale,
@@ -937,6 +941,52 @@ maintainer's hardware, or names the maintainer gate.
    winning; a spoke not named as
    standby cannot stand in. Verification: a three-host smoke that stops the
    hub. **Yes.**
+
+   Built, with these narrower readings:
+   - **Naming is a handshake.** The hub signs a request to each spoke it means to
+     name, and the spoke answers only if its person ticked Standby. The hub does
+     not learn a grant from anything else, so a spoke that unticks Standby later is
+     still named in the roster; it refuses to stand in (a standby needs the item
+     on its own grant), and members that did not tick it refuse its rosters.
+   - **A standby's key is its host identity key.** It signs rosters with it and
+     presents the public key beside its signature; a member accepts the key only if
+     its fingerprint is the one the latest hub-signed roster lists for that
+     standby. There is no separate standby roster key.
+   - **"Cannot reach the hub" is measured by the member.** Every member looks for
+     the hub on a timer (a signed heartbeat) and remembers when it last answered. A
+     standby-signed roster is accepted only if a fresh heartbeat fails and the
+     silence has lasted the failover time; the time comes from the roster
+     (default five minutes) and a test may override it. Only a standby that stands
+     in tells members, by signing the next roster with its own key and sending it;
+     a member that missed that asks the standbys in order.
+   - **The standby holds the roster only.** What a standby needs to take over is
+     the latest hub-signed roster, which names every member's address, pin, and key
+     fingerprint, so the hub copies nothing else to it. Wake times do not exist
+     (slice 8); the hand-back carries a `wakeTimes` field that is always empty.
+   - **A stand-in adds spokes only, never owners or guests.** A join through a
+     stand-in code makes a spoke with no owner mark; guest joins and the owner
+     code wait for the hub. A standing-in standby cannot remove the hub or a
+     standby, because either would change the standby order or a hub role, which
+     every member refuses from a standby. Leave is told to the hub only.
+   - **Merge-back is the hub's.** The standby sends its additions and removals
+     with the hub-signed sequence it stood in on; the hub keeps a log of its own
+     removals by sequence and merges with `mergeStandInMembership`. The hub drops
+     an unsigned claim of an owner mark, an unlock key, or a port from an added
+     member and records the member with no paired device, so the hub holds no owner
+     power for it until a person confirms one.
+   - **Promotion changes no spoke by itself.** A named standby, on the person's
+     confirmation in its own window or `octant hub promote --confirm`, becomes the
+     hub, clears the standby order, drops the old hub from the roster, and signs
+     with its own roster key. Every spoke, including those that ticked Standby,
+     accepts it in its own window (`octant hub accept-hub`): H11's automatic
+     following for spokes that ticked Standby is not built. The new hub trusts
+     the key a member presents when its fingerprint matches the roster. Guests the
+     standby admitted as a spoke are revoked, and guests join the new hub again.
+   - **Where the person reaches it.** The hub's Settings section sets the
+     order; a standby's Settings shows that it is standing in and carries the
+     promotion. Stand-in join codes, stand-in removal, and accepting a promoted hub
+     are `octant hub` commands and loopback routes only.
+
 8. **Wake service.** Spokes report wake times; the hub sends Wake-on-LAN or a
    nudge; the spoke fires its own timer. Acceptance: the hub never learns a
    routine's prompt or Project; a nudge for an unknown routine does nothing.

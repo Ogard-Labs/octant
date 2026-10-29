@@ -134,6 +134,13 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
   "no-such-alert": "That alert is already gone.",
   "could-not-remove":
     "The remote listener could not restart without the Tailscale certificate, so it is still on. Try turning it off again.",
+  "standby-not-granted":
+    "That computer's person has not ticked Standby in its hub grant, so it cannot be a standby.",
+  "member-unreachable": "Octant could not reach that computer to ask it. Nothing changed.",
+  "unknown-member": "That is not a member of this hub.",
+  "duplicate-member": "A computer can be named only once.",
+  "not-a-named-standby": "The hub has not named this computer a standby.",
+  "already-hub": "This computer is already the hub.",
 };
 
 interface Reply {
@@ -160,10 +167,22 @@ interface HubStatus {
   /** The hub's own owner list, and the roster members that list an unlock key but are not on it. */
   readonly owners: ReadonlyArray<OwnerRow>;
   readonly ownerCandidates: ReadonlyArray<OwnerCandidateRow>;
+  /** The standby hubs this hub's roster names, in the order members try them. */
+  readonly standbyOrder: ReadonlyArray<string>;
   readonly link?: {
     readonly membership: "member" | "removed";
     readonly hubName: string;
     readonly grant: Grant;
+    /** This computer is a named standby: its own window may make it the hub for good. */
+    readonly namedStandby: boolean;
+    /** The roster this computer holds was signed by a standby because the hub is unreachable. */
+    readonly followsStandby: boolean;
+    /** Set while this computer stands in for a hub it cannot reach. */
+    readonly standIn?: {
+      readonly startedAt: number;
+      readonly added: number;
+      readonly removed: number;
+    };
     /** The hub's roster as this computer holds it, each with whether this computer accepted it. */
     readonly roster: ReadonlyArray<Member & { readonly accepted: boolean }>;
     /** This computer's own owner list, the roster entries to confirm or that changed, Confirm new members, the members it holds for it, and its alerts. */
@@ -223,6 +242,10 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
   const [pending, setPending] = useState<ReadonlyArray<RemotePendingPairingRequest>>([]);
   const [removing, setRemoving] = useState<Member>();
   const [leaving, setLeaving] = useState(false);
+  const [promoting, setPromoting] = useState(false);
+  /** The standby order being edited; absent while the window shows the order the hub holds. */
+  const [standbyDraft, setStandbyDraft] = useState<ReadonlyArray<string>>();
+  const promoteOpener = useRef<HTMLButtonElement>(null);
   const [certificate, setCertificate] = useState<CertificateStatus>();
   const [transparencyRead, setTransparencyRead] = useState(false);
   const transparencyId = useId();
@@ -401,6 +424,50 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
         field(reply.body, "hubNotified") === true
           ? "Left the hub. The hub was told and drops this computer from its roster."
           : "Left the hub. The hub could not be reached, so remove this computer from its roster on the hub.",
+      );
+    }
+    await refresh();
+  };
+
+  const heldStandbyOrder = status?.standbyOrder ?? [];
+  const standbyOrder = standbyDraft ?? heldStandbyOrder;
+  const standbyChanged =
+    standbyDraft !== undefined && standbyDraft.join() !== heldStandbyOrder.join();
+  const nameOf = (memberId: string) =>
+    status?.members.find((member) => member.memberId === memberId)?.name ?? memberId;
+
+  const moveStandby = (index: number, by: -1 | 1) => {
+    const next = [...standbyOrder];
+    const [moved] = next.splice(index, 1);
+    if (moved !== undefined) next.splice(index + by, 0, moved);
+    setStandbyDraft(next);
+  };
+
+  const saveStandbyOrder = async () => {
+    const reply = await act(
+      "standby-order",
+      { memberIds: standbyOrder },
+      "ordered",
+      "Octant could not set the standby order.",
+    );
+    if (reply !== undefined) {
+      setStandbyDraft(undefined);
+      setMessage("Standby order saved.");
+    }
+    await refresh();
+  };
+
+  const promote = async () => {
+    setPromoting(false);
+    const reply = await act(
+      "promote",
+      { confirmed: true },
+      "promoted",
+      "Octant could not make this computer the hub.",
+    );
+    if (reply !== undefined) {
+      setMessage(
+        "This computer is now the hub. Each other computer accepts it from its own window.",
       );
     }
     await refresh();
@@ -660,7 +727,7 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
         {message === undefined ? null : (
           <SettingsState
             kind={
-              /^(Approved|Denied|Removed|Left|Added|Confirm|Dismissed|The hub grant is saved)/.test(
+              /^(Approved|Denied|Removed|Left|Added|Confirm|Dismissed|The hub grant is saved|Standby order saved|This computer is now the hub)/.test(
                 message,
               )
                 ? "success"
@@ -811,6 +878,90 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
       )}
 
       {!hubOn || status === undefined ? null : (
+        <SettingsSection title="Standby hubs">
+          <p className="settings-section-line">
+            A standby hub takes over the roster while this hub is unreachable, and hands its changes
+            back when this hub returns. Members try the standbys in this order. A computer can be a
+            standby only if its own person ticked Standby in its hub grant. Only this window changes
+            the order.
+          </p>
+          {standbyOrder.length === 0 ? (
+            <SettingsState kind="empty">No standby hub is named.</SettingsState>
+          ) : (
+            <ol aria-label="Standby order" className="setgroup">
+              {standbyOrder.map((memberId, index) => (
+                <li className="setrow" key={memberId}>
+                  <span className="setrow-label">{`${index + 1}. ${nameOf(memberId)}`}</span>
+                  <div className="setrow-control">
+                    <OctantButton
+                      aria-label={`Move ${nameOf(memberId)} up`}
+                      disabled={busy || index === 0}
+                      onClick={() => moveStandby(index, -1)}
+                      size="sm"
+                      type="button"
+                      variant="secondary"
+                    >
+                      Up
+                    </OctantButton>
+                    <OctantButton
+                      aria-label={`Move ${nameOf(memberId)} down`}
+                      disabled={busy || index === standbyOrder.length - 1}
+                      onClick={() => moveStandby(index, 1)}
+                      size="sm"
+                      type="button"
+                      variant="secondary"
+                    >
+                      Down
+                    </OctantButton>
+                    <OctantButton
+                      aria-label={`Stop ${nameOf(memberId)} being a standby`}
+                      disabled={busy}
+                      onClick={() => setStandbyDraft(standbyOrder.filter((id) => id !== memberId))}
+                      size="sm"
+                      type="button"
+                      variant="secondary"
+                    >
+                      Remove
+                    </OctantButton>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          )}
+          <div className="host-settings__controls">
+            {status.members
+              .filter(
+                (member) =>
+                  (member.role === "spoke" || member.role === "standby-hub") &&
+                  !standbyOrder.includes(member.memberId),
+              )
+              .map((member) => (
+                <OctantButton
+                  aria-label={`Name ${member.name} a standby`}
+                  disabled={busy}
+                  key={member.memberId}
+                  onClick={() => setStandbyDraft([...standbyOrder, member.memberId])}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  {`Add ${member.name}`}
+                </OctantButton>
+              ))}
+            <OctantButton
+              disabled={busy || !standbyChanged}
+              onClick={() => void saveStandbyOrder()}
+              size="sm"
+              type="button"
+              variant="default"
+            >
+              Save the standby order
+            </OctantButton>
+          </div>
+        </SettingsSection>
+      )}
+
+      {!hubOn || status === undefined ? null : (
         <SettingsSection title="Owner devices">
           <p className="settings-section-line">
             An owner device can act on this hub with a window's powers after a fresh unlock. A
@@ -878,10 +1029,49 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
                   {
                     label: "State",
                     value:
-                      linked.membership === "removed" ? "The hub removed this computer" : "Joined",
+                      linked.membership === "removed"
+                        ? "The hub removed this computer"
+                        : linked.standIn !== undefined
+                          ? "Standing in for the hub"
+                          : linked.followsStandby
+                            ? "The hub is unreachable: following the standby"
+                            : "Joined",
                   },
                 ]}
               />
+              {linked.standIn === undefined ? null : (
+                <p className="settings-section-line">
+                  {`This computer saw no hub for the failover time and now serves the roster. Since then it added ${linked.standIn.added} and removed ${linked.standIn.removed}. It hands those changes back when the hub answers.`}
+                </p>
+              )}
+              {!linked.namedStandby || linked.membership !== "member" ? null : (
+                <div className="host-settings__controls">
+                  <OctantButton
+                    aria-expanded={promoting}
+                    aria-haspopup="dialog"
+                    disabled={busy}
+                    onClick={() => setPromoting(true)}
+                    ref={promoteOpener}
+                    size="sm"
+                    type="button"
+                    variant="secondary"
+                  >
+                    Make this computer the hub…
+                  </OctantButton>
+                </div>
+              )}
+              {!promoting ? null : (
+                <OctantConfirmDialog
+                  cancelLabel="Not now"
+                  confirmLabel="Make this the hub"
+                  onCancel={() => setPromoting(false)}
+                  onConfirm={() => void promote()}
+                  restoreFocus={promoteOpener}
+                  title="Make this computer the hub for good?"
+                >
+                  {`${linked.hubName} leaves the roster and this computer becomes the hub. Nothing follows by itself: each other computer's person accepts this one from their own window.`}
+                </OctantConfirmDialog>
+              )}
               {linked.roster.length === 0 ? null : (
                 <ul aria-label="Members of this hub" className="setgroup">
                   {linked.roster.map((member) => (
@@ -1056,6 +1246,10 @@ function readStatus(body: unknown): HubStatus | undefined {
   const enabled = field(hub, "enabled");
   if (typeof enabled !== "boolean") return undefined;
   const members = readMembers(field(field(field(hub, "roster"), "roster"), "members"));
+  const orderRows = field(field(field(hub, "roster"), "roster"), "standbyOrder");
+  const standbyOrder = Array.isArray(orderRows)
+    ? orderRows.filter((id): id is string => typeof id === "string")
+    : [];
   const membership = field(spoke, "membership");
   const hubName = field(field(spoke, "hub"), "name");
   const grant = readGrant(field(spoke, "grant"));
@@ -1071,15 +1265,27 @@ function readStatus(body: unknown): HubStatus | undefined {
     const roster = readMembers(field(field(field(spoke, "roster"), "roster"), "members")).map(
       (member) => ({ ...member, accepted: accepted.has(member.memberId) }),
     );
+    const standIn = field(spoke, "standIn");
+    const startedAt = field(standIn, "startedAt");
+    const added = field(standIn, "added");
+    const removed = field(standIn, "removed");
     return {
       enabled,
       members,
       owners: readOwners(field(hub, "owners")),
       ownerCandidates: readOwnerCandidates(field(hub, "ownerCandidates")),
+      standbyOrder,
       link: {
         membership,
         hubName,
         grant,
+        namedStandby: field(spoke, "namedStandby") === true,
+        followsStandby: field(spoke, "rosterSignedBy") === "standby",
+        ...(typeof startedAt === "number" &&
+        typeof added === "number" &&
+        typeof removed === "number"
+          ? { standIn: { startedAt, added, removed } }
+          : {}),
         roster,
         owners: readOwners(field(spoke, "owners")),
         ownerCandidates: readOwnerCandidates(field(spoke, "ownerCandidates")),
@@ -1095,6 +1301,7 @@ function readStatus(body: unknown): HubStatus | undefined {
     members,
     owners: readOwners(field(hub, "owners")),
     ownerCandidates: readOwnerCandidates(field(hub, "ownerCandidates")),
+    standbyOrder,
   };
 }
 

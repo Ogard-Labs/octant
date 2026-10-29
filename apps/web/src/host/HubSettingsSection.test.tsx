@@ -735,3 +735,118 @@ describe("HubSettingsSection new members", () => {
     expect(await screen.findByText("That alert is already gone.")).toBeVisible();
   });
 });
+
+describe("HubSettingsSection failover", () => {
+  const hubBody = (standbyOrder: ReadonlyArray<string>) => ({
+    hub: {
+      enabled: true,
+      roster: {
+        roster: {
+          standbyOrder,
+          members: [
+            { memberId: "m-1", name: "Mac mini", role: "hub", owner: false },
+            {
+              memberId: "m-2",
+              name: "Laptop",
+              role: standbyOrder.includes("m-2") ? "standby-hub" : "spoke",
+              owner: false,
+            },
+            { memberId: "m-3", name: "Studio", role: "spoke", owner: false },
+          ],
+        },
+      },
+    },
+    spoke: { membership: "none" },
+  });
+
+  const standbySpoke = (extra: Record<string, unknown>) => ({
+    hub: { enabled: false },
+    spoke: {
+      membership: "member",
+      hub: { memberId: "m-1", name: "Mac mini" },
+      grant: { items: ["roster", "standby"], actProjects: [] },
+      acceptedMemberIds: [],
+      roster: { roster: { members: [] } },
+      namedStandby: true,
+      rosterSignedBy: "hub",
+      ...extra,
+    },
+  });
+
+  it("lists the standby order and lets the window reorder, add, and save it", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderHub({
+      status: { status: 200, body: hubBody(["m-2"]) },
+      "standby-order": { status: 200, body: { status: "ordered" } },
+    });
+
+    const order = await screen.findByRole("list", { name: "Standby order" });
+    expect(within(order).getByText("1. Laptop")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Save the standby order" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Name Laptop a standby" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Name Studio a standby" }));
+    await user.click(screen.getByRole("button", { name: "Move Studio up" }));
+    expect(within(order).getByText("1. Studio")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Save the standby order" }));
+
+    await waitFor(() =>
+      expect(calls.find((call) => call.operation === "standby-order")?.body).toEqual({
+        memberIds: ["m-3", "m-2"],
+      }),
+    );
+    expect(await screen.findByText("Standby order saved.")).toBeVisible();
+  });
+
+  it("says plainly when a named computer's person has not ticked Standby", async () => {
+    const user = userEvent.setup();
+    renderHub({
+      status: { status: 200, body: hubBody([]) },
+      "standby-order": { status: 409, body: { status: "refused", kind: "standby-not-granted" } },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Name Laptop a standby" }));
+    await user.click(screen.getByRole("button", { name: "Save the standby order" }));
+
+    expect(await screen.findByText(/has not ticked Standby/)).toBeVisible();
+  });
+
+  it("shows a standby that is standing in and what it changed", async () => {
+    renderHub({
+      status: {
+        status: 200,
+        body: standbySpoke({ standIn: { startedAt: NOW, baseSequence: 3, added: 1, removed: 2 } }),
+      },
+    });
+
+    expect(await screen.findByText("Standing in for the hub")).toBeVisible();
+    expect(screen.getByText(/added 1 and removed 2/)).toBeVisible();
+  });
+
+  it("makes a named standby the hub only after the person confirms in its own window", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderHub({
+      status: { status: 200, body: standbySpoke({}) },
+      promote: { status: 200, body: { status: "promoted" } },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Make this computer the hub…" }));
+    expect(calls.some((call) => call.operation === "promote")).toBe(false);
+    await user.click(await screen.findByRole("button", { name: "Make this the hub" }));
+
+    await waitFor(() =>
+      expect(calls.find((call) => call.operation === "promote")?.body).toEqual({
+        confirmed: true,
+      }),
+    );
+  });
+
+  it("offers no promotion to a computer the hub did not name a standby", async () => {
+    renderHub({ status: { status: 200, body: standbySpoke({ namedStandby: false }) } });
+
+    await screen.findByText("Joined");
+    expect(
+      screen.queryByRole("button", { name: "Make this computer the hub…" }),
+    ).not.toBeInTheDocument();
+  });
+});
