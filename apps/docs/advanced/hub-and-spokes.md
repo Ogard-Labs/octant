@@ -301,17 +301,18 @@ spoke. Only the spoke can change it.
 | Act       | Act here as a paired device would, in Projects you name.                                  |
 
 Ticking an item records your choice. In this release the hub can use only
-Roster, Status, Wake, and Push. Wake works only once you turn on the hub's wake
-service (see [Wake a sleeping computer](#wake-a-sleeping-computer)). Push works
-only once you turn on the hub's push sender (see
+Roster, Status, Wake, Push, and Provision. Wake works only once you turn on the
+hub's wake service (see [Wake a sleeping computer](#wake-a-sleeping-computer)).
+Push works only once you turn on the hub's push sender (see
 [Send phone notifications through the hub](#send-phone-notifications-through-the-hub)).
-Owners works for your own owner devices (see
+Provision works only once you turn on the hub's offers (see
+[Offer settings from the hub](#offer-settings-from-the-hub)). Owners works for your own owner devices (see
 [Owner devices](#owner-devices)). Introduce makes this computer accept the other
 spokes and your phones as full members (see
 [Delegate work to another computer](#delegate-work-to-another-computer)).
 Standby lets a standby hub you named act here while the hub is down (see
-[If the hub goes down](#if-the-hub-goes-down)). The other items (Provision and
-Act) do nothing yet, because the features behind them are not available yet.
+[If the hub goes down](#if-the-hub-goes-down)). Act does nothing yet, because the
+feature behind it is not available yet.
 
 Whatever you tick, the computer keeps its files, sign-ins, sandbox, and every
 approval.
@@ -509,6 +510,73 @@ was refused, never what was in it.
 The hub passes notifications to the push gateway only. It does not send to Apple
 or Google itself. A delivery to a real phone through the hub has not been tried
 yet.
+
+## Offer settings from the hub
+
+The hub can offer its spokes a piece of configuration. An offer is only data. It
+lands on a spoke as a **proposal** that the spoke's own person applies or
+dismisses. Nothing arrives trusted or switched on, and no offer carries a key.
+This is off until you turn it on, and a computer takes part only if its own
+person ticked **Provision**.
+
+**Turn it on (the hub).** On the hub, open **Settings → Remote access → Offers**
+and switch it on, or run `octant hub provision on`. `octant hub provision off`
+turns it off and forgets the offers the hub held. Only the hub's own window makes
+offers.
+
+**Make an offer (the hub).** Settings offers the stable or preview update channel.
+`octant hub offer` offers every kind:
+
+| Kind           | Command                                                                         |
+| -------------- | ------------------------------------------------------------------------------- |
+| Update channel | `octant hub offer update-channel stable\|preview [--mirror <signed-feed.json>]` |
+| Plugin         | `octant hub offer plugin <catalog-id> <entry-id> <sha256:digest>`               |
+| Agent profile  | `octant hub offer agent-profile <fields.json>`                                  |
+| Model endpoint | `octant hub offer model-endpoint <fields.json>`                                 |
+| Routine        | `octant hub offer routine <fields.json>`                                        |
+
+`octant hub offer-withdraw <offer-id>` withdraws one. A profile, endpoint, or
+routine file holds the fields of the offer and nothing else. An endpoint has no
+field for a key, and Octant refuses any offer with a field it does not define, an
+address with a name, password, or query in it, or text that looks like a key.
+
+**Take part (a spoke).** Tick **Provision** in the spoke's hub grant (see
+[The hub grant](#the-hub-grant)). Each offer then appears under **Settings →
+Remote access → Join a hub → Offers from the hub**, or in `octant hub status`.
+Choose **Apply** or **Dismiss**, or run `octant hub apply <offer-id>` or
+`octant hub dismiss <offer-id>`. A proposal lapses after a week, and a computer
+holds at most 32.
+
+**What applying does.** It uses the same service you would use yourself:
+
+- **Update channel.** The computer follows the stable or preview channel. It
+  never moves to the candidate channel on an offer. If the hub mirrors the signed
+  feed, the computer fetches that copy and checks the feed's own signature against
+  the release keys this build trusts. Bytes the hub changed, or signed itself,
+  fail that check and nothing changes.
+- **Plugin.** The package is fetched and checked the ordinary way and installed.
+  It arrives untrusted and switched off. You trust and enable it yourself.
+- **Agent profile.** It is added without a secret. A profile that asks for Full
+  access or a remembered permission is refused.
+- **Model endpoint.** The row is added switched off and without a key. Add the key
+  from the endpoint's own page.
+- **Routine.** It waits for you, always. You choose its Project, and it is made by
+  this computer under its own limits, as a routine you wrote would be. Apply it
+  with `octant hub apply <offer-id> --project <project-id>`.
+
+**Apply on arrival (a spoke).** Each of these is off until you turn it on:
+update channel, plugin install (untrusted and off), and agent profile. Turn them
+on under **Offers from the hub**, or run `octant hub auto-apply <kind> on|off`.
+It does exactly what **Apply** does and never more. A routine and a model
+endpoint always wait for you.
+
+The journal records each offer made, proposed, applied (by whom, and whether you
+or the standing choice did), dismissed, and refused, with the reason. It never
+holds an offer's text.
+
+This computer applies a routine only where it can build one itself. In this
+release it cannot, so a routine proposal can be read and dismissed but not
+applied yet.
 
 ## Leave a hub and remove a device
 
