@@ -204,6 +204,6 @@ describe("BrowserHubSection", () => {
     await user.click(screen.getByRole("button", { name: "Join the hub" }));
 
     await waitFor(() => expect(join).not.toHaveBeenCalled());
-    expect(await screen.findByRole("alert")).toBeVisible();
+    expect(await screen.findByRole("alert")).toHaveTextContent("This isn't an Octant join code.");
   });
 });

@@ -158,7 +158,13 @@ export function BrowserHubSection(props: BrowserHubSectionProps) {
   const begin = async () => {
     const reading = readAppPairingCode(code.trim());
     if (reading.status === "refused") {
-      setPhase({ kind: "failed", message: reading.message });
+      setPhase({
+        kind: "failed",
+        message:
+          reading.reason === "not-a-pairing-code"
+            ? "This isn't an Octant join code."
+            : reading.message,
+      });
       return;
     }
     setPhase({ kind: "working" });
