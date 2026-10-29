@@ -966,6 +966,48 @@ describe("outside driver brokered requests", () => {
       expect(channel.driver.stopped()).toBe(false);
     });
 
+    it("sends nothing upstream when the send is cancelled while the key is being read", async () => {
+      let keyRead: (() => void) | undefined;
+      const resolver: ProviderCredentialResolver = {
+        has: async () => true,
+        resolve: async () => "KEY-A",
+        lease: () =>
+          new Promise((resolve) => {
+            keyRead = () => resolve({ credential: "KEY-A", reportRejected: () => {} });
+          }),
+      };
+      const fetch = vi.fn<OutsideDriverFetch>(async () => new Response("ok"));
+      let asked: Promise<FixtureHttpResult> | undefined;
+      const handler: FixtureDriverHandler = (_params, context) => {
+        asked = context.http({
+          requestId: context.id,
+          url: `${baseUrl}chat`,
+          method: "GET",
+          auth: { header: "authorization", scheme: "Bearer" },
+        });
+        return new Promise(() => {});
+      };
+      const { probe, proxy } = harness(
+        { "session/send": handler },
+        {
+          fetch,
+          credentialResolver: resolver,
+          key: { header: "authorization", scheme: "Bearer" },
+        },
+      );
+      await probe();
+      const session = await proxy.harnessEndpoint.open(modelId);
+      const cancel = new AbortController();
+      const sending = session.send(request(), { signal: cancel.signal, onEvent: () => {} });
+      await vi.waitFor(() => expect(keyRead).toBeDefined());
+      cancel.abort();
+      await rejection(sending);
+      keyRead?.();
+
+      expect((await asked)?.error).toMatchObject({ data: { category: "interrupted" } });
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
     it("stops a driver whose brokered call names a send the host never issued, or a probe", async () => {
       for (const requestId of [999, 2]) {
         const handler: FixtureDriverHandler = async (_params, context) => {

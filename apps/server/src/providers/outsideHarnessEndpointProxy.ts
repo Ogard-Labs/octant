@@ -622,6 +622,9 @@ function makeBroker(input: {
         params.auth.scheme === "Bearer" ? `Bearer ${credential}` : credential,
       );
     }
+    // A cancel that landed while the key was read has already fired, so the
+    // listener below would never see it and the request would still go out.
+    if (signal.aborted) throw interrupted();
     // The connection deadline ends when the headers arrive; a fetch signal
     // that stayed armed past then would cut off a streamed answer that runs
     // longer than the deadline. The body is bounded between chunks instead.
