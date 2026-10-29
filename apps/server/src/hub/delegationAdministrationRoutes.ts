@@ -113,7 +113,7 @@ export function createDelegationAdministrationRouteHandler(
 }
 
 /** A refusal is a state the person can act on, so it answers 409 with its kind; anything else is the outcome. */
-function outcome(value: { readonly status: string }): Response {
+function outcome(value: { readonly status: string; readonly kind?: string }): Response {
   const refused =
     value.status === "refused" ||
     value.status === "refused-by-target" ||

@@ -46,6 +46,7 @@ function refusalStatus(kind: DelegationRefusal["kind"]): number {
   if (kind === "invalid" || kind === "project-mismatch") return 400;
   if (kind === "unknown-request") return 404;
   if (kind === "request-id-in-use") return 409;
+  if (kind === "too-many-open-delegations") return 429;
   if (NOT_AVAILABLE.has(kind)) return 422;
   if (kind === "start-failed") return 503;
   return 403;

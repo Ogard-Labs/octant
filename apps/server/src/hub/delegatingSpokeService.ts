@@ -31,7 +31,13 @@ import {
 import { delegationPostureWithin } from "@octant/domain";
 import { Schema } from "effect";
 import { frameExternalContentForModel } from "../context/externalContentFraming";
-import type { DelegationStatePort, OwedCancel, SentDelegation } from "./delegationStateStore";
+import {
+  MAX_OPEN_DELEGATIONS,
+  openSentCount,
+  type DelegationStatePort,
+  type OwedCancel,
+  type SentDelegation,
+} from "./delegationStateStore";
 import { FRESHNESS_WINDOW_MS, HUB_PEER_KEY_HEADER, sendHubLinkRequest } from "./hubLink";
 import { listenerPinFromDigest } from "./hubCrypto";
 import type { HubHostIdentity } from "./hubService";
@@ -121,7 +127,8 @@ export type DelegateOutcome =
         | "mode-differs-from-parent"
         | "authority-above-parent"
         | "target-unreachable"
-        | "target-answer-invalid";
+        | "target-answer-invalid"
+        | "too-many-open-delegations";
     }
   | {
       readonly status: "refused-by-target";
@@ -232,6 +239,10 @@ export class DelegatingSpokeService {
       this.#update(requestId, { sentAt });
     } else {
       const current = this.#options.state.load();
+      // An open delegation is never forgotten to make room for another.
+      if (openSentCount(current) >= MAX_OPEN_DELEGATIONS) {
+        return { status: "refused", kind: "too-many-open-delegations" };
+      }
       this.#options.state.save({
         ...current,
         sent: [

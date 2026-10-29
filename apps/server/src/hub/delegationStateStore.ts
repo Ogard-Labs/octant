@@ -23,8 +23,14 @@ import { Schema } from "effect";
 const SUBDIR = "hub";
 const FILE = "delegations.json";
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
-/** The newest entries a host keeps of each kind; a person's own devices delegate rarely. */
-const MAX_REMEMBERED = 1_024;
+/** The newest settled entries a host keeps of each kind; a person's own devices delegate rarely. */
+export const MAX_REMEMBERED_SETTLED = 1_024;
+/**
+ * The most delegations a host holds open at once (sent and still active, or
+ * received and not yet settled). An open one is never forgotten to make room:
+ * forgetting a running child would strand it, so past this a new one is refused.
+ */
+export const MAX_OPEN_DELEGATIONS = 4_096;
 
 /** A delegation this spoke accepted from a peer, and the thread it became here. */
 export const ReceivedDelegation = Schema.Struct({
@@ -112,6 +118,28 @@ export const EMPTY_DELEGATION_STATE: DelegationState = { received: [], sent: [] 
 
 const decodeState = Schema.decodeUnknownSync(DelegationState);
 
+/** A sent delegation nothing more will happen to: its result is recorded, or it ended. */
+export function isSettledSent(entry: SentDelegation): boolean {
+  return entry.resultRecorded === true || entry.state === "failed" || entry.state === "cancelled";
+}
+
+/** Sent delegations still active plus cancellations still owed: what the hard limit counts. */
+export function openSentCount(state: DelegationState): number {
+  return (
+    state.sent.filter((entry) => !isSettledSent(entry)).length + (state.owedCancels ?? []).length
+  );
+}
+
+/** Drops the oldest settled entries beyond the cap; an entry that is not settled is never dropped. */
+function dropOldestSettled(
+  entries: ReadonlyArray<SentDelegation>,
+  settled: (entry: SentDelegation) => boolean,
+): ReadonlyArray<SentDelegation> {
+  let excess = entries.filter(settled).length - MAX_REMEMBERED_SETTLED;
+  if (excess <= 0) return entries;
+  return entries.filter((entry) => !(settled(entry) && excess-- > 0));
+}
+
 export interface DelegationStatePort {
   readonly load: () => DelegationState;
   readonly save: (state: DelegationState) => void;
@@ -133,11 +161,12 @@ export function createDelegationStateStore(dataDirectory: string): DelegationSta
       chmodSync(directory, 0o700);
       const staging = `${path}.${process.pid}.tmp`;
       const kept: DelegationState = {
-        received: state.received.slice(-MAX_REMEMBERED),
-        sent: state.sent.slice(-MAX_REMEMBERED),
-        ...(state.owedCancels === undefined
-          ? {}
-          : { owedCancels: state.owedCancels.slice(-MAX_REMEMBERED) }),
+        // A received entry carries no state of its own (the thread it became
+        // does), so the peer service prunes those; the store never drops one.
+        received: state.received,
+        sent: dropOldestSettled(state.sent, isSettledSent),
+        // An owed cancel is a promise to stop a child; it expires by age, not by count.
+        ...(state.owedCancels === undefined ? {} : { owedCancels: state.owedCancels }),
       };
       writeFileSync(staging, JSON.stringify(Schema.encodeSync(DelegationState)(kept)), {
         mode: 0o600,

@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Schema } from "effect";
 import {
+  DelegationRequestId,
   ProjectId,
   UtcTimestamp,
   decodeDelegationStartCommand,
@@ -28,7 +29,11 @@ import { HUB_LINK_HEADER, HUB_PEER_KEY_HEADER, signHubLinkRequest } from "./hubL
 import { HubTestNetwork, startHubTestHost, type HubTestHost } from "./hubHost.test-support";
 import { PEER_DELEGATION_ROUTES } from "./peerDelegationRoutes";
 import type { ChildReading, PeerDelegationHost } from "./peerDelegationService";
-import { createDelegationStateStore } from "./delegationStateStore";
+import {
+  MAX_OPEN_DELEGATIONS,
+  MAX_REMEMBERED_SETTLED,
+  createDelegationStateStore,
+} from "./delegationStateStore";
 import { createPinnedHubTransport, type HubTransport } from "./pinnedHubTransport";
 
 const cleanups: Array<() => Promise<void> | void> = [];
@@ -1306,6 +1311,154 @@ describe("what a peer or the hub can reach on the spoke it delegates to", () => 
     // The thread is still running, and nothing marked it Done.
     expect(child.threads.size).toBe(1);
     expect([...child.threads.values()][0]?.state).toBe("running");
+  });
+});
+
+describe("delegation memory limits", () => {
+  const decodeRequestId = Schema.decodeUnknownSync(DelegationRequestId);
+  const delegated = async (a: HubTestHost, b: HubTestHost) => {
+    const outcome = await a.delegating.delegate(startCommand(b), { windowId: "window-a" });
+    if (outcome.status !== "delegated") throw new Error(JSON.stringify(outcome));
+    return outcome.requestId;
+  };
+
+  it("keeps a running delegation, and can still poll it, when more settled ones than the cap follow it", async () => {
+    const { a, b } = await threeHosts();
+    const running = await delegated(a, b);
+    const [template] = a.delegationState.load().sent;
+    if (template === undefined) throw new Error("No sent delegation.");
+    const settled = Array.from({ length: MAX_REMEMBERED_SETTLED + 76 }, () => ({
+      ...template,
+      requestId: decodeRequestId(randomUUID()),
+      state: "completed" as const,
+      resultRecorded: true as const,
+    }));
+
+    const before = a.delegationState.load();
+    a.delegationState.save({ ...before, sent: [...before.sent, ...settled] });
+
+    const kept = a.delegationState.load().sent;
+    expect(kept.filter((entry) => entry.resultRecorded === true)).toHaveLength(
+      MAX_REMEMBERED_SETTLED,
+    );
+    expect(kept[0]?.requestId).toBe(running);
+    expect(await a.delegating.refresh(String(running))).toMatchObject({
+      status: "in-progress",
+      state: "running",
+    });
+  });
+
+  it("keeps every cancellation still owed however many there are", async () => {
+    const { a, b } = await threeHosts();
+    const running = await delegated(a, b);
+    const [template] = a.delegationState.load().sent;
+    if (template === undefined) throw new Error("No sent delegation.");
+    const owedSince = template.sentAt;
+    const owed = Array.from({ length: MAX_REMEMBERED_SETTLED + 76 }, () => ({
+      requestId: decodeRequestId(randomUUID()),
+      targetMemberId: template.targetMemberId,
+      sentAt: template.sentAt,
+      owedSince,
+    }));
+
+    a.delegationState.save({ ...a.delegationState.load(), owedCancels: owed });
+
+    expect(a.delegationState.load().owedCancels).toHaveLength(owed.length);
+    expect(a.delegationState.load().sent.map((entry) => entry.requestId)).toEqual([running]);
+  });
+
+  it("refuses a new start once the delegations still open reach the hard limit, without forgetting any", async () => {
+    const { a, b, child } = await threeHosts();
+    await delegated(a, b);
+    const [template] = a.delegationState.load().sent;
+    if (template === undefined) throw new Error("No sent delegation.");
+    const open = Array.from({ length: MAX_OPEN_DELEGATIONS - 1 }, () => ({
+      ...template,
+      requestId: decodeRequestId(randomUUID()),
+    }));
+    const before = a.delegationState.load();
+    a.delegationState.save({ ...before, sent: [...before.sent, ...open] });
+
+    const refused = await a.delegating.delegate(startCommand(b), { windowId: "window-a" });
+
+    expect(refused).toEqual({ status: "refused", kind: "too-many-open-delegations" });
+    expect(a.delegationState.load().sent).toHaveLength(MAX_OPEN_DELEGATIONS);
+    expect(child.started).toHaveLength(1);
+  });
+
+  it("admits a delegation beside many open ones on the target, forgetting none of them", async () => {
+    const { a, b, child } = await threeHosts();
+    await delegated(a, b);
+    const [template] = b.delegationState.load().received;
+    if (template === undefined) throw new Error("No received delegation.");
+    const open = Array.from({ length: MAX_REMEMBERED_SETTLED }, () => ({
+      ...template,
+      requestId: decodeRequestId(randomUUID()),
+      threadId: randomUUID(),
+    }));
+    const before = b.delegationState.load();
+    b.delegationState.save({ ...before, received: [...before.received, ...open] });
+
+    await delegated(a, b);
+
+    expect(b.delegationState.load().received).toHaveLength(MAX_REMEMBERED_SETTLED + 2);
+    expect(child.started).toHaveLength(2);
+  });
+
+  it("refuses a delegation on the target once the open ones reach the hard limit", async () => {
+    const { a, b, child } = await threeHosts();
+    await delegated(a, b);
+    const [template] = b.delegationState.load().received;
+    if (template === undefined) throw new Error("No received delegation.");
+    const open = Array.from({ length: MAX_OPEN_DELEGATIONS - 1 }, () => ({
+      ...template,
+      requestId: decodeRequestId(randomUUID()),
+      threadId: randomUUID(),
+    }));
+    const before = b.delegationState.load();
+    b.delegationState.save({ ...before, received: [...before.received, ...open] });
+
+    const refused = await a.delegating.delegate(startCommand(b), { windowId: "window-a" });
+
+    expect(refused).toMatchObject({
+      status: "refused-by-target",
+      httpStatus: 429,
+      reason: "too-many-open-delegations",
+    });
+    expect(b.delegationState.load().received).toHaveLength(MAX_OPEN_DELEGATIONS);
+    expect(child.started).toHaveLength(1);
+  });
+
+  it("forgets only ended delegations on the target when the cap is passed", async () => {
+    const ended = new Set<string>();
+    const base = fakeChildHost();
+    const child = {
+      ...base,
+      host: {
+        ...base.host,
+        readThread: async (threadId: string, turnId: string) =>
+          ended.has(threadId)
+            ? ({ state: "completed", artifacts: [] } satisfies ChildReading)
+            : base.host.readThread(threadId, turnId),
+      },
+    };
+    const { a, b } = await threeHosts({ child });
+    const running = await delegated(a, b);
+    const [template] = b.delegationState.load().received;
+    if (template === undefined) throw new Error("No received delegation.");
+    const finished = Array.from({ length: MAX_REMEMBERED_SETTLED + 76 }, () => {
+      const threadId = randomUUID();
+      ended.add(threadId);
+      return { ...template, requestId: decodeRequestId(randomUUID()), threadId };
+    });
+    const before = b.delegationState.load();
+    b.delegationState.save({ ...before, received: [...before.received, ...finished] });
+
+    await delegated(a, b);
+
+    const kept = b.delegationState.load().received;
+    expect(kept.length).toBeLessThanOrEqual(MAX_REMEMBERED_SETTLED);
+    expect(kept.some((entry) => String(entry.requestId) === String(running))).toBe(true);
   });
 });
 

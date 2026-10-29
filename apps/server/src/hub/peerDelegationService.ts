@@ -26,7 +26,12 @@ import {
 } from "@octant/contracts";
 import { clampDelegation, type DelegationProjectAuthority } from "@octant/domain";
 import { Schema } from "effect";
-import type { DelegationStatePort, ReceivedDelegation } from "./delegationStateStore";
+import {
+  MAX_OPEN_DELEGATIONS,
+  MAX_REMEMBERED_SETTLED,
+  type DelegationStatePort,
+  type ReceivedDelegation,
+} from "./delegationStateStore";
 import type { PeerRequestOutcome } from "./spokeLinkService";
 
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
@@ -102,6 +107,7 @@ export type DelegationRefusalKind =
   | "provider-unavailable"
   | "above-granted-authority"
   | "request-id-in-use"
+  | "too-many-open-delegations"
   | "unknown-request"
   | "thread-unavailable"
   | "start-failed"
@@ -242,6 +248,7 @@ export class PeerDelegationService {
     principal: PeerPrincipal,
     authority: DelegatedAuthority,
   ): Promise<DelegationReceipt> {
+    if (!(await this.#makeRoom())) return refusal("too-many-open-delegations");
     const started = await this.#options.host.startThread({
       requestId: request.requestId,
       senderName,
@@ -333,6 +340,34 @@ export class PeerDelegationService {
       status: outcome === "interrupted" ? "cancelled" : "already-finished",
       requestId: found.delegation.requestId,
     };
+  }
+
+  /**
+   * Past the settled cap, forgets the oldest delegations whose thread has
+   * ended, never one still running or waiting on approval, and says whether
+   * another may be admitted. A received entry has no state of its own, so the
+   * thread is asked; this runs only when the host already holds a full cap.
+   */
+  async #makeRoom(): Promise<boolean> {
+    const held = this.#options.state.load().received;
+    if (held.length < MAX_REMEMBERED_SETTLED) return true;
+    const ended = new Set<string>();
+    for (const entry of held) {
+      if (held.length - ended.size < MAX_REMEMBERED_SETTLED) break;
+      const reading = await this.#options.host.readThread(entry.threadId, entry.turnId);
+      if (
+        reading !== undefined &&
+        (reading.state === "completed" ||
+          reading.state === "failed" ||
+          reading.state === "cancelled")
+      ) {
+        ended.add(String(entry.requestId));
+      }
+    }
+    const current = this.#options.state.load();
+    const remaining = current.received.filter((entry) => !ended.has(String(entry.requestId)));
+    if (ended.size > 0) this.#options.state.save({ ...current, received: remaining });
+    return remaining.length < MAX_OPEN_DELEGATIONS;
   }
 
   #received(requestId: string, principal: PeerPrincipal): ReceivedDelegation | undefined {
