@@ -307,6 +307,42 @@ describe("useProviderController", () => {
     expect(api.execute).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps the host's withheld reason when a withheld provider is turned off", async () => {
+    const fx = provider({
+      displayName: "fx local",
+      driverKind: "fx",
+      configuration: {
+        kind: "fx-acp",
+        binaryPath: "/opt/homebrew/bin/fx",
+        authentication: "api-key",
+      },
+    });
+    const withheld = observation({
+      readiness: "unavailable",
+      processState: "stopped",
+      models: [],
+      reason: "driver-not-admitted",
+      message: "fx is not offered yet: the current fx release cannot load certificates.",
+    });
+    const api = client();
+    vi.mocked(api.bootstrap).mockResolvedValue(snapshot([fx], [withheld]));
+    vi.mocked(api.execute).mockResolvedValueOnce({
+      kind: "provider-updated",
+      instance: { ...fx, enabled: false, version: 2 as never },
+    });
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(result.current.setEnabled(id, false)).resolves.toBe(true);
+    });
+
+    expect(result.current.observedByInstance.get(id)).toMatchObject({
+      reason: "driver-not-admitted",
+      message: withheld.message,
+    });
+  });
+
   it("recovers authoritative state after a lost mutation response without replaying it", async () => {
     const api = client();
     vi.mocked(api.execute).mockRejectedValueOnce({
