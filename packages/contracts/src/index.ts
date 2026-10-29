@@ -73,6 +73,7 @@ export * from "./hubAndSpokes";
 export * from "./hubDelegation";
 export * from "./hubMembership";
 export * from "./hubOwners";
+export * from "./hubPush";
 export * from "./hubWake";
 export * from "./remoteRequestProof";
 export * from "./remotePushNotifications";

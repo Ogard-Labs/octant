@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { AuditActingPrincipal } from "./auditEvents";
 import { HubGrantItem, HubMemberId, RosterMember, SignedHubRoster } from "./hubAndSpokes";
+import { HubPushReason } from "./hubPush";
 import { HubWakeSpokeTimes } from "./hubWake";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -49,6 +50,9 @@ export const HubMembershipChange = Schema.Literal(
   "wake-nudge-sent",
   "wake-nudge-refused",
   "wake-unreachable",
+  "push-switch-changed",
+  "push-forwarded",
+  "push-refused",
 );
 export type HubMembershipChange = typeof HubMembershipChange.Type;
 
@@ -84,6 +88,10 @@ export const HubMembershipChangedPayload = Schema.Struct({
   wakeCount: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   /** For a wake change: why a nudge came to nothing. */
   wakeReason: Schema.optional(HubWakeReason),
+  /** For a push forward or refusal: the size of the delivery request in bytes, never its content. */
+  pushBytes: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  /** For a push refusal: why. */
+  pushReason: Schema.optional(HubPushReason),
 }).annotations(strict);
 export type HubMembershipChangedPayload = typeof HubMembershipChangedPayload.Type;
 export const decodeHubMembershipChangedPayload = Schema.decodeUnknownSync(
