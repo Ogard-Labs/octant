@@ -46,7 +46,13 @@ function fixture(options: { presence?: Presence; vaultRead?: UnlockKeyRead } = {
       },
     },
   });
-  return { key, counts, order, active, stored: () => ({ private: storedPrivate, public: storedPublic }) };
+  return {
+    key,
+    counts,
+    order,
+    active,
+    stored: () => ({ private: storedPrivate, public: storedPublic }),
+  };
 }
 
 async function verifies(publicKey: string, text: string, signature: string): Promise<boolean> {
