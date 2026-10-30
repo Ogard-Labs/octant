@@ -55,6 +55,8 @@ import {
   setProviderEnabled,
   normalizeOpenAiCompatibleBaseUrl,
   providerCliUpdateArgs,
+  providerLatestVersionNpmPackage,
+  isNewerProviderRelease,
   supportsProviderCliUpdate,
   updateProviderDefaults,
   type AzureFoundryConfigurationInput,
@@ -495,6 +497,22 @@ function createDualAuthCliProviderWithInvalidAuthentication(
 }
 
 describe("provider CLI update policy", () => {
+  it("calls only a strictly newer plain release an update", () => {
+    expect(isNewerProviderRelease("2.1.314", "2.1.308")).toBe(true);
+    expect(isNewerProviderRelease("2.1.308", "2.1.308")).toBe(false);
+    expect(isNewerProviderRelease("2.1.9", "2.1.10")).toBe(false);
+    expect(isNewerProviderRelease("1.0.0", "0.99.99")).toBe(true);
+    expect(isNewerProviderRelease("1.0.0-beta.1", "0.9.0")).toBe(false);
+  });
+
+  it("names an official npm package only for a CLI Octant can also update", () => {
+    expect(providerLatestVersionNpmPackage("codex")).toBe("@openai/codex");
+    expect(providerLatestVersionNpmPackage("claude")).toBe("@anthropic-ai/claude-code");
+    expect(providerLatestVersionNpmPackage("kimi-code")).toBeUndefined();
+    expect(providerLatestVersionNpmPackage("opencode")).toBeUndefined();
+    expect(providerLatestVersionNpmPackage("pi")).toBeUndefined();
+  });
+
   it("keeps update command support shared by server and renderer", () => {
     expect(providerCliUpdateArgs("devin")).toEqual(["update"]);
     expect(providerCliUpdateArgs("kimi-code")).toEqual(["upgrade"]);
