@@ -6717,7 +6717,14 @@ function LaunchedShell(
         wideContextOpen={!isNarrow && dockPresentedOpen}
         workspace={
           <StartQuickToolsContext.Provider value={startQuickToolsServices}>
-            <StartQuickToolsPlacementProvider>
+            <StartQuickToolsPlacementProvider
+              // The draft scope WorkspaceView gives the active pane's start screen.
+              activeDraftScope={
+                dockHoldsForCodeDraft && activePaneId !== undefined
+                  ? `code:${String(activePaneId)}`
+                  : undefined
+              }
+            >
               <div className="primary-workspace-layer">
                 <ReaderPagesContainer
                   actions={actions}

@@ -312,15 +312,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   // The shell owns a persisted selection when supplied; refused transitions
   // must keep its former Project without replacing the composer's draft.
   const selectedProjectId = props.onSelectProject === undefined ? localProjectId : props.projectId;
-  // A Code start screen hands its Project to the dock, which holds the quick
-  // tools while this task waits for its thread.
-  const chooseQuickToolsProject = useContext(StartQuickToolsPlacementContext)?.chooseProject;
-  const codeStart = props.mode === "code";
-  useEffect(() => {
-    if (chooseQuickToolsProject === undefined || !codeStart) return;
-    chooseQuickToolsProject(selectedProjectId);
-    return () => chooseQuickToolsProject(undefined);
-  }, [chooseQuickToolsProject, codeStart, selectedProjectId]);
   const selectProject = (projectId: ProjectId) => {
     if (props.onSelectProject === undefined) setLocalProjectId(projectId);
     else props.onSelectProject(projectId);
@@ -336,6 +327,16 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   useEffect(() => setLocalProjectId(props.projectId), [props.projectId]);
   const drafts = useContext(NewTaskDraftsContext);
   const draftScope = useContext(NewTaskDraftScopeContext);
+  // A Code start screen hands its Project to the dock, under its own draft
+  // scope, so the dock holds the active pane's quick tools while that task
+  // waits for its thread.
+  const chooseQuickToolsProject = useContext(StartQuickToolsPlacementContext)?.chooseProject;
+  const codeStart = props.mode === "code";
+  useEffect(() => {
+    if (chooseQuickToolsProject === undefined || !codeStart || draftScope === undefined) return;
+    chooseQuickToolsProject(draftScope, selectedProjectId);
+    return () => chooseQuickToolsProject(draftScope, undefined);
+  }, [chooseQuickToolsProject, codeStart, draftScope, selectedProjectId]);
   const [createFromSelection, setCreateFromSelectionState] = useState<
     NewTaskCreateFromSelection | undefined
   >(() => (draftScope === undefined ? undefined : drafts?.readCreateFrom(draftScope)));

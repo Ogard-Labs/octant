@@ -8,6 +8,7 @@ import { ArrowLeft, Globe, SquareTerminal, type LucideIcon } from "lucide-react"
 import {
   createContext,
   Suspense,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -41,21 +42,41 @@ export const StartQuickToolsContext = createContext<StartQuickToolsServices | un
  * holds that Project's quick tools while the new task waits for its thread.
  * They once stood as a 320px column beside the start screen as well, which
  * pushed the composer off centre and contradicted the dock.
+ *
+ * Each start screen registers under its own draft scope and the dock reads
+ * only the active pane's. With one shared value, two Code start screens in
+ * split panes overwrote each other, and a draft that became a thread cleared
+ * the other's Project, so its dock said the tools waited for the task.
  */
 export interface StartQuickToolsPlacement {
+  /** The active Code draft's chosen Project. */
   readonly projectId: ProjectId | undefined;
-  readonly chooseProject: (projectId: ProjectId | undefined) => void;
+  readonly chooseProject: (draftScope: string, projectId: ProjectId | undefined) => void;
 }
 
 export const StartQuickToolsPlacementContext = createContext<StartQuickToolsPlacement | undefined>(
   undefined,
 );
 
-export function StartQuickToolsPlacementProvider(props: { readonly children: ReactNode }) {
-  const [projectId, setProjectId] = useState<ProjectId>();
+export function StartQuickToolsPlacementProvider(props: {
+  /** The draft scope of the active pane's Code start screen, if it has one. */
+  readonly activeDraftScope: string | undefined;
+  readonly children: ReactNode;
+}) {
+  const [chosen, setChosen] = useState<ReadonlyMap<string, ProjectId>>(() => new Map());
+  const chooseProject = useCallback((draftScope: string, projectId: ProjectId | undefined) => {
+    setChosen((current) => {
+      if (current.get(draftScope) === projectId) return current;
+      const next = new Map(current);
+      if (projectId === undefined) next.delete(draftScope);
+      else next.set(draftScope, projectId);
+      return next;
+    });
+  }, []);
+  const projectId = props.activeDraftScope === undefined ? undefined : chosen.get(props.activeDraftScope);
   const placement = useMemo<StartQuickToolsPlacement>(
-    () => ({ projectId, chooseProject: setProjectId }),
-    [projectId],
+    () => ({ projectId, chooseProject }),
+    [projectId, chooseProject],
   );
   return (
     <StartQuickToolsPlacementContext.Provider value={placement}>
