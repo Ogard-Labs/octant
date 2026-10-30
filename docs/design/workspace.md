@@ -371,7 +371,9 @@ The top-right control reveals the dock only when the active pane has a bound thr
 or a valid launchable tool. A new Code task's pane, before its thread exists, keeps
 the dock: its title band shows the common tools disabled ("Available once the task
 starts") and its body says so, so the band does not vanish and return around the
-first message. An available empty dock opens on a stack of fact cards (Environment with
+first message. Once that start screen has a Project, the dock's body holds the
+Project's quick tools (Terminal and Browser) instead of a second column beside
+it ([DESIGN.md](../../DESIGN.md#welcome-and-composer)). An available empty dock opens on a stack of fact cards (Environment with
 the local window's Remote access switch, Local servers, Context, Changes,
 Outputs, Background tasks, Running now; see [DESIGN.md](../../DESIGN.md#shell-and-layout));
 its title band offers the common tools, Add tool lists the rest, and an open

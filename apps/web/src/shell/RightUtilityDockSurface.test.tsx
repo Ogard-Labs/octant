@@ -8,7 +8,10 @@ import {
   RIGHT_UTILITY_DOCK_SURFACES,
   type RightUtilityDockSurfaceId,
 } from "./rightUtilityDockModel";
+import { LOCAL_HOST_ID } from "@octant/contracts/host";
+import { decodeProjectId } from "@octant/contracts/projects";
 import { RightUtilityDockSurface } from "./RightUtilityDockSurface";
+import { StartQuickToolsContext, StartQuickToolsPlacementContext } from "./StartQuickTools";
 
 const browser = surface("browser");
 const terminal = surface("terminal");
@@ -332,6 +335,41 @@ describe("the right sidebar surface", () => {
     if (terminalTool === undefined) throw new Error("Expected the Terminal tool.");
     await user.click(terminalTool);
     expect(onOpenTab).not.toHaveBeenCalled();
+  });
+
+  it("holds the chosen Project's terminal and browser while the new task waits for its thread", () => {
+    const services = {
+      hostId: LOCAL_HOST_ID,
+      projectTerminalClient: { execute: vi.fn() } as never,
+      projectBrowserClient: { execute: vi.fn() } as never,
+    };
+    render(
+      <StartQuickToolsContext.Provider value={services}>
+        <StartQuickToolsPlacementContext.Provider
+          value={{
+            inDock: true,
+            projectId: decodeProjectId("30000000-0000-4000-8000-000000000001"),
+            chooseProject: vi.fn(),
+          }}
+        >
+          <RightUtilityDockSurface
+            launchableSurfaces={[]}
+            onCloseTab={vi.fn()}
+            onOpenTab={vi.fn()}
+            onSelectSurface={vi.fn()}
+            resolution={{ kind: "closed", reason: "no-surface" }}
+            tabs={[]}
+            toolsAwaitingThread={[terminal, browser]}
+          />
+        </StartQuickToolsPlacementContext.Provider>
+      </StartQuickToolsContext.Provider>,
+    );
+
+    const projectTools = screen.getByRole("complementary", { name: "Project tools" });
+    expect(within(projectTools).getByRole("button", { name: "Terminal" })).toBeEnabled();
+    expect(within(projectTools).getByRole("button", { name: "Browser" })).toBeEnabled();
+    expect(within(projectTools).getByText("Other tools open once the task starts")).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Tools open once the task starts" })).toBeNull();
   });
 });
 

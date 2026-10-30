@@ -5,7 +5,16 @@ import type { HostId } from "@octant/contracts/host";
 import type { ProjectId } from "@octant/contracts/projects";
 import { MIN_ZEN_RESEARCH_DOCK_WIDTH } from "@octant/contracts/zen";
 import { ArrowLeft, Globe, SquareTerminal, type LucideIcon } from "lucide-react";
-import { createContext, Suspense, useContext, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  Suspense,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { ZenProjectResearchDock, ZenProjectTerminalCard } from "./deferredSurfaces";
 import type { OctantHostBridge } from "./hostBridge";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -27,6 +36,39 @@ export interface StartQuickToolsServices {
 
 export const StartQuickToolsContext = createContext<StartQuickToolsServices | undefined>(undefined);
 
+/**
+ * Where a Code start screen's quick tools stand. The right dock holds its
+ * place for a new Code task and said its tools were unavailable, while a
+ * 320px quick-tools column beside it offered a terminal and a browser and
+ * pushed the composer off centre. When the dock is open for that task it
+ * holds the quick tools itself, for the Project the start screen chose.
+ */
+export interface StartQuickToolsPlacement {
+  readonly inDock: boolean;
+  readonly projectId: ProjectId | undefined;
+  readonly chooseProject: (projectId: ProjectId | undefined) => void;
+}
+
+export const StartQuickToolsPlacementContext = createContext<StartQuickToolsPlacement | undefined>(
+  undefined,
+);
+
+export function StartQuickToolsPlacementProvider(props: {
+  readonly inDock: boolean;
+  readonly children: ReactNode;
+}) {
+  const [projectId, setProjectId] = useState<ProjectId>();
+  const placement = useMemo<StartQuickToolsPlacement>(
+    () => ({ inDock: props.inDock, projectId, chooseProject: setProjectId }),
+    [props.inDock, projectId],
+  );
+  return (
+    <StartQuickToolsPlacementContext.Provider value={placement}>
+      {props.children}
+    </StartQuickToolsPlacementContext.Provider>
+  );
+}
+
 type OpenTool =
   | { readonly kind: "terminal"; readonly terminalId: CodeTerminalId }
   | { readonly kind: "browser" };
@@ -38,7 +80,11 @@ type OpenTool =
  * leaving the start screen) stops the shell rather than leave it running
  * unseen.
  */
-export function StartQuickTools(props: { readonly projectId: ProjectId }) {
+export function StartQuickTools(props: {
+  readonly projectId: ProjectId;
+  /** In the dock, the tools fill its body and say the rest wait for the task. */
+  readonly inDock?: boolean;
+}) {
   const services = useContext(StartQuickToolsContext);
   const [open, setOpen] = useState<OpenTool>();
   const [starting, setStarting] = useState(false);
@@ -106,9 +152,14 @@ export function StartQuickTools(props: { readonly projectId: ProjectId }) {
     setOpen(undefined);
   }
 
+  const dockClass = props.inDock === true ? " start-quick-tools--dock" : "";
   if (open === undefined) {
     return (
-      <aside aria-label="Quick tools" className="start-quick-tools">
+      <aside
+        // The dock's title band is already the "Quick tools" group.
+        aria-label={props.inDock === true ? "Project tools" : "Quick tools"}
+        className={`start-quick-tools${dockClass}`}
+      >
         <div className="start-quick-tools__list" role="group" aria-label="Open for this Project">
           <QuickToolRow
             disabled={starting}
@@ -130,6 +181,11 @@ export function StartQuickTools(props: { readonly projectId: ProjectId }) {
               {message}
             </OctantAlert>
           )}
+          {props.inDock === true ? (
+            <p className="oct-row-detail start-quick-tools__note">
+              Other tools open once the task starts
+            </p>
+          ) : null}
         </div>
       </aside>
     );
@@ -138,7 +194,7 @@ export function StartQuickTools(props: { readonly projectId: ProjectId }) {
   return (
     <aside
       aria-label={open.kind === "terminal" ? "Project terminal" : "Project browser"}
-      className="start-quick-tools start-quick-tools--open"
+      className={`start-quick-tools start-quick-tools--open${dockClass}`}
     >
       <header className="start-quick-tools__head">
         <OctantButton onClick={close} size="sm" type="button" variant="ghost">

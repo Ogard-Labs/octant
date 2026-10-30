@@ -79,7 +79,7 @@ import {
   type CodeComposerSuggestion,
   type CodeComposerSubmitInput,
 } from "../code/composer/CodeComposerAdapter";
-import { StartQuickTools } from "./StartQuickTools";
+import { StartQuickTools, StartQuickToolsPlacementContext } from "./StartQuickTools";
 import { useWorktreeRemoteFacts } from "../code/composer/useWorktreeRemoteFacts";
 import { WorkComposerAdapter } from "../work/composer/WorkComposerAdapter";
 import { ProjectCreateDialog } from "../projects/ProjectCreateDialog";
@@ -312,6 +312,16 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   // The shell owns a persisted selection when supplied; refused transitions
   // must keep its former Project without replacing the composer's draft.
   const selectedProjectId = props.onSelectProject === undefined ? localProjectId : props.projectId;
+  // A Code start screen hands its Project to the dock, which holds the quick
+  // tools while it is open for this task.
+  const quickToolsPlacement = useContext(StartQuickToolsPlacementContext);
+  const chooseQuickToolsProject = quickToolsPlacement?.chooseProject;
+  const codeStart = props.mode === "code";
+  useEffect(() => {
+    if (chooseQuickToolsProject === undefined || !codeStart) return;
+    chooseQuickToolsProject(selectedProjectId);
+    return () => chooseQuickToolsProject(undefined);
+  }, [chooseQuickToolsProject, codeStart, selectedProjectId]);
   const selectProject = (projectId: ProjectId) => {
     if (props.onSelectProject === undefined) setLocalProjectId(projectId);
     else props.onSelectProject(projectId);
@@ -826,7 +836,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             beside the composer without remounting it and losing the draft. */}
         <div className="draft-thread__with-tools">
           {composer}
-          {selectedProjectId === undefined ? null : (
+          {selectedProjectId === undefined || quickToolsPlacement?.inDock === true ? null : (
             <StartQuickTools projectId={selectedProjectId} />
           )}
         </div>

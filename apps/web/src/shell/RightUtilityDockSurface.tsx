@@ -1,11 +1,12 @@
 import { Plus, X } from "lucide-react";
-import { useEffect, useRef, type ReactNode, type Ref } from "react";
+import { useContext, useEffect, useRef, type ReactNode, type Ref } from "react";
 import { DockUtilityLauncher, type DockUtilityLauncherReference } from "./DockUtilityLauncher";
 import { DockToolIcon } from "./dockToolIcons";
 import { DockToolStrip } from "./DockToolStrip";
 import { IconButton } from "./IconButton";
 import { OctantButton } from "../ui/base/OctantButton";
 import { ShellState } from "./ShellState";
+import { StartQuickTools, StartQuickToolsPlacementContext } from "./StartQuickTools";
 import { MULTI_INSTANCE_DOCK_SURFACES } from "./rightUtilityDockModel";
 import type {
   RightUtilityDockResolution,
@@ -64,6 +65,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
   const activeSurface = props.resolution.kind === "closed" ? undefined : props.resolution.surface;
   const activeTabId = props.activeTabId ?? activeSurface?.id;
   const activeTab = props.tabs.find((tab) => tab.id === activeTabId);
+  const quickToolsProjectId = useContext(StartQuickToolsPlacementContext)?.projectId;
   const remaining = props.launchableSurfaces.filter(
     (surface) =>
       MULTI_INSTANCE_DOCK_SURFACES.has(surface.id) ||
@@ -177,7 +179,11 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
       </header>
       <div className="dock-body right-utility-dock__content">
         {props.toolsAwaitingThread !== undefined && props.resolution.kind !== "surface" ? (
-          <ShellState state="neutral" title="Tools open once the task starts" />
+          quickToolsProjectId === undefined ? (
+            <ShellState state="neutral" title="Tools open once the task starts" />
+          ) : (
+            <StartQuickTools inDock projectId={quickToolsProjectId} />
+          )
         ) : props.resolution.kind === "closed" ? (
           <div className="dock-start">{props.overview}</div>
         ) : props.resolution.kind === "unavailable" ? (
