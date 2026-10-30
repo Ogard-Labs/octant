@@ -757,7 +757,12 @@ function makeConnection(
             await closeState(previous);
             sessions.delete(input.sessionId);
           }
-          const tools = input.executionPolicy === "plan" ? [] : input.tools;
+          // Plan carries the tools it is handed: the server offers a Plan turn
+          // only the read tools and refuses a write call, and Pi's own built-ins
+          // are already narrowed to read-only. Dropping them here left the
+          // attestation (and so the capability flag) unset and every Plan turn
+          // that named a tool refused as unsupported.
+          const tools = input.tools;
           const compatibility = JSON.stringify([
             "pi",
             options.binaryPath,
@@ -1054,7 +1059,9 @@ function makeConnection(
           sessionId: input.sessionId,
           modelId: identity.modelId,
           executionPolicy: input.executionPolicy,
-          tools: input.tools ?? identity.tools,
+          // A Plan resume with no caller-supplied set fails closed to no tools,
+          // not the full catalogue the session was first opened with.
+          tools: input.tools ?? (input.executionPolicy === "plan" ? [] : identity.tools),
         }).pipe(
           Effect.map(() => ({ sessionId: input.sessionId, resumeCursor: input.resumeCursor })),
           Effect.mapError(() => failure("stale-resume", "Pi session could not be resumed.")),
