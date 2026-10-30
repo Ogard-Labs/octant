@@ -16,6 +16,7 @@ import {
 } from "../settings/primitives";
 import type {
   HubAdministrationBridge,
+  OwnerUnlockBridge,
   PrivateListenerEnableRequest,
   PrivateListenerPublicStatus,
   RemoteAccessAdministrationBridge,
@@ -50,6 +51,8 @@ export interface RemoteAccessSettingsSectionProps {
   readonly pairedComputers?: PairedComputersBridge | undefined;
   /** The hub role and hub membership; absent unless this is a local window. */
   readonly hub?: HubAdministrationBridge | undefined;
+  /** This Mac's unlock key, made when joining a hub as an owner; absent outside the desktop app. */
+  readonly ownerUnlock?: OwnerUnlockBridge | undefined;
   /** Reads the clock so a test can freeze ticket expiry. */
   readonly now?: () => number;
 }
@@ -101,6 +104,7 @@ export function RemoteAccessSettingsSection({
   bridge,
   pairedComputers,
   hub,
+  ownerUnlock,
   now,
 }: RemoteAccessSettingsSectionProps) {
   const clock = now ?? (() => Date.now());
@@ -850,7 +854,13 @@ export function RemoteAccessSettingsSection({
           )}
         </div>
       </SettingsPanel>
-      {hub === undefined ? null : <HubSettingsSection hub={hub} pairing={bridge} />}
+      {hub === undefined ? null : (
+        <HubSettingsSection
+          hub={hub}
+          pairing={bridge}
+          {...(ownerUnlock === undefined ? {} : { ownerUnlock })}
+        />
+      )}
       {pairedComputers === undefined ? null : (
         <PairedComputersSettingsSection bridge={pairedComputers} />
       )}

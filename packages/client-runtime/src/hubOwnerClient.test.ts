@@ -11,6 +11,12 @@ import {
 } from "@octant/contracts";
 import { newMemberConfirmationSigningPayload, ownerUnlockSigningPayload } from "@octant/domain";
 import type { PinnedListenerTransportPort } from "./appPairingCode";
+import {
+  desktopUnlockSigner,
+  readOwnerUnlockText,
+  type DesktopOwnerUnlockChallenge,
+  type DesktopOwnerUnlockPort,
+} from "./desktopOwnerUnlock";
 import { base64UrlDecode, base64UrlEncode, hex, sha256 } from "./hubLinkSigning";
 import {
   copyApiKeySignIn,
@@ -703,5 +709,112 @@ describe("copying an API-key sign-in between two hosts", () => {
     expect(describeOwnerRefusal("subscription-sign-in")).toBe(
       "Subscription sign-ins stay on the computer that holds them. Only API keys copy.",
     );
+  });
+});
+
+describe("owner client with the Mac's unlock key", () => {
+  /** The desktop's side, with a software key: it rebuilds the text from the challenge and signs it. */
+  async function macPort(keys: CryptoKeyPair, answer?: "cancelled") {
+    const signed: DesktopOwnerUnlockChallenge[] = [];
+    const port: Pick<DesktopOwnerUnlockPort, "ownerUnlockSign"> = {
+      ownerUnlockSign: async (challenge) => {
+        if (answer === "cancelled") return { status: "refused", kind: "cancelled" };
+        signed.push(challenge);
+        return {
+          status: "done",
+          signature: base64UrlEncode(
+            await crypto.subtle.sign(
+              { name: "ECDSA", hash: "SHA-256" },
+              keys.privateKey,
+              encoder.encode(ownerUnlockSigningPayload(challenge)),
+            ),
+          ),
+        };
+      },
+    };
+    const publicKey = base64UrlEncode(await crypto.subtle.exportKey("spki", keys.publicKey));
+    return { port, signed, publicKey };
+  }
+
+  it("produces a proof the host's verifier accepts for the action it names", async () => {
+    const keys = await p256();
+    const mac = await macPort(keys);
+    const host = fakeHost({ unlockPublicKey: keys.publicKey });
+    const client = await ownerFixture(host, desktopUnlockSigner(mac.port, mac.publicKey));
+
+    expect(await client.dismissAlert(ALERT_ID)).toEqual({
+      status: "done",
+      body: { status: "dismissed", alertId: ALERT_ID },
+    });
+    expect(mac.signed).toHaveLength(1);
+    expect(mac.signed[0]).toMatchObject({
+      hostMemberId: HOST_ID,
+      ownerMemberId: OWNER_ID,
+      method: "POST",
+      path: "/api/hub/owner/alerts/dismiss",
+    });
+  });
+
+  it("is refused by the host when another key signed", async () => {
+    const mac = await macPort(await p256());
+    const host = fakeHost({ unlockPublicKey: (await p256()).publicKey });
+    const client = await ownerFixture(host, desktopUnlockSigner(mac.port, mac.publicKey));
+
+    expect(await client.dismissAlert(ALERT_ID)).toEqual({
+      status: "refused",
+      kind: "unlock-signature-invalid",
+    });
+  });
+
+  it("reports a declined Touch ID prompt as a cancelled unlock and sends no action", async () => {
+    const keys = await p256();
+    const mac = await macPort(keys, "cancelled");
+    const host = fakeHost({ unlockPublicKey: keys.publicKey });
+    const client = await ownerFixture(host, desktopUnlockSigner(mac.port, mac.publicKey));
+
+    expect(await client.dismissAlert(ALERT_ID)).toEqual({
+      status: "not-unlocked",
+      reason: "cancelled",
+    });
+    expect(host.requests.map((request) => request.path)).toEqual(["/api/hub/owner/challenge"]);
+  });
+
+  it("hands the desktop only owner unlock challenges, never another text", async () => {
+    const keys = await p256();
+    const mac = await macPort(keys);
+    const signer = desktopUnlockSigner(mac.port, mac.publicKey);
+    if (signer.shape !== "raw") throw new Error("expected a raw signer");
+    const opened = await signer.open();
+    if (opened.status !== "signed") throw new Error("expected an open key");
+
+    await expect(opened.value.sign("any text the page likes")).rejects.toThrow();
+    await expect(
+      opened.value.sign(
+        newMemberConfirmationSigningPayload({
+          spokeId: HOST_ID as HubMemberId,
+          memberId: MEMBER_ID as HubMemberId,
+          identityKeyFingerprint: "c".repeat(64),
+          confirmedBy: OWNER_ID as HubMemberId,
+          unlockKeyFingerprint: "d".repeat(64),
+          confirmedAt: "2026-10-29T10:00:00.000Z" as NewMemberAlert["raisedAt"],
+        }),
+      ),
+    ).rejects.toThrow();
+    expect(mac.signed).toEqual([]);
+  });
+
+  it("reads back exactly the challenge an unlock text was built from", () => {
+    const challenge = {
+      challengeId: CHALLENGE_ID,
+      nonce: "n",
+      hostMemberId: HOST_ID,
+      ownerMemberId: OWNER_ID,
+      method: "POST",
+      path: "/api/hub/owner/session",
+      bodyHash: "b".repeat(64),
+      expiresAt: 1_900_000_000_000,
+    };
+    expect(readOwnerUnlockText(ownerUnlockSigningPayload(challenge))).toEqual(challenge);
+    expect(readOwnerUnlockText(`${ownerUnlockSigningPayload(challenge)}\nextra`)).toBeUndefined();
   });
 });

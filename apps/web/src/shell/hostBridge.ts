@@ -1,5 +1,6 @@
 import type { CodeOperationApprovalRequest } from "@octant/contracts/code-operations";
 import type { AppReleaseRing, AppUpdateState } from "@octant/contracts/app-updates";
+import type { DesktopOwnerUnlockPort } from "@octant/client-runtime";
 import type { NativeMenuRequest, NativeMenuOutcome } from "@octant/contracts/shell";
 
 export type { AppUpdateState };
@@ -291,6 +292,29 @@ export function hubAdministrationOf(
   return request === undefined ? undefined : { hubAdministrationRequest: request };
 }
 
+/**
+ * A Mac owner device's unlock key (Touch ID or the account password). The
+ * desktop makes the key and returns only its public half, signs one owner
+ * unlock challenge, and forgets the key. Absent outside the desktop app.
+ */
+export type OwnerUnlockBridge = DesktopOwnerUnlockPort;
+
+/** The Mac's unlock key when this window is a desktop window, else nothing. */
+export function ownerUnlockOf(bridge: OctantHostBridge | undefined): OwnerUnlockBridge | undefined {
+  if (
+    bridge?.ownerUnlockMakeKey === undefined ||
+    bridge.ownerUnlockSign === undefined ||
+    bridge.ownerUnlockForgetKey === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    ownerUnlockMakeKey: bridge.ownerUnlockMakeKey,
+    ownerUnlockSign: bridge.ownerUnlockSign,
+    ownerUnlockForgetKey: bridge.ownerUnlockForgetKey,
+  };
+}
+
 export type AppStoreConnectKeyOperation = "status" | "set" | "remove";
 
 /**
@@ -310,6 +334,7 @@ export interface OctantHostBridge
     Partial<PairedComputersBridge>,
     Partial<SshTargetAdministrationBridge>,
     Partial<HubAdministrationBridge>,
+    Partial<OwnerUnlockBridge>,
     Partial<AppStoreConnectKeyBridge> {
   /**
    * Shows a server another paired computer granted this device, served by

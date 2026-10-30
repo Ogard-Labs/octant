@@ -42,8 +42,10 @@ passkey, or Android. An owner device's one unlock covers five minutes of
 administration (the host keeps the session in memory), copies an API-key
 sign-in between two spokes, reads a Code posture, and applies or dismisses a
 provisioning proposal, read narrowly as slice 5 and slice 10 record; a host
-changes no posture for an owner device yet, and a Mac Touch ID unlock key is not
-built. The wake service is built (the hub's own
+changes no posture for an owner device yet. A Mac's Touch ID unlock key is built
+(a Secure Enclave key made through the desktop's native helper and registered
+when the Mac joins a hub, read narrowly as slice 5 records); the real Touch ID
+prompt has not been run. The wake service is built (the hub's own
 switch, spokes reporting opaque routine times, the Wake-on-LAN packet and signed
 nudge, standbys holding the times), read narrowly as the last item of slice 8
 records; it has run only between hosts on loopback with a fake socket, and a real
@@ -1010,6 +1012,30 @@ maintainer's hardware, or names the maintainer gate.
    - **No window for these yet.** The server routes and the client-runtime calls
      (`openSession`, `readPosture`, `changePosture`, `copyApiKeySignIn`) are built;
      the Settings rows and the phone screens that call them are not.
+   - **A Mac's unlock key is built and has one door.** The desktop's native
+     Keychain helper makes a P-256 key in the Secure Enclave whose access
+     control needs the person present (Touch ID, falling back to the account
+     password) and keeps only the key's enclave-bound blob in the Keychain. The
+     window's bridge has three calls: make the key (the public key comes back),
+     sign one owner unlock challenge, and forget the key. `sign` takes the
+     host's challenge fields and the desktop builds the unlock text itself; a
+     path outside the owner routes, a method other than GET or POST, a field
+     with a line break, or any extra field is refused, so the bridge signs no
+     other text. A Mac with no Secure Enclave, or with no Touch ID or password
+     set, refuses with `unavailable`; it never makes a software key. Joining a
+     hub from the desktop makes the key and presents its public half at the end
+     of the join, and the hub keeps it only for an owner code; a join that ends
+     without joining, and leaving the hub, forget the key. The key is made on
+     every desktop join because the joining side cannot tell an owner code from
+     another; an unused key of a non-owner join stays until the Mac leaves. The
+     Mac's key signs the unlock text only: a new-member confirmation needs a
+     phone's or a browser's key, and a Touch ID prompt that is declined reads as
+     a cancelled unlock. No desktop screen acts as an owner on another
+     computer yet (a desktop window already holds its own host's powers), so
+     the signer (`desktopUnlockSigner` in client-runtime) is built and tested
+     with a software key but has no caller beyond the join. Not run: the real
+     Touch ID prompt and a signed, packaged helper on a real Mac are a
+     maintainer gate.
 
 6. **Delegation.** Remote child runs from A to B with the peer grant, `peer:A`
    principal, approvals on B, results as data, and cancel. Acceptance: B
