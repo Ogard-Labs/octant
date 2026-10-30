@@ -1098,7 +1098,8 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("hub-role"),
           label: "Act as hub",
           scope: "host",
-          keywords: "hub act as hub role roster members spokes add device join code tailscale",
+          keywords:
+            "hub act as hub role roster members spokes add device join code tailscale ask to sign in claude codex account",
         },
         {
           id: settingId("hub-tailscale-certificate"),
@@ -1118,7 +1119,8 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("hub-join"),
           label: "Join a hub",
           scope: "host",
-          keywords: "hub join spoke code comparison grant leave roster introduce owners",
+          keywords:
+            "hub join spoke code comparison grant leave roster introduce owners sign-in sign in request accept decline provider account",
         },
         {
           id: settingId("hub-confirm-new-members"),

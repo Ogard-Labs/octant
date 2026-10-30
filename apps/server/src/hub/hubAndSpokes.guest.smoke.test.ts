@@ -192,6 +192,72 @@ describe("a guest joining a hub that has a spoke", () => {
     expect(spoke.administration.listDevices()).toEqual([]);
   });
 
+  describe("a browser reaching a spoke at its own web app origin", () => {
+    /**
+     * A browser holds no pin: it asks the origin the roster names, under its own
+     * certificate check. The test network stands in for that check by dialling
+     * the spoke's listener, and refuses any trust but the platform's.
+     */
+    function browserTransport(
+      network: HubTestNetwork,
+      spoke: { readonly origin: string; readonly pin: string },
+    ): PinnedListenerTransportPort {
+      const pinned = guestTransport(network);
+      return ({ origin, trust }) =>
+        trust.current.kind === "platform" && origin === spoke.origin
+          ? pinned({ origin, trust: { current: { kind: "pinned", pin: spoke.pin } } })
+          : { status: "unavailable" };
+    }
+
+    it("is admitted by a spoke that accepted it, with the hub out of the path", async () => {
+      const { network, hub, spoke } = await startHubAndSpoke();
+      const { record, signer } = await joinGuest(hub, network, spoke);
+      const target = guestSpokeTargets(record).find((entry) => entry.role === "spoke");
+      if (target === undefined) throw new Error("The roster gave no spoke.");
+      const hubRequestsBefore = hub.requests.length;
+
+      const admitted = await admitGuestOnSpoke({
+        target: { ...target, webOrigin: target.origin },
+        signer,
+        deviceLabel: "Browser",
+        transport: browserTransport(network, target),
+        via: "web-origin",
+      });
+
+      expect(admitted.status).toBe("admitted");
+      expect(
+        spoke.administration
+          .listDevices()
+          .find((device) => device.deviceKeyFingerprint === signer.fingerprint)?.state,
+      ).toBe("active");
+      expect(hub.requests.slice(hubRequestsBefore)).toEqual([]);
+      // This hub lists an address and no Tailscale name, so it serves no web app
+      // page the spoke would let ask it anything cross-origin.
+      expect(spoke.spoke.hubWebOrigin()).toBeUndefined();
+    });
+
+    it("is refused by a spoke that has not accepted it, and that spoke makes no device", async () => {
+      const { network, hub, spoke } = await startHubAndSpoke();
+      expect(spoke.spoke.setGrant({ items: ["roster"], actProjects: [] }, window).status).toBe(
+        "changed",
+      );
+      const { record, signer } = await joinGuest(hub, network, spoke);
+      const target = guestSpokeTargets(record).find((entry) => entry.role === "spoke");
+      if (target === undefined) throw new Error("The roster gave no spoke.");
+
+      const refused = await admitGuestOnSpoke({
+        target: { ...target, webOrigin: target.origin },
+        signer,
+        deviceLabel: "Browser",
+        transport: browserTransport(network, target),
+        via: "web-origin",
+      });
+
+      expect(refused).toEqual({ status: "refused", httpStatus: 403, kind: "guest-not-accepted" });
+      expect(spoke.administration.listDevices()).toEqual([]);
+    });
+  });
+
   it("is refused by a spoke whose verified roster does not list the guest", async () => {
     const { network, hub, spoke } = await startHubAndSpoke();
     const stranger = await createGuestSigner({

@@ -18,6 +18,25 @@ describe("a browser's way of reaching a host", () => {
     ).toBe("unavailable");
   });
 
+  it("also reaches the web app origins the hub's roster names, and still no other origin", () => {
+    const studio = "https://studio.tail1234.ts.net";
+    const transport = browserPageTransport(PAGE, [studio]);
+
+    expect(transport({ origin: studio, trust: { current: { kind: "platform" } } }).status).toBe(
+      "available",
+    );
+    expect(
+      transport({ origin: studio, trust: { current: { kind: "pinned", pin: "sha256-AAAA" } } })
+        .status,
+    ).toBe("unavailable");
+    expect(
+      transport({
+        origin: "https://elsewhere.tail1234.ts.net",
+        trust: { current: { kind: "platform" } },
+      }).status,
+    ).toBe("unavailable");
+  });
+
   it("will not send a request that asks for a pin it cannot check", () => {
     const transport = browserPageTransport(PAGE);
 

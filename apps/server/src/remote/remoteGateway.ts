@@ -158,6 +158,10 @@ export interface RemoteGatewayServices {
     request: Request,
     facts?: { readonly sourceKey: string },
   ) => Promise<Response | undefined>;
+  /** The origin of the hub's web app, when this host holds a roster naming one; see the route policy. */
+  readonly hubWebOrigin?: () => string | undefined;
+  /** The web origins of the roster members the page this hub serves may connect to; see the route policy. */
+  readonly spokeWebOrigins?: () => readonly string[];
   readonly serve: Serve;
   readonly now?: () => number;
   readonly uuid?: () => string;
@@ -738,7 +742,11 @@ function assembleServices(
 
   // Route policy — exact origin from the listener config so policy identity
   // matches listener identity.
-  const policy = createRemoteRoutePolicy({ origin: identity.origin });
+  const policy = createRemoteRoutePolicy({
+    origin: identity.origin,
+    ...(options.hubWebOrigin === undefined ? {} : { hubWebOrigin: options.hubWebOrigin }),
+    ...(options.spokeWebOrigins === undefined ? {} : { spokeWebOrigins: options.spokeWebOrigins }),
+  });
 
   // Route handler — facts-aware so protocol routes receive the trusted
   // source class from the accepted socket.

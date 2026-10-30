@@ -34,6 +34,7 @@ import {
   ownerPostureUnlockClass,
   ownerUnlockSigningPayload,
   reconcileHeldGrants,
+  rosterMemberWebOrigin,
   type StandInMembershipChanges,
 } from "./hubAndSpokesPolicy";
 
@@ -1019,5 +1020,30 @@ describe("the text a roster signature covers", () => {
     expect(hubRosterSigningPayload(withKey)).not.toBe(hubRosterSigningPayload(body));
     expect(hubRosterSigningPayload(withKey)).not.toBe(hubRosterSigningPayload(otherKey));
     expect(hubRosterSigningPayload(body)).not.toContain("ownerUnlockPublicKey");
+  });
+});
+
+describe("the web app origin a roster entry gives a browser", () => {
+  const named = (
+    names: ReadonlyArray<string>,
+    extra: Partial<RosterMember> = {},
+  ): RosterMember => ({ ...member(3, "spoke"), privateNames: names, ...extra });
+
+  it("names the Tailscale name and the listener port", () => {
+    expect(rosterMemberWebOrigin(named(["Studio.tail1234.ts.net"], { listenerPort: 8443 }))).toBe(
+      "https://studio.tail1234.ts.net:8443",
+    );
+    expect(rosterMemberWebOrigin(named(["studio.tail1234.ts.net"]))).toBe(
+      "https://studio.tail1234.ts.net",
+    );
+  });
+
+  it("names nothing for a member without a Tailscale name, or for a guest", () => {
+    expect(rosterMemberWebOrigin(named([]))).toBeUndefined();
+    expect(rosterMemberWebOrigin(named(["mac.local"]))).toBeUndefined();
+    expect(rosterMemberWebOrigin(named(["evil.ts.net.example.com"]))).toBeUndefined();
+    expect(
+      rosterMemberWebOrigin(named(["phone.tail1234.ts.net"], { role: "guest" })),
+    ).toBeUndefined();
   });
 });

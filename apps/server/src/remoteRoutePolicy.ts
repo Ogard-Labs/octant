@@ -132,6 +132,8 @@ export const REMOTE_HUB_LINK_ROUTE_IDS = {
   directPushDeliveries: "hub-link-direct-push-deliveries",
   provisionOffer: "hub-link-provision-offer",
   provisionMirror: "hub-link-provision-mirror",
+  signInRequest: "hub-link-sign-in-request",
+  signInOutcome: "hub-link-sign-in-outcome",
   owner: "hub-link-owner",
   delegate: "hub-link-delegate",
   delegationStatus: "hub-link-delegation-status",
@@ -425,6 +427,30 @@ const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
     allowedContentTypes: ["application/json"],
     maxBodyBytes: 65_536,
     maxResponseBytes: 4_096,
+  },
+  // Hub-started sign-in: the hub's question to a spoke (a kind and a request id, never a
+  // credential) and a spoke's one-word answer about how it ended.
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.signInRequest,
+    match: { kind: "exact", path: "/api/hub/sign-in-request" },
+    surface: "pre-auth",
+    methods: ["POST"],
+    allowQuery: false,
+    allowedRequestHeaders: ["content-type", HUB_LINK_HEADER],
+    allowedContentTypes: ["application/json"],
+    maxBodyBytes: 1_024,
+    maxResponseBytes: 1_024,
+  },
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.signInOutcome,
+    match: { kind: "exact", path: "/api/hub/sign-in-outcome" },
+    surface: "pre-auth",
+    methods: ["POST"],
+    allowQuery: false,
+    allowedRequestHeaders: ["content-type", HUB_LINK_HEADER, HUB_PEER_KEY_HEADER],
+    allowedContentTypes: ["application/json"],
+    maxBodyBytes: 1_024,
+    maxResponseBytes: 1_024,
   },
   {
     id: REMOTE_HUB_LINK_ROUTE_IDS.provisionMirror,
@@ -895,6 +921,19 @@ export interface RemoteRoutePolicyOptions {
   readonly maxResponseBytes?: number;
   readonly maxConcurrentRequests?: number;
   readonly maxConcurrentServerProxyRequests?: number;
+  /**
+   * The origin of the hub's web app, when this host is a spoke that holds a
+   * roster naming one. A browser guest on the hub's page reaches the spoke
+   * directly from there, so the page's origin may make the few signed requests
+   * in `HUB_WEB_APP_REQUESTS` and no other.
+   */
+  readonly hubWebOrigin?: () => string | undefined;
+  /**
+   * The web origins of the roster members this host, as a hub, serves its web
+   * app to. The page may connect to exactly these besides itself, so a browser
+   * on it can reach each spoke; read per response so a roster change applies.
+   */
+  readonly spokeWebOrigins?: () => readonly string[];
 }
 
 export interface RemoteRoutePolicy {
@@ -999,8 +1038,38 @@ export function createRemoteRoutePolicy(options: RemoteRoutePolicyOptions): Remo
       };
     },
     inspect: (request) =>
-      inspectRequest(request, parsedOrigin, routes, maxBodyBytes, maxResponseBytes),
+      inspectRequest(
+        request,
+        parsedOrigin,
+        routes,
+        maxBodyBytes,
+        maxResponseBytes,
+        options.hubWebOrigin?.(),
+        options.spokeWebOrigins?.() ?? [],
+      ),
   };
+}
+
+/**
+ * What a browser on the hub's own page may ask a spoke from that other origin:
+ * admit it as a guest, and read the alerts and holds an owner device sees. Both
+ * reads change nothing; every request that changes something (and so asks for
+ * an unlock, which a passkey bound to the hub's origin cannot give here) stays
+ * same-origin. Each is signed by the browser's device key and judged by the
+ * handler, so the origin is a door the handler still has to open.
+ */
+const HUB_WEB_APP_REQUESTS: ReadonlyArray<{ readonly method: string; readonly path: string }> = [
+  { method: "POST", path: "/api/hub/guest" },
+  { method: "GET", path: "/api/hub/owner/alerts" },
+  { method: "GET", path: "/api/hub/owner/held-members" },
+];
+
+function hubWebAppMayAsk(request: Request, pathname: string): boolean {
+  const method =
+    request.method.toUpperCase() === "OPTIONS"
+      ? normalizedHeader(request.headers, "access-control-request-method")?.toUpperCase()
+      : request.method.toUpperCase();
+  return HUB_WEB_APP_REQUESTS.some((entry) => entry.method === method && entry.path === pathname);
 }
 
 export function createRemoteRouteHandler(
@@ -1116,19 +1185,27 @@ function inspectRequest(
   routes: readonly RemoteRouteDefinition[],
   defaultMaxBodyBytes: number,
   defaultMaxResponseBytes: number,
+  hubWebOrigin: string | undefined,
+  spokeWebOrigins: readonly string[],
 ): RemoteRouteDecision {
   const url = new URL(request.url);
   const method = request.method.toUpperCase();
   const headerOrigin = request.headers.get("origin");
   const authorityMatched = request.headers.get("host") === origin.host;
-  const originMatched = headerOrigin === null || headerOrigin === origin.origin;
+  const ownOrigin = headerOrigin === null || headerOrigin === origin.origin;
+  const fromHubWebApp =
+    !ownOrigin &&
+    hubWebOrigin !== undefined &&
+    headerOrigin === hubWebOrigin &&
+    hubWebAppMayAsk(request, url.pathname);
+  const originMatched = ownOrigin || fromHubWebApp;
   const forwardedHeaders = hasForwardedIdentity(request.headers);
   const pathSurface = classifyPath(url.pathname, routes);
   const facts: RedactedRemoteRequestFacts = {
     method,
     surface: pathSurface,
     authority: authorityMatched ? "matched" : "mismatched",
-    origin: headerOrigin === null ? "absent" : originMatched ? "matched" : "mismatched",
+    origin: headerOrigin === null ? "absent" : ownOrigin ? "matched" : "mismatched",
     forwardedHeaders,
   };
 
@@ -1139,7 +1216,12 @@ function inspectRequest(
   if (!originMatched || headerOrigin === "null") return reject(403, facts);
 
   const fetchSite = normalizedHeader(request.headers, "sec-fetch-site");
-  if (fetchSite !== undefined && fetchSite !== "same-origin" && fetchSite !== "none") {
+  if (
+    fetchSite !== undefined &&
+    fetchSite !== "same-origin" &&
+    fetchSite !== "none" &&
+    !(fromHubWebApp && (fetchSite === "cross-site" || fetchSite === "same-site"))
+  ) {
     return reject(403, facts);
   }
 
@@ -1148,7 +1230,12 @@ function inspectRequest(
     if (route === undefined || headerOrigin === null || !routeAllowsQuery(route, url)) {
       return reject(404, facts);
     }
-    return inspectPreflight(request, route, facts, origin.origin);
+    return inspectPreflight(
+      request,
+      route,
+      facts,
+      fromHubWebApp && headerOrigin !== null ? headerOrigin : origin.origin,
+    );
   }
 
   if (pathSurface === "local-only" || pathSurface === "unknown") return reject(404, facts);
@@ -1157,9 +1244,13 @@ function inspectRequest(
     if (hasBody(request)) return reject(413, facts);
     const headers = remoteHeaders(headerOrigin === null ? undefined : headerOrigin, []);
     // The app frames one thing: a running design's page on this same origin.
+    // The page's own meta policy allows any tailnet name; this header narrows
+    // that to the spokes the roster names. A browser enforces both.
+    const connectSrc =
+      spokeWebOrigins.length === 0 ? "" : `; connect-src 'self' ${spokeWebOrigins.join(" ")}`;
     headers.set(
       "content-security-policy",
-      `${REMOTE_SECURITY_POLICY.csp}; frame-src ${origin.origin}${CANVAS_DESIGN_PAGE_PATH}`,
+      `${REMOTE_SECURITY_POLICY.csp}${connectSrc}; frame-src ${origin.origin}${CANVAS_DESIGN_PAGE_PATH}`,
     );
     return allow(
       "web-assets",

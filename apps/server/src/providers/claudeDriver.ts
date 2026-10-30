@@ -781,6 +781,9 @@ function observation(
   const result = decodeProviderProbeResult({
     instanceId: options.instanceId,
     readiness: input.readiness,
+    // The runtime's `auth status` only says logged in, so the account kind is
+    // the one this instance is configured to sign in with.
+    ...(input.readiness === "ready" ? { accountAuthentication: options.authentication } : {}),
     processState: "stopped",
     detectedVersion: input.version,
     ...(input.credentialStatus === undefined ? {} : { credentialStatus: input.credentialStatus }),

@@ -10,10 +10,20 @@ export interface OwnerSpoke {
   readonly memberId: string;
   readonly name: string;
   readonly client: OwnerClient;
+  /**
+   * Set when this client can only read: a browser's passkey belongs to the one
+   * origin that served its page, so acting on this computer happens on its own
+   * web app, here.
+   */
+  readonly openAt?: string;
 }
 
 export interface OwnerAlertRow {
-  readonly spoke: { readonly memberId: string; readonly name: string };
+  readonly spoke: {
+    readonly memberId: string;
+    readonly name: string;
+    readonly openAt?: string;
+  };
   /** The member this row is about: named by its alert, or by the computer's hold when no alert is left. */
   readonly member: HeldMember;
   /** The alert that raised the member; none once it was dismissed or the computer dropped it. Remove and Dismiss need it. */
@@ -44,7 +54,11 @@ export async function readOwnerAlerts(
       const heldMembers = held.status === "read" ? held.members : [];
       const heldIds = new Set(heldMembers.map((member) => String(member.memberId)));
       const alerts = answer.status === "read" ? answer.alerts : [];
-      const where = { memberId: spoke.memberId, name: spoke.name };
+      const where = {
+        memberId: spoke.memberId,
+        name: spoke.name,
+        ...(spoke.openAt === undefined ? {} : { openAt: spoke.openAt }),
+      };
       const raised = alerts.map(
         (alert): OwnerAlertRow => ({
           spoke: where,

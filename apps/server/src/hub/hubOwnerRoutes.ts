@@ -34,6 +34,8 @@ import {
   decodeOwnerPostureReadRequest,
   decodeOwnerRemovalRequest,
   decodeOwnerUnlockProof,
+  decodeHubSignInAsk,
+  decodeHubSignInDecisionRequest,
   type AuditActingPrincipal,
   type HubGrant,
   type HubMemberId,
@@ -54,8 +56,10 @@ import type { OwnerCredentialCopyService } from "./ownerCredentialCopy";
 import type { OwnerPostureHost } from "./ownerPostureHost";
 import { ownerEntries } from "./ownerRecords";
 import type { OwnerSessionCheck, OwnerUnlockService, OwnerUnlockVerification } from "./ownerUnlock";
+import type { SignInService } from "./signInService";
 import type { SpokeLinkService } from "./spokeLinkService";
 import type { SpokeProvisionService } from "./spokeProvisionService";
+import type { SpokeSignInService } from "./spokeSignInService";
 
 export const HUB_OWNER_ROUTE_PREFIX = "/api/hub/owner";
 
@@ -81,6 +85,11 @@ export const HUB_OWNER_ROUTES = {
   credentialCopy: `${HUB_OWNER_ROUTE_PREFIX}/credentials/copy`,
   provisionApply: `${HUB_OWNER_ROUTE_PREFIX}/provision/apply`,
   provisionDismiss: `${HUB_OWNER_ROUTE_PREFIX}/provision/dismiss`,
+  signInRequests: `${HUB_OWNER_ROUTE_PREFIX}/sign-in/requests`,
+  signInAsk: `${HUB_OWNER_ROUTE_PREFIX}/sign-in/ask`,
+  signInAccept: `${HUB_OWNER_ROUTE_PREFIX}/sign-in/accept`,
+  signInDecline: `${HUB_OWNER_ROUTE_PREFIX}/sign-in/decline`,
+  signInCheck: `${HUB_OWNER_ROUTE_PREFIX}/sign-in/check`,
 } as const;
 
 type OwnerRoute = (typeof HUB_OWNER_ROUTES)[keyof typeof HUB_OWNER_ROUTES];
@@ -90,6 +99,7 @@ const OWNER_ROUTES: ReadonlySet<string> = new Set(Object.values(HUB_OWNER_ROUTES
 const READ_ROUTES: ReadonlySet<string> = new Set([
   HUB_OWNER_ROUTES.alerts,
   HUB_OWNER_ROUTES.heldMembers,
+  HUB_OWNER_ROUTES.signInRequests,
 ]);
 
 /** The routes an unlock can be asked for: every one that changes something. */
@@ -104,6 +114,7 @@ const HUB_ONLY: ReadonlySet<string> = new Set([
   HUB_OWNER_ROUTES.hubRole,
   HUB_OWNER_ROUTES.joinCode,
   HUB_OWNER_ROUTES.removeMember,
+  HUB_OWNER_ROUTES.signInAsk,
 ]);
 const EITHER: ReadonlySet<string> = new Set([
   HUB_OWNER_ROUTES.challenge,
@@ -164,6 +175,8 @@ export interface HubOwnerRouteOptions {
   readonly postures: OwnerPostureHost;
   readonly credentials: OwnerCredentialCopyService;
   readonly provision: SpokeProvisionService;
+  readonly signIn: SignInService;
+  readonly spokeSignIn: SpokeSignInService;
   readonly record: (change: HubMembershipChangedPayload) => void;
   readonly now?: () => number;
 }
@@ -501,6 +514,30 @@ export function createHubOwnerRouteHandler(
       case HUB_OWNER_ROUTES.provisionDismiss:
         return outcome(
           options.provision.dismiss(decodeHubProposalDecisionRequest(json()).offerId, principal),
+        );
+      case HUB_OWNER_ROUTES.signInRequests:
+        return options.spoke.status().membership === "none"
+          ? refused(403, "not-a-spoke")
+          : Response.json({ requests: options.spokeSignIn.view() }, { headers: NO_STORE });
+      case HUB_OWNER_ROUTES.signInAsk:
+        return outcome(await options.signIn.ask(decodeHubSignInAsk(json()), principal));
+      case HUB_OWNER_ROUTES.signInAccept:
+        return outcome(
+          options.spokeSignIn.accept(decodeHubSignInDecisionRequest(json()).requestId, principal),
+        );
+      case HUB_OWNER_ROUTES.signInDecline:
+        return outcome(
+          await options.spokeSignIn.decline(
+            decodeHubSignInDecisionRequest(json()).requestId,
+            principal,
+          ),
+        );
+      case HUB_OWNER_ROUTES.signInCheck:
+        return outcome(
+          await options.spokeSignIn.check(
+            decodeHubSignInDecisionRequest(json()).requestId,
+            principal,
+          ),
         );
     }
   }

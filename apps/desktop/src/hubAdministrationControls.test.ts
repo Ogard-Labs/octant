@@ -260,6 +260,34 @@ describe("hub administration controls", () => {
     expect(calls).toHaveLength(2);
   });
 
+  it("sends a sign-in request and its answers only with a body that names nothing but the kind and the request", async () => {
+    const { calls, runtime: controls } = runtime(() => Response.json({ status: "asked" }));
+    const memberId = "11111111-1111-4111-8111-111111111111";
+    const requestId = "22222222-2222-4222-8222-222222222222";
+
+    await sendHubAdministrationOperation(controls, "sign-in-ask", {
+      memberId,
+      kind: "claude-subscription",
+    });
+    await sendHubAdministrationOperation(controls, "sign-in-accept", { requestId });
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://127.0.0.1:4317/api/desktop/hub/sign-in/ask",
+      "http://127.0.0.1:4317/api/desktop/hub/sign-in/accept",
+    ]);
+
+    for (const [operation, body] of [
+      ["sign-in-ask", { memberId, kind: "claude-subscription", token: "x" }],
+      ["sign-in-ask", { memberId, kind: "openai-compatible" }],
+      ["sign-in-decline", { requestId, outcome: "signed-in" }],
+      ["sign-in-check", {}],
+    ] as const) {
+      expect(await sendHubAdministrationOperation(controls, operation, body)).toMatchObject({
+        status: 400,
+      });
+    }
+    expect(calls).toHaveLength(2);
+  });
+
   it("sends the wake switch and the hardware address only with their decoded bodies", async () => {
     const { calls, runtime: controls } = runtime(() => Response.json({ status: "changed" }));
 

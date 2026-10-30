@@ -13,6 +13,8 @@ import {
   decodeHubMirrorRequest,
   decodeHubOfferDelivery,
   decodeHubPushCopy,
+  decodeHubSignInDelivery,
+  decodeHubSignInOutcomeReport,
   decodeHubStandInHandback,
   decodeHubWakeCopy,
   decodeHubWakeNudge,
@@ -26,9 +28,11 @@ import { HUB_LINK_HEADER, HUB_PEER_KEY_HEADER, HubLinkVerifier } from "./hubLink
 import type { HubService } from "./hubService";
 import type { ProvisionService } from "./provisionService";
 import type { PushService } from "./pushService";
+import type { SignInService } from "./signInService";
 import type { SpokeLinkService } from "./spokeLinkService";
 import type { SpokeProvisionService } from "./spokeProvisionService";
 import type { SpokePushService } from "./spokePushService";
+import type { SpokeSignInService } from "./spokeSignInService";
 import type { SpokeWakeService } from "./spokeWakeService";
 import type { WakeService } from "./wakeService";
 
@@ -63,6 +67,10 @@ export const HUB_LINK_ROUTES = {
   provisionOffer: "/api/hub/provision-offer",
   /** A spoke asks the hub for the signed update feed document an offer mirrors. */
   provisionMirror: "/api/hub/provision-mirror",
+  /** The hub asks a spoke whose grant ticks Sign-in to sign in to a provider account; the spoke's person decides. */
+  signInRequest: "/api/hub/sign-in-request",
+  /** A spoke tells the hub one word about how a sign-in request ended. */
+  signInOutcome: "/api/hub/sign-in-outcome",
 } as const;
 
 type RouteValue = (typeof HUB_LINK_ROUTES)[keyof typeof HUB_LINK_ROUTES];
@@ -90,6 +98,8 @@ export interface HubLinkRouteOptions {
   readonly spokePush: SpokePushService;
   readonly provision: ProvisionService;
   readonly spokeProvision: SpokeProvisionService;
+  readonly signIn: SignInService;
+  readonly spokeSignIn: SpokeSignInService;
   readonly now?: () => number;
 }
 
@@ -313,6 +323,55 @@ export function createHubLinkRouteHandler(
             receipt.kind === "not-a-spoke" || receipt.kind === "hub-revoked" ? 401 : 403,
             receipt.kind,
           );
+    }
+
+    if (route === HUB_LINK_ROUTES.signInRequest) {
+      // Only the hub asks: a standby, a peer, and a guest are not the hub's key.
+      const authenticated = options.spoke.authenticateHub({
+        header,
+        method: request.method,
+        path: route,
+        body,
+      });
+      if (authenticated.status === "refused") return refused(401, authenticated.kind);
+      let delivery;
+      try {
+        delivery = decodeHubSignInDelivery(JSON.parse(body));
+      } catch {
+        // A field that could carry a code, an address, or a name never gets as far as a question.
+        return refused(400, "malformed");
+      }
+      const receipt = await options.spokeSignIn.receive(authenticated.principal.memberId, delivery);
+      return receipt.status === "asked"
+        ? Response.json(receipt, { status: 201, headers: NO_STORE })
+        : refused(
+            receipt.kind === "not-a-spoke" || receipt.kind === "hub-revoked" ? 401 : 403,
+            receipt.kind,
+          );
+    }
+
+    if (route === HUB_LINK_ROUTES.signInOutcome) {
+      const hubOn = options.hub.status().enabled;
+      if (!hubOn) return refused(403, "hub-role-off");
+      const verified = memberVerifier.verify({
+        header,
+        method: request.method,
+        path: route,
+        body,
+        recipientMemberId: options.hub.hubMemberId(),
+        publicKeyFor: (sender) => options.hub.memberKey(sender, presentedKey ?? undefined),
+      });
+      if (verified.status === "refused") return refused(401, verified.kind);
+      let report;
+      try {
+        report = decodeHubSignInOutcomeReport(JSON.parse(body));
+      } catch {
+        return refused(400, "malformed");
+      }
+      const receipt = options.signIn.receiveOutcome(verified.senderMemberId, report);
+      return receipt.status === "recorded"
+        ? Response.json(receipt, { headers: NO_STORE })
+        : refused(403, receipt.kind);
     }
 
     if (route === HUB_LINK_ROUTES.provisionMirror) {

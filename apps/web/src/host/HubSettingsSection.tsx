@@ -82,6 +82,10 @@ const GRANT_ITEM_COPY: Readonly<Record<HubGrantItem, { label: string; line: stri
     label: "Provision",
     line: "Offer settings as proposals that you apply here.",
   },
+  "sign-in": {
+    label: "Sign-in",
+    line: "Let the hub ask you to sign in to a provider account here. Nothing starts until you accept.",
+  },
   act: {
     label: "Act",
     line: "Act here as a paired device would, in the Projects you name. Approvals stay here.",
@@ -198,6 +202,45 @@ interface Reply {
   readonly body: unknown;
 }
 
+const SIGN_IN_KINDS: ReadonlyArray<{ readonly kind: string; readonly label: string }> = [
+  { kind: "claude-subscription", label: "Claude account" },
+  { kind: "codex-subscription", label: "Codex account" },
+];
+
+const signInKindLabel = (kind: string) =>
+  SIGN_IN_KINDS.find((entry) => entry.kind === kind)?.label ?? "account";
+
+/** Why a computer did not take a sign-in request, in the words the hub's person reads. */
+const SIGN_IN_REFUSAL_COPY: Readonly<Record<string, string>> = {
+  "hub-role-off": "The hub role is off.",
+  "unknown-member": "That computer is not a member of this hub.",
+  unreachable: "Octant could not reach that computer.",
+  "sign-in-not-granted": "That computer's person did not allow sign-in requests.",
+  "unknown-kind": "That computer has no such account to sign in to.",
+  "already-signed-in": "That account is already signed in there.",
+  "already-asked": "That computer already has a request for this account.",
+  "rate-limited": "That computer has had enough requests this hour. Try again later.",
+  "answer-refused": "That computer did not take the request.",
+};
+
+/** What the hub shows beside a member about its last sign-in request: one word. */
+function signInResultText(result: string): string {
+  switch (result) {
+    case "asked":
+      return "waiting for its person";
+    case "signed-in":
+      return "signed in";
+    case "declined":
+      return "declined";
+    case "expired":
+      return "expired";
+    case "failed":
+      return "failed";
+    default:
+      return SIGN_IN_REFUSAL_COPY[result.replace(/^refused:/, "")] ?? "not taken";
+  }
+}
+
 interface Member {
   readonly memberId: string;
   readonly name: string;
@@ -223,6 +266,7 @@ interface HubStatus {
   readonly push?: PushView;
   readonly directPush?: DirectPushView;
   readonly provision?: ProvisionView;
+  readonly signIn?: SignInView;
   readonly link?: {
     readonly membership: "member" | "removed";
     readonly hubName: string;
@@ -281,6 +325,30 @@ interface ProvisionView {
       readonly offerId: string;
       readonly offer: ProposalOffer;
       readonly expiresAt: string;
+    }>;
+  };
+}
+
+/**
+ * Hub-started sign-in as this window sees it: the hub's last request to each
+ * member with its one result word, and the requests this computer's person has
+ * yet to answer. The command to run is shown only here, after Accept.
+ */
+interface SignInView {
+  readonly hub: ReadonlyArray<{
+    readonly memberId: string;
+    readonly kind: string;
+    /** `asked`, an outcome word, or `refused:<reason>`. */
+    readonly result: string;
+  }>;
+  readonly spoke: {
+    readonly accepting: boolean;
+    readonly requests: ReadonlyArray<{
+      readonly requestId: string;
+      readonly kind: string;
+      readonly state: "asked" | "accepted";
+      readonly expiresAt: string;
+      readonly guidance?: string;
     }>;
   };
 }
@@ -381,6 +449,7 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
   const [, setTick] = useState(0);
   const [pending, setPending] = useState<ReadonlyArray<RemotePendingPairingRequest>>([]);
   const [removing, setRemoving] = useState<Member>();
+  const [askingMemberId, setAskingMemberId] = useState<string>();
   const [leaving, setLeaving] = useState(false);
   const [promoting, setPromoting] = useState(false);
   /** The standby order being edited; absent while the window shows the order the hub holds. */
@@ -784,6 +853,63 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
     );
     if (reply !== undefined)
       setMessage("Offer withdrawn. Proposals already held stay with their person.");
+    await refresh();
+  };
+
+  const askToSignIn = async (member: Member, kind: string) => {
+    setAskingMemberId(undefined);
+    const reply = await act(
+      "sign-in-ask",
+      { memberId: member.memberId, kind },
+      "asked",
+      `Octant could not ask ${member.name} to sign in.`,
+      SIGN_IN_REFUSAL_COPY,
+    );
+    if (reply !== undefined) {
+      setMessage(
+        `Asked ${member.name} to sign in to its ${signInKindLabel(kind)}. Its person decides, and finishes the sign-in on that computer.`,
+      );
+    }
+    await refresh();
+  };
+
+  const answerSignIn = async (
+    operation: "sign-in-accept" | "sign-in-decline" | "sign-in-check",
+    requestId: string,
+  ) => {
+    if (operation !== "sign-in-check") {
+      await act(
+        operation,
+        { requestId },
+        operation === "sign-in-accept" ? "accepted" : "declined",
+        "Octant could not answer that request.",
+        SIGN_IN_REFUSAL_COPY,
+      );
+      await refresh();
+      return;
+    }
+    // A check can answer "not yet", which is not a failure, so it reads its own reply.
+    setMessage(undefined);
+    setBusy(true);
+    try {
+      const reply = await request(operation, { requestId });
+      const answer = field(reply.body, "status");
+      if (reply.status === 200 && answer === "ended") {
+        setMessage(
+          field(reply.body, "outcome") === "signed-in"
+            ? "Signed in. The hub is told the result."
+            : "Octant could not read that sign-in. The hub is told it failed.",
+        );
+      } else if (reply.status === 200 && answer === "pending") {
+        setMessage("Not signed in yet. Finish the sign-in in the terminal, then check again.");
+      } else {
+        setMessage(refusalText(reply, "Octant could not check that sign-in."));
+      }
+    } catch (error) {
+      setMessage(failureMessage(error, "Octant could not check that sign-in."));
+    } finally {
+      setBusy(false);
+    }
     await refresh();
   };
 
@@ -1214,9 +1340,43 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
                   <p className="setrow-hint">
                     {member.role}
                     {member.owner ? " · owner" : ""}
+                    {(status.signIn?.hub ?? [])
+                      .filter((entry) => entry.memberId === member.memberId)
+                      .map((entry) => (
+                        <span key={entry.kind}>
+                          {` · ${signInKindLabel(entry.kind)}: ${signInResultText(entry.result)}`}
+                        </span>
+                      ))}
                   </p>
                   {member.role === "hub" ? null : (
                     <div className="setrow-control">
+                      {member.role !== "spoke" &&
+                      member.role !== "standby-hub" ? null : askingMemberId === member.memberId ? (
+                        SIGN_IN_KINDS.map((entry) => (
+                          <OctantButton
+                            aria-label={`Ask ${member.name} to sign in to its ${entry.label}`}
+                            disabled={busy}
+                            key={entry.kind}
+                            onClick={() => void askToSignIn(member, entry.kind)}
+                            size="sm"
+                            type="button"
+                            variant="secondary"
+                          >
+                            {entry.label}
+                          </OctantButton>
+                        ))
+                      ) : (
+                        <OctantButton
+                          aria-label={`Ask ${member.name} to sign in`}
+                          disabled={busy}
+                          onClick={() => setAskingMemberId(member.memberId)}
+                          size="sm"
+                          type="button"
+                          variant="secondary"
+                        >
+                          Ask to sign in
+                        </OctantButton>
+                      )}
                       <OctantButton
                         aria-label={`Remove ${member.name}`}
                         onClick={() => setRemoving(member)}
@@ -1762,6 +1922,59 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
                 </ul>
               )}
               {grantEditor(linked.grant, "Save the grant")}
+              {status?.signIn?.spoke.accepting !== true ? null : (
+                <div className="settings-panel__stack">
+                  <h4 className="settings-section-line">Sign-in requests from the hub</h4>
+                  {status.signIn.spoke.requests.length === 0 ? (
+                    <SettingsState kind="empty">The hub has asked for nothing.</SettingsState>
+                  ) : (
+                    <ul aria-label="Sign-in requests from the hub" className="setgroup">
+                      {status.signIn.spoke.requests.map((request) => (
+                        <li className="setrow" key={request.requestId}>
+                          <span className="setrow-label">
+                            {`The hub asks you to sign in to your ${signInKindLabel(request.kind)} on this computer`}
+                          </span>
+                          <p className="setrow-hint">
+                            {request.state === "asked"
+                              ? `Nothing starts until you accept. Lapses ${request.expiresAt}.`
+                              : `${request.guidance ?? ""} Lapses ${request.expiresAt}.`}
+                          </p>
+                          {request.state === "asked" ? (
+                            <OctantButton
+                              disabled={busy}
+                              onClick={() => void answerSignIn("sign-in-accept", request.requestId)}
+                              size="sm"
+                              type="button"
+                              variant="default"
+                            >
+                              Accept
+                            </OctantButton>
+                          ) : (
+                            <OctantButton
+                              disabled={busy}
+                              onClick={() => void answerSignIn("sign-in-check", request.requestId)}
+                              size="sm"
+                              type="button"
+                              variant="default"
+                            >
+                              Check sign-in
+                            </OctantButton>
+                          )}
+                          <OctantButton
+                            disabled={busy}
+                            onClick={() => void answerSignIn("sign-in-decline", request.requestId)}
+                            size="sm"
+                            type="button"
+                            variant="secondary"
+                          >
+                            Decline
+                          </OctantButton>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
               {status?.provision?.spoke.offering !== true ? null : (
                 <div className="settings-panel__stack">
                   <h4 className="settings-section-line">Offers from the hub</h4>
@@ -2019,6 +2232,7 @@ function readStatus(body: unknown): HubStatus | undefined {
   const push = readPush(field(body, "push"));
   const directPush = readDirectPush(field(body, "directPush"));
   const provision = readProvision(field(body, "provision"));
+  const signIn = readSignIn(field(body, "signIn"));
   if (
     (membership === "member" || membership === "removed") &&
     typeof hubName === "string" &&
@@ -2045,6 +2259,7 @@ function readStatus(body: unknown): HubStatus | undefined {
       ...(push === undefined ? {} : { push }),
       ...(directPush === undefined ? {} : { directPush }),
       ...(provision === undefined ? {} : { provision }),
+      ...(signIn === undefined ? {} : { signIn }),
       link: {
         membership,
         hubName,
@@ -2076,6 +2291,7 @@ function readStatus(body: unknown): HubStatus | undefined {
     ...(push === undefined ? {} : { push }),
     ...(directPush === undefined ? {} : { directPush }),
     ...(provision === undefined ? {} : { provision }),
+    ...(signIn === undefined ? {} : { signIn }),
   };
 }
 
@@ -2098,6 +2314,48 @@ function readDirectPush(value: unknown): DirectPushView | undefined {
     ios: ios === "stored",
     android: android === "stored",
   };
+}
+
+function readSignIn(value: unknown): SignInView | undefined {
+  const rawHub = field(value, "hub");
+  const accepting = field(field(value, "spoke"), "accepting");
+  const rawRequests = field(field(value, "spoke"), "requests");
+  if (!Array.isArray(rawHub) || typeof accepting !== "boolean" || !Array.isArray(rawRequests)) {
+    return undefined;
+  }
+  const hub = rawHub.flatMap((entry: unknown) => {
+    const memberId = field(entry, "memberId");
+    const kind = field(entry, "kind");
+    const result = field(entry, "result");
+    const refused = field(result, "refused");
+    const word =
+      typeof result === "string" ? result : typeof refused === "string" ? `refused:${refused}` : "";
+    return typeof memberId === "string" && typeof kind === "string" && word !== ""
+      ? [{ memberId, kind, result: word }]
+      : [];
+  });
+  const requests = rawRequests.flatMap((entry: unknown) => {
+    const requestId = field(entry, "requestId");
+    const kind = field(entry, "kind");
+    const state = field(entry, "state");
+    const expiresAt = field(entry, "expiresAt");
+    const guidance = field(entry, "guidance");
+    return typeof requestId === "string" &&
+      typeof kind === "string" &&
+      (state === "asked" || state === "accepted") &&
+      typeof expiresAt === "string"
+      ? [
+          {
+            requestId,
+            kind,
+            state: state === "accepted" ? ("accepted" as const) : ("asked" as const),
+            expiresAt,
+            ...(typeof guidance === "string" ? { guidance } : {}),
+          },
+        ]
+      : [];
+  });
+  return { hub, spoke: { accepting, requests } };
 }
 
 function readProvision(value: unknown): ProvisionView | undefined {

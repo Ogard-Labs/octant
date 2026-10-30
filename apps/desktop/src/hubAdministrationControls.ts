@@ -24,6 +24,8 @@ import {
   decodeHubPromoteRequest,
   decodeHubProposalDecisionRequest,
   decodeHubProvisionSwitchRequest,
+  decodeHubSignInAsk,
+  decodeHubSignInDecisionRequest,
   decodeHubPushSwitchRequest,
   decodeHubStandbyOrderRequest,
   decodeHubWakeHardwareAddressRequest,
@@ -202,6 +204,26 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     method: "POST",
     path: "/api/desktop/hub/provision/auto-apply",
     decodeBody: decodeHubAutoApplyRequest,
+  },
+  "sign-in-ask": {
+    method: "POST",
+    path: "/api/desktop/hub/sign-in/ask",
+    decodeBody: decodeHubSignInAsk,
+  },
+  "sign-in-accept": {
+    method: "POST",
+    path: "/api/desktop/hub/sign-in/accept",
+    decodeBody: decodeHubSignInDecisionRequest,
+  },
+  "sign-in-decline": {
+    method: "POST",
+    path: "/api/desktop/hub/sign-in/decline",
+    decodeBody: decodeHubSignInDecisionRequest,
+  },
+  "sign-in-check": {
+    method: "POST",
+    path: "/api/desktop/hub/sign-in/check",
+    decodeBody: decodeHubSignInDecisionRequest,
   },
 } as const satisfies Readonly<Record<string, HubAdministrationRoute>>;
 

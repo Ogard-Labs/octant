@@ -611,6 +611,23 @@ export function authorizeHubRequest(input: {
   return { status: "allowed" };
 }
 
+/**
+ * The origin a browser reaches a member's own web app at: its listener on its
+ * Tailscale name, which the host's Tailscale certificate makes a browser trust.
+ * A member that lists no `.ts.net` name serves its browser no web app (a LAN
+ * address or a bare IP cannot carry that certificate), and a guest serves none.
+ * The origin comes from the signed roster entry alone, so the hub adds no
+ * claim of its own and never sits in the path.
+ */
+export function rosterMemberWebOrigin(member: RosterMember): string | undefined {
+  if (member.role === "guest") return undefined;
+  const name = member.privateNames
+    .map((candidate) => candidate.trim().toLowerCase())
+    .find((candidate) => /^[a-z0-9-]+(\.[a-z0-9-]+)*\.ts\.net$/.test(candidate));
+  if (name === undefined) return undefined;
+  return `https://${name}${member.listenerPort === undefined ? "" : `:${member.listenerPort}`}`;
+}
+
 /** The hub grant a spoke starts with: the roster, Introduce, and Owners ticked, the rest off. */
 export function defaultHubGrant(): HubGrant {
   return { items: ["roster", "introduce", "owners"], actProjects: [] };
