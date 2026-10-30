@@ -592,23 +592,7 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByLabelText("Follow-up message")).toHaveValue("check tests too");
   });
 
-  it("does not offer @Browser in a thread whose provider cannot carry the tool", async () => {
-    const user = userEvent.setup();
-    const incapable = { ...providerGroup(), appManagedTools: "unsupported" } as never;
-    render(
-      <CodeThreadWorkspace
-        controller={controller()}
-        providerGroups={[incapable]}
-        threadId={threadId}
-        browserAvailable
-      />,
-    );
-
-    await user.type(screen.getByLabelText("Follow-up message"), "@b");
-    expect(screen.queryByRole("option", { name: /Browser/ })).not.toBeInTheDocument();
-  });
-
-  it("offers @Browser when the thread's provider can carry app-managed tools", async () => {
+  it("does not offer a Browser chip even when the provider can carry the tool", async () => {
     const user = userEvent.setup();
     const capable = { ...providerGroup(), appManagedTools: "supported" } as never;
     render(
@@ -616,12 +600,11 @@ describe("CodeThreadWorkspace", () => {
         controller={controller()}
         providerGroups={[capable]}
         threadId={threadId}
-        browserAvailable
       />,
     );
 
     await user.type(screen.getByLabelText("Follow-up message"), "@b");
-    expect(await screen.findByRole("option", { name: /Browser/ })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /Browser/ })).not.toBeInTheDocument();
   });
 
   it("exposes Stop turn while the turn runs and hides it when idle", async () => {

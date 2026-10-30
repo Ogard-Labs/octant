@@ -4591,18 +4591,11 @@ export class ChatService {
         : { selections: [], entries: [], toolSet: unattachedComputer };
     }
     const computer = selections.filter(isComputerUseSelection);
-    const browser = selections.filter(isBrowserUseSelection);
-    // Browser use is a Work and Code capability; a Chat thread never carries
-    // it, so the selection is refused rather than silently dropped.
-    if (browser.length > 0) {
-      throw new ChatServiceError({
-        category: "unsupported",
-        message: "Browser use is not available in Chat.",
-      });
-    }
     // Computer use is a host-owned app-managed tool. Its structured selection
     // is retained with the turn but does not enter the generic extension
-    // resolver (which only knows installed packages).
+    // resolver (which only knows installed packages). A Browser selection from
+    // a draft written before Browser became an offered tool is kept with the
+    // turn and ignored: Chat never carries Browser.
     const other = selections.filter(
       (selection) => !isComputerUseSelection(selection) && !isBrowserUseSelection(selection),
     );

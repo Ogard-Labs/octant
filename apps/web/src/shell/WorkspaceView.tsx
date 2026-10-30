@@ -1167,7 +1167,6 @@ function renderCodeTab(
           ? {}
           : { appleToolchainClient: props.appleToolchainClient })}
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
-        {...(browserAutomationClient === undefined ? {} : { browserAvailable: true })}
         controller={codeController}
         holdAccessNotice={props.codeControllers.holdAccessNotice}
         onOpenCodeThread={props.onOpenCodeThread}
@@ -1519,7 +1518,6 @@ function renderNonCodeTab(
           {...(props.extensionClient === undefined
             ? {}
             : { extensionClient: props.extensionClient })}
-          browserAvailable={props.browserAutomationClient !== undefined}
           {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
           {...(props.githubClient === undefined ? {} : { githubClient: props.githubClient })}
           {...(props.githubCloneClient === undefined
@@ -1840,7 +1838,6 @@ function renderNonCodeTab(
                 {...(props.extensionClient === undefined
                   ? {}
                   : { extensionClient: props.extensionClient })}
-                browserAvailable={props.browserAutomationClient !== undefined}
                 {...(props.onOpenCanvasReference === undefined
                   ? {}
                   : { onOpenCanvas: props.onOpenCanvasReference })}

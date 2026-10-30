@@ -433,10 +433,13 @@ session and exact offered catalogue, and reports app tools only with a process
 receipt attesting that external MCP, plugins, and skills cannot enter the
 runtime; see [Provider runtimes](design/provider-runtimes.md#local-server-provider-adapter).
 
-Browser and Computer are granted differently. Browser is a Work and Code
-capability; Chat never offers it. It is offered on every Work or Code turn
-whose provider carries app-managed tools, `@Browser` only adds selection
-guidance, the first effect for an origin asks inline, and Plan mode refuses
+Browser and Computer are granted differently. Browser is a tool, not a
+mention: the host offers `octant_browser` on every Work or Code turn whose
+provider carries app-managed tools, with one host line of 40 tokens or fewer,
+and the agent uses it when the request needs it. No composer selection exists,
+and neither the definition nor the message text grants anything; a Browser
+selection left in an older draft or queued message is ignored. Chat never
+offers it. The first effect for an origin asks inline, and Plan mode refuses
 effects. Computer is the bundled plugin plus a per-send `@Computer`
 selection: only that send carries the full `octant_computer` family. A turn
 without the selection carries the refusal-only definition described under
@@ -2967,9 +2970,9 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   unable). ACP agents
   read `not-reported` and `none`: their history is the agent's own and opaque
   to Octant. Settings › Providers & Models shows these facts on each runtime
-  card (Octant tools, Activity, Resume, Context window, Compaction), and the
-  composers offer neither `@Browser` nor `@Computer` for a selection whose
-  runtime does not carry Octant's tools. Bounded
+  card (Octant tools, Activity, Resume, Context window, Compaction). A runtime
+  that does not carry Octant's tools is offered no Browser, and the composers
+  offer no `@Computer` for it. Bounded
   provider subprocesses run under a deny-default profile: Seatbelt via
   `sandbox-exec` on macOS, Bubblewrap (`bwrap`) on Linux. Missing the backend
   selected for the host platform fails closed as incompatible.

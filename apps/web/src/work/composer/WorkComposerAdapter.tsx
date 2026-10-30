@@ -6,14 +6,7 @@ import {
   NewTaskDraftScopeContext,
   useNewTaskPrompt,
 } from "../../composer/useNewTaskPrompt";
-import {
-  ApplicationMentionTypeahead,
-  BrowserUseMention,
-  ComputerUseMention,
-  useApplicationMentionTypeahead,
-  useBrowserUseMention,
-  useComputerUseMention,
-} from "../../computerUse/ComputerUseMention";
+import { ComputerUseMention, useComputerUseMention } from "../../computerUse/ComputerUseMention";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import {
   unattachedCapabilityMentionCopy,
@@ -106,7 +99,6 @@ export interface WorkComposerAdapterProps {
     modelOptionValues?: ProviderModelOptionValues,
   ) => boolean | void | Promise<boolean | void>;
   readonly extensionClient?: ExtensionClient;
-  readonly browserAvailable?: boolean;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly onAttachFolder?: () => void;
@@ -175,14 +167,6 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     ...(selectedFamily === undefined ? {} : { providerFamily: selectedFamily }),
     ...(storedExtensionReceipts.length === 0 ? {} : { initialReceipts: storedExtensionReceipts }),
   });
-  const browser = useBrowserUseMention({
-    textarea: () => textareaRef.current,
-    draft: prompt,
-    onDraftChange: setPrompt,
-    scopeKey: "work-draft",
-    available: props.browserAvailable === true && runtimeCarriesTools,
-    onChoose: () => void extensionDraft.resolveReference("@browser"),
-  });
   const slash = useComposerSlashCommands({
     textarea: () => textareaRef.current,
     draft: prompt,
@@ -193,15 +177,8 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     draft: prompt,
     onDraftChange: setPrompt,
     onResolveExtensionReference: extensionDraft.resolveReference,
-    apps: [
-      { kind: "computer", controller: computer },
-      { kind: "browser", controller: browser },
-    ],
+    apps: [{ kind: "computer", controller: computer }],
   });
-  const appMentions = useApplicationMentionTypeahead([
-    { controller: computer, kind: "computer" },
-    { controller: browser, kind: "browser" },
-  ]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const appliedPromptRevision = useRef<number | undefined>(undefined);
   const promptRequest = props.promptRequest;
@@ -354,9 +331,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (atMenu.handleKeyDown(event)) return;
-    if (appMentions.handleKeyDown(event)) return;
     if (computer.handleKeyDown(event)) return;
-    if (browser.handleKeyDown(event)) return;
     if (slash.handleKeyDown(event)) return;
     if (mention.handleKeyDown(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
@@ -442,7 +417,6 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
             chips={
               <>
                 <ComputerUseMention controller={computer} surface="chips" />
-                <BrowserUseMention controller={browser} surface="chips" />
                 {extensionDraft.receipts.length > 0 ? (
                   <ul aria-label="Selected extensions" className="composer-chips">
                     {extensionDraft.receipts.map((receipt) => (
@@ -476,32 +450,24 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
               <OctantTextarea
                 aria-label="First message"
                 aria-autocomplete="list"
-                aria-expanded={atMenu.open || computer.open || browser.open || slash.open}
+                aria-expanded={atMenu.open || computer.open || slash.open}
                 aria-controls={
                   atMenu.open
                     ? atMenu.listId
-                    : appMentions.open.length > 1
-                      ? appMentions.listId
-                      : computer.open
-                        ? computer.listId
-                        : browser.open
-                          ? browser.listId
-                          : slash.open
-                            ? slash.listId
-                            : undefined
+                    : computer.open
+                      ? computer.listId
+                      : slash.open
+                        ? slash.listId
+                        : undefined
                 }
                 aria-activedescendant={
                   atMenu.active !== undefined
                     ? `${atMenu.listId}-${atMenu.active.id}`
-                    : appMentions.open.length > 1
-                      ? `${appMentions.listId}-${appMentions.open[appMentions.active]?.kind ?? ""}`
-                      : computer.open
-                        ? `${computer.listId}-computer`
-                        : browser.open
-                          ? `${browser.listId}-browser`
-                          : slash.active === undefined
-                            ? undefined
-                            : `${slash.listId}-${slash.active.id}`
+                    : computer.open
+                      ? `${computer.listId}-computer`
+                      : slash.active === undefined
+                        ? undefined
+                        : `${slash.listId}-${slash.active.id}`
                 }
                 autoFocus
                 className="composer-input"
@@ -509,14 +475,12 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                 onChange={(event) => {
                   setPrompt(event.target.value);
                   computer.sync(event.target.value, event.currentTarget.selectionStart);
-                  browser.sync(event.target.value, event.currentTarget.selectionStart);
                   slash.sync(event.target.value, event.currentTarget.selectionStart);
                   atMenu.sync(event.target.value, event.currentTarget.selectionStart);
                   mention.sync(event.target.value, event.currentTarget.selectionStart);
                 }}
                 onClick={(event) => {
                   mention.sync(event.currentTarget.value, event.currentTarget.selectionStart);
-                  browser.sync(event.currentTarget.value, event.currentTarget.selectionStart);
                   slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
                   atMenu.sync(event.currentTarget.value, event.currentTarget.selectionStart);
                 }}
@@ -535,12 +499,8 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
             typeahead={
               atMenu.open ? (
                 <ComposerAtTypeahead controller={atMenu} />
-              ) : appMentions.open.length > 1 ? (
-                <ApplicationMentionTypeahead typeahead={appMentions} />
               ) : computer.open ? (
                 <ComputerUseMention controller={computer} surface="typeahead" />
-              ) : browser.open ? (
-                <BrowserUseMention controller={browser} surface="typeahead" />
               ) : slash.open ? (
                 <ComposerSlashTypeahead controller={slash} />
               ) : mention.open ? (

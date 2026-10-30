@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BROWSER_USE_PLUGIN,
-  BROWSER_SELECTION_GUIDANCE,
+  BROWSER_TOOL_HOST_LINE,
   browserUseSelection,
   isBrowserUseSelection,
   validateBrowserUseSelection,
@@ -13,7 +13,6 @@ describe("Browser use selection", () => {
     expect(BROWSER_USE_PLUGIN.slug).toBe("browser");
     expect(isBrowserUseSelection(selection)).toBe(true);
     expect(validateBrowserUseSelection(selection)).toBe(true);
-    expect(BROWSER_SELECTION_GUIDANCE).toContain("octant_browser");
     if (selection.kind !== "plugin") throw new Error("expected plugin selection");
     expect(
       validateBrowserUseSelection({
@@ -21,5 +20,10 @@ describe("Browser use selection", () => {
         packageId: "00000000-0000-0000-0000-000000000000" as never,
       }),
     ).toBe(false);
+  });
+
+  it("keeps the Browser host line within 40 tokens", () => {
+    expect(BROWSER_TOOL_HOST_LINE).toContain("octant_browser");
+    expect(Math.ceil(BROWSER_TOOL_HOST_LINE.length / 4)).toBeLessThanOrEqual(40);
   });
 });

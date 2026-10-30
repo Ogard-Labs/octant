@@ -73,11 +73,7 @@ import {
   type ThreadWorkingDirectory,
   type WindowId,
 } from "@octant/contracts";
-import {
-  BROWSER_SELECTION_GUIDANCE,
-  isBrowserUseSelection,
-  validateBrowserUseSelection,
-} from "@octant/plugin-host/browser-use";
+import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import type { ProviderDriver, ProviderSessionHandle } from "@octant/provider-sdk/driver";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import type {
@@ -968,18 +964,6 @@ export class WorkTurnService {
       createdAt: this.#clock(),
       safeInputBudget: this.#safeInputBudgetTokens,
       contributions: [
-        ...(command.extensionSelections?.some(isBrowserUseSelection) === true
-          ? [
-              {
-                text: BROWSER_SELECTION_GUIDANCE,
-                sourceKind: "instruction",
-                referenceId: "octant-browser-guidance",
-                category: "octant-policy",
-                posture: "required",
-                block: { kind: "instructions", text: BROWSER_SELECTION_GUIDANCE },
-              } as const,
-            ]
-          : []),
         ...harnessContext.map(
           (block, index): WorkTurnContextContribution => ({
             text: block.text,
@@ -1472,29 +1456,6 @@ export class WorkTurnService {
           "Computer use is unavailable for this provider or task. Check Computer use in Settings.",
       });
       return;
-    }
-    const browserSelections =
-      input.command.extensionSelections?.filter(isBrowserUseSelection) ?? [];
-    if (
-      browserSelections.length > 1 ||
-      browserSelections.some((selection) => !validateBrowserUseSelection(selection))
-    ) {
-      this.#refuseTurn(input.command, {
-        category: "unavailable",
-        message: "Browser selection is invalid or stale.",
-      });
-      return;
-    }
-    if (browserSelections.length > 0) {
-      if (
-        !appManagedTools?.definitions.some((definition) => definition.name === "octant_browser")
-      ) {
-        this.#refuseTurn(input.command, {
-          category: "unsupported",
-          message: "The selected Browser is unavailable for this provider or task.",
-        });
-        return;
-      }
     }
     // Only a thread whose person chose the runtime's artifact tool is offered
     // it; every other thread of the account keeps Canvas and its launch keeps

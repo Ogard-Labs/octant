@@ -56,7 +56,6 @@ import {
 } from "@octant/contracts";
 import type { ExtensionSnapshot } from "@octant/contracts/extension-rpc";
 import { browserUseSelection } from "@octant/plugin-host/browser-use";
-import { decodeExtensionSelection } from "@octant/contracts/extensions";
 import {
   decodeContentSha256,
   decodePreviewContextSelectionId,
@@ -1233,36 +1232,31 @@ function genericChatStream(text: string): Response {
 }
 
 describe("ChatService", () => {
-  it("refuses a Browser selection in Chat even when the host could expose a Browser tool", async () => {
-    const browserWindow = decodeWindowId("84000000-0000-4000-8000-000000000010");
-    const { service, fakeDriver } = openFixture({
-      resolveAppManagedTools: () => ({
-        definitions: [{ name: "octant_browser", inputSchema: { type: "object", properties: {} } }],
-        execute: async () => ({ result: {} }),
-      }),
-    });
+  it("ignores a Browser selection from an older draft and sends the Chat turn without Browser", async () => {
+    const window = decodeWindowId("84000000-0000-4000-8000-000000000010");
+    const { service, fakeDriver } = openFixture();
     const created = await service.execute({
       kind: "create-chat-thread",
       hostId: "local",
       title: "Browser in Chat",
     });
     if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
-    await expect(
-      service.execute(
-        {
-          kind: "send-chat-turn",
-          threadId: created.thread.id,
-          expectedVersion: created.thread.version,
-          prompt: "Open the docs",
-          extensionSelections: [browserUseSelection("chat-browser-guidance")],
-        },
-        { windowId: browserWindow },
-      ),
-    ).rejects.toMatchObject({ failure: { category: "unsupported" } });
-    expect(fakeDriver.acquireInputs).toHaveLength(0);
-    expect(service.read(created.thread.id).turns).toHaveLength(0);
+    const sent = await service.execute(
+      {
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Open the docs",
+        extensionSelections: [browserUseSelection("chat-browser-guidance")],
+      },
+      { windowId: window },
+    );
+    expect(sent).toMatchObject({ kind: "turn-created" });
+    expect(fakeDriver.sentTurns[0]?.tools.map(({ name }) => name) ?? []).not.toContain(
+      "octant_browser",
+    );
+    expect(JSON.stringify(fakeDriver.sentTurns[0]?.context)).not.toContain("octant_browser");
   });
-
   it("tells the model to deliver kept work as a Canvas only when Chat offers the Canvas tool", async () => {
     const window = decodeWindowId("84000000-0000-4000-8000-000000000013");
     const { service, fakeDriver } = openFixture({
@@ -1438,90 +1432,6 @@ describe("ChatService", () => {
     expect(sent).toMatchObject({ kind: "turn-created" });
     expect(unattachedCalls).toHaveLength(1);
     expect(fakeDriver.sentTurns[0]?.tools.map(({ name }) => name)).toContain("octant_computer");
-  });
-
-  it("refuses an invalid Browser receipt before provider acquisition", async () => {
-    const browserWindow = decodeWindowId("84000000-0000-4000-8000-000000000011");
-    const { service, fakeDriver } = openFixture({
-      resolveAppManagedTools: () => ({
-        definitions: [{ name: "octant_browser", inputSchema: {} }],
-        execute: async () => ({ result: {} }),
-      }),
-    });
-    const created = await service.execute({
-      kind: "create-chat-thread",
-      hostId: "local",
-      title: "Invalid Browser guidance",
-    });
-    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
-    const selection = browserUseSelection("chat-invalid-browser");
-    await expect(
-      service.execute(
-        {
-          kind: "send-chat-turn",
-          threadId: created.thread.id,
-          expectedVersion: created.thread.version,
-          prompt: "Open the docs",
-          extensionSelections: [
-            decodeExtensionSelection({
-              ...selection,
-              catalogEpoch: `sha256:${"f".repeat(64)}`,
-            }),
-          ],
-        },
-        { windowId: browserWindow },
-      ),
-    ).rejects.toMatchObject({ failure: { category: "unsupported" } });
-    expect(fakeDriver.acquireInputs).toHaveLength(0);
-  });
-
-  it("refuses Browser when the selected Chat provider exposes no Browser tool", async () => {
-    const browserWindow = decodeWindowId("84000000-0000-4000-8000-000000000012");
-    const { service, fakeDriver } = openFixture();
-    const created = await service.execute({
-      kind: "create-chat-thread",
-      hostId: "local",
-      title: "Unsupported Browser guidance",
-    });
-    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
-    await expect(
-      service.execute(
-        {
-          kind: "send-chat-turn",
-          threadId: created.thread.id,
-          expectedVersion: created.thread.version,
-          prompt: "Open the docs",
-          extensionSelections: [browserUseSelection("chat-unsupported-browser")],
-        },
-        { windowId: browserWindow },
-      ),
-    ).rejects.toMatchObject({ failure: { category: "unsupported" } });
-    expect(fakeDriver.acquireInputs).toHaveLength(0);
-  });
-
-  it("refuses a Browser-selected Chat turn without a window capability", async () => {
-    const { service, fakeDriver } = openFixture({
-      resolveAppManagedTools: () => ({
-        definitions: [{ name: "octant_browser", inputSchema: { type: "object", properties: {} } }],
-        execute: async () => ({ result: {} }),
-      }),
-    });
-    const created = await service.execute({
-      kind: "create-chat-thread",
-      hostId: "local",
-      title: "Missing Browser window",
-    });
-    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
-    await expect(
-      service.execute({
-        kind: "send-chat-turn",
-        threadId: created.thread.id,
-        expectedVersion: created.thread.version,
-        prompt: "Continue this",
-        extensionSelections: [browserUseSelection("chat-browser-without-window")],
-      }),
-    ).rejects.toMatchObject({ failure: { category: "unsupported" } });
-    expect(fakeDriver.acquireInputs).toHaveLength(0);
   });
 
   it("honors a pre-admitted thread id for linked Chat creation", async () => {

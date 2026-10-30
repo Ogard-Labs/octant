@@ -226,7 +226,6 @@ export interface DraftThreadWorkspaceProps {
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly extensionClient?: ExtensionClient;
-  readonly browserAvailable?: boolean;
   readonly creating?: boolean;
   readonly errorMessage?: string;
   readonly pendingMessage?: string;
@@ -795,9 +794,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           : { windowCapability: props.windowCapability })}
         {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
-        {...(props.browserAvailable === undefined
-          ? {}
-          : { browserAvailable: props.browserAvailable })}
         onCreateThread={(input) => {
           const submitted = {
             ...input,
@@ -869,9 +865,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           {...(props.extensionClient === undefined
             ? {}
             : { extensionClient: props.extensionClient })}
-          {...(props.browserAvailable === undefined
-            ? {}
-            : { browserAvailable: props.browserAvailable })}
           onCreateThread={(
             prompt,
             images,

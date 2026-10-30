@@ -29,7 +29,6 @@ export default function CodeWorkspaceTab(props: {
   readonly holdAccessNotice?: CodeThreadControllers["holdAccessNotice"];
   readonly appleToolchainClient?: AppleToolchainClient;
   readonly extensionClient?: ExtensionClient;
-  readonly browserAvailable?: boolean;
   readonly projectRemembersFullAccess?: boolean;
   readonly tab: CodeWorkspaceTab;
   readonly hostBridge?: OctantHostBridge;
@@ -142,9 +141,6 @@ export default function CodeWorkspaceTab(props: {
           ? {}
           : { appleToolchainClient: props.appleToolchainClient })}
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
-        {...(props.browserAvailable === undefined
-          ? {}
-          : { browserAvailable: props.browserAvailable })}
         {...(approvals === undefined ? {} : { approvals })}
         {...(props.projectRemembersFullAccess !== true ? {} : { projectRemembersFullAccess: true })}
         client={props.controller.client}
