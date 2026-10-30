@@ -423,9 +423,11 @@ describe("WindowChrome", () => {
       '.project-section[data-empty="true"] .project-section__header-actions',
     );
     expect(revealed).toContain("opacity: 1;");
-    expect(revealed).toContain("width: auto;");
-    // With Projects present the controls stay hover-only.
-    expect(cssRule(".project-section__header-actions")).toContain("opacity: 0;");
+    // With Projects present the controls stay hover-only, but keep their
+    // width while hidden, so the list tools beside them never slide.
+    const resting = cssRule(".project-section__header-actions");
+    expect(resting).toContain("opacity: 0;");
+    expect(resting).not.toContain("width: 0;");
     // The host is a select when there is more than one, and a select sets its
     // own size, so the tray's size has to name it too.
     expect(styles).toMatch(
