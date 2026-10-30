@@ -1,6 +1,5 @@
 import { threadCompactionSubject } from "../context/CompactionDivider";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
-import { ComputerUseMention, useComputerUseMention } from "../computerUse/ComputerUseMention";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import {
   decodeWorkAttachmentId,
@@ -25,7 +24,6 @@ import {
 import type { ProjectSummary, ProjectId } from "@octant/contracts/projects";
 import type { BrowserToolApproval } from "@octant/contracts/browser-automation-rpc";
 import {
-  pickerGroupCarriesAppManagedTools,
   prependEarlierTurns,
   refreshNewestTurns,
   startedConversationPickerGroups,
@@ -74,10 +72,6 @@ import { appendTranscript } from "../voice/appendTranscript";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import type { ImageGenerationProfileView } from "@octant/contracts";
 import { decodeBrowserThreadId, decodeImageGenerationScopeId } from "@octant/contracts";
-import {
-  unattachedCapabilityMentionCopy,
-  unattachedCapabilityMentions,
-} from "@octant/plugin-host/capability-mentions";
 import { BrowserCaptureList } from "../browser/BrowserCaptureList";
 import { GeneratedImageList } from "../image/GeneratedImageList";
 import { ImageGenerationAction } from "../image/ImageGenerationAction";
@@ -692,20 +686,6 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   const suggestionInput = useComposerSuggestionInput(prompt, (text) =>
     composerDraft.setDraft(text, text.length),
   );
-  const runtimeCarriesTools = pickerGroupCarriesAppManagedTools(
-    props.providerGroups ?? [],
-    thread === undefined
-      ? undefined
-      : { providerInstanceId: thread.providerInstanceId, modelId: thread.modelId },
-  );
-  const computer = useComputerUseMention({
-    textarea: () => textareaRef.current,
-    draft: prompt,
-    scopeKey: String(props.threadId),
-    providerCarriesTools: runtimeCarriesTools,
-    onDraftChange: (next, caret) => composerDraft.setDraft(next, caret),
-    onSelectionEdited: () => composerDraft.setDraft(composerDraft.text),
-  });
   const providerFamily: ExtensionProviderFamily | undefined = providerFamilyForThread(
     props.providerGroups,
     thread?.providerInstanceId,
@@ -713,7 +693,6 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
     mode: "work",
-    providerCarriesTools: runtimeCarriesTools,
     projectId: thread?.projectId ?? projectId ?? null,
     threadId: thread?.id ?? props.threadId,
     ...(providerFamily === undefined ? {} : { providerFamily }),
@@ -1495,20 +1474,11 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       ) {
         return false;
       }
-      const computerUseSelection = computer.selection;
       const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
         receipt.selection === undefined ? [] : [receipt.selection],
       );
       const promptText = composerDraft.text;
       if (promptText.length === 0) return false;
-      const unattachedMentions = unattachedCapabilityMentions(promptText, [
-        ...extensionSelections,
-        ...(computerUseSelection === undefined ? [] : [computerUseSelection]),
-      ]);
-      if (unattachedMentions.length > 0) {
-        setErrorMessage(unattachedCapabilityMentionCopy(unattachedMentions));
-        return false;
-      }
       const sendingThreadId = String(thread.id);
       const draftRevision = composerDraft.revisionFor(String(props.threadId));
       const attachmentIds: WorkAttachmentId[] = [];
@@ -1551,12 +1521,10 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
               threadMentionIds,
               fileMentionPaths,
               extensionSelections,
-              ...(computerUseSelection === undefined ? {} : { computerUseSelection }),
             },
             () => {
               if (currentThreadKeyRef.current !== sendingThreadId) return;
               images.consume(staged);
-              computer.consume(computerUseSelection);
               if (composerDraft.revisionFor(sendingThreadId) === draftRevision) {
                 composerDraft.clear();
                 threadMentions.clear();
@@ -1571,7 +1539,6 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         }
         const started = await props.turnClient.startFirstTurn({
           kind: "start-work-thread-turn",
-          ...(computerUseSelection === undefined ? {} : { computerUseSelection }),
           ...(extensionSelections.length === 0 ? {} : { extensionSelections }),
           requestId: decodeWorkTurnRequestId(globalThis.crypto.randomUUID()),
           threadId: props.threadId,
@@ -1611,7 +1578,6 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
             ? current
             : [...current, started.turn],
         );
-        computer.consume(computerUseSelection);
         textareaRef.current?.focus();
         return true;
       } catch (error) {
@@ -1627,8 +1593,6 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       }
     },
     [
-      computer.selection,
-      computer.consume,
       composerDraft,
       fileMentions,
       images,
@@ -1687,8 +1651,6 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       setCreating(false);
     }
   }, [
-    computer.selection,
-    computer.consume,
     extensionDraft,
     canSubmit,
     composerDraft,
@@ -1754,7 +1716,6 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (suggestionInput.takeOnTab(event)) return;
-    if (computer.handleKeyDown(event)) return;
     if (slash.handleKeyDown(event)) return;
     if (mention.handleKeyDown(event)) return;
     if (fileMentions.handleKeyDown(event)) return;
@@ -1770,7 +1731,6 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   }
 
   function syncMentions(value: string, caret: number | null) {
-    computer.sync(value, caret);
     slash.sync(value, caret);
     mention.sync(value, caret);
     fileMentions.sync(value, caret);
@@ -2202,7 +2162,6 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         className="thread-composer thread-column"
         chips={
           <>
-            <ComputerUseMention controller={computer} surface="chips" />
             {extensionDraft.receipts.length > 0 ? (
               <ul aria-label="Selected extensions" className="composer-chips">
                 {extensionDraft.receipts.map((receipt) => (
@@ -2248,14 +2207,10 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           <OctantTextarea
             aria-label="Work prompt"
             aria-autocomplete="list"
-            aria-expanded={computer.open || slash.open}
-            aria-controls={computer.open ? computer.listId : slash.open ? slash.listId : undefined}
+            aria-expanded={slash.open}
+            aria-controls={slash.open ? slash.listId : undefined}
             aria-activedescendant={
-              computer.open
-                ? `${computer.listId}-computer`
-                : slash.active === undefined
-                  ? undefined
-                  : `${slash.listId}-${slash.active.id}`
+              slash.active === undefined ? undefined : `${slash.listId}-${slash.active.id}`
             }
             autoFocus
             className="composer-input"
@@ -2289,9 +2244,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           />
         }
         typeahead={
-          computer.open ? (
-            <ComputerUseMention controller={computer} surface="typeahead" />
-          ) : slash.open ? (
+          slash.open ? (
             <ComposerSlashTypeahead controller={slash} />
           ) : (
             <>

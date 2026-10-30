@@ -1,7 +1,6 @@
 import { threadCompactionSubject } from "../context/CompactionDivider";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
 import type { ProviderModelOptionValues, ThreadDocumentDelivery } from "@octant/contracts";
-import { ComputerUseMention, useComputerUseMention } from "../computerUse/ComputerUseMention";
 import {
   MAX_CODE_THREAD_TITLE_LENGTH,
   type CodeApprovalId,
@@ -15,7 +14,6 @@ import {
   clampTurnAccessPosture,
   decidesCodeEffectsByApproval,
   harnessAsksUnderSessionFullAccess,
-  pickerGroupCarriesAppManagedTools,
   startedCodeThreadPickerGroups,
   type PickerGroup,
 } from "@octant/domain";
@@ -130,10 +128,6 @@ import {
   useComposerSlashCommands,
 } from "../composer/useComposerSlashCommands";
 import { useComposerSuggestionInput } from "../composer/useComposerSuggestionInput";
-import {
-  unattachedCapabilityMentionCopy,
-  unattachedCapabilityMentions,
-} from "@octant/plugin-host/capability-mentions";
 
 export type CodeAttachmentClient = Pick<
   CodeClient,
@@ -298,26 +292,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // an acknowledged message leaves the composer, so an async mention lookup cannot
   // erase a newer draft typed while that lookup is pending.
   const draftRevisionRef = useRef(0);
-  const runtimeCarriesTools = pickerGroupCarriesAppManagedTools(
-    props.providerGroups ?? [],
-    view === undefined
-      ? undefined
-      : { providerInstanceId: view.thread.providerInstanceId, modelId: view.thread.modelId },
-  );
-  const computer = useComputerUseMention({
-    textarea: () => textareaRef.current,
-    draft,
-    scopeKey: String(props.threadId),
-    providerCarriesTools: runtimeCarriesTools,
-    onDraftChange: (next) => {
-      draftRevisionRef.current += 1;
-      setDraft(next);
-      props.controller.setPendingDraft?.(next);
-    },
-    onSelectionEdited: () => {
-      draftRevisionRef.current += 1;
-    },
-  });
   const providerFamily: ExtensionProviderFamily | undefined = providerFamilyForThread(
     props.providerGroups,
     view?.thread.providerInstanceId,
@@ -325,7 +299,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
     mode: "code",
-    providerCarriesTools: runtimeCarriesTools,
     projectId: view?.thread.projectId ?? null,
     threadId: view === undefined ? props.threadId : view.thread.id,
     ...(providerFamily === undefined ? {} : { providerFamily }),
@@ -586,7 +559,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   });
 
   function syncMentions(value: string, caret: number | null) {
-    computer.sync(value, caret);
     slash.sync(value, caret);
     mention.sync(value, caret);
     pathMentions.sync(value, caret);
@@ -840,18 +812,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   async function submitFollowUp() {
     if (!canSend || queuePreparingRef.current) return;
     const draftRevision = draftRevisionRef.current;
-    const computerUseSelection = computer.selection;
     const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
       receipt.selection === undefined ? [] : [receipt.selection],
     );
-    const unattachedMentions = unattachedCapabilityMentions(trimmed, [
-      ...extensionSelections,
-      ...(computerUseSelection === undefined ? [] : [computerUseSelection]),
-    ]);
-    if (unattachedMentions.length > 0) {
-      setSendNotice(unattachedCapabilityMentionCopy(unattachedMentions));
-      return;
-    }
     setSendNotice(undefined);
     setImageSaveMessage(undefined);
     const originThreadKey = String(props.threadId);
@@ -882,12 +845,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             threadMentionIds,
             fileMentionPaths,
             extensionSelections,
-            ...(computerUseSelection === undefined ? {} : { computerUseSelection }),
           },
           () => {
             attachments.acceptQueueClaim(captured);
             if (!mountedRef.current || activeThreadKeyRef.current !== originThreadKey) return;
-            computer.consume(computerUseSelection);
             if (draftRevisionRef.current === draftRevision) {
               setDraft("");
               props.controller.setPendingDraft?.("");
@@ -920,14 +881,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       fileMentionPaths,
       access,
     ];
-    if (computerUseSelection !== undefined) {
-      sendArguments[5] = false;
-      sendArguments[6] = computerUseSelection;
-    }
     if (extensionSelections.length > 0) sendArguments[7] = extensionSelections;
     const sent = await props.controller.sendFollowUp(...sendArguments);
     if (sent) {
-      computer.consume(computerUseSelection);
       attachments.takeForSend();
       // Only the draft that was sent is cleared: typing during the awaited send
       // bumps the revision, and that newer draft stays. The host keeps the
@@ -963,7 +919,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (suggestionInput.takeOnTab(event)) return;
-    if (computer.handleKeyDown(event)) return;
     if (slash.handleKeyDown(event)) return;
     if (mention.handleKeyDown(event)) return;
     if (pathMentions.handleKeyDown(event)) return;
@@ -1873,7 +1828,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
              * removal here: rendering a control whose sidecar this workspace
              * cannot open would mint a thread the user never sees.
              */}
-            <ComputerUseMention controller={computer} surface="chips" />
             {extensionDraft.receipts.length > 0 ? (
               <ul aria-label="Selected extensions" className="composer-chips">
                 {extensionDraft.receipts.map((receipt) => (
@@ -1957,29 +1911,25 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         input={
           <OctantTextarea
             aria-activedescendant={
-              computer.open
-                ? `${computer.listId}-computer`
-                : slash.active !== undefined
-                  ? `${slash.listId}-${slash.active.id}`
-                  : mention.activeCandidate !== undefined
-                    ? `${mentionListId}-${String(mention.activeCandidate.threadId)}`
-                    : pathMentionOpen && pathMentions.activeCandidate !== undefined
-                      ? `${pathMentionListId}-${pathMentions.activeCandidate.path}`
-                      : undefined
+              slash.active !== undefined
+                ? `${slash.listId}-${slash.active.id}`
+                : mention.activeCandidate !== undefined
+                  ? `${mentionListId}-${String(mention.activeCandidate.threadId)}`
+                  : pathMentionOpen && pathMentions.activeCandidate !== undefined
+                    ? `${pathMentionListId}-${pathMentions.activeCandidate.path}`
+                    : undefined
             }
             aria-autocomplete="list"
             aria-controls={
-              computer.open
-                ? computer.listId
-                : slash.open
-                  ? slash.listId
-                  : mention.open
-                    ? mentionListId
-                    : pathMentionOpen
-                      ? pathMentionListId
-                      : undefined
+              slash.open
+                ? slash.listId
+                : mention.open
+                  ? mentionListId
+                  : pathMentionOpen
+                    ? pathMentionListId
+                    : undefined
             }
-            aria-expanded={computer.open || slash.open || mention.open || pathMentionOpen}
+            aria-expanded={slash.open || mention.open || pathMentionOpen}
             className="composer-input window-no-drag"
             id={`code-thread-composer-${String(thread.id)}`}
             onChange={(event) => {
@@ -2025,9 +1975,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           />
         }
         typeahead={
-          computer.open ? (
-            <ComputerUseMention controller={computer} surface="typeahead" />
-          ) : slash.open ? (
+          slash.open ? (
             <ComposerSlashTypeahead controller={slash} />
           ) : (
             <>

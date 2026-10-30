@@ -433,19 +433,50 @@ session and exact offered catalogue, and reports app tools only with a process
 receipt attesting that external MCP, plugins, and skills cannot enter the
 runtime; see [Provider runtimes](design/provider-runtimes.md#local-server-provider-adapter).
 
-Browser and Computer are granted differently. Browser is a tool, not a
-mention: the host offers `octant_browser` on every Work or Code turn whose
-provider carries app-managed tools, with one host line of 40 tokens or fewer,
-and the agent uses it when the request needs it. No composer selection exists,
-and neither the definition nor the message text grants anything; a Browser
-selection left in an older draft or queued message is ignored. Chat never
-offers it. The first effect for an origin asks inline, and Plan mode refuses
-effects. Computer is the bundled plugin plus a per-send `@Computer`
-selection: only that send carries the full `octant_computer` family. A turn
-without the selection carries the refusal-only definition described under
-[Computer use plugin](#extensions-and-skills), and none at all when Computer
-use is disabled, constrained out, or in Plan mode. Each application still
-needs its own approval.
+**Browser and Computer are tools, not mentions.** The host offers them on
+every eligible turn, and the agent uses them when the person's request needs
+them. No composer selection exists, and neither the tool definition nor the
+message text grants anything: authority comes from the person's approval at
+the moment of action. A Browser or Computer selection left in an older draft or
+queued message still decodes, is kept with the turn as journaled, and is
+ignored; the composers drop it from a restored draft with a note.
+
+- **Browser** is offered in Work and Code when the provider carries app-managed
+  tools, never in Chat. The first effect on each origin asks inline. In Plan
+  the definition is present and every effect is refused.
+- **Computer** is offered in Chat, Work, and Code only when all of these hold:
+  the bundled plugin is enabled, there is a screen bridge or a leased desktop,
+  the provider carries app-managed tools, the tool is not constrained out, and
+  the turn is not in Plan. Otherwise no definition is offered at all.
+- **Providers.** Claude Code and Codex carry both tools; other providers carry
+  them only through a verified app-tool transport, per the table above. A
+  runtime without app tools gets neither, and Settings says so on its card.
+- **Agent context** is the definitions plus one host line per offered tool, 40
+  tokens or fewer, saying what the tool is for, that it asks first, and that
+  what it reads is data. Detail stays behind the tool's `help` or `describe`.
+- **Destination.** A send names a disposable desktop by its destination alone;
+  without one, Computer acts on this Mac.
+
+Dropping the chip widens what an agent may _ask_ for, since any eligible turn
+can request control, including one that has read hostile content. The
+selection used to be the person's intent for each send; these rules put that
+intent at the moment of action instead:
+
+- The first Computer action on each application in a thread asks, even under
+  Full access: no app grant exists until the person approves one, and the
+  tool never reads the execution policy to skip the ask. A grant lasts five
+  minutes and covers that application, owner, and authority only.
+- Once outside content has entered the thread (a Browser page, a tool result,
+  imported content), no standing grant carries a Computer action: every
+  action asks again, for that one action, and the ask names what marked the
+  thread.
+- The approval card shows the agent's stated reason, quoted as its words, and
+  the outside sources with their last read.
+- Only the person at this Mac approves control of this Mac. A paired device or
+  remote client may read a session's state and can neither approve nor stop
+  it; a desktop lease's approvals are asked in the thread.
+- Stop, cancellation, a changed authority, or turning the plugin off revokes
+  control.
 
 Canvas follows the same rule through its read-only `describe` operation: the
 always-visible `octant_canvas` description says only what an agent needs before
@@ -2961,8 +2992,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   read `not-reported` and `none`: their history is the agent's own and opaque
   to Octant. Settings › Providers & Models shows these facts on each runtime
   card (Octant tools, Activity, Resume, Context window, Compaction). A runtime
-  that does not carry Octant's tools is offered no Browser, and the composers
-  offer no `@Computer` for it. Bounded
+  that does not carry Octant's tools is offered neither Browser nor Computer.
+  Bounded
   provider subprocesses run under a deny-default profile: Seatbelt via
   `sandbox-exec` on macOS, Bubblewrap (`bwrap`) on Linux. Missing the backend
   selected for the host platform fails closed as incompatible.
@@ -6499,15 +6530,14 @@ marketplace was lifted by the maintainer on 2026-10-20; the start gates in
 [release-boundary holds](release-boundary-holds.md) are met by this section
 and the rules above.
 
-**Computer use plugin.** The bundled Computer component is selected through
-`@Computer` in Chat, Work, and Code. The server validates the structured
-selection and supplies `octant_computer` through the provider's existing
-app-managed tool transport. The capability binds to one send: a turn whose
-message carried no selection still registers the name, as a refusal-only
-definition that tells the agent to ask for @Computer again rather than a
-provider-side unknown-tool failure. The public plugin capability is bound to one
-task, window, provider, model, and access posture. Each application needs a
-five-minute approval; stop, cancellation, changed authority, or disable revokes
+**Computer use plugin.** The bundled Computer component supplies
+`octant_computer` through the provider's existing app-managed tool transport on
+every eligible Chat, Work, and Code turn, under the offer and approval rules in
+[Browser and Computer are tools, not mentions](#process-topology); no composer
+selection exists. The public plugin capability is bound to one task, window,
+provider, model, and access posture, and may pass the agent's one-line reason
+for an action to the host, which shows it on the approval and grants nothing
+for it. Each application needs a five-minute approval; stop, cancellation, changed authority, or disable revokes
 control. Observations carry window and element identities, with screenshots
 for image-capable models. Application content remains untrusted.
 Lifecycle evidence retains the exact tool authority: Chat may have no Project;

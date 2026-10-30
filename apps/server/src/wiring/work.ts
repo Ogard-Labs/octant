@@ -409,12 +409,7 @@ export function wireWork(deps: WorkDependencies) {
           modelId: input.thread.modelId,
           executionPolicy: "approval-gated",
         });
-        const computer =
-          input.computerUseSelection === undefined
-            ? browserSupported
-              ? computerUseTools?.unattachedToolSet(computerOwner)
-              : undefined
-            : computerToolsFor(computerOwner, input.computerUseSelection);
+        const computer = computerToolsFor(computerOwner);
         if (
           native === undefined &&
           browser === undefined &&

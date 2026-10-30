@@ -509,7 +509,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         agentRuns: agentRunPersistence,
         resolveSelectedExtensions,
         pinnedExtensionIds,
-        computerUseTools: ({ windowId, thread, selection, destination, ask }) =>
+        computerUseTools: ({ windowId, thread, destination, ask }) =>
           computerToolsFor(
             decodeComputerUseOwner({
               windowId,
@@ -520,19 +520,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               executionPolicy: thread.executionPolicy,
               ...(destination === undefined ? {} : { leaseId: destination.leaseId }),
             }),
-            selection,
             ask,
-          ),
-        computerUseUnattachedTools: ({ windowId, thread }) =>
-          computerUseTools?.unattachedToolSet(
-            decodeComputerUseOwner({
-              windowId,
-              threadId: thread.id,
-              mode: "code",
-              providerInstanceId: thread.providerInstanceId,
-              modelId: thread.modelId,
-              executionPolicy: thread.executionPolicy,
-            }),
           ),
         spendCeiling,
         terminalProcessPort,
