@@ -1,29 +1,15 @@
-/* Quick tools beside a Code start screen: a column on the stage, divided from
-   the start screen by one hairline, that lists the chosen Project's terminal
-   and browser and then holds the one that was opened. */
-.draft-thread__with-tools {
-  display: flex;
-  min-width: 0;
-  min-height: 0;
-  height: 100%;
-  flex: 1 1 auto;
-}
-
-.draft-thread__with-tools > :first-child {
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
+/* Quick tools in the right dock for a new Code task: they fill the dock's
+   body, list the chosen Project's terminal and browser, and then hold the one
+   that was opened. */
 .start-quick-tools {
   display: flex;
-  width: 320px;
+  height: 100%;
   min-height: 0;
-  flex: 0 0 320px;
+  flex: 1 1 auto;
   flex-direction: column;
-  border-left: 1px solid var(--octant-border-soft);
 }
 
-/* Listed, the tools sit in the middle of the column as plain rows. */
+/* Listed, the tools sit in the middle of the dock as plain rows. */
 .start-quick-tools:not(.start-quick-tools--open) {
   justify-content: center;
   padding: var(--oct-space-4);
@@ -68,8 +54,8 @@
   flex-direction: column;
 }
 
-/* The Project browser is a floating dock in Zen; here it sits in the column,
-   on the same stage as the start screen beside it. Zen's floating fill made
+/* The Project browser is a floating dock in Zen; here it sits in the dock's
+   body. Zen's floating fill made
    it an opaque slab from the title band down, the one solid column in a
    window of glass. */
 .start-quick-tools__body .zen-research {
@@ -81,9 +67,7 @@
   box-shadow: none;
 }
 
-/* A narrow stage keeps the start screen whole. */
-@media (max-width: 1100px) {
-  .start-quick-tools {
-    display: none;
-  }
+.start-quick-tools__note {
+  margin-top: var(--oct-space-3);
+  padding: 0 var(--oct-space-3);
 }

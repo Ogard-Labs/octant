@@ -1,11 +1,46 @@
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { decodeProjectId } from "@octant/contracts/projects";
+import type { ProjectId } from "@octant/contracts/projects";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useContext, useEffect } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { StartQuickTools, StartQuickToolsContext } from "./StartQuickTools";
+import {
+  StartQuickTools,
+  StartQuickToolsContext,
+  StartQuickToolsPlacementContext,
+  StartQuickToolsPlacementProvider,
+} from "./StartQuickTools";
 
 const projectId = decodeProjectId("30000000-0000-4000-8000-000000000001");
+const otherProjectId = decodeProjectId("30000000-0000-4000-8000-000000000002");
+
+/** Registers a start screen's Project the way a Code draft does. */
+function DraftRegistration(props: { readonly scope: string; readonly projectId: ProjectId }) {
+  const chooseProject = useContext(StartQuickToolsPlacementContext)?.chooseProject;
+  useEffect(() => {
+    chooseProject?.(props.scope, props.projectId);
+    return () => chooseProject?.(props.scope, undefined);
+  }, [chooseProject, props.scope, props.projectId]);
+  return null;
+}
+
+function DockProject() {
+  const placement = useContext(StartQuickToolsPlacementContext);
+  return <output aria-label="Dock Project">{String(placement?.projectId ?? "none")}</output>;
+}
+
+function SplitDrafts(props: { readonly active: string; readonly withSecond: boolean }) {
+  return (
+    <StartQuickToolsPlacementProvider activeDraftScope={props.active}>
+      <DraftRegistration projectId={projectId} scope="code:left" />
+      {props.withSecond ? (
+        <DraftRegistration projectId={otherProjectId} scope="code:right" />
+      ) : null}
+      <DockProject />
+    </StartQuickToolsPlacementProvider>
+  );
+}
 
 function renderTools(execute: ReturnType<typeof vi.fn>) {
   const services = {
@@ -56,5 +91,18 @@ describe("StartQuickTools", () => {
   it("offers nothing where the window holds no Project tools", () => {
     const { container } = render(<StartQuickTools projectId={projectId} />);
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("keeps each split pane's start-screen Project when the other draft becomes a thread", () => {
+    const { rerender } = render(<SplitDrafts active="code:right" withSecond />);
+    const dock = screen.getByRole("status", { name: "Dock Project" });
+    expect(dock).toHaveTextContent(String(otherProjectId));
+
+    rerender(<SplitDrafts active="code:left" withSecond />);
+    expect(dock).toHaveTextContent(String(projectId));
+
+    // The right draft starts its task and leaves; the left keeps its Project.
+    rerender(<SplitDrafts active="code:left" withSecond={false} />);
+    expect(dock).toHaveTextContent(String(projectId));
   });
 });

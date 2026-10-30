@@ -5,7 +5,17 @@ import type { HostId } from "@octant/contracts/host";
 import type { ProjectId } from "@octant/contracts/projects";
 import { MIN_ZEN_RESEARCH_DOCK_WIDTH } from "@octant/contracts/zen";
 import { ArrowLeft, Globe, SquareTerminal, type LucideIcon } from "lucide-react";
-import { createContext, Suspense, useContext, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  Suspense,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { ZenProjectResearchDock, ZenProjectTerminalCard } from "./deferredSurfaces";
 import type { OctantHostBridge } from "./hostBridge";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -27,13 +37,62 @@ export interface StartQuickToolsServices {
 
 export const StartQuickToolsContext = createContext<StartQuickToolsServices | undefined>(undefined);
 
+/**
+ * The Project a Code start screen chose, handed to the right dock, which
+ * holds that Project's quick tools while the new task waits for its thread.
+ * They once stood as a 320px column beside the start screen as well, which
+ * pushed the composer off centre and contradicted the dock.
+ *
+ * Each start screen registers under its own draft scope and the dock reads
+ * only the active pane's. With one shared value, two Code start screens in
+ * split panes overwrote each other, and a draft that became a thread cleared
+ * the other's Project, so its dock said the tools waited for the task.
+ */
+export interface StartQuickToolsPlacement {
+  /** The active Code draft's chosen Project. */
+  readonly projectId: ProjectId | undefined;
+  readonly chooseProject: (draftScope: string, projectId: ProjectId | undefined) => void;
+}
+
+export const StartQuickToolsPlacementContext = createContext<StartQuickToolsPlacement | undefined>(
+  undefined,
+);
+
+export function StartQuickToolsPlacementProvider(props: {
+  /** The draft scope of the active pane's Code start screen, if it has one. */
+  readonly activeDraftScope: string | undefined;
+  readonly children: ReactNode;
+}) {
+  const [chosen, setChosen] = useState<ReadonlyMap<string, ProjectId>>(() => new Map());
+  const chooseProject = useCallback((draftScope: string, projectId: ProjectId | undefined) => {
+    setChosen((current) => {
+      if (current.get(draftScope) === projectId) return current;
+      const next = new Map(current);
+      if (projectId === undefined) next.delete(draftScope);
+      else next.set(draftScope, projectId);
+      return next;
+    });
+  }, []);
+  const projectId =
+    props.activeDraftScope === undefined ? undefined : chosen.get(props.activeDraftScope);
+  const placement = useMemo<StartQuickToolsPlacement>(
+    () => ({ projectId, chooseProject }),
+    [projectId, chooseProject],
+  );
+  return (
+    <StartQuickToolsPlacementContext.Provider value={placement}>
+      {props.children}
+    </StartQuickToolsPlacementContext.Provider>
+  );
+}
+
 type OpenTool =
   | { readonly kind: "terminal"; readonly terminalId: CodeTerminalId }
   | { readonly kind: "browser" };
 
 /**
- * The quick tools beside a Code start screen: the chosen Project's terminal
- * and browser, opened in this panel without starting a thread. A Project
+ * The quick tools in the right dock for a new Code task: the chosen Project's
+ * terminal and browser, opened in the dock without starting a thread. A Project
  * terminal has nothing else to reopen it from, so closing the panel (or
  * leaving the start screen) stops the shell rather than leave it running
  * unseen.
@@ -108,7 +167,8 @@ export function StartQuickTools(props: { readonly projectId: ProjectId }) {
 
   if (open === undefined) {
     return (
-      <aside aria-label="Quick tools" className="start-quick-tools">
+      // The dock's title band is already the "Quick tools" group.
+      <aside aria-label="Project tools" className="start-quick-tools">
         <div className="start-quick-tools__list" role="group" aria-label="Open for this Project">
           <QuickToolRow
             disabled={starting}
@@ -130,6 +190,9 @@ export function StartQuickTools(props: { readonly projectId: ProjectId }) {
               {message}
             </OctantAlert>
           )}
+          <p className="oct-row-detail start-quick-tools__note">
+            Other tools open once the task starts
+          </p>
         </div>
       </aside>
     );

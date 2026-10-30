@@ -495,18 +495,13 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     [prompt],
   );
   const trimmed = prompt.trim();
-  // A Code thread belongs to a Project (decision 0037), so the first turn
-  // cannot start until one is chosen.
   const [submitting, setSubmitting] = useState(false);
   // A send refused before the host saw it explains itself beside the composer,
   // since no thread exists to carry a reason.
   const [sendNotice, setSendNotice] = useState<string>();
-  const canSubmit =
-    trimmed.length > 0 &&
-    !props.creating &&
-    !submitting &&
-    !slash.resolving &&
-    props.projectId !== undefined;
+  // A notice about the Project no longer applies once another is chosen.
+  useEffect(() => setSendNotice(undefined), [props.projectId]);
+  const canSubmit = trimmed.length > 0 && !props.creating && !submitting && !slash.resolving;
 
   // Server-authoritative ref catalog for the branch selector, fetched lazily
   // the first time the selector opens.
@@ -635,6 +630,13 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
+    // A Code thread belongs to a Project, so the first turn cannot start until
+    // one is chosen. Send stays live and says so: a Send greyed out for this
+    // alone left people guessing why nothing happened.
+    if (props.projectId === undefined) {
+      setSendNotice("Choose a Project first. A Code task works in a folder.");
+      return;
+    }
     const computerUseSelection = computer.selection;
     const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
       receipt.selection === undefined ? [] : [receipt.selection],
@@ -1007,6 +1009,18 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           />
         </div>
 
+        {/* A refusal answers the Send just pressed, so it sits under the
+            composer rather than below the start screen's cards. */}
+        {props.errorMessage !== undefined ? (
+          <OctantAlert className="code-composer-adapter__error" tone="danger">
+            {props.errorMessage}
+          </OctantAlert>
+        ) : sendNotice !== undefined ? (
+          <OctantAlert className="code-composer-adapter__error" tone="danger">
+            {sendNotice}
+          </OctantAlert>
+        ) : null}
+
         {props.projectSetup}
 
         {/* Start from origin only decides where a new worktree branches from.
@@ -1058,16 +1072,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           </div>
         )}
         {props.beneath}
-
-        {props.errorMessage !== undefined ? (
-          <OctantAlert className="code-composer-adapter__error" tone="danger">
-            {props.errorMessage}
-          </OctantAlert>
-        ) : sendNotice !== undefined ? (
-          <OctantAlert className="code-composer-adapter__error" tone="danger">
-            {sendNotice}
-          </OctantAlert>
-        ) : null}
         {props.creating ? (
           <div>
             <p aria-label="First-turn status" role="status">

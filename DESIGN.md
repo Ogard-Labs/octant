@@ -548,14 +548,19 @@ has no 24px step and `ui:check` refuses a raw size, so the nearest token,
 One quiet line under it, at the detail step in muted ink, says
 "Pick a project, or just start typing". The start screen names no time of day
 and counts nothing: what is running and what waits for review live in the
-sidebar. Once a Code start screen has a Project chosen, a quick-tools column
-stands beside it on the stage (320px, one hairline, hidden below 1100px): the
-Project's own Terminal and Browser as plain rows in the middle of the column.
-Each opens in that column without starting a thread, the same window-local
+sidebar. Once a Code start screen has a Project chosen, its quick tools are
+the Project's own Terminal and Browser as plain rows in the right dock's body,
+above one muted line, "Other tools open once the task starts". They live only
+in the dock: a column beside the start screen squeezed the composer off centre
+and contradicted the dock, so with the dock closed the start screen stands
+alone. Each opens in the dock without starting a thread, the same window-local
 Project terminal and browser Zen uses, which no agent can see or reach;
 "Quick tools" returns to the list, and closing the terminal (or leaving the
 start screen) stops its shell, since nothing else could reopen it. The
-composer never remounts when the Project is chosen, so the draft stays. Every
+composer never remounts when the Project is chosen, so the draft stays. Send
+on a Code start screen with no Project chosen stays live and answers with one
+line directly under the composer, "Choose a Project first. A Code task works in a
+folder.", rather than greying out with no reason. Every
 start screen's composer asks "Ask anything…", and the message field keeps its
 accessible name.
 
@@ -1335,7 +1340,7 @@ stage), defined once on every shell in `shell.css`:
 - **An outline button** rests on that card step instead of the page colour
   (`--octant-outline-rest`); its hover and pressed fills stay the control
   fills.
-- **Quick tools** beside a Code start screen are a clear column on the stage.
+- **Quick tools** for a Code start screen are clear in the body of the dock.
 - **The Browser** is clear on its own start page, whose rows take the card
   step; a loaded page keeps its opaque canvas.
 
@@ -1721,7 +1726,8 @@ A welcome, Project, or other pane with neither a bound thread nor a valid
 launchable tool keeps the dock closed and omits its toggle. The exception is a
 new Code task's pane before its thread exists: the dock keeps its place, its
 title band shows the common tools disabled ("Available once the task starts"),
-and its body says so, so the band does not vanish and return around the first
+and its body says so (or, once the start screen has a Project, holds that
+Project's quick tools), so the band does not vanish and return around the first
 message. Restored presentation for another subject never makes unavailable
 chrome visible.
 

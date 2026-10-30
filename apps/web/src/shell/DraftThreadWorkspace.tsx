@@ -79,7 +79,7 @@ import {
   type CodeComposerSuggestion,
   type CodeComposerSubmitInput,
 } from "../code/composer/CodeComposerAdapter";
-import { StartQuickTools } from "./StartQuickTools";
+import { StartQuickToolsPlacementContext } from "./StartQuickTools";
 import { useWorktreeRemoteFacts } from "../code/composer/useWorktreeRemoteFacts";
 import { WorkComposerAdapter } from "../work/composer/WorkComposerAdapter";
 import { ProjectCreateDialog } from "../projects/ProjectCreateDialog";
@@ -327,6 +327,16 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   useEffect(() => setLocalProjectId(props.projectId), [props.projectId]);
   const drafts = useContext(NewTaskDraftsContext);
   const draftScope = useContext(NewTaskDraftScopeContext);
+  // A Code start screen hands its Project to the dock, under its own draft
+  // scope, so the dock holds the active pane's quick tools while that task
+  // waits for its thread.
+  const chooseQuickToolsProject = useContext(StartQuickToolsPlacementContext)?.chooseProject;
+  const codeStart = props.mode === "code";
+  useEffect(() => {
+    if (chooseQuickToolsProject === undefined || !codeStart || draftScope === undefined) return;
+    chooseQuickToolsProject(draftScope, selectedProjectId);
+    return () => chooseQuickToolsProject(draftScope, undefined);
+  }, [chooseQuickToolsProject, codeStart, draftScope, selectedProjectId]);
   const [createFromSelection, setCreateFromSelectionState] = useState<
     NewTaskCreateFromSelection | undefined
   >(() => (draftScope === undefined ? undefined : drafts?.readCreateFrom(draftScope)));
@@ -822,14 +832,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     );
     return (
       <>
-        {/* The wrapper is always there, so choosing a Project adds the tools
-            beside the composer without remounting it and losing the draft. */}
-        <div className="draft-thread__with-tools">
-          {composer}
-          {selectedProjectId === undefined ? null : (
-            <StartQuickTools projectId={selectedProjectId} />
-          )}
-        </div>
+        {composer}
         {addFolderDialog}
       </>
     );

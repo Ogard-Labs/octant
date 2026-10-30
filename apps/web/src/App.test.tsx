@@ -6236,7 +6236,12 @@ describe("App", () => {
       expect(tool).toHaveAttribute("aria-description", "Available once the task starts");
     }
     expect(within(dock).queryByRole("button", { name: "Add tool" })).toBeNull();
-    expect(within(dock).getByText("Tools open once the task starts")).toBeVisible();
+    // The draft has a Project, so the dock holds its quick tools, and the
+    // stage carries no second column beside it.
+    const projectTools = within(dock).getByRole("complementary", { name: "Project tools" });
+    expect(within(projectTools).getByRole("button", { name: "Terminal" })).toBeEnabled();
+    expect(within(projectTools).getByText("Other tools open once the task starts")).toBeVisible();
+    expect(screen.getAllByRole("button", { name: "Terminal" })).toHaveLength(1);
 
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Start here");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
@@ -6246,7 +6251,7 @@ describe("App", () => {
       expect(within(dock).getByRole("button", { name: "Open Terminal" })).toBeEnabled(),
     );
     expect(screen.getByRole("complementary", { name: "Right Utility Dock" })).toBe(dock);
-    expect(within(dock).queryByText("Tools open once the task starts")).toBeNull();
+    expect(within(dock).queryByRole("complementary", { name: "Project tools" })).toBeNull();
   });
 
   it("closes the dock when the active pane becomes a Project overview, which holds neither a thread nor a task draft", async () => {

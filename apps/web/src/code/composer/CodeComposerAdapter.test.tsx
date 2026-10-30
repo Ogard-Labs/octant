@@ -631,7 +631,7 @@ describe("CodeComposerAdapter interactions", () => {
    * first turn while no Project is chosen, or the thread would run against a
    * root nobody picked.
    */
-  it("refuses to start the first turn until a Project is chosen", async () => {
+  it("refuses to start the first turn until a Project is chosen, and says why", async () => {
     const onCreateThread = vi.fn();
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -660,7 +660,9 @@ describe("CodeComposerAdapter interactions", () => {
     });
 
     expect(onCreateThread).not.toHaveBeenCalled();
-    expect(container.querySelector('[aria-label="Create thread"]')).toBeDisabled();
+    expect(container.textContent).toContain(
+      "Choose a Project first. A Code task works in a folder.",
+    );
     root.unmount();
     container.remove();
   });

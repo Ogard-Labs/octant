@@ -22,10 +22,13 @@ A Code Project can remember how new threads should start: in **this Project's cu
 ## Quick tools on the start screen
 
 Once you choose a Project on a Code start screen, **Terminal** and **Browser**
-appear in a column beside it (on a window at least 1100px wide). They open the
+appear in the right sidebar. Open the sidebar to use them. They open the
 Project's own terminal and browser right there, before any thread exists. No
 agent can see or use either. **Quick tools** takes you back to the list;
 closing the terminal stops its shell.
+
+A Code task always works in a folder, so Send asks you to choose a Project
+first. To talk without a folder, start a chat from the Work composer instead.
 
 ## Sending while a response is running
 
