@@ -136,6 +136,26 @@ async function launchToolingServer(root: string, checkout: string, receiptDirect
   return outcome.process;
 }
 
+function startTerminal(root: string, checkout: string) {
+  const temporaryDirectory = join(root, "tmp");
+  mkdirSync(temporaryDirectory);
+  return new TerminalProcessPort({
+    confinement: makeProcessConfinementLive(),
+    temporaryDirectory,
+    shellStateDirectory: join(root, "shell"),
+    receiptDirectory: join(root, "receipts"),
+    networkEgress: "none",
+    platform: "darwin",
+  }).start({
+    shell: "/bin/zsh",
+    cwd: checkout,
+    stateScope: "session-escape",
+    environment: { HOME: temporaryDirectory, PATH: "/usr/bin:/bin", TERM: "dumb" },
+    columns: 80,
+    rows: 24,
+  });
+}
+
 describe.runIf(process.platform === "darwin" && existsSync("/usr/bin/sandbox-exec"))(
   "a confined child that starts its own session on macOS",
   () => {
@@ -159,30 +179,33 @@ describe.runIf(process.platform === "darwin" && existsSync("/usr/bin/sandbox-exe
       expect(await heartbeatContinues(checkout)).toBe(false);
     });
 
-    it("ends when the terminal that ran it closes", async () => {
+    it("ends a background job in its own process group when the terminal closes", async () => {
       const { root, checkout } = makeRoot();
-      const temporaryDirectory = join(root, "tmp");
-      mkdirSync(temporaryDirectory);
-      const handle = new TerminalProcessPort({
-        confinement: makeProcessConfinementLive(),
-        temporaryDirectory,
-        shellStateDirectory: join(root, "shell"),
-        receiptDirectory: join(root, "receipts"),
-        networkEgress: "none",
-        platform: "darwin",
-      }).start({
-        shell: "/bin/zsh",
-        cwd: checkout,
-        stateScope: "session-escape",
-        environment: { HOME: temporaryDirectory, PATH: "/usr/bin:/bin", TERM: "dumb" },
-        columns: 80,
-        rows: 24,
-      });
+      const handle = startTerminal(root, checkout);
       await handle.receiptReady;
-      handle.write(`${ESCAPE_COMMAND}\r`);
+      handle.write("set -m; ./beat.sh &\r");
       await waitForHeartbeat(checkout);
       await handle.close();
       expect(await heartbeatContinues(checkout)).toBe(false);
+    });
+
+    it("lets a terminal start a session of its own, as tmux does, and keeps that child confined", async () => {
+      const { root, checkout } = makeRoot();
+      const handle = startTerminal(root, checkout);
+      await handle.receiptReady;
+      const outside = join(root, "outside");
+      mkdirSync(outside);
+      const target = join(outside, "written");
+      const sessionChild = `/usr/bin/perl -e 'use POSIX; if (!fork) { POSIX::setsid() or exit 3; open(my $f, ">", "./started"); close $f; open(my $o, ">", "${target}"); exec "/bin/sleep", "3" }'`;
+      handle.write(`${sessionChild}\r`);
+      const deadline = Date.now() + 5_000;
+      while (!existsSync(join(checkout, "started"))) {
+        if (Date.now() > deadline) throw new Error("The session child never started.");
+        await delay(50);
+      }
+      await delay(300);
+      expect(existsSync(target)).toBe(false);
+      await handle.close();
     });
   },
 );

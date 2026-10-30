@@ -6933,9 +6933,10 @@ mechanisms are:
   interactive terminals. Its own PID namespace ends with the capsule, so a
   descendant that called `setsid()` still ends when a terminal or a
   `repo-tooling` language server stops. Seatbelt has no PID namespace: on
-  macOS the profile of a terminal, a language server, and a debug adapter
-  refuses `setsid()`, and closing a terminal also ends every process on its
-  controlling terminal; a `posix_spawn` child with its own session remains a
+  macOS the profile of a language server and a debug adapter refuses
+  `setsid()`; a terminal allows it so `tmux` and `script` work, and such a
+  child outlives the terminal but keeps its confinement. Closing a terminal
+  also ends every process on its controlling terminal; a `posix_spawn` child with its own session remains a
   residual. The rule, its measurement, and its reason are under
   [Repository tooling](design/language-services.md#repository-tooling). Every confined launch passes `--cap-drop ALL`, so the
   capsule's effective capability set is empty whether or not the server runs

@@ -536,24 +536,31 @@ classes.
   `--unshare-all` gives the server its own PID namespace and
   `--die-with-parent` ends the namespace with the capsule, so a child that
   called `setsid()` dies with it. Seatbelt has no PID namespace, so on macOS
-  the profile of a terminal, a language server, and a debug adapter refuses
-  `setsid()`, and a child stays in the group the stop ends. A terminal's
+  the profile of a language server and a debug adapter refuses `setsid()`, and
+  a child stays in the group the stop ends. A terminal's profile allows it,
+  so `tmux` and `script` work. A terminal's
   shell gives each job a group of its own, so closing a terminal also ends
   every process whose controlling terminal is the shell's: read while the
   shell still runs, and each checked again by its start time before the
   kill. Measured on macOS 27.0.1 on 2026-10-30: before this rule, a child
   that forked, called `setsid()`, and outlived its parent survived a
-  `repo-tooling` server's stop, a restarted host's receipt reap, and a
-  terminal's close; with it, all three end it.
+  `repo-tooling` server's stop and a restarted host's receipt reap; with it,
+  both end it. A background job in its own group on the terminal ends on
+  close.
   Reason: refusing the call holds without following any process. Following
   descendants does not hold on macOS: `ps` hides the environment of system
   programs, so an environment marker never showed on a `/bin/sleep` child,
   and an orphan's parent is `launchd`, so a process-tree walk loses it once
   its own parent exits. Reading which sandbox another process runs in needs
-  a native helper the server does not have. The cost: a program that starts
-  a session of its own this way (`tmux`, `script`, Python's
-  `start_new_session`) fails in these launches on macOS rather than
-  escaping.
+  a native helper the server does not have. The cost for servers and
+  adapters: a program that starts a session of its own this way (`tmux`,
+  `script`, Python's `start_new_session`) fails in those launches on macOS
+  rather than escaping.
+  Terminals are the exception: a person runs `tmux` and `script` there, and
+  a session child outliving its terminal is ordinary terminal-app behavior.
+  Such a child keeps the sandbox it inherited (the folder and its own
+  writable roots, no home folder), so outliving the terminal gains it no
+  authority.
   Residual on macOS: `posix_spawn` with `POSIX_SPAWN_SETSID` is a separate
   system call and still starts a new session (measured with Python's
   `os.posix_spawn(setsid=True)`), so such a child outlives the stop once its

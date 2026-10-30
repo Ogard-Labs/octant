@@ -380,7 +380,6 @@ export class TerminalProcessPort {
         networkEgress: this.#dependencies.networkEgress,
         allowFileReadStar: true,
         terminal: { shellStateDirectory: shellState },
-        refuseNewSession: true,
         // Deny the whole shared base, not the siblings that happen to exist
         // now: another repository's state directory may be created after this
         // profile is generated, and this shell must never gain it. The allow
