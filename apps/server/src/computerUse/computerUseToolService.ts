@@ -36,6 +36,10 @@ const refused = (reason: string, message: string): ComputerControlResult => ({
   message,
 });
 const NO_DESTINATION = refused("no-destination", "No computer-use destination is available.");
+const NO_LIVE_DESKTOP = refused(
+  "no-destination",
+  "This host has no screen of its own, and this thread has no running desktop. Start a desktop from the thread's Desktop tab, then send again.",
+);
 const DESKTOP_LABEL = "this thread's disposable desktop";
 const ownerKey = (owner: ComputerUseOwner) =>
   JSON.stringify([
@@ -327,6 +331,9 @@ export function createComputerUseToolService(options: {
     }
     if (owner.leaseId === undefined) {
       if (options.desktop === undefined) return NO_DESTINATION;
+      // A host with no screen of its own has no macOS permission to grant, so
+      // its refusal names the desktop the thread needs instead.
+      if (options.destination?.().status === "leasable") return NO_LIVE_DESKTOP;
       await options.desktop.configure(options.settings());
       if (!(await options.desktop.reserve(owner)))
         return refused(

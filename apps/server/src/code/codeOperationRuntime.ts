@@ -266,6 +266,14 @@ export interface CodeOperationRuntimeOptions {
    * one of the thread's disposable desktops. `ask` asks the turn's person in
    * the thread, which is where a desktop's approvals are answered.
    */
+  /**
+   * The thread's own running desktop, for a send that names no destination on
+   * a host with no screen of its own. Absent when there is none or more than
+   * one, so the host never chooses between two.
+   */
+  readonly threadDesktopDestination?: (
+    thread: CodeThread,
+  ) => ComputerUseDestinationSelection | undefined;
   readonly computerUseTools?: (input: {
     readonly windowId: WindowId;
     readonly thread: CodeThread;
@@ -2359,13 +2367,15 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     // it acts. A desktop destination the send cannot bind is refused rather
     // than quietly falling back to this Mac. A Computer selection from an
     // older draft or queued message is ignored.
+    const computerUseDestination =
+      command.computerUseDestination ?? this.#options.threadDesktopDestination?.(input.thread);
     if (
-      command.computerUseDestination !== undefined &&
+      computerUseDestination !== undefined &&
       (this.#options.supportsAppManagedTools?.(input.thread) !== true ||
         this.#options.computerUseTools?.({
           windowId: input.windowId,
           thread: input.thread,
-          destination: command.computerUseDestination,
+          destination: computerUseDestination,
           // Admission only checks that the send can bind its destination;
           // the turn's own tool set asks in its thread.
           ask: () => Promise.resolve("cancelled"),
@@ -2517,9 +2527,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           ? { pendingHandoff: { blocks: forkHandoff.blocks, record: forkHandoff.record } }
           : {}),
       ...(forkMerges.records.length === 0 ? {} : { pendingForkMerges: forkMerges.records }),
-      ...(command.computerUseDestination === undefined
-        ? {}
-        : { computerUseDestination: command.computerUseDestination }),
+      ...(computerUseDestination === undefined ? {} : { computerUseDestination }),
       ...(input.extensionTools === undefined ? {} : { extensionTools: input.extensionTools }),
       ...(command.extensionSelections === undefined || command.extensionSelections.length === 0
         ? {}

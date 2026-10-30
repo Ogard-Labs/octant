@@ -241,7 +241,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "siblingThreadsService"
     | "threadOutsideContentMarks"
   > &
-  Pick<ComputerUseWiring, "computerToolsFor" | "computerUseTools"> &
+  Pick<ComputerUseWiring, "computerToolsFor" | "computerUseTools" | "threadDesktopDestination"> &
   Pick<WorkspaceWiring, "codeBoardPlanProgressSource" | "contextHarness" | "projectService"> &
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
   Pick<HarnessStateWiring, "onHarnessQuestionAsked" | "onHarnessQuestionSettled"> &
@@ -330,6 +330,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     codeThreadMentionDirectory,
     computerToolsFor,
     computerUseTools,
+    threadDesktopDestination,
     configuredDriverOptions,
     consumeCreateFromIssueFramed,
     contextHarness,
@@ -509,6 +510,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         agentRuns: agentRunPersistence,
         resolveSelectedExtensions,
         pinnedExtensionIds,
+        threadDesktopDestination,
         computerUseTools: ({ windowId, thread, destination, ask }) =>
           computerToolsFor(
             decodeComputerUseOwner({

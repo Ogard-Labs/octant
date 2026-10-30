@@ -776,7 +776,12 @@ Rules this slice resolved:
 
 - **One destination per send, named by lease id.** `computerUseDestination`
   alone names the lease; a `computerUseSelection` beside it, from an older
-  send, is ignored. Absent, the destination is this Mac. At admission the host binds
+  send, is ignored. Absent, the destination is this Mac, except on a host
+  with no screen of its own (it reports `leasable`): there the host binds the
+  thread's one `ready` desktop, and binds none when the thread has two, so no
+  client needs a picker and the host never chooses between two. With no live
+  desktop, Computer refuses `no-destination` and says to start one from the
+  Desktop tab, never naming macOS permissions. At admission the host binds
   only a lease that is the sending thread's own and `ready`, or the turn does
   not start; every command then goes through the lease service, which checks
   the lease's authority again. Only Code turns carry a destination; a Work
