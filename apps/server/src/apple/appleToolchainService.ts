@@ -518,36 +518,42 @@ export class AppleToolchainService {
       const prior = this.#findCompletedInput(request, context);
       if (prior !== undefined) return replayedFrom(prior);
     }
-    if (!isBuildRequest(request)) await this.#learnCreatedSimulator(request.simulatorId, context);
-    const cached = this.#findDiscovery(request);
-    const decision = isBuildRequest(request)
-      ? evaluateAppleBuildRequest(
-          request,
-          cached?.toolchain ?? this.#lastToolchain,
-          context,
-          cached?.simulators ?? this.#lastSimulators,
-        )
-      : evaluateAppleSimulatorRequest(request, context, cached?.simulators ?? this.#lastSimulators);
-    if (decision.kind === "denied") {
-      return this.#record(
-        evidenceForDenied(request, decision.reason, startedAt, this.#options.now()),
-        context,
-      );
-    }
-    if (request.kind === "archive") {
-      return this.#record(
-        evidence(request, "unavailable", startedAt, this.#options.now(), [], [], "not-required"),
-        context,
-      );
-    }
-
+    // Register before the device-list refresh so a cancel that arrives while it
+    // runs finds the action and aborts it.
     const controller = new AbortController();
     const active = this.#activate(request, context, controller, startedAt);
     try {
+      if (!isBuildRequest(request)) {
+        await this.#learnCreatedSimulator(request.simulatorId, context, controller.signal);
+      }
+      const cached = this.#findDiscovery(request);
+      const decision = isBuildRequest(request)
+        ? evaluateAppleBuildRequest(
+            request,
+            cached?.toolchain ?? this.#lastToolchain,
+            context,
+            cached?.simulators ?? this.#lastSimulators,
+          )
+        : evaluateAppleSimulatorRequest(
+            request,
+            context,
+            cached?.simulators ?? this.#lastSimulators,
+          );
+      if (decision.kind === "denied") {
+        return this.#record(
+          evidenceForDenied(request, decision.reason, startedAt, this.#options.now()),
+          context,
+        );
+      }
+      if (request.kind === "archive") {
+        return this.#record(
+          evidence(request, "unavailable", startedAt, this.#options.now(), [], [], "not-required"),
+          context,
+        );
+      }
       await this.#persistReceipts();
       const result = await this.#run(request, context, controller.signal, active);
-      const completed = this.#record(result, context);
-      return completed;
+      return this.#record(result, context);
     } finally {
       this.#active.delete(String(request.actionId));
       try {
@@ -787,6 +793,7 @@ export class AppleToolchainService {
   async #learnCreatedSimulator(
     simulatorId: AppleSimulatorRecord["simulatorId"],
     context: AppleExecutionContext,
+    signal: AbortSignal,
   ): Promise<void> {
     const known = (records: ReadonlyArray<AppleSimulatorRecord>) =>
       records.some((record) => String(record.simulatorId) === String(simulatorId));
@@ -800,6 +807,7 @@ export class AppleToolchainService {
       ["xcrun", "simctl", "list", "devices", "available", "--json"],
       context,
       DISCOVERY_TIMEOUT_MS,
+      signal,
     );
     if (!succeeded(listed)) return;
     let fresh: ReadonlyArray<AppleSimulatorRecord>;

@@ -979,6 +979,57 @@ describe("AppleToolchainService lifecycle", () => {
     );
   });
 
+  it("lets a cancel stop an action that is still reading the device list for a new Simulator", async () => {
+    const created = "30000000-0000-4000-8000-000000000030";
+    let listed = false;
+    const base = discoveryExecutor();
+    const controlled: string[] = [];
+    const execute = vi.fn(async (input: Parameters<typeof base>[0], signal?: AbortSignal) => {
+      if (input.argv.join(" ") === "xcrun simctl list devices available --json" && listed) {
+        return await new Promise<ReturnType<typeof processResult>>((resolve) => {
+          signal?.addEventListener(
+            "abort",
+            () => resolve(processResult("", { termination: "cancelled", exitCode: null })),
+            { once: true },
+          );
+        });
+      }
+      if (input.argv[1] === "simctl") controlled.push(input.argv[2] ?? "");
+      return base(input);
+    });
+    const service = new AppleToolchainService({
+      execute,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    listed = true;
+
+    const running = service.execute(
+      simulatorRequest({
+        kind: "boot",
+        simulatorId: created as never,
+        approval: buildRequest().approval,
+      }),
+      context,
+    );
+    await vi.waitFor(() => expect(service.snapshot(context).active).toHaveLength(1));
+    await expect(
+      service.cancel(
+        {
+          actionId: ids.action as never,
+          correlationId: ids.correlation as never,
+          authority,
+          reason: "user-requested",
+        },
+        context,
+      ),
+    ).resolves.toBe(true);
+    await running;
+    expect(controlled).not.toContain("boot");
+  });
+
   it("puts a Simulator back to shutdown when boot does not become ready, so Boot can be offered again", async () => {
     const execute = discoveryExecutor();
     const service = new AppleToolchainService({
