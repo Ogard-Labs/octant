@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import { AuditActingPrincipal } from "./auditEvents";
 import { HubGrantItem, HubMemberId, RosterMember, SignedHubRoster } from "./hubAndSpokes";
 import { HubPushReason } from "./hubPush";
+import { RemotePushPlatform } from "./remotePushNotifications";
 import { HubOfferId, HubOfferKind, HubProvisionMode, HubProvisionReason } from "./hubProvision";
 import { HubSignInKind, HubSignInOutcome, HubSignInReason } from "./hubSignIn";
 import { HUB_WAKE_MAX_SPOKES, HubWakeSpokeTimes } from "./hubWake";
@@ -57,6 +58,9 @@ export const HubMembershipChange = Schema.Literal(
   "push-switch-changed",
   "push-forwarded",
   "push-refused",
+  "direct-push-switch-changed",
+  "direct-push-environment-changed",
+  "direct-push-credential-changed",
   "provision-switch-changed",
   "provision-offered",
   "provision-withdrawn",
@@ -127,6 +131,8 @@ export const HubMembershipChangedPayload = Schema.Struct({
   pushBytes: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   /** For a push refusal: why. */
   pushReason: Schema.optional(HubPushReason),
+  /** For a direct-sending credential change: which phone platform it concerned, never the credential. */
+  pushPlatform: Schema.optional(RemotePushPlatform),
   /** For a provisioning change: the offer, its kind, whether a person or the standing choice applied it, and why one came to nothing. */
   offerId: Schema.optional(HubOfferId),
   provisionKind: Schema.optional(HubOfferKind),

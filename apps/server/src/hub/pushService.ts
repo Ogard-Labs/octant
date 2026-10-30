@@ -20,6 +20,7 @@ import {
   type HubPushHandoff,
   type HubPushReason,
   type HubPushResult,
+  type RemotePushGatewayRefusalCode,
   type RemotePushGatewaySettingsV1,
   type RosterMember,
 } from "@octant/contracts";
@@ -30,6 +31,7 @@ import {
   gatewayDeliveryUrl,
   refusalCode,
 } from "../remote/gatewayPushDeliveryTransport";
+import type { DirectPushGateway } from "./directPushGateway";
 import { listenerPinFromDigest } from "./hubCrypto";
 import { HUB_LINK_REQUEST_TIMEOUT_MS, HUB_PEER_KEY_HEADER, sendHubLinkRequest } from "./hubLink";
 import type { HubHostIdentity } from "./hubService";
@@ -68,6 +70,15 @@ export interface PushServiceOptions {
    * next one.
    */
   readonly gateway: () => Pick<RemotePushGatewaySettingsV1, "enabled" | "gatewayUrl">;
+  /**
+   * This hub's own gateway, when its person turned on direct sending. While it
+   * is on, the hub delivers to Apple and Google itself instead of forwarding to
+   * the gateway the Notifications setting names.
+   */
+  readonly direct?: {
+    readonly enabled: () => boolean;
+    readonly deliver: DirectPushGateway["deliver"];
+  };
   readonly record: (change: HubMembershipChangedPayload) => void;
   readonly now: () => number;
   readonly fetch?: typeof fetch;
@@ -185,42 +196,67 @@ export class PushService {
       return refuse("malformed");
     }
     const bytes = Buffer.byteLength(handoff.body, "utf8");
-    const gateway = this.#options.gateway();
-    if (!gateway.enabled) return refuse("gateway-off");
-    const target = decidePushGateway({
-      requested: handoff.gatewayUrl,
-      configured: gateway.gatewayUrl,
-    });
-    if (target.status === "refuse") return refuse(target.kind);
+    // A hub that sends directly is its own gateway: the request goes to the
+    // platforms through its own rules, and the Notifications setting, which names
+    // a gateway to contact, is not consulted. A standing-in standby holds no
+    // credentials and still forwards.
+    const sendDirect = book.kind === "hub" ? this.#options.direct : undefined;
+    const direct = sendDirect?.enabled() === true ? sendDirect : undefined;
+    let target: { readonly gatewayUrl: string } | undefined;
+    if (direct === undefined) {
+      const gateway = this.#options.gateway();
+      if (!gateway.enabled) return refuse("gateway-off");
+      const decision = decidePushGateway({
+        requested: handoff.gatewayUrl,
+        configured: gateway.gatewayUrl,
+      });
+      if (decision.status === "refuse") return refuse(decision.kind);
+      target = decision;
+    }
     const confirmed = await this.#confirmGrant(book, sender);
     if (confirmed.status === "refused") return refuse(confirmed.kind);
 
-    let response: Response;
-    try {
-      response = await (this.#options.fetch ?? fetch)(gatewayDeliveryUrl(target.gatewayUrl), {
-        method: "POST",
-        headers: gatewayDeliveryHeaders(handoff),
-        body: handoff.body,
-        // The signed request goes only to the address the hub's person set, never to a redirect.
-        redirect: "manual",
-        signal: AbortSignal.timeout(this.#options.gatewayTimeoutMs ?? DEFAULT_GATEWAY_TIMEOUT_MS),
+    let gatewayStatus: number;
+    let code: RemotePushGatewayRefusalCode | undefined;
+    if (direct !== undefined) {
+      const answer = await direct.deliver(handoff.body, {
+        hostKey: handoff.hostKey,
+        timestamp: handoff.timestamp,
+        signature: handoff.signature,
       });
-    } catch {
-      this.#note(book, memberId, "failed");
-      this.#options.record({
-        change: "push-refused",
-        actingPrincipal: principal,
-        memberId,
-        pushBytes: bytes,
-        pushReason: "gateway-unreachable",
-      });
-      return { status: "refused", kind: "gateway-unreachable" };
+      gatewayStatus = answer.status;
+      code = "code" in answer ? answer.code : undefined;
+    } else if (target !== undefined) {
+      let response: Response;
+      try {
+        response = await (this.#options.fetch ?? fetch)(gatewayDeliveryUrl(target.gatewayUrl), {
+          method: "POST",
+          headers: gatewayDeliveryHeaders(handoff),
+          body: handoff.body,
+          // The signed request goes only to the address the hub's person set, never to a redirect.
+          redirect: "manual",
+          signal: AbortSignal.timeout(this.#options.gatewayTimeoutMs ?? DEFAULT_GATEWAY_TIMEOUT_MS),
+        });
+      } catch {
+        this.#note(book, memberId, "failed");
+        this.#options.record({
+          change: "push-refused",
+          actingPrincipal: principal,
+          memberId,
+          pushBytes: bytes,
+          pushReason: "gateway-unreachable",
+        });
+        return { status: "refused", kind: "gateway-unreachable" };
+      }
+      gatewayStatus = response.status;
+      code = await refusalCode(response);
+    } else {
+      return refuse("gateway-off");
     }
-    const code = await refusalCode(response);
     this.#note(
       book,
       memberId,
-      response.status >= 200 && response.status < 300 ? "forwarded" : "failed",
+      gatewayStatus >= 200 && gatewayStatus < 300 ? "forwarded" : "failed",
     );
     this.#options.record({
       change: "push-forwarded",
@@ -232,7 +268,7 @@ export class PushService {
       status: "forwarded",
       answer: {
         status: "forwarded",
-        gatewayStatus: response.status,
+        gatewayStatus,
         ...(code === undefined ? {} : { code }),
       },
     };

@@ -53,7 +53,10 @@ const ROUTES = new Set([
   "/v1/desktop-provider-credentials/resolve",
   "/v1/desktop-provider-credentials/set",
   "/v1/desktop-provider-credentials/delete",
-  // No resolve: nothing on the host reads an App Store Connect key back yet,
+  "/v1/push-platform-credentials/has",
+  "/v1/push-platform-credentials/resolve",
+  "/v1/push-platform-credentials/set",
+  "/v1/push-platform-credentials/delete",
   "/v1/oauth/begin",
   "/v1/oauth/status",
   "/v1/oauth/refresh",
@@ -69,6 +72,7 @@ const REPLICA_STORE_CREDENTIAL_PREFIX = "/v1/replica-store-credentials/";
 const CANVAS_PUBLIC_SHARE_SECRET_PREFIX = "/v1/canvas-public-share-secrets/";
 const MCP_SERVER_CREDENTIAL_PREFIX = "/v1/mcp-server-credentials/";
 const DESKTOP_PROVIDER_CREDENTIAL_PREFIX = "/v1/desktop-provider-credentials/";
+const PUSH_PLATFORM_CREDENTIAL_PREFIX = "/v1/push-platform-credentials/";
 type NamespacedIdField = "instanceId" | "credentialRef" | "secretId";
 const MAX_CREDENTIAL_BYTES = 12 * 1_024;
 const PURGE_FAILURE_STATUS: Readonly<Record<CredentialPurgeFailure["category"], number>> = {
@@ -131,6 +135,13 @@ export async function startCredentialBroker(
    * with the same UUID can reach one, and a desktop driver can reach no other.
    */
   desktopProviderCredentials?: CredentialStore,
+  /**
+   * The Apple and Google push credentials and the sealing key a hub that sends
+   * notifications directly holds, in a credential namespace of their own. They
+   * are served only on `/v1/push-platform-credentials/*`, so no provider,
+   * device key, or other secret with the same UUID can reach one.
+   */
+  pushPlatformCredentials?: CredentialStore,
 ): Promise<CredentialBroker> {
   const token = randomBytes(32).toString("base64url");
   const runtime = createHostOAuthRuntime({
@@ -163,6 +174,7 @@ export async function startCredentialBroker(
       canvasPublicShareSecrets,
       mcpServerCredentials,
       desktopProviderCredentials,
+      pushPlatformCredentials,
     ).then(
       ({ destroyIncoming, response }) => {
         const headers: Record<string, string> = {};
@@ -237,6 +249,7 @@ export async function startCredentialBroker(
         canvasPublicShareSecrets,
         mcpServerCredentials,
         desktopProviderCredentials,
+        pushPlatformCredentials,
       ),
   });
 }
@@ -254,6 +267,7 @@ async function handleIncoming(
   canvasPublicShareSecrets: CredentialStore | undefined,
   mcpServerCredentials: CredentialStore | undefined,
   desktopProviderCredentials: CredentialStore | undefined,
+  pushPlatformCredentials: CredentialStore | undefined,
 ): Promise<{ destroyIncoming: boolean; response: ResponseData }> {
   if (brokerUrl === undefined) throw new Error("unavailable");
   const headers = requestHeaders(incoming.headers);
@@ -289,6 +303,7 @@ async function handleIncoming(
         canvasPublicShareSecrets,
         mcpServerCredentials,
         desktopProviderCredentials,
+        pushPlatformCredentials,
       ),
     ),
   };
@@ -307,6 +322,7 @@ async function handleBrokerRequest(
   canvasPublicShareSecrets: CredentialStore | undefined,
   mcpServerCredentials: CredentialStore | undefined,
   desktopProviderCredentials: CredentialStore | undefined,
+  pushPlatformCredentials: CredentialStore | undefined,
 ): Promise<Response> {
   const url = new URL(request.url);
   if (!isAuthorized(peerAddress, request.headers, token)) {
@@ -377,6 +393,16 @@ async function handleBrokerRequest(
       "credentialRef",
       request,
       desktopProviderCredentials,
+    );
+  }
+
+  if (url.pathname.startsWith(PUSH_PLATFORM_CREDENTIAL_PREFIX)) {
+    if (pushPlatformCredentials === undefined) return failure("not-found", 404);
+    return handleNamespacedRoute(
+      url.pathname.slice(PUSH_PLATFORM_CREDENTIAL_PREFIX.length),
+      "credentialRef",
+      request,
+      pushPlatformCredentials,
     );
   }
 

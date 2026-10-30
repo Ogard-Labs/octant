@@ -196,6 +196,37 @@ describe("hub administration controls", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("sends the direct sending operations only with their decoded bodies", async () => {
+    const { calls, runtime: controls } = runtime(() => Response.json({ status: "changed" }));
+
+    await sendHubAdministrationOperation(controls, "direct-push", { enabled: true });
+    await sendHubAdministrationOperation(controls, "direct-push-environment", {
+      environment: "development",
+    });
+    await sendHubAdministrationOperation(controls, "direct-push-credential-remove", {
+      platform: "ios",
+    });
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://127.0.0.1:4317/api/desktop/hub/direct-push",
+      "http://127.0.0.1:4317/api/desktop/hub/direct-push/environment",
+      "http://127.0.0.1:4317/api/desktop/hub/direct-push/credential/remove",
+    ]);
+
+    for (const [operation, body] of [
+      ["direct-push", { enabled: "yes" }],
+      ["direct-push-environment", { environment: "staging" }],
+      ["direct-push-credential", { platform: "android" }],
+      ["direct-push-credential", { platform: "android", serviceAccount: "{}", extra: 1 }],
+      ["direct-push-credential", { platform: "ios", keyId: "x", teamId: "x", bundleId: "x" }],
+      ["direct-push-credential-remove", { platform: "web" }],
+    ] as const) {
+      expect(await sendHubAdministrationOperation(controls, operation, body)).toMatchObject({
+        status: 400,
+      });
+    }
+    expect(calls).toHaveLength(3);
+  });
+
   it("sends an offer, and a proposal's apply, only with a body that carries no secret", async () => {
     const { calls, runtime: controls } = runtime(() => Response.json({ status: "offered" }));
     const offer = {

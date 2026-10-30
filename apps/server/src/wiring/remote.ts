@@ -23,6 +23,7 @@ import { createSignInHostPorts } from "../hub/signInHostPorts";
 import { SignInService } from "../hub/signInService";
 import { SpokeSignInService } from "../hub/spokeSignInService";
 import { createProviderCredentialRouteHandler } from "../providers/providerCredentialRoutes";
+import { makePushPlatformCredentialBrokerClient } from "../providers/credentialBrokerClient";
 import { ProviderServiceError } from "../providers/providerService";
 import { providerKeyJournal, reconcileProviderKeyChanges } from "../providers/providerKeyJournal";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -71,6 +72,10 @@ import { FailoverService } from "../hub/failoverService";
 import { HubService, type HubPairingPort } from "../hub/hubService";
 import { createHubStateStore } from "../hub/hubStateStore";
 import { createPinnedHubTransport } from "../hub/pinnedHubTransport";
+import { createDirectPushGateway } from "../hub/directPushGateway";
+import { createDirectPushRouteHandler } from "../hub/directPushRoutes";
+import { createDirectPushSender } from "../hub/directPushSenders";
+import { DirectPushService } from "../hub/directPushService";
 import { PushService } from "../hub/pushService";
 import { createRosterSigningKeyStore } from "../hub/rosterSigningKey";
 import { deviceLifecycleAt, SpokeLinkService } from "../hub/spokeLinkService";
@@ -377,10 +382,11 @@ export function wireRemote(deps: RemoteDependencies) {
         productDispatch: services.productDispatch ?? authenticatedProductDispatch,
         hubLink:
           services.hubLink ??
-          (async (request) =>
+          (async (request, facts) =>
             (await hubLinkRoutes(request)) ??
             (await peerDelegationRoutes(request)) ??
             (await peerCredentialRoutes(request)) ??
+            (await directPushRoutes(request, facts)) ??
             hubOwnerRoutes(request)),
         hubWebOrigin: services.hubWebOrigin ?? (() => spokeLinkService.hubWebOrigin()),
         spokeWebOrigins:
@@ -525,11 +531,40 @@ export function wireRemote(deps: RemoteDependencies) {
   // The push sender is off until the person turns it on in the hub's window. A
   // spoke hands the hub its sealed envelopes only if its hub grant ticks Push; the
   // hub forwards them to the gateway its own Notifications setting names.
+  // A hub that sends directly is its own push gateway for a phone app its person built,
+  // with the person's own Apple and Google credentials. Off until a window turns it on.
+  const directPushService = new DirectPushService({
+    state: hubStateStore,
+    credentials:
+      options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+        ? undefined
+        : makePushPlatformCredentialBrokerClient({
+            url: options.credentialBrokerUrl,
+            token: options.credentialBrokerToken,
+          }),
+    record: recordHubMembership,
+  });
+  const directPushGateway = createDirectPushGateway({
+    enabled: () => directPushService.enabled(),
+    sealingKey: () => directPushService.sealingKey(),
+    holdsCredential: (platform) => directPushService.holdsCredential(platform),
+    sender: createDirectPushSender({
+      credentials: directPushService.credentialSource(),
+      environment: () => directPushService.environment(),
+      now: Date.now,
+    }),
+    now: Date.now,
+  });
+  const directPushRoutes = createDirectPushRouteHandler({ gateway: directPushGateway });
   const pushService = new PushService({
     state: hubStateStore,
     identity: resolveHubIdentity,
     transport: hubTransport,
     gateway: pushGatewaySetting.current,
+    direct: {
+      enabled: () => directPushService.enabled(),
+      deliver: (body, headers) => directPushGateway.deliver(body, headers),
+    },
     record: recordHubMembership,
     now: Date.now,
   });
@@ -663,6 +698,7 @@ export function wireRemote(deps: RemoteDependencies) {
     spokeWake: spokeWakeService,
     push: pushService,
     spokePush: spokePushService,
+    directPush: directPushService,
     provision: provisionService,
     spokeProvision: spokeProvisionService,
     signIn: signInService,

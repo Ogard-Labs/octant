@@ -96,6 +96,17 @@ export function makeDesktopProviderCredentialBrokerClient(
   return makeBrokerCredentialClient(options, "/v1/desktop-provider-credentials/", "credentialRef");
 }
 
+/**
+ * The Apple and Google push credentials, and the sealing key, of a hub that
+ * sends notifications directly. They sit in a credential namespace of their
+ * own, so no provider instance or other secret with the same UUID can read one.
+ */
+export function makePushPlatformCredentialBrokerClient(
+  options: CredentialBrokerClientOptions,
+): ProviderCredentialStore {
+  return makeBrokerCredentialClient(options, "/v1/push-platform-credentials/", "credentialRef");
+}
+
 function makeBrokerCredentialClient(
   options: CredentialBrokerClientOptions,
   routePrefix:
@@ -104,7 +115,8 @@ function makeBrokerCredentialClient(
     | "/v1/replica-store-credentials/"
     | "/v1/canvas-public-share-secrets/"
     | "/v1/mcp-server-credentials/"
-    | "/v1/desktop-provider-credentials/",
+    | "/v1/desktop-provider-credentials/"
+    | "/v1/push-platform-credentials/",
   field: "providerInstanceId" | "instanceId" | "credentialRef" | "secretId",
 ): ProviderCredentialStore {
   const fetch = options.fetch ?? globalThis.fetch;

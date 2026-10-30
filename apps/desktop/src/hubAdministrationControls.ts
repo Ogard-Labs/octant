@@ -14,6 +14,10 @@ import {
   decodeConfirmNewMembersRequest,
   decodeHubGrant,
   decodeHubAutoApplyRequest,
+  decodeHubDirectPushCredentialRemoveRequest,
+  decodeHubDirectPushCredentialRequest,
+  decodeHubDirectPushEnvironmentRequest,
+  decodeHubDirectPushSwitchRequest,
   decodeHubLeaveRequest,
   decodeHubOfferRequest,
   decodeHubOfferWithdrawRequest,
@@ -150,6 +154,26 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     method: "POST",
     path: "/api/desktop/hub/push",
     decodeBody: decodeHubPushSwitchRequest,
+  },
+  "direct-push": {
+    method: "POST",
+    path: "/api/desktop/hub/direct-push",
+    decodeBody: decodeHubDirectPushSwitchRequest,
+  },
+  "direct-push-environment": {
+    method: "POST",
+    path: "/api/desktop/hub/direct-push/environment",
+    decodeBody: decodeHubDirectPushEnvironmentRequest,
+  },
+  "direct-push-credential": {
+    method: "POST",
+    path: "/api/desktop/hub/direct-push/credential",
+    decodeBody: decodeHubDirectPushCredentialRequest,
+  },
+  "direct-push-credential-remove": {
+    method: "POST",
+    path: "/api/desktop/hub/direct-push/credential/remove",
+    decodeBody: decodeHubDirectPushCredentialRemoveRequest,
   },
   provision: {
     method: "POST",

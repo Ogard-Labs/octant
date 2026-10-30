@@ -25,6 +25,8 @@ export type DesktopCredentialBackend =
       readonly mcpServerCredentials: CredentialStore;
       /** Cloud desktop providers' API keys, in their own Keychain service. */
       readonly desktopProviderCredentials: CredentialStore;
+      /** Push credentials of a hub that sends notifications directly, in their own Keychain service. */
+      readonly pushPlatformCredentials: CredentialStore;
     }
   | {
       readonly kind: "secret-service";
@@ -40,6 +42,8 @@ export type DesktopCredentialBackend =
       readonly mcpServerCredentials: CredentialStore;
       /** Cloud desktop providers' API keys, under their own attribute. */
       readonly desktopProviderCredentials: CredentialStore;
+      /** Push credentials of a hub that sends notifications directly, under their own attribute. */
+      readonly pushPlatformCredentials: CredentialStore;
     }
   | {
       readonly kind: "credential-manager";
@@ -50,6 +54,7 @@ export type DesktopCredentialBackend =
       readonly canvasPublicShareSecrets?: undefined;
       readonly mcpServerCredentials?: undefined;
       readonly desktopProviderCredentials?: undefined;
+      readonly pushPlatformCredentials?: undefined;
     }
   | {
       readonly kind: "unavailable";
@@ -60,6 +65,7 @@ export type DesktopCredentialBackend =
       readonly canvasPublicShareSecrets?: undefined;
       readonly mcpServerCredentials?: undefined;
       readonly desktopProviderCredentials?: undefined;
+      readonly pushPlatformCredentials?: undefined;
     };
 
 /**
@@ -104,6 +110,10 @@ export async function resolveDesktopCredentialBackend(options: {
         storeScope: options.storeScope,
         namespace: "desktop-provider-credential",
       }),
+      pushPlatformCredentials: makeKeychainCredentialStore(options.keychainHelperPath, {
+        storeScope: options.storeScope,
+        namespace: "push-platform-credential",
+      }),
     };
   }
   if (options.platform === "linux") {
@@ -124,6 +134,9 @@ export async function resolveDesktopCredentialBackend(options: {
       }),
       desktopProviderCredentials: makeSecretServiceCredentialStore({
         namespace: "desktop-provider-credential",
+      }),
+      pushPlatformCredentials: makeSecretServiceCredentialStore({
+        namespace: "push-platform-credential",
       }),
     };
   }

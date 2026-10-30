@@ -38,6 +38,7 @@ describe("resolveDesktopCredentialBackend", () => {
       canvasPublicShareSecrets: expect.any(Object),
       mcpServerCredentials: expect.any(Object),
       desktopProviderCredentials: expect.any(Object),
+      pushPlatformCredentials: expect.any(Object),
     });
     expect(backend.purgeStore).toBeUndefined();
   });

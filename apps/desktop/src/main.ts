@@ -1667,6 +1667,7 @@ async function startDesktopCredentialBroker(): Promise<CredentialBroker | undefi
     backend.canvasPublicShareSecrets,
     backend.mcpServerCredentials,
     backend.desktopProviderCredentials,
+    backend.pushPlatformCredentials,
   );
 }
 

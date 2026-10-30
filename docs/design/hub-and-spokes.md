@@ -63,7 +63,10 @@ sealed, spoke-signed delivery requests, the hub forwarding them unchanged to the
 push gateway, and a standing-in standby doing the same), read narrowly as the
 last item of slice 9 records; it has run only between hosts on loopback against a
 local stand-in for the gateway, never against the real gateway or to a real
-phone, and it never sends to Apple or Google itself. Provisioning is built (the
+phone. Direct sending is built too (the hub serves the gateway's two routes for a
+phone app its person built, and sends to Apple and Google itself with the
+person's own credentials), and has run only against local stand-ins for Apple and
+Google, never to a real phone. Provisioning is built (the
 hub's own switch, offers as data, proposals the spoke's person applies or
 dismisses, and applying on arrival for three kinds), read narrowly as the last
 item of slice 10 records; it has run only between hosts on loopback with fake
@@ -933,7 +936,7 @@ choice to the design, the design's recommendation was taken.
 | H4  | One hub per spoke, or several?                                              | One active hub. A standby takes over the roster and coordination only while the hub is down                                                                                                                                                                                                                      |
 | H5  | May the hub's provisioning offers apply on a spoke without asking?          | Per kind (update channel, untrusted plugin install, profile without secrets), off by default; a routine always asks                                                                                                                                                                                              |
 | H6  | Can a subscription sign-in held by a provider's own app be copied?          | Never; these tokens refresh, so a copy and its source would log each other out, and the provider's terms are unchecked. Each machine signs in itself, and the hub can ask a spoke to start that sign-in (hub-started sign-in); the person finishes it on the spoke. API keys copy already                        |
-| H7  | Which push path does the hub support first?                                 | Forward to the push gateway from Mobile maturity; direct sending only once self-building the phone app is documented                                                                                                                                                                                             |
+| H7  | Which push path does the hub support first?                                 | Forward to the push gateway from Mobile maturity, or, off by default, send directly from the hub with the person's own Apple and Firebase credentials for a phone app they built ([Building the phone app yourself](mobile-maturity.md#building-the-phone-app-yourself))                                         |
 | H8  | Where do the hub's services live?                                           | In the Octant server (`apps/server`). The roster and failover are on with the hub role; the wake service and push sender are each off until turned on                                                                                                                                                            |
 | H10 | May a standby add or remove members while standing in?                      | Yes; the hub takes the changes back on return, and removal wins                                                                                                                                                                                                                                                  |
 | H11 | How is a standby promoted to hub for good?                                  | A local action on the standby; spokes whose grant covers the standby follow it, and the rest confirm the new hub locally                                                                                                                                                                                         |
@@ -1341,8 +1344,35 @@ maintainer's hardware, or names the maintainer gate.
      standing-in standby journals and keeps no counts.
    - **The window bridge.** The desktop's allow-list of hub operations gained
      `push`, decoded against its contract before it is forwarded.
-   - **Not built.** Sending to Apple or Google directly (decision H7's second
-     path), and any delivery to a real phone.
+   - **Direct sending is the hub's own gateway.** A hub whose person turned on
+     Send notifications directly serves the gateway's two routes
+     (`/v1/capabilities`, `/v1/deliveries`) on its private listener, with the
+     rules, bounds, and status codes of Mobile maturity's Gateway rules, and
+     sends to Apple and Google itself with credentials the person stored. The
+     switch is a second one on the hub, off by default, window only, and it
+     needs the hub role on. A forward then goes to the hub's own gateway in
+     the same process, not over the network, and the Notifications setting, which
+     names a gateway to contact, is not consulted: a hub that sends directly
+     contacts no gateway. A request that names another gateway is answered by
+     the hub's own, which refuses a capability it did not issue (`421`, reported
+     to the spoke as `gateway-mismatch`).
+   - **Only a hub sends directly.** A standing-in standby holds no credentials and
+     forwards to its configured gateway as before. Turning off the hub role turns
+     direct sending off. Removing a platform's credential leaves the sealing key,
+     so capabilities already given to phones keep opening; the platform answers
+     `503 unavailable` until a credential is stored again.
+   - **Credentials stay out of the journal.** The Apple `.p8` key with its key ID,
+     team ID, and bundle ID, the Google service account (reduced to its client
+     email, project, and signing key), and the key that seals capabilities live in
+     a credential namespace of their own. They are never journaled, logged, or
+     returned: status says `stored` or `not-stored`, and the journal records the
+     platform that changed. Only the loopback window route changes any of this
+     (`/api/desktop/hub/direct-push` and its environment and credential routes); a
+     peer, guest, device, agent, or routine cannot. No command-line switch exists.
+   - **The Apple environment is the person's word.** Production or development,
+     picked in Settings; the sandbox host is used only for development.
+   - **Not built.** Any delivery to a real phone, with either path: a maintainer
+     check that needs a phone app built with the person's own accounts.
 
 10. **Provisioning.** Update-feed mirror, catalog offers, profiles, and routine
     offers as proposals, with per-kind auto-apply per H5. Acceptance: nothing

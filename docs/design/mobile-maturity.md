@@ -434,7 +434,9 @@ sender holding it. The sender is a minimal Octant push gateway
 
 The wire shapes are in `packages/contracts/src/remotePushNotifications.ts` and
 the signing text in `packages/domain/src/pushNotificationPolicy.ts`; the
-gateway service implements them in `octant-webapp` (`apps/push`).
+gateway service implements them in `octant-webapp` (`apps/push`), and a hub
+serves the same rules for a phone app its person built themselves
+([Building the phone app yourself](#building-the-phone-app-yourself)).
 
 - **Capability.** The phone posts `RemotePushCapabilityRequestV1` (platform,
   platform token, the host key fingerprint it saw at pairing) to
@@ -490,6 +492,62 @@ platform-failed` otherwise, and `503 unavailable` without that platform's
   `gateway-refused`, `gateway-rate-limited`, `gateway-malformed`,
   `gateway-unreachable`, or `gateway-failed`. Only a window on the computer can
   change the setting; a paired device reads it and is refused a change.
+
+#### Building the phone app yourself
+
+A person who builds the phone app from source, with their own Apple Developer
+and Firebase accounts, can let their own hub be that phone's push gateway, so
+nothing goes through an Octant-run service. The hub serves the rules above
+unchanged (`POST /v1/capabilities` and `POST /v1/deliveries`, the same
+bounds, refusals, and status codes) and sends to Apple and Google itself with
+the person's credentials. A build from the Octant release, the store build,
+cannot use it: only the account that signs an app holds the push credential
+that reaches it.
+
+- **Build the app.** Use your own bundle identifier (reverse-DNS, such as
+  `com.example.octant`) in place of the release's, signed by your own team.
+  Turn on the Push Notifications capability for that App ID and add the
+  `aps-environment` entitlement (`development` for a build installed from Xcode,
+  `production` for TestFlight and the App Store). In a Firebase project, add an
+  Android app with your package name and take its `google-services.json` into
+  the build.
+- **Make the credentials.** In your Apple Developer account, create a key with
+  the Apple Push Notifications service enabled and download the `.p8` file once;
+  note its key ID and your team ID. In the Firebase console, open Project
+  settings › Service accounts and generate a private key for the Firebase Admin
+  service account, which downloads a JSON file.
+- **Turn it on at the hub.** On the hub's own window, open Settings › Remote
+  access › Send notifications directly. Enter the key ID, team ID, bundle
+  identifier, and the `.p8` text; paste the service-account JSON; mark a build
+  installed from Xcode as a development build; then switch it on. The values go
+  to the host's credential store. They are never shown again, journaled,
+  logged, or returned: Settings says only _Stored_ or _Not stored_.
+- **Point the app at the hub.** Build the app with its push gateway address
+  (`MOBILE_PUSH_GATEWAY_URL`) set to the hub's private address, the same
+  `https://` name the phone pairs with. The phone trades its platform token for
+  a capability there, exactly as it would at the Octant service, and the hub
+  seals it under a key it keeps in the credential store. A capability from any
+  other gateway is answered `421`, and the sender reports `gateway-mismatch`.
+- **What stays the same.** The hub answers these two routes only on the private
+  listener it already uses, and only while the switch is on; with it off, both
+  answer `503 unavailable`. A spoke that ticked Push hands the hub its sealed,
+  spoke-signed requests as before, and the hub delivers them itself instead of
+  forwarding to a gateway. Only a window on the hub changes any of this; a
+  peer, guest, agent, or routine cannot.
+- **What reaches Apple and Google.** Exactly the payloads under [Gateway
+  rules](#gateway-rules). APNs uses `alert` push type with `mutable-content` and
+  the collapse id; the sealed content sits under the `octant` key as `version`,
+  `encapsulatedKey`, and `ciphertext`. FCM gets the same three as string data
+  values, with the collapse id as `collapse_key`. The provider token is an ES256
+  token from your `.p8` key; the FCM access token is minted from the service
+  account with an RS256 assertion. The hub reads no address from either file, so
+  the only hosts it reaches are `api.push.apple.com` (or
+  `api.sandbox.push.apple.com`), `oauth2.googleapis.com`, and
+  `fcm.googleapis.com`.
+- **Not yet proven.** Delivery to a real phone, on either platform, is a
+  maintainer check that needs a device built this way. The phone side that opens
+  the content (the notification service extension and the Android receiver) is
+  still to build, as [Phone rules](#phone-rules) says.
 
 #### Phone rules
 

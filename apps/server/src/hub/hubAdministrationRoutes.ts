@@ -16,6 +16,10 @@ import {
   decodeHubMemberReference,
   decodeHubPromoteRequest,
   decodeHubAutoApplyRequest,
+  decodeHubDirectPushCredentialRemoveRequest,
+  decodeHubDirectPushCredentialRequest,
+  decodeHubDirectPushEnvironmentRequest,
+  decodeHubDirectPushSwitchRequest,
   decodeHubOfferRequest,
   decodeHubOfferWithdrawRequest,
   decodeHubProposalDecisionRequest,
@@ -34,6 +38,7 @@ import {
 } from "@octant/contracts";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
+import type { DirectPushService } from "./directPushService";
 import type { FailoverService } from "./failoverService";
 import type { HubService } from "./hubService";
 import type { ProvisionService } from "./provisionService";
@@ -87,6 +92,11 @@ export const HUB_ADMINISTRATION_ROUTES = {
   wakeHardwareAddress: "/api/desktop/hub/wake/hardware-address",
   /** The hub's push switch: only a window on the hub turns it on or off. */
   push: "/api/desktop/hub/push",
+  /** Direct sending: only a window on the hub turns it on, picks the Apple environment, or stores or removes a credential. */
+  directPush: "/api/desktop/hub/direct-push",
+  directPushEnvironment: "/api/desktop/hub/direct-push/environment",
+  directPushCredential: "/api/desktop/hub/direct-push/credential",
+  directPushCredentialRemove: "/api/desktop/hub/direct-push/credential/remove",
   /** The hub's offer switch: only a window on the hub turns it on or off. */
   provision: "/api/desktop/hub/provision",
   /** The hub's window makes an offer for its spokes. */
@@ -116,6 +126,7 @@ export interface HubAdministrationRouteOptions {
   readonly spokeWake: SpokeWakeService;
   readonly push: PushService;
   readonly spokePush: SpokePushService;
+  readonly directPush: DirectPushService;
   readonly provision: ProvisionService;
   readonly spokeProvision: SpokeProvisionService;
   readonly signIn: SignInService;
@@ -171,6 +182,7 @@ export function createHubAdministrationRouteHandler(
         failover: options.failover.status(),
         wake: { hub: options.wake.status(), spoke: options.spokeWake.status() },
         push: { hub: options.push.status(), spoke: { handing: options.spokePush.granted() } },
+        directPush: await options.directPush.status(),
         provision: { hub: options.provision.status(), spoke: options.spokeProvision.view() },
         signIn: { hub: options.signIn.status(), spoke: options.spokeSignIn.view() },
       });
@@ -313,6 +325,24 @@ export function createHubAdministrationRouteHandler(
         case HUB_ADMINISTRATION_ROUTES.push: {
           const value = decodeHubPushSwitchRequest(parseJson(request, body.text));
           return outcome(await options.push.setEnabled(value.enabled, WINDOW_PRINCIPAL));
+        }
+        case HUB_ADMINISTRATION_ROUTES.directPush: {
+          const value = decodeHubDirectPushSwitchRequest(parseJson(request, body.text));
+          return outcome(options.directPush.setEnabled(value.enabled, WINDOW_PRINCIPAL));
+        }
+        case HUB_ADMINISTRATION_ROUTES.directPushEnvironment: {
+          const value = decodeHubDirectPushEnvironmentRequest(parseJson(request, body.text));
+          return outcome(options.directPush.setEnvironment(value.environment, WINDOW_PRINCIPAL));
+        }
+        case HUB_ADMINISTRATION_ROUTES.directPushCredential: {
+          const value = decodeHubDirectPushCredentialRequest(parseJson(request, body.text));
+          return outcome(await options.directPush.storeCredential(value, WINDOW_PRINCIPAL));
+        }
+        case HUB_ADMINISTRATION_ROUTES.directPushCredentialRemove: {
+          const value = decodeHubDirectPushCredentialRemoveRequest(parseJson(request, body.text));
+          return outcome(
+            await options.directPush.removeCredential(value.platform, WINDOW_PRINCIPAL),
+          );
         }
         case HUB_ADMINISTRATION_ROUTES.provision: {
           const value = decodeHubProvisionSwitchRequest(parseJson(request, body.text));

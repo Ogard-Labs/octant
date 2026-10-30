@@ -35,6 +35,12 @@ export const SECRET_SERVICE_MCP_SERVER_CREDENTIAL_ATTRIBUTE = "octant.mcp-server
  */
 export const SECRET_SERVICE_DESKTOP_PROVIDER_CREDENTIAL_ATTRIBUTE =
   "octant.desktop-provider-credentials.v1";
+/**
+ * The Apple and Google push credentials, and the sealing key, of a hub that
+ * sends notifications directly. A person may replace one.
+ */
+export const SECRET_SERVICE_PUSH_PLATFORM_CREDENTIAL_ATTRIBUTE =
+  "octant.push-platform-credentials.v1";
 const NAMESPACES = {
   provider: { attribute: SECRET_SERVICE_ATTRIBUTE, label: "Octant provider credential" },
   "replica-device-key": {
@@ -56,6 +62,10 @@ const NAMESPACES = {
   "desktop-provider-credential": {
     attribute: SECRET_SERVICE_DESKTOP_PROVIDER_CREDENTIAL_ATTRIBUTE,
     label: "Octant desktop provider key",
+  },
+  "push-platform-credential": {
+    attribute: SECRET_SERVICE_PUSH_PLATFORM_CREDENTIAL_ATTRIBUTE,
+    label: "Octant push credential",
   },
 } as const;
 const DEFAULT_TIMEOUT_MS = 2_000;

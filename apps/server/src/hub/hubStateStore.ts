@@ -11,6 +11,7 @@ import {
   AppUpdateFeed,
   HardwareAddress,
   HubAutoApplyKind,
+  HubDirectPushEnvironment,
   HubGrant,
   HubMemberId,
   HubOfferBody,
@@ -139,6 +140,17 @@ export const HubPushState = Schema.Struct({
 }).annotations(strict);
 export type HubPushState = typeof HubPushState.Type;
 
+/**
+ * Whether this hub is the push gateway for a phone app its person built, and
+ * which Apple push service that build talks to. Off until the person turns it
+ * on in a window; the credentials live in the credential store, not here.
+ */
+export const HubDirectPushState = Schema.Struct({
+  enabled: Schema.Boolean,
+  environment: HubDirectPushEnvironment,
+}).annotations(strict);
+export type HubDirectPushState = typeof HubDirectPushState.Type;
+
 /** How the hub's last attempt to hand one spoke one offer ended. */
 export const ProvisionDeliveryRecord = Schema.Struct({
   memberId: HubMemberId,
@@ -241,6 +253,7 @@ export const HubSideState = Schema.Struct({
   signIn: Schema.optional(HubSignInState),
   wake: Schema.optional(HubWakeState),
   push: Schema.optional(HubPushState),
+  directPush: Schema.optional(HubDirectPushState),
   provision: Schema.optional(HubProvisionState),
   roster: Schema.optional(SignedHubRoster),
   members: Schema.Array(HubMemberRecord),

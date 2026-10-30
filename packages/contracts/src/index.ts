@@ -74,6 +74,7 @@ export * from "./hubDelegation";
 export * from "./hubMembership";
 export * from "./hubOwners";
 export * from "./hubProvision";
+export * from "./hubDirectPush";
 export * from "./hubSignIn";
 export * from "./hubPush";
 export * from "./hubWake";

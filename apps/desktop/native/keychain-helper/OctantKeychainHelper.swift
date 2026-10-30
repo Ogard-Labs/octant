@@ -35,6 +35,11 @@ private let desktopProviderCredentialNamespace = "desktop-provider-credential"
 // enumerable so a full data purge can still remove a leftover key; nothing
 // reads or writes it.
 private let appStoreConnectKeyService = "app.octant.app-store-connect-keys.v1"
+// The Apple and Google push credentials, and the sealing key, of a hub that
+// sends notifications directly live in a service of their own. A person may
+// replace one.
+private let pushPlatformCredentialService = "app.octant.push-platform-credentials.v1"
+private let pushPlatformCredentialNamespace = "push-platform-credential"
 // An owner device's unlock key: a P-256 key made in the Secure Enclave that
 // signs only after the person proves presence (Touch ID or the account
 // password). The Keychain item holds the key's opaque blob, which only this
@@ -80,6 +85,7 @@ private let octantOwnedServices = [
     mcpServerCredentialService,
     desktopProviderCredentialService,
     appStoreConnectKeyService,
+    pushPlatformCredentialService,
     ownerUnlockService,
 ]
 
@@ -114,6 +120,11 @@ private let separateNamespaces: [String: SeparateNamespace] = [
     ),
     desktopProviderCredentialNamespace: SeparateNamespace(
         service: desktopProviderCredentialService,
+        idField: "credentialRef",
+        replaceable: true
+    ),
+    pushPlatformCredentialNamespace: SeparateNamespace(
+        service: pushPlatformCredentialService,
         idField: "credentialRef",
         replaceable: true
     ),

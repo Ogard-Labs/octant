@@ -1328,6 +1328,96 @@ describe("HubSettingsSection push sender", () => {
   });
 });
 
+describe("HubSettingsSection direct sending", () => {
+  const hubWithDirectPush = (directPush: unknown) => ({
+    hub: {
+      enabled: true,
+      roster: { roster: { standbyOrder: [], members: [] } },
+    },
+    spoke: { membership: "none" },
+    directPush,
+  });
+  const off = {
+    enabled: false,
+    environment: "production",
+    ios: "not-stored",
+    android: "not-stored",
+  };
+
+  it("is off until the window turns it on, and then says so", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderHub({
+      status: { status: 200, body: hubWithDirectPush(off) },
+      "direct-push": { status: 200, body: { status: "changed" } },
+    });
+
+    const toggle = await screen.findByRole("switch", { name: "Send notifications directly" });
+    expect(toggle).not.toBeChecked();
+    await user.click(toggle);
+
+    await waitFor(() =>
+      expect(calls.find((call) => call.operation === "direct-push")?.body).toEqual({
+        enabled: true,
+      }),
+    );
+    expect(await screen.findByText(/Direct sending is on/)).toBeVisible();
+  });
+
+  it("shows only whether each credential is stored and offers to remove one", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderHub({
+      status: { status: 200, body: hubWithDirectPush({ ...off, ios: "stored" }) },
+      "direct-push-credential-remove": { status: 200, body: { status: "changed" } },
+    });
+
+    expect(await screen.findByText(/^Stored\. The \.p8 key/)).toBeVisible();
+    expect(screen.getByText(/^Not stored\. The service-account JSON/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+
+    await waitFor(() =>
+      expect(
+        calls.find((call) => call.operation === "direct-push-credential-remove")?.body,
+      ).toEqual({ platform: "ios" }),
+    );
+  });
+
+  it("sends a service account once and clears the field before the answer", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderHub({
+      status: { status: 200, body: hubWithDirectPush(off) },
+      "direct-push-credential": { status: 200, body: { status: "changed" } },
+    });
+
+    const field = await screen.findByLabelText("Service account (JSON)");
+    await user.type(field, "account");
+    await user.click(screen.getByRole("button", { name: "Store service account" }));
+
+    await waitFor(() =>
+      expect(calls.find((call) => call.operation === "direct-push-credential")?.body).toEqual({
+        platform: "android",
+        serviceAccount: "account",
+      }),
+    );
+    expect(field).toHaveValue("");
+  });
+
+  it("says plainly when the host refused a credential", async () => {
+    const user = userEvent.setup();
+    renderHub({
+      status: { status: 200, body: hubWithDirectPush(off) },
+      "direct-push-credential": {
+        status: 409,
+        body: { status: "refused", kind: "invalid-credential" },
+      },
+    });
+
+    await user.type(await screen.findByLabelText("Service account (JSON)"), "x");
+    await user.click(screen.getByRole("button", { name: "Store service account" }));
+
+    expect(await screen.findByText(/not a key Apple or Google issues/)).toBeVisible();
+  });
+});
+
 describe("HubSettingsSection sign-in requests", () => {
   const REQUEST = "77777777-7777-4777-8777-777777777777";
   const hubWithSignIn = (hub: unknown) => ({

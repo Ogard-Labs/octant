@@ -154,7 +154,10 @@ export interface RemoteGatewayServices {
    * Member-to-member requests of a hub and its spokes. Each is signed with the
    * sender's identity key and judged by the handler; undefined answers not found.
    */
-  readonly hubLink?: (request: Request) => Promise<Response | undefined>;
+  readonly hubLink?: (
+    request: Request,
+    facts?: { readonly sourceKey: string },
+  ) => Promise<Response | undefined>;
   /** The origin of the hub's web app, when this host holds a roster naming one; see the route policy. */
   readonly hubWebOrigin?: () => string | undefined;
   /** The web origins of the roster members the page this hub serves may connect to; see the route policy. */
@@ -761,7 +764,7 @@ function assembleServices(
       route.id === REMOTE_CANVAS_DESIGN_PAGE_ROUTE_ID
         ? options.designPage?.(request)
         : HUB_LINK_ROUTE_IDS.has(route.id)
-          ? options.hubLink?.(request)
+          ? options.hubLink?.(request, facts)
           : handlePreAuthRoute(request, route, facts, protocol, auth, clockPosture),
     authenticatedProduct: async (request, route, facts) =>
       handleAuthenticatedRoute(request, route, facts, auth),
