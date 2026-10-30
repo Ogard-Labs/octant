@@ -18,6 +18,7 @@ import {
   authorizeOwnerRequest,
   authorizePeer,
   clampDelegation,
+  decideHubFollow,
   decideRosterReplacement,
   decideStandIn,
   decideStandInHandback,
@@ -524,6 +525,88 @@ describe("decideStandIn", () => {
     expect(kind(decide({ silentForMs: 299_999 }))).toBe("hub-seen-recently");
     expect(kind(decide({ standingIn: true }))).toBe("already-standing-in");
     expect(kind(decide({ anchor: undefined }))).toBe("no-hub-roster");
+  });
+});
+
+describe("decideHubFollow", () => {
+  const anchor = signed(roster(5, baseMembers, [2]));
+  // Standby 2 promoted itself: it signs as hub, the old hub is gone, the order is empty.
+  const promoted = (sequence = 6, members: ReadonlyArray<RosterMember> = promotedMembers) =>
+    signed(roster(sequence, members, []), "hub", 2);
+  const promotedMembers = [member(2, "hub"), member(3, "spoke"), member(4, "guest")];
+  const decide = (overrides: Partial<Parameters<typeof decideHubFollow>[0]> = {}) =>
+    decideHubFollow({
+      anchor,
+      heldSequence: 5,
+      selfMemberId: memberId(3),
+      grant: { items: ["roster", "standby"], actProjects: [] },
+      candidate: promoted(),
+      promoterKeyFingerprint: key(2),
+      silentForMs: 300_000,
+      failoverAfterMs: 300_000,
+      ...overrides,
+    });
+  const kind = (result: ReturnType<typeof decideHubFollow>) =>
+    result.status === "refused" ? result.kind : result.status;
+
+  it("follows a named standby's promotion for a spoke that ticked Standby once the old hub has been silent", () => {
+    expect(kind(decide())).toBe("follow");
+  });
+
+  it("leaves a spoke that did not tick Standby to accept the new hub itself", () => {
+    expect(kind(decide({ grant: { items: ["roster"], actProjects: [] } }))).toBe(
+      "standby-not-granted",
+    );
+    expect(kind(decide({ grant: undefined }))).toBe("standby-not-granted");
+  });
+
+  it("does not follow for a spoke that ticked Standby but unticked Roster", () => {
+    expect(kind(decide({ grant: { items: ["standby"], actProjects: [] } }))).toBe(
+      "roster-not-granted",
+    );
+  });
+
+  it("refuses a promotion from a member the last hub-signed roster did not name as standby", () => {
+    expect(kind(decide({ candidate: signed(roster(6, promotedMembers, []), "hub", 4) }))).toBe(
+      "not-signed-as-hub",
+    );
+    const impostor = [member(4, "hub"), member(3, "spoke")];
+    expect(kind(decide({ candidate: signed(roster(6, impostor, []), "hub", 4) }))).toBe(
+      "not-a-named-standby",
+    );
+    expect(kind(decide({ anchor: signed(roster(5, baseMembers, [])) }))).toBe(
+      "not-a-named-standby",
+    );
+    expect(kind(decide({ anchor: undefined }))).toBe("no-hub-roster");
+  });
+
+  it("refuses a promotion signed by a standby, or one that does not make the signer the hub", () => {
+    expect(kind(decide({ candidate: signed(roster(6, promotedMembers, []), "standby", 2) }))).toBe(
+      "not-signed-as-hub",
+    );
+    const stillStandby = [member(1, "hub"), member(2, "standby-hub"), member(3, "spoke")];
+    expect(kind(decide({ candidate: signed(roster(6, stillStandby, [2]), "hub", 2) }))).toBe(
+      "not-signed-as-hub",
+    );
+  });
+
+  it("refuses a key that is not the one the last hub-signed roster fingerprints", () => {
+    expect(kind(decide({ promoterKeyFingerprint: key(9) }))).toBe("key-mismatch");
+  });
+
+  it("refuses a roster whose sequence does not move forward", () => {
+    expect(kind(decide({ candidate: promoted(5) }))).toBe("stale-sequence");
+    expect(kind(decide({ candidate: promoted(4) }))).toBe("stale-sequence");
+  });
+
+  it("refuses a roster that does not list this spoke", () => {
+    expect(kind(decide({ candidate: promoted(6, [member(2, "hub"), member(4, "guest")]) }))).toBe(
+      "self-not-listed",
+    );
+  });
+
+  it("refuses while the old hub has not been silent for the whole failover time", () => {
+    expect(kind(decide({ silentForMs: 299_999 }))).toBe("hub-seen-recently");
   });
 });
 

@@ -401,8 +401,10 @@ computer decides for itself.
 **If the hub is lost for good.** On the standby's own window, choose **Make this
 computer the hub…** under **Join a hub**, and confirm. Or run
 `octant hub promote --confirm` on it. The old hub leaves the list and the
-standby order is cleared. Nothing follows by itself: on each other computer,
-run `octant hub accept-hub <name of the new hub>` in its own window. A computer
+standby order is cleared. A computer where you ticked **Standby** follows the new
+hub by itself once the old hub has been out of reach for the failover time, and
+keeps exactly the permissions it gave the old hub. On each other computer, run
+`octant hub accept-hub <name of the new hub>` in its own window. A computer
 asks the new hub over the connection it already trusted for that standby, and
 accepts it only if it answers as that standby with a list that includes the
 computer. Phones that joined as guests join the new hub again with a new code.

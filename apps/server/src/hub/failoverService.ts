@@ -412,7 +412,14 @@ export class FailoverService {
       return;
     }
     if (current.standIn !== undefined || silentForMs < failoverAfterMs) return;
+    // Looked for afresh each time: a standby followed before may have stopped standing in.
+    this.#followingStandby = undefined;
     await this.#followStandby(current, anchor);
+    if (this.#followingStandby !== undefined) return;
+    // No standby is standing in. A standby that was promoted for good answers as
+    // the hub; a spoke that ticked Standby takes it, and the rest wait for their
+    // person (the follow refuses them).
+    await this.#options.spoke.followPromotedHub({ silentForMs, failoverAfterMs });
   }
 
   #failoverAfterMs(link: HubLinkState): number {

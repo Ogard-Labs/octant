@@ -46,7 +46,8 @@ records; it has run only between hosts on loopback with a fake socket, and a rea
 Wake-on-LAN wake of a sleeping Mac has not been tried. Delegation is
 built for Work Projects, read narrowly as the last item of the delivery plan's
 slice 6 records. Failover is built (a named standby, member switching, stand-in,
-step-down with merge-back, and promotion), read narrowly as the last item of
+step-down with merge-back, and promotion, which spokes that ticked Standby
+follow without a person), read narrowly as the last item of
 slice 7 records; it has run only between hosts on loopback, with the hub
 stopped by blocking its address, never on a real network or after a real
 reboot. Push through the hub is built (the hub's own switch, a spoke handing it
@@ -754,7 +755,9 @@ are and how to reach them.
 - **Replacing the hub for good.** Promoting a standby to hub permanently, for
   example after the Mac mini dies, is a local action on the standby that the
   person confirms, followed by each spoke accepting the new hub
-  ([decision H11](#decisions)).
+  ([decision H11](#decisions)): a spoke that ticked Standby takes it after the old
+  hub has been silent for the failover time, and any other spoke accepts it in
+  its own window.
 
 Rationale: the hub holds little authority (a roster, wake times, and a send
 path), so a short-lived second hub costs little, and failover needs no
@@ -1024,12 +1027,24 @@ maintainer's hardware, or names the maintainer gate.
      (`handback-invalid`, journaled as `stand-in-refused`) if it removes the hub, a
      standby, or the sender, or adds anything but a spoke: the hub signs the merge,
      so it must not carry a change members refuse from a standby.
-   - **Promotion changes no spoke by itself.** A named standby, on the person's
-     confirmation in its own window or `octant hub promote --confirm`, becomes the
-     hub, clears the standby order, drops the old hub from the roster, and signs
-     with its own roster key. Every spoke, including those that ticked Standby,
-     accepts it in its own window (`octant hub accept-hub`): H11's automatic
-     following for spokes that ticked Standby is not built. The new hub trusts
+   - **Promotion is followed by spokes that ticked Standby, and awaited by the
+     rest.** A named standby, on the person's confirmation in its own window or
+     `octant hub promote --confirm`, becomes the hub, clears the standby order,
+     drops the old hub from the roster, and signs with its own roster key. A
+     spoke whose hub grant ticks Standby takes it without a person
+     (`decideHubFollow`) only if it also ticks Roster, and only on its own failover look: the old hub must have
+     been silent for the whole failover time (so a promotion while the old hub is
+     reachable waits for the person, as a standby-signed roster does), the signer
+     must be a standby the last hub-signed roster named, with the key that roster
+     fingerprints, answering as hub with a signature that verifies against its
+     roster key, and the roster must list the spoke and move the sequence
+     forward. The spoke's grant, peer grants, and owners carry over untouched, and
+     the journal records `new-hub-accepted` under the new hub with the reason
+     `standby-granted-hub-silent`. A refusal changes nothing. Every other spoke
+     accepts the new hub in its own window (`octant hub accept-hub`); none shows a
+     pending notice, and a spoke that is off or asleep during the look follows or
+     waits on a later one. A standby that is itself standing in when another is
+     promoted does not follow. The new hub trusts
      the key a member presents when its fingerprint matches the roster. Guests the
      standby admitted as a spoke are revoked, and guests join the new hub again.
    - **Where the person reaches it.** The hub's Settings section sets the
