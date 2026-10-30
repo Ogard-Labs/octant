@@ -120,7 +120,7 @@ function makeLinearClient(
 
 describe("DraftThreadWorkspace", () => {
   it.each(["chat", "work", "code"] as const)(
-    "carries a selected Computer plugin into the first %s message",
+    "offers no Computer chip in the first %s message, even on a Mac with a screen",
     async (mode) => {
       const descriptor = Object.getOwnPropertyDescriptor(window, "octantHost");
       Object.defineProperty(window, "octantHost", {
@@ -139,8 +139,7 @@ describe("DraftThreadWorkspace", () => {
           />,
         );
         await user.type(screen.getByRole("textbox", { name: "First message" }), "Use @Com");
-        await user.keyboard("{Enter}");
-        expect(screen.getByRole("button", { name: "Remove Computer" })).toBeVisible();
+        expect(screen.queryByRole("option", { name: /Computer/ })).not.toBeInTheDocument();
         if (mode !== "chat") {
           await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
           await user.click(
@@ -149,11 +148,8 @@ describe("DraftThreadWorkspace", () => {
         }
         await user.click(screen.getByRole("button", { name: "Create thread" }));
         expect(onCreateThread).toHaveBeenCalledOnce();
-        expect(onCreateThread.mock.calls[0]?.[0]).toBe("Use");
-        expect(onCreateThread.mock.calls[0]?.[7]).toMatchObject({
-          kind: "plugin",
-          componentId: "computer",
-        });
+        expect(onCreateThread.mock.calls[0]?.[0]).toBe("Use @Com");
+        expect(onCreateThread.mock.calls[0]?.[7]).toBeUndefined();
       } finally {
         if (descriptor === undefined) Reflect.deleteProperty(window, "octantHost");
         else Object.defineProperty(window, "octantHost", descriptor);

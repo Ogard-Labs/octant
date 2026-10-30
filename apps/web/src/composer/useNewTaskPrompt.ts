@@ -3,7 +3,6 @@ import {
   type GithubIssueContextRequest,
   type LinearIssueContextRequest,
 } from "@octant/contracts";
-import type { ExtensionSelection } from "@octant/contracts/extensions";
 import type { CodeNewThreadWorkspace } from "@octant/contracts/projects";
 import type { PermissionPersistence, ProviderExecutionPolicy } from "@octant/contracts/providers";
 import { createContext, useCallback, useContext, useState, useSyncExternalStore } from "react";
@@ -103,11 +102,6 @@ export interface NewTaskDrafts {
     scope: string,
     receipts: ReadonlyArray<ComposerExtensionSelection>,
   ) => void;
-  readonly readComputerSelection: (scope: string) => ExtensionSelection | undefined;
-  readonly writeComputerSelection: (
-    scope: string,
-    selection: ExtensionSelection | undefined,
-  ) => void;
   readonly subscribe: (onStoreChange: () => void) => () => void;
 }
 
@@ -126,7 +120,6 @@ export function createNewTaskDrafts(): NewTaskDrafts {
   const codeCheckouts = new Map<string, NewTaskCodeCheckoutDraft>();
   const mentionChips = new Map<string, ReadonlyArray<NewTaskMentionChip>>();
   const extensionReceipts = new Map<string, ReadonlyArray<ComposerExtensionSelection>>();
-  const computerSelections = new Map<string, ExtensionSelection>();
   const listeners = new Set<() => void>();
   const notify = () => {
     for (const listener of listeners) listener();
@@ -168,11 +161,6 @@ export function createNewTaskDrafts(): NewTaskDrafts {
       if (receipts.length === 0) extensionReceipts.delete(scope);
       else extensionReceipts.set(scope, receipts);
     },
-    readComputerSelection: (scope) => computerSelections.get(scope),
-    writeComputerSelection: (scope, selection) => {
-      if (selection === undefined) computerSelections.delete(scope);
-      else computerSelections.set(scope, selection);
-    },
     subscribe: (onStoreChange) => {
       listeners.add(onStoreChange);
       return () => {
@@ -192,7 +180,6 @@ function discardNewTaskDraftScope(drafts: NewTaskDrafts, scope: string): void {
   drafts.writeCodeCheckout(scope, undefined);
   drafts.writeMentionChips(scope, []);
   drafts.writeExtensionReceipts(scope, []);
-  drafts.writeComputerSelection(scope, undefined);
 }
 
 /**

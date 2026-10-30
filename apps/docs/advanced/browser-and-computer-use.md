@@ -161,18 +161,26 @@ waiting or the page half-open.
 ## Computer use
 
 Computer access requests show a compact, left-aligned approval card with the
-server-provided application, task scope, and duration. **Deny** and **Approve once**
-remain visible together; the activity footer does not repeat the approval status.
+server-provided application, task scope, and duration, the agent's own reason
+for the action when it gave one, and any outside content the task has read.
+**Deny** and **Approve once** remain visible together; the activity footer does
+not repeat the approval status.
 
 Typing targets an observed text field directly; a preceding background click to
 focus the field is unnecessary. After an application restarts, request its current
 window list rather than reusing earlier window IDs.
 
-Computer use is a bundled plugin for the Apple Silicon macOS desktop app.
-Choose **Computer** from the `@` picker in a Chat, Work, or Code composer, then
-describe what to do. The selected Computer chip gives a supported provider
-the `octant_computer` tool and instructions for using it. Ordinary text that
-mentions a computer does not enable the tool.
+Computer use is a bundled plugin for the Apple Silicon macOS desktop app. You
+do not pick it in the composer: while it is on, every Chat, Work, or Code turn
+on a supported provider is offered the `octant_computer` tool, and the agent
+uses it when your request needs an app, as in "open Notes and add today's
+list". Being offered the tool controls nothing. Plan mode, a provider without
+Octant's tools, or the plugin turned off offers no tool at all.
+
+The first time the agent acts on an app in a task, Octant asks you, even when
+the task has Full access. After the task has read outside content, such as a
+web page, every action asks again, one action at a time, and the card names
+what the task read.
 
 Open **Settings → Computer use** to enable the plugin, set up Accessibility
 and Screen Recording permissions, and check the installed CuaDriver version.

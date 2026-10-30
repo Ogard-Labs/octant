@@ -102,6 +102,12 @@ const MAC_TOOL: ProviderToolDefinition = {
         enum: [...PRESS_KEYS],
         description: "Navigation or editing key for press. Use type to enter text.",
       },
+      reason: {
+        type: "string",
+        maxLength: 200,
+        description:
+          "One short sentence saying why this action serves the person's request; shown to them when the app asks.",
+      },
       direction: { type: "string", enum: ["up", "down", "left", "right"] },
       amount: { type: "integer", minimum: 1, maximum: 10 },
     },
@@ -175,6 +181,12 @@ const DESKTOP_TOOL: ProviderToolDefinition = {
         enum: [...PRESS_KEYS],
         description: "Navigation or editing key for press. Use type to enter text.",
       },
+      reason: {
+        type: "string",
+        maxLength: 200,
+        description:
+          "One short sentence saying why this action serves the person's request; shown to them when the app asks.",
+      },
       direction: { type: "string", enum: ["up", "down", "left", "right"] },
       amount: { type: "integer", minimum: 1, maximum: 10 },
     },
@@ -199,11 +211,20 @@ export function createComputerUsePlugin(host: ComputerUseHostPort): ComputerUseT
           reason: "tool-unavailable",
           message: "This plugin does not offer that tool.",
         };
-      let parsed: unknown;
+      let raw: unknown;
       try {
-        parsed = JSON.parse(input.inputJson);
+        raw = JSON.parse(input.inputJson);
       } catch {
         return INVALID_COMMAND;
+      }
+      // The agent's reason rides beside the command, not in it: the command
+      // contract refuses any field it does not name.
+      let parsed = raw;
+      let reason = "";
+      if (typeof raw === "object" && raw !== null && "reason" in raw) {
+        const { reason: stated, ...command } = raw;
+        if (typeof stated === "string") reason = stated.trim().slice(0, 200);
+        parsed = command;
       }
       if (
         desktop !== undefined &&
@@ -226,7 +247,7 @@ export function createComputerUsePlugin(host: ComputerUseHostPort): ComputerUseT
       } catch {
         return INVALID_COMMAND;
       }
-      return host.execute(command, input.signal);
+      return host.execute(command, input.signal, reason === "" ? undefined : { reason });
     },
   };
 }

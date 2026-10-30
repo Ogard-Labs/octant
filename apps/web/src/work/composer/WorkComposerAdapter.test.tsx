@@ -8,7 +8,6 @@ import { WorkComposerAdapter } from "./WorkComposerAdapter";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { PickerGroup } from "@octant/domain";
 import { decodeExtensionSelection } from "@octant/contracts/extensions";
-import { computerUseSelection } from "@octant/plugin-host/computer-use";
 import {
   createNewTaskDrafts,
   NewTaskDraftsContext,
@@ -434,119 +433,6 @@ describe("WorkComposerAdapter interactions", () => {
     expect(onCreateThread.mock.calls[0]?.[4]).toEqual([
       expect.objectContaining({ kind: "plugin" }),
     ]);
-  });
-
-  it("keeps a selected Computer receipt after Settings remounts while tools are blocked", async () => {
-    const user = userEvent.setup();
-    const onCreateThread = vi.fn();
-    const drafts = createNewTaskDrafts();
-    drafts.write("work:pane", "open the app");
-    drafts.writeExtensionReceipts("work:pane", [
-      {
-        reference: "@Computer",
-        label: "Computer",
-        selection: computerUseSelection("00000000-0000-4000-8000-000000000201"),
-        status: { kind: "selected" },
-      },
-    ]);
-    const wrap = (selection?: {
-      readonly selectedProviderInstanceId: ReturnType<typeof decodeProviderInstanceId>;
-      readonly selectedModelId: ReturnType<typeof decodeProviderModelId>;
-    }) => (
-      <NewTaskDraftsContext.Provider value={drafts}>
-        <NewTaskDraftScopeContext.Provider value="work:pane">
-          <WorkComposerAdapter
-            {...baseProps}
-            projectId={"00000000-0000-0000-0000-000000000001" as ProjectId}
-            onCreateThread={onCreateThread}
-            {...selection}
-          />
-        </NewTaskDraftScopeContext.Provider>
-      </NewTaskDraftsContext.Provider>
-    );
-    // A selected provider that is not in the groups reports no Octant tools,
-    // so the chip is a blocked projection. Persisting that projection would
-    // drop the selection before Settings remounts the draft.
-    const blocked = render(
-      wrap({
-        selectedProviderInstanceId: decodeProviderInstanceId(
-          "80000000-0000-4000-8000-0000000000b1",
-        ),
-        selectedModelId: decodeProviderModelId("missing-model"),
-      }),
-    );
-    await waitFor(() => {
-      expect(drafts.readExtensionReceipts("work:pane")[0]?.selection).toBeDefined();
-    });
-    blocked.unmount();
-    render(wrap());
-    expect(await screen.findByLabelText("Selected extensions")).toHaveTextContent("Computer");
-    await user.click(screen.getByRole("button", { name: "Create thread" }));
-    await waitFor(() => expect(onCreateThread).toHaveBeenCalled());
-    expect(onCreateThread.mock.calls[0]?.[4]).toEqual([
-      expect.objectContaining({ kind: "plugin" }),
-    ]);
-  });
-
-  it("keeps a direct Computer selection after Settings remounts while tools are blocked", async () => {
-    const descriptor = Object.getOwnPropertyDescriptor(window, "octantHost");
-    Object.defineProperty(window, "octantHost", {
-      configurable: true,
-      value: { getComputerUseStatus: async () => ({ supported: true }) },
-    });
-    try {
-      const user = userEvent.setup();
-      const onCreateThread = vi.fn();
-      const drafts = createNewTaskDrafts();
-      drafts.write("work:pane", "use the host");
-      drafts.writeComputerSelection(
-        "work:pane",
-        computerUseSelection("00000000-0000-4000-8000-000000000301"),
-      );
-      const wrap = (selection?: {
-        readonly selectedProviderInstanceId: ReturnType<typeof decodeProviderInstanceId>;
-        readonly selectedModelId: ReturnType<typeof decodeProviderModelId>;
-      }) => (
-        <NewTaskDraftsContext.Provider value={drafts}>
-          <NewTaskDraftScopeContext.Provider value="work:pane">
-            <WorkComposerAdapter
-              {...baseProps}
-              projectId={"00000000-0000-0000-0000-000000000001" as ProjectId}
-              onCreateThread={onCreateThread}
-              {...selection}
-            />
-          </NewTaskDraftScopeContext.Provider>
-        </NewTaskDraftsContext.Provider>
-      );
-      const blocked = render(
-        wrap({
-          selectedProviderInstanceId: decodeProviderInstanceId(
-            "80000000-0000-4000-8000-0000000000b1",
-          ),
-          selectedModelId: decodeProviderModelId("missing-model"),
-        }),
-      );
-      expect(screen.queryByRole("button", { name: "Remove Computer" })).not.toBeInTheDocument();
-      await waitFor(() => {
-        expect(drafts.readComputerSelection("work:pane")).toEqual(
-          expect.objectContaining({ kind: "plugin" }),
-        );
-      });
-      blocked.unmount();
-      expect(drafts.readComputerSelection("work:pane")).toEqual(
-        expect.objectContaining({ kind: "plugin" }),
-      );
-      render(wrap());
-      expect(await screen.findByRole("button", { name: "Remove Computer" })).toBeVisible();
-      await user.click(screen.getByRole("button", { name: "Create thread" }));
-      await waitFor(() => expect(onCreateThread).toHaveBeenCalled());
-      expect(onCreateThread.mock.calls[0]?.[3]).toEqual(
-        expect.objectContaining({ kind: "plugin" }),
-      );
-    } finally {
-      if (descriptor === undefined) Reflect.deleteProperty(window, "octantHost");
-      else Object.defineProperty(window, "octantHost", descriptor);
-    }
   });
 });
 
