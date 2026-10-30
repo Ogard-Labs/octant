@@ -1625,36 +1625,35 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 }
 
 /* Code Project Overview: one thread-major list over host-authoritative
-   projections. Cards, chips, facts, and callouts are the system recipes
-   (.setgroup, .badge, .tag, .kv, .callout); this surface only places them. */
+   projections. On the Project page the list is a Settings-style card of rows
+   under a section label; chips, facts, and callouts are the system recipes
+   (.badge, .tag, .kv, .callout), and this surface only places them. */
 .code-project-overview {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 32px;
-  margin-top: 28px;
+  gap: var(--oct-space-8);
 }
 
 .code-project-overview__sessions,
 .code-project-overview__quick-start {
+  display: grid;
   min-width: 0;
+  gap: var(--oct-space-3);
 }
 
-/* Section labels follow Settings: sentence case, the secondary weight, a
-   hairline underneath, and a count at the far end where there is one. */
+/* Section labels follow Settings: sentence case, 14px, medium weight, the
+   primary ink, and a count at the far end where there is one. */
 .code-project-overview__section-header {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 4px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--oct-border);
+  gap: var(--oct-space-4);
 }
 
 .code-project-overview__section-header h2 {
   margin: 0;
-  color: var(--oct-meta);
+  color: var(--oct-fg);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-medium);
@@ -1663,12 +1662,28 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 
 .code-project-overview__count,
 .code-project-overview__note {
-  color: var(--oct-meta);
+  color: var(--oct-fg-2);
   font-size: var(--oct-text-xs);
 }
 
 .code-project-overview__note {
-  margin: 12px 0 0;
+  margin: 0;
+}
+
+/* The list, and the line that stands in for it while loading or empty, sit
+   in the page's card so they read on a surface rather than on the ground. */
+.code-project-overview__sessions
+  > :is(.code-project-overview__threads, .code-project-overview__note) {
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(
+    --project-overview-card-fill,
+    color-mix(in oklab, var(--oct-fg) 3%, var(--oct-bg))
+  );
+}
+
+.code-project-overview__sessions > .code-project-overview__note {
+  padding: var(--oct-space-4);
 }
 
 .code-project-overview__habit {
@@ -1691,20 +1706,35 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   list-style: none;
 }
 
-/* One thread per row, hairlines between rows, no card: the list is a table
-   of the Project's work, and a card around every row made a page of boxes. */
+/* One thread per row, divided by a hairline inset from the card's edges:
+   the title line, then its state, posture, and facts as one quiet line,
+   then the Details disclosure. */
+.code-project-overview__threads > li {
+  position: relative;
+  min-width: 0;
+}
+
+.code-project-overview__threads > li + li::before {
+  position: absolute;
+  top: 0;
+  right: var(--oct-space-4);
+  left: var(--oct-space-4);
+  border-top: 1px solid var(--oct-hairline);
+  content: "";
+}
+
 .code-project-thread {
   display: grid;
-  gap: 4px;
-  padding: var(--oct-space-3) 0;
-  border-bottom: 1px solid var(--oct-border);
+  gap: var(--oct-space-2);
+  min-width: 0;
+  padding: var(--oct-space-3) var(--oct-space-4);
 }
 
 .code-project-thread__row {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 8px;
+  gap: var(--oct-space-2);
 }
 
 .code-project-thread__title {
@@ -1713,24 +1743,17 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   height: auto;
   min-height: 0;
   justify-content: flex-start;
-  padding: 2px 0;
+  padding: 0;
   margin-inline-start: 0;
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-medium);
   text-align: left;
 }
 
-.code-project-thread__title > span {
+.code-project-thread__title span {
   overflow: hidden;
+  font-weight: var(--oct-weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.code-project-thread__chips {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: var(--oct-space-1);
 }
 
 .code-project-thread__pin {
@@ -1744,16 +1767,34 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   opacity: 1;
 }
 
-/* Facts read as one quiet line: "Branch main · Changes 1 changed file". */
+.code-project-thread__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+  gap: var(--oct-space-1) var(--oct-space-3);
+}
+
+.code-project-thread__chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+/* Facts read as one quiet line: "Branch main · Blocked Not confirmed
+   finished yet." Each label keeps a word space from its value. */
 .code-project-thread__facts {
   display: flex;
   flex-wrap: wrap;
+  min-width: 0;
   gap: 2px var(--oct-space-3);
   margin: 0;
   padding: 0;
   list-style: none;
   color: var(--oct-fg-2);
   font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-snug);
 }
 
 .code-project-thread__facts li {
@@ -1771,19 +1812,29 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 }
 
 .code-project-thread__more summary {
+  width: fit-content;
   cursor: pointer;
   color: var(--oct-meta);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.code-project-thread__more summary:hover,
+.code-project-thread__more[open] summary {
+  color: var(--oct-fg-2);
 }
 
 .code-project-thread__more .kv {
-  margin-top: 8px;
+  margin-top: var(--oct-space-2);
 }
 
 .code-project-overview__sessions > p,
 .code-project-overview__quick-start > p,
 .code-project-overview__state p {
   margin: 0;
-  color: var(--oct-muted);
+  color: var(--oct-fg-2);
   font-size: var(--oct-text-xs);
   line-height: 1.5;
   overflow-wrap: anywhere;
@@ -1798,62 +1849,6 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .code-project-overview__state svg {
   flex: none;
   margin-top: 2px;
-}
-
-/* Each thread card is the system setgroup recipe; the surface owns only the
-   interior placement of the title row, inline facts, and disclosure. */
-.code-project-thread {
-  display: grid;
-  gap: var(--oct-space-2);
-  min-width: 0;
-  padding: var(--oct-space-3) var(--oct-space-4) 12px;
-}
-
-.code-project-thread__row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.code-project-thread__title {
-  flex: 1 1 220px;
-  min-width: 0;
-  justify-content: flex-start;
-  text-align: left;
-}
-
-.code-project-thread__title span {
-  overflow: hidden;
-  font-weight: var(--oct-weight-display);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.code-project-thread__chips {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--oct-space-1);
-}
-
-.code-project-thread__pin {
-  flex: none;
-}
-
-.code-project-thread__more summary {
-  cursor: pointer;
-  color: var(--oct-meta);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-.code-project-thread__more[open] summary {
-  margin-bottom: 8px;
-  color: var(--oct-fg-2);
 }
 
 .code-project-overview__quick-start-copy {
@@ -1877,14 +1872,6 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 
 .code-project-overview__quick-start .welcome__heading {
   display: none;
-}
-
-@media (max-width: 760px) {
-  .code-project-overview__facts,
-  .code-project-overview__sessions,
-  .code-project-overview__quick-start {
-    padding-inline: var(--oct-space-5);
-  }
 }
 
 @media (max-width: 680px) {

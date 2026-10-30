@@ -67,6 +67,23 @@ Projects opens its searchable directory in the main workspace. Selecting a Proje
 replaces that directory with the Project overview; Projects in primary navigation
 returns to the directory. Neither view adds a second sidebar. Other destinations
 replace the directory while preserving the underlying Project selection.
+
+The Project overview is one reading column in the 880px measure, starting
+below the title band. The header sits on the page: the Project tile at 40px
+(the colour picker), the name as the editable title with the kind ("Code
+Project") as its subtitle, and the actions at the right edge, New thread in
+the neutral secondary paint beside the ghost Relink folder and Archive
+Project. Everything else reads on cards in the Settings section recipe: one
+card for the binding (the root in mono with its availability on the first
+row, what the binding grants on the second), then labelled groups. Threads
+are rows in one card: the title alone on its line, then the state chip,
+approval posture, and facts on one line beneath it, then Details. Settings
+rows split into **Context** (Memory, Brand kit, Canvases) and **Access and
+limits** (Provider access, Disposable desktop, Status file, Spend ceiling); a
+group with no rows is not drawn. Over an application ground the cards keep the
+opaque card step even under Glass, and the header's text takes the start
+screen's page-colour glow: set straight on the ground, the overview's rows
+read through the ground's letters (October 2026).
 Work's sidebar lists Chat and Work Projects only. When it has none and Code
 has at least one, the empty Projects line says the Projects are in Code and
 offers Switch to Code; a host with no Projects in any mode keeps "No Projects

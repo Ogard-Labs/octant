@@ -553,19 +553,6 @@ function CodeProjectThreadRow(props: {
           >
             <span>{row.title}</span>
           </OctantButton>
-          <span className="code-project-thread__chips">
-            <ThreadStateBadge row={row} />
-            {row.thread === undefined ? null : (
-              <span className="tag">{policyLabel(row.thread.executionPolicy)}</span>
-            )}
-            {row.thread?.unread === true ? (
-              <OctantBadge variant="default">New activity</OctantBadge>
-            ) : null}
-            {(row.thread?.followUp ?? row.card?.followUp) === true ? (
-              <span className="tag">Follow-up</span>
-            ) : null}
-            {pinned ? <span className="tag">Pinned</span> : null}
-          </span>
           {props.onPin === undefined ? null : (
             <OctantButton
               aria-label={pinned ? `Unpin ${row.title}` : `Pin ${row.title}`}
@@ -584,16 +571,34 @@ function CodeProjectThreadRow(props: {
           )}
         </div>
       )}
-      {facts.length === 0 ? null : (
-        <ul className="code-project-thread__facts" aria-label="Thread facts">
-          {facts.map((fact) => (
-            <li key={fact.label}>
-              <span className="code-project-thread__fact-label">{fact.label}</span>
-              <span>{fact.value}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+      {/* State, posture, and facts read as one line under the title, so a
+          row scans left to right instead of splitting its state off to the
+          far edge of a wide page. */}
+      <div className="code-project-thread__meta">
+        <span className="code-project-thread__chips">
+          <ThreadStateBadge row={row} />
+          {row.thread === undefined ? null : (
+            <span className="tag">{policyLabel(row.thread.executionPolicy)}</span>
+          )}
+          {row.thread?.unread === true ? (
+            <OctantBadge variant="default">New activity</OctantBadge>
+          ) : null}
+          {(row.thread?.followUp ?? row.card?.followUp) === true ? (
+            <span className="tag">Follow-up</span>
+          ) : null}
+          {pinned ? <span className="tag">Pinned</span> : null}
+        </span>
+        {facts.length === 0 ? null : (
+          <ul className="code-project-thread__facts" aria-label="Thread facts">
+            {facts.map((fact) => (
+              <li key={fact.label}>
+                <span className="code-project-thread__fact-label">{fact.label}</span>
+                <span>{fact.value}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
       {detail.length === 0 ? null : (
         <details className="code-project-thread__more">
           <summary>Details</summary>
