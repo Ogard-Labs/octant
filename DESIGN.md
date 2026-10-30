@@ -1101,7 +1101,9 @@ meta ink with a 20px gap above, so a label never reads as one more row. A
 thread row that carries a facts line is two lines of type and takes 8px above
 and below them (about 56px). Hover-only actions (add, more, pin, archive,
 and a tab's pin and close) take no width until their row is hovered or
-focused. Icon sizes are 16/19/22px for small/medium/large actions; touch
+focused. A section heading's add and more controls are the exception: the
+list's view and filter controls share that row, so they keep their width while
+hidden and only fade in, and nothing beside them moves. Icon sizes are 16/19/22px for small/medium/large actions; touch
 surfaces keep 44px targets. The workspace and Settings share the saved sidebar
 width, defaulting to 280px (wide enough to read a thread's title rather than
 guess it); narrow Settings layouts retain their responsive

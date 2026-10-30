@@ -246,18 +246,19 @@
 }
 
 /* The header's controls answer for the section the pointer is already on, so
-   they appear with it, and take no room until then: kept in flow and in the
-   tab order, so focus still reaches them and reveals them, but zero width
-   until the pointer or focus is on the section, so a quiet label is only a
-   label. An open menu holds them visible: they must not vanish out from
-   under the cursor that opened one. */
+   they appear with it: kept in flow and in the tab order, so focus still
+   reaches them and reveals them, but transparent until the pointer or focus
+   is on the section, so a quiet label is only a label. They keep their width
+   while hidden. The list's view, filter, and arrangement controls share this
+   row, and when these grew from zero width on hover they pushed those
+   controls 49px to the left each time the pointer entered the sidebar. An
+   open menu holds them visible: they must not vanish out from under the
+   cursor that opened one. */
 .project-section__header-actions {
   display: flex;
-  width: 0;
-  min-width: 0;
+  flex: none;
   align-items: center;
   gap: 2px;
-  overflow: hidden;
   /* The Add button takes the group's tint; hover reads in the foreground. */
   color: var(--oct-meta);
   opacity: 0;
@@ -272,8 +273,6 @@
 .project-section:focus-within .project-section__header-actions,
 .project-section__header-actions:has([aria-expanded="true"]),
 .project-section__header-actions:has([data-popup-open]) {
-  width: auto;
-  overflow: visible;
   opacity: 1;
 }
 
