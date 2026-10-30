@@ -689,7 +689,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
           )}
         </div>
         <div className="composer-model-picker__pane">
-          <label className="composer-model-picker__search">
+          <label className="octant-popover-search composer-model-picker__search">
             <Search aria-hidden="true" size={14} />
             <OctantInput
               autoFocus
@@ -704,6 +704,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
               onChange={(event) => setQuery(event.currentTarget.value)}
               placeholder="Search models…"
               type="search"
+              unstyled
               value={query}
             />
           </label>

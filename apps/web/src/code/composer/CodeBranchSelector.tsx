@@ -65,7 +65,7 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
       triggerLabel="Base branch"
       {...(props.disabled === undefined ? {} : { triggerDisabled: props.disabled })}
     >
-      <label className="code-branch-selector__search">
+      <label className="octant-popover-search code-branch-selector__search">
         <Search aria-hidden="true" size={14} />
         <OctantInput
           aria-label="Search refs"
@@ -73,16 +73,17 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
           placeholder="Search refs…"
           ref={searchRef}
           type="search"
+          unstyled
           value={query}
         />
       </label>
       <div aria-label="Refs" className="code-branch-selector__list" role="listbox">
         {props.loading === true && (props.refs === undefined || props.refs.length === 0) ? (
-          <p className="code-branch-selector__empty" role="status">
+          <p className="octant-popover-empty" role="status">
             Loading refs…
           </p>
         ) : filtered.length === 0 ? (
-          <p className="code-branch-selector__empty" role="status">
+          <p className="octant-popover-empty" role="status">
             {props.refs === undefined || props.refs.length === 0
               ? "No refs reported for this repository."
               : "No refs match the search."}
@@ -97,7 +98,7 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
             return (
               <OctantButton
                 aria-selected={selected}
-                className="code-branch-selector__option"
+                className="octant-popover-option code-branch-selector__option"
                 key={`${ref.kind}:${ref.name}`}
                 onClick={() => {
                   props.onSelectRef(ref);

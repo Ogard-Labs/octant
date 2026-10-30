@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { Check, Search } from "lucide-react";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type {
   GithubAuthenticationSnapshot,
@@ -200,24 +201,34 @@ export function CreateFromIssuePicker(props: CreateFromIssuePickerProps) {
         {...(repository === undefined ? {} : { selectedNodeId: repository.nodeId })}
       />
       {repository === undefined ? (
-        <p className="create-from-issue__hint">Choose a repository to list its issues.</p>
+        <p className="octant-popover-empty">Choose a repository to list its issues.</p>
       ) : (
         <>
-          <OctantInput
-            aria-label="Search issues"
-            disabled={props.disabled}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search issues…"
-            type="search"
-            value={query}
-          />
-          {issues.kind === "loading" ? <p role="status">Loading issues…</p> : null}
+          <label className="octant-popover-search">
+            <Search aria-hidden="true" size={14} />
+            <OctantInput
+              aria-label="Search issues"
+              disabled={props.disabled}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search issues…"
+              type="search"
+              unstyled
+              value={query}
+            />
+          </label>
+          {issues.kind === "loading" ? (
+            <p className="octant-popover-empty" role="status">
+              Loading issues…
+            </p>
+          ) : null}
           {issues.kind === "error" || issues.kind === "unavailable" ? (
             <OctantAlert tone="warning">{issues.message}</OctantAlert>
           ) : null}
           {issues.kind === "ready" ? (
             issues.rows.length === 0 ? (
-              <p role="status">No issues match.</p>
+              <p className="octant-popover-empty" role="status">
+                No issues match.
+              </p>
             ) : (
               <ul aria-label="GitHub issues" className="github-picker__listbox" id={listboxId}>
                 {issues.rows.map((row) => {
@@ -230,7 +241,7 @@ export function CreateFromIssuePicker(props: CreateFromIssuePickerProps) {
                     <li key={row.number}>
                       <OctantButton
                         aria-pressed={selected}
-                        className="github-picker__option"
+                        className="octant-popover-option github-picker__option"
                         disabled={props.disabled}
                         onClick={() =>
                           onSelect(
@@ -251,6 +262,14 @@ export function CreateFromIssuePicker(props: CreateFromIssuePickerProps) {
                         <span className="github-picker__option-meta">
                           {row.state} · {row.author}
                         </span>
+                        {selected ? (
+                          <Check
+                            aria-hidden="true"
+                            className="octant-popover-option__check"
+                            size={14}
+                            strokeWidth={2}
+                          />
+                        ) : null}
                       </OctantButton>
                     </li>
                   );

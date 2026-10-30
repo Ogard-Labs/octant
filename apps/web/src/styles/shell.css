@@ -2405,22 +2405,27 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
 /* The menu opens on the side of the trigger with more room (the selector
    measures it) and is capped to that room. Hung always below, it ran past the
    window's bottom edge where the composer docks at the page foot and showed
-   one Project and a half. */
+   one Project and a half. Inside that cap only the saved Projects scroll: the
+   ways to add one stay pinned under them, where a long list once pushed
+   "New Project from GitHub repository…" past the menu's bottom edge. The face
+   is the shared popover recipe (fill, overlay shadow, 12px radius). */
 .composer-folder-selector__menu {
   position: absolute;
   z-index: 40;
   inset-block-end: calc(100% + 6px);
   inset-inline-start: 0;
-  display: grid;
-  width: min(24rem, calc(100vw - 2rem));
+  display: flex;
+  flex-direction: column;
+  width: min(22rem, calc(100vw - 2rem));
   max-height: min(28rem, 64vh);
   gap: var(--oct-space-1);
-  padding: var(--oct-space-2);
-  overflow: auto;
-  background: var(--octant-surface-raised, var(--octant-surface));
-  border: 1px solid var(--octant-border-strong);
+  padding: calc(var(--oct-space-1) + 2px);
+  overflow: hidden;
+  color: var(--popover-foreground);
+  background: var(--popover);
   border-radius: var(--oct-radius-md);
   box-shadow: var(--octant-shadow-overlay);
+  animation: octant-popover-enter var(--oct-motion-fast) cubic-bezier(0.2, 0, 0, 1);
 }
 
 .composer-folder-selector__menu--below {
@@ -2428,11 +2433,29 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   inset-block-end: auto;
 }
 
+@keyframes octant-popover-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-folder-selector__menu {
+    animation: none;
+  }
+}
+
 /* The GitHub flow carries a picker and a confirmation card, so the same
-   menu opens wider for it. */
+   menu opens wider for it and scrolls as one. */
 .composer-folder-selector__menu--github {
   width: min(30rem, calc(100vw - 2rem));
-  padding: 8px;
+  overflow: auto;
 }
 
 .composer-folder-selector__head {
@@ -2449,94 +2472,66 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   font-weight: var(--oct-weight-medium);
 }
 
-.composer-folder-selector__search {
-  width: 100%;
-}
-
 .composer-folder-selector__menu [role="listbox"] {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.composer-folder-selector__saved {
   display: grid;
+  flex: 1 1 auto;
+  align-content: start;
   gap: 1px;
+  min-height: 0;
+  overflow-y: auto;
 }
 
-.composer-folder-selector__group {
-  margin: 0;
-  padding: var(--oct-space-2) 8px 2px;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-
-.composer-folder-selector__option {
+.composer-folder-selector__actions {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  justify-content: stretch;
-  gap: 0 8px;
-  width: 100%;
-  height: auto;
-  min-height: 30px;
-  padding: var(--oct-space-1) var(--oct-space-2);
-  border-radius: var(--oct-radius-sm);
-  color: var(--oct-fg);
-  font-weight: 400;
-  text-align: start;
-  white-space: normal;
+  flex: 0 0 auto;
+  gap: 1px;
+  margin-top: var(--oct-space-1);
+  padding-top: var(--oct-space-1);
+  border-top: 1px solid var(--oct-hairline);
 }
 
-.composer-folder-selector__option > svg {
-  color: var(--oct-muted);
-}
-
-.composer-folder-selector__option:hover,
-.composer-folder-selector__option--active {
-  background: var(--oct-fg-soft);
-}
-
-.composer-folder-selector__option[aria-disabled="true"] {
-  cursor: not-allowed;
-  color: var(--octant-text-secondary);
-}
-
-.composer-folder-selector__option--selected {
-  background: var(--octant-selection);
-}
-
+/* Name and folder share one line: the name reads first and the folder trails
+   it in the meta tone, cut from the end. Two-line rows made five Projects
+   fill the menu. The full folder stays in the row's title. */
 .composer-folder-selector__option-copy {
-  display: grid;
+  display: flex;
+  flex: 1 1 auto;
+  align-items: baseline;
+  gap: var(--oct-space-2);
   min-width: 0;
-  gap: 1px;
 }
 
 .composer-folder-selector__option-name {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
-  font-size: var(--oct-text-sm);
   text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+/* With a folder beside it, the name keeps most of the line. */
+.composer-folder-selector__option-name:not(:last-child) {
+  flex-shrink: 0;
+  max-width: 60%;
 }
 
 .composer-folder-selector__option-path {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.composer-folder-selector__option-reason {
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-.composer-folder-selector__check {
-  color: var(--oct-fg);
-}
-
-.composer-folder-selector__empty {
-  margin: 0;
-  padding: 8px;
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
+.composer-folder-selector__option--active {
+  background: var(--octant-control-hover);
 }
 
 .draft-thread__context-item {
@@ -2608,9 +2603,11 @@ form > .work-composer-adapter__attachments {
 }
 
 .create-from-issue-control__popup {
-  width: min(36rem, calc(100vw - 2rem));
+  display: flex;
+  flex-direction: column;
+  width: min(32rem, calc(100vw - 2rem));
   max-height: min(60vh, 32rem);
-  padding: 8px 12px 12px;
+  padding: calc(var(--oct-space-1) + 2px);
   overflow: auto;
 }
 
@@ -2618,14 +2615,30 @@ form > .work-composer-adapter__attachments {
 .create-from-issue {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--oct-space-1);
   min-width: 0;
 }
 
-.create-from-issue__hint {
-  margin: 0;
-  color: var(--octant-text-muted);
-  font-size: var(--oct-text-xs);
+/* The source tabs read as the popup's heading: the chosen one in the text
+   tone, the other in the meta tone, with no fill, so a lone "Issues" tab is
+   a title rather than a pressed button. */
+.create-from-issue-control__panel > [role="tablist"] {
+  display: flex;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-1) var(--oct-space-1) var(--oct-space-1);
+}
+
+.create-from-issue-control__panel > [role="tablist"] > [role="tab"] {
+  height: 24px;
+  padding-inline: var(--oct-space-1);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}
+
+.create-from-issue-control__panel > [role="tablist"] > [role="tab"][aria-selected="true"] {
+  color: var(--oct-fg);
+  background: transparent;
 }
 
 .draft-thread__error,
@@ -2931,7 +2944,9 @@ form > .work-composer-adapter__attachments {
 .code-branch-selector__menu {
   display: flex;
   flex-direction: column;
+  gap: var(--oct-space-1);
   width: min(320px, calc(100vw - 32px));
+  padding: calc(var(--oct-space-1) + 2px);
   overflow: hidden;
   /* Fill and edge come from the popover recipe. Setting a workspace fill and a
      strong border here on top of the overlay's own ring made this the one
@@ -2942,36 +2957,14 @@ form > .work-composer-adapter__attachments {
 .code-branch-selector__list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  max-height: min(180px, 30vh);
-  padding: var(--oct-space-2);
+  gap: 1px;
+  max-height: min(240px, 36vh);
   overflow: auto;
 }
 
 .code-branch-selector__option {
-  border-radius: var(--oct-radius-sm);
-  display: flex;
-  align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  min-height: 28px;
-  padding: var(--oct-space-1) var(--oct-space-2);
-  color: var(--octant-text-primary);
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  font: inherit;
   font-size: var(--oct-text-detail);
-  text-align: left;
-}
-
-.code-branch-selector__option:hover {
-  background: var(--octant-control-hover);
-}
-
-.code-branch-selector__option[aria-selected="true"] {
-  background: var(--oct-selection);
 }
 
 .code-branch-selector__option-name {
@@ -2988,21 +2981,15 @@ form > .work-composer-adapter__attachments {
   color: var(--octant-text-muted);
 }
 
-.code-branch-selector__empty {
-  margin: 0;
-  padding: 8px;
-  color: var(--octant-text-muted);
-  font-size: var(--oct-text-detail);
-}
-
 .code-branch-selector__footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--oct-space-2);
-  padding: 8px 12px;
+  min-height: 34px;
+  padding: var(--oct-space-1) var(--oct-space-2) 0;
   color: var(--octant-text-secondary);
-  border-top: 1px solid var(--octant-border);
+  border-top: 1px solid var(--oct-hairline);
   font-size: var(--oct-text-detail);
   font-weight: var(--oct-weight-medium);
 }
