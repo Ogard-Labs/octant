@@ -264,6 +264,22 @@ describe("authenticated product route dispatch", () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
 
+  it("refuses a paired device a Computer approval for this Mac before the route sees it", async () => {
+    const dispatch = vi.fn(async () => Response.json({ ok: true }));
+    const product = createAuthenticatedProductDispatch({ dispatch });
+
+    // Only the person at this Mac answers what an agent may do to it; a paired
+    // device may watch the session but neither approve nor stop it.
+    for (const path of ["/api/computer-use/approvals", "/api/computer-use/stop"]) {
+      expect(
+        classifyProductAction(new Request(`https://octant.example${path}`, { method: "POST" })),
+      ).toBeUndefined();
+      const response = await product(handoff(path, "POST"));
+      expect(response?.status).toBe(403);
+    }
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
   it("refuses a paired device a Project browser before the route sees it", async () => {
     const dispatch = vi.fn(async () => Response.json({ ok: true }));
     const product = createAuthenticatedProductDispatch({ dispatch });

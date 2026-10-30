@@ -389,7 +389,7 @@ export function wireChat(deps: ChatDependencies) {
         for (const guard of attachmentPurgeGuards) await guard(threadId);
       },
       agentRuns: agentRunPersistence,
-      resolveComputerUseTools: ({ windowId, thread, selection }) =>
+      resolveComputerUseTools: ({ windowId, thread }) =>
         computerToolsFor(
           decodeComputerUseOwner({
             windowId,
@@ -399,27 +399,7 @@ export function wireChat(deps: ChatDependencies) {
             modelId: thread.modelId,
             executionPolicy: "approval-gated",
           }),
-          selection,
         ),
-      resolveUnattachedComputerUseTools: ({ windowId, thread }) => {
-        const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
-        const supported =
-          observed?.capabilities.appManagedTools === "supported" ||
-          observed?.verifiedToolModelIds?.some(
-            (candidate) => String(candidate) === String(thread.modelId),
-          ) === true;
-        if (!supported) return undefined;
-        return computerUseTools?.unattachedToolSet(
-          decodeComputerUseOwner({
-            windowId,
-            threadId: thread.id,
-            mode: "chat",
-            providerInstanceId: thread.providerInstanceId,
-            modelId: thread.modelId,
-            executionPolicy: "approval-gated",
-          }),
-        );
-      },
       spendCeiling,
       persistence,
       issueContext: githubIssueContextService,

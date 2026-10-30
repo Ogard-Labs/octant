@@ -12,7 +12,6 @@ import {
 import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerAtMenu";
 import { useExtensionDraftSelections } from "../chat/useExtensionDraftSelections";
 import { providerFamilyForThread } from "../providers/providerFamily";
-import { ComputerUseMention, useComputerUseMention } from "../computerUse/ComputerUseMention";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import { decodeGithubIssueContextRequest } from "@octant/contracts";
 import type { RepositoryIssueRow } from "../github/readIssuesAcrossRepositories";
@@ -58,7 +57,6 @@ import {
 } from "../linear/CreateFromLinearIssuePicker";
 import {
   draftThreadModePresentation,
-  pickerGroupCarriesAppManagedTools,
   resolveCodeNewThreadWorkspace,
   type CreateHostViewScope,
   type DraftIntentCard,
@@ -951,39 +949,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
 
   const presentation = draftThreadModePresentation(props.mode);
   const [prompt, setPrompt] = useNewTaskPrompt();
-  const storedComputerSelection =
-    draftScope === undefined ? undefined : drafts?.readComputerSelection(draftScope);
-  const computer = useComputerUseMention({
-    textarea: () => textareaRef.current,
-    draft: prompt,
-    onDraftChange: setPrompt,
-    scopeKey: "chat-draft",
-    providerCarriesTools: pickerGroupCarriesAppManagedTools(
-      props.providerGroups,
-      props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
-        ? undefined
-        : {
-            providerInstanceId: props.selectedProviderInstanceId,
-            modelId: props.selectedModelId,
-          },
-    ),
-    ...(storedComputerSelection === undefined ? {} : { initialSelection: storedComputerSelection }),
-  });
-  const structuredDraftScope = useRef(draftScope);
-  useLayoutEffect(() => {
-    if (drafts === undefined || draftScope === undefined) return;
-    if (structuredDraftScope.current === draftScope) return;
-    structuredDraftScope.current = draftScope;
-    computer.restore(drafts.readComputerSelection(draftScope));
-  }, [computer, drafts, draftScope]);
-  useEffect(() => {
-    if (draftScope === undefined || drafts === undefined) return;
-    if (structuredDraftScope.current !== draftScope) return;
-    drafts.writeComputerSelection(draftScope, computer.stagedSelection);
-  }, [computer.stagedSelection, drafts, draftScope]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // A Chat draft is a first-message composer like Work's and Code's, so it
-  // offers the same host command list rather than only the @Computer mention.
+  // offers the same host command list.
   const slash = useComposerSlashCommands({
     draft: prompt,
     onDraftChange: setPrompt,
@@ -996,15 +964,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
     mode: "chat",
-    providerCarriesTools: pickerGroupCarriesAppManagedTools(
-      props.providerGroups,
-      props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
-        ? undefined
-        : {
-            providerInstanceId: props.selectedProviderInstanceId,
-            modelId: props.selectedModelId,
-          },
-    ),
     projectId: null,
     ...(draftProviderFamily === undefined ? {} : { providerFamily: draftProviderFamily }),
   });
@@ -1013,7 +972,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     onDraftChange: setPrompt,
     textarea: () => textareaRef.current,
     onResolveExtensionReference: extensionDraft.resolveReference,
-    apps: [{ kind: "computer", controller: computer }],
   });
   useEffect(() => {
     if (props.pendingMessage === undefined) return;
@@ -1033,16 +991,11 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
-    const chosenSelections = extensionDraft.receipts.flatMap((receipt) =>
+    const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
       receipt.selection === undefined ? [] : [receipt.selection],
     );
-    // The receiving Chat path replaces the Computer selection with any extension list.
-    const extensionSelections =
-      chosenSelections.length === 0 || computer.selection === undefined
-        ? chosenSelections
-        : [computer.selection, ...chosenSelections];
     const afterCreate = (created: boolean | void | Promise<boolean | void>) => {
-      if (chosenSelections.length === 0) return;
+      if (extensionSelections.length === 0) return;
       void Promise.resolve(created).then((accepted) => {
         if (accepted !== false) extensionDraft.clear();
       });
@@ -1057,7 +1010,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           undefined,
           issueContext,
           linearIssueContext,
-          computer.selection,
+          undefined,
           extensionSelections.length === 0 ? undefined : extensionSelections,
           undefined,
           undefined,
@@ -1076,22 +1029,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           undefined,
           issueContext,
           linearIssueContext,
-          computer.selection,
+          undefined,
           extensionSelections,
         ),
-      );
-      return;
-    }
-    if (computer.selection !== undefined) {
-      void props.onCreateThread(
-        trimmed,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        issueContext,
-        linearIssueContext,
-        computer.selection,
       );
       return;
     }
@@ -1110,7 +1050,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     );
   }, [
     canSubmit,
-    computer.selection,
     extensionDraft,
     issueContext,
     linearIssueContext,
@@ -1122,7 +1061,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (atMenu.handleKeyDown(event)) return;
     if (slash.handleKeyDown(event)) return;
-    if (computer.handleKeyDown(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       submit();
@@ -1172,7 +1110,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             }
             chips={
               <>
-                <ComputerUseMention controller={computer} surface="chips" />
                 {extensionDraft.receipts.length > 0 ? (
                   <ul aria-label="Selected extensions" className="composer-chips">
                     {extensionDraft.receipts.map((receipt) => (
@@ -1201,39 +1138,26 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                 <ComposerAtTypeahead controller={atMenu} />
               ) : slash.open ? (
                 <ComposerSlashTypeahead controller={slash} />
-              ) : (
-                <ComputerUseMention controller={computer} surface="typeahead" />
-              )
+              ) : null
             }
             input={
               <OctantTextarea
                 aria-label="First message"
                 aria-autocomplete="list"
-                aria-expanded={atMenu.open || computer.open || slash.open}
-                aria-controls={
-                  atMenu.open
-                    ? atMenu.listId
-                    : computer.open
-                      ? computer.listId
-                      : slash.open
-                        ? slash.listId
-                        : undefined
-                }
+                aria-expanded={atMenu.open || slash.open}
+                aria-controls={atMenu.open ? atMenu.listId : slash.open ? slash.listId : undefined}
                 aria-activedescendant={
                   atMenu.active !== undefined
                     ? `${atMenu.listId}-${atMenu.active.id}`
-                    : computer.open
-                      ? `${computer.listId}-computer`
-                      : slash.active === undefined
-                        ? undefined
-                        : `${slash.listId}-${slash.active.id}`
+                    : slash.active === undefined
+                      ? undefined
+                      : `${slash.listId}-${slash.active.id}`
                 }
                 autoFocus
                 className="composer-input"
                 disabled={props.creating}
                 onChange={(event) => {
                   setPrompt(event.target.value);
-                  computer.sync(event.target.value, event.currentTarget.selectionStart);
                   slash.sync(event.target.value, event.currentTarget.selectionStart);
                   atMenu.sync(event.target.value, event.currentTarget.selectionStart);
                 }}
