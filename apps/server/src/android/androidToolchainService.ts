@@ -113,6 +113,8 @@ export interface AndroidToolchainServiceOptions {
   /** Managed serve-avd for an already booted emulator serial. Absent means adb. */
   readonly serveAvd?: ServeAvdPort;
   readonly fetchImpl?: typeof fetch;
+  /** Overrides how long typing waits after a tap or swipe; tests shorten it. */
+  readonly textSettleMs?: number;
   /** Overrides how long an attached serve-avd may take to answer; tests shorten it. */
   readonly streamWaitMs?: Partial<{ readonly headers: number; readonly firstFrame: number }>;
   /** Overrides how long a shutdown waits for the emulator to leave adb; tests shorten it. */
@@ -140,6 +142,9 @@ const SHUTDOWN_ABSENT_MS = 15_000;
 const MAX_RECENT = 64;
 const MAX_DIAGNOSTICS = 16;
 const SCREEN_POLL_MS = 400;
+// Typing right after a tap loses the first characters: the tap focuses the field,
+// but the input method binds to it a moment later (observed: "octant" typed as "ctant").
+const TEXT_AFTER_POINTER_MS = 700;
 /**
  * How long an attached serve-avd may take to answer the stream request and to
  * send its first picture. On a Mac under heavy load the tool needed up to
@@ -202,6 +207,8 @@ export class AndroidToolchainService {
   >();
   // Emulators whose recorder is still starting; a second start must not launch another.
   readonly #recordingStarts = new Set<string>();
+  // When each emulator last took a tap or swipe, so typing can wait for the field's input method.
+  readonly #lastPointerInput = new Map<string, number>();
   readonly #paneOpenRequests = new Map<
     string,
     {
@@ -746,6 +753,15 @@ export class AndroidToolchainService {
       );
     }
     if (isAndroidEmulatorInputKind(request.kind)) {
+      const emulatorKey = String(request.emulatorId);
+      if (request.kind === "tap" || request.kind === "swipe") {
+        this.#lastPointerInput.set(emulatorKey, Date.now());
+      } else if (request.kind === "type-text") {
+        const waitMs =
+          (this.#options.textSettleMs ?? TEXT_AFTER_POINTER_MS) -
+          (Date.now() - (this.#lastPointerInput.get(emulatorKey) ?? 0));
+        if (waitMs > 0) await sleep(waitMs, signal);
+      }
       const managed = await this.#serveAvdInput(request, serial, signal, startedAt);
       if (managed !== undefined) return managed;
       const argv = inputArgv(adb, serial, request);

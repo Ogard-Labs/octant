@@ -154,7 +154,7 @@ export function redactedAndroidInputDiagnostic(
   if (request.kind === "type-text") {
     return {
       severity: "note",
-      message: `type-text completed (length=${request.text?.length ?? 0}; redacted)`,
+      message: `type-text completed (length=${request.text?.length ?? 0}; redacted); the emulator does not report what the field received, so check the screen`,
     };
   }
   if (request.kind === "key-press") {
