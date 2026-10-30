@@ -13,6 +13,7 @@ import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
 } from "../../composer/useComposerSlashCommands";
+import { ComposerAtTypeahead, useComposerAtMenu } from "../../composer/useComposerAtMenu";
 import { ComposerAttachButton } from "../../composer/ComposerAttachButton";
 import { StartSuggestionChip } from "../../composer/StartSuggestionChip";
 import type { CodeCheckoutId, CodeRepositoryId } from "@octant/contracts/code";
@@ -258,6 +259,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     textarea: () => textareaRef.current,
     draft: prompt,
     onDraftChange: setPrompt,
+  });
+  const atMenu = useComposerAtMenu({
+    textarea: () => textareaRef.current,
+    draft: prompt,
+    onDraftChange: setPrompt,
     onResolveExtensionReference: extensionDraft.resolveReference,
   });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -455,7 +461,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const [sendNotice, setSendNotice] = useState<string>();
   // A notice about the Project no longer applies once another is chosen.
   useEffect(() => setSendNotice(undefined), [props.projectId]);
-  const canSubmit = trimmed.length > 0 && !props.creating && !submitting && !slash.resolving;
+  const canSubmit = trimmed.length > 0 && !props.creating && !submitting && !atMenu.resolving;
 
   // Server-authoritative ref catalog for the branch selector, fetched lazily
   // the first time the selector opens.
@@ -650,6 +656,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (atMenu.handleKeyDown(event)) return;
     if (slash.handleKeyDown(event)) return;
     if (mention.handleKeyDown(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
@@ -783,10 +790,14 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
               <OctantTextarea
                 aria-label="First message"
                 aria-autocomplete="list"
-                aria-expanded={slash.open}
-                aria-controls={slash.open ? slash.listId : undefined}
+                aria-expanded={atMenu.open || slash.open}
+                aria-controls={atMenu.open ? atMenu.listId : slash.open ? slash.listId : undefined}
                 aria-activedescendant={
-                  slash.active === undefined ? undefined : `${slash.listId}-${slash.active.id}`
+                  atMenu.active !== undefined
+                    ? `${atMenu.listId}-${atMenu.active.id}`
+                    : slash.active === undefined
+                      ? undefined
+                      : `${slash.listId}-${slash.active.id}`
                 }
                 autoFocus
                 className="composer-input"
@@ -794,11 +805,13 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                 onChange={(event) => {
                   setPrompt(event.target.value);
                   slash.sync(event.target.value, event.currentTarget.selectionStart);
+                  atMenu.sync(event.target.value, event.currentTarget.selectionStart);
                   mention.sync(event.target.value, event.currentTarget.selectionStart);
                 }}
                 onClick={(event) => {
                   mention.sync(event.currentTarget.value, event.currentTarget.selectionStart);
                   slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+                  atMenu.sync(event.currentTarget.value, event.currentTarget.selectionStart);
                 }}
                 onKeyDown={handleKeyDown}
                 onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
@@ -812,7 +825,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
               />
             }
             typeahead={
-              slash.open ? (
+              atMenu.open ? (
+                <ComposerAtTypeahead controller={atMenu} />
+              ) : slash.open ? (
                 <ComposerSlashTypeahead controller={slash} />
               ) : mention.open ? (
                 <ThreadMentionTypeahead

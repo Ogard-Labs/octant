@@ -33,7 +33,7 @@ import {
   implicitCodexAccountOwnerId,
   isImageProfileDriverKind,
 } from "@octant/domain";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import { SettingsSection } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -66,6 +66,10 @@ export interface ProviderSettingsViewProps {
   readonly presentationObservedByInstance?: ReadonlyMap<ProviderInstanceId, ProviderObservedState>;
   readonly probingIds: ReadonlySet<ProviderInstanceId>;
   readonly updatingIds?: ReadonlySet<ProviderInstanceId>;
+  /** Newest published release per CLI, when the host could read it. */
+  readonly latestVersions?: ReadonlyMap<ProviderInstanceId, string>;
+  /** Asks the host for the newest releases; called when this page opens. */
+  readonly onCheckLatestVersions?: () => void;
   readonly busy: boolean;
   readonly credentialManagementAvailable: boolean;
   readonly message?: string;
@@ -341,6 +345,10 @@ function suggestedAccountName(
 
 export function ProviderSettingsView(props: ProviderSettingsViewProps) {
   const [addAccount, setAddAccount] = useState<AddAccountRequest | undefined>(undefined);
+  const { instances, onCheckLatestVersions } = props;
+  useEffect(() => {
+    onCheckLatestVersions?.();
+  }, [instances, onCheckLatestVersions]);
   // A card's "Add account" opens the same manual form for its driver. A created
   // account closes it again, so the suggested name is not offered twice.
   const created = async (operation: Promise<boolean>) => {
@@ -432,6 +440,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
           : { presentationObservedByInstance: props.presentationObservedByInstance })}
         probingIds={props.probingIds}
         {...(props.updatingIds === undefined ? {} : { updatingIds: props.updatingIds })}
+        {...(props.latestVersions === undefined ? {} : { latestVersions: props.latestVersions })}
         status={props.status}
         onAgentEligibleModelsChange={props.onAgentEligibleModelsChange}
         onHiddenModelsChange={props.onHiddenModelsChange}

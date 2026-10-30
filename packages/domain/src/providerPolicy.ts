@@ -148,6 +148,43 @@ export function providerCliUpdateArgs(
     : PROVIDER_CLI_UPDATE_COMMANDS[driverKind];
 }
 
+/**
+ * The npm package whose `latest` dist-tag names the newest release of a CLI that
+ * Octant can already update. Only a CLI whose official distribution is that
+ * package is listed; any other CLI has no check and shows no "update available".
+ */
+const PROVIDER_LATEST_VERSION_NPM_PACKAGES: Partial<Record<ProviderDriverKind, string>> = {
+  codex: "@openai/codex",
+  claude: "@anthropic-ai/claude-code",
+  grok: "@xai-official/grok",
+  copilot: "@github/copilot",
+  cline: "cline",
+};
+
+export function providerLatestVersionNpmPackage(
+  driverKind: ProviderDriverKind,
+): string | undefined {
+  return supportsProviderCliUpdate(driverKind)
+    ? PROVIDER_LATEST_VERSION_NPM_PACKAGES[driverKind]
+    : undefined;
+}
+
+/** Whether `latest` is a strictly newer release than `installed`; false when either is not major.minor.patch. */
+export function isNewerProviderRelease(latest: string, installed: string): boolean {
+  const parse = (value: string) => {
+    const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(value.trim());
+    return match === null ? undefined : [Number(match[1]), Number(match[2]), Number(match[3])];
+  };
+  const next = parse(latest);
+  const current = parse(installed);
+  if (next === undefined || current === undefined) return false;
+  for (let index = 0; index < 3; index += 1) {
+    const difference = (next[index] ?? 0) - (current[index] ?? 0);
+    if (difference !== 0) return difference > 0;
+  }
+  return false;
+}
+
 export function supportsProviderCliUpdate(driverKind: ProviderDriverKind): boolean {
   return providerCliUpdateArgs(driverKind) !== undefined;
 }

@@ -248,8 +248,11 @@ search), and loads only Octant's own extension by path. A user-level or
 project-level `mcp.json` therefore starts no server and no inherited command
 is registered. App-managed tools are reported only for the releases whose
 tool attestation, approval bridge, and confinement Octant verified: 0.85.1 and
-1.1.0, exactly; any other release lists its models and reports app tools
-unsupported, and a session that offers tools on it is refused. Only 0.85.1 is
+every release from 1.1.0 whose probe attests the tool bridge. A newer Pi
+therefore needs no Octant release; a release below 1.1.0 (other than 0.85.1), or
+one whose probe does not attest, lists its models and reports app tools
+unsupported, and a session that offers tools on it is refused with a message
+that names the floor. Only 0.85.1 is
 verified for warm reuse of a settled process; other releases close it and
 cold-resume the native history. Pi 1.1.0 adds `aborted` to `agent_settled`:
 an aborted run is reported as interrupted, never as completed. A Pi session
@@ -512,6 +515,36 @@ items skipped); a body that is not a model list, no mappable item, a route-not-s
 "models can't be listed" state carrying the manual model IDs, never a
 protocol failure. Credential, usage-limit, and availability answers keep
 failing the check with their typed states.
+
+## Runtime updates
+
+Octant tells the person when a newer release of a runtime exists and runs the
+runtime's own updater only when they click **Update CLI**. Discovery still never
+installs or updates anything.
+
+- **Who may check.** The host, for an enabled instance whose CLI Octant can
+  already update and whose official distribution is an npm package: Codex
+  (`@openai/codex`), Claude Code (`@anthropic-ai/claude-code`), Grok Build
+  (`@xai-official/grok`), GitHub Copilot (`@github/copilot`) and Cline
+  (`cline`). The package table lives with `providerLatestVersionNpmPackage`
+  in `@octant/domain`. A runtime without an official npm package (Devin,
+  Mistral Vibe, Kimi Code) and runtimes with no provider-owned updater (Pi,
+  OpenCode's managed copy aside) show no "update available".
+- **What is sent.** One plain `GET` of the package's `dist-tags` on the npm
+  registry, with the constrained marketplace User-Agent and an `Accept` header:
+  no task data, thread, Project, account, instance or host identifier. The
+  answer's `latest` tag must be a plain version string or it is ignored.
+- **When.** Never at discovery. The renderer asks when Providers settings loads
+  an enabled instance, once per instance per session; the host caches the
+  answer for a day (a failure for an hour). It follows the Marketplace fetches
+  switch: off means no request is made, and a failed or refused lookup is
+  silent.
+- **What it does.** Settings shows "Update available (installed → newest)" next
+  to **Update CLI** when the newest is strictly newer than the probed version.
+  It changes nothing by itself: the click runs the provider's own updater as
+  before, with no automatic update. After the updater exits the host probes
+  again, so a release that no longer passes a version floor or capability check
+  shows its refusal reason instead of failing turns.
 
 ## Verification
 
