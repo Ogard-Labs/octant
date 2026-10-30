@@ -377,6 +377,81 @@ export function decideStandIn(input: {
   return { status: "stand-in" };
 }
 
+export type HubFollowDecision =
+  | { readonly status: "follow" }
+  | {
+      readonly status: "refused";
+      readonly kind:
+        | "no-hub-roster"
+        | "standby-not-granted"
+        | "roster-not-granted"
+        | "not-signed-as-hub"
+        | "not-a-named-standby"
+        | "key-mismatch"
+        | "self-not-listed"
+        | "stale-sequence"
+        | "hub-seen-recently";
+    };
+
+/**
+ * Whether a spoke takes a promoted standby as its hub without a person. The
+ * spoke's own hub grant must tick Standby and Roster, the roster must be signed as hub by
+ * a member the latest hub-signed roster named as standby, with the key that
+ * roster fingerprints, and must list this spoke and move the sequence
+ * forward. Like a standby-signed roster, it is taken only after the old hub
+ * has been silent for the whole failover time. A refusal other than
+ * `standby-not-granted` or `roster-not-granted` leaves the spoke as it was; a
+ * spoke that did not tick both waits for its person to accept the new hub. The caller verifies the
+ * signature against the key the promoted hub presented and passes the
+ * fingerprint of the identity key it proved in `promoterKeyFingerprint`.
+ */
+export function decideHubFollow(input: {
+  readonly anchor: SignedHubRoster | undefined;
+  readonly heldSequence: number;
+  readonly selfMemberId: HubMemberId;
+  readonly grant: HubGrant | undefined;
+  readonly candidate: SignedHubRoster;
+  readonly promoterKeyFingerprint: string;
+  readonly silentForMs: number;
+  readonly failoverAfterMs: number;
+}): HubFollowDecision {
+  if (input.anchor === undefined) return { status: "refused", kind: "no-hub-roster" };
+  if (authorizeHubRequest({ grant: input.grant, item: "standby" }).status === "refused") {
+    return { status: "refused", kind: "standby-not-granted" };
+  }
+  // The new hub's roster is installed without a person, so the Roster item
+  // governs it as it governs every roster that arrives.
+  if (authorizeHubRequest({ grant: input.grant, item: "roster" }).status === "refused") {
+    return { status: "refused", kind: "roster-not-granted" };
+  }
+  const { signedBy, roster: promoted } = input.candidate;
+  if (
+    signedBy.kind !== "hub" ||
+    !promoted.members.some(
+      (member) => sameId(member.memberId, signedBy.memberId) && member.role === "hub",
+    )
+  ) {
+    return { status: "refused", kind: "not-signed-as-hub" };
+  }
+  const named = input.anchor.roster.members.find(
+    (member) => sameId(member.memberId, signedBy.memberId) && member.role === "standby-hub",
+  );
+  if (named === undefined || !includesId(input.anchor.roster.standbyOrder, signedBy.memberId)) {
+    return { status: "refused", kind: "not-a-named-standby" };
+  }
+  if (named.identityKeyFingerprint !== input.promoterKeyFingerprint) {
+    return { status: "refused", kind: "key-mismatch" };
+  }
+  if (!promoted.members.some((member) => sameId(member.memberId, input.selfMemberId))) {
+    return { status: "refused", kind: "self-not-listed" };
+  }
+  if (promoted.sequence <= input.heldSequence) return { status: "refused", kind: "stale-sequence" };
+  if (input.silentForMs < input.failoverAfterMs) {
+    return { status: "refused", kind: "hub-seen-recently" };
+  }
+  return { status: "follow" };
+}
+
 export type HeldGrantReconciliation = {
   readonly kept: ReadonlyArray<PeerGrant>;
   readonly dropped: ReadonlyArray<PeerGrant>;
@@ -581,6 +656,25 @@ export function hubRosterSigningPayload(roster: HubRoster): string {
 export const OWNER_UNLOCK_LIFETIME_MS = 60_000;
 
 /**
+ * How long one verified unlock keeps covering administration screens (decision
+ * H17). It is short enough that a phone left on a table stops being useful
+ * quickly, and long enough to change a handful of settings in one sitting.
+ */
+export const OWNER_ADMINISTRATION_SESSION_MS = 5 * 60_000;
+
+/**
+ * Which unlock an owner action asks for. `administration` is covered by an
+ * open session; `own` (Full access, merge, credential copy, owner changes, and
+ * opening a session itself) always needs a fresh per-request challenge.
+ */
+export type OwnerUnlockClass = "administration" | "own";
+
+/** Full access is the one posture a session cannot reach; every other posture lowers or keeps authority. */
+export function ownerPostureUnlockClass(posture: string): OwnerUnlockClass {
+  return posture === "full-access" ? "own" : "administration";
+}
+
+/**
  * The exact text an owner's unlock key answers for one action. The host
  * issued the challenge for this owner, this method, this path, and this body
  * hash, so a signature for one action opens no other. A WebAuthn assertion
@@ -639,7 +733,8 @@ export type OwnerRequestAuthorization =
         | "not-an-owner"
         | "identity-mismatch"
         | "not-in-roster"
-        | "unlock-required";
+        | "unlock-required"
+        | "own-unlock-required";
     };
 
 /**
@@ -658,8 +753,14 @@ export function authorizeOwnerRequest(input: {
   readonly roster: HubRoster;
   readonly memberId: HubMemberId;
   readonly identityKeyFingerprint: string;
-  /** `not-needed` is for asking the host for a challenge or reading an alert, which change nothing. */
-  readonly unlock: "fresh" | "absent" | "not-needed";
+  /**
+   * `fresh` is a per-request challenge the caller verified; `session` is an
+   * open administration session the caller verified. `not-needed` is for asking
+   * the host for a challenge or reading an alert, which change nothing.
+   */
+  readonly unlock: "fresh" | "session" | "absent" | "not-needed";
+  /** What the action asks for; an action that does not say is treated as `own`. */
+  readonly unlockClass?: OwnerUnlockClass;
 }): OwnerRequestAuthorization {
   const listed = input.roster.members.find((member) => sameId(member.memberId, input.memberId));
   if (listed?.role === "hub" || listed?.role === "standby-hub") {
@@ -681,5 +782,8 @@ export function authorizeOwnerRequest(input: {
     };
   }
   if (input.unlock === "absent") return { status: "refused", kind: "unlock-required" };
+  if (input.unlock === "session" && (input.unlockClass ?? "own") === "own") {
+    return { status: "refused", kind: "own-unlock-required" };
+  }
   return { status: "allowed", entry: honored.entry };
 }
