@@ -67,9 +67,6 @@ import { wireThreadNotifications } from "./wiring/notifications";
 import { wireWorkRequests } from "./wiring/workRequests";
 import { wireRoutes } from "./wiring/routes";
 import { wireRemote } from "./wiring/remote";
-import { wireSshTargets } from "./wiring/sshTargets";
-import { remoteCodeProjectOf } from "./sshTarget/sshRemoteCodeThreads";
-import type { SshTargetStore } from "./sshTarget/sshTargetStore";
 import { wireReplica } from "./wiring/replica";
 
 export { MAX_CHAT_ATTACHMENT_BYTES };
@@ -338,10 +335,6 @@ export function startOctantServer(
       windowAuthorityStore,
       workThreadProjection,
     });
-    // SSH targets are wired after the workspace; a window binds to a
-    // remote-bound Project through their store once it exists, and no
-    // request is served before then.
-    const remoteCodeProjectStore: { store?: SshTargetStore } = {};
     const {
       authorizeWorkThreadForWindow,
       codeBoardPlanProgressSource,
@@ -366,13 +359,6 @@ export function startOctantServer(
       workProjectStatusFiles,
       workProjectStatusReader,
     } = yield* wireWorkspace({
-      remoteCodeProjects: {
-        has: (projectId) =>
-          remoteCodeProjectStore.store?.getProject(String(projectId)) !== undefined,
-        holdsThread: (thread) =>
-          remoteCodeProjectStore.store !== undefined &&
-          remoteCodeProjectOf(remoteCodeProjectStore.store, thread) !== undefined,
-      },
       onWindowRevoked,
       bindingReceiptStore,
       githubCapabilityService,
@@ -448,13 +434,6 @@ export function startOctantServer(
       windowAuthorityStore,
       workThreadProjection,
     });
-    const { sshTargetConnections, sshTargetStore } = wireSshTargets({
-      configuredDriverOptions,
-      persistence,
-      providerDataDirectory,
-      version,
-    });
-    remoteCodeProjectStore.store = sshTargetStore;
     const {
       followUpCreation,
       restartContinuation,
@@ -498,8 +477,6 @@ export function startOctantServer(
       providerDataDirectory,
       runningWorkTurnAccess,
       sideTasks,
-      sshTargetConnections,
-      sshTargetStore,
       threadFollowUpSuggestions,
       toolEgressRules,
       turnMetrics,
@@ -555,7 +532,6 @@ export function startOctantServer(
       persistence,
       projectRootPort,
       projectService,
-      sshTargetStore,
       windowAuthorityStore,
     });
     const {
@@ -716,8 +692,6 @@ export function startOctantServer(
       sideTasks,
       simulatorInputGrants,
       spendCeiling,
-      sshTargetConnections,
-      sshTargetStore,
       threadMentionService: (): ThreadMentionService => threadMentionService,
       threadOutsideContentMarks,
     });
@@ -1174,8 +1148,6 @@ export function startOctantServer(
       privateListenerSetting,
       providerCredentialRoutes,
       remoteHost,
-      sshRemoteTerminals,
-      sshTargetAdministrationRoutes,
     } = wireRemote({
       canvasPublicShareService,
       threadExportService,
@@ -1210,8 +1182,6 @@ export function startOctantServer(
       remoteServerGrants,
       serve,
       shellService,
-      sshTargetConnections,
-      sshTargetStore,
       codeOperationRuntime,
       startedAt,
       threadMessageQueue,
@@ -1297,7 +1267,6 @@ export function startOctantServer(
                 (await privateListenerAdministrationRoutes(request)) ??
                 (await hubAdministrationRoutes(request)) ??
                 (await delegationAdministrationRoutes(request)) ??
-                (await sshTargetAdministrationRoutes(request)) ??
                 (await providerCredentialRoutes(request)) ??
                 (await localDeviceAdministrationRoutes(request)) ??
                 (await hostControlRoutes(request)) ??
@@ -1489,14 +1458,6 @@ export function startOctantServer(
           }
           try {
             zenService.close();
-          } catch (error) {
-            shutdownFailure ??= error;
-          }
-          try {
-            // Remote shells end as stopped, then each executor exits when its
-            // session's input closes.
-            await sshRemoteTerminals.close();
-            sshTargetConnections.close();
           } catch (error) {
             shutdownFailure ??= error;
           }

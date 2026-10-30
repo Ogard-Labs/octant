@@ -65,7 +65,6 @@ import type {
   ProviderDriver,
   ProviderSessionResume,
 } from "@octant/provider-sdk/driver";
-import { acquireProviderConnection } from "@octant/provider-sdk/process-placement";
 import type { Journal } from "../persistence/journal";
 import { GhPullRequestPort, createGhCommandPort, type GhDeliveryTarget } from "./ghPullRequestPort";
 import { GitMutationPort } from "./gitMutationPort";
@@ -191,7 +190,6 @@ import {
 } from "./codeAppManagedTools";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { heldTurnContext } from "../providers/heldTurnContext";
-import type { RemoteCodeTurnBinding, RemoteCodeTurnInput } from "../sshTarget/sshRemoteCodeThreads";
 import {
   PROVIDER_CONTEXT_RESTATED,
   type ProviderTurnContextDelta,
@@ -518,13 +516,6 @@ export interface CodeOperationRuntimeOptions {
     /** The turn's resolved credential values, which a journal read redacts. */
     readonly secrets: ReadonlyArray<string>;
   }) => AppManagedToolSet | undefined;
-  /**
-   * A turn of a thread whose checkout is a remote root: the native harness's
-   * tools on its SSH target, or a placed ACP agent's client tools and its
-   * placement there, bound to the target's session now, or why the thread
-   * cannot run there. Absent means this host runs no such turn.
-   */
-  readonly remoteCodeTurn?: (input: RemoteCodeTurnInput) => RemoteCodeTurnBinding;
   readonly spendCeiling?: {
     readonly admit: SpendCeilingService["admit"];
     readonly settle: SpendCeilingService["settle"];
@@ -1524,9 +1515,8 @@ export function createCodeOperationRuntime(
         if (!(await options.windowAccess.canAccessProject(windowId, stored.projectId)))
           return undefined;
         const checkout = options.persistence.readCodeCheckout(stored.checkoutId);
-        // A remote root names the target's folder. A runtime starts there only
-        // through the placement a turn binds on the target's session, and this
-        // acquisition carries none, so it would start here against that path.
+        // A remote root names a folder on another machine, so a runtime
+        // started here would run against that path on this host.
         if (checkout === undefined || checkout.kind === "remote-root") return undefined;
         const root = await options.resolveCheckoutRoot(windowId, stored, checkout);
         if (root === undefined || root === null) return undefined;
@@ -1610,8 +1600,8 @@ export function createCodeOperationRuntime(
         return { status: "refused", reason: "unavailable" };
       }
       // A fork starts from files this host's Git captured. A remote root's
-      // path names a folder on the target, and on this host either nothing or
-      // an unrelated folder of the same name, so no capture runs there.
+      // path names a folder on another machine, and on this host either
+      // nothing or an unrelated folder of the same name, so no capture runs.
       if (options.persistence.readCodeCheckout(source.checkoutId)?.kind === "remote-root") {
         return { status: "refused", reason: "unavailable" };
       }
@@ -2036,13 +2026,6 @@ interface ActiveTurn {
   readonly computerUseDestination?: ComputerUseDestinationSelection;
   /** The selected MCP servers' tools, resolved when the turn was accepted. */
   readonly extensionTools?: AppManagedToolSet;
-  /**
-   * A remote-bound Project's turn: its tools on the target, and a placed
-   * runtime's placement, bound to the session it held when the turn was
-   * taken on. They are the turn's whole tool set; nothing of this host's
-   * checkout tools joins them.
-   */
-  readonly remote?: Extract<RemoteCodeTurnBinding, { readonly status: "bound" }>;
   readonly extensionSelections?: ReadonlyArray<
     import("@octant/contracts/extensions").ExtensionSelection
   >;
@@ -2093,13 +2076,9 @@ interface ActiveTurn {
   readonly onContextDelivered?: () => void;
 }
 
-/**
- * Why a remote-bound thread's turn stopped when its target's session ended.
- * The command running there died with the executor and nothing was queued
- * for a later session, so the person sends again once the target is back.
- */
-const TARGET_DISCONNECTED =
-  "The SSH target's session ended (target-disconnected). Nothing was queued; Octant reconnects to the target on its own, so send the message again once it is connected.";
+/** Why a turn on a thread whose checkout is a folder on another machine did not start. */
+const REMOTE_FOLDER_UNSUPPORTED =
+  "This thread's checkout is a folder on a remote machine, which Octant no longer supports. Start a new thread in a local Project.";
 
 /** Why a turn carrying conversation merged back from a fork did not start. */
 const FORK_MERGE_UNREADABLE =
@@ -2388,22 +2367,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         "The task's previous turn stopped before the provider started. Retry that message, or start a new task.",
       );
     const driver = resolvedDriver;
-    // A thread on an SSH target has only the harness's hands there: Browser,
-    // Computer, and a fork's session seeding all act on this host.
-    const remoteThread = this.#isRemoteThread(input.thread);
-    if (remoteThread) {
-      if (this.#options.remoteCodeTurn === undefined)
-        return failStart("This host cannot run a thread on an SSH target.");
-      if (
-        command.computerUseSelection !== undefined ||
-        command.extensionSelections?.some(isBrowserUseSelection) === true
-      )
-        return failStart(
-          "Browser and Computer are not offered to a thread on an SSH target. Send the message without them.",
-        );
-      if (input.thread.forkedFrom !== undefined)
-        return failStart("A thread on an SSH target cannot start from a fork.");
-    }
+    // A thread from a build that could run on a remote machine keeps its
+    // remote folder, which this host cannot run a turn in.
+    if (this.#isRemoteThread(input.thread)) return failStart(REMOTE_FOLDER_UNSUPPORTED);
     const browserSelections = command.extensionSelections?.filter(isBrowserUseSelection) ?? [];
     if (
       browserSelections.length > 1 ||
@@ -2552,43 +2518,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       await input.extensionTools?.close?.().catch(() => undefined);
       return failStart(FORK_MERGE_UNREADABLE);
     }
-    // A remote-bound thread's provider is checked and its tools are bound to
-    // the target's session last, before anything launches, so no refusal
-    // after this point leaves a binding behind. A session that ends before
-    // the turn is taken on still stops it.
-    let remote: Extract<RemoteCodeTurnBinding, { readonly status: "bound" }> | undefined;
-    let targetLostBeforeStart = false;
-    if (remoteThread) {
-      const bound = this.#options.remoteCodeTurn?.({
-        thread: input.thread,
-        windowId: input.windowId,
-        driver,
-        secrets,
-        onTargetDisconnected: () => {
-          const running = this.#active.get(key);
-          if (running !== undefined && remote !== undefined && running.remote === remote) {
-            void this.#interruptForLostTarget(running);
-          } else targetLostBeforeStart = true;
-        },
-      });
-      if (bound === undefined || bound.status === "refused") {
-        await input.extensionTools?.close?.().catch(() => undefined);
-        return failStart(bound?.message ?? "This host cannot run a thread on an SSH target.");
-      }
-      remote = bound;
-      // Extensions' tools act on this host; the remote tool set is the whole turn's.
-      await input.extensionTools?.close?.().catch(() => undefined);
-    }
     // Driver, credentials, and fork preparation may outlive the host's admission.
     if (input.admissionCurrent?.() === false) {
-      remote?.release();
       return refuseRevokedAdmission();
-    }
-    // Nothing below yields before the turn is held, so a session that ends
-    // from here on finds the running turn and stops it.
-    if (targetLostBeforeStart) {
-      remote?.release();
-      return failStart(TARGET_DISCONNECTED);
     }
     // Feedback stays pending through every preparation refusal. Consuming it
     // here does not yield between the final admission check and owning the turn.
@@ -2621,10 +2553,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       ...(command.computerUseDestination === undefined
         ? {}
         : { computerUseDestination: command.computerUseDestination }),
-      ...(input.extensionTools === undefined || remote !== undefined
-        ? {}
-        : { extensionTools: input.extensionTools }),
-      ...(remote === undefined ? {} : { remote }),
+      ...(input.extensionTools === undefined ? {} : { extensionTools: input.extensionTools }),
       ...(command.extensionSelections === undefined || command.extensionSelections.length === 0
         ? {}
         : { extensionSelections: command.extensionSelections }),
@@ -3488,7 +3417,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     await Promise.all(
       activeTurns.map(async (active) => {
         active.state = "interrupted";
-        active.remote?.release();
         this.#persistRuntimeWork(active, "interrupted");
         active.abort.abort();
         if (active.connection === undefined) return;
@@ -3511,41 +3439,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     return this.#options.persistence.readCodeCheckout(thread.checkoutId)?.kind === "remote-root";
   }
 
-  /**
-   * The target's session ended under a remote-bound turn. The turn stops as
-   * interrupted, which aborts its calls and so withdraws an approval or a
-   * question still waiting; nothing is retried or queued.
-   */
-  async #interruptForLostTarget(active: ActiveTurn): Promise<void> {
-    if (active.state !== "running" && active.state !== "waiting") return;
-    active.interruptMessage = TARGET_DISCONNECTED;
-    active.state = "interrupted";
-    this.#persistRuntimeWork(active, "interrupted");
-    active.abort.abort();
-    if (active.connection !== undefined) {
-      await Effect.runPromise(
-        active.connection
-          .interrupt(active.sessionId as never)
-          .pipe(Effect.catchAll(() => Effect.void)),
-      );
-    }
-  }
-
   #appManagedTools(active: ActiveTurn): AppManagedToolSet | undefined {
-    if (active.remote !== undefined) {
-      // The turn's whole tool set: every other set reads or acts on a folder
-      // or a device of this host. The runner closes it when the turn ends.
-      const { tools, release } = active.remote;
-      const standing = this.#options.windowAccess.standingAuthority;
-      return {
-        ...tools,
-        execute: (input) => standing(() => tools.execute(input)),
-        close: async () => {
-          release();
-          await tools.close?.();
-        },
-      };
-    }
     const supportsAppManagedTools = this.#options.supportsAppManagedTools?.(active.thread) === true;
     const supportsAcpClientCapabilities =
       this.#options.supportsAcpClientCapabilities?.(active.thread) === true;
@@ -3709,7 +3603,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     });
     if (replay.status !== "ok") {
       active.state = "waiting";
-      active.remote?.release();
       // Nothing downstream reports an outcome for a turn that never reached the
       // provider, so the record it opened has to be closed here or the board
       // would read the thread as executing until the next restart.
@@ -3914,13 +3807,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                   category: "unauthorized",
                   message: "Provider authority mismatch.",
                 });
-              // A runtime placed on the thread's target starts only through
-              // the placement its turn was bound with, on that session.
-              const placement = active.remote?.placement;
-              return acquireProviderConnection(
-                active.driver,
-                placement === undefined ? acquireInput : { ...acquireInput, placement },
-              ).pipe(
+              return active.driver.acquire(acquireInput).pipe(
                 Effect.tap((connection) =>
                   Effect.sync(() => {
                     active.connection = connection;
@@ -3942,14 +3829,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             }),
           reconcileObservation: ({ claim }) =>
             Effect.promise(async () => {
-              // A remote root is no folder of this host, so no local Git
-              // process may observe a path that only names it.
-              if (active.remote !== undefined) {
-                return {
-                  status: "not-confirmed" as const,
-                  summary: "The checkout is on an SSH target; this host does not observe it.",
-                };
-              }
               if (claim.kind === "file-change" || claim.kind === "diff") {
                 const observation = await this.#git.observe(active.checkoutRoot);
                 return observation.status === "ready"

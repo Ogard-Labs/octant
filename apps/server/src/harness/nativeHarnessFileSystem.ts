@@ -26,8 +26,8 @@ export type NativeHarnessFileRefusal =
   | "old-text-ambiguous"
   | "pattern-invalid"
   /**
-   * A Project on an SSH target whose session is gone, or whose target does
-   * not admit the call in the turn's posture now. Nothing reached the files.
+   * The files' machine cannot be reached. Nothing reached the files. Kept so
+   * a refusal recorded by an earlier build still reads.
    */
   | "target-unavailable";
 

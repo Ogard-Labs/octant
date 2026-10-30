@@ -245,7 +245,6 @@ describe("data-rights smoke: export, purge, re-export on a throwaway host", () =
       listCanvases: () => [],
       readSettings: () => ({ chatEnabled: true, workEnabled: true, themeMode: "dark" }),
       listProjectIds: () => [String(projectId)],
-      listSshTargets: () => [],
     });
 
     // The live purge wiring from #986/#997: journal erasure plus the artifact

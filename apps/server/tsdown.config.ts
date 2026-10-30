@@ -15,10 +15,7 @@ export default defineConfig({
     ],
     onlyBundle: false,
   },
-  // The SSH executor is its own entry, so `octant executor --stdio` on a
-  // target loads none of the server and opens no store. The headless artifact
-  // ships it as `lib/server/sshTarget/executorMain.mjs`.
-  entry: ["src/main.ts", "src/sshTarget/executorMain.ts"],
+  entry: ["src/main.ts"],
   format: ["esm"],
   platform: "node",
   target: "es2024",

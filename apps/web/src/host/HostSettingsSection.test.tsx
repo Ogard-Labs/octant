@@ -565,7 +565,6 @@ describe("HostSettingsSection", () => {
                 projectMemory: [],
                 canvases: [],
                 settings: { chatEnabled: true, workEnabled: false, themeMode: "dark" },
-                sshTargets: [],
                 usage: [],
                 retention: { windows: [], tombstones: [] },
                 omissions: [

@@ -174,16 +174,15 @@ export type ProviderRuntimeEgressDecision =
     };
 
 /**
- * The runtime rule a provider runtime placed on an SSH target is decided by,
- * at a proxy of its own on this host. Canonical:
- * docs/design/remote-ssh-environments.md § Runtime placement.
+ * The rule a provider runtime's own proxy decides by,
+ * on this host.
  *
  * Any public name is allowed, because inference must not wait on a rule; no
  * thread or Project rule applies and nothing is proposed. A destination that
  * is an address, a single label, or `localhost` is refused here, and the
  * proxy's private-address check refuses every name that resolves to a
  * loopback, private, or link-local address (the cloud metadata service
- * among them), so the target's own network stays out of reach.
+ * among them), so the host's own network stays out of reach.
  */
 export function decideProviderRuntimeEgress(destination: {
   readonly host: string;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { REMOTE_ACCESS_EVENT_NAMES } from "@octant/contracts/remote-access";
 import { EventPayloadInvalid, UnknownEventName } from "./journalErrors";
+import { RETIRED_EVENT_NAMES } from "./retiredEvents";
 import { createPhase1RuntimeRegistries } from "./runtimeRegistry";
 import { decodePersistedShellSettings } from "./shellPersistenceSchema";
 
@@ -245,6 +246,15 @@ describe("createPhase1RuntimeRegistries", () => {
     ).toThrow(EventPayloadInvalid);
   });
 
+  it("still decodes every retired event name, so an older journal replays without quarantine", () => {
+    const registry = createPhase1RuntimeRegistries();
+    for (const eventName of RETIRED_EVENT_NAMES) {
+      expect(() => registry.events.decode(eventName, 1, { anyEarlierShape: true })).not.toThrow();
+    }
+    expect(RETIRED_EVENT_NAMES).toContain("ssh-target.registered@1");
+    expect(RETIRED_EVENT_NAMES).toContain("provider-runtime-egress.launch-started@1");
+  });
+
   it("still rejects a genuinely unregistered event name", () => {
     const registry = createPhase1RuntimeRegistries();
     expect(() => registry.events.decode("agent-run-settings.never-registered@1", 1, {})).toThrow(
@@ -292,7 +302,6 @@ describe("createPhase1RuntimeRegistries", () => {
       "extensions",
       "extension-tool-grants",
       "extension-project-pins",
-      "ssh-targets",
       "remote-access",
       "thread-checkpoint",
       "product-feedback",
@@ -330,7 +339,6 @@ describe("createPhase1RuntimeRegistries", () => {
       "extensions",
       "extension-tool-grants",
       "extension-project-pins",
-      "ssh-targets",
       "remote-access",
       "thread-checkpoint",
       "product-feedback",

@@ -77,8 +77,6 @@ import type { HarnessStateWiring } from "./harnessState";
 import type { DevicesWiring } from "./devices";
 import type { BrowserWiring } from "./browser";
 import type { CanvasWiring } from "./canvas";
-import type { SshTargetsWiring } from "./sshTargets";
-import { bindRemoteCodeTurn, remoteCodeCheckoutRoot } from "../sshTarget/sshRemoteCodeThreads";
 
 function withCodeOperationRuntime(
   service: CodeRouteService,
@@ -287,8 +285,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   Pick<
     HarnessWiring,
     "nativeHarnessComposition" | "nativeHarnessHooks" | "onHarnessRecoveryLifted"
-  > &
-  Pick<SshTargetsWiring, "sshTargetConnections" | "sshTargetStore"> & {
+  > & {
     /** Wired by wireChat; read only after startup. */
     readonly codeThreadMentionDirectory: () => ReturnType<typeof createCodeThreadMentionDirectory>;
     /** Wired by wireWork; read only after startup. */
@@ -373,8 +370,6 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     sideTasks,
     simulatorInputGrants,
     spendCeiling,
-    sshTargetConnections,
-    sshTargetStore,
     threadMentionService,
     threadOutsideContentMarks,
     workRequestRuntime,
@@ -573,10 +568,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           retainProjectAccess: (windowId) => codeProjectAccess.retain(windowId),
         },
         resolveCheckoutRoot: async (windowId, thread, checkout) => {
-          // A remote root is named, never resolved here: the path is the
-          // target's, and only the turn's executor tools act on it.
-          if (checkout.kind === "remote-root")
-            return remoteCodeCheckoutRoot(sshTargetStore, thread);
+          // A remote root names a folder on another machine, never one here.
+          if (checkout.kind === "remote-root") return undefined;
           const root = await roots.resolve(windowId, thread, checkout, rootProbePath);
           if (root === undefined) return undefined;
           const workingDirectory = await resolveThreadWorkingDirectory(
@@ -624,16 +617,6 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             projectId: input.thread.projectId,
           }),
         nativeHarnessTools: (input) => nativeHarnessComposition.forCode(input),
-        remoteCodeTurn: (input) =>
-          bindRemoteCodeTurn(
-            {
-              store: sshTargetStore,
-              connections: sshTargetConnections,
-              composition: nativeHarnessComposition,
-              uuid: randomUUID,
-            },
-            input,
-          ),
         nativeHarness: nativeHarnessHooks,
         onProviderTurnRequested: (threadId) => {
           if (codeService instanceof CodeService) codeService.noteProviderTurnRequested(threadId);

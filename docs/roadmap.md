@@ -161,9 +161,6 @@ authority, privacy, and release boundaries.
   [Enterprise provider identity](design/enterprise-provider-identity.md).
 - **Disposable Linux desktops for headless hosts** — short-lived desktops a
   headless host can drive.
-- **Remote SSH development environments** — a Code Project on a machine reached
-  over SSH, with this host keeping authority. Design:
-  [Remote SSH environments](design/remote-ssh-environments.md).
 - **Third-party provider-driver plugins** — outside drivers admitted to the
   provider catalog through the published seams.
 - **EU/GDPR compliance package** — pending legal review.

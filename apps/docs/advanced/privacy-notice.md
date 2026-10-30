@@ -271,11 +271,8 @@ copy, not the authoritative export.
 **Export this host.** **Export my data** is the host-wide cut
 (`octant.host-export/1`): one local-owner read of every thread the host
 can project — across Chat, Work, and Code — plus Projects, memory,
-Canvases, settings, SSH targets, usage rows, and the retention state
-including purge tombstones, streamed as line-delimited JSON. An SSH target
-appears as when it was registered, the Projects bound to it, and what Octant
-decided from its last attestation; its address, remote user, host key, and
-the remote folders are left out, as a local Project's folder is. It is local-owner-only: a
+Canvases, settings, usage rows, and the retention state
+including purge tombstones, streamed as line-delimited JSON. It is local-owner-only: a
 remote or paired device principal is refused before any export data is read.
 The same unrepresentable rules as the thread bundle apply — no credentials,
 no filesystem paths, no raw provider payloads. Some non-thread records that
