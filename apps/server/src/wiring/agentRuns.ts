@@ -47,7 +47,10 @@ import type { AgentRunRouteDependencies } from "../agentRun/agentRunRoutes";
 import type { AgentRunControlAdmissionDependencies } from "../agentRun/agentRunControlAdmission";
 import { admittedParentWorkContext } from "../agentRun/agentRunParentContext";
 import { createAgentsManagedTools } from "../agentRun/agentRunManagedTools";
-import { agentRunEligibleTargets as eligibleAgentRunTargets } from "../agentRun/agentRunDelegation";
+import {
+  agentRunEligibleTargets as eligibleAgentRunTargets,
+  type RemoteDelegationPort,
+} from "../agentRun/agentRunDelegation";
 import {
   createAgentRunChildWorktreePort,
   resolveAgentRunChildWorktreeThreadId,
@@ -1043,6 +1046,19 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         modelId: String(candidate.modelId),
       }),
   });
+  // Hub membership is wired after this scope, so a helper request that names a
+  // target member reaches the delegating service through a holder wireRemote fills.
+  const remoteDelegationHolder: { port?: RemoteDelegationPort } = {};
+  const remoteDelegation: RemoteDelegationPort = {
+    start: async (input) =>
+      remoteDelegationHolder.port === undefined
+        ? {
+            status: "refused",
+            reason: "remote-delegation-unavailable",
+            message: "This host cannot start helpers on other members.",
+          }
+        : remoteDelegationHolder.port.start(input),
+  };
   // Every turn's `octant_agents` tool set binds to the calling thread: the
   // delegation and the cancellation authority it petitions are the same ones
   // the Agents dock uses, so a tool call and a click are the same request.
@@ -1060,6 +1076,8 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
       windowId: input.windowId,
       parentThreadId: input.parentThreadId,
       listTargets: () => agentRunEligibleTargets(input.projectId),
+      projectId: input.projectId,
+      remote: remoteDelegation,
       routing: {
         router: { resolve: (request) => nativeHarnessRouter.resolve(request) },
         recordDecision: (parent, decision) => {
@@ -1267,6 +1285,8 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     managedWorktreeReceipts,
     nativeHarnessRouter,
     nativeHarnessRoutingStore,
+    remoteDelegation,
+    remoteDelegationHolder,
     runtimeOutsideContentMarks,
     sideTasks,
     spendCeiling,
