@@ -73,7 +73,7 @@ function thenableFrom(value: unknown): Promise<unknown> | undefined {
 export interface CreateFromIssuePickerProps {
   readonly client: GithubClient;
   readonly selected?: GithubIssueContextRequest;
-  readonly onSelect: (issue: GithubIssueContextRequest) => void;
+  readonly onSelect: (issue: GithubIssueContextRequest, title: string) => void;
   readonly disabled?: boolean;
 }
 
@@ -233,11 +233,14 @@ export function CreateFromIssuePicker(props: CreateFromIssuePickerProps) {
                         className="github-picker__option"
                         disabled={props.disabled}
                         onClick={() =>
-                          onSelect({
-                            owner: repository.owner,
-                            name: repository.name,
-                            number: row.number,
-                          })
+                          onSelect(
+                            {
+                              owner: repository.owner,
+                              name: repository.name,
+                              number: row.number,
+                            },
+                            row.title,
+                          )
                         }
                         type="button"
                         variant="bare"

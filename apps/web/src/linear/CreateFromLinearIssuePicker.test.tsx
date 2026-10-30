@@ -72,10 +72,10 @@ describe("Create from Linear issue picker", () => {
     await user.click(
       await screen.findByRole("button", { name: /ENG-12 Browse issues in the workspace/ }),
     );
-    expect(onSelect).toHaveBeenCalledWith({
-      id: "11111111-1111-4111-8111-111111111111",
-      identifier: "ENG-12",
-    });
+    expect(onSelect).toHaveBeenCalledWith(
+      { id: "11111111-1111-4111-8111-111111111111", identifier: "ENG-12" },
+      "Browse issues in the workspace",
+    );
     expect(onSelect.mock.calls[0]?.[0]).not.toHaveProperty("title");
     expect(onSelect.mock.calls[0]?.[0]).not.toHaveProperty("description");
   });

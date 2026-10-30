@@ -106,7 +106,10 @@ describe("Create from issue picker", () => {
     render(<CreateFromIssuePicker client={makeClient()} onSelect={onSelect} />);
     await user.click(await screen.findByText("octant/octant"));
     await user.click(await screen.findByRole("button", { name: /#7 Flaky search/ }));
-    expect(onSelect).toHaveBeenCalledWith({ owner: "octant", name: "octant", number: 7 });
+    expect(onSelect).toHaveBeenCalledWith(
+      { owner: "octant", name: "octant", number: 7 },
+      "Flaky search",
+    );
     expect(onSelect.mock.calls[0]?.[0]).not.toHaveProperty("title");
     expect(onSelect.mock.calls[0]?.[0]).not.toHaveProperty("body");
   });
