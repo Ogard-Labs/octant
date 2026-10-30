@@ -35,7 +35,6 @@ import {
 } from "@octant/contracts/computer-use-plugin";
 import type { DesktopLaunchPort, DesktopProvider } from "@octant/plugin-api/desktop-provider";
 import { runDesktopProviderConformance } from "@octant/plugin-api/desktop-provider-conformance";
-import { computerUseSelection } from "@octant/plugin-host/computer-use";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import { createComputerUseToolService } from "./computerUseToolService";
 import {
@@ -671,7 +670,7 @@ describe("host-local desktop under real Bubblewrap and Xvfb", () => {
         threadTitle: () => "Notes app",
         record: () => undefined,
       });
-      const bound = computer.toolSet(owner, computerUseSelection("scripted"), true, async (q) => {
+      const bound = computer.toolSet(owner, true, async (q) => {
         asked.push(q);
         return "approved";
       });

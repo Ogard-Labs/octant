@@ -15,7 +15,6 @@ import {
   type ComputerUseActionKind,
   type ToolActionAuthority,
 } from "@octant/contracts";
-import { validateComputerUseSelection } from "@octant/plugin-host/computer-use";
 import { decideDesktopArtifactPath, isToolAllowedByAllowlist } from "@octant/domain";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { createComputerUsePlugin } from "../plugins/computerUse/computerUsePlugin";
@@ -27,6 +26,9 @@ import {
 import type { DesktopComputerUsePort } from "./desktopComputerUsePort";
 import type { LeasedComputerUsePort } from "./desktopLeaseService";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
+
+/** `ComputerUsePendingApproval.summary` rejects anything longer. */
+const APPROVAL_SUMMARY_LIMIT = 512;
 
 const refused = (reason: string, message: string): ComputerControlResult => ({
   kind: "refused",
@@ -81,6 +83,8 @@ export function createComputerUseToolService(options: {
       readonly appId: string;
       readonly sessionId: string;
       readonly authority: ToolActionAuthority;
+      /** The agent's stated reason, shown on the approval this action asks. */
+      readonly reason?: string;
       result?: ComputerControlResult;
     }
   >();
@@ -134,7 +138,7 @@ export function createComputerUseToolService(options: {
         correlationId: randomUUID(),
         capability: { id: "computer-use", version: 1 },
         authority,
-        intent: "Use the task's explicitly selected Computer use plugin.",
+        intent: "Use Octant's bundled Computer use tool for this task.",
         approval: { kind: "not-required" },
       }),
       arguments: {
@@ -198,10 +202,22 @@ export function createComputerUseToolService(options: {
       // A desktop app is a file the agent sent, so its name alone does not
       // say where it runs.
       const where = action?.owner.leaseId === undefined ? "" : ` on ${DESKTOP_LABEL}`;
-      if (action !== undefined && options.externalContentIngested(action.owner)) {
-        return `Allow this one action in ${action.appId}${where} for "${options.threadTitle(action.owner).slice(0, 100)}".`;
-      }
-      return `Allow control of ${action?.appId ?? "this application"}${where} for "${action === undefined ? "this task" : options.threadTitle(action.owner).slice(0, 100)}" for 5 minutes.`;
+      // Without a chip the person no longer said "use Computer" in the send,
+      // so the card carries the agent's own account of why, quoted as its
+      // words rather than stated as a fact. The whole summary has a contract
+      // limit, so the reason takes only what the rest leaves.
+      const title =
+        action === undefined ? "this task" : options.threadTitle(action.owner).slice(0, 100);
+      const head =
+        action !== undefined && options.externalContentIngested(action.owner)
+          ? `Allow this one action in ${action.appId}${where} for "${title}".`
+          : `Allow control of ${action?.appId ?? "this application"}${where} for "${title}" for 5 minutes.`;
+      const prefix = ' The agent says: "';
+      const room = APPROVAL_SUMMARY_LIMIT - head.length - prefix.length - 2;
+      if (action?.reason === undefined || room < 1) return head.slice(0, APPROVAL_SUMMARY_LIMIT);
+      const reason =
+        action.reason.length > room ? `${action.reason.slice(0, room - 1)}…` : action.reason;
+      return `${head}${prefix}${reason}"`;
     },
     // A marked thread's one-time approval says what marked it. A mark the
     // host reads as present but whose sources it cannot name still says so,
@@ -256,6 +272,7 @@ export function createComputerUseToolService(options: {
     command: ComputerControlCommand,
     signal?: AbortSignal,
     ask?: ComputerUseThreadAsk,
+    reason?: string,
   ): Promise<ComputerControlResult> {
     if (command.operation === "stop") {
       for (const action of pending.values()) {
@@ -351,14 +368,24 @@ export function createComputerUseToolService(options: {
             ? command.operation
             : "observe-window";
     const grantKey = `${ownerKey(owner)}:${JSON.stringify(authority)}:${appId}`;
-    // A five-minute app grant is a standing approval. Once the thread has
-    // ingested external content, standing approvals no longer carry an
-    // irreversible action (untrustedContentPolicy), so the runtime asks again
-    // and the person confirms this action freshly.
+    // The first action on each app in a thread always asks: no grant exists
+    // until the person approves one, and the owner's execution policy is never
+    // read here, so Full access skips nothing. A five-minute app grant is a
+    // standing approval. Once the thread has ingested external content,
+    // standing approvals no longer carry an irreversible action
+    // (untrustedContentPolicy), so the runtime asks again and the person
+    // confirms this action freshly.
     const requiresApproval =
       (grants.get(grantKey)?.expiresAt ?? 0) <= Date.now() ||
       options.externalContentIngested(owner);
-    const action = { owner, command, appId, sessionId, authority };
+    const action = {
+      owner,
+      command,
+      appId,
+      sessionId,
+      authority,
+      ...(reason === undefined ? {} : { reason }),
+    };
     pending.set(actionId, action);
     // A desktop's approval is also asked in the thread, where any client that
     // may open the thread can answer it; whichever answer lands first decides.
@@ -598,68 +625,27 @@ export function createComputerUseToolService(options: {
       );
     },
     /**
-     * A refusal-only `octant_computer` for turns whose message carried no
-     * @Computer selection. The capability binds to one send, so a model
-     * that saw the tool on an earlier turn calls it again on a follow-up;
-     * registering the name lets that call return the recovery instead of
-     * the provider's bare unknown-tool failure, which the model reports as
-     * "currently unavailable". No definition when the composer cannot offer
-     * the chip — disabled globally or constrained out — since nothing could
-     * reattach it. Plan mode is the same dead end: Plan owners are refused
-     * every non-stop Computer command, so the re-attach instruction could
-     * never succeed.
+     * The turn's `octant_computer`, offered on every eligible turn without a
+     * composer selection and bound at admission to the send's destination:
+     * this Mac, or the owner's `leaseId`, one of the thread's disposable
+     * desktops. A desktop binding needs `ask`, the turn's way to ask its
+     * person in the thread, and refuses a lease that is not the thread's own
+     * or not running. A turn that cannot use the tool gets no definition at
+     * all: with the plugin disabled, in Plan, with the tool constrained out,
+     * or with no screen to drive, the agent is never told it exists.
      */
-    unattachedToolSet: (rawOwner: ComputerUseOwner): AppManagedToolSet | undefined => {
+    toolSet: (
+      rawOwner: ComputerUseOwner,
+      imagesSupported: boolean = true,
+      ask?: ComputerUseThreadAsk,
+    ): AppManagedToolSet | undefined => {
       const owner = decodeComputerUseOwner(rawOwner);
-      // Its recovery tells the agent to re-attach this Mac's Computer, which
-      // a host without a screen of its own cannot offer.
       if (
-        options.desktop === undefined ||
         !options.settings().enabled ||
         owner.executionPolicy === "plan" ||
         !isToolAllowedByAllowlist(options.toolConstraints(owner), "octant_computer")
       )
         return undefined;
-      return {
-        definitions: [
-          {
-            name: "octant_computer",
-            description:
-              "Octant Computer use operates applications on this Mac. It is not attached to this turn: a turn carries it only when the message includes the @Computer selection. Ask the user to add @Computer and send the request again.",
-            inputSchema: {
-              type: "object",
-              additionalProperties: false,
-              properties: { operation: { type: "string" } },
-            },
-          },
-        ],
-        execute: () =>
-          Promise.resolve({
-            result: {
-              error: "computer-use-not-attached",
-              message: options.settings().enabled
-                ? "Octant's Computer tool is not attached to this turn. Tell the user to add @Computer to the message and send it again."
-                : "Computer use is turned off in Settings, so it cannot be attached. Answer without it.",
-            },
-            isError: true,
-          }),
-      };
-    },
-    /**
-     * The turn's `octant_computer`, bound at admission to the destination the
-     * send selected: this Mac, or the owner's `leaseId`, one of the thread's
-     * disposable desktops. A desktop binding needs `ask`, the turn's way to
-     * ask its person in the thread, and refuses a lease that is not the
-     * thread's own or not running.
-     */
-    toolSet: (
-      rawOwner: ComputerUseOwner,
-      selection: unknown,
-      imagesSupported: boolean = true,
-      ask?: ComputerUseThreadAsk,
-    ): AppManagedToolSet | undefined => {
-      if (!validateComputerUseSelection(selection, options.settings().enabled)) return undefined;
-      const owner = decodeComputerUseOwner(rawOwner);
       const leases = options.leases;
       const onDesktop = owner.leaseId !== undefined;
       if (
@@ -689,7 +675,7 @@ export function createComputerUseToolService(options: {
         "The task's computer-use authority changed.",
       );
       const plugin = createComputerUsePlugin({
-        execute: (command, signal) => {
+        execute: (command, signal, request) => {
           if (needsImageModel && command.operation !== "stop")
             return Promise.resolve(imageModelRefusal);
           if (!imagesSupported && command.operation === "click" && "x" in command)
@@ -703,7 +689,7 @@ export function createComputerUseToolService(options: {
           // the person at this Mac.
           return authorityChanged()
             ? Promise.resolve(ownerChangedRefusal)
-            : execute(owner, command, signal, onDesktop ? ask : undefined);
+            : execute(owner, command, signal, onDesktop ? ask : undefined, request?.reason);
         },
         ...(onDesktop && ask !== undefined
           ? {

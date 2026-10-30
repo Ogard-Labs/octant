@@ -27,11 +27,7 @@ import type { CanvasContextSelection } from "@octant/contracts/canvasContext";
 import type { PreviewContextSelection } from "@octant/contracts/previews";
 import type { ProviderObservedState, ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import { decodeProviderModelId } from "@octant/contracts/providers";
-import {
-  modelCarriesAppManagedTools,
-  startedConversationPickerGroups,
-  type PickerGroup,
-} from "@octant/domain";
+import { startedConversationPickerGroups, type PickerGroup } from "@octant/domain";
 import { buildComposerPoolModel } from "@octant/domain/composer-pool-policy";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useThreadMessageQueue } from "../messageQueue/useThreadMessageQueue";
@@ -53,10 +49,6 @@ import { ChatThreadActionsMenu } from "./ChatThreadActionsMenu";
 import { ChatTranscript } from "./ChatTranscript";
 import { canvasCardsForShownRun } from "./chatTranscriptWindow";
 import { formatOutgoingMessageWithQuotes, type TranscriptQuoteChip } from "./quoteSelection";
-import {
-  unattachedCapabilityMentionCopy,
-  unattachedCapabilityMentions,
-} from "@octant/plugin-host/capability-mentions";
 import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
 import { ThreadWorkShelf } from "./ThreadWorkShelf";
 import type { ChatController } from "./useChatController";
@@ -361,19 +353,8 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const activeProvider = props.providerSnapshot?.instances.find(
     (instance) => String(instance.id) === String(activeThread?.providerInstanceId),
   );
-  const activeObservation = props.providerSnapshot?.observedStates.find(
-    (observed) => String(observed.instanceId) === String(activeThread?.providerInstanceId),
-  );
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
-    ...(activeObservation === undefined || activeThread === undefined
-      ? {}
-      : {
-          providerCarriesTools: modelCarriesAppManagedTools(
-            activeObservation,
-            activeThread.modelId,
-          ),
-        }),
     ...(activeProvider === undefined
       ? {}
       : { providerFamily: activeProvider.driverKind as ExtensionProviderFamily }),
@@ -785,18 +766,6 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
 
   const submitTurn = async (draft: string): Promise<boolean> => {
     const extensionReceiptsForSend = pendingExtensionRef.current;
-    // Refusing before anything is claimed keeps the staged attachments and
-    // context with the draft the user fixes.
-    const unattachedMentions = unattachedCapabilityMentions(
-      draft,
-      extensionReceiptsForSend.flatMap((receipt) =>
-        receipt.selection === undefined ? [] : [receipt.selection],
-      ),
-    );
-    if (unattachedMentions.length > 0) {
-      setSendNotice(unattachedCapabilityMentionCopy(unattachedMentions));
-      return false;
-    }
     setSendNotice(undefined);
     const claimedAttachments = pendingAttachmentsRef.current;
     pendingAttachmentsRef.current = [];
@@ -1468,14 +1437,6 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               extensionReceipts: [...pendingExtensionRef.current],
               threadMentionChips: [...threadMentions.chips],
             };
-            const extensionSelections = context.extensionReceipts.flatMap((receipt) =>
-              receipt.selection === undefined ? [] : [receipt.selection],
-            );
-            const unattached = unattachedCapabilityMentions(draft, extensionSelections);
-            if (unattached.length > 0) {
-              setSendNotice(unattachedCapabilityMentionCopy(unattached));
-              return false;
-            }
             pendingAttachmentsRef.current = [];
             deferredAttachmentsRef.current = claimed;
             const releaseClaim = () => {
@@ -1507,7 +1468,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                   attachmentIds: context.attachmentIds,
                   previewSelections: context.previewSelections,
                   canvasSelections: context.canvasSelections,
-                  extensionSelections,
+                  extensionSelections: context.extensionReceipts.flatMap((receipt) =>
+                    receipt.selection === undefined ? [] : [receipt.selection],
+                  ),
                   threadMentionIds,
                 },
                 () => {

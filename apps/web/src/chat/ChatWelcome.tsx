@@ -35,10 +35,6 @@ import { WelcomeHeading } from "../composer/WelcomeHeading";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import type { DraftRecentThread } from "../shell/DraftThreadWorkspace";
-import {
-  unattachedCapabilityMentionCopy,
-  unattachedCapabilityMentions,
-} from "@octant/plugin-host/capability-mentions";
 import { WorkKindSwitch } from "../shell/WorkKindSwitch";
 
 export interface ChatWelcomeProps {
@@ -101,7 +97,6 @@ export function ChatWelcome(props: ChatWelcomeProps) {
   const [attachmentNotice, setAttachmentNotice] = useState<string>();
   // This composer has no suggestion list, so a capability token typed here can
   // only ever leave as unattached prose; the refusal says where one attaches.
-  const [sendNotice, setSendNotice] = useState<string>();
   const slash = useComposerSlashCommands({
     draft: prompt,
     onDraftChange: setPrompt,
@@ -111,7 +106,6 @@ export function ChatWelcome(props: ChatWelcomeProps) {
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
     mode: "chat",
-    providerCarriesTools: false,
     projectId: null,
     ...(family === undefined ? {} : { providerFamily: family }),
   });
@@ -140,19 +134,13 @@ export function ChatWelcome(props: ChatWelcomeProps) {
         : props.status === "disconnected"
           ? "Chat is disconnected."
           : undefined);
-  const visibleStatusMessage = statusMessage ?? sendNotice ?? attachmentNotice;
+  const visibleStatusMessage = statusMessage ?? attachmentNotice;
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
     const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
       receipt.selection === undefined ? [] : [receipt.selection],
     );
-    const unattachedMentions = unattachedCapabilityMentions(trimmed, extensionSelections);
-    if (unattachedMentions.length > 0) {
-      setSendNotice(unattachedCapabilityMentionCopy(unattachedMentions, false));
-      return;
-    }
-    setSendNotice(undefined);
     const options = Object.keys(modelOptionValues).length === 0 ? undefined : modelOptionValues;
     if (extensionSelections.length > 0) {
       props.onCreateChat(trimmed, options, extensionSelections);

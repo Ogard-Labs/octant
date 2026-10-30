@@ -237,7 +237,7 @@ export interface PickerGroup {
   /**
    * Whether the provider can carry Octant-managed tools at all. Absent when
    * the instance was never probed; a surface that offers an app-managed tool
-   * (like @Browser) reads this so the offer never precedes a refusal.
+   * (like the Browser tool) reads this so the offer never precedes a refusal.
    */
   readonly appManagedTools?: ProviderCapabilitySupport;
   /**

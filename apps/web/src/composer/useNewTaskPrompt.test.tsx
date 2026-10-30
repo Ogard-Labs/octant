@@ -104,8 +104,8 @@ describe("useNewTaskPrompt", () => {
     ]);
     drafts.writeExtensionReceipts("chat:pane-a", [
       {
-        reference: "@Browser",
-        label: "Browser",
+        reference: "$review",
+        label: "Review",
         status: { kind: "blocked", reason: "unavailable" },
       },
     ]);
