@@ -2367,19 +2367,31 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     // it acts. A desktop destination the send cannot bind is refused rather
     // than quietly falling back to this Mac. A Computer selection from an
     // older draft or queued message is ignored.
+    const admitsComputer = (destination: ComputerUseDestinationSelection) =>
+      this.#options.supportsAppManagedTools?.(input.thread) === true &&
+      this.#options.computerUseTools?.({
+        windowId: input.windowId,
+        thread: input.thread,
+        destination,
+        // Admission only checks that the send can bind its destination;
+        // the turn's own tool set asks in its thread.
+        ask: () => Promise.resolve("cancelled"),
+      }) !== undefined;
+    // The thread's running desktop is only a default: a turn that cannot carry
+    // Computer (Plan, or an allowlist without it) proceeds without the tool
+    // instead of being refused.
+    const implicitDestination =
+      command.computerUseDestination === undefined
+        ? this.#options.threadDesktopDestination?.(input.thread)
+        : undefined;
     const computerUseDestination =
-      command.computerUseDestination ?? this.#options.threadDesktopDestination?.(input.thread);
+      command.computerUseDestination ??
+      (implicitDestination !== undefined && admitsComputer(implicitDestination)
+        ? implicitDestination
+        : undefined);
     if (
-      computerUseDestination !== undefined &&
-      (this.#options.supportsAppManagedTools?.(input.thread) !== true ||
-        this.#options.computerUseTools?.({
-          windowId: input.windowId,
-          thread: input.thread,
-          destination: computerUseDestination,
-          // Admission only checks that the send can bind its destination;
-          // the turn's own tool set asks in its thread.
-          ask: () => Promise.resolve("cancelled"),
-        }) === undefined)
+      command.computerUseDestination !== undefined &&
+      !admitsComputer(command.computerUseDestination)
     )
       return failStart(
         "The selected desktop is not this thread's running desktop, or this provider cannot carry Octant's Computer tool. Choose a running desktop of this thread and retry.",

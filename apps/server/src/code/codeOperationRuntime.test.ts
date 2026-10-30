@@ -7739,6 +7739,32 @@ it("binds the Computer tool to the thread's running desktop when the send names 
   fixture.close();
 });
 
+it("starts a turn without Computer when the thread's running desktop cannot be bound to it", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const connection = providerConnection(queue);
+  const fixture = runtimeFixture({
+    provider: providerDriver(connection),
+    supportsAppManagedTools: true,
+    threadDesktopDestination: () => ({
+      kind: "desktop-lease" as const,
+      leaseId: decodeDesktopLeaseId("95000000-0000-4000-8000-000000000002"),
+    }),
+    // Plan, or a tool allowlist without Computer, offers no tool set.
+    computerUseTools: () => undefined,
+  });
+  await fixture.runtime.execute(windowId, {
+    kind: "start-provider-turn",
+    operationId: operationId(91),
+    threadId,
+    checkoutId,
+    sessionId,
+    prompt: fixture.prompt,
+  });
+  await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+  await fixture.runtime.close();
+  fixture.close();
+});
+
 it("binds the Computer tool to the desktop the send named and asks its approvals in the thread", async () => {
   const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
   const connection = providerConnection(queue);

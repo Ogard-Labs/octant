@@ -1644,6 +1644,8 @@ function providerSettingsViewProps(
     onModelContextWindowChange: controller.setModelContextWindow,
     probingIds: controller.probingIds,
     updatingIds: controller.updatingIds,
+    latestVersions: controller.latestVersions,
+    onCheckLatestVersions: controller.checkLatestVersions,
     status: controller.status,
   };
 }

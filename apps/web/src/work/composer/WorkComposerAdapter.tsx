@@ -15,6 +15,7 @@ import {
   useComposerSlashCommands,
   ComposerSlashTypeahead,
 } from "../../composer/useComposerSlashCommands";
+import { ComposerAtTypeahead, useComposerAtMenu } from "../../composer/useComposerAtMenu";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import type {
   ProviderInstanceId,
@@ -144,6 +145,11 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     textarea: () => textareaRef.current,
     draft: prompt,
     onDraftChange: setPrompt,
+  });
+  const atMenu = useComposerAtMenu({
+    textarea: () => textareaRef.current,
+    draft: prompt,
+    onDraftChange: setPrompt,
     onResolveExtensionReference: extensionDraft.resolveReference,
   });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -203,7 +209,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
   const [submitting, setSubmitting] = useState(false);
   // A send refused before the host saw it explains itself beside the composer,
   // since no thread exists to carry a reason.
-  const canSubmit = trimmed.length > 0 && !props.creating && !submitting && !slash.resolving;
+  const canSubmit = trimmed.length > 0 && !props.creating && !submitting && !atMenu.resolving;
 
   useEffect(() => {
     if (props.projectId !== undefined) setProjectRequired(false);
@@ -270,6 +276,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (atMenu.handleKeyDown(event)) return;
     if (slash.handleKeyDown(event)) return;
     if (mention.handleKeyDown(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
@@ -387,10 +394,14 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
               <OctantTextarea
                 aria-label="First message"
                 aria-autocomplete="list"
-                aria-expanded={slash.open}
-                aria-controls={slash.open ? slash.listId : undefined}
+                aria-expanded={atMenu.open || slash.open}
+                aria-controls={atMenu.open ? atMenu.listId : slash.open ? slash.listId : undefined}
                 aria-activedescendant={
-                  slash.active === undefined ? undefined : `${slash.listId}-${slash.active.id}`
+                  atMenu.active !== undefined
+                    ? `${atMenu.listId}-${atMenu.active.id}`
+                    : slash.active === undefined
+                      ? undefined
+                      : `${slash.listId}-${slash.active.id}`
                 }
                 autoFocus
                 className="composer-input"
@@ -398,11 +409,13 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                 onChange={(event) => {
                   setPrompt(event.target.value);
                   slash.sync(event.target.value, event.currentTarget.selectionStart);
+                  atMenu.sync(event.target.value, event.currentTarget.selectionStart);
                   mention.sync(event.target.value, event.currentTarget.selectionStart);
                 }}
                 onClick={(event) => {
                   mention.sync(event.currentTarget.value, event.currentTarget.selectionStart);
                   slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+                  atMenu.sync(event.currentTarget.value, event.currentTarget.selectionStart);
                 }}
                 ref={textareaRef}
                 onDragOver={(event) => event.preventDefault()}
@@ -417,7 +430,9 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
               />
             }
             typeahead={
-              slash.open ? (
+              atMenu.open ? (
+                <ComposerAtTypeahead controller={atMenu} />
+              ) : slash.open ? (
                 <ComposerSlashTypeahead controller={slash} />
               ) : mention.open ? (
                 <ThreadMentionTypeahead

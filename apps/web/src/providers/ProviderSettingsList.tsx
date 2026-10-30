@@ -18,6 +18,7 @@ import {
   codexAccountUsesAssignedDirectory,
   isAcpAgentInstance,
   isImageProfileDriverKind,
+  isNewerProviderRelease,
   modelCanTakeDelegatedWork,
   subscriptionDescriptorIdOf,
   supportsProviderCliUpdate,
@@ -82,6 +83,7 @@ export type ProviderSettingsListProps = Pick<
   | "observedByInstance"
   | "probingIds"
   | "updatingIds"
+  | "latestVersions"
   | "busy"
   | "credentialManagementAvailable"
   | "onRename"
@@ -336,6 +338,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
           : { onModelContextWindowChange: props.onModelContextWindowChange })}
         probing={props.probingIds.has(instance.id)}
         updating={props.updatingIds?.has(instance.id) === true}
+        {...latestVersionProp(props.latestVersions, instance.id)}
         reordering={reordering}
         startSignIn={
           props.signInStartingId !== undefined &&
@@ -611,6 +614,7 @@ interface ProviderRowProps {
   readonly busy: boolean;
   readonly probing: boolean;
   readonly updating: boolean;
+  readonly latestVersion?: string;
   readonly reordering: boolean;
   readonly credentialManagementAvailable: boolean;
   readonly index: number;
@@ -655,6 +659,14 @@ interface ProviderRowProps {
   readonly startSignIn: boolean;
 }
 
+function latestVersionProp(
+  latestVersions: ReadonlyMap<ProviderInstanceId, string> | undefined,
+  instanceId: ProviderInstanceId,
+): { readonly latestVersion?: string } {
+  const latestVersion = latestVersions?.get(instanceId);
+  return latestVersion === undefined ? {} : { latestVersion };
+}
+
 function ProviderRow(props: ProviderRowProps) {
   const hostPlatform = useHostPlatform();
   const [configurationOpen, setConfigurationOpen] = useState(false);
@@ -680,6 +692,14 @@ function ProviderRow(props: ProviderRowProps) {
       `${model.displayName} ${model.id}`.toLowerCase().includes(modelSearch),
     ) ?? [];
   const disabled = props.busy || props.probing || props.updating;
+  const installedVersion = props.observed?.detectedVersion;
+  const updateAvailable =
+    props.onUpdateProviderCli !== undefined &&
+    props.latestVersion !== undefined &&
+    installedVersion !== undefined &&
+    isNewerProviderRelease(props.latestVersion, installedVersion)
+      ? props.latestVersion
+      : undefined;
   const readiness = props.updating || props.probing ? "checking" : props.observed?.readiness;
   const [connectionDetailsOpen, setConnectionDetailsOpen] = useState(() => readiness !== "ready");
   // A row that comes to need attention opens; collapsing it afterwards sticks.
@@ -1069,6 +1089,11 @@ function ProviderRow(props: ProviderRowProps) {
                 size={14}
               />
             </OctantButton>
+            {updateAvailable === undefined ? null : (
+              <span className="provider-card__update-available" role="status">
+                Update available ({props.observed?.detectedVersion} → {updateAvailable})
+              </span>
+            )}
             {props.onUpdateProviderCli !== undefined &&
             supportsProviderCliUpdate(props.instance.driverKind) ? (
               <OctantButton

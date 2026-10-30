@@ -779,7 +779,9 @@ Rules this slice resolved:
   send, is ignored. Absent, the destination is this Mac, except on a host
   with no screen of its own (it reports `leasable`): there the host binds the
   thread's one `ready` desktop, and binds none when the thread has two, so no
-  client needs a picker and the host never chooses between two. With no live
+  client needs a picker and the host never chooses between two. That default
+  applies only to a turn that can carry Computer; in Plan, or with an allowlist
+  that excludes it, the turn starts without the tool. With no live
   desktop, Computer refuses `no-destination` and says to start one from the
   Desktop tab, never naming macOS permissions. At admission the host binds
   only a lease that is the sending thread's own and `ready`, or the turn does

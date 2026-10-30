@@ -1,4 +1,5 @@
 import { useComposerCompacting } from "../context/composerContextMeterScope";
+import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerAtMenu";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import {
   useId,
@@ -247,9 +248,15 @@ export function ChatComposer(props: ChatComposerProps) {
   // skill only appears when this composer actually has the host's draft
   // resolution path, because that path — not this list — decides whether the
   // reference is allowed.
-  const offeredCommands = useOctantCommands().filter(
-    (command) => command.action.kind === "run" || props.onResolveExtensionReference !== undefined,
-  );
+  const offeredCommands = useOctantCommands().filter((command) => command.action.kind === "run");
+  const atMenu = useComposerAtMenu({
+    draft: props.draft,
+    onDraftChange: props.onDraftChange,
+    textarea: () => messageRef.current,
+    ...(props.onResolveExtensionReference === undefined
+      ? {}
+      : { onResolveExtensionReference: resolveExtensionReference }),
+  });
   const [commandToken, setCommandToken] = useState<SlashCommandToken | undefined>(undefined);
   const [activeCommandIndex, setActiveCommandIndex] = useState(0);
   const commandMatches =
@@ -378,6 +385,7 @@ export function ChatComposer(props: ChatComposerProps) {
   }
 
   function syncTokens(draft: string, caretIndex: number | null) {
+    atMenu.sync(draft, caretIndex);
     mention.sync(draft, caretIndex);
     syncCommandToken(draft, caretIndex);
   }
@@ -421,6 +429,7 @@ export function ChatComposer(props: ChatComposerProps) {
   async function onDraftKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.nativeEvent.isComposing) return;
     if (suggestionInput.takeOnTab(event)) return;
+    if (atMenu.handleKeyDown(event)) return;
     if (commandOpen && commandMatches.length > 0) {
       if (event.key === "ArrowDown") {
         event.preventDefault();
@@ -613,21 +622,37 @@ export function ChatComposer(props: ChatComposerProps) {
   const input = (
     <OctantTextarea
       aria-activedescendant={
-        activeCommand !== undefined
-          ? `${commandListId}-${activeCommand.id}`
-          : activeMention === undefined
-            ? undefined
-            : `${mentionListId}-${String(activeMention.threadId)}`
+        atMenu.active !== undefined
+          ? `${atMenu.listId}-${atMenu.active.id}`
+          : activeCommand !== undefined
+            ? `${commandListId}-${activeCommand.id}`
+            : activeMention === undefined
+              ? undefined
+              : `${mentionListId}-${String(activeMention.threadId)}`
       }
       aria-autocomplete={
-        props.threadMentions === undefined && offeredCommands.length === 0 ? undefined : "list"
+        props.threadMentions === undefined &&
+        offeredCommands.length === 0 &&
+        props.onResolveExtensionReference === undefined
+          ? undefined
+          : "list"
       }
-      aria-controls={commandOpen ? commandListId : mentionOpen ? mentionListId : undefined}
+      aria-controls={
+        atMenu.open
+          ? atMenu.listId
+          : commandOpen
+            ? commandListId
+            : mentionOpen
+              ? mentionListId
+              : undefined
+      }
       aria-describedby={statusId}
       aria-expanded={
-        props.threadMentions === undefined && offeredCommands.length === 0
+        props.threadMentions === undefined &&
+        offeredCommands.length === 0 &&
+        props.onResolveExtensionReference === undefined
           ? undefined
-          : commandOpen || mentionOpen
+          : atMenu.open || commandOpen || mentionOpen
       }
       className="composer-input window-no-drag"
       onChange={(event) => {
@@ -929,7 +954,7 @@ export function ChatComposer(props: ChatComposerProps) {
           },
         },
       }}
-      typeahead={typeahead}
+      typeahead={atMenu.open ? <ComposerAtTypeahead controller={atMenu} /> : typeahead}
     />
   );
 }

@@ -365,7 +365,9 @@ stopping a turn. Pins can be set only from the Octant window on this host.
 
 ### Structured references
 
-In a composer, typing `@` opens a searchable plugin palette. Selections
+In a composer, typing `@` opens one searchable list of enabled skills, plugin
+MCP servers and connectors you added yourself; in Work and Code it also lists
+files in the thread's folder. Selections
 become structured reference chips backed by the stable extension ID —
 `@plugin-name` selects the primary capability when unambiguous, and
 `@plugin-name/component-name` selects an explicit component. References can
@@ -497,7 +499,7 @@ Some gaps remain:
   because Octant reuses that profile for your sign-in. Codex also loads the
   skills in your own `~/.agents/skills` and Codex skills folders by itself.
 
-Type `/` in a Chat, Work, or Code composer — including Chat's first message — to find commands and enabled skills. Browser and Computer entries appear only when those capabilities are available.
+Type `@` in a Chat, Work, or Code composer — including a new thread's first message — to find enabled skills, plugin MCP servers and connectors. In Work and Code the same list includes files in the thread's folder. A disabled or untrusted item is not listed. Type `/` for commands only. `$skill-name` still works as a typed shortcut. Browser and Computer entries appear in the `@` list only when those capabilities are available.
 Choosing a skill creates a visible selection that can be removed before sending;
 it does not enable a disabled skill. Chat, Work, and Code resolve selected skill
 instructions through the extension service before provider execution. Unavailable

@@ -3,6 +3,11 @@ import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
 } from "../composer/useComposerSlashCommands";
+import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerAtMenu";
+import { useExtensionDraftSelections } from "./useExtensionDraftSelections";
+import { providerFamilyForThread } from "../providers/providerFamily";
+import type { ExtensionClient } from "@octant/client-runtime/extension-client";
+import type { ExtensionSelection } from "@octant/contracts/extensions";
 import { Compass, GraduationCap, ListChecks, PenLine } from "lucide-react";
 import { useNewTaskPrompt } from "../composer/useNewTaskPrompt";
 import { useCallback, useRef, useState, type KeyboardEvent } from "react";
@@ -49,7 +54,13 @@ export interface ChatWelcomeProps {
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
   readonly selectedProviderInstanceId?: ProviderInstanceId;
   readonly selectedModelId?: ProviderModelId;
-  readonly onCreateChat: (prompt: string, modelOptionValues?: ProviderModelOptionValues) => void;
+  /** Reads the effective skills and servers the `@` list offers. Absent: `@` lists none. */
+  readonly extensionClient?: ExtensionClient;
+  readonly onCreateChat: (
+    prompt: string,
+    modelOptionValues?: ProviderModelOptionValues,
+    extensionSelections?: ReadonlyArray<ExtensionSelection>,
+  ) => void;
   readonly onSelectProvider?: (selection: ModelPickerSelection) => void;
   readonly onOpenSettings?: () => void;
   readonly onRetry?: () => void;
@@ -91,6 +102,21 @@ export function ChatWelcome(props: ChatWelcomeProps) {
     onDraftChange: setPrompt,
     textarea: () => textareaRef.current,
   });
+  const family = providerFamilyForThread(props.providerGroups, props.selectedProviderInstanceId);
+  const extensionDraft = useExtensionDraftSelections({
+    ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
+    mode: "chat",
+    projectId: null,
+    ...(family === undefined ? {} : { providerFamily: family }),
+  });
+  const atMenu = useComposerAtMenu({
+    draft: prompt,
+    onDraftChange: setPrompt,
+    textarea: () => textareaRef.current,
+    ...(props.extensionClient === undefined
+      ? {}
+      : { onResolveExtensionReference: extensionDraft.resolveReference }),
+  });
   const { modelKey, modelOptionValues, setModelChoice } = useDraftModelOptions(
     props.providerGroups ?? [],
     props.selectedProviderInstanceId,
@@ -98,7 +124,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
   );
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const trimmed = prompt.trim();
-  const canSubmit = trimmed.length > 0 && ready && !props.creating && !slash.resolving;
+  const canSubmit = trimmed.length > 0 && ready && !props.creating && !atMenu.resolving;
   const statusMessage =
     props.errorMessage ??
     (props.status === "loading"
@@ -112,11 +138,19 @@ export function ChatWelcome(props: ChatWelcomeProps) {
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
-    if (Object.keys(modelOptionValues).length === 0) props.onCreateChat(trimmed);
-    else props.onCreateChat(trimmed, modelOptionValues);
-  }, [canSubmit, props, trimmed, modelOptionValues]);
+    const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
+      receipt.selection === undefined ? [] : [receipt.selection],
+    );
+    const options = Object.keys(modelOptionValues).length === 0 ? undefined : modelOptionValues;
+    if (extensionSelections.length > 0) {
+      props.onCreateChat(trimmed, options, extensionSelections);
+      extensionDraft.clear();
+    } else if (options === undefined) props.onCreateChat(trimmed);
+    else props.onCreateChat(trimmed, options);
+  }, [canSubmit, extensionDraft, props, trimmed, modelOptionValues]);
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (atMenu.handleKeyDown(event)) return;
     if (slash.handleKeyDown(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -164,11 +198,19 @@ export function ChatWelcome(props: ChatWelcomeProps) {
             input={
               <OctantTextarea
                 aria-activedescendant={
-                  slash.active === undefined ? undefined : `${slash.listId}-${slash.active.id}`
+                  atMenu.active !== undefined
+                    ? `${atMenu.listId}-${atMenu.active.id}`
+                    : slash.active === undefined
+                      ? undefined
+                      : `${slash.listId}-${slash.active.id}`
                 }
                 aria-autocomplete={slash.commandIds.length === 0 ? undefined : "list"}
-                aria-controls={slash.open ? slash.listId : undefined}
-                aria-expanded={slash.commandIds.length === 0 ? undefined : slash.open}
+                aria-controls={atMenu.open ? atMenu.listId : slash.open ? slash.listId : undefined}
+                aria-expanded={
+                  slash.commandIds.length === 0 && !atMenu.open
+                    ? undefined
+                    : atMenu.open || slash.open
+                }
                 aria-label="First message"
                 autoFocus
                 className="composer-input"
@@ -177,9 +219,11 @@ export function ChatWelcome(props: ChatWelcomeProps) {
                   setPrompt(event.target.value);
                   setAttachmentNotice(undefined);
                   slash.sync(event.target.value, event.currentTarget.selectionStart);
+                  atMenu.sync(event.target.value, event.currentTarget.selectionStart);
                 }}
                 onClick={(event) => {
                   slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+                  atMenu.sync(event.currentTarget.value, event.currentTarget.selectionStart);
                 }}
                 onKeyDown={handleKeyDown}
                 placeholder={presentation.composerPlaceholder}
@@ -188,7 +232,36 @@ export function ChatWelcome(props: ChatWelcomeProps) {
                 value={prompt}
               />
             }
-            typeahead={slash.open ? <ComposerSlashTypeahead controller={slash} /> : undefined}
+            chips={
+              extensionDraft.receipts.length > 0 ? (
+                <ul aria-label="Selected extensions" className="composer-chips">
+                  {extensionDraft.receipts.map((receipt) => (
+                    <li className="chip" key={receipt.reference}>
+                      <span>{receipt.label}</span>
+                      {receipt.status.kind === "blocked" ? (
+                        <span>{`Blocked: ${receipt.status.reason}`}</span>
+                      ) : null}
+                      <OctantButton
+                        aria-label={`Remove ${receipt.label} extension`}
+                        className="chip-x window-no-drag"
+                        onClick={() => extensionDraft.remove(receipt.reference)}
+                        type="button"
+                        variant="bare"
+                      >
+                        ×
+                      </OctantButton>
+                    </li>
+                  ))}
+                </ul>
+              ) : undefined
+            }
+            typeahead={
+              atMenu.open ? (
+                <ComposerAtTypeahead controller={atMenu} />
+              ) : slash.open ? (
+                <ComposerSlashTypeahead controller={slash} />
+              ) : undefined
+            }
             row={{
               leading: (
                 <>
