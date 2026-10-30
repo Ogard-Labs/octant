@@ -115,7 +115,6 @@ import { ComputerUseSettingsView } from "../settings/ComputerUseSettingsView";
 import { DesktopSpendCapSettings } from "../settings/DesktopSpendCapSettings";
 import type { DesktopPaneClient } from "@octant/client-runtime/desktop-pane-client";
 import { ManagedToolsSettingsView } from "../settings/ManagedToolsSettingsView";
-import { AppStoreConnectKeySection } from "../settings/AppStoreConnectKeySection";
 import { UserProfileSettingsView } from "../profile/UserProfileSettingsView";
 import {
   ScopeIndicator,
@@ -1026,19 +1025,12 @@ function ActiveSectionContent({
           )}
         </>
       );
-    case "device-tools": {
-      const appStoreConnectKeyRequest = props.hostBridge?.appStoreConnectKeyRequest;
+    case "device-tools":
       return (
-        <>
-          <ManagedToolsSettingsView
-            {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
-          />
-          {appStoreConnectKeyRequest === undefined ? null : (
-            <AppStoreConnectKeySection bridge={{ appStoreConnectKeyRequest }} />
-          )}
-        </>
+        <ManagedToolsSettingsView
+          {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
+        />
       );
-    }
     case "providers":
       // The catalog of every provider Octant can set up sits under the ones
       // this host has, so finding and configuring a provider is one page. A

@@ -99,7 +99,6 @@ export const DESKTOP_IPC_CHANNELS = {
   ownerUnlockMake: "octant:owner-unlock:make",
   ownerUnlockSign: "octant:owner-unlock:sign",
   ownerUnlockForget: "octant:owner-unlock:forget",
-  appStoreConnectKeyRequest: "octant:app-store-connect-key:request",
   remoteHostIdentityStatus: "octant:remote-host-identity:status",
   remoteHostIdentityRotate: "octant:remote-host-identity:rotate",
   remoteHostIdentityRecover: "octant:remote-host-identity:recover",
