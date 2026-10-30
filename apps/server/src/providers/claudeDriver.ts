@@ -1539,16 +1539,38 @@ function makeConnection(
       signal: AbortSignal,
       resumeSessionId?: string,
     ): Promise<SessionState> => {
-      const observed = options.runtimeRegistry.observedState(options.instanceId);
-      const selectedModel = observed?.models.find((model) => model.id === input.modelId);
-      if (
-        observed?.readiness !== "ready" ||
-        selectedModel?.source !== "discovered" ||
-        selectedModel.verification !== "verified"
-      ) {
+      // An account nobody has checked yet (a fresh start, or a runtime exit that
+      // cleared the reading) shows "Not checked". The turn runs that check
+      // itself instead of failing on the missing reading.
+      const observed =
+        options.runtimeRegistry.observedState(options.instanceId) ??
+        (await runSetupEffect(
+          Effect.scoped(
+            makeProbe(
+              options,
+              environmentFactory,
+              factories.clock,
+            )({ instanceId: options.instanceId }),
+          ),
+          signal,
+        ));
+      if (observed.readiness === "unauthenticated") {
+        throw failure(
+          "unauthenticated",
+          "Claude is not signed in. Open Settings, then Providers, sign in to this account and try again.",
+        );
+      }
+      if (observed.readiness !== "ready") {
+        throw failure(
+          "unavailable",
+          "Octant could not check this Claude account. Open Settings, then Providers, check the account and try again.",
+        );
+      }
+      const selectedModel = observed.models.find((model) => model.id === input.modelId);
+      if (selectedModel?.source !== "discovered" || selectedModel.verification !== "verified") {
         throw failure(
           "unsupported",
-          "Claude model is not available in the verified provider observation.",
+          "This Claude account does not offer the selected model. Pick another model and try again.",
         );
       }
       const effort = selectedEffort(selectedModel, input.modelOptionValues);
