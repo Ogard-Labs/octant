@@ -31,13 +31,15 @@ confirms, or dismisses alerts, and a passkey owner can confirm too. A remote
 browser can join the hub that serves its page as a guest, with a plain or owner
 code (Settings → Remote access → Hub); with an owner code it makes a passkey for
 that origin first and keeps its identity, and it fails closed to a plain guest
-when it cannot make one. A browser reaches only the origin that served its page,
-under its own certificate check, because it cannot check a pin. So it cannot yet
-reach other members, and a spoke's alerts show in a browser only on that spoke's
-own origin, with the browser's join and passkey held there; reaching spokes from
-the hub's page (decision H15's links, and a browser identity a spoke can accept)
-is not built. The browser flow is tested with a faked authenticator and has not
-been run against a real hub. Nothing here has been run on a real phone, a real
+when it cannot make one. A browser cannot check a pin, so it reaches only the
+origin that served its page and the web app origins the hub's signed roster
+names for spokes (a member's Tailscale name and port), each under its own
+certificate check. The hub's page lists the members, links each spoke's own web
+app, and can ask a spoke directly to admit the browser as a guest, as slice 4
+records; the owner panel reads each spoke's alerts from that spoke's origin, and
+acting on one still happens on that spoke's own page, where its passkey is. The
+browser flow is tested with a faked authenticator and has not been run against a
+real hub or a real Tailscale certificate. Nothing here has been run on a real phone, a real
 passkey, or Android. An owner device's one unlock covers five minutes of
 administration (the host keeps the session in memory), copies an API-key
 sign-in between two spokes, reads a Code posture, and applies or dismisses a
@@ -958,6 +960,32 @@ maintainer's hardware, or names the maintainer gate.
    (H14); desktop windows show every member. Acceptance: a spoke that has not accepted a
    guest refuses it; a forged roster refuses. Verification: client-runtime
    tests and a three-host smoke; a phone run is a maintainer gate.
+
+   Built, with these narrower readings for a browser on the hub's page:
+   - **The roster already carries the link.** A spoke's web app origin is
+     `https://` plus the first `.ts.net` name its signed roster entry lists, and
+     its listener port. No roster field was added, the hub signs nothing new, and a
+     member with no Tailscale name has no web app to link. The hub never proxies.
+   - **The introduction is the roster the spoke holds.** A browser guest asks a
+     spoke at that origin to admit it with the same signed request a phone sends
+     (`/api/hub/guest`). The spoke admits it only if it accepted the guest when a
+     verified roster listed it, and refuses it otherwise, so there is no new
+     code or token. A browser that cannot make a passkey stays a plain guest.
+   - **The browser reaches only origins it was served from or the roster names.**
+     It never relaxes its certificate check and sends no request that asks for a
+     pin.
+   - **A spoke answers the hub's page cross-origin for three requests.** The
+     spoke lets the origin of the hub's own web app, taken from the roster it
+     holds, make `POST /api/hub/guest` and read `GET /api/hub/owner/alerts` and
+     `GET /api/hub/owner/held-members`. Each stays signed and judged by the
+     handler. Every request that changes something stays same-origin, because it
+     asks for an unlock and a passkey belongs to one origin. No other origin, and
+     no spoke without a roster naming a hub web app, gets any of it.
+   - **The owner panel reads, then points.** It reads each spoke's alerts from the
+     spoke's origin with the browser's device key and names a spoke that did not
+     answer; to confirm, dismiss, or remove, the person opens that spoke's own
+     page. A browser that is not an owner on a spoke gets that spoke's refusal.
+
 5. **Owner devices and shared sign-ins.** Owner marking, the Owners hub grant
    item, unlock keys on the phone (Secure Enclave, Android Keystore), the Mac
    (Touch ID or password), and the browser (passkey), unlock verification on

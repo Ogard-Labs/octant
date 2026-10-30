@@ -30,7 +30,7 @@ import {
 import { ExternalContentClearStore } from "../context/externalContentClearStore";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
-import { defaultShellSettings, enabledModes } from "@octant/domain";
+import { defaultShellSettings, enabledModes, rosterMemberWebOrigin } from "@octant/domain";
 import {
   createRemoteGateway,
   type RemoteGateway,
@@ -377,6 +377,14 @@ export function wireRemote(deps: RemoteDependencies) {
             (await peerDelegationRoutes(request)) ??
             (await peerCredentialRoutes(request)) ??
             hubOwnerRoutes(request)),
+        hubWebOrigin: services.hubWebOrigin ?? (() => spokeLinkService.hubWebOrigin()),
+        spokeWebOrigins:
+          services.spokeWebOrigins ??
+          (() =>
+            (hubService.status().roster?.roster.members ?? []).flatMap((member) => {
+              const webOrigin = rosterMemberWebOrigin(member);
+              return webOrigin === undefined ? [] : [webOrigin];
+            })),
         remoteServerGrants: services.remoteServerGrants ?? remoteServerGrantGatewayPort,
         serve: options.remoteServe ?? serve,
         config,

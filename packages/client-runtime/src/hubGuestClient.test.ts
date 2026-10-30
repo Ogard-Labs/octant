@@ -223,6 +223,12 @@ describe("the members a guest connects to", () => {
     expect(targets[0]?.pin).toBe(
       `sha256-${encode(Uint8Array.from({ length: 32 }, () => 0xbb).buffer)}`,
     );
+    // Only a member that lists a Tailscale name serves a browser its own web app.
+    expect(targets.map((target) => target.webOrigin)).toEqual([
+      undefined,
+      "https://laptop.tail1234.ts.net:9443",
+      undefined,
+    ]);
   });
 
   it("leaves out a member that names only a public address and never the guest itself", async () => {
@@ -468,6 +474,54 @@ describe("a guest asking a spoke to admit it", () => {
     expect(seen[0]?.header).toMatch(
       new RegExp(`^v1\\.${String(guestId)}\\.1700000000000\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$`),
     );
+  });
+
+  it("lets a browser ask a spoke at its web app origin under the browser's own certificate check", async () => {
+    const signer = await createGuestSigner({ memberId: String(guestId), keyPair: await newKey() });
+    const seen: Array<{ readonly origin: string; readonly trust: string; readonly url: string }> =
+      [];
+    const transport: PinnedListenerTransportPort = ({ origin, trust }) => ({
+      status: "available",
+      fetch: async (input) => {
+        seen.push({ origin, trust: trust.current.kind, url: String(input) });
+        return Response.json(
+          { spokeMemberId: String(id("2")), deviceId: "11111111-1111-4111-8111-111111111111" },
+          { status: 201 },
+        );
+      },
+    });
+    const target = {
+      memberId: String(id("2")),
+      name: "Laptop",
+      role: "spoke" as const,
+      origin: "https://100.101.102.104:8443",
+      pin: "sha256-PIN",
+    };
+
+    const admitted = await admitGuestOnSpoke({
+      target: { ...target, webOrigin: "https://laptop.tail1.ts.net:8443" },
+      signer,
+      deviceLabel: "Browser",
+      transport,
+      via: "web-origin",
+    });
+    const noName = await admitGuestOnSpoke({
+      target,
+      signer,
+      deviceLabel: "Browser",
+      transport,
+      via: "web-origin",
+    });
+
+    expect(admitted).toMatchObject({ status: "admitted" });
+    expect(seen).toEqual([
+      {
+        origin: "https://laptop.tail1.ts.net:8443",
+        trust: "platform",
+        url: "https://laptop.tail1.ts.net:8443/api/hub/guest",
+      },
+    ]);
+    expect(noName).toEqual({ status: "unreachable" });
   });
 
   it("reports the spoke's refusal as it was said and an unreachable spoke as unreachable", async () => {

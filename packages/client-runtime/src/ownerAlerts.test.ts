@@ -1,6 +1,8 @@
 import type { HeldMember, NewMemberAlert } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
-import type { OwnerClient } from "./hubOwnerClient";
+import type { PinnedListenerTransportPort } from "./appPairingCode";
+import { createGuestSigner } from "./hubGuestClient";
+import { createOwnerClient, type OwnerClient, type OwnerUnlockSigner } from "./hubOwnerClient";
 import { readOwnerAlerts, runOwnerAlertAction, type OwnerSpoke } from "./ownerAlerts";
 
 const held = (suffix: string): HeldMember =>
@@ -87,5 +89,97 @@ describe("an owner's list of members to look at", () => {
       status: "refused",
       kind: "no-such-alert",
     });
+  });
+});
+
+describe("alerts read from more than one origin", () => {
+  const readOnlyUnlock: OwnerUnlockSigner = {
+    shape: "webauthn",
+    publicKey: "cGFzc2tleQ",
+    assert: async () => ({ status: "unavailable" }),
+  };
+
+  async function browserIdentity() {
+    const keyPair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
+      "sign",
+      "verify",
+    ]);
+    return createGuestSigner({ memberId: "00000000-0000-4000-8000-0000000000b1", keyPair });
+  }
+
+  it("asks each computer at its own origin, signed for that computer, and never reaches another", async () => {
+    const identity = await browserIdentity();
+    const calls: Array<{ readonly url: string; readonly sender: string | undefined }> = [];
+    const answers = new Map<string, Response>([
+      ["https://mini.tail1.ts.net/api/hub/owner/alerts", Response.json({ alerts: [] })],
+      ["https://mini.tail1.ts.net/api/hub/owner/held-members", Response.json({ members: [] })],
+      ["https://studio.tail1.ts.net/api/hub/owner/alerts", Response.json({ alerts: [] })],
+      [
+        "https://studio.tail1.ts.net/api/hub/owner/held-members",
+        Response.json({ members: [held("a")] }),
+      ],
+    ]);
+    const transport: PinnedListenerTransportPort = ({ origin, trust }) =>
+      trust.current.kind === "platform" && origin.endsWith(".ts.net")
+        ? {
+            status: "available",
+            fetch: async (input, init) => {
+              const url = String(input);
+              calls.push({
+                url,
+                sender: new Headers(init?.headers).get("x-octant-hub-link")?.split(".")[1],
+              });
+              return answers.get(url)?.clone() ?? new Response(null, { status: 404 });
+            },
+          }
+        : { status: "unavailable" };
+    const spoke = (memberId: string, name: string, origin: string): OwnerSpoke => ({
+      memberId,
+      name,
+      openAt: origin,
+      client: createOwnerClient({
+        target: { memberId, origin },
+        identity,
+        unlock: readOnlyUnlock,
+        transport,
+      }),
+    });
+
+    const reading = await readOwnerAlerts([
+      spoke("mini-id", "Mac mini", "https://mini.tail1.ts.net"),
+      spoke("studio-id", "Studio", "https://studio.tail1.ts.net"),
+    ]);
+
+    expect(reading.unanswered).toEqual([]);
+    expect(reading.rows.map((row) => [row.spoke.name, row.spoke.openAt, row.member.name])).toEqual([
+      ["Studio", "https://studio.tail1.ts.net", "tablet a"],
+    ]);
+    expect(new Set(calls.map((call) => new URL(call.url).origin))).toEqual(
+      new Set(["https://mini.tail1.ts.net", "https://studio.tail1.ts.net"]),
+    );
+    // Every read is signed by the browser's one identity key.
+    for (const call of calls) expect(call.sender).toBe(identity.memberId);
+  });
+
+  it("names a computer that did not answer", async () => {
+    const identity = await browserIdentity();
+    const spoke: OwnerSpoke = {
+      memberId: "mini-id",
+      name: "Mac mini",
+      openAt: "https://mini.tail1.ts.net",
+      client: createOwnerClient({
+        target: { memberId: "mini-id", origin: "https://mini.tail1.ts.net" },
+        identity,
+        unlock: readOnlyUnlock,
+        transport: () => ({
+          status: "available",
+          fetch: async () => {
+            throw new Error("down");
+          },
+        }),
+      }),
+    };
+
+    expect((await readOwnerAlerts([spoke])).unanswered).toEqual(["Mac mini"]);
   });
 });
