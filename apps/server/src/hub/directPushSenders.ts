@@ -13,7 +13,7 @@
 // endpoint. None is read from a credential file or a request. An answer that
 // redirects is a failure, and no call waits more than ten seconds.
 
-import { createPrivateKey, createSign } from "node:crypto";
+import { createPrivateKey, sign } from "node:crypto";
 import { connect, constants as http2Constants } from "node:http2";
 import type {
   HubDirectPushEnvironment,
@@ -25,7 +25,7 @@ import type {
 export const DIRECT_PUSH_ORIGINS = {
   apnsProduction: "https://api.push.apple.com",
   apnsDevelopment: "https://api.sandbox.push.apple.com",
-  googleOAuth: "https://oauth2.googleapis.com",
+  googleTokenService: "https://oauth2.googleapis.com",
   fcm: "https://fcm.googleapis.com",
 } as const;
 
@@ -160,7 +160,7 @@ export function createDirectPushSender(options: DirectPushSenderOptions): Direct
       {
         iss: credential.clientEmail,
         scope: FCM_SCOPE,
-        aud: `${DIRECT_PUSH_ORIGINS.googleOAuth}/token`,
+        aud: `${DIRECT_PUSH_ORIGINS.googleTokenService}/token`,
         iat: Math.floor(now / 1_000),
         exp: Math.floor(now / 1_000) + 3_600,
       },
@@ -168,7 +168,7 @@ export function createDirectPushSender(options: DirectPushSenderOptions): Direct
     );
     if (assertion === undefined) return undefined;
     try {
-      const response = await fetchImpl(`${origins.googleOAuth}/token`, {
+      const response = await fetchImpl(`${origins.googleTokenService}/token`, {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
@@ -336,11 +336,11 @@ function signedJwt(
   const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
   const signingInput = `${encode(header)}.${encode(claims)}`;
   try {
-    const signer = createSign("SHA256").update(signingInput);
+    const data = Buffer.from(signingInput, "utf8");
     const signature =
       algorithm === "ES256"
-        ? signer.sign({ key: privateKey, dsaEncoding: "ieee-p1363" })
-        : signer.sign(privateKey);
+        ? sign("sha256", data, { key: privateKey, dsaEncoding: "ieee-p1363" })
+        : sign("sha256", data, privateKey);
     return `${signingInput}.${signature.toString("base64url")}`;
   } catch {
     return undefined;

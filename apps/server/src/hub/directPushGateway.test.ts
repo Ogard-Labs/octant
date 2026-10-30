@@ -85,7 +85,7 @@ interface PlatformStandIns {
   readonly origins: {
     readonly apnsProduction: string;
     readonly apnsDevelopment: string;
-    readonly googleOAuth: string;
+    readonly googleTokenService: string;
     readonly fcm: string;
   };
 }
@@ -179,7 +179,7 @@ async function startPlatforms(): Promise<PlatformStandIns> {
     oauth,
     fcm,
     redirected,
-    origins: { apnsProduction, apnsDevelopment, googleOAuth: google, fcm: google },
+    origins: { apnsProduction, apnsDevelopment, googleTokenService: google, fcm: google },
   };
 }
 
