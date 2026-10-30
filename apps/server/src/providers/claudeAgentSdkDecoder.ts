@@ -481,6 +481,7 @@ const INFORMATIONAL_SYSTEM_SUBTYPES: ReadonlySet<string> = new Set([
   "notification",
   "thinking_tokens",
   "informational",
+  "dev_intent",
 ]);
 
 function isHarmlessInformational(message: Record<string, unknown>): boolean {
@@ -620,6 +621,18 @@ function isHarmlessInformational(message: Record<string, unknown>): boolean {
       typeof message.estimated_tokens_delta === "number" &&
       Number.isFinite(message.estimated_tokens_delta) &&
       (message.user_message_uuid === undefined || typeof message.user_message_uuid === "string") &&
+      typeof message.uuid === "string" &&
+      typeof message.session_id === "string"
+    );
+  }
+  // Claude Code 2.1.308 notes what it understood a turn to be for (`kind`) and
+  // what started it (`trigger`). Refusing it failed Code sessions at startup;
+  // the note names no tool, path, or permission, so nothing acts on it.
+  if (message.subtype === "dev_intent") {
+    return (
+      hasOnlyKeys(message, ["type", "subtype", "kind", "trigger", "uuid", "session_id"]) &&
+      typeof message.kind === "string" &&
+      typeof message.trigger === "string" &&
       typeof message.uuid === "string" &&
       typeof message.session_id === "string"
     );
