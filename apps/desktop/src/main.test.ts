@@ -60,7 +60,7 @@ import {
   validateProjectWindowTarget,
 } from "./main";
 import type { RemoteDeviceControlService } from "./remoteDeviceControls";
-import type { CredentialStore } from "@octant/host-runtime";
+import { CredentialStoreFailure, type CredentialStore } from "@octant/host-runtime";
 import { ProjectWindowAuthorityUnavailableError } from "./projectRootPicker";
 
 describe("packaged desktop storage identity", () => {
@@ -1193,6 +1193,17 @@ describe("provider API key host operations", () => {
       "Two keys for this provider cannot have the same label.",
     );
     expect(values.get(providerInstanceId)).toBe(before);
+  });
+
+  it("tells the person why the Linux keyring would not take a key, in words they can act on", async () => {
+    const { call, store } = installKeys();
+    for (const [cause, words] of [
+      ["locked", "Your keyring is locked"],
+      ["no-login-collection", "no Login keyring"],
+    ] as const) {
+      vi.mocked(store.set).mockRejectedValueOnce(new CredentialStoreFailure("unavailable", cause));
+      await expect(call("add", providerInstanceId, FIRST, "Work")).rejects.toThrow(words);
+    }
   });
 
   it("removes the last key by deleting the stored entry", async () => {

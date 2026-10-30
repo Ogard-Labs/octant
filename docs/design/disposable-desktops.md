@@ -249,15 +249,15 @@ lease anyway.
   what it may spend.
 - **Reading** the screen (a frame, a screenshot, a window list) needs no
   approval. **Agent input** follows the existing computer-use rules unchanged:
-  `@Computer`-style per-send selection, per-application approval, sensitive-field
-  protection, the session cap, and the taint rule.
+  the tool offered on every eligible turn, per-application approval,
+  sensitive-field protection, the session cap, and the taint rule.
 - **The person's input** from a Desktop tab is not an agent action and asks for
   nothing. It is journaled as `local-user` or `remote-device`; agent input is
   journaled as `agent`. Either operator may act at any time; the agent's next
   observation is fresh, so it never acts on a frame the person changed.
-- One destination per send. A send's structured selection names the destination
-  (this Mac, or one of the thread's leases); the host binds the plugin's port to
-  it at admission and never chooses between two.
+- One destination per send. A send's destination names where Computer acts
+  (one of the thread's leases; absent, this Mac); the host binds the plugin's
+  port to it at admission and never chooses between two.
 - No lease command reaches another thread's lease, and a restored tab never
   rebinds to a different lease.
 
@@ -775,8 +775,15 @@ through the lease service lands in a running desktop's inbox.
 Rules this slice resolved:
 
 - **One destination per send, named by lease id.** `computerUseDestination`
-  is valid only beside `computerUseSelection`; alone, it fails the turn's
-  start. Absent, the destination is this Mac. At admission the host binds
+  alone names the lease; a `computerUseSelection` beside it, from an older
+  send, is ignored. Absent, the destination is this Mac, except on a host
+  with no screen of its own (it reports `leasable`): there the host binds the
+  thread's one `ready` desktop, and binds none when the thread has two, so no
+  client needs a picker and the host never chooses between two. That default
+  applies only to a turn that can carry Computer; in Plan, or with an allowlist
+  that excludes it, the turn starts without the tool. With no live
+  desktop, Computer refuses `no-destination` and says to start one from the
+  Desktop tab, never naming macOS permissions. At admission the host binds
   only a lease that is the sending thread's own and `ready`, or the turn does
   not start; every command then goes through the lease service, which checks
   the lease's authority again. Only Code turns carry a destination; a Work

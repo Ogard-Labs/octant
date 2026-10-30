@@ -92,6 +92,12 @@ export interface ProviderCredentialRouteOptions {
     | undefined;
   readonly journal: ProviderKeyJournal;
   /**
+   * Checks the provider again after its key changed. The observed state is
+   * cached from the last check, so without this a key stored from the command
+   * line reads Needs key until the host restarts.
+   */
+  readonly reprobe: (windowId: WindowId, instance: ProviderInstance) => Promise<void>;
+  /**
    * Removes the provider through the same service Settings uses, so its own
    * refusals (an active session, the implicit owner of an account) apply.
    */
@@ -231,6 +237,8 @@ export function createProviderCredentialRouteHandler(
           // request stays unsettled and the next start clears the key again.
           await credentials.store.delete(id);
           recorder.complete("removed");
+          if (target.kind === "existing")
+            void options.reprobe(windowId, target.instance).catch(() => undefined);
           return answer("removed", target);
         }
         if (target.kind === "existing" && !usesStoredKey(target.instance)) {
@@ -268,9 +276,10 @@ export function createProviderCredentialRouteHandler(
           return refuse(current === undefined ? "not-found" : "changed");
         }
         recorder.complete("stored");
+        void options.reprobe(windowId, current).catch(() => undefined);
         return answer("stored", target);
-      } catch {
-        return refuse("credential-store-unavailable");
+      } catch (error) {
+        return refuse("credential-store-unavailable", storeCauseOf(error));
       }
     });
   };
@@ -394,9 +403,19 @@ const REFUSAL_MESSAGE: Readonly<Record<ProviderCredentialRefusal, string>> = {
   "credential-store-unavailable": "The host credential store is unavailable.",
 };
 
-function refuse(category: ProviderCredentialRefusal): Response {
+/** The keyring's own reason, when the store said why it refused. */
+function storeCauseOf(error: unknown): "locked" | "no-login-collection" | undefined {
+  const cause =
+    typeof error === "object" && error !== null ? (error as { cause?: unknown }).cause : undefined;
+  return cause === "locked" || cause === "no-login-collection" ? cause : undefined;
+}
+
+function refuse(
+  category: ProviderCredentialRefusal,
+  cause?: "locked" | "no-login-collection",
+): Response {
   return Response.json(
-    { category, message: REFUSAL_MESSAGE[category] },
+    { category, message: REFUSAL_MESSAGE[category], ...(cause === undefined ? {} : { cause }) },
     { status: REFUSAL_STATUS[category] },
   );
 }

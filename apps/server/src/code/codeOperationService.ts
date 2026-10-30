@@ -6,6 +6,7 @@ import type { SelectedExtensionResolver } from "../extensions/selectedExtensions
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { randomUUID } from "node:crypto";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
+import { isComputerUseSelection } from "@octant/plugin-host/computer-use";
 import {
   decodeCodeOperationCommand,
   decodeCodeOperationResult,
@@ -3571,7 +3572,9 @@ export class CodeOperationService {
         "refused",
       );
     const selections =
-      command.extensionSelections?.filter((selection) => !isBrowserUseSelection(selection)) ?? [];
+      command.extensionSelections?.filter(
+        (selection) => !isBrowserUseSelection(selection) && !isComputerUseSelection(selection),
+      ) ?? [];
     const pinnedExtensionIds = this.#options.pinnedExtensionIds?.(String(thread.projectId)) ?? [];
     let skillContext: ReadonlyArray<ProviderContextBlock> = [];
     let extensionTools: AppManagedToolSet | undefined;

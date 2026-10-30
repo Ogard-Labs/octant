@@ -1,4 +1,4 @@
-import { createElement, useId, useRef, useState, type KeyboardEvent } from "react";
+import { createElement, useId, useState, type KeyboardEvent } from "react";
 import { Slash } from "lucide-react";
 import {
   applySlashCommandToken,
@@ -9,21 +9,20 @@ import {
 import { useOctantCommands } from "../palette/CommandRegistry";
 import { OctantButton } from "../ui/base/OctantButton";
 
-/** Shared `/` behavior for every composer, including first-turn drafts. */
+/**
+ * Shared `/` behavior for every composer, including first-turn drafts. `/`
+ * runs commands only; skills, plugin servers, and connectors are picked with
+ * `@` (see `useComposerAtMenu`).
+ */
 export function useComposerSlashCommands(input: {
   readonly draft: string;
   readonly onDraftChange: (draft: string, caret?: number) => void;
-  readonly onResolveExtensionReference?: (reference: string) => Promise<boolean>;
   readonly textarea?: () => HTMLTextAreaElement | null;
 }) {
   const listId = useId();
-  const commands = useOctantCommands().filter(
-    (command) => command.action.kind === "run" || input.onResolveExtensionReference !== undefined,
-  );
+  const commands = useOctantCommands().filter((command) => command.action.kind === "run");
   const [token, setToken] = useState<ReturnType<typeof parseSlashCommandToken>>();
   const [activeIndex, setActiveIndex] = useState(0);
-  const [resolving, setResolving] = useState(false);
-  const pendingResolution = useRef(false);
   const matches = token === undefined ? [] : filterOctantCommands(commands, token.query);
   const tokenIsCurrent =
     token !== undefined && input.draft.slice(token.start, token.end) === `/${token.query}`;
@@ -35,7 +34,7 @@ export function useComposerSlashCommands(input: {
     setActiveIndex(0);
   };
   const choose = (command: OctantCommand) => {
-    if (token === undefined || !tokenIsCurrent || pendingResolution.current) return;
+    if (token === undefined || !tokenIsCurrent) return;
     const applied = applySlashCommandToken(input.draft, token);
     input.onDraftChange(applied.draft, applied.caretIndex);
     setToken(undefined);
@@ -46,34 +45,10 @@ export function useComposerSlashCommands(input: {
       textarea.focus();
       textarea.setSelectionRange(applied.caretIndex, applied.caretIndex);
     });
-    if (command.action.kind === "run") {
-      command.action.run();
-      return;
-    }
-    setResolving(true);
-    pendingResolution.current = true;
-    const pending = input.onResolveExtensionReference?.(command.action.reference);
-    if (pending === undefined) {
-      setResolving(false);
-      pendingResolution.current = false;
-      return;
-    }
-    void pending
-      .catch(() => false)
-      .finally(() => {
-        pendingResolution.current = false;
-        setResolving(false);
-      });
+    if (command.action.kind === "run") command.action.run();
   };
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): boolean => {
     if (event.nativeEvent.isComposing) return false;
-    if (resolving) {
-      if (event.key === "Enter" && !event.shiftKey) {
-        event.preventDefault();
-        return true;
-      }
-      return false;
-    }
     if (open && matches.length > 0) {
       if (event.key === "ArrowDown") {
         event.preventDefault();
@@ -107,7 +82,6 @@ export function useComposerSlashCommands(input: {
     listId,
     matches,
     open,
-    resolving,
     sync,
   };
 }

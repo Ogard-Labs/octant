@@ -92,6 +92,7 @@ import {
   invalidateModelCapabilityEvidence,
   isImageProfileDriverKind,
   isNativeHarnessDriverKind,
+  providerLatestVersionNpmPackage,
   type CapabilityEvidenceChange,
 } from "@octant/domain";
 import { describeProviderRuntimeIntegration } from "@octant/domain/provider-runtime-integration";
@@ -238,6 +239,8 @@ export interface ProviderServiceOptions {
    */
   readonly ensureAccountDirectory?: (directory: string) => Promise<void>;
   readonly runCliUpdate?: (input: ProviderCliUpdateInput) => Promise<ProviderCliUpdateOutput>;
+  /** Newest published release of an npm-distributed CLI; undefined when unknown. */
+  readonly latestNpmVersion?: (packageName: string) => Promise<string | undefined>;
   /** Read-only host fact used to refuse enabling a missing local CLI. */
   readonly isProviderExecutableAvailable?: (instance: ProviderInstance) => boolean;
   readonly uuid: () => string;
@@ -277,6 +280,7 @@ export class ProviderService implements ProviderServiceApi {
   readonly #ensureAccountDirectory: (directory: string) => Promise<void>;
   readonly #clearProviderCredential: ProviderServiceOptions["clearProviderCredential"];
   readonly #runCliUpdate: (input: ProviderCliUpdateInput) => Promise<ProviderCliUpdateOutput>;
+  readonly #latestNpmVersion: (packageName: string) => Promise<string | undefined>;
   readonly #isProviderExecutableAvailable: (instance: ProviderInstance) => boolean;
 
   constructor(options: ProviderServiceOptions) {
@@ -320,6 +324,7 @@ export class ProviderService implements ProviderServiceApi {
       });
     this.#clearProviderCredential = options.clearProviderCredential;
     this.#runCliUpdate = options.runCliUpdate ?? runProviderCliUpdate;
+    this.#latestNpmVersion = options.latestNpmVersion ?? (async () => undefined);
     this.#isProviderExecutableAvailable = options.isProviderExecutableAvailable ?? (() => true);
   }
 
@@ -633,6 +638,19 @@ export class ProviderService implements ProviderServiceApi {
     if (command.kind === "probe-provider") {
       const result = await this.probe(authenticatedWindowId, command.instanceId);
       return decodeProviderRegistryCommandResult({ kind: "provider-probed", result });
+    }
+    if (command.kind === "check-provider-latest-version") {
+      this.#assertReady();
+      const instance = this.#persistence.readProviderInstance(command.instanceId);
+      if (instance === undefined) throw this.#invalid("Provider instance was not found.");
+      const packageName = providerLatestVersionNpmPackage(instance.driverKind);
+      const latestVersion =
+        packageName === undefined ? undefined : await this.#latestNpmVersion(packageName);
+      return decodeProviderRegistryCommandResult({
+        kind: "provider-latest-version",
+        instanceId: command.instanceId,
+        ...(latestVersion === undefined ? {} : { latestVersion }),
+      });
     }
     if (command.kind === "update-provider-cli") {
       this.#assertReady();
@@ -1444,14 +1462,18 @@ export class ProviderService implements ProviderServiceApi {
     }
   }
 
-  async probe(_authenticatedWindowId: WindowId, input: unknown): Promise<ProviderProbeResult> {
+  async probe(
+    _authenticatedWindowId: WindowId,
+    input: unknown,
+    options?: { readonly fresh?: boolean },
+  ): Promise<ProviderProbeResult> {
     let instanceId: ProviderInstanceId;
     try {
       instanceId = decodeProviderInstanceId(input);
     } catch {
       throw this.#invalid("Provider instance ID is invalid.");
     }
-    return this.#probeConfiguredInstance(instanceId);
+    return this.#probeConfiguredInstance(instanceId, options?.fresh === true);
   }
 
   /**
@@ -1461,11 +1483,20 @@ export class ProviderService implements ProviderServiceApi {
    * adding a provider, and a person's own click took 22, 39 and 67 seconds in
    * turn on one slow Azure listing. A probe asked for while one is already
    * running joins it, unless another operation (an enable or a configuration
-   * change) queued after it: that one must be checked afresh.
+   * change) queued after it: that one must be checked afresh. A key change
+   * is written outside that queue, so its caller asks for a fresh probe: a
+   * running one may have read the key store before the change.
    */
-  #probeConfiguredInstance(instanceId: ProviderInstanceId): Promise<ProviderProbeResult> {
+  #probeConfiguredInstance(
+    instanceId: ProviderInstanceId,
+    fresh = false,
+  ): Promise<ProviderProbeResult> {
     const running = this.#probesInFlight.get(instanceId);
-    if (running !== undefined && this.#instanceOperationTails.get(instanceId) === running.tail) {
+    if (
+      !fresh &&
+      running !== undefined &&
+      this.#instanceOperationTails.get(instanceId) === running.tail
+    ) {
       return running.result;
     }
     const result = this.#queueProbe(instanceId);

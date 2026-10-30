@@ -46,8 +46,8 @@ import type {
   ProviderSessionHandle,
   ProviderSessionStart,
 } from "@octant/provider-sdk/driver";
-import { browserUseSelection } from "@octant/plugin-host/browser-use";
-import { computerUseSelection } from "@octant/plugin-host/computer-use";
+import { BROWSER_TOOL_HOST_LINE, browserUseSelection } from "@octant/plugin-host/browser-use";
+import { COMPUTER_TOOL_HOST_LINE, computerUseSelection } from "@octant/plugin-host/computer-use";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
@@ -2056,7 +2056,7 @@ describe("CodeOperationRuntime", () => {
     },
   );
 
-  it("adds fixed Browser guidance when the task explicitly selects Browser", async () => {
+  it("tells the agent about Browser in one host line on a Code turn with no selection", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const provider = providerConnection(queue);
     const authority = decodeToolActionAuthority({
@@ -2091,19 +2091,15 @@ describe("CodeOperationRuntime", () => {
         checkoutId,
         sessionId,
         prompt: fixture.prompt,
-        extensionSelections: [browserUseSelection("code-browser-guidance")],
       });
       await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
-      expect(provider.send).toHaveBeenCalledWith(
-        expect.objectContaining({
-          context: expect.arrayContaining([
-            expect.objectContaining({
-              kind: "instructions",
-              text: expect.stringContaining("Octant's built-in Browser"),
-            }),
-          ]),
-        }),
-      );
+      const sent = vi.mocked(provider.send).mock.calls[0]?.[0];
+      expect(sent?.tools?.map(({ name }) => name)).toContain("octant_browser");
+      expect(
+        sent?.context?.filter(
+          (block) => block.kind === "instructions" && block.text === BROWSER_TOOL_HOST_LINE,
+        ),
+      ).toHaveLength(1);
     } finally {
       fixture.close();
     }
@@ -5985,12 +5981,12 @@ function runtimeFixture(options: {
   browserAutomation?: Parameters<typeof createCodeOperationRuntime>[0]["browserAutomation"];
   appleToolchain?: Parameters<typeof createCodeOperationRuntime>[0]["appleToolchain"];
   computerUseTools?: Parameters<typeof createCodeOperationRuntime>[0]["computerUseTools"];
+  threadDesktopDestination?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["threadDesktopDestination"];
   resolveSelectedExtensions?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["resolveSelectedExtensions"];
-  computerUseUnattachedTools?: Parameters<
-    typeof createCodeOperationRuntime
-  >[0]["computerUseUnattachedTools"];
   agentMessages?: Parameters<typeof createCodeOperationRuntime>[0]["agentMessages"];
   siblingThreads?: Parameters<typeof createCodeOperationRuntime>[0]["siblingThreads"];
   contributedTools?: Parameters<typeof createCodeOperationRuntime>[0]["contributedTools"];
@@ -6291,15 +6287,15 @@ function runtimeFixture(options: {
       environment: {},
     }),
     resolveProviderDriver: options.resolveProviderDriver ?? (async () => options.provider),
+    ...(options.threadDesktopDestination === undefined
+      ? {}
+      : { threadDesktopDestination: options.threadDesktopDestination }),
     ...(options.computerUseTools === undefined
       ? {}
       : { computerUseTools: options.computerUseTools }),
     ...(options.resolveSelectedExtensions === undefined
       ? {}
       : { resolveSelectedExtensions: options.resolveSelectedExtensions }),
-    ...(options.computerUseUnattachedTools === undefined
-      ? {}
-      : { computerUseUnattachedTools: options.computerUseUnattachedTools }),
     ...(options.agentMessages === undefined ? {} : { agentMessages: options.agentMessages }),
     ...(options.siblingThreads === undefined ? {} : { siblingThreads: options.siblingThreads }),
     ...(options.contributedTools === undefined
@@ -6682,7 +6678,7 @@ function providerEvent(
     ...value,
   } as ProviderRuntimeEvent;
 }
-it("names why a turn whose provider cannot carry an app-managed tool was refused", async () => {
+it("ignores an older Browser selection on a provider without app tools and starts the turn", async () => {
   const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
   const provider = providerConnection(queue);
   const authority = decodeToolActionAuthority({
@@ -6711,32 +6707,23 @@ it("names why a turn whose provider cannot carry an app-managed tool was refused
     },
   });
   try {
-    // A refusal the person can act on: without the sentence, the composer
-    // could only say "The provider turn could not be started."
-    await expect(
-      fixture.runtime.execute(windowId, {
-        kind: "start-provider-turn",
-        operationId: operationId(76),
-        threadId,
-        checkoutId,
-        sessionId,
-        prompt: fixture.prompt,
-        extensionSelections: [browserUseSelection("code-browser-refusal")],
-      }),
-    ).resolves.toMatchObject({
-      kind: "provider-turn-state",
-      state: "failed",
-      failure: {
-        category: "failed",
-        message:
-          "This provider cannot carry Octant's Browser tool. Check the provider's connection in Settings, then retry without the Browser selection.",
-      },
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operationId(76),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+      extensionSelections: [browserUseSelection("code-browser-refusal")],
     });
+    await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+    const sent = vi.mocked(provider.send).mock.calls[0]?.[0];
+    expect(sent?.tools?.map(({ name }) => name) ?? []).not.toContain("octant_browser");
+    expect(JSON.stringify(sent?.context ?? [])).not.toContain("octant_browser");
   } finally {
     fixture.close();
   }
 });
-
 it("lets a follow-up open a fresh provider session when a refused turn never reached one", async () => {
   const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
   const connection = providerConnection(queue);
@@ -7160,33 +7147,17 @@ it("does not include ACP client tools when only bridge support is enabled", asyn
   fixture.close();
 });
 
-it("registers a refusal-only Computer tool on a turn that carried no Computer selection", async () => {
+it("offers the Computer tool and its host line on a Code turn whose send has no chip", async () => {
   const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
   const starts: Array<ProviderSessionStart> = [];
-  const provider = providerDriver(providerConnection(queue, starts));
-  const unattachedCalls: string[] = [];
+  const connection = providerConnection(queue, starts);
   const fixture = runtimeFixture({
-    provider,
+    provider: providerDriver(connection),
     supportsAppManagedTools: true,
-    computerUseUnattachedTools: () => {
-      unattachedCalls.push("called");
-      return {
-        definitions: [
-          {
-            name: "octant_computer",
-            description: "Not attached to this turn.",
-            inputSchema: { type: "object" },
-          },
-        ],
-        execute: async () => ({
-          result: {
-            error: "computer-use-not-attached",
-            message: "Tell the user to add @Computer and send again.",
-          },
-          isError: true,
-        }),
-      };
-    },
+    computerUseTools: () => ({
+      definitions: [{ name: "octant_computer", inputSchema: { type: "object" } }],
+      execute: async () => ({ result: { kind: "apps", apps: [] } }),
+    }),
   });
 
   await fixture.runtime.execute(windowId, {
@@ -7196,10 +7167,18 @@ it("registers a refusal-only Computer tool on a turn that carried no Computer se
     checkoutId,
     sessionId,
     prompt: fixture.prompt,
+    // A Computer selection from an older draft is ignored, not required.
+    computerUseSelection: computerUseSelection("older-draft"),
   });
 
-  expect(unattachedCalls).toHaveLength(1);
+  await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
   expect(starts[0]?.tools?.map((tool) => tool.name)).toContain("octant_computer");
+  const sent = vi.mocked(connection.send).mock.calls[0]?.[0];
+  expect(
+    (sent?.context ?? []).filter(
+      (block) => block.kind === "instructions" && block.text === COMPUTER_TOOL_HOST_LINE,
+    ),
+  ).toHaveLength(1);
   fixture.close();
 });
 
@@ -7724,42 +7703,65 @@ it("records an agent message delivered once the provider accepted the turn that 
   lost.fixture.close();
 });
 
-it("keeps the selected Computer tool instead of the refusal stub when @Computer is attached", async () => {
+it("binds the Computer tool to the thread's running desktop when the send names none", async () => {
   const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
-  const starts: Array<ProviderSessionStart> = [];
-  const provider = providerDriver(providerConnection(queue, starts));
-  const unattachedCalls: string[] = [];
+  const connection = providerConnection(queue);
+  const bindings: Array<
+    Parameters<NonNullable<Parameters<typeof createCodeOperationRuntime>[0]["computerUseTools"]>>[0]
+  > = [];
+  const destination = {
+    kind: "desktop-lease" as const,
+    leaseId: decodeDesktopLeaseId("95000000-0000-4000-8000-000000000002"),
+  };
   const fixture = runtimeFixture({
-    provider,
+    provider: providerDriver(connection),
     supportsAppManagedTools: true,
-    computerUseTools: () => ({
-      definitions: [
-        {
-          name: "octant_computer",
-          description: "The real tool.",
-          inputSchema: { type: "object" },
-        },
-      ],
-      execute: async () => ({ result: { kind: "apps", apps: [] } }),
-    }),
-    computerUseUnattachedTools: () => {
-      unattachedCalls.push("called");
-      return undefined;
+    threadDesktopDestination: () => destination,
+    computerUseTools: (input) => {
+      bindings.push(input);
+      return {
+        definitions: [{ name: "octant_computer", inputSchema: { type: "object" } }],
+        execute: async () => ({ result: { kind: "apps", apps: [] } }),
+      };
     },
   });
-
   await fixture.runtime.execute(windowId, {
     kind: "start-provider-turn",
-    operationId: operationId(81),
+    operationId: operationId(90),
     threadId,
     checkoutId,
     sessionId,
     prompt: fixture.prompt,
-    computerUseSelection: computerUseSelection("selected"),
   });
+  await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+  expect(bindings.map((binding) => binding.destination)).toEqual([destination, destination]);
+  await fixture.runtime.close();
+  fixture.close();
+});
 
-  expect(unattachedCalls).toHaveLength(0);
-  expect(starts[0]?.tools?.map((tool) => tool.name)).toContain("octant_computer");
+it("starts a turn without Computer when the thread's running desktop cannot be bound to it", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const connection = providerConnection(queue);
+  const fixture = runtimeFixture({
+    provider: providerDriver(connection),
+    supportsAppManagedTools: true,
+    threadDesktopDestination: () => ({
+      kind: "desktop-lease" as const,
+      leaseId: decodeDesktopLeaseId("95000000-0000-4000-8000-000000000002"),
+    }),
+    // Plan, or a tool allowlist without Computer, offers no tool set.
+    computerUseTools: () => undefined,
+  });
+  await fixture.runtime.execute(windowId, {
+    kind: "start-provider-turn",
+    operationId: operationId(91),
+    threadId,
+    checkoutId,
+    sessionId,
+    prompt: fixture.prompt,
+  });
+  await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+  await fixture.runtime.close();
   fixture.close();
 });
 
@@ -7785,25 +7787,7 @@ it("binds the Computer tool to the desktop the send named and asks its approvals
     leaseId: decodeDesktopLeaseId("95000000-0000-4000-8000-000000000001"),
   };
 
-  // A destination names where the selected tool acts; without the selection it binds nothing.
-  await expect(
-    fixture.runtime.execute(windowId, {
-      kind: "start-provider-turn",
-      operationId: operationId(87),
-      threadId,
-      checkoutId,
-      sessionId,
-      prompt: fixture.prompt,
-      computerUseDestination: destination,
-    }),
-  ).resolves.toMatchObject({
-    state: "failed",
-    failure: {
-      message: "A Computer destination needs the Computer selection in the same message.",
-    },
-  });
-  expect(bindings).toEqual([]);
-
+  // The destination alone names where the offered tool acts; no selection is needed.
   const startOperation = operationId(88);
   await fixture.runtime.execute(windowId, {
     kind: "start-provider-turn",
@@ -7812,7 +7796,6 @@ it("binds the Computer tool to the desktop the send named and asks its approvals
     checkoutId,
     sessionId,
     prompt: fixture.prompt,
-    computerUseSelection: computerUseSelection("selected"),
     computerUseDestination: destination,
   });
   await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());

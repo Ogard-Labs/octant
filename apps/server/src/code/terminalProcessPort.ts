@@ -1,8 +1,10 @@
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import type { ProviderExecutionPolicy } from "@octant/contracts";
 import * as nodePty from "node-pty";
 import {
@@ -19,6 +21,7 @@ import {
 import type { OsNetworkEgress } from "../process/threadEgressPolicy";
 
 export const MAX_TERMINAL_INPUT_BYTES = 64 * 1024;
+const execFileAsync = promisify(execFile);
 
 /**
  * Points the shell's own bookkeeping at the Octant-owned state directory so
@@ -268,6 +271,7 @@ export class TerminalProcessPort {
     readonly ensurePtyHelperExecutable: () => void;
     readonly confinement: ProcessConfinementPort;
     readonly platform: NodeJS.Platform;
+    readonly endsSessionMembers: boolean;
     readonly temporaryDirectory: string;
     readonly shellStateDirectory: string;
     readonly networkEgress: OsNetworkEgress;
@@ -294,6 +298,9 @@ export class TerminalProcessPort {
       receiptDirectory: dependencies.receiptDirectory,
       processIdentity: dependencies.processIdentity,
       platform,
+      // Only a shell this port spawned has a real terminal whose members are
+      // provably its own; a supplied spawn's pid may name any process.
+      endsSessionMembers: dependencies.spawn === undefined && platform === "darwin",
       ensurePtyHelperExecutable:
         dependencies.ensurePtyHelperExecutable ??
         (dependencies.spawn !== undefined || nativeBunPtyAvailable
@@ -517,6 +524,24 @@ export class TerminalProcessPort {
   }
 
   async #close(pty: PtyProcess): Promise<void> {
+    // The shell gives every job a process group of its own, so ending the
+    // shell's group left a job that had outlived its parent running: measured
+    // on macOS 27, a command's orphaned child survived the close. Every
+    // process whose controlling terminal is this shell's belongs to its
+    // session, and nothing else can hold that terminal, so they are read
+    // while the shell still runs and ended once its group is gone. Linux needs
+    // none of this: the capsule's PID namespace ends with the shell.
+    const members = this.#dependencies.endsSessionMembers
+      ? await readTerminalSessionMembers(pty.pid)
+      : [];
+    try {
+      await this.#closeProcessGroup(pty);
+    } finally {
+      for (const member of members) await endTerminalSessionMember(member);
+    }
+  }
+
+  async #closeProcessGroup(pty: PtyProcess): Promise<void> {
     const groupId = -Math.abs(pty.pid);
     if (!signalProcessGroupIfPresent(this.#dependencies.killProcessGroup, groupId, "SIGTERM"))
       return;
@@ -721,6 +746,56 @@ async function waitForPtyExit(pty: PtyProcess, timeoutMs: number): Promise<boole
     if (settled) disposable.dispose();
     else timeout = setTimeout(() => finish(false), timeoutMs);
   });
+}
+
+interface TerminalSessionMember {
+  readonly pid: number;
+  readonly startedAt: string;
+}
+
+async function readTerminalSessionMembers(
+  shellPid: number,
+): Promise<ReadonlyArray<TerminalSessionMember>> {
+  try {
+    const terminal = (await readProcessTable(["-o", "tty=", "-p", String(shellPid)])).trim();
+    if (!/^ttys\d+$/.test(terminal)) return [];
+    const members: TerminalSessionMember[] = [];
+    for (const line of (await readProcessTable(["-t", terminal, "-o", "pid=,lstart="])).split(
+      "\n",
+    )) {
+      const match = /^\s*(\d+)\s+(\S.*?)\s*$/.exec(line);
+      if (match?.[1] !== undefined && match[2] !== undefined)
+        members.push({ pid: Number(match[1]), startedAt: match[2] });
+    }
+    return members;
+  } catch {
+    // A shell that already exited has no terminal left to read.
+    return [];
+  }
+}
+
+/** Ends a member only while its pid still names the process that was read. */
+async function endTerminalSessionMember(member: TerminalSessionMember): Promise<void> {
+  let startedAt: string;
+  try {
+    startedAt = (await readProcessTable(["-o", "lstart=", "-p", String(member.pid)])).trim();
+  } catch {
+    return;
+  }
+  if (startedAt !== member.startedAt) return;
+  try {
+    process.kill(member.pid, "SIGKILL");
+  } catch {
+    // Already gone.
+  }
+}
+
+async function readProcessTable(args: ReadonlyArray<string>): Promise<string> {
+  const { stdout } = await execFileAsync("/bin/ps", [...args], {
+    timeout: 2_000,
+    maxBuffer: 256 * 1024,
+  });
+  return stdout;
 }
 
 function defaultProcessGroupExists(pid: number): boolean {

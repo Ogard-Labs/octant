@@ -1,8 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   decodeApprovalOutsideContent,
   decodeDesktopLeaseId,
   decodeDesktopProviderId,
+  decodeEventActor,
   decodeToolActionAuthority,
 } from "@octant/contracts";
 import {
@@ -12,7 +16,15 @@ import {
   type ComputerControlResult,
   type ComputerUseOwner,
 } from "@octant/contracts/computer-use-plugin";
-import { computerUseSelection } from "@octant/plugin-host/computer-use";
+import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
+import {
+  readApprovalOutsideContent,
+  readThreadExternalContentTaint,
+} from "../context/externalContentTaintProjection";
+import { Journal } from "../persistence/journal";
+import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
+import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
+import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import type { ComputerUseEvidenceEvent } from "./computerUseRuntime";
 import { createComputerUseToolService } from "./computerUseToolService";
 import type { DesktopTransferConfirmation } from "./desktopLeaseService";
@@ -39,11 +51,34 @@ const marking = decodeApprovalOutsideContent({
   sourceCount: 1,
 });
 
+const directories: Array<string> = [];
+afterEach(() => {
+  for (const directory of directories.splice(0))
+    rmSync(directory, { recursive: true, force: true });
+});
+
+function openDatabase(): SqliteConnection {
+  const directory = mkdtempSync(join(tmpdir(), "octant-computer-marks-"));
+  directories.push(directory);
+  const connection = openSqlite(join(directory, "octant.sqlite3"));
+  applyMigrations(connection, MIGRATIONS, () => "2026-10-30T12:00:00.000Z");
+  return connection;
+}
+
 function fixture(overrides?: {
   readonly enabled?: boolean;
   readonly toolConstraints?: ReadonlyArray<string>;
   /** Whether the host can name the sources that marked the thread. */
   readonly namesSources?: boolean;
+  /** The owner the turn's tool is offered to; this Mac's approval-gated Chat by default. */
+  readonly toolOwner?: ComputerUseOwner;
+  /** A host with no screen of its own, whose only destination is a lease. */
+  readonly leasableOnly?: boolean;
+  /** Reads the thread's real outside-content mark in place of the fixture's flag. */
+  readonly marks?: {
+    readonly ingested: () => boolean;
+    readonly outsideContent: () => ReturnType<typeof readApprovalOutsideContent>;
+  };
 }) {
   let current = true;
   let tainted = false;
@@ -69,24 +104,35 @@ function fixture(overrides?: {
         update: "current",
       }),
       configure: async () => {},
-      reserve: async () => true,
+      reserve: async () => overrides?.leasableOnly !== true,
       execute,
       release,
     },
+    ...(overrides?.leasableOnly === true
+      ? {
+          destination: () => ({
+            status: "leasable" as const,
+            kind: "disposable-desktop" as const,
+            leasable: [],
+          }),
+        }
+      : {}),
     settings: () => settings,
     authority: () => authority,
     ownerIsCurrent: () => current,
     toolConstraints: () => toolConstraints,
-    externalContentIngested: () => tainted,
-    outsideContent: () => (tainted && overrides?.namesSources !== false ? marking : undefined),
+    externalContentIngested: overrides?.marks?.ingested ?? (() => tainted),
+    outsideContent:
+      overrides?.marks?.outsideContent ??
+      (() => (tainted && overrides?.namesSources !== false ? marking : undefined)),
     threadTitle: () => "Fixture task",
     record: async () => {},
   });
-  const tools = service.toolSet(owner, computerUseSelection("test"));
+  const tools = service.toolSet(overrides?.toolOwner ?? owner);
   return {
     service,
     get tools() {
-      if (tools === undefined) throw new Error("Expected selected plugin.");
+      if (tools === undefined) throw new Error("Expected the offered tool.");
       return tools;
     },
     execute,
@@ -274,8 +320,8 @@ describe("Computer use through a provider tool", () => {
       expect(f.execute).toHaveBeenCalledOnce();
       await f.tools.close?.();
       expect(f.release).not.toHaveBeenCalled();
-      const next = f.service.toolSet(owner, computerUseSelection("next-turn"));
-      if (next === undefined) throw new Error("Expected selected plugin.");
+      const next = f.service.toolSet(owner);
+      if (next === undefined) throw new Error("Expected the offered tool.");
       expect(
         await next.execute({
           name: "octant_computer",
@@ -563,53 +609,200 @@ describe("Computer use through a provider tool", () => {
   });
 });
 
-describe("a turn without a Computer selection", () => {
-  it("registers the tool name so a stale call returns the re-attach recovery", async () => {
+/** Approves the one action now waiting for this Mac's person. */
+async function approvePending(f: ReturnType<typeof fixture>, approver = owner) {
+  await vi.waitFor(() =>
+    expect(
+      f.service.runtime.list(approver.windowId).find((view) => view.pendingApproval !== undefined),
+    ).toBeDefined(),
+  );
+  const view = f.service.runtime
+    .list(approver.windowId)
+    .find((candidate) => candidate.pendingApproval !== undefined);
+  if (view?.pendingApproval === undefined) throw new Error("Expected an approval.");
+  await f.service.runtime.decide({
+    ownerWindowId: approver.windowId,
+    threadId: approver.threadId,
+    authority,
+    sessionId: view.sessionId,
+    actionId: view.pendingApproval.actionId,
+    approvalId: view.pendingApproval.approvalId,
+    decision: "approved",
+  });
+  return view.pendingApproval;
+}
+
+describe("Computer offered on every eligible turn", () => {
+  it("offers the full tool to a turn whose send carries no selection", async () => {
     const f = fixture();
     try {
-      const unattached = f.service.unattachedToolSet(owner);
-      if (unattached === undefined) throw new Error("Expected a refusal definition.");
-      expect(unattached.definitions.map((definition) => definition.name)).toEqual([
-        "octant_computer",
-      ]);
-      const answer = await unattached.execute({ name: "octant_computer", inputJson: "{}" });
-      expect(answer.isError).toBe(true);
-      expect(answer.result).toMatchObject({ error: "computer-use-not-attached" });
-      expect(JSON.stringify(answer.result)).toContain("@Computer");
-      // Help belongs to the attached family; without @Computer it is refused too.
-      const help = await unattached.execute({
-        name: "octant_computer",
-        inputJson: '{"operation":"help"}',
-      });
-      expect(help.result).toMatchObject({ error: "computer-use-not-attached" });
+      expect(f.tools.definitions.map((definition) => definition.name)).toEqual(["octant_computer"]);
     } finally {
       await f.service.close();
     }
   });
 
-  it("ships no definition while Computer use is disabled, since nothing could reattach it", async () => {
+  it("tells a host with no screen to start a desktop instead of asking for macOS permissions", async () => {
+    const f = fixture({ leasableOnly: true });
+    try {
+      const outcome = await f.tools.execute({
+        name: "octant_computer",
+        inputJson: '{"operation":"apps"}',
+      });
+      expect(outcome).toMatchObject({
+        isError: true,
+        result: { kind: "refused", reason: "no-destination" },
+      });
+      expect(JSON.stringify(outcome)).toContain("Desktop tab");
+      expect(JSON.stringify(outcome)).not.toContain("macOS");
+    } finally {
+      await f.service.close();
+    }
+  });
+
+  it("asks before the first action on each app in a thread even under Full access", async () => {
+    const fullAccess = decodeComputerUseOwner({ ...owner, executionPolicy: "full-access" });
+    const f = fixture({ toolOwner: fullAccess });
+    try {
+      const first = f.tools.execute({
+        name: "octant_computer",
+        inputJson: '{"operation":"windows","appId":"com.example.Fixture"}',
+      });
+      const asked = await approvePending(f, fullAccess);
+      expect(asked.summary).toContain("com.example.Fixture");
+      expect(await first).toMatchObject({ result: { kind: "windows" } });
+      // The grant covers that app only: the next app asks again.
+      const other = f.tools.execute({
+        name: "octant_computer",
+        inputJson: '{"operation":"windows","appId":"com.example.Other"}',
+      });
+      const askedAgain = await approvePending(f, fullAccess);
+      expect(askedAgain.summary).toContain("com.example.Other");
+      await other;
+      expect(f.execute).toHaveBeenCalledTimes(2);
+    } finally {
+      await f.service.close();
+    }
+  });
+
+  it("shows the agent's reason on the approval it asks", async () => {
+    const f = fixture();
+    try {
+      const call = f.tools.execute({
+        name: "octant_computer",
+        inputJson: JSON.stringify({
+          operation: "windows",
+          appId: "com.example.Fixture",
+          reason: "Open the notes the person asked about",
+        }),
+      });
+      const asked = await approvePending(f);
+      expect(asked.summary).toContain('The agent says: "Open the notes the person asked about"');
+      expect(await call).toMatchObject({ result: { kind: "windows" } });
+    } finally {
+      await f.service.close();
+    }
+  });
+
+  it("keeps the approval summary within its contract limit for a long reason", async () => {
+    const f = fixture();
+    try {
+      const call = f.tools.execute({
+        name: "octant_computer",
+        inputJson: JSON.stringify({
+          operation: "windows",
+          appId: "com.example.Fixture",
+          reason: "r".repeat(600),
+        }),
+      });
+      const asked = await approvePending(f);
+      expect(asked.summary.length).toBeLessThanOrEqual(512);
+      expect(asked.summary).toContain("The agent says:");
+      expect(await call).toMatchObject({ result: { kind: "windows" } });
+    } finally {
+      await f.service.close();
+    }
+  });
+
+  it("asks again for a Computer action once a Browser page entered the thread, naming the page", async () => {
+    const connection = openDatabase();
+    const runtime = createPhase1RuntimeRegistries();
+    const journal = new Journal({
+      connection,
+      registry: runtime.events,
+      projections: runtime.projections,
+      clock: () => "2026-10-30T12:00:00.000Z",
+    });
+    const ingestions = new ExternalContentIngestionStore({
+      journal,
+      connection,
+      uuid: () => crypto.randomUUID(),
+      clock: () => "2026-10-30T12:00:00.000Z",
+      actor: decodeEventActor({ kind: "system", actorId: "99999999-9999-4999-8999-999999999999" }),
+    });
+    const f = fixture({
+      marks: {
+        ingested: () =>
+          readThreadExternalContentTaint(connection, owner.threadId).externalContentIngested,
+        outsideContent: () => readApprovalOutsideContent(connection, owner.threadId),
+      },
+    });
+    try {
+      const first = f.tools.execute({
+        name: "octant_computer",
+        inputJson: '{"operation":"windows","appId":"com.example.Fixture"}',
+      });
+      expect((await approvePending(f)).scope).toBe("application-session");
+      await first;
+      // The record the Browser writes when it reads a page into the thread.
+      ingestions.record({
+        threadId: owner.threadId,
+        provenance: { origin: "tool-result", sourceLabel: "browser-observation" },
+        contentReference: "browser-observation-fixture",
+        correlationId: crypto.randomUUID(),
+        authorized: true,
+      });
+      const after = f.tools.execute({
+        name: "octant_computer",
+        inputJson: '{"operation":"windows","appId":"com.example.Fixture"}',
+      });
+      const asked = await approvePending(f);
+      expect(asked.scope).toBeUndefined();
+      expect(asked.summary).toContain("this one action");
+      expect(asked.outsideContent?.sources.map((source) => source.sourceLabel)).toContain(
+        "browser-observation",
+      );
+      await after;
+      expect(f.execute).toHaveBeenCalledTimes(2);
+    } finally {
+      await f.service.close();
+      connection.close();
+    }
+  });
+
+  it("offers no definition while Computer use is disabled", async () => {
     const f = fixture({ enabled: false });
     try {
-      expect(f.service.unattachedToolSet(owner)).toBeUndefined();
+      expect(f.service.toolSet(owner)).toBeUndefined();
     } finally {
       await f.service.close();
     }
   });
 
-  it("ships no definition when the thread's tool constraints exclude it", async () => {
+  it("offers no definition when the thread's tool constraints exclude it", async () => {
     const f = fixture({ toolConstraints: ["octant_terminal"] });
     try {
-      expect(f.service.unattachedToolSet(owner)).toBeUndefined();
+      expect(f.service.toolSet(owner)).toBeUndefined();
     } finally {
       await f.service.close();
     }
   });
 
-  it("ships no definition in Plan mode, since a re-attached call would still be refused", async () => {
+  it("offers no definition in Plan", async () => {
     const f = fixture();
     try {
       expect(
-        f.service.unattachedToolSet(decodeComputerUseOwner({ ...owner, executionPolicy: "plan" })),
+        f.service.toolSet(decodeComputerUseOwner({ ...owner, executionPolicy: "plan" })),
       ).toBeUndefined();
     } finally {
       await f.service.close();
@@ -737,12 +930,7 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
         tainted = true;
       },
       tools(target: ComputerUseOwner = onDesktop, imagesSupported = true) {
-        const tools = service.toolSet(
-          target,
-          computerUseSelection("desktop"),
-          imagesSupported,
-          ask,
-        );
+        const tools = service.toolSet(target, imagesSupported, ask);
         if (tools === undefined) throw new Error("Expected the desktop to bind.");
         return tools;
       },
@@ -761,15 +949,12 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
       const tools = bound.tools();
       expect(tools.definitions[0]?.description).toContain("disposable Linux desktop");
       expect(JSON.stringify(tools.definitions[0]?.inputSchema)).toContain("send-file");
-      expect(
-        unbindable.service.toolSet(onDesktop, computerUseSelection("desktop"), true, bound.ask),
-      ).toBeUndefined();
-      expect(bound.service.toolSet(onDesktop, computerUseSelection("desktop"))).toBeUndefined();
-      // A host with no screen of its own binds no Mac, offers no re-attach
-      // recovery for one, and still reports itself leasable rather than a screen.
+      expect(unbindable.service.toolSet(onDesktop, true, bound.ask)).toBeUndefined();
+      expect(bound.service.toolSet(onDesktop)).toBeUndefined();
+      // A host with no screen of its own offers no Mac tool at all, and still
+      // reports itself leasable rather than a screen.
       expect(bound.service.runtime.destination()).toMatchObject({ status: "leasable" });
-      expect(bound.service.toolSet(owner, computerUseSelection("mac"))).toBeUndefined();
-      expect(bound.service.unattachedToolSet(owner)).toBeUndefined();
+      expect(bound.service.toolSet(owner)).toBeUndefined();
     } finally {
       await bound.service.close();
       await unbindable.service.close();
@@ -828,7 +1013,7 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
         }),
     );
     try {
-      const tools = f.service.toolSet(onDesktop, computerUseSelection("desktop"), true, ask);
+      const tools = f.service.toolSet(onDesktop, true, ask);
       if (tools === undefined) throw new Error("Expected the desktop to bind.");
       const launched = tools.execute(call({ operation: "launch", appId: "notes-app" }));
       await vi.waitFor(() => expect(questions).toHaveLength(1));
@@ -882,19 +1067,16 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
     }
   });
 
-  it("refuses every command and every file in Plan without asking or reaching the desktop", async () => {
+  it("offers no tool in Plan, so nothing asks or reaches the desktop", async () => {
     const f = desktop();
     try {
-      const tools = f.tools(decodeComputerUseOwner({ ...onDesktop, executionPolicy: "plan" }));
-      for (const operation of [
-        { operation: "launch", appId: "notes-app" },
-        { operation: "send-file", path: "dist/notes-app" },
-      ]) {
-        await expect(tools.execute(call(operation))).resolves.toMatchObject({
-          isError: true,
-          result: { kind: "refused", reason: "unavailable" },
-        });
-      }
+      expect(
+        f.service.toolSet(
+          decodeComputerUseOwner({ ...onDesktop, executionPolicy: "plan" }),
+          true,
+          f.ask,
+        ),
+      ).toBeUndefined();
       expect(f.ask).not.toHaveBeenCalled();
       expect(f.control).not.toHaveBeenCalled();
       expect(f.sendFile).not.toHaveBeenCalled();
@@ -973,7 +1155,7 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
   it("keeps keyboard-focus typing to the desktop and refuses it on this Mac", async () => {
     const f = desktop({ withMac: true });
     try {
-      const mac = f.service.toolSet(owner, computerUseSelection("mac"));
+      const mac = f.service.toolSet(owner);
       if (mac === undefined) throw new Error("Expected this Mac to bind.");
       await expect(
         mac.execute(

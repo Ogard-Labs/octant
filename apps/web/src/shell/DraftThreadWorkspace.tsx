@@ -9,7 +9,9 @@ import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
 } from "../composer/useComposerSlashCommands";
-import { ComputerUseMention, useComputerUseMention } from "../computerUse/ComputerUseMention";
+import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerAtMenu";
+import { useExtensionDraftSelections } from "../chat/useExtensionDraftSelections";
+import { providerFamilyForThread } from "../providers/providerFamily";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import { decodeGithubIssueContextRequest } from "@octant/contracts";
 import type { RepositoryIssueRow } from "../github/readIssuesAcrossRepositories";
@@ -55,7 +57,6 @@ import {
 } from "../linear/CreateFromLinearIssuePicker";
 import {
   draftThreadModePresentation,
-  pickerGroupCarriesAppManagedTools,
   resolveCodeNewThreadWorkspace,
   type CreateHostViewScope,
   type DraftIntentCard,
@@ -223,7 +224,6 @@ export interface DraftThreadWorkspaceProps {
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly extensionClient?: ExtensionClient;
-  readonly browserAvailable?: boolean;
   readonly creating?: boolean;
   readonly errorMessage?: string;
   readonly pendingMessage?: string;
@@ -792,9 +792,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           : { windowCapability: props.windowCapability })}
         {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
-        {...(props.browserAvailable === undefined
-          ? {}
-          : { browserAvailable: props.browserAvailable })}
         onCreateThread={(input) => {
           const submitted = {
             ...input,
@@ -866,9 +863,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           {...(props.extensionClient === undefined
             ? {}
             : { extensionClient: props.extensionClient })}
-          {...(props.browserAvailable === undefined
-            ? {}
-            : { browserAvailable: props.browserAvailable })}
           onCreateThread={(
             prompt,
             images,
@@ -955,43 +949,29 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
 
   const presentation = draftThreadModePresentation(props.mode);
   const [prompt, setPrompt] = useNewTaskPrompt();
-  const storedComputerSelection =
-    draftScope === undefined ? undefined : drafts?.readComputerSelection(draftScope);
-  const computer = useComputerUseMention({
-    textarea: () => textareaRef.current,
-    draft: prompt,
-    onDraftChange: setPrompt,
-    scopeKey: "chat-draft",
-    providerCarriesTools: pickerGroupCarriesAppManagedTools(
-      props.providerGroups,
-      props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
-        ? undefined
-        : {
-            providerInstanceId: props.selectedProviderInstanceId,
-            modelId: props.selectedModelId,
-          },
-    ),
-    ...(storedComputerSelection === undefined ? {} : { initialSelection: storedComputerSelection }),
-  });
-  const structuredDraftScope = useRef(draftScope);
-  useLayoutEffect(() => {
-    if (drafts === undefined || draftScope === undefined) return;
-    if (structuredDraftScope.current === draftScope) return;
-    structuredDraftScope.current = draftScope;
-    computer.restore(drafts.readComputerSelection(draftScope));
-  }, [computer, drafts, draftScope]);
-  useEffect(() => {
-    if (draftScope === undefined || drafts === undefined) return;
-    if (structuredDraftScope.current !== draftScope) return;
-    drafts.writeComputerSelection(draftScope, computer.stagedSelection);
-  }, [computer.stagedSelection, drafts, draftScope]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // A Chat draft is a first-message composer like Work's and Code's, so it
-  // offers the same host command list rather than only the @Computer mention.
+  // offers the same host command list.
   const slash = useComposerSlashCommands({
     draft: prompt,
     onDraftChange: setPrompt,
     textarea: () => textareaRef.current,
+  });
+  const draftProviderFamily = providerFamilyForThread(
+    props.providerGroups,
+    props.selectedProviderInstanceId,
+  );
+  const extensionDraft = useExtensionDraftSelections({
+    ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
+    mode: "chat",
+    projectId: null,
+    ...(draftProviderFamily === undefined ? {} : { providerFamily: draftProviderFamily }),
+  });
+  const atMenu = useComposerAtMenu({
+    draft: prompt,
+    onDraftChange: setPrompt,
+    textarea: () => textareaRef.current,
+    onResolveExtensionReference: extensionDraft.resolveReference,
   });
   useEffect(() => {
     if (props.pendingMessage === undefined) return;
@@ -1007,37 +987,51 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     textareaRef.current?.focus();
   }, [promptRequest]);
   const trimmed = prompt.trim();
-  const canSubmit = trimmed.length > 0 && !props.creating;
+  const canSubmit = trimmed.length > 0 && !props.creating && !atMenu.resolving;
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
+    const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
+      receipt.selection === undefined ? [] : [receipt.selection],
+    );
+    const afterCreate = (created: boolean | void | Promise<boolean | void>) => {
+      if (extensionSelections.length === 0) return;
+      void Promise.resolve(created).then((accepted) => {
+        if (accepted !== false) extensionDraft.clear();
+      });
+    };
     if (Object.keys(modelOptionValues).length > 0) {
-      void props.onCreateThread(
-        trimmed,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        issueContext,
-        linearIssueContext,
-        computer.selection,
-        undefined,
-        undefined,
-        undefined,
-        modelOptionValues,
+      afterCreate(
+        props.onCreateThread(
+          trimmed,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          issueContext,
+          linearIssueContext,
+          undefined,
+          extensionSelections.length === 0 ? undefined : extensionSelections,
+          undefined,
+          undefined,
+          modelOptionValues,
+        ),
       );
       return;
     }
-    if (computer.selection !== undefined) {
-      void props.onCreateThread(
-        trimmed,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        issueContext,
-        linearIssueContext,
-        computer.selection,
+    if (extensionSelections.length > 0) {
+      afterCreate(
+        props.onCreateThread(
+          trimmed,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          issueContext,
+          linearIssueContext,
+          undefined,
+          extensionSelections,
+        ),
       );
       return;
     }
@@ -1056,7 +1050,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     );
   }, [
     canSubmit,
-    computer.selection,
+    extensionDraft,
     issueContext,
     linearIssueContext,
     modelOptionValues,
@@ -1065,8 +1059,8 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   ]);
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (atMenu.handleKeyDown(event)) return;
     if (slash.handleKeyDown(event)) return;
-    if (computer.handleKeyDown(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       submit();
@@ -1114,25 +1108,47 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                 />
               </div>
             }
-            chips={<ComputerUseMention controller={computer} surface="chips" />}
+            chips={
+              <>
+                {extensionDraft.receipts.length > 0 ? (
+                  <ul aria-label="Selected extensions" className="composer-chips">
+                    {extensionDraft.receipts.map((receipt) => (
+                      <li className="chip" key={receipt.reference}>
+                        <span>{receipt.label}</span>
+                        {receipt.status.kind === "blocked" ? (
+                          <span>{`Blocked: ${receipt.status.reason}`}</span>
+                        ) : null}
+                        <OctantButton
+                          aria-label={`Remove ${receipt.label} extension`}
+                          className="chip-x window-no-drag"
+                          onClick={() => extensionDraft.remove(receipt.reference)}
+                          type="button"
+                          variant="bare"
+                        >
+                          ×
+                        </OctantButton>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </>
+            }
             typeahead={
-              slash.open ? (
+              atMenu.open ? (
+                <ComposerAtTypeahead controller={atMenu} />
+              ) : slash.open ? (
                 <ComposerSlashTypeahead controller={slash} />
-              ) : (
-                <ComputerUseMention controller={computer} surface="typeahead" />
-              )
+              ) : null
             }
             input={
               <OctantTextarea
                 aria-label="First message"
                 aria-autocomplete="list"
-                aria-expanded={computer.open || slash.open}
-                aria-controls={
-                  computer.open ? computer.listId : slash.open ? slash.listId : undefined
-                }
+                aria-expanded={atMenu.open || slash.open}
+                aria-controls={atMenu.open ? atMenu.listId : slash.open ? slash.listId : undefined}
                 aria-activedescendant={
-                  computer.open
-                    ? `${computer.listId}-computer`
+                  atMenu.active !== undefined
+                    ? `${atMenu.listId}-${atMenu.active.id}`
                     : slash.active === undefined
                       ? undefined
                       : `${slash.listId}-${slash.active.id}`
@@ -1142,14 +1158,16 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                 disabled={props.creating}
                 onChange={(event) => {
                   setPrompt(event.target.value);
-                  computer.sync(event.target.value, event.currentTarget.selectionStart);
                   slash.sync(event.target.value, event.currentTarget.selectionStart);
+                  atMenu.sync(event.target.value, event.currentTarget.selectionStart);
                 }}
                 onClick={(event) => {
                   slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+                  atMenu.sync(event.currentTarget.value, event.currentTarget.selectionStart);
                 }}
                 onSelect={(event) => {
                   slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+                  atMenu.sync(event.currentTarget.value, event.currentTarget.selectionStart);
                 }}
                 onKeyDown={handleKeyDown}
                 placeholder={presentation.composerPlaceholder}

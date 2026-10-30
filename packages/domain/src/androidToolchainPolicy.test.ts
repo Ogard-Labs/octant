@@ -88,7 +88,7 @@ describe("evaluateAndroidEmulatorRequest", () => {
 
   it("redacts typed characters from durable diagnostic copy", () => {
     expect(redactedAndroidInputDiagnostic({ kind: "type-text", text: "secret" }).message).toBe(
-      "type-text completed (length=6; redacted)",
+      "type-text completed (length=6; redacted); the emulator does not report what the field received, so check the screen",
     );
     expect(
       redactedAndroidInputDiagnostic({ kind: "type-text", text: "secret" }).message,

@@ -78,6 +78,7 @@ export {
 export {
   CredentialPurgeFailure,
   CredentialStoreFailure,
+  type CredentialStoreFailureCause,
   type CredentialPurgeFailureCategory,
   type CredentialPurgeInput,
   type CredentialPurgeResult,

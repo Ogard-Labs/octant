@@ -20,7 +20,13 @@ discovery fails, the failure may carry an optional, additive `step` (`xcode`,
 `licence`, `runtime`, or `project`) naming the probe that failed — Xcode
 selection, `xcodebuild -license check`, Simulator listing, or project listing —
 so the setup checklist marks that row and treats earlier rows as passed; a host
-that omits it leaves every row unchecked. An agent's
+that omits it leaves every row unchecked. The tab appears only for a checkout
+with an `.xcodeproj` or `.xcworkspace` at its root, and a project added while the
+thread is open appears without reloading. `xcodebuild` has no option for a bare
+Swift package, so an `octant_apple` request naming `Package.swift` fails at the
+`project` step saying an Xcode project or workspace is needed. A Simulator
+created after discovery is found by reading the device list again when a request
+names it. An agent's
 `octant_apple` `boot`, `run`, or `open` raises that pane once per request
 instead of launching Simulator.app. That request lives only in server memory,
 keyed by thread and served only to the same thread and checkout; it is never
@@ -475,7 +481,10 @@ a keyboard it cannot read or does not accept is refused
 (`keyboard-layout-unknown`, `keyboard-layout-unsupported`) rather than typed
 wrong. Any other text, including punctuation, letters such as æ, ø, å, or é,
 and other scripts, is copied to the Simulator's pasteboard with
-`xcrun simctl pbcopy` and pasted with Command-V. The paste route does not check
+`xcrun simctl pbcopy` and pasted with Command-V. The action reports success when
+the keystroke is sent, not when the field takes the text (a field that is not
+focused, or that refuses a paste, ignores it), so the evidence note says the
+text was sent as a paste and the agent checks the screen. The paste route does not check
 the keyboard layout. If the copy fails, the action is refused as unavailable
 and no key is pressed. Whether the paste lands in every field, and how the paste
 key behaves on a non-QWERTY layout, are not verified on a device; the desktop
@@ -519,7 +528,11 @@ applies.
 
 **Android typing has no character check in the host.** Text goes through
 `adb shell input text`, with spaces sent as `%s` and the whole word quoted for
-the device shell, or through `serve-avd`'s text action. The Simulator's
+the device shell, or through `serve-avd`'s text action. A tap focuses a field
+before its input method is ready and typing straight after it loses the first
+characters, so typing waits until 700 ms after the emulator's last tap or swipe.
+The emulator never reports what the field received, so the evidence note tells
+the agent to check the screen. The Simulator's
 character rule does not apply. What the emulator types for punctuation,
 non-Latin letters, or a new line is not verified.
 

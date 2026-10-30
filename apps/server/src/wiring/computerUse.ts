@@ -450,17 +450,24 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
   onWindowRevoked((windowId) => {
     void computerUseTools?.revokeWindow(windowId);
   });
-  const computerToolsFor = (
-    owner: ComputerUseOwner,
-    selection: unknown,
-    ask?: ComputerUseThreadAsk,
-  ) => {
-    const model = providerRuntimeRegistry
-      .observedState(owner.providerInstanceId)
-      ?.models.find((candidate) => String(candidate.id) === String(owner.modelId));
+  /**
+   * The turn's Computer tool, offered on every turn whose provider carries
+   * Octant's app tools; undefined when the runtime cannot carry it, so the
+   * agent is never told about a tool it could not call.
+   */
+  const computerToolsFor = (owner: ComputerUseOwner, ask?: ComputerUseThreadAsk) => {
+    const observed = providerRuntimeRegistry.observedState(owner.providerInstanceId);
+    const carriesAppTools =
+      observed?.capabilities.appManagedTools === "supported" ||
+      observed?.verifiedToolModelIds?.some(
+        (candidate) => String(candidate) === String(owner.modelId),
+      ) === true;
+    if (!carriesAppTools) return undefined;
+    const model = observed?.models.find(
+      (candidate) => String(candidate.id) === String(owner.modelId),
+    );
     const tools = computerUseTools?.toolSet(
       owner,
-      selection,
       model?.inputModalities.includes("image") === true,
       ask,
     );
@@ -571,6 +578,25 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     offeredDesktopProviders: () => leasableProvidersOf(desktopLeases.destination()),
     stopComputerSettingsWatch,
     stopDesktopLeases,
+    /**
+     * Where a send that names no destination acts on a host with no screen of
+     * its own: the thread's one running desktop, if it has exactly one.
+     */
+    threadDesktopDestination: (thread: { readonly id: unknown }) => {
+      if (desktopLeases.destination().status !== "leasable") return undefined;
+      const running = persistence.desktopLeaseProjection
+        .list()
+        .filter(
+          ({ lease }) =>
+            lease.state === "ready" &&
+            lease.owner.mode === "code" &&
+            String(lease.owner.threadId) === String(thread.id),
+        );
+      const [only] = running;
+      return running.length === 1 && only !== undefined
+        ? ({ kind: "desktop-lease", leaseId: only.lease.leaseId } as const)
+        : undefined;
+    },
     webAssets,
   };
 }

@@ -44,6 +44,7 @@ import {
   type WebContents,
 } from "electron";
 import {
+  CredentialStoreFailure,
   deriveHostRuntimeHostId,
   prepareHostRuntimePaths,
   readHostInfoReceipt,
@@ -872,8 +873,20 @@ async function requireStoredApiKeys(
   return stored;
 }
 
+// Shown to the person as written, so preload.ts lists them too.
+const KEYRING_LOCKED_MESSAGE =
+  "Your keyring is locked. Unlock it (open Passwords and Keys and unlock Login), then try again.";
+const KEYRING_MISSING_MESSAGE =
+  "Your session has no Login keyring to keep keys in. Create one named Login in Passwords and Keys, set it as default, then try again.";
+
 function sanitizeApiKeyError(error: unknown): Error {
   if (error instanceof ApiKeyPoolError) return new Error(error.message);
+  if (error instanceof CredentialStoreFailure && error.cause === "locked") {
+    return new Error(KEYRING_LOCKED_MESSAGE);
+  }
+  if (error instanceof CredentialStoreFailure && error.cause === "no-login-collection") {
+    return new Error(KEYRING_MISSING_MESSAGE);
+  }
   return new Error("Octant could not update the provider API keys.");
 }
 

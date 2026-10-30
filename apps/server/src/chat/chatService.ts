@@ -5,6 +5,7 @@ import {
   CANVAS_DELIVERY_INSTRUCTIONS,
   offersCanvasTool,
 } from "../canvas/canvasDeliveryInstructions";
+import { appToolHostLines } from "../providers/appToolHostLines";
 import { createHash } from "node:crypto";
 import {
   ActorId,
@@ -673,17 +674,11 @@ export interface ChatServiceOptions {
     readonly coordinationDepth?: number;
   }) => AppManagedToolSet | undefined;
   readonly resolveExtensionSelectionContext?: ChatExtensionSelectionContextResolver;
-  readonly resolveComputerUseTools?: (input: {
-    readonly thread: ChatThread;
-    readonly windowId: WindowId;
-    readonly selection: ExtensionSelection;
-  }) => AppManagedToolSet | undefined;
   /**
-   * A refusal-only `octant_computer` for turns that carry no Computer
-   * selection: registering the name lets a stale call return the
-   * re-attach recovery instead of a provider-side unknown-tool failure.
+   * The turn's Computer tool, offered on every eligible turn without a
+   * composer selection; undefined when the turn cannot use it.
    */
-  readonly resolveUnattachedComputerUseTools?: (input: {
+  readonly resolveComputerUseTools?: (input: {
     readonly thread: ChatThread;
     readonly windowId: WindowId;
   }) => AppManagedToolSet | undefined;
@@ -988,7 +983,6 @@ export class ChatService {
   readonly #nativeHarness?: ChatServiceOptions["nativeHarness"];
   readonly #resolveExtensionSelectionContext?: ChatExtensionSelectionContextResolver;
   readonly #resolveComputerUseTools?: ChatServiceOptions["resolveComputerUseTools"];
-  readonly #resolveUnattachedComputerUseTools?: ChatServiceOptions["resolveUnattachedComputerUseTools"];
   readonly #hiddenThreadIds: () => ReadonlySet<string>;
   readonly #resolveSideChatSourceContext?: ChatServiceOptions["resolveSideChatSourceContext"];
   /**
@@ -1061,8 +1055,6 @@ export class ChatService {
     }
     if (options.resolveComputerUseTools !== undefined)
       this.#resolveComputerUseTools = options.resolveComputerUseTools;
-    if (options.resolveUnattachedComputerUseTools !== undefined)
-      this.#resolveUnattachedComputerUseTools = options.resolveUnattachedComputerUseTools;
     if (options.contextMaintenanceTimeoutMs !== undefined) {
       this.#contextMaintenanceTimeoutMs = options.contextMaintenanceTimeoutMs;
     }
@@ -2572,10 +2564,7 @@ export class ChatService {
       // Resolve them before route gathering because a provider probe can touch
       // a CLI, credentials, or network.  Preparation reuses these approved
       // facts after route resolution rather than resolving them twice.
-      // With no selections there is nothing to check, and resolving then
-      // would compose the unattached-Computer refusal stub against the
-      // persisted provider — preparation must build it against the provider
-      // the turn actually routes to.
+      // With no selections there is nothing to check.
       const resolvedExtensions =
         command.extensionSelections === undefined || command.extensionSelections.length === 0
           ? undefined
@@ -4034,10 +4023,11 @@ export class ChatService {
     const attachments = await this.#loadFinalizedAttachments(thread.id, attachmentIds);
     const researchRoute = this.#resolveResearchRoute(thread, settings, probe);
     this.#assertResearchAvailable(thread, researchRoute);
-    const appManagedTools =
+    const carriesAppTools =
       executionContext?.windowId !== undefined &&
-      this.#resolveAppManagedTools !== undefined &&
-      this.#effectiveAppManagedTools(probe, decodeProviderModelId(thread.modelId)) === "supported"
+      this.#effectiveAppManagedTools(probe, decodeProviderModelId(thread.modelId)) === "supported";
+    const hostAppTools =
+      carriesAppTools && this.#resolveAppManagedTools !== undefined
         ? this.#resolveAppManagedTools({
             windowId: executionContext.windowId,
             thread,
@@ -4047,6 +4037,15 @@ export class ChatService {
               : { coordinationDepth: executionContext.coordinationDepth }),
           })
         : undefined;
+    // Computer is offered on every eligible turn, built here against the
+    // provider the turn routes to rather than with the send's selections.
+    const computerTools = carriesAppTools
+      ? this.#resolveComputerUseTools?.({ thread, windowId: executionContext.windowId })
+      : undefined;
+    const appManagedTools =
+      computerTools === undefined
+        ? hostAppTools
+        : combineAppManagedToolSets(hostAppTools, computerTools);
     const resolvedExtensions =
       preResolvedExtensions ??
       (await this.#resolveExtensionContext(
@@ -4123,6 +4122,7 @@ export class ChatService {
         threadMentionContexts,
         handoff?.blocks,
         offersCanvasTool(tools?.definitions),
+        appToolHostLines(tools?.definitions),
       );
     let context = planWith(sideChatSourceContext);
     // A plan that leaves earlier conversation out to fit cannot be met by the
@@ -4581,42 +4581,12 @@ export class ChatService {
     readonly entries: ReadonlyArray<ResolvedChatExtensionContextEntry>;
     readonly toolSet?: AppManagedToolSet;
   }> {
-    if (selections === undefined || selections.length === 0) {
-      const unattachedComputer =
-        windowId === undefined
-          ? undefined
-          : this.#resolveUnattachedComputerUseTools?.({ thread, windowId });
-      return unattachedComputer === undefined
-        ? { selections: [], entries: [] }
-        : { selections: [], entries: [], toolSet: unattachedComputer };
-    }
-    const computer = selections.filter(isComputerUseSelection);
-    const browser = selections.filter(isBrowserUseSelection);
-    // Browser use is a Work and Code capability; a Chat thread never carries
-    // it, so the selection is refused rather than silently dropped.
-    if (browser.length > 0) {
-      throw new ChatServiceError({
-        category: "unsupported",
-        message: "Browser use is not available in Chat.",
-      });
-    }
-    // Computer use is a host-owned app-managed tool. Its structured selection
-    // is retained with the turn but does not enter the generic extension
-    // resolver (which only knows installed packages).
-    const other = selections.filter(
+    // A Computer or Browser selection from a draft written before they became
+    // offered tools is kept with the turn and ignored; neither enters the
+    // generic extension resolver, which only knows installed packages.
+    const other = (selections ?? []).filter(
       (selection) => !isComputerUseSelection(selection) && !isBrowserUseSelection(selection),
     );
-    const computerTools =
-      windowId === undefined || computer.length > 1
-        ? undefined
-        : computer.length === 1 && computer[0] !== undefined
-          ? this.#resolveComputerUseTools?.({ thread, windowId, selection: computer[0] })
-          : this.#resolveUnattachedComputerUseTools?.({ thread, windowId });
-    if (computer.length > 0 && computerTools === undefined)
-      throw new ChatServiceError({
-        category: "unavailable",
-        message: "Computer use is unavailable for this task. Check Computer use in Settings.",
-      });
     if (other.length > 0 && this.#resolveExtensionSelectionContext === undefined) {
       throw new ChatServiceError({
         category: "unavailable",
@@ -4634,11 +4604,9 @@ export class ChatService {
           });
     const externalTools = "toolSet" in resolved ? resolved.toolSet : undefined;
     return {
-      selections,
+      selections: selections ?? [],
       entries: resolved.entries,
-      ...(externalTools === undefined && computerTools === undefined
-        ? {}
-        : { toolSet: combineAppManagedToolSets(externalTools, computerTools) }),
+      ...(externalTools === undefined ? {} : { toolSet: externalTools }),
     };
   }
 
@@ -5178,6 +5146,7 @@ export class ChatService {
      * offered neither.
      */
     canvasOffered = false,
+    toolHostLines: ReadonlyArray<string> = [],
   ): ChatTurnContextPlan {
     const providerInstanceId = decodeProviderInstanceId(thread.providerInstanceId);
     const subject = decodeContextSubjectRef({
@@ -5531,6 +5500,19 @@ export class ChatService {
             ),
           ]
         : []),
+      ...toolHostLines.map((line, index) =>
+        contextEntry(
+          this.#contextEntry(
+            thread,
+            "octant-policy",
+            line,
+            Math.max(16, Math.ceil(line.length / 4)),
+            "required",
+            { kind: "instruction", referenceId: `octant-tool-host-line:${index}` },
+          ),
+          { kind: "instructions", text: line },
+        ),
+      ),
       ...memoryEntries,
       ...summaryEntries,
       ...transcriptEntries,

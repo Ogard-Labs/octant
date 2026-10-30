@@ -51,7 +51,7 @@ import {
 import { Effect, Queue, Schema, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
-import { browserUseSelection } from "@octant/plugin-host/browser-use";
+import { BROWSER_TOOL_HOST_LINE, browserUseSelection } from "@octant/plugin-host/browser-use";
 import { createWorkThreadMentionDirectory } from "../chat/threadMentionService";
 import { createWorkTurnRouteHandler } from "../workTurnRoutes";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
@@ -1593,7 +1593,7 @@ describe("WorkTurnService", () => {
     expect(fixture.acquireInputs).toHaveLength(0);
   });
 
-  it("refuses Browser when the selected Work provider exposes no Browser tool", async () => {
+  it("ignores a Browser selection from an older draft and runs the Work turn", async () => {
     const fixture = serviceFixture();
     const result = await fixture.service.startFirstTurn(ids.window, {
       ...startCommand(),
@@ -1602,21 +1602,23 @@ describe("WorkTurnService", () => {
     expect(result.kind).toBe("accepted");
     await fixture.waitForIdle();
     const lookup = await fixture.service.lookupFirstTurn(ids.window, ids.request);
-    expect(lookup).toMatchObject({
-      kind: "accepted",
-      turn: {
-        status: "failed",
-        failure: {
-          category: "unsupported",
-          message: "The selected Browser is unavailable for this provider or task.",
-        },
-      },
-    });
-    expect(fixture.acquireInputs).toHaveLength(0);
+    expect(lookup).toMatchObject({ kind: "accepted", turn: { status: "completed" } });
   });
-
   it("settles the live stream when a refusal ends the turn before the provider runs", async () => {
-    const fixture = serviceFixture();
+    // A tool set too large for the input limit is refused after acceptance.
+    const fixture = serviceFixture({
+      safeInputBudgetTokens: 200,
+      resolveAppManagedTools: () => ({
+        definitions: [
+          {
+            name: "octant_browser",
+            description: "x".repeat(4000),
+            inputSchema: { type: "object" },
+          },
+        ],
+        execute: async () => ({ result: {} }),
+      }),
+    });
     // A reader attached the way the view attaches: from the start of the thread,
     // before the refusal is written.
     const controller = new AbortController();
@@ -1632,42 +1634,39 @@ describe("WorkTurnService", () => {
       }
     })();
 
-    await fixture.service.startFirstTurn(ids.window, {
-      ...startCommand(),
-      extensionSelections: [browserUseSelection("settle-refusal")],
-    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
     await fixture.waitForIdle();
     await vi.waitFor(() => expect(frames).toContain("turn-settled"));
     controller.abort();
     await reader;
   });
 
-  it("counts Browser instructions before accepting a Work turn at its input limit", async () => {
-    const plain = serviceFixture({ safeInputBudgetTokens: 200 });
-    await expect(plain.service.startFirstTurn(ids.window, startCommand())).resolves.toMatchObject({
-      kind: "accepted",
-    });
-    await plain.waitForIdle();
+  it("counts the Browser tool and its host line against a Work turn's input limit", async () => {
     const run = vi.fn(async () => ({ kind: "completed" as const, response: "Should not run" }));
     const browser = serviceFixture({
       safeInputBudgetTokens: 200,
       turnRuntime: { run },
       resolveAppManagedTools: () => ({
-        definitions: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+        definitions: [
+          {
+            name: "octant_browser",
+            description: "x".repeat(4000),
+            inputSchema: { type: "object" },
+          },
+        ],
         execute: async () => ({ result: {} }),
       }),
     });
-    await expect(
-      browser.service.startFirstTurn(ids.window, {
-        ...startCommand(),
-        extensionSelections: [browserUseSelection("budget-check")],
-      }),
-    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    await expect(browser.service.startFirstTurn(ids.window, startCommand())).resolves.toMatchObject(
+      { kind: "accepted" },
+    );
+    await browser.waitForIdle();
+    await expect(browser.service.lookupFirstTurn(ids.window, ids.request)).resolves.toMatchObject({
+      turn: { status: "failed", failure: { category: "invalid" } },
+    });
     expect(run).not.toHaveBeenCalled();
-    expect(browser.persistence.journal.append).not.toHaveBeenCalled();
   });
-
-  it("forwards fixed Browser guidance when Work exposes Browser", async () => {
+  it("tells the agent about Browser in one host line whenever Work offers it, with no selection", async () => {
     const contexts: Array<ReadonlyArray<{ readonly kind: string; readonly text: string }>> = [];
     const fixture = serviceFixture({
       resolveAppManagedTools: () => ({
@@ -1681,21 +1680,31 @@ describe("WorkTurnService", () => {
         },
       },
     });
-    const result = await fixture.service.startFirstTurn(ids.window, {
-      ...startCommand(),
-      extensionSelections: [browserUseSelection("work-browser-guidance")],
-    });
+    const result = await fixture.service.startFirstTurn(ids.window, startCommand());
     expect(result.kind).toBe("accepted");
     await fixture.waitForIdle();
-    expect(contexts.flat()).toContainEqual({
-      kind: "instructions",
-      text: expect.stringContaining("Octant's built-in Browser"),
-    });
-    expect(
-      contexts.flat().filter((block) => block.text.includes("Octant's built-in Browser")),
-    ).toHaveLength(1);
+    expect(contexts.flat().filter((block) => block.text === BROWSER_TOOL_HOST_LINE)).toHaveLength(
+      1,
+    );
   });
 
+  it("leaves Browser out of a Work turn's context when the turn does not offer it", async () => {
+    const contexts: Array<ReadonlyArray<{ readonly kind: string; readonly text: string }>> = [];
+    const fixture = serviceFixture({
+      turnRuntime: {
+        run: async (input) => {
+          contexts.push(input.context ?? []);
+          return { kind: "completed", response: "Provider reply" };
+        },
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      extensionSelections: [browserUseSelection("work-without-browser")],
+    });
+    await fixture.waitForIdle();
+    expect(JSON.stringify(contexts.flat())).not.toContain("octant_browser");
+  });
   it("opens every task with the Project's status, and takes stock when the status is stale", async () => {
     const contexts: Array<ReadonlyArray<{ readonly kind: string; readonly text: string }>> = [];
     const disk = new Map<string, string>([

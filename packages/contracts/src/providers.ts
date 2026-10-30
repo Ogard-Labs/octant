@@ -2141,6 +2141,10 @@ export const ProviderRegistryCommand = Schema.Union(
     instanceId: ProviderInstanceId,
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("check-provider-latest-version"),
+    instanceId: ProviderInstanceId,
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("verify-model-tools"),
     instanceId: ProviderInstanceId,
     modelId: ProviderModelId,
@@ -2198,6 +2202,12 @@ export const ProviderRegistryCommandResult = Schema.Union(
     currentVersion: Schema.optional(Schema.NonEmptyTrimmedString),
     message: Schema.optional(Schema.NonEmptyTrimmedString),
     diagnostic: Schema.optional(ProviderProcessDiagnostic),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("provider-latest-version"),
+    instanceId: ProviderInstanceId,
+    /** Absent when the check is off, offline, or the provider has no sanctioned source. */
+    latestVersion: Schema.optional(Schema.NonEmptyTrimmedString),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("model-tools-verified"),

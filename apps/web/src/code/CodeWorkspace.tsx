@@ -124,7 +124,6 @@ export interface CodeWorkspaceProps {
   readonly controller: CodeController;
   readonly holdAccessNotice?: CodeThreadControllers["holdAccessNotice"];
   readonly extensionClient?: ExtensionClient;
-  readonly browserAvailable?: boolean;
   readonly projectRemembersFullAccess?: boolean;
   readonly createUuid?: () => string;
   readonly projections?: CodeWorkspaceProjections;
@@ -214,9 +213,6 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
           ? {}
           : { holdAccessNotice: props.holdAccessNotice })}
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
-        {...(props.browserAvailable === undefined
-          ? {}
-          : { browserAvailable: props.browserAvailable })}
         {...(props.providerGroups === undefined ? {} : { providerGroups: props.providerGroups })}
         {...(props.harnessAutoReviewSupported === undefined
           ? {}

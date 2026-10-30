@@ -506,7 +506,9 @@ function credentialStoreFailure(error: unknown): Response {
   if (error instanceof CredentialStoreFailure) {
     const status =
       error.category === "missing" ? 404 : error.category === "unavailable" ? 503 : 500;
-    return failure(error.category, status);
+    return error.cause === undefined
+      ? failure(error.category, status)
+      : Response.json({ error: error.category, cause: error.cause }, { status });
   }
   return failure("failed", 503);
 }

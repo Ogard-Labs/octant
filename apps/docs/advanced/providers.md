@@ -121,8 +121,7 @@ the page never infers them from what a picker can mention.
 Every transport belongs to one provider connection and ends with it. Octant
 never writes a runtime's MCP or hook configuration to offer its tools. A
 runtime whose transport is not confirmed by its check reports Octant tools as
-not available, and the composers then do not offer **@Browser** or
-**@Computer** for it; a typed reference is shown as blocked.
+not available. Its turns are then offered neither the Browser nor Computer.
 
 ### App-managed browser tools
 
@@ -401,6 +400,14 @@ does not fail over, rotate, or load-balance between accounts.
 
 If you previously connected Claude for helpers, Octant no longer stores that
 token. Revoke the leftover token with Anthropic.
+
+When Settings can see that a newer release exists, it shows **Update available
+(installed → newest)** beside **Update CLI**. This applies to Codex, Claude Code,
+Grok Build, GitHub Copilot and Cline, whose newest version Octant reads from the
+npm registry once a day. The lookup sends only the package name and is off when
+you turn off marketplace fetches. Nothing updates until you click **Update CLI**;
+the connection check that follows shows why a release Octant cannot use yet is
+refused.
 
 The **Update CLI** action is shown only for providers with a verified native
 update command. It runs that command against the same configured executable,
