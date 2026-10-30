@@ -577,6 +577,52 @@ describe("AndroidToolchainService", () => {
     }
   });
 
+  it("waits for the field's input method before typing even when the tap itself was slow to deliver", async () => {
+    const calls: Array<{ readonly kind: string; readonly at: number }> = [];
+    const execute = vi.fn(async (input: { readonly argv: ReadonlyArray<string> }) => {
+      const argv = input.argv.join(" ");
+      if (argv.includes("input tap")) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        calls.push({ kind: "tap", at: Date.now() });
+      }
+      if (argv.includes("input text")) calls.push({ kind: "text", at: Date.now() });
+      return discoveryExecutor()(input);
+    });
+    const service = new AndroidToolchainService({
+      execute,
+      access: async () => undefined,
+      realpath: async (path: string) => path,
+      environment: () => ({ ANDROID_HOME: "/sdk" }),
+      writeArtifact: async () => undefined,
+      now: () => "2026-09-18T10:00:00.000Z",
+      newId: () => ids.action,
+      textSettleMs: 150,
+    });
+    try {
+      await service.discover(discoveryRequest, context);
+      const granted = { ...context, inputGranted: true };
+      await service.execute(
+        action("tap", { point: { x: 10, y: 10 }, requestedBy: actor }),
+        granted,
+      );
+      await service.execute(
+        action("type-text", {
+          text: "octant",
+          requestedBy: actor,
+          actionId: "30000000-0000-4000-8000-000000000201",
+        }),
+        granted,
+      );
+      const tap = calls.find((call) => call.kind === "tap");
+      const text = calls.find((call) => call.kind === "text");
+      expect(tap).toBeDefined();
+      expect(text).toBeDefined();
+      expect((text?.at ?? 0) - (tap?.at ?? 0)).toBeGreaterThanOrEqual(140);
+    } finally {
+      await service.close();
+    }
+  });
+
   it("refuses discovery outside the requesting task authority before probing the SDK", async () => {
     const execute = discoveryExecutor();
     const access = vi.fn(async () => undefined);

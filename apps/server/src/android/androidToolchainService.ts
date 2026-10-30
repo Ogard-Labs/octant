@@ -754,47 +754,54 @@ export class AndroidToolchainService {
     }
     if (isAndroidEmulatorInputKind(request.kind)) {
       const emulatorKey = String(request.emulatorId);
-      if (request.kind === "tap" || request.kind === "swipe") {
-        this.#lastPointerInput.set(emulatorKey, Date.now());
-      } else if (request.kind === "type-text") {
+      if (request.kind === "type-text") {
         const waitMs =
           (this.#options.textSettleMs ?? TEXT_AFTER_POINTER_MS) -
           (Date.now() - (this.#lastPointerInput.get(emulatorKey) ?? 0));
         if (waitMs > 0) await sleep(waitMs, signal);
       }
-      const managed = await this.#serveAvdInput(request, serial, signal, startedAt);
-      if (managed !== undefined) return managed;
-      const argv = inputArgv(adb, serial, request);
-      if (argv === undefined) {
-        return deniedEvidence(request, "invalid-destination", startedAt, this.#options.now());
-      }
-      const result = await this.#command(argv, context, request.timeoutMs, signal);
-      if (lostServerMidCommand(result)) {
-        // The device may already have acted, so this is not a failure to
-        // retry: a retried type-text typed its text twice.
+      try {
+        const managed = await this.#serveAvdInput(request, serial, signal, startedAt);
+        if (managed !== undefined) return managed;
+        const argv = inputArgv(adb, serial, request);
+        if (argv === undefined) {
+          return deniedEvidence(request, "invalid-destination", startedAt, this.#options.now());
+        }
+        const result = await this.#command(argv, context, request.timeoutMs, signal);
+        if (lostServerMidCommand(result)) {
+          // The device may already have acted, so this is not a failure to
+          // retry: a retried type-text typed its text twice.
+          return await this.#logged(
+            request,
+            "interrupted",
+            startedAt,
+            [
+              {
+                severity: "note",
+                message: `${request.kind} may have reached the emulator; adb lost its server before the device answered`,
+              },
+            ],
+            "complete",
+          );
+        }
+        const note = succeeded(result)
+          ? redactedAndroidInputDiagnostic(request)
+          : { severity: "note" as const, message: `${request.kind} ${outcomeFor(result)}` };
         return await this.#logged(
           request,
-          "interrupted",
+          outcomeFor(result),
           startedAt,
-          [
-            {
-              severity: "note",
-              message: `${request.kind} may have reached the emulator; adb lost its server before the device answered`,
-            },
-          ],
-          "complete",
+          [note],
+          result.cleanupUncertain ? "uncertain" : "complete",
         );
+      } finally {
+        // Stamped once the pointer has been delivered, not when it was
+        // requested: attaching the helper and reading the screen can take
+        // longer than the settling interval itself.
+        if (request.kind === "tap" || request.kind === "swipe") {
+          this.#lastPointerInput.set(emulatorKey, Date.now());
+        }
       }
-      const note = succeeded(result)
-        ? redactedAndroidInputDiagnostic(request)
-        : { severity: "note" as const, message: `${request.kind} ${outcomeFor(result)}` };
-      return await this.#logged(
-        request,
-        outcomeFor(result),
-        startedAt,
-        [note],
-        result.cleanupUncertain ? "uncertain" : "complete",
-      );
     }
     if (request.kind === "start-recording") {
       const key = String(request.emulatorId);
