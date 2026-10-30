@@ -171,6 +171,7 @@ export class LanguageServerProcessPort {
       allowFileReadStar: true,
       additionalDenyReadPaths: [input.cacheRoot],
       isolatedRoots: [input.cacheRoot],
+      refuseNewSession: true,
     };
     let launch: ConfinedProcessLaunch;
     try {

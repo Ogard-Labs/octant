@@ -535,16 +535,40 @@ classes.
   then its proxy closes. On Linux that ends every descendant: Bubblewrap's
   `--unshare-all` gives the server its own PID namespace and
   `--die-with-parent` ends the namespace with the capsule, so a child that
-  called `setsid()` dies with it. On macOS Seatbelt has no PID namespace, so
-  a child that calls `setsid()` leaves the group and outlives the stop. It
-  keeps the server's confinement (the checkout and cache writable, no home
-  folder), and its only network was the proxy, which has closed. A
-  terminal's commands share this residual, since both end a process group.
-  Not yet measured: on a Mac, a `repo-tooling` fixture server and a terminal
-  command that each start a child calling `setsid()` and sleeping, stopped by
-  the host (server stop, terminal close, host restart), then `ps` shows
-  whether the child survived each stop and whether the restart's receipt reap
-  ends it. A shared fix waits on that measurement.
+  called `setsid()` dies with it. Seatbelt has no PID namespace, so on macOS
+  the profile of a language server and a debug adapter refuses `setsid()`, and
+  a child stays in the group the stop ends. A terminal's profile allows it,
+  so `tmux` and `script` work. A terminal's
+  shell gives each job a group of its own, so closing a terminal also ends
+  every process whose controlling terminal is the shell's: read while the
+  shell still runs, and each checked again by its start time before the
+  kill. Measured on macOS 27.0.1 on 2026-10-30: before this rule, a child
+  that forked, called `setsid()`, and outlived its parent survived a
+  `repo-tooling` server's stop and a restarted host's receipt reap; with it,
+  both end it. A background job in its own group on the terminal ends on
+  close.
+  Reason: refusing the call holds without following any process. Following
+  descendants does not hold on macOS: `ps` hides the environment of system
+  programs, so an environment marker never showed on a `/bin/sleep` child,
+  and an orphan's parent is `launchd`, so a process-tree walk loses it once
+  its own parent exits. Reading which sandbox another process runs in needs
+  a native helper the server does not have. The cost for servers and
+  adapters: a program that starts a session of its own this way (`tmux`,
+  `script`, Python's `start_new_session`) fails in those launches on macOS
+  rather than escaping.
+  Terminals are the exception: a person runs `tmux` and `script` there, and
+  a session child outliving its terminal is ordinary terminal-app behavior.
+  Such a child keeps the sandbox it inherited (the folder and its own
+  writable roots, no home folder), so outliving the terminal gains it no
+  authority.
+  Residual on macOS: `posix_spawn` with `POSIX_SPAWN_SETSID` is a separate
+  system call and still starts a new session (measured with Python's
+  `os.posix_spawn(setsid=True)`), so such a child outlives the stop once its
+  parent has exited. It keeps the launch's confinement (for a server, the
+  checkout and cache writable, no home folder), and a server's only network
+  was the proxy, which has closed. A terminal whose shell exited by itself
+  has no terminal left to read, so its background jobs outlive it, as in
+  any terminal app.
 - **Network (D6).** Each start gets its own egress proxy, the one harness
   commands use, and the `proxied` OS level: loopback on macOS, a Unix socket
   and in-capsule forwarder on Linux. Its connections are decided on the Code
@@ -1487,15 +1511,15 @@ Rejected alternatives:
    Provider-neutral, but it does nothing for debugpy, the one adapter
    measured.
 
-| Threat                                               | Mitigation                                                                                                                          | Residual                                                                                 |
-| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| The adapter points the host at another local service | The host connects only to the session's own host-chosen child port; any other host or port is refused before a connection is opened | None                                                                                     |
-| `attach` reaches a process outside the session       | Sent only on a child connection to the same adapter in the same capsule; Linux PID namespace; no task port on macOS                 | As for the parent: same-user processes on macOS stay visible to the capsule's broad read |
-| A child escapes the parent's confinement or network  | The child runs in the parent's capsule; the host launches nothing for it                                                            | None beyond the parent's                                                                 |
-| Another local process drives a child port on macOS   | Host-chosen ports, held only while the session runs                                                                                 | A same-user process can connect to them during the session, as to the debug port         |
-| A program floods the host with children              | At most 8 at once and 32 per session; the rest run undebugged                                                                       | None                                                                                     |
-| The program swaps the relay socket for a link out    | The host links the forwarder's socket before the adapter runs, where no capsule sees it, and connects only through that link        | None                                                                                     |
-| A child outlives its session                         | Every end of the parent ends its children, then the capsule's group as today                                                        | As for the parent: a process that calls `setsid()` leaves the group                      |
+| Threat                                               | Mitigation                                                                                                                          | Residual                                                                                                           |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| The adapter points the host at another local service | The host connects only to the session's own host-chosen child port; any other host or port is refused before a connection is opened | None                                                                                                               |
+| `attach` reaches a process outside the session       | Sent only on a child connection to the same adapter in the same capsule; Linux PID namespace; no task port on macOS                 | As for the parent: same-user processes on macOS stay visible to the capsule's broad read                           |
+| A child escapes the parent's confinement or network  | The child runs in the parent's capsule; the host launches nothing for it                                                            | None beyond the parent's                                                                                           |
+| Another local process drives a child port on macOS   | Host-chosen ports, held only while the session runs                                                                                 | A same-user process can connect to them during the session, as to the debug port                                   |
+| A program floods the host with children              | At most 8 at once and 32 per session; the rest run undebugged                                                                       | None                                                                                                               |
+| The program swaps the relay socket for a link out    | The host links the forwarder's socket before the adapter runs, where no capsule sees it, and connects only through that link        | None                                                                                                               |
+| A child outlives its session                         | Every end of the parent ends its children, then the capsule's group as today                                                        | As for the parent: on macOS a `posix_spawn` child with its own session ([Repository tooling](#repository-tooling)) |
 
 _Verify:_ a fixture adapter that announces a child by event and
 by `startDebugging`, under Bubblewrap in an approval-gated thread: the child

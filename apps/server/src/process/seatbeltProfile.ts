@@ -78,6 +78,13 @@ export interface SeatbeltProfileInput {
    */
   readonly allowSimulatorControl?: boolean;
   /**
+   * Whether the launch's processes may not call `setsid()`. Stopping a
+   * terminal, language server, or debug adapter ends its process group, and a
+   * child that started a session of its own left that group and outlived the
+   * stop. Linux needs no rule: the capsule's PID namespace ends with it.
+   */
+  readonly refuseNewSession?: boolean;
+  /**
    * Extra read denials kept alongside the defaults instead of replacing them.
    *
    * Use this for a shared parent whose siblings belong to other authority
@@ -141,6 +148,8 @@ export interface ProcessConfinementPrepareInput {
   readonly writeBoundRoot?: boolean;
   /** See {@link SeatbeltProfileInput.allowSimulatorControl}. */
   readonly allowSimulatorControl?: boolean;
+  /** See {@link SeatbeltProfileInput.refuseNewSession}. */
+  readonly refuseNewSession?: boolean;
   /** See {@link SeatbeltProfileInput.additionalDenyReadPaths}. */
   readonly additionalDenyReadPaths?: ReadonlyArray<string>;
   /** See {@link SeatbeltProfileInput.additionalDenyWritePaths}. */
@@ -676,6 +685,13 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     // of tinypool's `WorkerInfo.destroy`. `target children` covers the
     // descendants this process started and nothing else.
     "(allow signal (target children))",
+    // Deny-default leaves system calls open, so this names the one that
+    // leaves the process group. Measured on macOS 27: a confined server's
+    // child that called `setsid()` survived the server's stop, its terminal's
+    // close, and a restarted host's receipt reap. `posix_spawn` with
+    // POSIX_SPAWN_SETSID is its own call and still starts a new session; see
+    // the language services design for that residual.
+    ...(input.refuseNewSession === true ? ["(deny syscall-unix (syscall-number SYS_setsid))"] : []),
     "(allow sysctl-read)",
     ...seatbeltNetworkRules(input.networkEgress),
     // TLS clients that verify through Security.framework — Rust's
@@ -921,6 +937,7 @@ function prepareSeatbeltLaunch(
     ...(input.allowSimulatorControl === undefined
       ? {}
       : { allowSimulatorControl: input.allowSimulatorControl }),
+    ...(input.refuseNewSession === undefined ? {} : { refuseNewSession: input.refuseNewSession }),
     ...(input.additionalDenyReadPaths === undefined
       ? {}
       : { additionalDenyReadPaths: input.additionalDenyReadPaths }),

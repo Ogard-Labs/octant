@@ -229,6 +229,7 @@ export class DebugAdapterProcessPort {
         allowProcessExec: true,
         allowProcessFork: true,
         networkEgress,
+        refuseNewSession: true,
         additionalDenyReadPaths: [input.stateRoot],
         additionalDenyWritePaths: [input.stateRoot],
         isolatedRoots: [input.stateRoot],
