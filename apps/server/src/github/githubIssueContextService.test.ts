@@ -174,6 +174,17 @@ describe("GitHub issue context", () => {
     expect(redactIssueContextText("ghp_abcdefghijklmnopqrstuvwxyz")).toBe("[redacted]");
   });
 
+  it("redacts AWS access key ids and named secret access keys", () => {
+    const accessKeyId = `AKIA${"Q".repeat(16)}`;
+    const secretKey = "z".repeat(20) + "/" + "y".repeat(19);
+    const redacted = redactIssueContextText(
+      `Cloud key ${accessKeyId} with secret ${secretKey} and aws_secret_access_key=${secretKey}`,
+    );
+    expect(redacted).not.toContain(accessKeyId);
+    expect(redacted).not.toContain(secretKey);
+    expect(redacted).toContain("Cloud key");
+  });
+
   it("frames the composed block as untrusted workspace data, never an instruction section", async () => {
     const { service: context } = service({});
     const result = await context.prepare({ owner: "octant", name: "octant", number: 7 }, signal());

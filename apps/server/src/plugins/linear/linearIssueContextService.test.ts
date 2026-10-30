@@ -103,6 +103,17 @@ describe("Linear issue context", () => {
     expect(authorization).not.toContain("Bearer");
   });
 
+  it("redacts AWS access key ids and named secret access keys", () => {
+    const accessKeyId = `AKIA${"Q".repeat(16)}`;
+    const secretKey = "z".repeat(20) + "/" + "y".repeat(19);
+    const redacted = redactLinearIssueContextText(
+      `Cloud key ${accessKeyId} with secret ${secretKey} and aws_secret_access_key=${secretKey}`,
+    );
+    expect(redacted).not.toContain(accessKeyId);
+    expect(redacted).not.toContain(secretKey);
+    expect(redacted).toContain("Cloud key");
+  });
+
   it("redacts an authorization header without consuming the following line", () => {
     const redacted = redactLinearIssueContextText(
       "authorization: Bearer secret-token-value\nIssue description stays",

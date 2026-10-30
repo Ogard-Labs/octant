@@ -5,7 +5,7 @@ import type {
   GithubIssueContextRequest,
 } from "@octant/contracts";
 import { MAX_NEW_THREAD_DRAFT_INTENT_BYTES } from "@octant/contracts";
-import { decideGithubCatalogueRead } from "@octant/domain";
+import { decideGithubCatalogueRead, redactAwsCredentialShapes } from "@octant/domain";
 import type { FramedExternalContent } from "../context/externalContentFraming";
 import { frameExternalContentForModel } from "../context/externalContentFraming";
 import type {
@@ -192,7 +192,7 @@ export function redactIssueContextText(value: string): string {
     if (!SECRETISH.test(normalized)) break;
     normalized = normalized.replaceAll(SECRETISH, "[redacted]");
   }
-  return normalized;
+  return redactAwsCredentialShapes(normalized, "[redacted]");
 }
 
 export function composeGithubIssueContextBlock(fields: GithubIssueContextFields): string {
