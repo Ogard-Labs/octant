@@ -6,7 +6,7 @@ import type { SettingsDeepLink } from "@octant/contracts";
 import type { ShellSettings, WindowWorkspace } from "@octant/contracts/shell";
 import { defaultShellSettings } from "@octant/domain/shell-policy";
 import type { ResolvedSidebarBackground } from "@octant/theme/backgrounds";
-import { PanelLeftClose, Search, SquarePen, X } from "lucide-react";
+import { House, PanelLeftClose, Search, SquarePen, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AUTOMATION_CENTER_NAVIGATION_ENABLED } from "../automation/automationCenterGate";
 import { AGENTS_CENTER_NAVIGATION_ENABLED } from "../agents/agentsCenterGate";
@@ -134,6 +134,12 @@ export interface ShellSidebarProps {
    * carries the destinations and counts, and the sidebar keeps the header,
    * search, threads, Projects, and profile.
    */
+  /**
+   * The way back to the mode's start screen. It leads the places in either
+   * rail and the sidebar's own actions, because the start screen has no row
+   * of its own and leaving it used to strand the person.
+   */
+  readonly home?: { readonly onOpen: () => void; readonly active: boolean };
   /** Plan usage rings for the icon rail, in either placement. */
   readonly railUsage?: ReactNode;
   readonly railBeside?: {
@@ -327,6 +333,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
       <SidebarRail
         activeMode={activeMode}
         destinations={railDestinations}
+        {...(props.home === undefined ? {} : { home: props.home })}
         modes={modes}
         nativeHost={props.nativeHost === true}
         {...(props.railBeside.onOpenActivity === undefined
@@ -357,6 +364,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
     return (
       <SidebarRail
         activeMode={activeMode}
+        {...(props.home === undefined ? {} : { home: props.home })}
         destinations={destinationRows.flatMap((id) => {
           const action = navigationActions[id];
           return id === "projects" || action === undefined
@@ -447,6 +455,15 @@ export function ShellSidebar(props: ShellSidebarProps) {
               actions={
                 <>
                   <span className="sidebar__primary-actions">
+                    {props.home === undefined || besideRail !== null ? null : (
+                      <IconButton
+                        aria-current={props.home.active ? "page" : undefined}
+                        data-navigation-id="home"
+                        icon={House}
+                        label="Home"
+                        onClick={props.home.onOpen}
+                      />
+                    )}
                     {filter === undefined || searchAlwaysShown ? (
                       filter === undefined ? (
                         <IconButton

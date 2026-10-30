@@ -4,6 +4,7 @@ import {
   CheckCheck,
   ClipboardCheck,
   Folders,
+  House,
   Inbox,
   LoaderCircle,
   Search,
@@ -42,6 +43,8 @@ export interface SidebarRailProps {
   readonly activeMode: OctantMode;
   readonly modes: ReadonlyArray<OctantMode>;
   readonly onSelectMode: (mode: VisibleMode) => void;
+  /** The way back to the mode's start screen, first among the places. */
+  readonly home?: { readonly onOpen: () => void; readonly active: boolean };
   /** The count tiles, drawn as icons with their counts as badges. */
   readonly tiles: ReadonlyArray<SidebarTile>;
   /** Destination rows still shown beside the tiles (Board, Pull requests, …). */
@@ -128,8 +131,19 @@ export function SidebarRail(props: SidebarRailProps) {
             </div>
           </>
         )}
-        {beside || (props.tiles.length === 0 && props.destinations.length === 0) ? null : (
+        {beside ||
+        (props.home === undefined &&
+          props.tiles.length === 0 &&
+          props.destinations.length === 0) ? null : (
           <RailDivider />
+        )}
+        {props.home === undefined ? null : (
+          <RailButton
+            active={props.home.active}
+            icon={House}
+            label="Home"
+            onSelect={props.home.onOpen}
+          />
         )}
         {props.tiles.map((tile) => {
           const rail = TILE_RAIL[tile.id];
