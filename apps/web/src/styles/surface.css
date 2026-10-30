@@ -900,20 +900,37 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
    not pull at the transcript. Opaque is the fallback, including when
    transparency is reduced.
 
-   The surface belongs to the pane that holds a thread, not to whichever view
-   the pane is showing at the moment. Painted on the conversation view alone,
-   the "Loading Code thread" state that stands in for it while the thread
-   loads had no surface at all, and the picture showed straight through. It
-   starts below the title band, which belongs to the window frame.
+   Every surface that shows text or information reads on this veil, not only
+   a thread: the Image generator, the Projects list, and a Project's page drew
+   their text straight on the ground, and a photo ran through the letters
+   (October 2026). Only a start screen (a welcome or a new thread) stays open
+   on the ground; its reading column has a wash of its own above. One list
+   names them, so a new page or pane kind reads on the veil without a rule of
+   its own.
+
+   The surface belongs to the pane, not to whichever view the pane is showing
+   at the moment. Painted on the conversation view alone, the "Loading Code
+   thread" state that stands in for it while the thread loads had no surface
+   at all, and the picture showed straight through. It starts below the title
+   band, which belongs to the window frame.
 
    The veil is the sheet's colour, not the stage's. On a black (OLED) ground
    the stage colour turned every thread into a black hole inside the grey
-   sheet, while the pages around it (Board, Inbox) read grey over the ground. */
+   sheet. */
 .shell--app-backdrop.shell-frame
-  .workspace-pane:is(
-    [data-surface-kind="chat-thread"],
-    [data-surface-kind="work-thread"],
-    [data-surface-kind="code-overview"]
+  :is(
+    .workspace-pane:not([data-surface-kind="welcome"], [data-surface-kind="draft-thread"]),
+    .primary-workspace-layer
+      > :is(
+        .inbox-layer,
+        .code-board-layer,
+        .archive-layer,
+        .review-layer,
+        .projects-page-layer,
+        .agents-center-layer,
+        .automation-center-layer,
+        .artifact-library-layer
+      )
   ) {
   --octant-thread-veil: var(--octant-sheet-surface);
   background: linear-gradient(
@@ -926,13 +943,42 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 @media (prefers-reduced-transparency: no-preference) {
   html:not([data-octant-reduced-transparency="true"])
     .shell--app-backdrop.shell-frame
-    .workspace-pane:is(
-      [data-surface-kind="chat-thread"],
-      [data-surface-kind="work-thread"],
-      [data-surface-kind="code-overview"]
+    :is(
+      .workspace-pane:not([data-surface-kind="welcome"], [data-surface-kind="draft-thread"]),
+      .primary-workspace-layer
+        > :is(
+          .inbox-layer,
+          .code-board-layer,
+          .archive-layer,
+          .review-layer,
+          .projects-page-layer,
+          .agents-center-layer,
+          .automation-center-layer,
+          .artifact-library-layer
+        )
     ) {
     --octant-thread-veil: color-mix(in srgb, var(--octant-sheet-surface) 80%, transparent);
   }
+}
+
+/* A destination page covers every pane, so the veil of a thread left open
+   beneath it would lay a second one under the page's own and wash the ground
+   out entirely. Under a page the panes stay clear. */
+.shell--app-backdrop.shell-frame
+  .primary-workspace-layer:has(
+    > :is(
+      .inbox-layer,
+      .code-board-layer,
+      .archive-layer,
+      .review-layer,
+      .projects-page-layer,
+      .agents-center-layer,
+      .automation-center-layer,
+      .artifact-library-layer
+    )
+  )
+  .workspace-pane {
+  background: transparent;
 }
 
 /* A thread's own container painted the theme's opaque workspace colour over
@@ -950,53 +996,51 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 }
 
 /* Under Glass the sheet is nearly clear, so an 80% veil of it could not quiet
-   the ground: its letters ran crisp behind the transcript. While a thread is
-   on screen the ground itself steps down to about the strength the veil
-   leaves it on an opaque sheet. A backdrop blur behind the thread was tried
-   first: a browser frosted the letters, but the packaged window, whose glass
-   is the system's, drew them sharp. */
+   the ground: its letters ran crisp behind the transcript, and on a
+   destination page "Describe with Octant" sat on a column of glyphs. While
+   any reading surface is on screen the ground itself steps down to about the
+   strength the veil leaves it on an opaque sheet; a third was tried first and
+   the To review list still read as names printed over a character ground
+   (walk-through, October 2026). A backdrop blur behind the thread was tried
+   too: a browser frosted the letters, but the packaged window, whose glass is
+   the system's, drew them sharp. */
 .shell--app-backdrop.shell--material-translucent.shell-frame:has(
-    .workspace-pane:is(
-      [data-surface-kind="chat-thread"],
-      [data-surface-kind="work-thread"],
-      [data-surface-kind="code-overview"]
+    :is(
+      .workspace-pane:not([data-surface-kind="welcome"], [data-surface-kind="draft-thread"]),
+      .primary-workspace-layer
+        > :is(
+          .inbox-layer,
+          .code-board-layer,
+          .archive-layer,
+          .review-layer,
+          .projects-page-layer,
+          .agents-center-layer,
+          .automation-center-layer,
+          .artifact-library-layer
+        )
     )
   )
   > .app-backdrop[data-placement="shell"] {
   opacity: 0.2;
 }
 
-/* A destination page is cards and lines of text on the same clear sheet, and
-   its letters ran crisp through both: "Describe with Octant" sat on a column
-   of glyphs. At a third of its strength the To review list still read as
-   names printed over a character ground (walk-through, October 2026), so a
-   page takes the thread's fifth. Named after the thread rule, so a page
-   opened over a thread wins. */
-.shell--app-backdrop.shell--material-translucent.shell-frame:has(
-    .primary-workspace-layer
-      > :is(
-        .inbox-layer,
-        .code-board-layer,
-        .archive-layer,
-        .review-layer,
-        .projects-page-layer,
-        .agents-center-layer,
-        .automation-center-layer,
-        .artifact-library-layer
-      )
-  )
-  > .app-backdrop[data-placement="shell"] {
-  opacity: 0.2;
-}
-
-/* Where the pane meets the sheet's rounded corner, its veil rounds with it. */
+/* Where the veil meets the sheet's rounded corner, it rounds with it. */
 @media (min-width: 681px) {
   .shell--app-backdrop.shell-frame
     > .workspace-layer:not(.workspace-layer--wide-context-open, .workspace-layer--bottom-panel-open)
-    .workspace-pane:is(
-      [data-surface-kind="chat-thread"],
-      [data-surface-kind="work-thread"],
-      [data-surface-kind="code-overview"]
+    :is(
+      .workspace-pane:not([data-surface-kind="welcome"], [data-surface-kind="draft-thread"]),
+      .primary-workspace-layer
+        > :is(
+          .inbox-layer,
+          .code-board-layer,
+          .archive-layer,
+          .review-layer,
+          .projects-page-layer,
+          .agents-center-layer,
+          .automation-center-layer,
+          .artifact-library-layer
+        )
     ) {
     border-bottom-right-radius: var(--oct-radius-md);
   }

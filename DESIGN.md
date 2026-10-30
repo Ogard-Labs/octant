@@ -677,10 +677,16 @@ it, so the prompt and the recent-thread list read on the plain page; in the
 light theme it fades out sooner, because dark text over a pale picture has
 less contrast headroom than light text over a dark one. A person
 may instead put the ground behind every page, from the workspace's leading
-edge, and under the sidebar too when they ask for it (see Shapes and depth). Conversations
-soften it beneath one continuous reading veil, the sheet colour at 80%, so it
-shows at about a fifth of its strength behind a thread and agent replies
-remain bare prose (0155). Increased contrast turns the ground off; reduced motion
+edge, and under the sidebar too when they ask for it (see Shapes and depth). Every
+surface that shows text or information softens it beneath one continuous
+reading veil, the sheet colour at 80%, so it shows at about a fifth of its
+strength and agent replies remain bare prose (0155): a thread, every other pane
+(a Project's page, Settings, a file, a preview), and every destination page
+(Inbox, Board, Archive, Review, Projects, Agents, Automations, Artifacts, Image
+generator). A start screen (a welcome or a new thread) is the one exception and
+stays open on the ground. The veil is one rule in `surface.css` keyed on the
+pane kind and the destination layers, never a colour per screen; a page drawn
+over the panes clears their veil so the two never stack. Increased contrast turns the ground off; reduced motion
 shows an animated picture's still frame. It is chosen in Settings ›
 Appearance › Background. The phone shares the same pictures and print effect under
 Appearance › Background.
@@ -1303,8 +1309,9 @@ Controls keep their own opaque fills (a switch thumb, a filled or secondary
 button, a segmented track), and menus, popovers, and dialogs keep the opaque
 floating surface. Increased contrast and reduced transparency return cards and
 outline buttons to their opaque colours. The ground behind it all steps down
-by what is on screen: a fifth of its strength behind a thread or a
-destination page.
+by what is on screen: a fifth of its strength behind any surface that shows
+text (a thread, any other pane, or a destination page), and only a start
+screen keeps more of it.
 
 Shadow tokens are `--octant-shadow-hairline`, `--octant-shadow-xs`,
 `--octant-shadow-sm`, `--octant-shadow-md`, `--octant-shadow-lg`,
