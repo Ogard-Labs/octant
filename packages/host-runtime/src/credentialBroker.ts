@@ -71,6 +71,10 @@ const ROUTES = new Set([
   // An App Store Connect API request is authorized by a token the broker
   // signs here; the answer is that one short-lived token, never the key.
   "/v1/app-store-connect-keys/sign-token",
+  "/v1/push-platform-credentials/has",
+  "/v1/push-platform-credentials/resolve",
+  "/v1/push-platform-credentials/set",
+  "/v1/push-platform-credentials/delete",
   "/v1/oauth/begin",
   "/v1/oauth/status",
   "/v1/oauth/refresh",
@@ -87,6 +91,7 @@ const CANVAS_PUBLIC_SHARE_SECRET_PREFIX = "/v1/canvas-public-share-secrets/";
 const MCP_SERVER_CREDENTIAL_PREFIX = "/v1/mcp-server-credentials/";
 const DESKTOP_PROVIDER_CREDENTIAL_PREFIX = "/v1/desktop-provider-credentials/";
 const APP_STORE_CONNECT_KEY_PREFIX = "/v1/app-store-connect-keys/";
+const PUSH_PLATFORM_CREDENTIAL_PREFIX = "/v1/push-platform-credentials/";
 type NamespacedIdField = "instanceId" | "credentialRef" | "secretId";
 const MAX_CREDENTIAL_BYTES = 12 * 1_024;
 const PURGE_FAILURE_STATUS: Readonly<Record<CredentialPurgeFailure["category"], number>> = {
@@ -168,6 +173,13 @@ export async function startCredentialBroker(
    * CLI; tests pass a fake.
    */
   readOnePassword: OnePasswordRead = readOnePasswordWithCli,
+  /**
+   * The Apple and Google push credentials and the sealing key a hub that sends
+   * notifications directly holds, in a credential namespace of their own. They
+   * are served only on `/v1/push-platform-credentials/*`, so no provider,
+   * device key, or other secret with the same UUID can reach one.
+   */
+  pushPlatformCredentials?: CredentialStore,
 ): Promise<CredentialBroker> {
   const token = randomBytes(32).toString("base64url");
   const runtime = createHostOAuthRuntime({
@@ -203,6 +215,7 @@ export async function startCredentialBroker(
       appStoreConnectKeys,
       appStoreConnectKeyFileRoot,
       readOnePassword,
+      pushPlatformCredentials,
       oauth?.now ?? Date.now,
     ).then(
       ({ destroyIncoming, response }) => {
@@ -281,6 +294,7 @@ export async function startCredentialBroker(
         appStoreConnectKeys,
         appStoreConnectKeyFileRoot,
         readOnePassword,
+        pushPlatformCredentials,
         oauth?.now ?? Date.now,
       ),
   });
@@ -302,6 +316,7 @@ async function handleIncoming(
   appStoreConnectKeys: CredentialStore | undefined,
   appStoreConnectKeyFileRoot: string | undefined,
   readOnePassword: OnePasswordRead,
+  pushPlatformCredentials: CredentialStore | undefined,
   now: () => number,
 ): Promise<{ destroyIncoming: boolean; response: ResponseData }> {
   if (brokerUrl === undefined) throw new Error("unavailable");
@@ -341,6 +356,7 @@ async function handleIncoming(
         appStoreConnectKeys,
         appStoreConnectKeyFileRoot,
         readOnePassword,
+        pushPlatformCredentials,
         now,
       ),
     ),
@@ -363,6 +379,7 @@ async function handleBrokerRequest(
   appStoreConnectKeys: CredentialStore | undefined,
   appStoreConnectKeyFileRoot: string | undefined,
   readOnePassword: OnePasswordRead,
+  pushPlatformCredentials: CredentialStore | undefined,
   now: () => number,
 ): Promise<Response> {
   const url = new URL(request.url);
@@ -434,6 +451,16 @@ async function handleBrokerRequest(
       "credentialRef",
       request,
       desktopProviderCredentials,
+    );
+  }
+
+  if (url.pathname.startsWith(PUSH_PLATFORM_CREDENTIAL_PREFIX)) {
+    if (pushPlatformCredentials === undefined) return failure("not-found", 404);
+    return handleNamespacedRoute(
+      url.pathname.slice(PUSH_PLATFORM_CREDENTIAL_PREFIX.length),
+      "credentialRef",
+      request,
+      pushPlatformCredentials,
     );
   }
 

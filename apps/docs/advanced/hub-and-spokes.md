@@ -507,9 +507,37 @@ computer, how many notifications the hub forwarded and refused and how the last
 one went. The hub's journal records which computer, how large, and why a request
 was refused, never what was in it.
 
-The hub passes notifications to the push gateway only. It does not send to Apple
-or Google itself. A delivery to a real phone through the hub has not been tried
-yet.
+By default the hub passes notifications to the push gateway only. It sends to
+Apple and Google itself only if you build the phone app yourself and turn on
+direct sending, below. A delivery to a real phone through the hub has not been
+tried yet.
+
+### Send notifications directly (your own phone app)
+
+If you build the phone app yourself, with your own Apple Developer and Firebase
+accounts, your hub can be that phone's push gateway, so nothing goes through an
+Octant-run service. The store build of the phone app cannot use this: only the
+account that signs an app can send notifications to it.
+
+1. Build the app with your own bundle identifier and the Push Notifications
+   capability, add your Firebase project's `google-services.json` for Android, and
+   set the app's push gateway address to your hub's private address. The steps are
+   in [Building the phone app yourself](https://github.com/Ogard-Labs/octant/blob/main/docs/design/mobile-maturity.md#building-the-phone-app-yourself).
+2. On the hub, open **Settings → Remote access → Send notifications directly**.
+   Enter your Apple key ID, team ID, bundle ID and the `.p8` key, and paste your
+   Firebase service-account JSON. Settings then says **Stored**. It never shows a
+   key again.
+3. Turn on **Development build** if you installed the app straight from Xcode.
+   Leave it off for TestFlight and App Store builds.
+4. Switch on **Send notifications directly**. It is off by default.
+
+Only the hub's own window changes any of this. Phones reach the hub over your
+private network only, and while the switch is off the hub answers that
+notifications are unavailable. The hub calls Apple and Google with your
+credentials, and nobody else; what it sends is the same sealed notification the
+gateway would get, which only your phone can read. A computer that ticked
+**Push** hands its notifications to the hub as before, and the hub delivers them
+itself. A delivery to a real phone this way has not been tried yet.
 
 ## Offer settings from the hub
 

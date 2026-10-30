@@ -49,6 +49,7 @@ async function setup(
     spokeWake: host.spokeWake,
     push: host.push,
     spokePush: host.spokePush,
+    directPush: host.directPush,
     provision: host.provision,
     spokeProvision: host.spokeProvision,
     certificate: new TailscaleCertificateService({

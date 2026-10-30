@@ -83,6 +83,9 @@ const GRANT_ITEM_COPY: Readonly<Record<HubGrantItem, { label: string; line: stri
 
 const REFUSAL_COPY: Readonly<Record<string, string>> = {
   "hub-role-off": "The hub role is off.",
+  "invalid-credential":
+    "That is not a key Apple or Google issues. Check the file and try again; nothing was stored.",
+  "credential-store-unavailable": "The credential store on this computer is unavailable.",
   "listener-not-running":
     "The remote listener is not running. Turn it on first under Remote listener.",
   "listener-not-private":
@@ -211,6 +214,7 @@ interface HubStatus {
   readonly standbyOrder: ReadonlyArray<string>;
   readonly wake?: WakeView;
   readonly push?: PushView;
+  readonly directPush?: DirectPushView;
   readonly provision?: ProvisionView;
   readonly link?: {
     readonly membership: "member" | "removed";
@@ -297,6 +301,14 @@ interface PushView {
   readonly spoke: { readonly handing: boolean };
 }
 
+/** Direct sending as this window sees it: the switch, the Apple environment, and whether each credential is stored. Never the credential. */
+interface DirectPushView {
+  readonly enabled: boolean;
+  readonly development: boolean;
+  readonly ios: boolean;
+  readonly android: boolean;
+}
+
 /** The wake service as this window sees it: the hub's switch and times, and this computer's side as a spoke. */
 interface WakeView {
   readonly hub: {
@@ -363,6 +375,19 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
   /** The hardware address being typed; absent while the field shows the one this computer holds. */
   const [addressDraft, setAddressDraft] = useState<string>();
   const addressId = useId();
+  /** The Apple and Google credentials being typed. They leave this state the moment they are sent, stored or not. */
+  const [appleDraft, setAppleDraft] = useState({
+    keyId: "",
+    teamId: "",
+    bundleId: "",
+    privateKey: "",
+  });
+  const [googleDraft, setGoogleDraft] = useState("");
+  const appleKeyIdId = useId();
+  const appleTeamIdId = useId();
+  const appleBundleIdId = useId();
+  const applePrivateKeyId = useId();
+  const googleAccountId = useId();
   const promoteOpener = useRef<HTMLButtonElement>(null);
   const [certificate, setCertificate] = useState<CertificateStatus>();
   const [transparencyRead, setTransparencyRead] = useState(false);
@@ -609,6 +634,88 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
           ? "Push sender is on. A computer uses it only if its person ticked Push."
           : "Push sender is off. The hub forgot its counts.",
       );
+    }
+    await refresh();
+  };
+
+  const setDirectPush = async (on: boolean) => {
+    const reply = await act(
+      "direct-push",
+      { enabled: on },
+      "changed",
+      on ? "Octant could not turn on direct sending." : "Octant could not turn off direct sending.",
+    );
+    if (reply !== undefined) {
+      setMessage(
+        on
+          ? "Direct sending is on. This hub now sends notifications to Apple and Google itself, with your own credentials."
+          : "Direct sending is off. The hub answers unavailable on its gateway address.",
+      );
+    }
+    await refresh();
+  };
+
+  const setDirectPushDevelopment = async (development: boolean) => {
+    const reply = await act(
+      "direct-push-environment",
+      { environment: development ? "development" : "production" },
+      "changed",
+      "Octant could not change the Apple environment.",
+    );
+    if (reply !== undefined) {
+      setMessage(
+        development
+          ? "Apple notifications go to the development service."
+          : "Apple notifications go to the production service.",
+      );
+    }
+    await refresh();
+  };
+
+  const storeAppleKey = async () => {
+    const draft = appleDraft;
+    // Cleared before the answer, so the key never waits in this window's memory for a reply.
+    setAppleDraft({ keyId: "", teamId: "", bundleId: "", privateKey: "" });
+    const reply = await act(
+      "direct-push-credential",
+      {
+        platform: "ios",
+        keyId: draft.keyId.trim().toUpperCase(),
+        teamId: draft.teamId.trim().toUpperCase(),
+        bundleId: draft.bundleId.trim(),
+        privateKey: draft.privateKey,
+      },
+      "changed",
+      "Octant could not store the Apple key. Check the key ID, team ID and bundle ID.",
+      REFUSAL_COPY,
+    );
+    if (reply !== undefined) setMessage("Apple key stored.");
+    await refresh();
+  };
+
+  const storeGoogleAccount = async () => {
+    const draft = googleDraft;
+    setGoogleDraft("");
+    const reply = await act(
+      "direct-push-credential",
+      { platform: "android", serviceAccount: draft },
+      "changed",
+      "Octant could not store the service account.",
+      REFUSAL_COPY,
+    );
+    if (reply !== undefined) setMessage("Google service account stored.");
+    await refresh();
+  };
+
+  const removeDirectPushCredential = async (platform: "ios" | "android") => {
+    const reply = await act(
+      "direct-push-credential-remove",
+      { platform },
+      "changed",
+      "Octant could not remove the credential.",
+    );
+    if (reply !== undefined) {
+      setMessage(platform === "ios" ? "Apple key removed." : "Google service account removed.");
     }
     await refresh();
   };
@@ -962,7 +1069,7 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
         {message === undefined ? null : (
           <SettingsState
             kind={
-              /^(Approved|Denied|Removed|Left|Added|Confirm|Dismissed|The hub grant is saved|Standby order saved|This computer is now the hub|Wake service is|Push sender is|Offers are|Offered|Offer withdrawn|Offer applied|Hardware address)/.test(
+              /^(Approved|Denied|Removed|Left|Added|Confirm|Dismissed|The hub grant is saved|Standby order saved|This computer is now the hub|Wake service is|Push sender is|Direct sending is|Apple key (stored|removed)|Apple notifications go|Google service account (stored|removed)|Offers are|Offered|Offer withdrawn|Offer applied|Hardware address)/.test(
                 message,
               )
                 ? "success"
@@ -1273,6 +1380,156 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
               ))}
             </ul>
           )}
+        </SettingsSection>
+      )}
+
+      {!hubOn || status === undefined || status.directPush === undefined ? null : (
+        <SettingsSection title="Send notifications directly">
+          <div className="setgroup">
+            <SettingRow
+              description="Use this hub as the push gateway for a phone app you built yourself with your own Apple Developer and Firebase accounts, so nothing goes through an Octant-run service. The hub then sends sealed notifications to Apple and Google itself and answers on its private address only. It cannot read them. Off by default; a store build of the phone app is not served."
+              label="Send notifications directly"
+              scope="host"
+              settingId="hub-direct-push"
+            >
+              <OctantSwitch
+                checked={status.directPush.enabled}
+                disabled={busy}
+                label="Send notifications directly"
+                onCheckedChange={(on) => void setDirectPush(on)}
+              />
+            </SettingRow>
+            <SettingRow
+              description="Turn on for a build installed straight from Xcode, which Apple's sandbox serves. Leave off for TestFlight and App Store builds."
+              label="Development build"
+              scope="host"
+              settingId="hub-direct-push-environment"
+            >
+              <OctantSwitch
+                checked={status.directPush.development}
+                disabled={busy}
+                label="Development build"
+                onCheckedChange={(on) => void setDirectPushDevelopment(on)}
+              />
+            </SettingRow>
+          </div>
+          <div className="settings-panel__stack">
+            <SettingRow
+              description={`${status.directPush.ios ? "Stored" : "Not stored"}. The .p8 key from your Apple Developer account goes to this computer's credential store and is never shown again.`}
+              label="Apple push key"
+              scope="host"
+              settingId="hub-direct-push-apple"
+            >
+              {status.directPush.ios ? (
+                <OctantButton
+                  disabled={busy}
+                  onClick={() => void removeDirectPushCredential("ios")}
+                  variant="outline"
+                >
+                  Remove
+                </OctantButton>
+              ) : null}
+            </SettingRow>
+            <OctantField>
+              <OctantFieldLabel htmlFor={appleKeyIdId}>Key ID</OctantFieldLabel>
+              <OctantInput
+                autoComplete="off"
+                id={appleKeyIdId}
+                onChange={(event) => setAppleDraft({ ...appleDraft, keyId: event.target.value })}
+                placeholder="ABCDE12345"
+                spellCheck={false}
+                value={appleDraft.keyId}
+              />
+            </OctantField>
+            <OctantField>
+              <OctantFieldLabel htmlFor={appleTeamIdId}>Team ID</OctantFieldLabel>
+              <OctantInput
+                autoComplete="off"
+                id={appleTeamIdId}
+                onChange={(event) => setAppleDraft({ ...appleDraft, teamId: event.target.value })}
+                placeholder="TEAM123456"
+                spellCheck={false}
+                value={appleDraft.teamId}
+              />
+            </OctantField>
+            <OctantField>
+              <OctantFieldLabel htmlFor={appleBundleIdId}>Bundle ID</OctantFieldLabel>
+              <OctantInput
+                autoComplete="off"
+                id={appleBundleIdId}
+                onChange={(event) => setAppleDraft({ ...appleDraft, bundleId: event.target.value })}
+                placeholder="com.example.octant"
+                spellCheck={false}
+                value={appleDraft.bundleId}
+              />
+            </OctantField>
+            <OctantField>
+              <OctantFieldLabel htmlFor={applePrivateKeyId}>
+                Private key (.p8 file)
+              </OctantFieldLabel>
+              <OctantTextarea
+                autoComplete="off"
+                id={applePrivateKeyId}
+                onChange={(event) =>
+                  setAppleDraft({ ...appleDraft, privateKey: event.target.value })
+                }
+                rows={4}
+                spellCheck={false}
+                value={appleDraft.privateKey}
+              />
+            </OctantField>
+            <div className="host-settings__controls">
+              <OctantButton
+                disabled={
+                  busy ||
+                  appleDraft.keyId.trim() === "" ||
+                  appleDraft.teamId.trim() === "" ||
+                  appleDraft.bundleId.trim() === "" ||
+                  appleDraft.privateKey.trim() === ""
+                }
+                onClick={() => void storeAppleKey()}
+              >
+                {status.directPush.ios ? "Replace Apple key" : "Store Apple key"}
+              </OctantButton>
+            </div>
+          </div>
+          <div className="settings-panel__stack">
+            <SettingRow
+              description={`${status.directPush.android ? "Stored" : "Not stored"}. The service-account JSON file from your Firebase project goes to this computer's credential store and is never shown again.`}
+              label="Google service account"
+              scope="host"
+              settingId="hub-direct-push-google"
+            >
+              {status.directPush.android ? (
+                <OctantButton
+                  disabled={busy}
+                  onClick={() => void removeDirectPushCredential("android")}
+                  variant="outline"
+                >
+                  Remove
+                </OctantButton>
+              ) : null}
+            </SettingRow>
+            <OctantField>
+              <OctantFieldLabel htmlFor={googleAccountId}>Service account (JSON)</OctantFieldLabel>
+              <OctantTextarea
+                autoComplete="off"
+                id={googleAccountId}
+                onChange={(event) => setGoogleDraft(event.target.value)}
+                rows={4}
+                spellCheck={false}
+                value={googleDraft}
+              />
+            </OctantField>
+            <div className="host-settings__controls">
+              <OctantButton
+                disabled={busy || googleDraft.trim() === ""}
+                onClick={() => void storeGoogleAccount()}
+              >
+                {status.directPush.android ? "Replace service account" : "Store service account"}
+              </OctantButton>
+            </div>
+          </div>
         </SettingsSection>
       )}
 
@@ -1730,6 +1987,7 @@ function readStatus(body: unknown): HubStatus | undefined {
   const grant = readGrant(field(spoke, "grant"));
   const wake = readWake(field(body, "wake"));
   const push = readPush(field(body, "push"));
+  const directPush = readDirectPush(field(body, "directPush"));
   const provision = readProvision(field(body, "provision"));
   if (
     (membership === "member" || membership === "removed") &&
@@ -1755,6 +2013,7 @@ function readStatus(body: unknown): HubStatus | undefined {
       standbyOrder,
       ...(wake === undefined ? {} : { wake }),
       ...(push === undefined ? {} : { push }),
+      ...(directPush === undefined ? {} : { directPush }),
       ...(provision === undefined ? {} : { provision }),
       link: {
         membership,
@@ -1785,7 +2044,29 @@ function readStatus(body: unknown): HubStatus | undefined {
     standbyOrder,
     ...(wake === undefined ? {} : { wake }),
     ...(push === undefined ? {} : { push }),
+    ...(directPush === undefined ? {} : { directPush }),
     ...(provision === undefined ? {} : { provision }),
+  };
+}
+
+function readDirectPush(value: unknown): DirectPushView | undefined {
+  const enabled = field(value, "enabled");
+  const environment = field(value, "environment");
+  const ios = field(value, "ios");
+  const android = field(value, "android");
+  if (
+    typeof enabled !== "boolean" ||
+    (environment !== "production" && environment !== "development") ||
+    (ios !== "stored" && ios !== "not-stored") ||
+    (android !== "stored" && android !== "not-stored")
+  ) {
+    return undefined;
+  }
+  return {
+    enabled,
+    development: environment === "development",
+    ios: ios === "stored",
+    android: android === "stored",
   };
 }
 

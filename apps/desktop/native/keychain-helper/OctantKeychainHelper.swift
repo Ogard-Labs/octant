@@ -35,6 +35,11 @@ private let desktopProviderCredentialNamespace = "desktop-provider-credential"
 // lives in a service of its own. A person may replace it.
 private let appStoreConnectKeyService = "app.octant.app-store-connect-keys.v1"
 private let appStoreConnectKeyNamespace = "app-store-connect-key"
+// The Apple and Google push credentials, and the sealing key, of a hub that
+// sends notifications directly live in a service of their own. A person may
+// replace one.
+private let pushPlatformCredentialService = "app.octant.push-platform-credentials.v1"
+private let pushPlatformCredentialNamespace = "push-platform-credential"
 private let hostIdentityNamespace = "app.octant.host-identity.v1"
 private let hostIdentityKeyId = "host-identity"
 private let maximumPurgeProviderInstances = 128
@@ -72,6 +77,7 @@ private let octantOwnedServices = [
     mcpServerCredentialService,
     desktopProviderCredentialService,
     appStoreConnectKeyService,
+    pushPlatformCredentialService,
 ]
 
 // A credential namespace of its own: the Keychain service it reaches, the
@@ -110,6 +116,11 @@ private let separateNamespaces: [String: SeparateNamespace] = [
     ),
     appStoreConnectKeyNamespace: SeparateNamespace(
         service: appStoreConnectKeyService,
+        idField: "credentialRef",
+        replaceable: true
+    ),
+    pushPlatformCredentialNamespace: SeparateNamespace(
+        service: pushPlatformCredentialService,
         idField: "credentialRef",
         replaceable: true
     ),

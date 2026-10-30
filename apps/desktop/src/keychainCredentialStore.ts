@@ -59,7 +59,8 @@ export type KeychainCredentialNamespace =
   | "canvas-public-share-secret"
   | "mcp-server-credential"
   | "desktop-provider-credential"
-  | "app-store-connect-key";
+  | "app-store-connect-key"
+  | "push-platform-credential";
 
 /** The request field that names an item in a namespace of its own. */
 const NAMESPACE_ID_FIELD = {
@@ -69,6 +70,7 @@ const NAMESPACE_ID_FIELD = {
   "mcp-server-credential": "secretId",
   "desktop-provider-credential": "credentialRef",
   "app-store-connect-key": "credentialRef",
+  "push-platform-credential": "credentialRef",
 } as const;
 
 export function keychainHelperSpec(

@@ -54,6 +54,9 @@ import type { PushDeliveryTransport } from "../automation/pushDeliveryTransport"
 import { createGatewayPushDeliveryTransport } from "../remote/gatewayPushDeliveryTransport";
 import { createHubPushDeliveryTransport } from "./hubPushTransport";
 import { ProvisionService } from "./provisionService";
+import { createDirectPushGateway, type DirectPushGateway } from "./directPushGateway";
+import type { DirectPushSendInput } from "./directPushSenders";
+import { DirectPushService } from "./directPushService";
 import { PushService } from "./pushService";
 import { SpokeProvisionService, type ProvisionHostPorts } from "./spokeProvisionService";
 import { SpokePushService } from "./spokePushService";
@@ -156,6 +159,10 @@ export interface HubTestHost {
   readonly push: PushService;
   /** This host's side of push through the hub as a spoke. */
   readonly spokePush: SpokePushService;
+  /** This host's own gateway for direct sending, the service behind its switch, and what it sent to the platforms. */
+  readonly directPush: DirectPushService;
+  readonly directGateway: DirectPushGateway;
+  readonly directSent: DirectPushSendInput[];
   /** This host's own Notifications setting: a test turns it on and names a gateway. */
   readonly pushSetting: { enabled: boolean; gatewayUrl: string };
   /** The transport this host's notifications are sent through: the hub's way where the grant ticks Push, else its own. */
@@ -430,11 +437,40 @@ export async function startHubTestHost(input: {
   let spokeWake = makeSpokeWake();
   // This host's own Notifications setting, which a test edits: off and the default gateway until it does.
   const pushSetting = { enabled: false, gatewayUrl: REMOTE_PUSH_GATEWAY_DEFAULT_URL };
+  // Direct sending with an in-memory credential store and a sender that records what reached "Apple and Google".
+  const directCredentials = new Map<string, string>();
+  const directPush = new DirectPushService({
+    state,
+    credentials: {
+      has: async (ref) => directCredentials.has(ref),
+      resolve: async (ref) => directCredentials.get(ref) ?? "",
+      set: async (ref, value) => void directCredentials.set(ref, value),
+      delete: async (ref) => void directCredentials.delete(ref),
+    },
+    record: (change) => records.push(change),
+  });
+  const directSent: DirectPushSendInput[] = [];
+  const directGateway = createDirectPushGateway({
+    enabled: () => directPush.enabled(),
+    sealingKey: () => directPush.sealingKey(),
+    holdsCredential: async () => true,
+    sender: {
+      send: async (sendInput) => {
+        directSent.push(sendInput);
+        return "accepted";
+      },
+    },
+    now: Date.now,
+  });
   const push = new PushService({
     state,
     identity: () => identity,
     transport,
     gateway: () => pushSetting,
+    direct: {
+      enabled: () => directPush.enabled(),
+      deliver: (body, headers) => directGateway.deliver(body, headers),
+    },
     record: (change) => records.push(change),
     now: wakeNow,
     ...(input.pushMaxPerMinute === undefined ? {} : { maxPerMinute: input.pushMaxPerMinute }),
@@ -670,6 +706,9 @@ export async function startHubTestHost(input: {
     },
     push,
     spokePush,
+    directPush,
+    directGateway,
+    directSent,
     pushSetting,
     pushDelivery,
     provision,

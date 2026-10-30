@@ -8,6 +8,7 @@ import {
   MAX_WORK_ATTACHMENT_BYTES,
   OWNER_IDENTITY_KEY_HEADER,
   OWNER_UNLOCK_HEADER,
+  REMOTE_PUSH_DELIVERY_HEADERS,
   REMOTE_SERVER_PROXY_RELAYED,
   REMOTE_SERVER_PROXY_RELAYED_HEADER,
   WORK_ATTACHMENT_MEDIA_TYPES,
@@ -140,6 +141,8 @@ export const REMOTE_HUB_LINK_ROUTE_IDS = {
   push: "hub-link-push",
   pushGrant: "hub-link-push-grant",
   pushCopy: "hub-link-push-copy",
+  directPushCapabilities: "hub-link-direct-push-capabilities",
+  directPushDeliveries: "hub-link-direct-push-deliveries",
   provisionOffer: "hub-link-provision-offer",
   provisionMirror: "hub-link-provision-mirror",
   owner: "hub-link-owner",
@@ -389,6 +392,37 @@ const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
     allowedRequestHeaders: ["content-type", HUB_LINK_HEADER],
     allowedContentTypes: ["application/json"],
     maxBodyBytes: 1_024,
+    maxResponseBytes: 4_096,
+  },
+  // A hub that sends notifications directly is the push gateway for a phone app its
+  // person built: a phone trades its platform token for a capability, and a computer
+  // posts one sealed envelope signed with its host key. The hub answers `unavailable`
+  // for both while its switch is off.
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.directPushCapabilities,
+    match: { kind: "exact", path: "/v1/capabilities" },
+    surface: "pre-auth",
+    methods: ["POST"],
+    allowQuery: false,
+    allowedRequestHeaders: ["content-type"],
+    allowedContentTypes: ["application/json"],
+    maxBodyBytes: 8_192,
+    maxResponseBytes: 4_096,
+  },
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.directPushDeliveries,
+    match: { kind: "exact", path: "/v1/deliveries" },
+    surface: "pre-auth",
+    methods: ["POST"],
+    allowQuery: false,
+    allowedRequestHeaders: [
+      "content-type",
+      REMOTE_PUSH_DELIVERY_HEADERS.hostKey,
+      REMOTE_PUSH_DELIVERY_HEADERS.timestamp,
+      REMOTE_PUSH_DELIVERY_HEADERS.signature,
+    ],
+    allowedContentTypes: ["application/json"],
+    maxBodyBytes: 8_192,
     maxResponseBytes: 4_096,
   },
   // Provisioning: the hub's offer to a spoke (configuration, never a secret) and a

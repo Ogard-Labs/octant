@@ -52,6 +52,15 @@ The design rests on a small set of invariants that every package obeys:
   separate call ([decisions/0061-in-app-changelog.md](decisions/0061-in-app-changelog.md)).
   Opening Updates reads the desktop's current local update state so the installed
   version and saved preferences appear without requesting the signed feed.
+  One more call exists only on a hub whose person turned on Send notifications
+  directly (off by default, window only): the hub calls Apple's push service
+  (`api.push.apple.com`, or `api.sandbox.push.apple.com` when the person marked
+  the build as development), `oauth2.googleapis.com`, and `fcm.googleapis.com`
+  with the person's own Apple and Firebase credentials, kept in the credential
+  store, to deliver sealed notifications to a phone app that person built
+  themselves. No other host, no redirect, ten seconds at most, and the content
+  stays sealed to the phone ([Building the phone app
+  yourself](design/mobile-maturity.md#building-the-phone-app-yourself)).
 - **The server is the authority.** Every authority check (mode, Project,
   thread, provider, approval, remote principal, optional spend ceiling) runs in
   `apps/server` before a side effect. The renderer and mobile app render what

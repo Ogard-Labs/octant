@@ -843,3 +843,89 @@ describe("push through a standby that stands in", () => {
     expect(gateway.received).toHaveLength(0);
   });
 });
+
+describe("a hub that sends notifications directly", () => {
+  /** A capability the hub's own gateway issues for a phone paired with `laptop`, and the delivery input that uses it. */
+  async function directInput(hub: HubTestHost, laptop: HubTestHost) {
+    const issued = await hub.directGateway.issueCapability(
+      JSON.stringify({
+        platform: "ios",
+        token: "ab".repeat(32),
+        hostKeyFingerprint: fingerprintOf(laptop),
+      }),
+      "phone",
+    );
+    if (!("capability" in issued)) throw new Error(`No capability: ${issued.status}`);
+    return {
+      destination: { deviceId: "device-1", platform: "ios" as const, token: issued.capability },
+      envelope,
+    };
+  }
+
+  it("delivers a spoke's notification itself and never contacts the gateway the Notifications setting names", async () => {
+    const gateway = await startGateway();
+    const { hub, laptop } = await startPair(gateway);
+    expect(hub.directPush.setEnabled(true, window)).toEqual({ status: "changed" });
+    const input = await directInput(hub, laptop);
+
+    await expect(laptop.pushDelivery.send(input)).resolves.toEqual({ kind: "delivered" });
+
+    expect(hub.directSent).toHaveLength(1);
+    expect(hub.directSent[0]).toMatchObject({ platform: "ios", token: "ab".repeat(32), envelope });
+    expect(gateway.received).toHaveLength(0);
+    expect(hub.push.status().spokes).toMatchObject([
+      { memberId: laptop.hostId, forwarded: 1, refused: 0 },
+    ]);
+  });
+
+  it("delivers itself even while its own Notifications setting is off", async () => {
+    const gateway = await startGateway();
+    const { hub, laptop } = await startPair(gateway);
+    hub.pushSetting.enabled = false;
+    hub.directPush.setEnabled(true, window);
+    const input = await directInput(hub, laptop);
+
+    await expect(laptop.pushDelivery.send(input)).resolves.toEqual({ kind: "delivered" });
+
+    expect(hub.directSent).toHaveLength(1);
+  });
+
+  it("forwards to the configured gateway when direct sending is off", async () => {
+    const gateway = await startGateway();
+    const { hub, laptop } = await startPair(gateway);
+    const { input } = notificationFor(laptop, gateway);
+
+    await expect(laptop.pushDelivery.send(input)).resolves.toEqual({ kind: "delivered" });
+
+    expect(gateway.received).toHaveLength(1);
+    expect(hub.directSent).toHaveLength(0);
+  });
+
+  it("answers unavailable to a capability it issued once direct sending is turned off", async () => {
+    const gateway = await startGateway();
+    const { hub, laptop } = await startPair(gateway);
+    hub.directPush.setEnabled(true, window);
+    const input = await directInput(hub, laptop);
+    hub.directPush.setEnabled(false, window);
+
+    // The Notifications setting names the stand-in gateway, which does not know this capability.
+    await expect(laptop.pushDelivery.send(input)).resolves.toMatchObject({ kind: "failed" });
+    expect(hub.directSent).toHaveLength(0);
+  });
+
+  it("reports a capability another gateway issued as a mismatch the person can fix, without sending", async () => {
+    const gateway = await startGateway();
+    const { hub, laptop } = await startPair(gateway);
+    hub.directPush.setEnabled(true, window);
+    const { input } = notificationFor(laptop, gateway);
+
+    await expect(laptop.pushDelivery.send(input)).resolves.toEqual({
+      kind: "failed",
+      retryable: false,
+      category: "gateway-mismatch",
+    });
+
+    expect(hub.directSent).toHaveLength(0);
+    expect(gateway.received).toHaveLength(0);
+  });
+});

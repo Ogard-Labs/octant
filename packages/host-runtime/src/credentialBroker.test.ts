@@ -661,6 +661,59 @@ describe("startCredentialBroker", () => {
     }
   });
 
+  it("keeps a hub's push credentials out of reach of every other route that names the same id", async () => {
+    const credentialRef = randomUUID();
+    const pushKeys = memoryStore();
+    const broker = await startCredentialBroker(
+      memoryStore(),
+      undefined,
+      undefined,
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      undefined,
+      undefined,
+      pushKeys,
+    );
+    try {
+      const call = async (path: string, body: Record<string, string>) =>
+        broker.fetchForTest(
+          brokerRequest(broker.url, broker.token, path, { body: JSON.stringify(body) }),
+        );
+      expect(
+        (await call("/v1/push-platform-credentials/set", { credentialRef, credential: "key" }))
+          .status,
+      ).toBe(200);
+      expect(
+        (await call("/v1/credentials/resolve", { providerInstanceId: credentialRef })).status,
+      ).toBe(404);
+      for (const route of [
+        "/v1/desktop-provider-credentials/resolve",
+        "/v1/replica-store-credentials/resolve",
+      ]) {
+        expect((await call(route, { credentialRef })).status).toBe(404);
+      }
+      expect(
+        await (await call("/v1/app-store-connect-keys/has", { credentialRef })).json(),
+      ).toEqual({ present: false });
+      expect(
+        (await call("/v1/mcp-server-credentials/resolve", { secretId: credentialRef })).status,
+      ).toBe(404);
+      expect(
+        await (await call("/v1/push-platform-credentials/resolve", { credentialRef })).json(),
+      ).toEqual({ credential: "key" });
+      expect(
+        await (await call("/v1/push-platform-credentials/delete", { credentialRef })).json(),
+      ).toEqual({ deleted: true });
+      expect(await pushKeys.has(credentialRef)).toBe(false);
+    } finally {
+      await broker.close();
+    }
+  });
+
   it("stores an App Store Connect key that no route, its own included, can read back", async () => {
     const credentialRef = randomUUID();
     const appStoreConnectKeys = memoryStore();

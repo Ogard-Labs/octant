@@ -1180,6 +1180,34 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "hub push sender phone notifications spokes sealed gateway forward standby off by default",
         },
         {
+          id: settingId("hub-direct-push"),
+          label: "Send notifications directly",
+          scope: "host",
+          keywords:
+            "hub send notifications directly push apple google firebase apns fcm phone app build yourself gateway own credentials off by default",
+        },
+        {
+          id: settingId("hub-direct-push-environment"),
+          label: "Development build",
+          scope: "host",
+          keywords:
+            "hub direct push apns development sandbox production testflight app store build apple environment",
+        },
+        {
+          id: settingId("hub-direct-push-apple"),
+          label: "Apple push key",
+          scope: "host",
+          keywords:
+            "hub direct push apple p8 key id team id bundle id apns credential stored not stored remove keychain",
+        },
+        {
+          id: settingId("hub-direct-push-google"),
+          label: "Google service account",
+          scope: "host",
+          keywords:
+            "hub direct push google firebase fcm service account json credential stored not stored remove keychain",
+        },
+        {
           id: settingId("hub-offers"),
           label: "Offers and proposals",
           scope: "host",
