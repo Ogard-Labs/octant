@@ -4872,6 +4872,28 @@ describe("ProviderService", () => {
     });
   });
 
+  it("reports the newest release for a CLI with an official npm package and nothing for one without", async () => {
+    const asked: string[] = [];
+    const latestNpmVersion = async (packageName: string) => {
+      asked.push(packageName);
+      return "9.9.9";
+    };
+    const withSource = serviceFixture({ instances: [claudeProvider()], latestNpmVersion });
+    await expect(
+      withSource.service.execute(windowId, { kind: "check-provider-latest-version", instanceId }),
+    ).resolves.toEqual({ kind: "provider-latest-version", instanceId, latestVersion: "9.9.9" });
+    expect(asked).toEqual(["@anthropic-ai/claude-code"]);
+
+    const withoutSource = serviceFixture({ instances: [kimiProvider()], latestNpmVersion });
+    await expect(
+      withoutSource.service.execute(windowId, {
+        kind: "check-provider-latest-version",
+        instanceId,
+      }),
+    ).resolves.toEqual({ kind: "provider-latest-version", instanceId });
+    expect(asked).toHaveLength(1);
+  });
+
   it("reports an unchanged known version instead of treating exit zero as a replacement", async () => {
     const fixture = serviceFixture({
       instances: [kimiProvider()],
@@ -5371,6 +5393,7 @@ function serviceFixture(
     readonly isOutsideDriverAdmitted?: (instance: ProviderInstance) => boolean;
     readonly isProviderExecutableAvailable?: (instance: ProviderInstance) => boolean;
     readonly runCliUpdate?: ProviderServiceOptions["runCliUpdate"];
+    readonly latestNpmVersion?: ProviderServiceOptions["latestNpmVersion"];
   } = {},
 ) {
   let instances = [...(options.instances ?? [])];
@@ -5464,6 +5487,9 @@ function serviceFixture(
         ? {}
         : { isProviderExecutableAvailable: options.isProviderExecutableAvailable }),
       ...(options.runCliUpdate === undefined ? {} : { runCliUpdate: options.runCliUpdate }),
+      ...(options.latestNpmVersion === undefined
+        ? {}
+        : { latestNpmVersion: options.latestNpmVersion }),
       uuid: () => crypto.randomUUID(),
       clock: () => now,
     }),

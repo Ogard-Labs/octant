@@ -148,6 +148,7 @@ import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
 } from "../composer/useComposerSlashCommands";
+import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerAtMenu";
 import { useComposerSuggestionInput } from "../composer/useComposerSuggestionInput";
 
 /** Only the person's messages carry a time here; the rows after one share it. */
@@ -701,7 +702,6 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     textarea: () => textareaRef.current,
     draft: composerDraft.text,
     onDraftChange: (next, caret) => composerDraft.setDraft(next, caret),
-    onResolveExtensionReference: extensionDraft.resolveReference,
   });
   const [loaded, setLoaded] = useState<WorkLoadedTurns>(NO_LOADED_TURNS);
   const turns = loaded.turns;
@@ -984,12 +984,23 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
   });
   const fileMentionOpen = fileMentions.open && !mention.open;
+  const atMenu = useComposerAtMenu({
+    textarea: () => textareaRef.current,
+    draft: composerDraft.text,
+    onDraftChange: (next, caret) => composerDraft.setDraft(next, caret),
+    onResolveExtensionReference: extensionDraft.resolveReference,
+    files: {
+      open: fileMentionOpen,
+      candidates: fileMentions.candidates,
+      choose: fileMentions.choose,
+    },
+  });
   const compacting = useComposerCompacting();
   const canSubmit =
     trimmed.length > 0 &&
     !compacting &&
     !creating &&
-    !slash.resolving &&
+    !atMenu.resolving &&
     !completionLocked &&
     !messageQueue.busy &&
     !messageQueue.uncertain &&
@@ -1716,6 +1727,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (suggestionInput.takeOnTab(event)) return;
+    if (atMenu.handleKeyDown(event)) return;
     if (slash.handleKeyDown(event)) return;
     if (mention.handleKeyDown(event)) return;
     if (fileMentions.handleKeyDown(event)) return;
@@ -1732,6 +1744,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
 
   function syncMentions(value: string, caret: number | null) {
     slash.sync(value, caret);
+    atMenu.sync(value, caret);
     mention.sync(value, caret);
     fileMentions.sync(value, caret);
   }
@@ -2207,10 +2220,14 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           <OctantTextarea
             aria-label="Work prompt"
             aria-autocomplete="list"
-            aria-expanded={slash.open}
-            aria-controls={slash.open ? slash.listId : undefined}
+            aria-expanded={atMenu.open || slash.open}
+            aria-controls={atMenu.open ? atMenu.listId : slash.open ? slash.listId : undefined}
             aria-activedescendant={
-              slash.active === undefined ? undefined : `${slash.listId}-${slash.active.id}`
+              atMenu.active !== undefined
+                ? `${atMenu.listId}-${atMenu.active.id}`
+                : slash.active === undefined
+                  ? undefined
+                  : `${slash.listId}-${slash.active.id}`
             }
             autoFocus
             className="composer-input"
@@ -2244,7 +2261,9 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           />
         }
         typeahead={
-          slash.open ? (
+          atMenu.open ? (
+            <ComposerAtTypeahead controller={atMenu} />
+          ) : slash.open ? (
             <ComposerSlashTypeahead controller={slash} />
           ) : (
             <>

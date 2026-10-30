@@ -31,6 +31,7 @@ import {
 } from "./piProcess";
 import { PiRpcFailure, type PiRpcEvent, type PiRpcResponse } from "./piRpcClient";
 import { outputStopReason } from "./outputStopReason";
+import { versionAtLeast } from "./acpProcess";
 import {
   createPiManagedToolsBridge,
   type PiManagedToolCall,
@@ -160,8 +161,23 @@ const PROBE_TOOL_BRIDGE = {
   url: "http://127.0.0.1:1/octant/probe",
   token: "octant-probe",
 } as const;
-/** The releases whose tool attestation, approval bridge and confinement Octant verified. */
-const PI_APP_MANAGED_TOOLS_VERSIONS: ReadonlySet<string> = new Set(["0.85.1", "1.1.0"]);
+/**
+ * Octant verified Pi's tool attestation, approval bridge and confinement on 0.85.1 and from
+ * 1.1.0. A later release is accepted when its probe attests the tools too, so a Pi update does
+ * not need an Octant release; a release below the floor, or one that does not attest, refuses.
+ */
+const PI_APP_MANAGED_TOOLS_FLOOR = [1, 1, 0] as const;
+const PI_APP_MANAGED_TOOLS_LEGACY = "0.85.1";
+
+export function piVerifiesManagedTools(version: string): boolean {
+  if (version === PI_APP_MANAGED_TOOLS_LEGACY) return true;
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
+  if (match === null) return false;
+  return versionAtLeast(
+    [Number(match[1]), Number(match[2]), Number(match[3])],
+    PI_APP_MANAGED_TOOLS_FLOOR,
+  );
+}
 /** The one release whose settled process Octant verified for warm reuse; others cold-resume. */
 const PI_WARM_REUSE_VERSION = "0.85.1";
 
@@ -309,7 +325,7 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
           rpc.request("get_commands", { expected: "octant-tool-attestation" }),
         );
         appManagedToolsVerified =
-          PI_APP_MANAGED_TOOLS_VERSIONS.has(connection.version) &&
+          piVerifiesManagedTools(connection.version) &&
           hasToolAttestation(attestation, [probeTool]);
         const models = normalizeModels(modelResponse);
         const observedAt = clock();
@@ -855,10 +871,10 @@ function makeConnection(
                   })
                   .pipe(Effect.provideService(Scope.Scope, scope)),
               );
-              if (tools.length > 0 && !PI_APP_MANAGED_TOOLS_VERSIONS.has(processConnection.version))
+              if (tools.length > 0 && !piVerifiesManagedTools(processConnection.version))
                 throw failure(
                   "unsupported",
-                  `Pi ${processConnection.version} is not verified for app-managed tools.`,
+                  `Pi ${processConnection.version} is not verified for app-managed tools. Update Pi to 1.1.0 or later.`,
                 );
               if (receipt === undefined)
                 await options.runtimeRegistry.trackProcess(options.instanceId, processConnection);
