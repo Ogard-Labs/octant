@@ -172,7 +172,10 @@ export function createDirectPushGateway(options: DirectPushGatewayOptions): Dire
       seenDeliveries.set(signedText, now);
 
       const capabilityKey = hash(request.capability);
-      const phoneKey = hash(`${opened.platform}\n${opened.token}`);
+      // APNs tokens are hex in either case and the sender lowercases them, so every spelling of
+      // one phone must share one counter.
+      const phoneToken = opened.platform === "ios" ? opened.token.toLowerCase() : opened.token;
+      const phoneKey = hash(`${opened.platform}\n${phoneToken}`);
       const perCapability = decidePushRate({
         recent: capabilityRates.get(capabilityKey) ?? [],
         nowMs: now,

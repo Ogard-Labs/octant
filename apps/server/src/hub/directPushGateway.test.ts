@@ -500,7 +500,8 @@ describe("a hub that sends notifications directly", () => {
     it("counts a phone's deliveries across every capability that names it", async () => {
       const h = await harness();
       const first = await h.capabilityFor("ios", APPLE_TOKEN);
-      const second = await h.capabilityFor("ios", APPLE_TOKEN);
+      // The same phone spelled in upper case still shares the one counter.
+      const second = await h.capabilityFor("ios", APPLE_TOKEN.toUpperCase());
       expect(second).not.toBe(first);
 
       for (let index = 0; index < 12; index += 1) {
@@ -589,12 +590,12 @@ describe("a hub that sends notifications directly", () => {
       expect([answer.status, code(answer)]).toEqual([410, "destination-gone"]);
     });
 
-    it("answers 410 when Apple calls the device token bad, and 502 for any other refusal", async () => {
+    it("keeps the registration when Apple calls the device token bad, which a wrong environment also causes, and answers 502", async () => {
       const h = await harness();
       const capability = await h.capabilityFor("ios", APPLE_TOKEN);
       h.platforms.apns.status = 400;
       h.platforms.apns.reason = "BadDeviceToken";
-      const gone = await h.deliver(h.signed(capability));
+      const bad = await h.deliver(h.signed(capability));
       h.clock.t += 10;
       h.platforms.apns.status = 400;
       h.platforms.apns.reason = "PayloadEmpty";
@@ -604,7 +605,7 @@ describe("a hub that sends notifications directly", () => {
       h.platforms.apns.reason = undefined;
       const down = await h.deliver(h.signed(capability));
 
-      expect([gone.status, code(gone)]).toEqual([410, "destination-gone"]);
+      expect([bad.status, code(bad)]).toEqual([502, "platform-failed"]);
       expect([failed.status, code(failed)]).toEqual([502, "platform-failed"]);
       expect([down.status, code(down)]).toEqual([502, "platform-failed"]);
     });

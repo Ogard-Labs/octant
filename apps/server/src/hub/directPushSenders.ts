@@ -138,9 +138,10 @@ export function createDirectPushSender(options: DirectPushSenderOptions): Direct
     if (answer === undefined) return "failed";
     if (answer.status === 200) return "accepted";
     if (answer.status === 403) appleToken = undefined;
-    if (answer.status === 410 || (answer.status === 400 && answer.reason === "BadDeviceToken")) {
-      return "destination-gone";
-    }
+    // Only 410 means the phone unregistered. APNs also answers 400 BadDeviceToken for a
+    // development token sent to production; clearing the registration then would outlive
+    // fixing the environment setting.
+    if (answer.status === 410) return "destination-gone";
     return "failed";
   };
 
