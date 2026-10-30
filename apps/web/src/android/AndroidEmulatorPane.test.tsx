@@ -1,5 +1,5 @@
 import type { AndroidDiscoverySnapshot } from "@octant/contracts/android-toolchain-rpc";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { AndroidEmulatorPane } from "./AndroidEmulatorPane";
 import { ids } from "../code/CodeDeliveryPane.test-fixtures";
@@ -192,6 +192,63 @@ describe("AndroidEmulatorPane", () => {
     await waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
     expect(requestApproval).toHaveBeenCalledTimes(1);
     expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "stop-recording" }));
+  });
+
+  it("names who asked on each recent line in Diagnostics", async () => {
+    const userEvent = (await import("@testing-library/user-event")).default;
+    const user = userEvent.setup();
+    const evidence = (kind: string, requestedBy: Record<string, unknown>, actionId: string) => ({
+      actionId,
+      kind,
+      outcome: "succeeded",
+      requestedBy,
+      diagnostics: [],
+      completedAt: `2026-10-14T20:00:0${actionId}.000Z`,
+    });
+    render(
+      <AndroidEmulatorPane
+        checkoutId={ids.checkout as never}
+        client={
+          client({
+            snapshot: vi.fn(async () => ({
+              sequence: 1,
+              snapshotAt: "2026-10-14T20:00:03.000Z",
+              sdk: discovery.sdk,
+              emulators: discovery.emulators,
+              active: [],
+              recentEvidence: [
+                evidence("tap", { kind: "local-user", actorId: "henrik" }, "1"),
+                evidence(
+                  "swipe",
+                  { kind: "agent", actorId: "claude", providerInstanceId: "p", threadId: "t" },
+                  "2",
+                ),
+              ],
+            })),
+          }) as never
+        }
+        createUuid={uuidFactory()}
+        hostBridge={
+          {
+            getHostCapabilities: () => ({
+              sidebarVibrancySupported: false,
+              liveAndroidFrameSupported: true,
+            }),
+          } as never
+        }
+        requestApproval={vi.fn(async () => ids.approval)}
+        thread={thread as never}
+      />,
+    );
+    await screen.findByRole("button", { name: "Home" });
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Diagnostics" }));
+    const rows = within(await screen.findByRole("region", { name: "Diagnostics" })).getAllByRole(
+      "listitem",
+    );
+    expect(rows[0]).toHaveTextContent("SwipeSucceededAgent");
+    expect(rows[1]).toHaveTextContent("TapSucceededYou");
   });
 
   it("offers Open URL only once the host reports it, and confirms each address before sending it", async () => {

@@ -75,6 +75,13 @@ computer-use-style actor attribution, and the same remote/headless fail-closed
 attach gate (see
 [decisions/0062-simulator-frame-input-transport.md](../decisions/0062-simulator-frame-input-transport.md)).
 
+Evidence for each action keeps `requestedBy`, and the pane's Diagnostics
+"Recent" list shows it on every line that has one: "Agent" for an agent's
+request, "You" for a person's, "Remote device" for a paired device and "Octant"
+for the host. Both panes draw the same row, so an agent's swipe is never read as
+a person's tap. Evidence is not journaled as separate input events; it lives in
+the host's bounded recent-evidence list.
+
 ## Native device helper and typed text
 
 Under the desktop app that injection is the native device helper of 0137: a

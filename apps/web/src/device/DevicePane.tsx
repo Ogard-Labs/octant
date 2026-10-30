@@ -469,6 +469,9 @@ function DeviceDiagnosticsCard(props: {
             <li key={row.id}>
               <span>{row.label}</span>
               <span className="device-rows__meta">{row.outcome}</span>
+              {row.requestedBy === undefined ? null : (
+                <span className="device-rows__meta">{row.requestedBy}</span>
+              )}
               {row.detail === undefined ? null : (
                 <span className="device-rows__detail">{row.detail}</span>
               )}
