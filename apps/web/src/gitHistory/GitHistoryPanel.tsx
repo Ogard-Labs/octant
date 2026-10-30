@@ -198,7 +198,7 @@ function BoundHistory(props: GitHistoryPanelProps) {
         <div className="git-history__status" role="status">
           {busy
             ? "Loading commits…"
-            : `${commits.length.toLocaleString()} ${search === "" ? (commits.length === 1 ? "commit" : "commits") : commits.length === 1 ? "match" : "matches"}`}
+            : `${commits.length.toLocaleString("en")} ${search === "" ? (commits.length === 1 ? "commit" : "commits") : commits.length === 1 ? "match" : "matches"}`}
           {page?.branch ? ` · ${page.branch}` : page?.head ? " · Detached HEAD" : ""}
         </div>
         {page?.shallow ? (

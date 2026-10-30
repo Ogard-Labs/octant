@@ -154,7 +154,7 @@ export function languageStatusText(state: CodeLanguageEditorState): string | und
       return "Language services are starting…";
     case "ready":
       if (state.problems === 0) return "No problems found";
-      return `${state.problems.toLocaleString()} ${state.problems === 1 ? "problem" : "problems"}${
+      return `${state.problems.toLocaleString("en")} ${state.problems === 1 ? "problem" : "problems"}${
         state.truncated ? " (first 1,000 shown)" : ""
       }`;
     case "off":

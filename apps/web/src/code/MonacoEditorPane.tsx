@@ -526,7 +526,7 @@ function ReadOnlyFile(props: {
           ? "Binary files are read-only."
           : "Files larger than 5 MiB are read-only."}
       </p>
-      <p>{props.file.metadata.byteLength.toLocaleString()} bytes</p>
+      <p>{props.file.metadata.byteLength.toLocaleString("en")} bytes</p>
     </section>
   );
 }

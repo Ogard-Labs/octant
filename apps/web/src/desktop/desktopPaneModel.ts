@@ -133,7 +133,7 @@ export function desktopWhere(
 
 /** Whole US cents as the person reads money: `$4.00`. */
 export function desktopDollars(cents: number): string {
-  return new Intl.NumberFormat(undefined, {
+  return new Intl.NumberFormat("en", {
     style: "currency",
     currency: "USD",
     currencyDisplay: "narrowSymbol",

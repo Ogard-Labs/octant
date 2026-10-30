@@ -104,10 +104,14 @@ export function CommitDetail(props: {
               </details>
             )}
             <p>
-              {detail.files.toLocaleString()}{" "}
+              {detail.files.toLocaleString("en")}{" "}
               {detail.files === 1 ? "changed file" : "changed files"}{" "}
-              <span className="git-history__additions">+{detail.insertions.toLocaleString()}</span>{" "}
-              <span className="git-history__deletions">−{detail.deletions.toLocaleString()}</span>
+              <span className="git-history__additions">
+                +{detail.insertions.toLocaleString("en")}
+              </span>{" "}
+              <span className="git-history__deletions">
+                −{detail.deletions.toLocaleString("en")}
+              </span>
             </p>
             {detail.commit.parents.length > 1 ? (
               <OctantSelectField

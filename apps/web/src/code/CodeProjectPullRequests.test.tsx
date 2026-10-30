@@ -496,7 +496,7 @@ describe("CodeProjectPullRequests", () => {
 
     const search = screen.getByRole("searchbox", { name: "Search pull requests" });
     await user.type(search, "missing title");
-    expect(screen.getByText("No pull requests match “missing title”.")).toBeVisible();
+    expect(screen.getByText("No pull requests match “missing title”")).toBeVisible();
     expect(screen.queryByText("List active pull requests")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Clear pull-request search" }));

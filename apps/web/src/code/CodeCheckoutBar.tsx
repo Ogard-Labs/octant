@@ -46,8 +46,8 @@ export function CodeCheckoutBar(props: { readonly onCreatePullRequest?: () => vo
       </span>
       {measured ? (
         <span className="code-checkout-bar__diffstat">
-          <span className="code-checkout-bar__insertions">{`+${insertions.toLocaleString()}`}</span>
-          <span className="code-checkout-bar__deletions">{`−${deletions.toLocaleString()}`}</span>
+          <span className="code-checkout-bar__insertions">{`+${insertions.toLocaleString("en")}`}</span>
+          <span className="code-checkout-bar__deletions">{`−${deletions.toLocaleString("en")}`}</span>
         </span>
       ) : null}
       {props.onCreatePullRequest === undefined ? null : (

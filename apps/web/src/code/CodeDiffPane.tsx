@@ -257,7 +257,7 @@ function AvailableDiff(
           <h1>{props.snapshot.title}</h1>
         </div>
         <p>
-          {props.snapshot.changedPaths.length.toLocaleString()}{" "}
+          {props.snapshot.changedPaths.length.toLocaleString("en")}{" "}
           {props.snapshot.changedPaths.length === 1 ? "changed path" : "changed paths"}
         </p>
         <OctantToggleGroup<CodeDiffLayout>
@@ -293,7 +293,7 @@ function AvailableDiff(
       {evidence.truncated === true ? (
         <OctantAlert className="code-diff-pane__warning" tone="warning">
           <strong>This diff is truncated and is not complete.</strong>
-          <p>{evidence.byteLength.toLocaleString()} bytes retained</p>
+          <p>{evidence.byteLength.toLocaleString("en")} bytes retained</p>
         </OctantAlert>
       ) : null}
 
@@ -332,10 +332,10 @@ function AvailableDiff(
                     {file.binary ? null : (
                       <span className="code-diff-pane__file-counts">
                         <span className="code-diff-pane__file-additions">
-                          +{file.additions.toLocaleString()}
+                          +{file.additions.toLocaleString("en")}
                         </span>
                         <span className="code-diff-pane__file-deletions">
-                          −{file.deletions.toLocaleString()}
+                          −{file.deletions.toLocaleString("en")}
                         </span>
                       </span>
                     )}

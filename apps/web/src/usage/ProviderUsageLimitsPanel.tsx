@@ -397,7 +397,7 @@ function LimitBucket(props: {
       label={capitalize(props.label)}
       now={props.now}
       remainingPercent={Math.floor((props.bucket.remaining / props.bucket.limit) * 100)}
-      detail={`${props.bucket.remaining.toLocaleString()} remaining of ${props.bucket.limit.toLocaleString()} ${props.label}`}
+      detail={`${props.bucket.remaining.toLocaleString("en")} remaining of ${props.bucket.limit.toLocaleString("en")} ${props.label}`}
       {...(props.bucket.resetsAt === undefined ? {} : { resetsAt: props.bucket.resetsAt })}
     />
   );

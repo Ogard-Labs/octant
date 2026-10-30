@@ -130,13 +130,13 @@ export function spendCeilingRemainingPhrases(
   const tokens = tighter(remainings, (remaining) => remaining.remainingTokens);
   if (tokens?.remainingTokens !== undefined && tokens.ceilingTokens !== undefined) {
     phrases.push(
-      `${tokens.remainingTokens.toLocaleString()} of ${tokens.ceilingTokens.toLocaleString()} tokens remaining`,
+      `${tokens.remainingTokens.toLocaleString("en")} of ${tokens.ceilingTokens.toLocaleString("en")} tokens remaining`,
     );
   }
   const turns = tighter(remainings, (remaining) => remaining.remainingTurns);
   if (turns?.remainingTurns !== undefined && turns.ceilingTurns !== undefined) {
     phrases.push(
-      `${turns.remainingTurns.toLocaleString()} of ${turns.ceilingTurns.toLocaleString()} turns remaining`,
+      `${turns.remainingTurns.toLocaleString("en")} of ${turns.ceilingTurns.toLocaleString("en")} turns remaining`,
     );
   }
   const runTime = tighter(remainings, (remaining) => remaining.remainingRunTimeSeconds);

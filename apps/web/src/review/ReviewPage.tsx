@@ -903,7 +903,7 @@ function DiffFiles(props: {
                 <span className="review-file__counts">
                   {file.binary
                     ? "binary"
-                    : `+${file.additions.toLocaleString()} −${file.deletions.toLocaleString()}`}
+                    : `+${file.additions.toLocaleString("en")} −${file.deletions.toLocaleString("en")}`}
                 </span>
               </span>
             </OctantButton>

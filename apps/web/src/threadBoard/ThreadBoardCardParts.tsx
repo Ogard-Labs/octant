@@ -76,10 +76,12 @@ export function ThreadBoardCardMeta(props: ThreadBoardCardMetaProps) {
       )}
       {props.diff === undefined ? null : (
         <span className="board-card-meta__diff">
-          <span className="board-card-meta__added">+{props.diff.insertions.toLocaleString()}</span>
+          <span className="board-card-meta__added">
+            +{props.diff.insertions.toLocaleString("en")}
+          </span>
           <span className="board-card-meta__removed">
             {"−"}
-            {props.diff.deletions.toLocaleString()}
+            {props.diff.deletions.toLocaleString("en")}
           </span>
         </span>
       )}

@@ -96,7 +96,7 @@ export function WorkResearchPanel(props: WorkResearchPanelProps) {
         <NewBriefForm onCreateBrief={props.onCreateBrief} />
       )}
       {props.briefs.length === 0 ? (
-        <SurfaceEmpty title="This Project has no research briefs." />
+        <SurfaceEmpty title="This Project has no research briefs" />
       ) : (
         <ul className="work-research__briefs">
           {props.briefs.map((view) => (

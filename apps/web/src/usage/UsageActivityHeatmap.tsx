@@ -110,8 +110,12 @@ export function UsageActivityHeatmap(props: UsageActivityHeatmapProps) {
               {props.cells.map((cell) => (
                 <tr key={cell.date}>
                   <th scope="row">{cell.date}</th>
-                  <td>{cell.state === "no-activity" ? "—" : cell.inputTokens.toLocaleString()}</td>
-                  <td>{cell.state === "no-activity" ? "—" : cell.outputTokens.toLocaleString()}</td>
+                  <td>
+                    {cell.state === "no-activity" ? "—" : cell.inputTokens.toLocaleString("en")}
+                  </td>
+                  <td>
+                    {cell.state === "no-activity" ? "—" : cell.outputTokens.toLocaleString("en")}
+                  </td>
                   <td>{cell.requestCount}</td>
                   <td>{cell.unavailableRequestCount}</td>
                   <td>{STATE_WORDS[cell.state]}</td>
@@ -135,7 +139,7 @@ function cellLabel(cell: UsageActivityCell): string {
     cell.state === "partially-unavailable"
       ? `, ${cell.unavailableRequestCount} without reported usage`
       : "";
-  return `${cell.date}: ${tokens.toLocaleString()} tokens across ${cell.requestCount} request${
+  return `${cell.date}: ${tokens.toLocaleString("en")} tokens across ${cell.requestCount} request${
     cell.requestCount === 1 ? "" : "s"
   }${suffix}`;
 }

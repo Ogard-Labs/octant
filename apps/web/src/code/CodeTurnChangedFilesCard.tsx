@@ -33,8 +33,8 @@ export function CodeTurnChangedFilesCard(props: { readonly changedFiles: CodeTur
             a sum it never saw. */}
         {truncated ? null : (
           <span className="code-turn-files__counts">
-            <span className="code-turn-files__insertions">{`+${insertions.toLocaleString()}`}</span>
-            <span className="code-turn-files__deletions">{`−${deletions.toLocaleString()}`}</span>
+            <span className="code-turn-files__insertions">{`+${insertions.toLocaleString("en")}`}</span>
+            <span className="code-turn-files__deletions">{`−${deletions.toLocaleString("en")}`}</span>
           </span>
         )}
       </header>
@@ -57,8 +57,8 @@ export function CodeTurnChangedFilesCard(props: { readonly changedFiles: CodeTur
                   <span className="code-turn-files__binary">Binary</span>
                 ) : (
                   <span className="code-turn-files__counts">
-                    <span className="code-turn-files__insertions">{`+${file.insertions.toLocaleString()}`}</span>
-                    <span className="code-turn-files__deletions">{`−${file.deletions.toLocaleString()}`}</span>
+                    <span className="code-turn-files__insertions">{`+${file.insertions.toLocaleString("en")}`}</span>
+                    <span className="code-turn-files__deletions">{`−${file.deletions.toLocaleString("en")}`}</span>
                   </span>
                 )}
               </li>

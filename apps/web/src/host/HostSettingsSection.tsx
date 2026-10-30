@@ -891,7 +891,7 @@ function BackupOutcomeView({ outcome }: { readonly outcome: HostBackupOutcome })
   return (
     <p aria-live="polite" className="settings-section-line">
       Backup {outcome.label} created — migration version {outcome.migrationVersion}, journal head{" "}
-      {outcome.journalHead}, {outcome.byteLength.toLocaleString()} bytes.
+      {outcome.journalHead}, {outcome.byteLength.toLocaleString("en")} bytes.
     </p>
   );
 }

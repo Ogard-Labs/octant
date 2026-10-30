@@ -429,7 +429,7 @@ function SummarySection({ dashboard }: { readonly dashboard: UsageDashboardRespo
           Highest-usage day:{" "}
           {summary.peakDay === undefined
             ? "Unavailable"
-            : `${summary.peakDay.date} · ${summary.peakDay.totalTokens.toLocaleString()} tokens across ${summary.peakDay.requestCount} request${summary.peakDay.requestCount === 1 ? "" : "s"}`}
+            : `${summary.peakDay.date} · ${summary.peakDay.totalTokens.toLocaleString("en")} tokens across ${summary.peakDay.requestCount} request${summary.peakDay.requestCount === 1 ? "" : "s"}`}
         </li>
         <li>
           Highest-usage model:{" "}
@@ -439,7 +439,7 @@ function SummarySection({ dashboard }: { readonly dashboard: UsageDashboardRespo
             <>
               {summary.peakModel.modelId} on{" "}
               <UsageName kind="provider" id={summary.peakModel.providerInstanceId} /> ·{" "}
-              {summary.peakModel.totalTokens.toLocaleString()} tokens
+              {summary.peakModel.totalTokens.toLocaleString("en")} tokens
             </>
           )}
         </li>
@@ -488,8 +488,8 @@ function CacheSection({ stats }: { readonly stats: UsageCacheStats }) {
               {stats.caches.map((cache) => (
                 <tr key={cache.key}>
                   <th scope="row">{cache.label}</th>
-                  <td>{cache.hitCount.toLocaleString()}</td>
-                  <td>{cache.missCount.toLocaleString()}</td>
+                  <td>{cache.hitCount.toLocaleString("en")}</td>
+                  <td>{cache.missCount.toLocaleString("en")}</td>
                   <td>
                     <RateMeter label={`${cache.label} hit rate`} ratio={cache.hitRatio} />
                   </td>
@@ -540,9 +540,9 @@ function CacheSection({ stats }: { readonly stats: UsageCacheStats }) {
                     <th scope="row">
                       <UsageName kind="provider" id={provider.providerInstanceId} />
                     </th>
-                    <td>{provider.requestCount.toLocaleString()}</td>
-                    <td>{provider.cacheReadInputTokens?.toLocaleString() ?? "Unknown"}</td>
-                    <td>{provider.cacheWriteInputTokens?.toLocaleString() ?? "Unknown"}</td>
+                    <td>{provider.requestCount.toLocaleString("en")}</td>
+                    <td>{provider.cacheReadInputTokens?.toLocaleString("en") ?? "Unknown"}</td>
+                    <td>{provider.cacheWriteInputTokens?.toLocaleString("en") ?? "Unknown"}</td>
                     <td>
                       <RateMeter
                         label={`${provider.providerInstanceId} cache traffic read share`}
@@ -580,7 +580,9 @@ function freshnessWords(
 ): string {
   if (lastRefreshAt === undefined) return "Never refreshed";
   const age =
-    stalenessMs === undefined ? "" : ` · ${Math.round(stalenessMs / 1000).toLocaleString()}s old`;
+    stalenessMs === undefined
+      ? ""
+      : ` · ${Math.round(stalenessMs / 1000).toLocaleString("en")}s old`;
   return `${new Date(lastRefreshAt).toLocaleString()}${age}`;
 }
 
@@ -589,7 +591,7 @@ function pacingWords(failureStreak: number, retryAt: string | undefined, now: nu
   const streak = `${failureStreak} failure${failureStreak === 1 ? "" : "s"} in a row`;
   if (retryAt === undefined) return `${streak} · next read may retry`;
   const seconds = Math.max(0, Math.round((new Date(retryAt).getTime() - now) / 1000));
-  return `${streak} · automatic retry in ${seconds.toLocaleString()}s; refresh still works`;
+  return `${streak} · automatic retry in ${seconds.toLocaleString("en")}s; refresh still works`;
 }
 
 function TotalItem(props: {
@@ -603,7 +605,7 @@ function TotalItem(props: {
       <dd data-unavailable={props.value === undefined ? "true" : "false"}>
         {props.value === undefined
           ? "Unavailable"
-          : `${props.value.toLocaleString()}${props.suffix ?? ""}`}
+          : `${props.value.toLocaleString("en")}${props.suffix ?? ""}`}
       </dd>
     </div>
   );
@@ -672,10 +674,10 @@ function BreakdownSection(props: {
                       )}
                     </th>
                     <td>{row.requestCount}</td>
-                    <td>{row.inputTokens.toLocaleString()}</td>
-                    <td>{row.outputTokens.toLocaleString()}</td>
+                    <td>{row.inputTokens.toLocaleString("en")}</td>
+                    <td>{row.outputTokens.toLocaleString("en")}</td>
                     {group.dimension === "context-category" ? (
-                      <td>{(row.plannedTokens ?? 0).toLocaleString()}</td>
+                      <td>{(row.plannedTokens ?? 0).toLocaleString("en")}</td>
                     ) : null}
                     <td>{row.unavailableRequestCount}</td>
                   </tr>
@@ -762,10 +764,10 @@ function DetailSection(props: {
                 </td>
                 <td>{row.requestShape}</td>
                 <td>{QUALITY_WORDS[row.quality]}</td>
-                <td>{row.plannedInputTokens?.toLocaleString() ?? "Unavailable"}</td>
-                <td>{row.inputTokens.toLocaleString()}</td>
-                <td>{row.outputTokens.toLocaleString()}</td>
-                <td>{row.varianceTokens?.toLocaleString() ?? "Unavailable"}</td>
+                <td>{row.plannedInputTokens?.toLocaleString("en") ?? "Unavailable"}</td>
+                <td>{row.inputTokens.toLocaleString("en")}</td>
+                <td>{row.outputTokens.toLocaleString("en")}</td>
+                <td>{row.varianceTokens?.toLocaleString("en") ?? "Unavailable"}</td>
                 <td>
                   {row.attribution.map((entry) => entry.category).join(", ") || "Unavailable"}
                 </td>

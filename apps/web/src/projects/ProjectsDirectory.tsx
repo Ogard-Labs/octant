@@ -66,7 +66,7 @@ export function ProjectsDirectory(props: ProjectsDirectoryProps) {
     );
   const emptyProps = filtered
     ? {
-        title: "No Projects match this view.",
+        title: "No Projects match this view",
         action: (
           <OctantButton onClick={clearFilters} size="sm" type="button" variant="outline">
             Clear filters
@@ -74,7 +74,7 @@ export function ProjectsDirectory(props: ProjectsDirectoryProps) {
         ),
       }
     : {
-        title: "No Projects yet.",
+        title: "No Projects yet",
         detail: "Add a Project to see it here.",
         icon: <FolderPlus size={20} strokeWidth={1.5} />,
         ...(props.onAddProject === undefined

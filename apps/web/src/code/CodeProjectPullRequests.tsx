@@ -288,7 +288,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
                   Clear search
                 </OctantButton>
               }
-              title={`No pull requests match “${search.trim()}”.`}
+              title={`No pull requests match “${search.trim()}”`}
             />
           ) : null}
           <div className="code-project-pull-requests__groups">
