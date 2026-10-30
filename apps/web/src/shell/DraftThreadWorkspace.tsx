@@ -9,6 +9,9 @@ import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
 } from "../composer/useComposerSlashCommands";
+import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerAtMenu";
+import { useExtensionDraftSelections } from "../chat/useExtensionDraftSelections";
+import { providerFamilyForThread } from "../providers/providerFamily";
 import { ComputerUseMention, useComputerUseMention } from "../computerUse/ComputerUseMention";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import { decodeGithubIssueContextRequest } from "@octant/contracts";
@@ -986,6 +989,32 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     onDraftChange: setPrompt,
     textarea: () => textareaRef.current,
   });
+  const draftProviderFamily = providerFamilyForThread(
+    props.providerGroups,
+    props.selectedProviderInstanceId,
+  );
+  const extensionDraft = useExtensionDraftSelections({
+    ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
+    mode: "chat",
+    providerCarriesTools: pickerGroupCarriesAppManagedTools(
+      props.providerGroups,
+      props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
+        ? undefined
+        : {
+            providerInstanceId: props.selectedProviderInstanceId,
+            modelId: props.selectedModelId,
+          },
+    ),
+    projectId: null,
+    ...(draftProviderFamily === undefined ? {} : { providerFamily: draftProviderFamily }),
+  });
+  const atMenu = useComposerAtMenu({
+    draft: prompt,
+    onDraftChange: setPrompt,
+    textarea: () => textareaRef.current,
+    onResolveExtensionReference: extensionDraft.resolveReference,
+    apps: [{ kind: "computer", controller: computer }],
+  });
   useEffect(() => {
     if (props.pendingMessage === undefined) return;
     setPrompt(props.pendingMessage);
@@ -1000,24 +1029,56 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     textareaRef.current?.focus();
   }, [promptRequest]);
   const trimmed = prompt.trim();
-  const canSubmit = trimmed.length > 0 && !props.creating;
+  const canSubmit = trimmed.length > 0 && !props.creating && !atMenu.resolving;
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
+    const chosenSelections = extensionDraft.receipts.flatMap((receipt) =>
+      receipt.selection === undefined ? [] : [receipt.selection],
+    );
+    // The receiving Chat path replaces the Computer selection with any extension list.
+    const extensionSelections =
+      chosenSelections.length === 0 || computer.selection === undefined
+        ? chosenSelections
+        : [computer.selection, ...chosenSelections];
+    const afterCreate = (created: boolean | void | Promise<boolean | void>) => {
+      if (chosenSelections.length === 0) return;
+      void Promise.resolve(created).then((accepted) => {
+        if (accepted !== false) extensionDraft.clear();
+      });
+    };
     if (Object.keys(modelOptionValues).length > 0) {
-      void props.onCreateThread(
-        trimmed,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        issueContext,
-        linearIssueContext,
-        computer.selection,
-        undefined,
-        undefined,
-        undefined,
-        modelOptionValues,
+      afterCreate(
+        props.onCreateThread(
+          trimmed,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          issueContext,
+          linearIssueContext,
+          computer.selection,
+          extensionSelections.length === 0 ? undefined : extensionSelections,
+          undefined,
+          undefined,
+          modelOptionValues,
+        ),
+      );
+      return;
+    }
+    if (extensionSelections.length > 0) {
+      afterCreate(
+        props.onCreateThread(
+          trimmed,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          issueContext,
+          linearIssueContext,
+          computer.selection,
+          extensionSelections,
+        ),
       );
       return;
     }
@@ -1050,6 +1111,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   }, [
     canSubmit,
     computer.selection,
+    extensionDraft,
     issueContext,
     linearIssueContext,
     modelOptionValues,
@@ -1058,6 +1120,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   ]);
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (atMenu.handleKeyDown(event)) return;
     if (slash.handleKeyDown(event)) return;
     if (computer.handleKeyDown(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
@@ -1107,9 +1170,36 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                 />
               </div>
             }
-            chips={<ComputerUseMention controller={computer} surface="chips" />}
+            chips={
+              <>
+                <ComputerUseMention controller={computer} surface="chips" />
+                {extensionDraft.receipts.length > 0 ? (
+                  <ul aria-label="Selected extensions" className="composer-chips">
+                    {extensionDraft.receipts.map((receipt) => (
+                      <li className="chip" key={receipt.reference}>
+                        <span>{receipt.label}</span>
+                        {receipt.status.kind === "blocked" ? (
+                          <span>{`Blocked: ${receipt.status.reason}`}</span>
+                        ) : null}
+                        <OctantButton
+                          aria-label={`Remove ${receipt.label} extension`}
+                          className="chip-x window-no-drag"
+                          onClick={() => extensionDraft.remove(receipt.reference)}
+                          type="button"
+                          variant="bare"
+                        >
+                          ×
+                        </OctantButton>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </>
+            }
             typeahead={
-              slash.open ? (
+              atMenu.open ? (
+                <ComposerAtTypeahead controller={atMenu} />
+              ) : slash.open ? (
                 <ComposerSlashTypeahead controller={slash} />
               ) : (
                 <ComputerUseMention controller={computer} surface="typeahead" />
@@ -1119,16 +1209,24 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
               <OctantTextarea
                 aria-label="First message"
                 aria-autocomplete="list"
-                aria-expanded={computer.open || slash.open}
+                aria-expanded={atMenu.open || computer.open || slash.open}
                 aria-controls={
-                  computer.open ? computer.listId : slash.open ? slash.listId : undefined
+                  atMenu.open
+                    ? atMenu.listId
+                    : computer.open
+                      ? computer.listId
+                      : slash.open
+                        ? slash.listId
+                        : undefined
                 }
                 aria-activedescendant={
-                  computer.open
-                    ? `${computer.listId}-computer`
-                    : slash.active === undefined
-                      ? undefined
-                      : `${slash.listId}-${slash.active.id}`
+                  atMenu.active !== undefined
+                    ? `${atMenu.listId}-${atMenu.active.id}`
+                    : computer.open
+                      ? `${computer.listId}-computer`
+                      : slash.active === undefined
+                        ? undefined
+                        : `${slash.listId}-${slash.active.id}`
                 }
                 autoFocus
                 className="composer-input"
@@ -1137,12 +1235,15 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                   setPrompt(event.target.value);
                   computer.sync(event.target.value, event.currentTarget.selectionStart);
                   slash.sync(event.target.value, event.currentTarget.selectionStart);
+                  atMenu.sync(event.target.value, event.currentTarget.selectionStart);
                 }}
                 onClick={(event) => {
                   slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+                  atMenu.sync(event.currentTarget.value, event.currentTarget.selectionStart);
                 }}
                 onSelect={(event) => {
                   slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+                  atMenu.sync(event.currentTarget.value, event.currentTarget.selectionStart);
                 }}
                 onKeyDown={handleKeyDown}
                 placeholder={presentation.composerPlaceholder}

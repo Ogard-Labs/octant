@@ -734,7 +734,9 @@ describe("Pi provider driver", () => {
     ["1.1.0", "supported"],
     ["0.80.10", "unsupported"],
     ["1.0.4", "unsupported"],
-    ["1.1.1", "unsupported"],
+    ["1.1.1", "supported"],
+    ["1.3.0", "supported"],
+    ["not-a-version", "unsupported"],
   ] as const)("reports app-managed tools for Pi %s as %s", async (version, expected) => {
     const { driver } = fixture(version);
     const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
@@ -742,11 +744,11 @@ describe("Pi provider driver", () => {
     expect(result.capabilities.appManagedTools).toBe(expected);
   });
 
-  it("starts an app-managed session on a verified Pi release and refuses it on a neighbouring one", async () => {
+  it("starts an app-managed session on a Pi release at or above the verified floor and refuses it below the verified floor", async () => {
     const tools = [{ name: "octant_browser", inputSchema: { type: "object", properties: {} } }];
     for (const [version, accepted] of [
-      ["1.1.0", true],
-      ["1.1.1", false],
+      ["1.3.0", true],
+      ["1.0.4", false],
     ] as const) {
       const { driver } = fixture(version);
       const scope = await Effect.runPromise(Scope.make());

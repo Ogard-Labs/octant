@@ -43,7 +43,7 @@ import {
   ProviderClientFailure,
   type ProviderClient,
 } from "@octant/client-runtime/provider-client";
-import { isAcpAgentInstance } from "@octant/domain";
+import { isAcpAgentInstance, providerLatestVersionNpmPackage } from "@octant/domain";
 import { parseClaudeAccountAccent } from "./configuration/claudeAccountValues";
 import { runProviderOAuthCommand } from "./providerOAuthClient";
 import type { ProviderOAuthCommand } from "./ProviderOAuthSignIn";
@@ -186,6 +186,10 @@ export function useProviderController(options: ProviderControllerOptions) {
   const credentialCleanupRequired = useRef<Set<ProviderInstanceId>>(new Set());
   const credentialStatusUnconfirmed = useRef<Set<ProviderInstanceId>>(new Set());
   const [snapshot, setSnapshot] = useState<ProviderRegistrySnapshot>();
+  const [latestVersions, setLatestVersions] = useState<ReadonlyMap<ProviderInstanceId, string>>(
+    new Map(),
+  );
+  const latestVersionChecked = useRef(new Set<ProviderInstanceId>());
   const [observedSnapshot, setObservedSnapshot] = useState<
     ReadonlyMap<ProviderInstanceId, ProviderObservedState>
   >(new Map());
@@ -345,6 +349,39 @@ export function useProviderController(options: ProviderControllerOptions) {
       mounted.current = false;
     };
   }, [load]);
+
+  // Read-only "newest release" lookup, asked for by the Providers settings page
+  // and never at startup or discovery. Once per instance per session; the host
+  // caches the answer for a day and answers nothing when offline, so a miss is
+  // silent.
+  const checkLatestVersions = useCallback(() => {
+    const current = authoritative.current;
+    if (client === undefined || current === undefined) return;
+    for (const instance of current.instances) {
+      if (
+        !instance.enabled ||
+        providerLatestVersionNpmPackage(instance.driverKind) === undefined ||
+        latestVersionChecked.current.has(instance.id)
+      ) {
+        continue;
+      }
+      latestVersionChecked.current.add(instance.id);
+      void client
+        .execute({ kind: "check-provider-latest-version", instanceId: instance.id })
+        .then((result) => {
+          if (
+            result.kind !== "provider-latest-version" ||
+            result.latestVersion === undefined ||
+            !mounted.current
+          ) {
+            return;
+          }
+          const latestVersion = result.latestVersion;
+          setLatestVersions((versions) => new Map(versions).set(instance.id, latestVersion));
+        })
+        .catch(() => undefined);
+    }
+  }, [client]);
 
   const recoverRegistryFailure = useCallback(
     async (error: unknown, fixedMessage?: string) => {
@@ -2428,6 +2465,8 @@ export function useProviderController(options: ProviderControllerOptions) {
     busy,
     probingIds,
     updatingIds,
+    latestVersions,
+    checkLatestVersions,
     credentialManagementAvailable: hostBridge !== undefined,
     ...(message === undefined ? {} : { message }),
     retry: load,

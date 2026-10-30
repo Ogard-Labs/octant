@@ -20,6 +20,7 @@ import {
   useComposerSlashCommands,
   ComposerSlashTypeahead,
 } from "../../composer/useComposerSlashCommands";
+import { ComposerAtTypeahead, useComposerAtMenu } from "../../composer/useComposerAtMenu";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import type {
   ProviderInstanceId,
@@ -170,7 +171,13 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     textarea: () => textareaRef.current,
     draft: prompt,
     onDraftChange: setPrompt,
+  });
+  const atMenu = useComposerAtMenu({
+    textarea: () => textareaRef.current,
+    draft: prompt,
+    onDraftChange: setPrompt,
     onResolveExtensionReference: extensionDraft.resolveReference,
+    apps: [{ kind: "computer", controller: computer }],
   });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const appliedPromptRevision = useRef<number | undefined>(undefined);
@@ -238,7 +245,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
   // A send refused before the host saw it explains itself beside the composer,
   // since no thread exists to carry a reason.
   const [sendNotice, setSendNotice] = useState<string>();
-  const canSubmit = trimmed.length > 0 && !props.creating && !submitting && !slash.resolving;
+  const canSubmit = trimmed.length > 0 && !props.creating && !submitting && !atMenu.resolving;
 
   useEffect(() => {
     if (props.projectId !== undefined) setProjectRequired(false);
@@ -323,6 +330,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (atMenu.handleKeyDown(event)) return;
     if (computer.handleKeyDown(event)) return;
     if (slash.handleKeyDown(event)) return;
     if (mention.handleKeyDown(event)) return;
@@ -442,16 +450,24 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
               <OctantTextarea
                 aria-label="First message"
                 aria-autocomplete="list"
-                aria-expanded={computer.open || slash.open}
+                aria-expanded={atMenu.open || computer.open || slash.open}
                 aria-controls={
-                  computer.open ? computer.listId : slash.open ? slash.listId : undefined
+                  atMenu.open
+                    ? atMenu.listId
+                    : computer.open
+                      ? computer.listId
+                      : slash.open
+                        ? slash.listId
+                        : undefined
                 }
                 aria-activedescendant={
-                  computer.open
-                    ? `${computer.listId}-computer`
-                    : slash.active === undefined
-                      ? undefined
-                      : `${slash.listId}-${slash.active.id}`
+                  atMenu.active !== undefined
+                    ? `${atMenu.listId}-${atMenu.active.id}`
+                    : computer.open
+                      ? `${computer.listId}-computer`
+                      : slash.active === undefined
+                        ? undefined
+                        : `${slash.listId}-${slash.active.id}`
                 }
                 autoFocus
                 className="composer-input"
@@ -460,11 +476,13 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                   setPrompt(event.target.value);
                   computer.sync(event.target.value, event.currentTarget.selectionStart);
                   slash.sync(event.target.value, event.currentTarget.selectionStart);
+                  atMenu.sync(event.target.value, event.currentTarget.selectionStart);
                   mention.sync(event.target.value, event.currentTarget.selectionStart);
                 }}
                 onClick={(event) => {
                   mention.sync(event.currentTarget.value, event.currentTarget.selectionStart);
                   slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+                  atMenu.sync(event.currentTarget.value, event.currentTarget.selectionStart);
                 }}
                 ref={textareaRef}
                 onDragOver={(event) => event.preventDefault()}
@@ -479,7 +497,9 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
               />
             }
             typeahead={
-              computer.open ? (
+              atMenu.open ? (
+                <ComposerAtTypeahead controller={atMenu} />
+              ) : computer.open ? (
                 <ComputerUseMention controller={computer} surface="typeahead" />
               ) : slash.open ? (
                 <ComposerSlashTypeahead controller={slash} />

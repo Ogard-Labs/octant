@@ -283,6 +283,16 @@ the package. Turn marketplace fetches off in
 catalog search stays with the in-memory curated entries. Details live under
 [Plugins and skills](/advanced/plugins-and-skills#what-a-marketplace-fetch-discloses).
 
+### Provider update checks
+
+Providers settings reads the newest published version of Codex, Claude Code,
+Grok Build, GitHub Copilot and Cline from the npm registry, at most once a day
+per tool. The request is a plain `GET` for the package name; it carries no
+thread, Project, account or device identifier, and discloses only your IP address
+and ordinary HTTP metadata. It follows the marketplace fetches switch: off means
+no request is made. Octant runs a tool's own updater only when you click
+**Update CLI**.
+
 ## Boundaries
 
 There is no app-level database encryption in the current preview; Octant

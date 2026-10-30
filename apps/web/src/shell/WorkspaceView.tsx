@@ -242,6 +242,7 @@ export interface WorkspaceViewProps {
     prompt?: string,
     modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
     paneId?: PaneId,
+    extensionSelections?: ReadonlyArray<import("@octant/contracts/extensions").ExtensionSelection>,
   ) => void;
   readonly onCreateChatProjectThread?: (
     projectId: ProjectId,
@@ -2260,8 +2261,15 @@ function renderNonCodeTab(
           {...(props.chatWelcomeCreating === undefined
             ? {}
             : { creating: props.chatWelcomeCreating })}
-          onCreateChat={(prompt, modelOptionValues) => {
-            props.onCreateChat(prompt, modelOptionValues, paneId);
+          {...(props.extensionClient === undefined
+            ? {}
+            : { extensionClient: props.extensionClient })}
+          onCreateChat={(prompt, modelOptionValues, extensionSelections) => {
+            if (extensionSelections === undefined) {
+              props.onCreateChat(prompt, modelOptionValues, paneId);
+            } else {
+              props.onCreateChat(prompt, modelOptionValues, paneId, extensionSelections);
+            }
           }}
           providerGroups={props.draftProviderGroups ?? []}
           {...(props.draftSelectedProviderInstanceId === undefined

@@ -129,6 +129,7 @@ import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
 } from "../composer/useComposerSlashCommands";
+import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerAtMenu";
 import { useComposerSuggestionInput } from "../composer/useComposerSuggestionInput";
 import {
   unattachedCapabilityMentionCopy,
@@ -338,7 +339,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       setDraft(next);
       props.controller.setPendingDraft?.(next);
     },
-    onResolveExtensionReference: extensionDraft.resolveReference,
   });
   const activeThreadKeyRef = useRef(String(props.threadId));
   activeThreadKeyRef.current = String(props.threadId);
@@ -549,6 +549,22 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   });
   const pathMentionListId = `code-path-mentions-${String(props.threadId)}`;
   const pathMentionOpen = pathMentions.open && !mention.open;
+  const atMenu = useComposerAtMenu({
+    textarea: () => textareaRef.current,
+    draft,
+    onDraftChange: (next) => {
+      draftRevisionRef.current += 1;
+      setDraft(next);
+      props.controller.setPendingDraft?.(next);
+    },
+    onResolveExtensionReference: extensionDraft.resolveReference,
+    apps: [{ kind: "computer", controller: computer }],
+    files: {
+      open: pathMentionOpen,
+      candidates: pathMentions.candidates,
+      choose: pathMentions.choose,
+    },
+  });
   const peekAbandoned = attachments.peekAbandoned;
   const markDraftStagedDropped = props.controller.markDraftStagedDropped;
   useEffect(() => {
@@ -588,6 +604,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   function syncMentions(value: string, caret: number | null) {
     computer.sync(value, caret);
     slash.sync(value, caret);
+    atMenu.sync(value, caret);
     mention.sync(value, caret);
     pathMentions.sync(value, caret);
   }
@@ -704,7 +721,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     trimmed.length > 0 &&
     !compacting &&
     !attachments.busy &&
-    !slash.resolving &&
+    !atMenu.resolving &&
     !queuePreparing &&
     !messageQueue.busy &&
     !messageQueue.uncertain &&
@@ -963,6 +980,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (suggestionInput.takeOnTab(event)) return;
+    if (atMenu.handleKeyDown(event)) return;
     if (computer.handleKeyDown(event)) return;
     if (slash.handleKeyDown(event)) return;
     if (mention.handleKeyDown(event)) return;
@@ -1957,29 +1975,35 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         input={
           <OctantTextarea
             aria-activedescendant={
-              computer.open
-                ? `${computer.listId}-computer`
-                : slash.active !== undefined
-                  ? `${slash.listId}-${slash.active.id}`
-                  : mention.activeCandidate !== undefined
-                    ? `${mentionListId}-${String(mention.activeCandidate.threadId)}`
-                    : pathMentionOpen && pathMentions.activeCandidate !== undefined
-                      ? `${pathMentionListId}-${pathMentions.activeCandidate.path}`
-                      : undefined
+              atMenu.active !== undefined
+                ? `${atMenu.listId}-${atMenu.active.id}`
+                : computer.open
+                  ? `${computer.listId}-computer`
+                  : slash.active !== undefined
+                    ? `${slash.listId}-${slash.active.id}`
+                    : mention.activeCandidate !== undefined
+                      ? `${mentionListId}-${String(mention.activeCandidate.threadId)}`
+                      : pathMentionOpen && pathMentions.activeCandidate !== undefined
+                        ? `${pathMentionListId}-${pathMentions.activeCandidate.path}`
+                        : undefined
             }
             aria-autocomplete="list"
             aria-controls={
-              computer.open
-                ? computer.listId
-                : slash.open
-                  ? slash.listId
-                  : mention.open
-                    ? mentionListId
-                    : pathMentionOpen
-                      ? pathMentionListId
-                      : undefined
+              atMenu.open
+                ? atMenu.listId
+                : computer.open
+                  ? computer.listId
+                  : slash.open
+                    ? slash.listId
+                    : mention.open
+                      ? mentionListId
+                      : pathMentionOpen
+                        ? pathMentionListId
+                        : undefined
             }
-            aria-expanded={computer.open || slash.open || mention.open || pathMentionOpen}
+            aria-expanded={
+              atMenu.open || computer.open || slash.open || mention.open || pathMentionOpen
+            }
             className="composer-input window-no-drag"
             id={`code-thread-composer-${String(thread.id)}`}
             onChange={(event) => {
@@ -2025,7 +2049,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           />
         }
         typeahead={
-          computer.open ? (
+          atMenu.open ? (
+            <ComposerAtTypeahead controller={atMenu} />
+          ) : computer.open ? (
             <ComputerUseMention controller={computer} surface="typeahead" />
           ) : slash.open ? (
             <ComposerSlashTypeahead controller={slash} />
