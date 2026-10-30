@@ -402,6 +402,7 @@ export function wireAutomation(deps: AutomationDependencies) {
     historyAvailable: () => automationHistoryAvailable,
   });
   return {
+    automationCommandService,
     automationNotificationRoutes,
     automationRoutes,
     automationScheduler,

@@ -181,3 +181,11 @@ export {
   type ApiKeySummary,
   type KeyRejection,
 } from "./apiKeyPool";
+export {
+  createReleaseFeedVerifier,
+  RELEASE_PREVIEW_PUBLIC_KEY,
+  RELEASE_STABLE_PUBLIC_KEY,
+  RELEASE_TRUSTED_KEYS,
+  type ReleaseFeedVerifier,
+  type ReleaseRing,
+} from "./updateReleaseKeys";

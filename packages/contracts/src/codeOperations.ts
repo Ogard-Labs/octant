@@ -7,7 +7,7 @@ import { Schema } from "effect";
 import { AgentRunResultDeliveryMark, MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS } from "./agentRun";
 import { ExtensionSelection } from "./extensions";
 import { ComputerUseDestinationSelection } from "./desktopLease";
-import { AppleActionRequest, AppleDeviceRequest } from "./appleToolchain";
+import { AppleActionRequest } from "./appleToolchain";
 import { AndroidEmulatorRequest } from "./androidToolchain";
 import {
   CodeAttachmentId,
@@ -1293,11 +1293,10 @@ const ApprovalEvent = Schema.Struct({
   ),
   summary: CodeApprovalSummaryText,
   /**
-   * Set when only a person at a window on the host's own computer may answer:
-   * the host refuses anyone else's answer and the request keeps waiting. A
-   * paired client shows such a card without answer controls instead of
-   * offering an answer that settles nothing. Absent on every other approval,
-   * and on any journaled before the host recorded the mark.
+   * Legacy mark from approvals for physical-device and distribution effects,
+   * which no longer exist. Nothing sets or reads it now. It stays in the schema
+   * because the event schema is strict and an older journal may hold it, and a
+   * decode failure would quarantine that thread on replay.
    */
   localPersonOnly: Schema.optional(Schema.Literal(true)),
 }).annotations({ ...strict, ...personDecides });
@@ -2360,14 +2359,6 @@ const APPROVAL_GATED_OPERATION_KINDS = new Set([
   "update-review-finding",
 ]);
 
-const APPROVAL_GATED_DEVICE_KINDS: ReadonlySet<string> = new Set([
-  "build",
-  "run",
-  "install",
-  "launch",
-  "terminate",
-]);
-
 export const CodeApprovalEffect = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("operation"),
@@ -2382,37 +2373,6 @@ export const CodeApprovalEffect = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("android-action"),
     request: AndroidEmulatorRequest,
-  }).annotations(strict),
-  // Starting or moving a physical device's lease asks a person at the Mac
-  // under every posture.
-  Schema.Struct({
-    kind: Schema.Literal("apple-device-lease"),
-    request: AppleDeviceRequest.pipe(Schema.filter((request) => request.kind === "use-device")),
-  }).annotations(strict),
-  // A device effect inside a lease follows the thread's posture, one approval
-  // per request. Reads need none, and uninstall and distribution are a local
-  // person's confirmation, not an approval of this kind.
-  Schema.Struct({
-    kind: Schema.Literal("apple-device-action"),
-    request: AppleDeviceRequest.pipe(
-      Schema.filter((request) => APPROVAL_GATED_DEVICE_KINDS.has(request.kind)),
-    ),
-  }).annotations(strict),
-  // An upload of exactly the confirmed build to App Store Connect asks a
-  // person at the Mac under every posture; Plan refuses it before asking.
-  Schema.Struct({
-    kind: Schema.Literal("apple-distribution-upload"),
-    request: AppleDeviceRequest.pipe(Schema.filter((request) => request.kind === "upload")),
-  }).annotations(strict),
-  // Submitting exactly the confirmed version for App Review, or releasing it,
-  // asks a person at the Mac under every posture; Plan refuses it before asking.
-  Schema.Struct({
-    kind: Schema.Literal("apple-distribution-version"),
-    request: AppleDeviceRequest.pipe(
-      Schema.filter(
-        (request) => request.kind === "submit-for-review" || request.kind === "release-version",
-      ),
-    ),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("create-thread-full-access"),

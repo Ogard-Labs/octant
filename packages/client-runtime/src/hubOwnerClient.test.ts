@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   OWNER_IDENTITY_KEY_HEADER,
+  OWNER_SESSION_HEADER,
   OWNER_UNLOCK_HEADER,
   decodeNewMemberConfirmation,
+  decodeOwnerPostureChangeRequest,
   type HubMemberId,
   type NewMemberAlert,
   type NewMemberAlertId,
@@ -11,6 +13,7 @@ import { newMemberConfirmationSigningPayload, ownerUnlockSigningPayload } from "
 import type { PinnedListenerTransportPort } from "./appPairingCode";
 import { base64UrlDecode, base64UrlEncode, hex, sha256 } from "./hubLinkSigning";
 import {
+  copyApiKeySignIn,
   createOwnerClient,
   describeOwnerRefusal,
   type OwnerUnlockSigner,
@@ -479,5 +482,226 @@ describe("owner client", () => {
     });
 
     expect(await client.dismissAlert(ALERT_ID)).toEqual({ status: "unreachable" });
+  });
+});
+
+/** A host that answers every action itself and issues a challenge for each unlock, without checking signatures. */
+function scriptedHost(answer: (request: Recorded) => Response | undefined) {
+  const requests: Recorded[] = [];
+  const transport: PinnedListenerTransportPort = () => ({
+    status: "available",
+    fetch: (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const request: Recorded = {
+        path: url.pathname,
+        method: init?.method ?? "GET",
+        body: typeof init?.body === "string" ? init.body : "",
+        headers: new Headers(init?.headers),
+      };
+      requests.push(request);
+      if (url.pathname === "/api/hub/owner/challenge") {
+        return Response.json({
+          challenge: {
+            challengeId: crypto.randomUUID(),
+            nonce: "nonce",
+            expiresAt: 1_900_000_000_000,
+          },
+        });
+      }
+      return answer(request) ?? Response.json({ status: "done" });
+    }) as typeof globalThis.fetch,
+  });
+  return { transport, requests };
+}
+
+function clientFor(transport: PinnedListenerTransportPort, unlock: OwnerUnlockSigner) {
+  return createOwnerClient({
+    target: { memberId: HOST_ID, origin: "https://100.64.0.2:13774", pin: "sha256-AAAA" },
+    identity: { memberId: OWNER_ID, publicKey: "AAAA", sign: async () => "AA" },
+    unlock,
+    transport,
+    now: () => Date.parse("2026-10-29T10:00:30.000Z"),
+  });
+}
+
+const SESSION_ID = "c2Vzc2lvbi1pZC1zZWNyZXQ";
+const SESSION_ENDS = Date.parse("2026-10-29T10:05:00.000Z");
+const openedSession = (expiresAt: number) =>
+  Response.json({ status: "opened", session: { sessionId: SESSION_ID, expiresAt } });
+const postureRequest = (posture: "plan" | "full-access") =>
+  decodeOwnerPostureChangeRequest({
+    subject: { kind: "code-thread", threadId: "77777777-7777-4777-8777-777777777777" },
+    posture,
+    persistence: "current-session",
+  });
+
+describe("owner client unlock session", () => {
+  it("unlocks once for a session and then sends administration changes without asking again", async () => {
+    const unlock = await rawSigner(await p256());
+    const host = scriptedHost((request) =>
+      request.path === "/api/hub/owner/session" ? openedSession(SESSION_ENDS) : undefined,
+    );
+    const client = clientFor(host.transport, unlock.signer);
+
+    const opened = await client.openSession();
+    const dismissed = await client.dismissAlert(ALERT_ID);
+    const confirmed = await client.setConfirmNewMembers(true);
+
+    expect(opened).toEqual({ status: "done", body: { expiresAt: SESSION_ENDS } });
+    expect(dismissed.status).toBe("done");
+    expect(confirmed.status).toBe("done");
+    expect(unlock.sessions.opened).toBe(1);
+    const actions = host.requests.filter(
+      (request) =>
+        request.path.endsWith("/dismiss") || request.path.endsWith("/confirm-new-members"),
+    );
+    expect(actions).toHaveLength(2);
+    for (const action of actions) {
+      expect(action.headers.get(OWNER_SESSION_HEADER)).toBe(SESSION_ID);
+      expect(action.headers.get(OWNER_UNLOCK_HEADER)).toBeNull();
+    }
+    expect(client.hasSession()).toBe(true);
+  });
+
+  it("asks for its own unlock for Full access even while a session is open", async () => {
+    const unlock = await rawSigner(await p256());
+    const host = scriptedHost((request) =>
+      request.path === "/api/hub/owner/session" ? openedSession(SESSION_ENDS) : undefined,
+    );
+    const client = clientFor(host.transport, unlock.signer);
+    await client.openSession();
+
+    await client.changePosture(postureRequest("plan"));
+    expect(unlock.sessions.opened).toBe(1);
+    await client.changePosture(postureRequest("full-access"));
+
+    expect(unlock.sessions.opened).toBe(2);
+    const changes = host.requests.filter(
+      (request) => request.path === "/api/hub/owner/posture/change",
+    );
+    expect(changes[0]?.headers.get(OWNER_SESSION_HEADER)).toBe(SESSION_ID);
+    expect(changes[1]?.headers.get(OWNER_SESSION_HEADER)).toBeNull();
+    expect(changes[1]?.headers.get(OWNER_UNLOCK_HEADER)).not.toBeNull();
+  });
+
+  it("falls back to a fresh unlock when the host ended the session, and forgets it", async () => {
+    const unlock = await rawSigner(await p256());
+    const host = scriptedHost((request) => {
+      if (request.path === "/api/hub/owner/session") return openedSession(SESSION_ENDS);
+      if (request.headers.get(OWNER_SESSION_HEADER) !== null) {
+        return Response.json({ status: "refused", kind: "session-expired" }, { status: 403 });
+      }
+      return undefined;
+    });
+    const client = clientFor(host.transport, unlock.signer);
+    await client.openSession();
+
+    const result = await client.dismissAlert(ALERT_ID);
+
+    expect(result.status).toBe("done");
+    expect(unlock.sessions.opened).toBe(2);
+    expect(client.hasSession()).toBe(false);
+  });
+
+  it("does not use a session past its time, and endSession forgets one", async () => {
+    const unlock = await rawSigner(await p256());
+    const host = scriptedHost((request) =>
+      request.path === "/api/hub/owner/session"
+        ? openedSession(Date.parse("2026-10-29T10:00:10.000Z"))
+        : undefined,
+    );
+    const client = clientFor(host.transport, unlock.signer);
+    await client.openSession();
+    expect(client.hasSession()).toBe(false);
+
+    await client.dismissAlert(ALERT_ID);
+    expect(unlock.sessions.opened).toBe(2);
+
+    const lasting = scriptedHost((request) =>
+      request.path === "/api/hub/owner/session" ? openedSession(SESSION_ENDS) : undefined,
+    );
+    const another = clientFor(lasting.transport, unlock.signer);
+    await another.openSession();
+    another.endSession();
+    expect(another.hasSession()).toBe(false);
+  });
+});
+
+describe("copying an API-key sign-in between two hosts", () => {
+  const SOURCE = "00000000-0000-4000-8000-0000000000a1";
+  const TARGET = "00000000-0000-4000-8000-0000000000b2";
+  const TICKET = "66666666-6666-4666-8666-666666666666";
+
+  it("unlocks on the receiving host first, then the sending host, and carries only the ticket", async () => {
+    const targetUnlock = await rawSigner(await p256());
+    const sourceUnlock = await rawSigner(await p256());
+    const order: string[] = [];
+    const target = scriptedHost((request) => {
+      order.push(`target ${request.path}`);
+      return request.path === "/api/hub/owner/credentials/receive"
+        ? Response.json({ status: "issued", ticketId: TICKET, expiresAt: 1 })
+        : undefined;
+    });
+    const source = scriptedHost((request) => {
+      order.push(`source ${request.path}`);
+      return request.path === "/api/hub/owner/credentials/copy"
+        ? Response.json({ status: "copied" })
+        : undefined;
+    });
+
+    const result = await copyApiKeySignIn({
+      target: clientFor(target.transport, targetUnlock.signer),
+      source: clientFor(source.transport, sourceUnlock.signer),
+      sourceMemberId: SOURCE,
+      targetMemberId: TARGET,
+      sourceCredentialName: "provider-1",
+      targetCredentialName: "provider-9",
+    });
+
+    expect(result).toEqual({ status: "done", body: { status: "copied" } });
+    expect(order.filter((line) => line.includes("/credentials/"))).toEqual([
+      "target /api/hub/owner/credentials/receive",
+      "source /api/hub/owner/credentials/copy",
+    ]);
+    expect(targetUnlock.sessions.opened).toBe(1);
+    expect(sourceUnlock.sessions.opened).toBe(1);
+    const sent = source.requests.find((request) => request.path.endsWith("/credentials/copy"));
+    expect(JSON.parse(sent?.body ?? "")).toEqual({
+      targetMemberId: TARGET,
+      sourceCredentialName: "provider-1",
+      ticketId: TICKET,
+    });
+    const asked = target.requests.find((request) => request.path.endsWith("/credentials/receive"));
+    expect(JSON.parse(asked?.body ?? "")).toEqual({
+      sourceMemberId: SOURCE,
+      targetCredentialName: "provider-9",
+    });
+  });
+
+  it("stops at the receiving host when it refuses, without unlocking on the sending one", async () => {
+    const targetUnlock = await rawSigner(await p256());
+    const sourceUnlock = await rawSigner(await p256());
+    const target = scriptedHost(() =>
+      Response.json({ status: "refused", kind: "not-a-spoke-member" }, { status: 409 }),
+    );
+    const source = scriptedHost(() => undefined);
+
+    const result = await copyApiKeySignIn({
+      target: clientFor(target.transport, targetUnlock.signer),
+      source: clientFor(source.transport, sourceUnlock.signer),
+      sourceMemberId: SOURCE,
+      targetMemberId: TARGET,
+      sourceCredentialName: "provider-1",
+      targetCredentialName: "provider-9",
+    });
+
+    expect(result).toEqual({ status: "refused", kind: "not-a-spoke-member" });
+    expect(sourceUnlock.sessions.opened).toBe(0);
+  });
+
+  it("explains a subscription sign-in in plain words", () => {
+    expect(describeOwnerRefusal("subscription-sign-in")).toBe(
+      "Subscription sign-ins stay on the computer that holds them. Only API keys copy.",
+    );
   });
 });

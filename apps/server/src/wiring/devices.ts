@@ -2,20 +2,16 @@ import {
   type AndroidEmulatorRequest,
   type AndroidRpcEnvelope,
   type AppleActionRequest,
-  type AppleDeviceRequest,
   type AppleRpcEnvelope,
   type AppleSimulatorId,
-  type CodeThread,
   decodeCodeCheckoutId,
   decodeCodeRelativePath,
   decodeCodeThreadId,
   LOCAL_TOOL_HOST_ID,
-  THREAD_RETENTION_EVENT_NAMES,
   type WindowId,
 } from "@octant/contracts";
 import { createHash, randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
@@ -23,17 +19,6 @@ import type { PersistenceService } from "../persistence/persistenceService";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { ValidationEventStore } from "../validation/validationEventStore";
 import { AppleRuntimeStore } from "../apple/appleRuntimeStore";
-import { AppleDeviceService, type AppleDeviceExecutionContext } from "../apple/appleDeviceService";
-import { AppleDistributionUpload } from "../apple/appleDistributionUpload";
-import { AppleStoreVersions } from "../apple/appleStoreVersions";
-import { createAppStoreConnectApi } from "../apple/appStoreConnectClient";
-import { APP_STORE_CONNECT_KEY_REF } from "../apple/appStoreConnectKeyRoutes";
-import {
-  makeAppStoreConnectKeyFileBrokerClient,
-  makeAppStoreConnectTokenBrokerClient,
-} from "../providers/credentialBrokerClient";
-import { createAppleDeviceRouteHandler } from "../appleDeviceRoutes";
-import type { ClientPrincipal } from "../clientPrincipal";
 import {
   APPLE_TOOLCHAIN_HOST_READ_PATHS,
   type AppleExecutionContext,
@@ -131,148 +116,20 @@ export interface DeviceApprovalChecks {
     windowId: WindowId,
     request: AndroidEmulatorRequest,
   ) => Promise<boolean> | undefined;
-  /** Whether a person at this window confirmed exactly this device lease. */
-  readonly validateAppleDeviceLease: (
-    windowId: WindowId,
-    request: AppleDeviceRequest,
-  ) => Promise<boolean> | undefined;
-  /** Whether this window holds the one-use approval of exactly this device effect. */
-  readonly validateAppleDeviceAction: (
-    windowId: WindowId,
-    request: AppleDeviceRequest,
-  ) => Promise<boolean> | undefined;
-  /** Whether a person at this window confirmed exactly this upload. */
-  readonly validateAppleDistributionUpload: (
-    windowId: WindowId,
-    request: AppleDeviceRequest,
-  ) => Promise<boolean> | undefined;
-  /** Whether a person at this window confirmed exactly this submission or release. */
-  readonly validateAppleDistributionVersion: (
-    windowId: WindowId,
-    request: AppleDeviceRequest,
-  ) => Promise<boolean> | undefined;
-}
-
-// Device effects a thread's posture decides, one approval per request.
-const APPLE_DEVICE_EFFECT_KINDS: ReadonlySet<AppleDeviceRequest["kind"]> = new Set([
-  "build",
-  "run",
-  "install",
-  "launch",
-  "terminate",
-]);
-
-/**
- * The context a physical device request acts under, for a pane click through
- * the device route and for the thread's agent through `octant_apple`.
- *
- * A lease start counts only when a person at a local window answered its
- * confirmation: the host's confirmations are shown by the desktop app, never
- * to a paired device. A device effect follows the thread's posture like a
- * Simulator effect: Full access runs it, approval-gated postures need this
- * window's one-use approval of exactly this request, and Plan is refused by
- * the device policy.
- *
- * The agent's requests come from no window principal, so a receipt counts
- * only because the Code runtime mints one for a device lease or effect after
- * a person at a window on this Mac answered it in the thread; a paired
- * device's answer mints nothing.
- */
-export function createAppleDeviceScopes(deps: {
-  readonly resolveThread: (
-    windowId: WindowId,
-    request: AppleDeviceRequest,
-  ) => Promise<
-    | {
-        readonly thread: CodeThread;
-        readonly checkout: { readonly id: CodeThread["checkoutId"] };
-        readonly rootPath: string;
-      }
-    | undefined
-  >;
-  readonly effectiveThread: (windowId: WindowId, thread: CodeThread) => CodeThread;
-  readonly approvals: Pick<
-    DeviceApprovalChecks,
-    | "validateAppleDeviceLease"
-    | "validateAppleDeviceAction"
-    | "validateAppleDistributionUpload"
-    | "validateAppleDistributionVersion"
-  >;
-}) {
-  const { approvals } = deps;
-  const resolveAppleDeviceContext = async (
-    windowId: WindowId,
-    request: AppleDeviceRequest,
-    mayCarryReceipt: boolean,
-  ): Promise<AppleDeviceExecutionContext | undefined> => {
-    const resolved = await deps.resolveThread(windowId, request);
-    if (resolved === undefined) return undefined;
-    const effectiveThread = deps.effectiveThread(windowId, resolved.thread);
-    // A lease start and a distribution step count only as a person's
-    // confirmation, which a receipt minted for a window on this Mac carries.
-    const confirmed =
-      request.approval.kind === "approved" &&
-      mayCarryReceipt &&
-      ((request.kind === "use-device" &&
-        ((await approvals.validateAppleDeviceLease(windowId, request)) ?? false)) ||
-        (request.kind === "upload" &&
-          ((await approvals.validateAppleDistributionUpload(windowId, request)) ?? false)) ||
-        ((request.kind === "submit-for-review" || request.kind === "release-version") &&
-          ((await approvals.validateAppleDistributionVersion(windowId, request)) ?? false)));
-    const effectApproved =
-      APPLE_DEVICE_EFFECT_KINDS.has(request.kind) &&
-      mayCarryReceipt &&
-      (effectiveThread.executionPolicy === "full-access" ||
-        (decidesCodeEffectsByApproval(effectiveThread.executionPolicy) &&
-          request.approval.kind === "approved" &&
-          ((await approvals.validateAppleDeviceAction(windowId, request)) ?? false)));
-    return {
-      authority: request.authority,
-      threadId: resolved.thread.id,
-      checkoutId: resolved.checkout.id,
-      checkoutRoot: resolved.rootPath,
-      executionPolicy: effectiveThread.executionPolicy,
-      approvalValid: confirmed || effectApproved,
-      ...(confirmed
-        ? { approvedBy: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID } as const }
-        : {}),
-    };
-  };
-  return {
-    resolveAppleDeviceScope: (
-      windowId: WindowId,
-      request: AppleDeviceRequest,
-      principal: ClientPrincipal,
-    ) => resolveAppleDeviceContext(windowId, request, principal.kind === "local-window"),
-    // The agent speaks only for itself: a request naming a person is a pane
-    // click, which comes through the route and its principal check.
-    resolveAppleDeviceAgentScope: async (windowId: WindowId, request: AppleDeviceRequest) =>
-      request.requestedBy.kind === "agent"
-        ? await resolveAppleDeviceContext(windowId, request, true)
-        : undefined,
-  };
 }
 
 export type DevicesDependencies = Pick<ServerStart, "persistence"> &
   Pick<
     AuthorityWiring,
-    | "androidInputGrants"
-    | "appleDeviceLeases"
-    | "codeSessionAuthority"
-    | "simulatorInputGrants"
-    | "windowAuthorityStore"
+    "androidInputGrants" | "codeSessionAuthority" | "simulatorInputGrants" | "windowAuthorityStore"
   > &
   Pick<WorkspaceWiring, "projectService"> &
   Pick<CodeWiring, "roots"> &
-  Pick<ProvidersWiring, "providerDataDirectory"> & {
-    /** The credential broker the App Store Connect key file is written through. */
-    readonly credentialBroker?: { readonly url: string; readonly token: string };
-  };
+  Pick<ProvidersWiring, "providerDataDirectory">;
 
 export function wireDevices(deps: DevicesDependencies) {
   const {
     androidInputGrants,
-    appleDeviceLeases,
     codeSessionAuthority,
     persistence,
     projectService,
@@ -280,7 +137,6 @@ export function wireDevices(deps: DevicesDependencies) {
     roots,
     simulatorInputGrants,
     windowAuthorityStore,
-    credentialBroker,
   } = deps;
   return Effect.gen(function* () {
     const appleRuntimeStore = new AppleRuntimeStore(join(providerDataDirectory, "apple-runtime"));
@@ -297,57 +153,15 @@ export function wireDevices(deps: DevicesDependencies) {
     // readable by an unrelated confined command (0160). Only the capture
     // launch itself carries the directory as an extra write root.
     const appleCaptureDirectory = join(providerDataDirectory, "apple-runtime", "captures");
-    // `devicectl` writes its answers here, and a device listing names every
-    // paired device's hardware identifiers, so it is private the same way.
-    const devicectlOutputDirectory = join(providerDataDirectory, "apple-runtime", "devicectl");
-    // A physical device's screen lands here before it becomes evidence; only
-    // its own capture launch may write it, as with the Simulator's captures.
-    const deviceCaptureDirectory = join(providerDataDirectory, "apple-runtime", "device-captures");
-    // The entitlements a device signature reads. Private like the others: no
-    // build, Simulator, or `devicectl` launch reaches it.
-    const appleSigningDirectory = join(providerDataDirectory, "apple-runtime", "signing");
-    // One folder per App Store upload for its archive and export, and one per
-    // upload the credential broker writes the App Store Connect key into. The
-    // key folders are denied to every Apple launch but the upload's own.
-    const appleUploadDirectory = join(
-      providerDataDirectory,
-      "apple-runtime",
-      "distribution-uploads",
-    );
-    const appleUploadKeyDirectory = join(
-      providerDataDirectory,
-      "apple-runtime",
+    // Folders the removed physical-device and distribution features left in this
+    // data directory. They may still hold device listings, entitlements, or a
+    // key file, so every Apple launch stays denied them.
+    const leftoverPrivateDirectories = [
+      "devicectl",
+      "device-captures",
+      "signing",
       "distribution-keys",
-    );
-    // The signing step runs `security` and `codesign` with no network
-    // (decision 2 of docs/design/apple-devices.md); every other Apple launch
-    // keeps the toolchain port's own egress.
-    const appleSigningProcess = new RepositoryTestProcessPort({
-      receiptDirectory: join(providerDataDirectory, "apple-runtime", "signing-receipts"),
-      literalReadPaths: APPLE_TOOLCHAIN_HOST_READ_PATHS,
-      networkEgress: "none",
-    });
-    yield* Effect.promise(() => appleSigningProcess.reconcile());
-    // A lease ends with the thread it was confirmed for: archived, purged, or
-    // bound to another checkout than the one the person saw.
-    const unsubscribeAppleDeviceLeases = persistence.journal.subscribeCommitted((append) => {
-      for (const event of append.events) {
-        if (event.eventName === "code.thread-updated@1" && event.aggregateType === "code-thread") {
-          const thread = persistence.readCodeThread(decodeCodeThreadId(event.aggregateId));
-          if (thread === undefined || thread.lifecycle !== "active") {
-            appleDeviceLeases.threadSettled(event.aggregateId, "thread-archived");
-          } else {
-            appleDeviceLeases.threadCheckout(event.aggregateId, String(thread.checkoutId));
-          }
-        } else if (event.eventName === THREAD_RETENTION_EVENT_NAMES.threadPurged) {
-          const purged = event.payload as { readonly mode?: unknown; readonly threadId?: unknown };
-          if (purged.mode === "code" && typeof purged.threadId === "string") {
-            appleDeviceLeases.threadSettled(purged.threadId, "thread-purged");
-          }
-        }
-      }
-    });
-    yield* Effect.addFinalizer(() => Effect.sync(unsubscribeAppleDeviceLeases));
+    ].map((name) => join(providerDataDirectory, "apple-runtime", name));
     const appleToolchainService = new AppleToolchainService({
       execute: (input, signal) => appleProcess.execute(input, signal),
       ...(simulatorDevice === undefined
@@ -355,12 +169,7 @@ export function wireDevices(deps: DevicesDependencies) {
         : { injectSimulatorInput: simulatorInputThroughDesktop(simulatorDevice) }),
       observeSimulators: (simulators) => simulatorInputGrants.closeUnlessBooted(simulators),
       captureDirectory: appleCaptureDirectory,
-      isolatedRoots: [
-        devicectlOutputDirectory,
-        deviceCaptureDirectory,
-        appleSigningDirectory,
-        appleUploadKeyDirectory,
-      ],
+      isolatedRoots: leftoverPrivateDirectories,
       // A host sweeps only the captures named for its own data directory, so
       // two hosts pointed at one directory never clear each other's files.
       captureOwner: createHash("sha256").update(providerDataDirectory).digest("hex").slice(0, 16),
@@ -393,11 +202,7 @@ export function wireDevices(deps: DevicesDependencies) {
       actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
     });
     const recordAppleEvidence = (
-      evidence:
-        | import("@octant/contracts").AppleBuildEvidence
-        | import("@octant/contracts").AppleDeviceEvidence
-        | import("@octant/contracts").AppleUploadEvidence
-        | import("@octant/contracts").AppleStoreVersionEvidence,
+      evidence: import("@octant/contracts").AppleBuildEvidence,
       startedAt: string,
     ) => {
       const composed = composeAppleValidationEvents({ evidence, startedAt, newId: randomUUID });
@@ -405,72 +210,6 @@ export function wireDevices(deps: DevicesDependencies) {
       appleValidationEvents.appendEvidence({ evidence: composed.record, expectedVersion: 1 });
       appleValidationEvents.appendReport({ report: composed.report, expectedVersion: 2 });
     };
-    const appleDistributionUpload = new AppleDistributionUpload({
-      execute: (input, signal) => appleProcess.execute(input, signal),
-      executeSigning: (input, signal) => appleSigningProcess.execute(input, signal),
-      // altool reaches App Store Connect under the toolchain port's egress.
-      executeUpload: (input, signal) => appleProcess.execute(input, signal),
-      keyFiles:
-        credentialBroker === undefined
-          ? undefined
-          : makeAppStoreConnectKeyFileBrokerClient(credentialBroker, APP_STORE_CONNECT_KEY_REF),
-      uploadRoot: appleUploadDirectory,
-      keyRoot: appleUploadKeyDirectory,
-      isolatedRoots: [
-        devicectlOutputDirectory,
-        deviceCaptureDirectory,
-        appleCaptureDirectory,
-        appleSigningDirectory,
-      ],
-      provisioningProfileDirectories: [
-        join(homedir(), "Library", "Developer", "Xcode", "UserData", "Provisioning Profiles"),
-        join(homedir(), "Library", "MobileDevice", "Provisioning Profiles"),
-      ],
-      realpath,
-      recordEvidence: recordAppleEvidence,
-      now: () => new Date().toISOString(),
-    });
-    // A submission for App Review or a release: App Store Connect API requests
-    // to its one recorded host, each authorized by a token the broker signs.
-    const appleStoreVersions = new AppleStoreVersions({
-      readApp: (input, context, signal) =>
-        appleDistributionUpload.readDeclaredApp(input, context, signal),
-      tokens:
-        credentialBroker === undefined
-          ? undefined
-          : makeAppStoreConnectTokenBrokerClient(credentialBroker, APP_STORE_CONNECT_KEY_REF),
-      api: createAppStoreConnectApi(),
-      recordEvidence: recordAppleEvidence,
-      now: () => new Date().toISOString(),
-    });
-    // A key file left by an upload the host did not see end is removed now.
-    yield* Effect.promise(() => appleDistributionUpload.sweepKeyFolders());
-    const appleDeviceService = new AppleDeviceService({
-      execute: (input, signal) => appleProcess.execute(input, signal),
-      executeSigning: (input, signal) => appleSigningProcess.execute(input, signal),
-      outputDirectory: devicectlOutputDirectory,
-      captureDirectory: deviceCaptureDirectory,
-      artifactRoot: appleRuntimeStore.artifactRoot,
-      signingDirectory: appleSigningDirectory,
-      // Where Xcode installs the person's provisioning profiles, the newer
-      // location first. Octant reads them and never writes there.
-      provisioningProfileDirectories: [
-        join(homedir(), "Library", "Developer", "Xcode", "UserData", "Provisioning Profiles"),
-        join(homedir(), "Library", "MobileDevice", "Provisioning Profiles"),
-      ],
-      isolatedRoots: [appleCaptureDirectory, appleUploadKeyDirectory],
-      identities: appleRuntimeStore,
-      leases: appleDeviceLeases,
-      realpath,
-      writeArtifact: (reference, bytes) => appleRuntimeStore.writeArtifact(reference, bytes),
-      readArtifact: (reference) => appleRuntimeStore.readArtifact(reference),
-      recordEvidence: recordAppleEvidence,
-      distribution: appleDistributionUpload,
-      storeVersions: appleStoreVersions,
-      now: () => new Date().toISOString(),
-      newId: randomUUID,
-    });
-    yield* Effect.addFinalizer(() => Effect.promise(() => appleDeviceService.close()));
     const androidRuntimeStore = new AndroidRuntimeStore(
       join(providerDataDirectory, "android-runtime"),
     );
@@ -505,7 +244,7 @@ export function wireDevices(deps: DevicesDependencies) {
     const bindDeviceApprovals = (approvals: DeviceApprovalChecks) => {
       const appleRootProbe = decodeCodeRelativePath("package.json");
       // The thread, checkout, and root an Apple request may act in, the same
-      // for the Simulator and for a physical device.
+      // for the Simulator.
       const resolveAppleThread = async (
         windowId: WindowId,
         scope: {
@@ -626,79 +365,6 @@ export function wireDevices(deps: DevicesDependencies) {
           ...(inputGranted ? { inputGranted } : {}),
         };
       };
-      const { resolveAppleDeviceScope, resolveAppleDeviceAgentScope } = createAppleDeviceScopes({
-        resolveThread: resolveAppleThread,
-        effectiveThread: (windowId, thread) =>
-          codeSessionAuthority.effectiveThread(windowId, thread),
-        approvals,
-      });
-      // The thread and checkout whose held screenshots and console reads a
-      // caller may read back.
-      const resolveAppleDeviceThread = async (
-        windowId: WindowId,
-        scope: Parameters<typeof resolveAppleThread>[1],
-      ) => {
-        const resolved = await resolveAppleThread(windowId, scope);
-        return resolved === undefined
-          ? undefined
-          : { threadId: resolved.thread.id, checkoutId: resolved.checkout.id };
-      };
-      // What an upload of this project would send, read in the thread's own
-      // checkout before anyone is asked to confirm it.
-      const prepareAppleUpload = async (
-        windowId: WindowId,
-        input: Parameters<typeof resolveAppleThread>[1] & {
-          readonly projectPath: string;
-          readonly scheme?: string | undefined;
-          readonly teamId: import("@octant/contracts").AppleTeamId;
-        },
-        signal?: AbortSignal,
-      ) => {
-        const resolved = await resolveAppleThread(windowId, input);
-        if (resolved === undefined || process.platform !== "darwin") return undefined;
-        return await appleDistributionUpload.prepare(
-          {
-            projectPath: input.projectPath,
-            ...(input.scheme === undefined ? {} : { scheme: input.scheme }),
-            teamId: input.teamId,
-          },
-          { checkoutRoot: resolved.rootPath },
-          signal,
-        );
-      };
-      // What App Store Connect holds for this project's version, read in the
-      // thread's own checkout before anyone is asked to submit or release it.
-      const prepareAppleStoreVersion = async (
-        windowId: WindowId,
-        input: Parameters<typeof resolveAppleThread>[1] & {
-          readonly projectPath: string;
-          readonly scheme?: string | undefined;
-        },
-        signal?: AbortSignal,
-      ) => {
-        const resolved = await resolveAppleThread(windowId, input);
-        if (resolved === undefined || process.platform !== "darwin") return undefined;
-        return await appleStoreVersions.prepare(
-          {
-            projectPath: input.projectPath,
-            ...(input.scheme === undefined ? {} : { scheme: input.scheme }),
-          },
-          { checkoutRoot: resolved.rootPath },
-          signal,
-        );
-      };
-      const appleDeviceRoutes = createAppleDeviceRouteHandler({
-        windowAuthorityStore,
-        service: appleDeviceService,
-        resolveScope: resolveAppleDeviceScope,
-        // A screenshot's pixels are read in the same thread scope, by a local
-        // window only; the route refuses every other principal first.
-        resolveThread: resolveAppleDeviceThread,
-        // The workbench's upload reads what it would send in the same thread
-        // scope, from a local window only; the route refuses anyone else first.
-        prepareUpload: prepareAppleUpload,
-        prepareStoreVersion: prepareAppleStoreVersion,
-      });
       const appleToolchainRoutes = createAppleToolchainRouteHandler({
         windowAuthorityStore,
         service: appleToolchainService,
@@ -851,14 +517,9 @@ export function wireDevices(deps: DevicesDependencies) {
       });
       return {
         androidToolchainRoutes,
-        appleDeviceRoutes,
         appleToolchainRoutes,
-        prepareAppleUpload,
-        prepareAppleStoreVersion,
         resolveAndroidContext,
         resolveAppleContext,
-        resolveAppleDeviceAgentScope,
-        resolveAppleDeviceThread,
       };
     };
     yield* Effect.promise(async () => {
@@ -874,7 +535,6 @@ export function wireDevices(deps: DevicesDependencies) {
     });
     return {
       androidToolchainService,
-      appleDeviceService,
       appleToolchainService,
       bindDeviceApprovals,
       recordAppleEvidence,

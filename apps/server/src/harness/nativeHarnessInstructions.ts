@@ -45,8 +45,7 @@ const OCTANT_TOOL_PURPOSE: Readonly<Record<string, string>> = {
   octant_agents: "start, watch, and stop helper agents that work beside you",
   octant_agent_message: "send a short message to another thread or helper agent",
   octant_android: "drive an Android emulator: boot, install, launch, tap, type, screenshot",
-  octant_apple:
-    "build, test, and run Apple apps, drive the iOS Simulator, and use a paired iPhone or iPad",
+  octant_apple: "build, test, and run Apple apps, and drive the iOS Simulator",
   octant_board: "read this Project's work board",
   octant_browser: "drive the built-in browser: open pages, read them, click, type, screenshot",
   octant_canvas: "write substantial deliverables as a Canvas document the user can open",

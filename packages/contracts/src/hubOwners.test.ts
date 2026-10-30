@@ -3,8 +3,13 @@ import { decodeAuditActingPrincipal } from "./auditEvents";
 import { decodeNewMemberConfirmation } from "./hubAndSpokes";
 import { decodeHubJoinRequest } from "./hubMembership";
 import {
+  decodeCredentialTransfer,
   decodeOwnerAdditionRequest,
+  decodeOwnerAdministrationSession,
   decodeOwnerChallengeRequest,
+  decodeOwnerCredentialCopyRequest,
+  decodeOwnerCredentialReceiveRequest,
+  decodeOwnerPostureChangeRequest,
   decodeOwnerUnlockProof,
 } from "./hubOwners";
 
@@ -127,5 +132,79 @@ describe("owner unlock contracts", () => {
       kind: "owner-unlock",
       memberId: uuid,
     });
+  });
+});
+
+describe("owner administration session, posture, and sign-in copy contracts", () => {
+  it("decodes a session and refuses a field it does not know", () => {
+    expect(decodeOwnerAdministrationSession({ sessionId: "c2Vzc2lvbg", expiresAt: 5 })).toEqual({
+      sessionId: "c2Vzc2lvbg",
+      expiresAt: 5,
+    });
+    expect(() =>
+      decodeOwnerAdministrationSession({ sessionId: "c2Vzc2lvbg", expiresAt: 5, owner: uuid }),
+    ).toThrow();
+  });
+
+  it("names a posture for a Code Project or a Code thread and refuses any other subject", () => {
+    const change = { posture: "plan", persistence: "current-session" };
+
+    expect(
+      decodeOwnerPostureChangeRequest({ ...change, subject: { kind: "project", projectId: uuid } })
+        .subject.kind,
+    ).toBe("project");
+    expect(
+      decodeOwnerPostureChangeRequest({
+        ...change,
+        subject: { kind: "code-thread", threadId: uuid },
+      }).subject.kind,
+    ).toBe("code-thread");
+    expect(() =>
+      decodeOwnerPostureChangeRequest({
+        ...change,
+        subject: { kind: "work-thread", threadId: uuid },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeOwnerPostureChangeRequest({
+        ...change,
+        posture: "root",
+        subject: { kind: "project", projectId: uuid },
+      }),
+    ).toThrow();
+  });
+
+  it("carries a sign-in by name and a ticket, and the transfer holds the value only for the receiving host", () => {
+    expect(
+      decodeOwnerCredentialCopyRequest({
+        targetMemberId: uuid,
+        sourceCredentialName: "provider-1",
+        ticketId: uuid,
+      }).sourceCredentialName,
+    ).toBe("provider-1");
+    expect(() =>
+      decodeOwnerCredentialCopyRequest({
+        targetMemberId: uuid,
+        sourceCredentialName: "provider-1",
+        ticketId: uuid,
+        value: "sk-secret",
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeOwnerCredentialReceiveRequest({
+        sourceMemberId: uuid,
+        targetCredentialName: "has space",
+      }),
+    ).toThrow();
+    expect(decodeCredentialTransfer({ ticketId: uuid, value: "sk-secret" }).value).toBe(
+      "sk-secret",
+    );
+    expect(() =>
+      decodeCredentialTransfer({
+        ticketId: uuid,
+        credentialName: "provider-1",
+        value: "sk-secret",
+      }),
+    ).toThrow();
   });
 });

@@ -19,21 +19,14 @@ import type {
 } from "@octant/contracts";
 import { MAX_BROWSER_TABS_PER_CONTEXT } from "@octant/contracts";
 import {
-  decodeAppleDeviceRequest,
   decodeAppleSimulatorId,
-  decodeAppleTeamId,
   decodeAndroidEmulatorId,
   type AppleActionRequest,
   type AppleBuildEvidence,
-  type AppleDeviceEvidence,
-  type AppleDeviceRefusalReason,
-  type AppleDeviceRequest,
-  type AppleDeviceResponse,
   type AppleDiscoveryRequest,
   type AppleRuntimeSnapshot,
   type ApplePlatform,
   type AppleSimulatorId,
-  type AppleTeamId,
   type AndroidDiscoveryRequest,
   type AndroidEmulatorEvidence,
   type AndroidEmulatorId,
@@ -48,9 +41,6 @@ import {
   isAppleSimulatorInputKind,
   isToolAllowedByAllowlist,
 } from "@octant/domain";
-import type { AppleDeviceCheck } from "../apple/appleDeviceService";
-import type { AppleUploadPreparation } from "../apple/appleDistributionUpload";
-import type { AppleStoreVersionPreparation } from "@octant/contracts/apple-toolchain-rpc";
 import type { AppleDiscoveryResult } from "../apple/appleToolchainService";
 import type { AndroidDiscoveryResult } from "../android/androidToolchainService";
 import type {
@@ -84,10 +74,6 @@ const MAX_BOARD_TOOL_CARDS = 100;
 
 /** How long one agent-driven Apple action may run before it is given up on. */
 const APPLE_BUILD_TIMEOUT_MS = 15 * 60_000;
-/** An archive of a real app, its export, and the upload itself, together. */
-const APPLE_UPLOAD_TIMEOUT_MS = 60 * 60_000;
-/** A few App Store Connect requests, and the person approving a 1Password read. */
-const APPLE_STORE_VERSION_TIMEOUT_MS = 5 * 60_000;
 const APPLE_BOOT_TIMEOUT_MS = 120_000;
 const APPLE_SIMULATOR_TIMEOUT_MS = 30_000;
 const MAX_APPLE_RESULT_DIAGNOSTICS = 16;
@@ -135,7 +121,7 @@ const terminalDefinition = {
 const appleDefinition = {
   name: CODE_APPLE_TOOL_NAME,
   description:
-    "Build, test, run, and drive Apple apps through Octant's in-app iOS Simulator pane and Apple workbench, and on paired iPhones and iPads. Begin with discover or status and reuse the returned identifiers. Show a Simulator only in that pane: never launch Simulator.app, run open -a Simulator, or start serve-sim. discover, status, screenshot, and open of a running Simulator are reads under any posture; every other operation is an effect that Plan mode refuses and an approval-gated thread runs only after the person allows it. Inspect returned evidence before claiming success. Call operation help for full usage.",
+    "Build, test, run, and drive Apple apps through Octant's in-app iOS Simulator pane and Apple workbench. Begin with discover or status and reuse the returned identifiers. Show a Simulator only in that pane: never launch Simulator.app, run open -a Simulator, or start serve-sim. discover, status, screenshot, and open of a running Simulator are reads under any posture; every other operation is an effect that Plan mode refuses and an approval-gated thread runs only after the person allows it. Inspect returned evidence before claiming success. Call operation help for full usage.",
   inputSchema: {
     type: "object",
     properties: {
@@ -155,26 +141,13 @@ const appleDefinition = {
           "swipe",
           "type-text",
           "key-press",
-          "use-device",
-          "release-device",
-          "install",
-          "launch",
-          "terminate",
-          "logs",
-          "upload",
-          "submit-for-review",
-          "release-version",
           "help",
         ],
       },
-      destination: { type: "string", enum: ["simulator", "device"] },
       projectPath: { type: "string" },
       scheme: { type: "string" },
       platform: { type: "string", enum: ["ios", "macos", "watchos", "tvos", "visionos"] },
       simulatorId: { type: "string" },
-      deviceId: { type: "string" },
-      teamId: { type: "string" },
-      product: { type: "string" },
       bundleIdentifier: { type: "string" },
       target: { type: "string" },
       x: { type: "number" },
@@ -239,7 +212,7 @@ const CODE_TOOL_HELP: Readonly<Record<string, string>> = {
   [CODE_TERMINAL_TOOL_NAME]:
     "Use Octant's terminal for this Code task: run starts a command, write supplies input to the running terminal, read checks its output, and stop terminates it. command is required for run or write. Check commandCompleted and commandExitCode; a running terminal is not proof that its command succeeded. For document artifacts, create files within the bound checkout and report their real relative paths. Octant's Files and Document tools provide host-authorized previews; never invent an artifact URL or claim a preview opened based on a write alone. Ordinary terminal permissions still apply.",
   [CODE_APPLE_TOOL_NAME]:
-    "Build, test, run, and inspect Apple apps through Octant's in-app Simulator pane and Apple workbench. Begin with discover or status and use the returned project, scheme, and destination identifiers for later operations. boot, run, and open show the selected Simulator in Octant's iOS Simulator pane — never launch Simulator.app, never run open -a Simulator, and never start serve-sim or another out-of-app simulator. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. tap takes a point (x, y) in the pixels of the latest screenshot; swipe goes from (x, y) to (toX, toY) in the same pixels, over durationMs when given — a short one flings a list, a long one drags. Use only supported operations and inspect returned build, test, or runtime evidence before claiming success. discover, status, screenshot, and open of a destination that is already running are reads; every other operation is an effect, which Plan mode refuses and an approval-gated thread runs only after the person allows it. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.\n\nPhysical iPhone or iPad: discover with destination device lists the Mac's paired devices with their deviceId, state, and whose lease each is under. use-device with deviceId asks the person at the Mac to let this thread use that device, under every posture including Full access, and returns only after they answer; a thread already holding it is not asked again. Every other device operation needs that lease: status, screenshot (returns the screen as an image), build and run (projectPath, teamId, optional scheme; signs for development with the person's own identity for that team and returns a product), install (product from this thread's build or run), launch, terminate, and logs (bundleIdentifier of the app this thread installed; logs returns the console output of the app Octant launched). release-device ends the lease. build, run, install, launch, and terminate are effects: Plan refuses them and an approval-gated thread asks the person for each. A device has no input or live view, so tap, swipe, typing, boot, and open are Simulator only. upload (projectPath, teamId, optional scheme) sends the thread's app to App Store Connect only when the person asked for it: Octant reads the exact app, version, build number, and App Store signature from the project and asks the person at the Mac to confirm that build, under every posture including Full access; Plan refuses it, and nothing is archived until they confirm. It needs no device. submit-for-review and release-version (projectPath, optional scheme) act on the App Store Connect version the project declares, only when the person asked for it: Octant reads that version, its selected build, and its state from App Store Connect, then asks the person at the Mac to confirm exactly that version under every posture including Full access; Plan refuses both, and nothing is sent until they confirm. submit-for-review needs a version whose build App Store Connect finished processing; release-version needs a version approved and waiting for a manual release, and publishes it to the App Store. Octant never writes store metadata, adds testers, or releases a version on its own. Octant never uninstalls an app or changes provisioning for the agent; a refusal names its reason, such as destination-leased, lease-required, locked, or developer-mode-off, and is not a step to work around.",
+    "Build, test, run, and inspect Apple apps through Octant's in-app Simulator pane and Apple workbench. Begin with discover or status and use the returned project, scheme, and destination identifiers for later operations. boot, run, and open show the selected Simulator in Octant's iOS Simulator pane — never launch Simulator.app, never run open -a Simulator, and never start serve-sim or another out-of-app simulator. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. tap takes a point (x, y) in the pixels of the latest screenshot; swipe goes from (x, y) to (toX, toY) in the same pixels, over durationMs when given — a short one flings a list, a long one drags. Use only supported operations and inspect returned build, test, or runtime evidence before claiming success. discover, status, screenshot, and open of a destination that is already running are reads; every other operation is an effect, which Plan mode refuses and an approval-gated thread runs only after the person allows it. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
   [CODE_ANDROID_TOOL_NAME]:
     "Boot, inspect, and drive Android emulators through Octant's in-app Android emulator pane. Begin with discover or status and use the returned AVD names for later operations. boot, open, install, and launch show the selected emulator in Octant's Android emulator pane — never start an external emulator window as the place to look. open boots the destination if it is shut down, otherwise only opens the pane. shutdown stops it; screenshot returns its current screen as an image when it fits the provider image limit. tap takes a point (x, y) in the pixels of the live screen; swipe goes from (x, y) to (toX, toY) over durationMs when given. install takes a checkout-relative APK; launch takes a package name. Use only supported operations and inspect returned evidence before claiming success. discover, status, screenshot, and open of a destination that is already running are reads; every other operation is an effect, which Plan mode refuses and an approval-gated thread runs only after the person allows it. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
 };
@@ -304,64 +277,6 @@ export interface CodeAppleToolPort extends CodeDeviceScreenshotPort {
     threadId: CodeThread["id"],
     simulatorId: AppleSimulatorId,
   ) => boolean;
-  /** The person's paired iPhones and iPads, on a host that lends a device layer. */
-  readonly devices?: CodeAppleDeviceToolPort;
-}
-
-/**
- * What the physical-device layer lends one Code thread's agent. Every request
- * is the agent's own (`requestedBy` names the agent and this thread) and the
- * host decides it with the same device policy a pane click goes through,
- * against a lease only a person at the Mac can start.
- */
-export interface CodeAppleDeviceToolPort {
-  readonly request: (
-    windowId: WindowId,
-    request: AppleDeviceRequest,
-    signal?: AbortSignal,
-  ) => Promise<AppleDeviceResponse | undefined>;
-  /** What the host would answer the request as it stands; nothing is carried out. */
-  readonly check: (
-    windowId: WindowId,
-    request: AppleDeviceRequest,
-    signal?: AbortSignal,
-  ) => Promise<AppleDeviceCheck | undefined>;
-  /** The pixels of a device screenshot this thread took, by its reference. */
-  readonly readScreenshot: CodeDeviceScreenshotPort["readScreenshot"];
-  /** The console output a `logs` read of this thread kept, by its reference. */
-  readonly readConsole: CodeDeviceScreenshotPort["readScreenshot"];
-  /**
-   * The exact build an upload of this project would send, read before anyone
-   * is asked; undefined when this host offers no upload.
-   */
-  readonly prepareUpload?: (
-    windowId: WindowId,
-    input: {
-      readonly authority: ToolActionAuthority;
-      readonly threadId: CodeThread["id"];
-      readonly checkoutId: CodeThread["checkoutId"];
-      readonly projectPath: string;
-      readonly scheme?: string;
-      readonly teamId: AppleTeamId;
-    },
-    signal?: AbortSignal,
-  ) => Promise<AppleUploadPreparation | undefined>;
-  /**
-   * What App Store Connect holds for the version this project declares, read
-   * before anyone is asked; undefined when this host offers no submission or
-   * release.
-   */
-  readonly prepareStoreVersion?: (
-    windowId: WindowId,
-    input: {
-      readonly authority: ToolActionAuthority;
-      readonly threadId: CodeThread["id"];
-      readonly checkoutId: CodeThread["checkoutId"];
-      readonly projectPath: string;
-      readonly scheme?: string;
-    },
-    signal?: AbortSignal,
-  ) => Promise<AppleStoreVersionPreparation | undefined>;
 }
 
 export interface CodeAndroidToolPort extends CodeDeviceScreenshotPort {
@@ -405,15 +320,7 @@ export interface CodeAndroidToolPort extends CodeDeviceScreenshotPort {
 /** A device effect the thread's agent asks for, exactly as it will reach the host. */
 export type CodeDeviceApprovalEffect =
   | { readonly kind: "apple-action"; readonly request: AppleActionRequest }
-  | { readonly kind: "android-action"; readonly request: AndroidEmulatorRequest }
-  /** Letting this thread use a paired device; only a person at the Mac may answer. */
-  | { readonly kind: "apple-device-lease"; readonly request: AppleDeviceRequest }
-  /** One effect on a leased device; only a person at the Mac may answer (decision 4). */
-  | { readonly kind: "apple-device-action"; readonly request: AppleDeviceRequest }
-  /** One upload of the confirmed build to App Store Connect; only a person at the Mac may answer. */
-  | { readonly kind: "apple-distribution-upload"; readonly request: AppleDeviceRequest }
-  /** One submission for App Review or one release of the confirmed version; only a person at the Mac may answer. */
-  | { readonly kind: "apple-distribution-version"; readonly request: AppleDeviceRequest };
+  | { readonly kind: "android-action"; readonly request: AndroidEmulatorRequest };
 
 export interface CodeAppManagedToolsOptions {
   readonly windowId: WindowId;
@@ -969,8 +876,6 @@ async function appleTool(
     checkoutId: options.thread.checkoutId,
   } as const;
 
-  if (targetsPhysicalDevice(input)) return appleDeviceTool(options, apple, input, scope, signal);
-
   if (input.operation === "status") {
     const snapshot = await apple.snapshot(options.windowId, scope);
     if (snapshot === undefined) return failure("apple-unavailable");
@@ -1111,616 +1016,6 @@ async function appleTool(
       : await apple.readScreenshot(options.windowId, scope, reference);
   if (signal?.aborted) return failure("tool-interrupted");
   return deviceScreenshotResult(result, bytes);
-}
-
-const APPLE_DEVICE_INSTALL_TIMEOUT_MS = 5 * 60_000;
-const APPLE_DEVICE_TIMEOUT_MS = 60_000;
-/** The most of an app's console output one `logs` result hands the provider, its latest bytes. */
-const MAX_APPLE_CONSOLE_RESULT_BYTES = 32 * 1024;
-/**
- * The most the console may weigh once it is a JSON string in the tool answer.
- * Newlines, quotes and control bytes grow when escaped, and an answer over the
- * turn-event limit is replaced whole by an error, so the console would be lost
- * rather than shortened.
- */
-const MAX_APPLE_CONSOLE_ENCODED_BYTES = 48 * 1024;
-
-type AppleDeviceOperation = Extract<
-  AppleDeviceRequest["kind"],
-  | "discover"
-  | "status"
-  | "use-device"
-  | "release-device"
-  | "screenshot"
-  | "logs"
-  | "build"
-  | "run"
-  | "install"
-  | "launch"
-  | "terminate"
->;
-
-// What the agent may ask of a physical device. Uninstall and a lease move are
-// the person's alone, and provisioning and distribution are never the agent's
-// to start, so the tool does not offer them; the host would refuse them anyway.
-const APPLE_DEVICE_OPERATIONS: ReadonlySet<string> = new Set<AppleDeviceOperation>([
-  "discover",
-  "status",
-  "use-device",
-  "release-device",
-  "screenshot",
-  "logs",
-  "build",
-  "run",
-  "install",
-  "launch",
-  "terminate",
-]);
-const APPLE_DEVICE_ONLY_OPERATIONS: ReadonlySet<string> = new Set([
-  "upload",
-  "submit-for-review",
-  "release-version",
-  "use-device",
-  "release-device",
-  "install",
-  "launch",
-  "terminate",
-  "logs",
-]);
-// Effects the thread's posture decides, one approval per request.
-const APPLE_DEVICE_EFFECTS: ReadonlySet<string> = new Set<AppleDeviceOperation>([
-  "build",
-  "run",
-  "install",
-  "launch",
-  "terminate",
-]);
-
-/**
- * The sentence each device refusal carries, so the agent can tell the person
- * what to do rather than relay a slug. A refusal names no other thread.
- */
-const APPLE_DEVICE_REFUSALS: Partial<Readonly<Record<AppleDeviceRefusalReason, string>>> = {
-  "toolchain-unavailable":
-    "Physical devices need a Mac with Xcode selected and its licence accepted. Open the thread on that Mac.",
-  "operation-unavailable": "The selected Xcode does not offer this device operation on this Mac.",
-  "provisioning-updates-not-offered":
-    "Octant never changes provisioning. The person fixes signing for the team in Xcode.",
-  "distribution-not-enabled": "Uploading, submitting, and releasing are not available.",
-  "person-required": "Only the person can do this, from the Apple workbench.",
-  "local-person-required": "Only a person at this Mac can do this.",
-  "read-only-policy": "Plan mode is read-only; this device effect cannot run.",
-  "approval-required": "This device effect needs the person's approval.",
-  "approval-denied": "The person did not allow this device effect.",
-  "confirmation-required": "The person has not let this thread use the device.",
-  "invalid-destination":
-    "No paired device with that deviceId. Call discover with destination device for the current list.",
-  "destination-leased":
-    "Another thread is using this device. The person can stop using it there, then ask again.",
-  "lease-required": "This thread does not hold the device. Ask with use-device first.",
-  "lease-changed": "The device's lease changed hands.",
-  locked: "The device is locked. Ask the person to unlock it, then try again.",
-  "developer-mode-off":
-    "Developer Mode is off on the device. The person turns it on in Settings, Privacy & Security, on the device.",
-  untrusted: "The device is not paired with this Mac. The person pairs and trusts it in Xcode.",
-  unavailable: "The device cannot be reached from this Mac.",
-  "invalid-artifact": "install takes only a product a build or run in this thread returned.",
-  "foreign-bundle":
-    "Only the app this thread installed on the device can be launched, stopped, or read.",
-  "process-not-owned": "Octant stops and reads only an app it launched for this thread.",
-  "upload-changed":
-    "The project no longer builds the app, version, build, or signature the person confirmed. Ask to upload again so they can confirm what it builds now.",
-  "store-version-changed":
-    "App Store Connect no longer holds that version with the confirmed build in a state ready for this step. Ask again so the person can confirm what it holds now.",
-  "release-not-manual":
-    "App Store Connect would release this version on its own once approved. The person sets it to release manually in App Store Connect; Octant never changes that setting.",
-  "key-source-unavailable":
-    "The App Store Connect key could not be read from 1Password: op is missing or signed out, or the person declined. Nothing was sent; the person can try again when 1Password is ready.",
-};
-
-/** Whether a call is for the person's paired device rather than a Simulator. */
-function targetsPhysicalDevice(input: AppleToolInput): boolean {
-  return (
-    input.deviceId !== undefined ||
-    input.destination === "device" ||
-    APPLE_DEVICE_ONLY_OPERATIONS.has(input.operation)
-  );
-}
-
-/**
- * The agent's use of a physical device (docs/design/apple-devices.md). A
- * lease is asked of a person at the Mac under every posture; an effect follows
- * the thread's posture like a Simulator effect, except that only a person at
- * the Mac may approve it; reads inside the lease run unasked. Before anyone is
- * asked, the host is asked whether anything but that answer would refuse the
- * call, so nobody approves a call that would then be refused.
- */
-async function appleDeviceTool(
-  options: CodeAppManagedToolsOptions,
-  apple: CodeAppleToolPort,
-  input: AppleToolInput,
-  scope: {
-    readonly authority: ToolActionAuthority;
-    readonly threadId: CodeThread["id"];
-    readonly checkoutId: CodeThread["checkoutId"];
-  },
-  signal?: AbortSignal,
-) {
-  const devices = apple.devices;
-  if (devices === undefined) {
-    return failure("toolchain-unavailable", APPLE_DEVICE_REFUSALS["toolchain-unavailable"]);
-  }
-  if (input.operation === "upload") {
-    return await appleUploadTool(options, devices, input, scope, signal);
-  }
-  if (input.operation === "submit-for-review" || input.operation === "release-version") {
-    return await appleStoreVersionTool(options, devices, input, input.operation, scope, signal);
-  }
-  if (!APPLE_DEVICE_OPERATIONS.has(input.operation)) {
-    return failure(
-      "not-offered-on-device",
-      "A physical device has no input channel or live view, and is never booted or opened by Octant. Use the Simulator for this operation.",
-    );
-  }
-  const prepared = appleDeviceRequest(input, scope, options.uuid);
-  if (prepared === undefined) return failure("invalid-apple-input");
-  if (signal?.aborted) return failure("tool-interrupted");
-  const decision = await appleDeviceApproval(options, devices, prepared, signal);
-  if (decision.kind === "refused") return failure(decision.reason, decision.message);
-  const answer = await devices.request(
-    options.windowId,
-    { ...prepared, approval: decision.approval },
-    signal,
-  );
-  if (answer === undefined) return failure("apple-unavailable");
-  return await appleDeviceResult(options, devices, scope, answer, signal);
-}
-
-/**
- * Who must answer before a device request reaches the host, and the approval
- * it then carries.
- */
-async function appleDeviceApproval(
-  options: CodeAppManagedToolsOptions,
-  devices: CodeAppleDeviceToolPort,
-  request: AppleDeviceRequest,
-  signal?: AbortSignal,
-): Promise<DeviceEffectDecision> {
-  const lease = request.kind === "use-device";
-  const effect = APPLE_DEVICE_EFFECTS.has(request.kind);
-  if (!lease && !effect) return { kind: "allowed", approval: NOT_REQUIRED };
-  const posture = currentPosture(options);
-  if (effect && posture === "plan") {
-    return { kind: "refused", reason: "plan-mode-read-only", message: postureRefusal("plan") };
-  }
-  // Full access runs a device effect unasked; it never starts a lease.
-  if (effect && !decidesCodeEffectsByApproval(posture)) {
-    return { kind: "allowed", approval: NOT_REQUIRED };
-  }
-  const checked = await devices.check(options.windowId, request, signal);
-  if (checked === undefined || checked.kind === "unavailable") {
-    return { kind: "refused", reason: "apple-unavailable" };
-  }
-  // A lease the thread already holds is not asked for again. An effect the
-  // host would run unasked is still asked here: the host decides against the
-  // thread's Full access, while this turn runs at the narrower posture the
-  // person chose for it, as a Simulator effect does.
-  if (checked.kind === "allowed" && lease) return { kind: "allowed", approval: NOT_REQUIRED };
-  const awaitsPerson = lease ? "confirmation-required" : "approval-required";
-  if (checked.kind === "refused" && checked.reason !== awaitsPerson) {
-    return {
-      kind: "refused",
-      reason: checked.reason,
-      ...(APPLE_DEVICE_REFUSALS[checked.reason] === undefined
-        ? {}
-        : { message: APPLE_DEVICE_REFUSALS[checked.reason] }),
-    };
-  }
-  if (signal?.aborted === true) return { kind: "refused", reason: "tool-interrupted" };
-  return await askPersonForDevice(
-    options,
-    { kind: lease ? "apple-device-lease" : "apple-device-action", request },
-    // A lease asks under every posture, Plan included: it opens a personal
-    // device to the thread but changes nothing on it.
-    !lease,
-    signal,
-  );
-}
-
-function appleDeviceRequest(
-  input: AppleToolInput,
-  scope: {
-    readonly authority: ToolActionAuthority;
-    readonly threadId: CodeThread["id"];
-    readonly checkoutId: CodeThread["checkoutId"];
-  },
-  uuid: () => string,
-): AppleDeviceRequest | undefined {
-  const kind = input.operation as AppleDeviceOperation;
-  const timeoutMs =
-    kind === "build" || kind === "run"
-      ? APPLE_BUILD_TIMEOUT_MS
-      : kind === "install"
-        ? APPLE_DEVICE_INSTALL_TIMEOUT_MS
-        : APPLE_DEVICE_TIMEOUT_MS;
-  try {
-    // The contract refuses what a kind does not take: a device for discover,
-    // none for the rest, a project and team for a build, a product for an
-    // install, and a bundle for launch, terminate, and logs.
-    return decodeAppleDeviceRequest({
-      ...scope,
-      actionId: uuid(),
-      correlationId: uuid(),
-      kind,
-      requestedBy: agentEventActor(scope.authority, scope.threadId, uuid),
-      ...(kind === "discover" || input.deviceId === undefined ? {} : { deviceId: input.deviceId }),
-      ...(kind === "build" || kind === "run"
-        ? {
-            ...(input.projectPath === undefined ? {} : { projectPath: input.projectPath }),
-            ...(input.scheme === undefined ? {} : { scheme: input.scheme }),
-            ...(input.teamId === undefined ? {} : { teamId: input.teamId }),
-          }
-        : {}),
-      ...(kind === "install" && input.product !== undefined ? { artifact: input.product } : {}),
-      ...((kind === "launch" || kind === "terminate" || kind === "logs") &&
-      input.bundleIdentifier !== undefined
-        ? { bundleIdentifier: input.bundleIdentifier }
-        : {}),
-      timeoutMs,
-      approval: NOT_REQUIRED,
-    });
-  } catch {
-    return undefined;
-  }
-}
-
-async function appleDeviceResult(
-  options: CodeAppManagedToolsOptions,
-  devices: CodeAppleDeviceToolPort,
-  scope: {
-    readonly authority: ToolActionAuthority;
-    readonly threadId: CodeThread["id"];
-    readonly checkoutId: CodeThread["checkoutId"];
-  },
-  answer: AppleDeviceResponse,
-  signal?: AbortSignal,
-) {
-  switch (answer.kind) {
-    case "apple-device-refused":
-      return failure(answer.reason, APPLE_DEVICE_REFUSALS[answer.reason]);
-    case "apple-device-failure":
-      return failure(answer.failure.category, answer.failure.message);
-    case "apple-device-discovery":
-      return {
-        result: {
-          devices: answer.discovery.devices.map((device) => ({
-            deviceId: String(device.deviceId),
-            name: device.name,
-            model: device.model,
-            osVersion: device.osVersion,
-            connection: device.connection,
-            state: device.state,
-          })),
-          tooling: answer.discovery.tooling,
-          leases: answer.discovery.leases.map((lease) => ({
-            deviceId: String(lease.deviceId),
-            holder: lease.holder,
-          })),
-        },
-        isError: false,
-      };
-    case "apple-device-status":
-      return {
-        result: {
-          deviceId: String(answer.device.deviceId),
-          name: answer.device.name,
-          model: answer.device.model,
-          osVersion: answer.device.osVersion,
-          connection: answer.device.connection,
-          state: answer.device.state,
-          lease: answer.holder ?? "none",
-        },
-        isError: false,
-      };
-    case "apple-device-leased":
-      return {
-        result: {
-          deviceId: String(answer.deviceId),
-          lease: "this-thread",
-          since: answer.grantedAt,
-        },
-        isError: false,
-      };
-    case "apple-device-released":
-      return { result: { deviceId: String(answer.deviceId), lease: "none" }, isError: false };
-    case "apple-device-evidence":
-      return await appleDeviceEvidenceResult(options, devices, scope, answer.evidence, signal);
-    case "apple-upload-evidence":
-      return {
-        result: {
-          kind: "upload",
-          outcome: answer.evidence.outcome,
-          bundleIdentifier: answer.evidence.upload.bundleIdentifier,
-          version: answer.evidence.upload.version,
-          buildNumber: answer.evidence.upload.buildNumber,
-          teamId: answer.evidence.upload.signing.teamId,
-          ...(answer.evidence.deliveryId === undefined
-            ? {}
-            : { deliveryId: answer.evidence.deliveryId }),
-          diagnostics: answer.evidence.diagnostics
-            .slice(0, MAX_APPLE_RESULT_DIAGNOSTICS)
-            .map((diagnostic) => ({ severity: diagnostic.severity, message: diagnostic.message })),
-        },
-        isError: answer.evidence.outcome !== "succeeded",
-      };
-    case "apple-store-version-evidence":
-      return {
-        result: {
-          kind: answer.evidence.kind,
-          outcome: answer.evidence.outcome,
-          bundleIdentifier: answer.evidence.storeVersion.bundleIdentifier,
-          version: answer.evidence.storeVersion.version,
-          buildNumber: answer.evidence.storeVersion.buildNumber,
-          ...(answer.evidence.appStoreConnectId === undefined
-            ? {}
-            : { appStoreConnectId: answer.evidence.appStoreConnectId }),
-          diagnostics: answer.evidence.diagnostics
-            .slice(0, MAX_APPLE_RESULT_DIAGNOSTICS)
-            .map((diagnostic) => ({ severity: diagnostic.severity, message: diagnostic.message })),
-        },
-        isError: answer.evidence.outcome !== "succeeded",
-      };
-  }
-}
-
-/**
- * The agent's request to upload the thread's app to App Store Connect, which
- * it makes only when the person asked for it (slice 7 of
- * docs/design/apple-devices.md). The host first reads exactly what would be
- * uploaded; the person at the Mac then confirms that build under every
- * posture, and nothing is archived, signed, or sent until they do. The agent
- * can ask; it never confirms.
- */
-async function appleUploadTool(
-  options: CodeAppManagedToolsOptions,
-  devices: CodeAppleDeviceToolPort,
-  input: AppleToolInput,
-  scope: {
-    readonly authority: ToolActionAuthority;
-    readonly threadId: CodeThread["id"];
-    readonly checkoutId: CodeThread["checkoutId"];
-  },
-  signal?: AbortSignal,
-) {
-  if (currentPosture(options) === "plan") {
-    return failure("plan-mode-read-only", postureRefusal("plan"));
-  }
-  if (devices.prepareUpload === undefined) {
-    return failure("operation-unavailable", APPLE_DEVICE_REFUSALS["operation-unavailable"]);
-  }
-  if (input.projectPath === undefined || input.teamId === undefined) {
-    return failure("invalid-apple-input", "upload names projectPath and teamId.");
-  }
-  let teamId: AppleTeamId;
-  try {
-    teamId = decodeAppleTeamId(input.teamId);
-  } catch {
-    return failure("invalid-apple-input", "teamId is a ten-character Apple team ID.");
-  }
-  const prepared = await devices.prepareUpload(
-    options.windowId,
-    {
-      ...scope,
-      projectPath: input.projectPath,
-      ...(input.scheme === undefined ? {} : { scheme: input.scheme }),
-      teamId,
-    },
-    signal,
-  );
-  if (prepared === undefined) return failure("apple-unavailable");
-  if (prepared.kind === "failed") return failure("upload-not-prepared", prepared.message);
-  let request: AppleDeviceRequest;
-  try {
-    request = decodeAppleDeviceRequest({
-      ...scope,
-      actionId: options.uuid(),
-      correlationId: options.uuid(),
-      kind: "upload",
-      requestedBy: agentEventActor(scope.authority, scope.threadId, options.uuid),
-      projectPath: input.projectPath,
-      ...(input.scheme === undefined ? {} : { scheme: input.scheme }),
-      teamId,
-      upload: prepared.upload,
-      timeoutMs: APPLE_UPLOAD_TIMEOUT_MS,
-      approval: NOT_REQUIRED,
-    });
-  } catch {
-    return failure("invalid-apple-input");
-  }
-  const checked = await devices.check(options.windowId, request, signal);
-  if (checked === undefined || checked.kind === "unavailable") return failure("apple-unavailable");
-  if (checked.kind === "refused" && checked.reason !== "confirmation-required") {
-    return failure(checked.reason, APPLE_DEVICE_REFUSALS[checked.reason]);
-  }
-  if (signal?.aborted === true) return failure("tool-interrupted");
-  // Asked under every posture, Full access included: an upload is the person's
-  // act, and the confirmation shows them exactly the build the agent asked for.
-  const decision = await askPersonForDevice(
-    options,
-    { kind: "apple-distribution-upload", request },
-    true,
-    signal,
-  );
-  if (decision.kind === "refused") return failure(decision.reason, decision.message);
-  const answer = await devices.request(
-    options.windowId,
-    { ...request, approval: decision.approval },
-    signal,
-  );
-  if (answer === undefined) return failure("apple-unavailable");
-  return await appleDeviceResult(options, devices, scope, answer, signal);
-}
-
-/**
- * The agent's request to submit the project's App Store Connect version for
- * App Review, or to release it, which it makes only when the person asked
- * (slice 8 of docs/design/apple-devices.md). The host reads what App Store
- * Connect holds for that version first; the person at the Mac then confirms
- * exactly that version under every posture, and nothing is sent until they
- * do. The agent can ask; it never confirms.
- */
-async function appleStoreVersionTool(
-  options: CodeAppManagedToolsOptions,
-  devices: CodeAppleDeviceToolPort,
-  input: AppleToolInput,
-  step: "submit-for-review" | "release-version",
-  scope: {
-    readonly authority: ToolActionAuthority;
-    readonly threadId: CodeThread["id"];
-    readonly checkoutId: CodeThread["checkoutId"];
-  },
-  signal?: AbortSignal,
-) {
-  if (currentPosture(options) === "plan") {
-    return failure("plan-mode-read-only", postureRefusal("plan"));
-  }
-  if (devices.prepareStoreVersion === undefined) {
-    return failure("operation-unavailable", APPLE_DEVICE_REFUSALS["operation-unavailable"]);
-  }
-  if (input.projectPath === undefined) {
-    return failure("invalid-apple-input", `${step} names projectPath.`);
-  }
-  const prepared = await devices.prepareStoreVersion(
-    options.windowId,
-    {
-      ...scope,
-      projectPath: input.projectPath,
-      ...(input.scheme === undefined ? {} : { scheme: input.scheme }),
-    },
-    signal,
-  );
-  if (prepared === undefined) return failure("apple-unavailable");
-  if (prepared.kind === "failed") return failure("store-version-not-prepared", prepared.message);
-  const { storeVersion } = prepared;
-  if (prepared.ready !== step) {
-    return failure(
-      "store-version-not-ready",
-      step === "submit-for-review"
-        ? `App Store Connect reports ${storeVersion.bundleIdentifier} ${storeVersion.version} as ${prepared.state}; a submission needs a version not yet submitted whose build finished processing.`
-        : `App Store Connect reports ${storeVersion.bundleIdentifier} ${storeVersion.version} as ${prepared.state}; a release needs a version approved and waiting for a manual release.`,
-    );
-  }
-  let request: AppleDeviceRequest;
-  try {
-    request = decodeAppleDeviceRequest({
-      ...scope,
-      actionId: options.uuid(),
-      correlationId: options.uuid(),
-      kind: step,
-      requestedBy: agentEventActor(scope.authority, scope.threadId, options.uuid),
-      storeVersion,
-      timeoutMs: APPLE_STORE_VERSION_TIMEOUT_MS,
-      approval: NOT_REQUIRED,
-    });
-  } catch {
-    return failure("invalid-apple-input");
-  }
-  const checked = await devices.check(options.windowId, request, signal);
-  if (checked === undefined || checked.kind === "unavailable") return failure("apple-unavailable");
-  if (checked.kind === "refused" && checked.reason !== "confirmation-required") {
-    return failure(checked.reason, APPLE_DEVICE_REFUSALS[checked.reason]);
-  }
-  if (signal?.aborted === true) return failure("tool-interrupted");
-  // Asked under every posture, Full access included: submitting or releasing
-  // is the person's act, and the confirmation names exactly that version.
-  const decision = await askPersonForDevice(
-    options,
-    { kind: "apple-distribution-version", request },
-    true,
-    signal,
-  );
-  if (decision.kind === "refused") return failure(decision.reason, decision.message);
-  const answer = await devices.request(
-    options.windowId,
-    { ...request, approval: decision.approval },
-    signal,
-  );
-  if (answer === undefined) return failure("apple-unavailable");
-  return await appleDeviceResult(options, devices, scope, answer, signal);
-}
-
-async function appleDeviceEvidenceResult(
-  options: CodeAppManagedToolsOptions,
-  devices: CodeAppleDeviceToolPort,
-  scope: {
-    readonly authority: ToolActionAuthority;
-    readonly threadId: CodeThread["id"];
-    readonly checkoutId: CodeThread["checkoutId"];
-  },
-  evidence: AppleDeviceEvidence,
-  signal?: AbortSignal,
-) {
-  const result = {
-    kind: evidence.kind,
-    deviceId: String(evidence.deviceId),
-    outcome: evidence.outcome,
-    ...(evidence.bundleIdentifier === undefined
-      ? {}
-      : { bundleIdentifier: evidence.bundleIdentifier }),
-    // install redeems this reference; it names no host path.
-    ...(evidence.product === undefined ? {} : { product: evidence.product }),
-    ...(evidence.signing === undefined ? {} : { signing: evidence.signing }),
-    durationMs: evidence.durationMs,
-    diagnostics: evidence.diagnostics.slice(0, MAX_APPLE_RESULT_DIAGNOSTICS).map((diagnostic) => ({
-      severity: diagnostic.severity,
-      message: diagnostic.message,
-      ...(diagnostic.location === undefined ? {} : { location: diagnostic.location }),
-    })),
-    artifacts: evidence.artifacts.map((artifact) => ({
-      kind: artifact.kind,
-      reference: artifact.reference,
-    })),
-  };
-  const answered = { result, isError: evidence.outcome !== "succeeded" };
-  if (evidence.outcome !== "succeeded") return answered;
-  if (evidence.kind === "screenshot") {
-    const reference = evidence.artifacts.find(
-      (artifact) => artifact.kind === "screenshot",
-    )?.reference;
-    if (signal?.aborted) return failure("tool-interrupted");
-    const bytes =
-      reference === undefined
-        ? undefined
-        : await devices.readScreenshot(options.windowId, scope, reference);
-    if (signal?.aborted) return failure("tool-interrupted");
-    return deviceScreenshotResult(answered, bytes);
-  }
-  if (evidence.kind === "logs") {
-    // The console reaches the provider only as this call's answer, inside the
-    // lease the person confirmed; the journal keeps its size alone.
-    const reference = evidence.artifacts.find((artifact) => artifact.kind === "log")?.reference;
-    const bytes =
-      reference === undefined
-        ? undefined
-        : await devices.readConsole(options.windowId, scope, reference);
-    if (bytes === undefined) {
-      return failure("console-unavailable", "The app's console output could not be read back.");
-    }
-    const console = new TextDecoder().decode(bytes);
-    const tail = boundedEncodedTail(
-      boundedUtf8Tail(console, MAX_APPLE_CONSOLE_RESULT_BYTES),
-      MAX_APPLE_CONSOLE_ENCODED_BYTES,
-    );
-    return {
-      result: {
-        ...result,
-        console: tail,
-        ...(tail.length < console.length ? { truncated: true } : {}),
-      },
-      isError: false,
-    };
-  }
-  return answered;
 }
 
 const ANDROID_BOOT_TIMEOUT_MS = 180_000;
@@ -2427,24 +1722,11 @@ interface AppleToolInput {
     | "tap"
     | "swipe"
     | "type-text"
-    | "key-press"
-    | "use-device"
-    | "release-device"
-    | "install"
-    | "launch"
-    | "terminate"
-    | "logs"
-    | "upload"
-    | "submit-for-review"
-    | "release-version";
-  readonly destination?: "simulator" | "device";
+    | "key-press";
   readonly projectPath?: string;
   readonly scheme?: string;
   readonly platform?: string;
   readonly simulatorId?: string;
-  readonly deviceId?: string;
-  readonly teamId?: string;
-  readonly product?: string;
   readonly bundleIdentifier?: string;
   readonly target?: string;
   readonly x?: number;
@@ -2629,14 +1911,10 @@ function parseAppleInput(value: string): AppleToolInput | undefined {
     value,
     new Set([
       "operation",
-      "destination",
       "projectPath",
       "scheme",
       "platform",
       "simulatorId",
-      "deviceId",
-      "teamId",
-      "product",
       "bundleIdentifier",
       "target",
       "x",
@@ -2663,31 +1941,7 @@ function parseAppleInput(value: string): AppleToolInput | undefined {
     operation !== "tap" &&
     operation !== "swipe" &&
     operation !== "type-text" &&
-    operation !== "key-press" &&
-    operation !== "use-device" &&
-    operation !== "release-device" &&
-    operation !== "install" &&
-    operation !== "launch" &&
-    operation !== "terminate" &&
-    operation !== "logs" &&
-    operation !== "upload" &&
-    operation !== "submit-for-review" &&
-    operation !== "release-version"
-  ) {
-    return undefined;
-  }
-  if (
-    parsed.destination !== undefined &&
-    parsed.destination !== "simulator" &&
-    parsed.destination !== "device"
-  ) {
-    return undefined;
-  }
-  // A call names one kind of destination; a device id under a Simulator
-  // destination, or both ids, is the caller's mistake, not a choice for Octant.
-  if (
-    parsed.deviceId !== undefined &&
-    (parsed.simulatorId !== undefined || parsed.destination === "simulator")
+    operation !== "key-press"
   ) {
     return undefined;
   }
@@ -2696,9 +1950,6 @@ function parseAppleInput(value: string): AppleToolInput | undefined {
     "scheme",
     "platform",
     "simulatorId",
-    "deviceId",
-    "teamId",
-    "product",
     "bundleIdentifier",
     "target",
     "text",
@@ -2925,19 +2176,6 @@ function boundedUtf8Tail(value: string, maxBytes: number): string {
   while (low < high) {
     const middle = Math.floor((low + high) / 2);
     if (Buffer.byteLength(value.slice(middle), "utf8") <= maxBytes) high = middle;
-    else low = middle + 1;
-  }
-  if (low < value.length && isLowSurrogate(value.charCodeAt(low))) low += 1;
-  return value.slice(low);
-}
-
-function boundedEncodedTail(value: string, maxEncodedBytes: number): string {
-  const encodedBytes = (text: string) => Buffer.byteLength(JSON.stringify(text), "utf8") - 2;
-  let low = 0;
-  let high = value.length;
-  while (low < high) {
-    const middle = Math.floor((low + high) / 2);
-    if (encodedBytes(value.slice(middle)) <= maxEncodedBytes) high = middle;
     else low = middle + 1;
   }
   if (low < value.length && isLowSurrogate(value.charCodeAt(low))) low += 1;
