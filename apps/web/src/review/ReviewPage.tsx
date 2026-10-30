@@ -5,7 +5,15 @@ import {
   type OctantKeybindingActionId,
   type OctantKeybindings,
 } from "@octant/domain";
-import { Check, Clock, CornerUpLeft, Minus, X, type LucideIcon } from "lucide-react";
+import {
+  Check,
+  ClipboardCheck,
+  Clock,
+  CornerUpLeft,
+  Minus,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ParsedDiffFile } from "../code/unifiedDiff";
 import { UnifiedDiffList } from "../code/UnifiedDiffList";
@@ -432,20 +440,31 @@ export function ReviewPage(props: ReviewPageProps) {
   return (
     <Surface ariaLabel="To review" className="review-page" measure="wide">
       <SurfaceHeader
-        actions={
-          <p aria-label="Keyboard shortcuts" className="review-legend">
-            {legend.map((item) => (
-              <span className="review-legend__item" key={item.label}>
-                {item.keys.map((key) => (
-                  <kbd key={key}>{key}</kbd>
-                ))}{" "}
-                {item.label}
-              </span>
-            ))}
-          </p>
-        }
+        {...(count === 0
+          ? {}
+          : {
+              // The keys act on a selected thread, so with nothing to review
+              // the legend would name keys that do nothing.
+              actions: (
+                <p aria-label="Keyboard shortcuts" className="review-legend">
+                  {legend.map((item) => (
+                    <span className="review-legend__item" key={item.label}>
+                      {item.keys.map((key) => (
+                        <kbd key={key}>{key}</kbd>
+                      ))}{" "}
+                      {item.label}
+                    </span>
+                  ))}
+                </p>
+              ),
+            })}
         onBack={props.onClose}
-        title={`To review · ${String(count)} finished ${count === 1 ? "thread" : "threads"}`}
+        subtitle={
+          count === 0
+            ? "Finished threads you have not opened, oldest first."
+            : `${String(count)} finished ${count === 1 ? "thread" : "threads"} you have not opened, oldest first.`
+        }
+        title="To review"
       />
       <section
         aria-label="Review finished threads"
@@ -470,6 +489,7 @@ export function ReviewPage(props: ReviewPageProps) {
         {selected === undefined ? (
           <SurfaceEmpty
             detail="Finished threads you have not opened will appear here."
+            icon={<ClipboardCheck size={20} strokeWidth={1.5} />}
             title="Nothing waiting for review"
           />
         ) : (

@@ -5,7 +5,7 @@ import type {
   ArtifactLibraryTab,
 } from "@octant/contracts/artifact-library";
 import type { CanvasId, OctantMode, ProjectId } from "@octant/contracts";
-import { LayoutGrid, List, Plus, Search } from "lucide-react";
+import { Layers, LayoutGrid, List, Plus, Search } from "lucide-react";
 import { SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -113,6 +113,7 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
   return (
     <div className="artifact-library">
       <SurfaceHeader
+        subtitle="What your threads have made, across every Project."
         title="Artifacts"
         {...(props.onClose === undefined ? {} : { onBack: props.onClose })}
         {...(props.onCreate === undefined
@@ -328,13 +329,14 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
                     onClick={() => props.onFiltersChange({ tab: "all", query: "" })}
                     size="sm"
                     type="button"
-                    variant="ghost"
+                    variant="outline"
                   >
                     {filters.tab === "shared" ? "View all artifacts" : "Clear filters"}
                   </OctantButton>
                 ),
               }
             : {})}
+          icon={<Layers size={20} strokeWidth={1.5} />}
           detail={
             filters.tab === "shared"
               ? "Artifacts you share will appear here."

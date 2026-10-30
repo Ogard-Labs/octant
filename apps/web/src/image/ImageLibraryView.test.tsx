@@ -36,11 +36,12 @@ describe("ImageLibraryView", () => {
     );
   });
 
-  it("points at Providers when no image profile is configured", () => {
+  it("points at Voice & images when no image profile is configured", () => {
     const onOpenSettings = vi.fn();
     render(<ImageLibraryView client={client()} onOpenSettings={onOpenSettings} profiles={[]} />);
 
-    expect(screen.getByRole("status")).toHaveTextContent("No image profile is configured.");
+    expect(screen.getByRole("status")).toHaveTextContent("No image profile yet");
+    expect(screen.getByRole("status")).toHaveTextContent("Settings › Voice & images");
     expect(screen.getByRole("button", { name: "Add an image profile" })).toBeVisible();
     expect(screen.queryByRole("button", { name: /Create image/ })).not.toBeInTheDocument();
   });

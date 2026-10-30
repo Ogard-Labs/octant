@@ -44,15 +44,9 @@ export function ProjectsDirectory(props: ProjectsDirectoryProps) {
     props.onAddProject === undefined && props.onDismiss === undefined ? undefined : (
       <>
         {props.onAddProject === undefined ? null : (
-          <OctantButton
-            aria-label="Add Project"
-            onClick={props.onAddProject}
-            size="icon"
-            title="Add Project"
-            type="button"
-            variant="ghost"
-          >
-            <Plus aria-hidden="true" size={16} strokeWidth={1.7} />
+          <OctantButton onClick={props.onAddProject} size="sm" type="button" variant="secondary">
+            <Plus aria-hidden="true" size={12} strokeWidth={1.8} />
+            Add Project
           </OctantButton>
         )}
         {props.onDismiss === undefined ? null : (

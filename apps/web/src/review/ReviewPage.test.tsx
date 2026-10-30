@@ -221,9 +221,8 @@ describe("ReviewPage", () => {
   it("lists the finished threads oldest first with what changed and whether it worked", async () => {
     render(<ReviewPage {...props()} />);
 
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
-      "To review · 3 finished threads",
-    );
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("To review");
+    expect(screen.getByText("3 finished threads you have not opened, oldest first.")).toBeVisible();
     const rows = within(screen.getByRole("navigation", { name: "Finished threads" })).getAllByRole(
       "button",
     );
@@ -449,9 +448,7 @@ describe("ReviewPage", () => {
 
     view.rerender(<ReviewPage {...page} entries={[third, first]} />);
 
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
-      "To review · 2 finished threads",
-    );
+    expect(screen.getByText("2 finished threads you have not opened, oldest first.")).toBeVisible();
     expect(
       within(current()).getByRole("heading", { name: "Tidy the settings copy" }),
     ).toBeVisible();

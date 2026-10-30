@@ -51,7 +51,7 @@ export function SidebarDestinationSettings(props: SidebarDestinationSettingsProp
                 }
               }}
               options={visibilityOptions[destination.placement]}
-              triggerClassName="w-32 shrink-0"
+              triggerClassName="w-36 shrink-0"
               value={sidebarDestinationVisibility(props.customization, destination.id)}
             />
             <span className="flex shrink-0 items-center gap-1">
