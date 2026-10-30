@@ -43,6 +43,8 @@ function setup(
     readonly instances?: ProviderInstance[];
     readonly storeAvailable?: boolean;
     readonly failingStore?: boolean;
+    readonly onReprobe?: (instance: ProviderInstance) => void;
+    readonly failingCause?: "locked" | "no-login-collection";
     readonly onSet?: () => void;
     readonly journalFails?: boolean;
     readonly failDelete?: boolean;
@@ -70,7 +72,11 @@ function setup(
   const stored = new Map<string, string>();
   const instances = input.instances ?? [gateway(GATEWAY_ID, "Private gateway")];
   const fail = async (): Promise<never> => {
-    throw { category: "unavailable", message: "The provider credential store is unavailable." };
+    throw {
+      category: "unavailable",
+      message: "The provider credential store is unavailable.",
+      ...(input.failingCause === undefined ? {} : { cause: input.failingCause }),
+    };
   };
   const handle = createProviderCredentialRouteHandler({
     desktopBridgeSecret: secret,
@@ -78,6 +84,7 @@ function setup(
     readProviderInstances: () => instances,
     readRemovedProviderInstanceIds: () => [REMOVED_ID],
     journal,
+    reprobe: async (_window, instance) => input.onReprobe?.(instance),
     removeProvider: async (_window, instance) => {
       if (input.providerRefusal !== undefined) {
         input.onRefuse?.(instances);
@@ -233,6 +240,28 @@ describe("host-local provider key routes", () => {
 
     expect(result.status).toBe(503);
     expect(result.body).toMatchObject({ category: "credential-store-unavailable" });
+  });
+
+  it("passes on why the keyring refused, so the person can fix it", async () => {
+    const { handle } = setup({ failingStore: true, failingCause: "locked" });
+    const result = await json(
+      await handle(hostLocal(SET, { instance: GATEWAY_ID, credential: KEY, replace: false })),
+    );
+
+    expect(result.status).toBe(503);
+    expect(result.body).toMatchObject({
+      category: "credential-store-unavailable",
+      cause: "locked",
+    });
+  });
+
+  it("re-checks the provider once its key is stored or removed, so Needs key clears without a restart", async () => {
+    const checked: string[] = [];
+    const { handle } = setup({ onReprobe: (instance) => checked.push(String(instance.id)) });
+    await handle(hostLocal(SET, { instance: GATEWAY_ID, credential: KEY, replace: false }));
+    await handle(hostLocal(REMOVE, { instance: GATEWAY_ID }));
+
+    expect(checked).toEqual([GATEWAY_ID, GATEWAY_ID]);
   });
 
   it("will not overwrite a stored key unless replace is asked for", async () => {

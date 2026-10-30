@@ -131,6 +131,21 @@ describe("octant provider key", () => {
     expect(err.join("")).toContain("octant server restart");
   });
 
+  it("tells a Linux person whether the keyring is locked or has no Login keyring", async () => {
+    for (const [cause, words] of [
+      ["locked", "keyring is locked"],
+      ["no-login-collection", 'no "Login" keyring'],
+    ] as const) {
+      const { err, run } = fixture(() => ({
+        status: 503,
+        body: { category: "credential-store-unavailable", message: "unavailable", cause },
+      }));
+
+      expect(await run(SET)).toBe(1);
+      expect(err.join("")).toContain(words);
+    }
+  });
+
   it("points a macOS host without a credential store at the desktop app", async () => {
     const { err, run } = fixture(() => ({
       status: 503,

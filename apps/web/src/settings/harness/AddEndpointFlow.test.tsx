@@ -327,6 +327,22 @@ describe("Add endpoint, step by step", () => {
     expect(credential.value).toBe("anthropic-secret");
   });
 
+  it("fills in Anthropic's own address so the box is never an empty-looking hint", async () => {
+    const user = userEvent.setup();
+    const props = renderFlow();
+    const form = await connect(user, "Anthropic-compatible", {
+      name: "Anthropic",
+      key: "anthropic-secret",
+    });
+    expect(within(form).getByRole("textbox", { name: /address/i })).toHaveValue(
+      "https://api.anthropic.com/v1",
+    );
+    await user.click(within(form).getByRole("button", { name: "Check and add" }));
+
+    const [, configuration] = vi.mocked(props.onCreateAnthropicCompatible).mock.calls[0]!;
+    expect(configuration.baseUrl).toBe("https://api.anthropic.com/v1");
+  });
+
   it("suggests Azure AI Foundry when an OpenAI-compatible address is on Azure, keeping the name", async () => {
     const user = userEvent.setup();
     const props = renderFlow();
