@@ -328,7 +328,7 @@ export class NativeHarnessApprovalStore {
    */
   #expire(): void {
     const now = Date.parse(this.#options.clock());
-    for (const waiter of [...this.#waiters.values()]) {
+    for (const waiter of Array.from(this.#waiters.values())) {
       if (waiter.expiresAt <= now) waiter.resolve("expired");
     }
   }

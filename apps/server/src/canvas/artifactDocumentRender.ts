@@ -1200,9 +1200,7 @@ function mockupPagePieces(
   const readable = readableMockup(block);
   const pages = canvasMockupFrames(readable)
     .map((frame) =>
-      canvasMockupHtml(readable, {
-        ...(frame.key === "screen" ? {} : { variantId: frame.key }),
-      }),
+      canvasMockupHtml(readable, frame.key === "screen" ? {} : { variantId: frame.key }),
     )
     .join("");
   return [

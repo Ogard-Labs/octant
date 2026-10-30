@@ -1108,15 +1108,14 @@ export function wireRemote(deps: RemoteDependencies) {
       threads: threadExportService,
       connection: persistence.connection,
       listWorkThreadIds: () => workThreadProjection.list().map((thread) => String(thread.id)),
-      listProjects: () => [
-        ...persistence.readProjects().map((project) => ({
+      listProjects: () =>
+        persistence.readProjects().map((project) => ({
           projectId: project.id,
           name: project.name,
           type: project.type,
           lifecycle: project.lifecycle,
           ...(project.type === "chat" ? {} : { canonicalRoot: project.binding.canonicalRoot }),
         })),
-      ],
       listProjectIds: () => persistence.readProjects().map((project) => String(project.id)),
       readProjectMemory: (projectId) => persistence.readProjectMemory(decodeProjectId(projectId)),
       listCanvases: () =>

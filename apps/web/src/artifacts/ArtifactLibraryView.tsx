@@ -414,7 +414,7 @@ function GroupedArtifacts(
     bucket.push(entry);
     grouped.set(key, bucket);
   }
-  const { entries, groupOf, view, ...actions } = props;
+  const { entries: _entries, groupOf: _groupOf, view, ...actions } = props;
   return (
     <div className="artifact-library__groups">
       {[...grouped.entries()]

@@ -85,6 +85,27 @@ describe("resolveUpdateOffer", () => {
     expect(result.kind).toBe("offer");
   });
 
+  it("offers a newer candidate build to a preview install that switched to the candidate ring and refuses an older one", () => {
+    const switched = {
+      ...app,
+      ring: "candidate" as const,
+      version: version("0.1.0-preview.20261029.63"),
+    };
+    const offered = resolveUpdateOffer({
+      document: feed({ release: { version: "0.1.0-candidate.20261030.65", ring: "candidate" } }),
+      app: switched,
+      verifySignature: accept,
+    });
+    const replayed = resolveUpdateOffer({
+      document: feed({ release: { version: "0.1.0-candidate.20261028.60", ring: "candidate" } }),
+      app: switched,
+      verifySignature: accept,
+    });
+
+    expect(offered.kind).toBe("offer");
+    expect(replayed).toEqual({ kind: "refuse", refusal: "not-newer" });
+  });
+
   it("verifies the signature against the keys of the ring the release claims", () => {
     // Each ring trusts its own keys. A document claiming stable is judged
     // against the stable keys even when a preview app fetched it, so a key that
@@ -323,6 +344,33 @@ describe("compareAppVersions", () => {
 
   it("counts numeric prerelease identifiers as numbers", () => {
     expect(compareAppVersions(version("1.0.0-rc.2"), version("1.0.0-rc.10"))).toBeLessThan(0);
+  });
+});
+
+describe("compareAppVersions across the preview and candidate rings", () => {
+  it("orders a preview and a candidate build by date and run, not by ring name", () => {
+    const preview = version("0.1.0-preview.20261029.63");
+    const candidate = version("0.1.0-candidate.20261030.65");
+    expect(compareAppVersions(candidate, preview)).toBeGreaterThan(0);
+    expect(compareAppVersions(preview, candidate)).toBeLessThan(0);
+    expect(
+      compareAppVersions(
+        version("0.1.0-candidate.20261030.66"),
+        version("0.1.0-preview.20261030.65"),
+      ),
+    ).toBeGreaterThan(0);
+    expect(
+      compareAppVersions(
+        version("0.1.0-candidate.20261030.65"),
+        version("0.1.0-preview.20261030.66"),
+      ),
+    ).toBeLessThan(0);
+    expect(
+      compareAppVersions(
+        version("0.1.0-candidate.20261030.65"),
+        version("0.1.0-preview.20261030.65"),
+      ),
+    ).toBe(0);
   });
 });
 

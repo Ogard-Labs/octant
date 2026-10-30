@@ -2,6 +2,7 @@ import type {
   IntegrationAuthenticationSnapshot,
   IntegrationExecutionResult,
 } from "@octant/contracts/integration";
+import { redactAwsCredentialShapes } from "@octant/domain";
 import {
   decodeLinearIssueDetail,
   linearIssueBrowseAvailable,
@@ -184,6 +185,7 @@ export function redactLinearIssueContextText(value: string): string {
     if (!SECRETISH.test(normalized)) break;
     normalized = normalized.replaceAll(SECRETISH, "[redacted]");
   }
+  normalized = redactAwsCredentialShapes(normalized, "[redacted]");
   // oxlint-disable-next-line no-control-regex -- NUL, C0, and DEL must not reach the model.
   return normalized.replaceAll(/[\u0000-\u001f\u007f]/g, " ");
 }

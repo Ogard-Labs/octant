@@ -165,6 +165,10 @@ describe("model context window", () => {
       "gpt-4o-2024-08-06",
       "openai/gpt-5-mini",
       "claude-sonnet-4-5",
+      "claude-haiku-5-5",
+      "anthropic/claude-opus-5-5",
+      "claude-fable-5-1",
+      "claude-sonnet-5-5-20261001",
       "claude-3-5-haiku-20241022",
       "o3",
     ]) {

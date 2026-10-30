@@ -3,11 +3,7 @@ import { originAllowed } from "@octant/domain";
 import { constants } from "node:fs";
 import { access } from "node:fs/promises";
 import { isAbsolute } from "node:path";
-import type {
-  BrowserActionRequest,
-  BrowserContextId,
-  BrowserContextPolicy,
-} from "@octant/contracts/browser-automation";
+import type { BrowserContextId, BrowserContextPolicy } from "@octant/contracts/browser-automation";
 import { MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS } from "@octant/contracts/browser-automation";
 import {
   MAX_BROWSER_DIAGNOSTIC_ENTRIES,

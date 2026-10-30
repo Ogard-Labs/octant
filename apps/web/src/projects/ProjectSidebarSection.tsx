@@ -122,7 +122,6 @@ import {
   type SidebarActivityMode,
   type SidebarActivityThread,
 } from "../shell/activityViewModel";
-import { IconButton } from "../shell/IconButton";
 import { threadRowStatusInput, type ChatThreadNavigationItem } from "../shell/navigationModel";
 import {
   describeSidebarProjectStatus,
@@ -558,7 +557,6 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
         ?.scrollIntoView({ block: "nearest", behavior: "smooth" }),
     );
     // The sequence is the request; the object around it is rebuilt every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listRequestSequence]);
 
   useEffect(() => {
