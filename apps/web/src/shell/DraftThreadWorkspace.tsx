@@ -345,6 +345,8 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   }>();
   const [createFromOpen, setCreateFromOpen] = useState(false);
   const [createFromTab, setCreateFromTab] = useState<"github" | "linear">("github");
+  const fillPromptRequest = (text: string) =>
+    setPromptRequest((current) => ({ text, revision: (current?.revision ?? 0) + 1 }));
   const adoptIssue = (row: RepositoryIssueRow) => {
     const reference = `${row.owner}/${row.name}#${String(row.number)}`;
     let request: GithubIssueContextRequest | undefined;
@@ -360,10 +362,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     setCreateFromSelection(
       request === undefined ? undefined : { kind: "github", request, label: reference },
     );
-    setPromptRequest((current) => ({
-      text: `Work on ${reference}: ${row.title}`,
-      revision: (current?.revision ?? 0) + 1,
-    }));
+    fillPromptRequest(`Work on ${reference}: ${row.title}`);
   };
   const pendingPrompt = props.pendingPrompt;
   const onPendingPromptConsumed = props.onPendingPromptConsumed;
@@ -406,20 +405,19 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           : { linearClient: props.linearClient })}
         creating={props.creating === true}
         onClear={() => setCreateFromSelection(undefined)}
-        onSelectGithub={(selected) => {
-          setCreateFromSelection({
-            kind: "github",
-            request: selected,
-            label: `${selected.owner}/${selected.name}#${String(selected.number)}`,
-          });
+        onSelectGithub={(selected, title) => {
+          const reference = `${selected.owner}/${selected.name}#${String(selected.number)}`;
+          setCreateFromSelection({ kind: "github", request: selected, label: reference });
+          fillPromptRequest(`Work on ${reference}: ${title}`);
           setCreateFromOpen(false);
         }}
-        onSelectLinear={(selected) => {
+        onSelectLinear={(selected, title) => {
           setCreateFromSelection({
             kind: "linear",
             request: { id: selected.id },
             label: selected.identifier,
           });
+          fillPromptRequest(`Work on ${selected.identifier}: ${title}`);
           setCreateFromOpen(false);
         }}
         open={createFromOpen}
@@ -652,8 +650,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
       props.linearPluginEnabled === true ? props.codeHome?.loadAssignedLinearIssues : undefined;
     const linearFresh =
       props.linearPluginEnabled === true ? props.codeHome?.loadOpenLinearIssues : undefined;
-    const fillPrompt = (text: string) =>
-      setPromptRequest((current) => ({ text, revision: (current?.revision ?? 0) + 1 }));
     const beneath = !home ? undefined : githubHomeClient === undefined &&
       linearHome === undefined &&
       props.codeHome === undefined ? (
@@ -700,7 +696,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                 }
               : undefined,
           );
-          fillPrompt(
+          fillPromptRequest(
             item.category === "issue"
               ? `Work on ${reference}: ${item.title}`
               : `Review pull request ${reference}: ${item.title}`,
@@ -713,7 +709,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             request: { id: row.id },
             label: row.identifier,
           });
-          fillPrompt(`Work on ${row.identifier}: ${row.title}`);
+          fillPromptRequest(`Work on ${row.identifier}: ${row.title}`);
         }}
       />
     );
@@ -998,6 +994,15 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     if (props.pendingMessage === undefined) return;
     setPrompt(props.pendingMessage);
   }, [props.pendingMessage]);
+  const appliedPromptRevision = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (promptRequest === undefined || appliedPromptRevision.current === promptRequest.revision) {
+      return;
+    }
+    appliedPromptRevision.current = promptRequest.revision;
+    setPrompt(promptRequest.text);
+    textareaRef.current?.focus();
+  }, [promptRequest]);
   const trimmed = prompt.trim();
   const canSubmit = trimmed.length > 0 && !props.creating;
 
@@ -1239,9 +1244,10 @@ function CreateFromIssueControl(props: {
   readonly selectedGithub?: GithubIssueContextRequest;
   readonly selectedLinear?: LinearIssueContextRequest;
   readonly selectedLabel?: string;
-  readonly onSelectGithub: (issue: GithubIssueContextRequest) => void;
+  readonly onSelectGithub: (issue: GithubIssueContextRequest, title: string) => void;
   readonly onSelectLinear: (
     issue: LinearIssueContextRequest & { readonly identifier: string },
+    title: string,
   ) => void;
   readonly onClear: () => void;
   readonly onToggle: () => void;

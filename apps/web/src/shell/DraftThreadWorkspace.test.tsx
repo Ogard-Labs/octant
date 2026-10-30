@@ -1451,6 +1451,7 @@ describe("DraftThreadWorkspace", () => {
     await user.click(
       await screen.findByRole("button", { name: /ENG-12 Browse issues in the workspace/ }),
     );
+    await user.clear(screen.getByRole("textbox", { name: "First message" }));
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Start from Linear");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
     expect(onCreateThread).toHaveBeenCalledWith(
@@ -1461,6 +1462,27 @@ describe("DraftThreadWorkspace", () => {
       undefined,
       undefined,
       { id: "11111111-1111-4111-8111-111111111111" },
+    );
+  });
+
+  it("prefills the prompt when a Linear issue is picked from Create from", async () => {
+    const user = userEvent.setup();
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        linearClient={makeLinearClient()}
+        linearPluginEnabled={true}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Create from…" }));
+    await user.click(await screen.findByRole("tab", { name: "Linear" }));
+    await user.click(
+      await screen.findByRole("button", { name: /ENG-12 Browse issues in the workspace/ }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(
+        "Work on ENG-12: Browse issues in the workspace",
+      ),
     );
   });
 
@@ -1492,6 +1514,7 @@ describe("DraftThreadWorkspace", () => {
     render(view);
 
     expect(await screen.findByText("ENG-12")).toBeVisible();
+    await user.clear(screen.getByRole("textbox", { name: "First message" }));
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Keep the issue");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
     expect(onCreateThread).toHaveBeenCalledWith(

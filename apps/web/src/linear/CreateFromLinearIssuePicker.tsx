@@ -68,7 +68,10 @@ function thenableFrom(value: unknown): Promise<unknown> | undefined {
 export interface CreateFromLinearIssuePickerProps {
   readonly client: IntegrationClient;
   readonly selected?: LinearIssueContextRequest;
-  readonly onSelect: (issue: LinearIssueContextRequest & { readonly identifier: string }) => void;
+  readonly onSelect: (
+    issue: LinearIssueContextRequest & { readonly identifier: string },
+    title: string,
+  ) => void;
   readonly disabled?: boolean;
 }
 
@@ -195,7 +198,7 @@ export function CreateFromLinearIssuePicker(props: CreateFromLinearIssuePickerPr
                     aria-pressed={selected}
                     className="github-picker__option"
                     disabled={props.disabled}
-                    onClick={() => onSelect({ id: row.id, identifier: row.identifier })}
+                    onClick={() => onSelect({ id: row.id, identifier: row.identifier }, row.title)}
                     type="button"
                     variant="bare"
                   >
