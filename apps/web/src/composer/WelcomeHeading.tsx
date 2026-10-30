@@ -40,7 +40,7 @@ export function WelcomeHeading(props: { readonly projectChosen?: boolean }) {
       <p className="oct-row-detail welcome__status">
         {props.projectChosen === true
           ? "Just start typing"
-          : "Pick a project, or just start typing"}
+          : "Pick a Project, or just start typing"}
       </p>
     </Fragment>
   );
