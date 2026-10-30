@@ -775,6 +775,29 @@ describe("WindowChrome", () => {
     );
   });
 
+  it("puts every page and pane that shows text on the veil, leaving only start screens open", () => {
+    // The Image generator and the Projects list drew their text straight on
+    // the ground while a thread read on the veil.
+    const railSource = readFileSync(
+      resolve(process.cwd(), "src/shell/WorkspaceRailLayers.tsx"),
+      "utf8",
+    );
+    const layers = [
+      ...new Set([...railSource.matchAll(/className="([a-z-]+-layer)"/g)].map((match) => match[1])),
+    ];
+    const flattened = styles.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\s+/g, " ");
+    const veiled =
+      /\.shell--app-backdrop\.shell-frame :is\( (\.workspace-pane:not\([^)]*\), \.primary-workspace-layer > :is\([^)]*\)) \) \{ --octant-thread-veil: var\(--octant-sheet-surface\);/.exec(
+        flattened,
+      )?.[1] ?? "";
+    expect(veiled).toContain(
+      '.workspace-pane:not([data-surface-kind="welcome"], [data-surface-kind="draft-thread"])',
+    );
+    for (const layer of [...layers, "projects-page-layer"]) {
+      expect(veiled, `${layer ?? ""} draws its text on the ground`).toContain(`.${layer ?? ""}`);
+    }
+  });
+
   it("keeps glass on input surfaces without enclosing agent replies", () => {
     const systemStyles = readFileSync(resolve(process.cwd(), "src/styles/octant.css"), "utf8")
       .replace(/\/\*[\s\S]*?\*\//g, "")
