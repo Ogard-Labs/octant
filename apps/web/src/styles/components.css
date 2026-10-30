@@ -164,7 +164,12 @@
   color: var(--oct-muted);
 }
 
-.octant-popover-option:hover {
+/* The pickers keep DOM focus in their search field and move an active row
+   with the arrow keys, so this fill is the only mark of the row Enter will
+   choose. It lives here, after the row's transparent reset, because a
+   feature stylesheet that loads earlier cannot win against it. */
+.octant-popover-option:hover,
+.octant-popover-option--active {
   background: var(--octant-control-hover);
 }
 

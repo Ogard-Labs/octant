@@ -73,6 +73,7 @@ describe("ComposerProjectSelector", () => {
     expect(row).toHaveAttribute("title", "Code needs a Git repository. Change it in Code settings");
     await user.keyboard("{ArrowDown}");
     expect(row).toHaveClass("composer-folder-selector__option--active");
+    expect(row).toHaveClass("octant-popover-option--active");
     await user.keyboard("{Enter}");
     expect(onSelect).not.toHaveBeenCalled();
   });

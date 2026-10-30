@@ -502,7 +502,7 @@ function RepositoryOption(props: {
         aria-selected={props.selected}
         className={
           props.active
-            ? "octant-popover-option github-picker__option github-picker__option--active"
+            ? "octant-popover-option octant-popover-option--active github-picker__option github-picker__option--active"
             : "octant-popover-option github-picker__option"
         }
         id={props.id}

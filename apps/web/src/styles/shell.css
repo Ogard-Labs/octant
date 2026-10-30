@@ -2530,10 +2530,6 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   text-overflow: ellipsis;
 }
 
-.composer-folder-selector__option--active {
-  background: var(--octant-control-hover);
-}
-
 .draft-thread__context-item {
   display: inline-flex;
   align-items: center;

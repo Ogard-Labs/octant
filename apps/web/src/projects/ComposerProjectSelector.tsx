@@ -227,7 +227,7 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
   }, [open, view]);
 
   const optionClass = (index: number) =>
-    `octant-popover-option composer-folder-selector__option${index === activeIndex ? " composer-folder-selector__option--active" : ""}`;
+    `octant-popover-option composer-folder-selector__option${index === activeIndex ? " octant-popover-option--active composer-folder-selector__option--active" : ""}`;
 
   return (
     <div className="composer-folder-selector">

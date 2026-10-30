@@ -926,10 +926,6 @@ html[data-octant-increased-contrast="true"] .code-diff-pane__warning {
   align-items: baseline;
 }
 
-.github-picker__option--active {
-  background: var(--octant-control-hover);
-}
-
 .github-picker__option-name {
   min-width: 0;
   overflow: hidden;
