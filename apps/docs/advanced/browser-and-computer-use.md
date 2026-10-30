@@ -195,8 +195,8 @@ operate. Use **Stop computer use** or disable the plugin to revoke access.
 Octant bundles its own CuaDriver, including the native SDK, and does not require
 a separate installation. **Automatic updates** is off by default. When you turn
 it on, Octant checks upstream daily, verifies the publisher, checksum, architecture, and
-driver compatibility, then upgrades after computer-use tasks finish. If the
-replacement cannot start, Octant retains the previous verified driver. You
+that its protocol is compatible with this Octant, then upgrades after computer-use tasks finish. If the
+replacement is incompatible or cannot start, Octant keeps the previous verified driver. You
 can use **Check for updates** in Settings at any time.
 Checks send no task content or identifiers.
 

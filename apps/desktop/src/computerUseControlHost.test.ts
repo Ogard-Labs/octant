@@ -209,10 +209,20 @@ describe("Thread-owned computer control", () => {
         expect.objectContaining({
           pid: 123,
           window_id: 9,
-          element_index: 4,
-          snapshot_id: "s00000002",
+          element_token: "s00000002:4",
           delivery_mode: "background",
         }),
+        expect.any(AbortSignal),
+      );
+      // The driver refuses arguments outside its schema, so the retired pair must not be sent.
+      expect(call).not.toHaveBeenCalledWith(
+        "click",
+        expect.objectContaining({ element_index: expect.anything() }),
+        expect.anything(),
+      );
+      expect(call).toHaveBeenCalledWith(
+        "get_window_state",
+        expect.objectContaining({ tree_format: "elements" }),
         expect.any(AbortSignal),
       );
       if (result.kind === "observation")

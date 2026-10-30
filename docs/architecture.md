@@ -6533,7 +6533,16 @@ so it checks upstream daily only
 when the person turns automatic updates on in Settings › Computer use; it is
 off by default, a saved choice is kept, and a manual Check for updates still
 works. Verified updates stage privately, activate
-only while idle, and retain the previous version if startup fails. The driver
+only while idle, and retain the previous version if startup fails. The SDK
+accepts a driver whose handshake reports its wire contract as the same
+`major.minor` as the one the SDK speaks (patch releases only, because the
+driver is pre-1.0), whatever the driver's own version; the check runs at every
+startup and when a staged update starts, before it becomes the active version,
+and an update that fails it is dropped and the previous driver restarts. Octant
+addresses elements by the snapshot's `element_token` and requests the
+structured element list; the driver refuses any argument outside a tool's
+schema, so a new driver release is checked against the tools Octant calls
+before the bundled pin moves. The driver
 never uses a standalone CuaDriver installation. Plan refuses computer-use
 control. See
 [decisions/0113-computer-use-plugin-and-driver-updates.md](decisions/0113-computer-use-plugin-and-driver-updates.md).

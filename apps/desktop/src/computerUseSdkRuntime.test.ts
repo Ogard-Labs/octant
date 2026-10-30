@@ -11,6 +11,8 @@ const native = vi.hoisted(() => ({
   requestPermissions: vi.fn(),
   currentPermissions: vi.fn(),
   openPermissionSettings: vi.fn(async () => {}),
+  contractVersion: "0.8.0",
+  driverVersion: "0.38.0",
 }));
 vi.mock("./computerUseDriverRelease", () => ({
   verifyComputerDriverBinary: vi.fn(async () => {}),
@@ -23,8 +25,8 @@ vi.mock("@trycua/cua-driver", () => ({
   EmbeddedCuaDriverHost: {
     withOptions: () => ({
       start: async () => ({
-        driverVersion: "0.26.0",
-        contractVersion: "0.8.0",
+        driverVersion: native.driverVersion,
+        contractVersion: native.contractVersion,
         generation: "fixture",
         socketPath: "fixture",
       }),
@@ -45,6 +47,7 @@ import { computerUsePermissions, startComputerDriverRuntime } from "./computerUs
 let root: string;
 beforeEach(async () => {
   vi.clearAllMocks();
+  native.contractVersion = "0.8.0";
   root = await mkdtemp(join(tmpdir(), "octant-runtime-test-"));
 });
 afterEach(async () => {
@@ -61,11 +64,29 @@ function health(status: string) {
 }
 function start() {
   return startComputerDriverRuntime({
-    driver: { path: "fixture", version: "0.26.0" },
+    driver: { path: "fixture", version: "0.38.0" },
     profileDirectory: root,
     onExit: () => {},
   });
 }
+describe("Embedded computer runtime contract", () => {
+  it("admits a driver whose contract differs only by patch", async () => {
+    native.contractVersion = "0.8.7";
+    native.callTool.mockResolvedValue(health("pass"));
+    const runtime = await start();
+    await runtime.close();
+  });
+  it.each(["0.9.0", "0.7.9", "1.8.0", "0.8"])(
+    "refuses a driver speaking contract %s and closes native resources",
+    async (contract) => {
+      native.contractVersion = contract;
+      await expect(start()).rejects.toThrow(/contract is incompatible/);
+      expect(native.callTool).not.toHaveBeenCalled();
+      expect(native.stop).toHaveBeenCalledOnce();
+      expect(native.destroyHost).toHaveBeenCalledOnce();
+    },
+  );
+});
 describe("Embedded computer runtime identity", () => {
   it("refuses a driver attached to a different host application and closes native resources", async () => {
     native.callTool.mockResolvedValue(health("fail"));

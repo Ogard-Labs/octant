@@ -3,7 +3,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { CuaDriverLike, EmbeddedCuaDriverHostLike, ToolResult } from "@trycua/cua-driver";
 import { verifyComputerDriverBinary } from "./computerUseDriverRelease";
-import type { StagedComputerDriver } from "./computerUseDriverUpdates";
+import {
+  isCompatibleComputerDriverContract,
+  type StagedComputerDriver,
+} from "./computerUseDriverUpdates";
 
 export interface ComputerDriverRuntime {
   readonly generation: string;
@@ -70,7 +73,7 @@ export async function startComputerDriverRuntime(options: {
     );
     if (
       connection.driverVersion !== options.driver.version ||
-      connection.contractVersion !== "0.8.0"
+      !isCompatibleComputerDriverContract(connection.contractVersion)
     )
       throw new Error("Computer-use driver contract is incompatible.");
     const connected = sdk.CuaDriver.connect(connection.socketPath);
