@@ -52,6 +52,12 @@
   outline: none;
 }
 
+/* With nothing to review there is no list column, so the empty state takes
+   the whole row instead of centring itself inside the 210px list track. */
+.review-page__body > .surface-empty {
+  grid-column: 1 / -1;
+}
+
 /* ── The list ── */
 
 .review-list {

@@ -342,7 +342,7 @@ export function UsageDashboard(props: UsageDashboardProps) {
                       onClick={() => setFilter({})}
                       size="sm"
                       type="button"
-                      variant="ghost"
+                      variant="outline"
                     >
                       Clear filters
                     </OctantButton>

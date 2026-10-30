@@ -11,7 +11,7 @@ import {
   type AgentRunClient,
 } from "@octant/client-runtime/agent-run-client";
 import type { AgentMessageClient } from "@octant/client-runtime/agent-message-client";
-import { Search } from "lucide-react";
+import { Bot, Search } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { AgentMessagingFactsRow } from "./AgentMessagingFactsRow";
 import { ShellState } from "../shell/ShellState";
@@ -123,7 +123,7 @@ export function AgentsCenter(props: AgentsCenterProps) {
   }, [controller, props]);
 
   return (
-    <Surface ariaLabel="Agents" className="agents-center">
+    <Surface ariaLabel="Agents" className="agents-center" measure="wide">
       <SurfaceHeader
         subtitle="Child runs across Chat, Work, and Code."
         title="Agents"
@@ -359,7 +359,7 @@ function AgentsCenterListBody(props: {
                   }}
                   size="sm"
                   type="button"
-                  variant="ghost"
+                  variant="outline"
                 >
                   Clear filters
                 </OctantButton>
@@ -371,6 +371,7 @@ function AgentsCenterListBody(props: {
             ? "Clear or adjust the active filters to see other runs."
             : "Child agents appear here after a thread starts one."
         }
+        icon={<Bot size={20} strokeWidth={1.5} />}
         title={hasActiveFilters ? "No agent runs match these filters" : "No agent runs yet"}
       />
     );

@@ -16,7 +16,7 @@ import {
   type ArrangeableItem,
   type ListArrangement,
 } from "@octant/client-runtime/list-arrangement";
-import { ChevronDown, Pencil, Plus, Search, Sparkles } from "lucide-react";
+import { CalendarClock, ChevronDown, Pencil, Plus, Search, Sparkles } from "lucide-react";
 import { RoutineCalendar } from "./RoutineCalendar";
 import { RoutineComposer } from "./RoutineComposer";
 import { ROUTINE_REQUEST_SUGGESTIONS, type RoutineRequestDraft } from "./routineRequestDraft";
@@ -245,7 +245,7 @@ export function AutomationCenter(props: AutomationCenterProps) {
   }
 
   return (
-    <Surface ariaLabel="Automations" className="automation-center">
+    <Surface ariaLabel="Automations" className="automation-center" measure="wide">
       <SurfaceHeader
         subtitle="Recurring and event-driven Work and Code threads."
         title="Automations"
@@ -570,12 +570,13 @@ function AutomationListBody(props: {
             }}
             size="sm"
             type="button"
-            variant="ghost"
+            variant="outline"
           >
             Clear filters
           </OctantButton>
         }
         detail="Clear or adjust the active filters to see other automations."
+        icon={<CalendarClock size={20} strokeWidth={1.5} />}
         title="No automations match these filters"
       />
     );

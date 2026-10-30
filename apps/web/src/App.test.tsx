@@ -942,14 +942,12 @@ describe("App", () => {
     await user.keyboard("{Enter}");
 
     // Nothing in this fixture is waiting, and the tile says the same.
-    expect(
-      await screen.findByRole("heading", { level: 1, name: "To review · 0 finished threads" }),
-    ).toBeVisible();
+    expect(await screen.findByRole("heading", { level: 1, name: "To review" })).toBeVisible();
     expect(screen.getByRole("button", { name: "To review, 0" })).toBeVisible();
     expect(screen.getByText("Nothing waiting for review")).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "Back to workspace" }));
-    expect(screen.queryByRole("heading", { name: /^To review ·/ })).toBeNull();
+    expect(screen.queryByRole("heading", { level: 1, name: "To review" })).toBeNull();
     expect(await screen.findByRole("region", { name: "Chat welcome" })).toBeVisible();
   });
 
@@ -5519,7 +5517,7 @@ describe("App", () => {
 
     const generator = await screen.findByRole("region", { name: "Image generator" });
     expect(await within(generator).findByRole("button", { name: "Create image" })).toBeEnabled();
-    expect(within(generator).queryByText(/No image profile is configured/)).not.toBeInTheDocument();
+    expect(within(generator).queryByText(/No image profile yet/)).not.toBeInTheDocument();
   });
 
   it("lists the active Project's pull requests in the dock and opens a row in the same dock", async () => {

@@ -1,5 +1,6 @@
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { OctantMode } from "@octant/contracts/modes";
+import { Archive } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Surface, SurfaceEmpty, SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -93,27 +94,28 @@ export function ArchiveView(props: ArchiveViewProps) {
   );
 
   return (
-    <Surface ariaLabel="Archive">
+    <Surface ariaLabel="Archive" measure="wide">
       <SurfaceHeader
-        actions={
-          <OctantSelectField
-            aria-label="Filter archive by Project"
-            onValueChange={(value) => setProjectFilter(value)}
-            options={[
-              { id: ALL_PROJECTS, label: "All Projects" },
-              { id: UNFILED, label: "Unfiled" },
-              ...props.projects.map((project) => ({
-                id: project.id,
-                label: project.name,
-              })),
-            ]}
-            value={projectFilter}
-          />
-        }
         onBack={props.onClose}
         subtitle="Threads kept out of active navigation."
         title="Archive"
       />
+      <div className="surface-toolbar">
+        <OctantSelectField
+          aria-label="Filter archive by Project"
+          className="w-auto min-w-48"
+          onValueChange={(value) => setProjectFilter(value)}
+          options={[
+            { id: ALL_PROJECTS, label: "All Projects" },
+            { id: UNFILED, label: "Unfiled" },
+            ...props.projects.map((project) => ({
+              id: project.id,
+              label: project.name,
+            })),
+          ]}
+          value={projectFilter}
+        />
+      </div>
 
       {chatArchive.kind === "loading" && props.entries.length === 0 ? (
         <ShellState
@@ -123,6 +125,7 @@ export function ArchiveView(props: ArchiveViewProps) {
         />
       ) : entries.length === 0 ? (
         <SurfaceEmpty
+          icon={<Archive size={20} strokeWidth={1.5} />}
           detail={
             projectFilter === ALL_PROJECTS
               ? "Archived threads will appear here."

@@ -31,13 +31,6 @@
   object-fit: contain;
 }
 
-.image-library__note {
-  margin: 0;
-  padding: var(--oct-space-4) 0;
-  color: var(--oct-muted);
-  font-size: var(--oct-text-sm);
-}
-
 .artifact-library-layer {
   position: absolute;
   inset: 0;

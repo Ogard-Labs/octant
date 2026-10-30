@@ -125,7 +125,7 @@ export function ArtifactLibrarySurface(props: ArtifactLibrarySurfaceProps) {
     });
 
   return (
-    <Surface ariaLabel="Artifact library">
+    <Surface ariaLabel="Artifact library" measure="wide">
       <ArtifactLibraryView
         busy={library.busy}
         filters={library.filters}

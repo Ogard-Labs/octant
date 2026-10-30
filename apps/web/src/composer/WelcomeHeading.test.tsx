@@ -8,8 +8,14 @@ describe("WelcomeHeading", () => {
   it("asks one question and says where to begin, without a greeting or counts", () => {
     render(<WelcomeHeading />);
     expect(screen.getByRole("heading", { name: "What are we building today?" })).toBeVisible();
-    expect(screen.getByText("Pick a project, or just start typing")).toBeVisible();
+    expect(screen.getByText("Pick a Project, or just start typing")).toBeVisible();
     expect(screen.queryByText(/running|waiting for your review|Good (morning|evening)/)).toBeNull();
+  });
+
+  it("stops asking for a project once one is chosen", () => {
+    render(<WelcomeHeading projectChosen />);
+    expect(screen.getByText("Just start typing")).toBeVisible();
+    expect(screen.queryByText(/Pick a Project/)).toBeNull();
   });
 
   it("draws the aperture mark at 22px above the question", () => {
