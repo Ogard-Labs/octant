@@ -118,7 +118,7 @@ The host supplies the tool transport automatically for supported runtimes:
 | Claude Code                | Agent SDK in-process MCP server                                                                                         |
 | OpenCode                   | Private MCP profile on macOS, only on the releases whose isolation Octant verified: 1.18.21, 2.0.22 and 2.0.27, exactly |
 | ACP runtimes               | HTTP MCP on macOS, when the runtime advertises and accepts it, or Octant verified that release accepts it               |
-| Pi                         | Owned extension and verified CLI catalogue, only on the verified releases 0.85.1 and 1.1.0                              |
+| Pi                         | Owned extension and verified CLI catalogue, only on 0.85.1 and 1.1.0 or later, when the probe attests it                |
 | Direct endpoints           | Only models whose tool use you verified                                                                                 |
 | A CLI in a thread terminal | `octant mcp`, Browser only; see [Browser for a CLI in a terminal](/advanced/terminal-browser)                           |
 

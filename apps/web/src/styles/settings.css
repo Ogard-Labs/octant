@@ -2897,6 +2897,10 @@ html[data-octant-increased-contrast="true"]
 .provider-card__authority-note {
   color: var(--octant-text-muted);
 }
+.provider-card__update-available {
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+}
 .provider-card__disclosure-icon {
   flex: 0 0 auto;
   transition: transform var(--oct-motion-fast) ease;

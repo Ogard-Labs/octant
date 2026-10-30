@@ -92,6 +92,7 @@ import {
   invalidateModelCapabilityEvidence,
   isImageProfileDriverKind,
   isNativeHarnessDriverKind,
+  providerLatestVersionNpmPackage,
   type CapabilityEvidenceChange,
 } from "@octant/domain";
 import { describeProviderRuntimeIntegration } from "@octant/domain/provider-runtime-integration";
@@ -238,6 +239,8 @@ export interface ProviderServiceOptions {
    */
   readonly ensureAccountDirectory?: (directory: string) => Promise<void>;
   readonly runCliUpdate?: (input: ProviderCliUpdateInput) => Promise<ProviderCliUpdateOutput>;
+  /** Newest published release of an npm-distributed CLI; undefined when unknown. */
+  readonly latestNpmVersion?: (packageName: string) => Promise<string | undefined>;
   /** Read-only host fact used to refuse enabling a missing local CLI. */
   readonly isProviderExecutableAvailable?: (instance: ProviderInstance) => boolean;
   readonly uuid: () => string;
@@ -277,6 +280,7 @@ export class ProviderService implements ProviderServiceApi {
   readonly #ensureAccountDirectory: (directory: string) => Promise<void>;
   readonly #clearProviderCredential: ProviderServiceOptions["clearProviderCredential"];
   readonly #runCliUpdate: (input: ProviderCliUpdateInput) => Promise<ProviderCliUpdateOutput>;
+  readonly #latestNpmVersion: (packageName: string) => Promise<string | undefined>;
   readonly #isProviderExecutableAvailable: (instance: ProviderInstance) => boolean;
 
   constructor(options: ProviderServiceOptions) {
@@ -320,6 +324,7 @@ export class ProviderService implements ProviderServiceApi {
       });
     this.#clearProviderCredential = options.clearProviderCredential;
     this.#runCliUpdate = options.runCliUpdate ?? runProviderCliUpdate;
+    this.#latestNpmVersion = options.latestNpmVersion ?? (async () => undefined);
     this.#isProviderExecutableAvailable = options.isProviderExecutableAvailable ?? (() => true);
   }
 
@@ -633,6 +638,19 @@ export class ProviderService implements ProviderServiceApi {
     if (command.kind === "probe-provider") {
       const result = await this.probe(authenticatedWindowId, command.instanceId);
       return decodeProviderRegistryCommandResult({ kind: "provider-probed", result });
+    }
+    if (command.kind === "check-provider-latest-version") {
+      this.#assertReady();
+      const instance = this.#persistence.readProviderInstance(command.instanceId);
+      if (instance === undefined) throw this.#invalid("Provider instance was not found.");
+      const packageName = providerLatestVersionNpmPackage(instance.driverKind);
+      const latestVersion =
+        packageName === undefined ? undefined : await this.#latestNpmVersion(packageName);
+      return decodeProviderRegistryCommandResult({
+        kind: "provider-latest-version",
+        instanceId: command.instanceId,
+        ...(latestVersion === undefined ? {} : { latestVersion }),
+      });
     }
     if (command.kind === "update-provider-cli") {
       this.#assertReady();

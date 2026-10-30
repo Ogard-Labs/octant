@@ -107,6 +107,7 @@ import { createProviderRouteHandler } from "../providers/providerRoutes";
 import { createDiscoveryRouteHandler } from "../providers/discoveryRoutes";
 import { createProviderFromDiscoveryCandidate } from "../providers/discoveryProviderCreate";
 import { makeDiscoveryService } from "../providers/discoveryService";
+import { createProviderLatestVersionCheck } from "../providers/providerLatestVersion";
 import { isProviderExecutableAvailable, ProviderService } from "../providers/providerService";
 import {
   CANONICAL_REVIEWED_MODEL_MANIFEST,
@@ -1293,6 +1294,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       await credentialResolver.delete(instanceId);
     };
     const providerService = new ProviderService({
+      latestNpmVersion: createProviderLatestVersionCheck({ isAllowed: isMarketplaceFetchAllowed }),
       persistence,
       runtimeRegistry: providerRuntimeRegistry,
       isProviderExecutableAvailable,

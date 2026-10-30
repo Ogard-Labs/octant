@@ -237,6 +237,16 @@ Before the service launches the maintainer must fill in: the abuse contact
 address, the hosting region, and the final legal wording of this disclosure.
 :::
 
+### Provider update checks
+
+Providers settings reads the newest published version of Codex, Claude Code,
+Grok Build, GitHub Copilot and Cline from the npm registry, at most once a day
+per tool. The request is a plain `GET` for the package name; it carries no
+thread, Project, account or device identifier, and discloses only your IP address
+and ordinary HTTP metadata. It follows the marketplace fetches switch: off means
+no request is made. Octant runs a tool's own updater only when you click
+**Update CLI**.
+
 ## What never leaves
 
 These do not go to an Octant-operated service (a public link carries only the

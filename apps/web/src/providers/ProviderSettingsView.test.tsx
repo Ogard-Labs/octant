@@ -1102,6 +1102,28 @@ describe("ProviderSettingsView", () => {
     expect(screen.queryByText(/login profile was preserved/i)).not.toBeInTheDocument();
   });
 
+  it("says an update is available beside Update CLI only when the newest release is newer than the installed one", () => {
+    const onCheckLatestVersions = vi.fn();
+    const view = (latest: string) => (
+      <ProviderSettingsView
+        {...fixture({
+          instance: kimiProvider(),
+          observed: observation({ readiness: "ready", detectedVersion: "0.26.0" }),
+        })}
+        latestVersions={new Map([[id, latest]])}
+        onCheckLatestVersions={onCheckLatestVersions}
+        onUpdateProviderCli={vi.fn(async () => true)}
+      />
+    );
+    const { unmount } = renderExpanded(view("0.27.1"));
+    expect(onCheckLatestVersions).toHaveBeenCalled();
+    expect(screen.getByText("Update available (0.26.0 → 0.27.1)")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Update CLI for Kimi local" })).toBeEnabled();
+    unmount();
+    renderExpanded(view("0.26.0"));
+    expect(screen.queryByText(/Update available/)).not.toBeInTheDocument();
+  });
+
   it("replaces a ready badge with a scoped Updating state during a CLI update", () => {
     renderExpanded(
       <ProviderSettingsView
