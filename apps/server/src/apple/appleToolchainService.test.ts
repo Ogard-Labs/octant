@@ -333,6 +333,32 @@ describe("AppleToolchainService discovery", () => {
     expect(execute).toHaveBeenCalled();
   });
 
+  it("says a Swift package alone is not an Xcode project, without probing the host", async () => {
+    const execute = discoveryExecutor();
+    const service = new AppleToolchainService({
+      execute,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+
+    const result = await service.discover(
+      { ...discoveryRequest, projectPath: "Package.swift" },
+      context,
+    );
+
+    expect(result).toEqual({
+      kind: "failure",
+      failure: {
+        category: "invalid",
+        message:
+          "The Simulator needs an Xcode project (.xcodeproj) or workspace (.xcworkspace); a Swift package (Package.swift) alone has none. Add one, then try again.",
+        step: "project",
+      },
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("reports unavailable Xcode without attempting project discovery", async () => {
     const execute = vi.fn(async () => processResult("", { exitCode: 1 }));
     const service = new AppleToolchainService({
@@ -905,6 +931,103 @@ describe("AppleToolchainService lifecycle", () => {
       context,
     );
     expect(service.snapshot(context).simulators[0]?.state).toBe("shutdown");
+  });
+
+  it("boots a Simulator created after discovery by reading the device list again", async () => {
+    const created = "30000000-0000-4000-8000-000000000030";
+    let listed = false;
+    const base = discoveryExecutor();
+    const execute = vi.fn(async (input: Parameters<typeof base>[0]) => {
+      if (input.argv.join(" ") === "xcrun simctl list devices available --json" && listed) {
+        return processResult(
+          JSON.stringify({
+            devices: {
+              "com.apple.CoreSimulator.SimRuntime.iOS-18-5": [
+                { name: "iPhone 16", udid: ids.simulator, state: "Booted", isAvailable: true },
+                { name: "iPhone 18 Pro", udid: created, state: "Shutdown", isAvailable: true },
+              ],
+            },
+          }),
+        );
+      }
+      if (input.argv[1] === "simctl" && input.argv[2] === "boot") return processResult("ok\n");
+      if (input.argv[1] === "simctl" && input.argv[2] === "bootstatus")
+        return processResult("ok\n");
+      return base(input);
+    });
+    const service = new AppleToolchainService({
+      execute,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    listed = true;
+
+    const booted = await service.execute(
+      simulatorRequest({
+        kind: "boot",
+        simulatorId: created as never,
+        approval: buildRequest().approval,
+      }),
+      context,
+    );
+
+    expect(booted.outcome).toBe("succeeded");
+    expect(service.snapshot(context).simulators).toContainEqual(
+      expect.objectContaining({ name: "iPhone 18 Pro", state: "booted" }),
+    );
+  });
+
+  it("lets a cancel stop an action that is still reading the device list for a new Simulator", async () => {
+    const created = "30000000-0000-4000-8000-000000000030";
+    let listed = false;
+    const base = discoveryExecutor();
+    const controlled: string[] = [];
+    const execute = vi.fn(async (input: Parameters<typeof base>[0], signal?: AbortSignal) => {
+      if (input.argv.join(" ") === "xcrun simctl list devices available --json" && listed) {
+        return await new Promise<ReturnType<typeof processResult>>((resolve) => {
+          signal?.addEventListener(
+            "abort",
+            () => resolve(processResult("", { termination: "cancelled", exitCode: null })),
+            { once: true },
+          );
+        });
+      }
+      if (input.argv[1] === "simctl") controlled.push(input.argv[2] ?? "");
+      return base(input);
+    });
+    const service = new AppleToolchainService({
+      execute,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    listed = true;
+
+    const running = service.execute(
+      simulatorRequest({
+        kind: "boot",
+        simulatorId: created as never,
+        approval: buildRequest().approval,
+      }),
+      context,
+    );
+    await vi.waitFor(() => expect(service.snapshot(context).active).toHaveLength(1));
+    await expect(
+      service.cancel(
+        {
+          actionId: ids.action as never,
+          correlationId: ids.correlation as never,
+          authority,
+          reason: "user-requested",
+        },
+        context,
+      ),
+    ).resolves.toBe(true);
+    await running;
+    expect(controlled).not.toContain("boot");
   });
 
   it("puts a Simulator back to shutdown when boot does not become ready, so Boot can be offered again", async () => {

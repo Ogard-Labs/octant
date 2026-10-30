@@ -59,6 +59,24 @@ describe("useAppleProjects", () => {
     expect(list).toHaveBeenCalledTimes(1);
   });
 
+  it("lists again when the host says the checkout's files changed, so a new project file needs no reload", async () => {
+    const { client, list } = listingClient();
+    let notify: (() => void) | undefined;
+    (client.watch as ReturnType<typeof vi.fn>).mockImplementation(async function* () {
+      await new Promise<void>((resolve) => {
+        notify = resolve;
+      });
+      yield { kind: "code-file-change", threadId, checkoutId, paths: ["Demo.xcodeproj"] };
+    });
+    renderHook(() => useAppleProjects({ client, threadId, checkoutId }));
+
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(notify).toBeDefined());
+    notify?.();
+
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+  });
+
   it("retries a listing refused while the checkout was waiting once the view reports it available", async () => {
     // The failure the original availability gate was added for: a one-shot
     // read taken while the host resolves the checkout keeps its refusal for

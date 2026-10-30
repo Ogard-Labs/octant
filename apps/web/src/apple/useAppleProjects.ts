@@ -32,16 +32,16 @@ export interface UseAppleProjectsOptions {
  *
  * Read from the host's own bounded listing rather than guessed from the
  * Project name: a thread whose checkout holds no Xcode project reports none,
- * and the workbench entry point simply does not appear. The listing is not
- * watched — this feeds a menu that is built when it opens, and holding a
- * change stream open for that would cost a connection to say nothing.
+ * and the workbench entry point simply does not appear. The listing follows the
+ * host's file-change notices, so a project file added while the thread is open
+ * shows up without reloading the window.
  */
 export function useAppleProjects(
   options: UseAppleProjectsOptions,
 ): ReadonlyArray<AppleProjectEntry> {
   const controller = useCodeFileListingController({
     enabled: options.threadId !== undefined && options.checkoutId !== undefined,
-    watch: false,
+    watch: true,
     ...(options.client === undefined ? {} : { client: options.client }),
     ...(options.threadId === undefined ? {} : { threadId: options.threadId }),
     ...(options.checkoutId === undefined ? {} : { checkoutId: options.checkoutId }),
