@@ -67,12 +67,6 @@ const populated: HostDataMap = {
         leavesMachine: true,
         purpose: "Skill search talks to skills.sh and npm when you search the marketplace.",
       },
-      {
-        kind: "known",
-        category: "ssh-target-connections",
-        leavesMachine: true,
-        purpose: "Octant connects to the SSH targets you register, through your own SSH client.",
-      },
     ],
   },
   projects: {
@@ -135,7 +129,6 @@ describe("HostDataMapView", () => {
     expect(screen.getAllByText(/app\.octant\.provider-credentials/).length).toBeGreaterThan(0);
     expect(screen.getByText("Notes")).toBeInTheDocument();
     expect(screen.getByText("Provider calls")).toBeInTheDocument();
-    expect(screen.getByText("SSH target connections")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Thread retention and purge" })).toHaveAttribute(
       "href",
       "#settings-thread-retention",
