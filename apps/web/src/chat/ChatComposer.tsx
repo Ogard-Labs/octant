@@ -1,4 +1,5 @@
 import { useComposerCompacting } from "../context/composerContextMeterScope";
+import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerAtMenu";
 import { ComputerUseMention, useComputerUseMention } from "../computerUse/ComputerUseMention";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import {
@@ -271,9 +272,16 @@ export function ChatComposer(props: ChatComposerProps) {
   // skill only appears when this composer actually has the host's draft
   // resolution path, because that path — not this list — decides whether the
   // reference is allowed.
-  const offeredCommands = useOctantCommands().filter(
-    (command) => command.action.kind === "run" || props.onResolveExtensionReference !== undefined,
-  );
+  const offeredCommands = useOctantCommands().filter((command) => command.action.kind === "run");
+  const atMenu = useComposerAtMenu({
+    draft: props.draft,
+    onDraftChange: props.onDraftChange,
+    textarea: () => messageRef.current,
+    ...(props.onResolveExtensionReference === undefined
+      ? {}
+      : { onResolveExtensionReference: resolveExtensionReference }),
+    apps: [{ kind: "computer", controller: computer }],
+  });
   const [commandToken, setCommandToken] = useState<SlashCommandToken | undefined>(undefined);
   const [activeCommandIndex, setActiveCommandIndex] = useState(0);
   const commandMatches =
@@ -403,6 +411,7 @@ export function ChatComposer(props: ChatComposerProps) {
 
   function syncTokens(draft: string, caretIndex: number | null) {
     computer.sync(draft, caretIndex);
+    atMenu.sync(draft, caretIndex);
     mention.sync(draft, caretIndex);
     syncCommandToken(draft, caretIndex);
   }
@@ -446,6 +455,7 @@ export function ChatComposer(props: ChatComposerProps) {
   async function onDraftKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.nativeEvent.isComposing) return;
     if (suggestionInput.takeOnTab(event)) return;
+    if (atMenu.handleKeyDown(event)) return;
     if (computer.handleKeyDown(event)) return;
     if (commandOpen && commandMatches.length > 0) {
       if (event.key === "ArrowDown") {
@@ -639,33 +649,43 @@ export function ChatComposer(props: ChatComposerProps) {
   const input = (
     <OctantTextarea
       aria-activedescendant={
-        computer.open
-          ? `${computer.listId}-computer`
-          : activeCommand !== undefined
-            ? `${commandListId}-${activeCommand.id}`
-            : activeMention === undefined
-              ? undefined
-              : `${mentionListId}-${String(activeMention.threadId)}`
+        atMenu.active !== undefined
+          ? `${atMenu.listId}-${atMenu.active.id}`
+          : computer.open
+            ? `${computer.listId}-computer`
+            : activeCommand !== undefined
+              ? `${commandListId}-${activeCommand.id}`
+              : activeMention === undefined
+                ? undefined
+                : `${mentionListId}-${String(activeMention.threadId)}`
       }
       aria-autocomplete={
-        !computer.available && props.threadMentions === undefined && offeredCommands.length === 0
+        !computer.available &&
+        props.threadMentions === undefined &&
+        offeredCommands.length === 0 &&
+        props.onResolveExtensionReference === undefined
           ? undefined
           : "list"
       }
       aria-controls={
-        computer.open
-          ? computer.listId
-          : commandOpen
-            ? commandListId
-            : mentionOpen
-              ? mentionListId
-              : undefined
+        atMenu.open
+          ? atMenu.listId
+          : computer.open
+            ? computer.listId
+            : commandOpen
+              ? commandListId
+              : mentionOpen
+                ? mentionListId
+                : undefined
       }
       aria-describedby={statusId}
       aria-expanded={
-        !computer.available && props.threadMentions === undefined && offeredCommands.length === 0
+        !computer.available &&
+        props.threadMentions === undefined &&
+        offeredCommands.length === 0 &&
+        props.onResolveExtensionReference === undefined
           ? undefined
-          : computer.open || commandOpen || mentionOpen
+          : atMenu.open || computer.open || commandOpen || mentionOpen
       }
       className="composer-input window-no-drag"
       onChange={(event) => {
@@ -968,7 +988,13 @@ export function ChatComposer(props: ChatComposerProps) {
         },
       }}
       typeahead={
-        computer.open ? <ComputerUseMention controller={computer} surface="typeahead" /> : typeahead
+        atMenu.open ? (
+          <ComposerAtTypeahead controller={atMenu} />
+        ) : computer.open ? (
+          <ComputerUseMention controller={computer} surface="typeahead" />
+        ) : (
+          typeahead
+        )
       }
     />
   );

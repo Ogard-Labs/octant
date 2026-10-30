@@ -14,6 +14,7 @@ export type OctantCommandGroup =
   | "Needs you"
   | "Skills"
   | "Plugins"
+  | "Connectors"
   | "Modes"
   | "Threads"
   | "Projects"

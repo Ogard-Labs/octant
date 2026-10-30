@@ -25,6 +25,7 @@ import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
 } from "../../composer/useComposerSlashCommands";
+import { ComposerAtTypeahead, useComposerAtMenu } from "../../composer/useComposerAtMenu";
 import { ComposerAttachButton } from "../../composer/ComposerAttachButton";
 import { StartSuggestionChip } from "../../composer/StartSuggestionChip";
 import type { CodeCheckoutId, CodeRepositoryId } from "@octant/contracts/code";
@@ -300,7 +301,16 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     textarea: () => textareaRef.current,
     draft: prompt,
     onDraftChange: setPrompt,
+  });
+  const atMenu = useComposerAtMenu({
+    textarea: () => textareaRef.current,
+    draft: prompt,
+    onDraftChange: setPrompt,
     onResolveExtensionReference: extensionDraft.resolveReference,
+    apps: [
+      { kind: "computer", controller: computer },
+      { kind: "browser", controller: browser },
+    ],
   });
   const appMentions = useApplicationMentionTypeahead([
     { controller: computer, kind: "computer" },
@@ -501,7 +511,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const [sendNotice, setSendNotice] = useState<string>();
   // A notice about the Project no longer applies once another is chosen.
   useEffect(() => setSendNotice(undefined), [props.projectId]);
-  const canSubmit = trimmed.length > 0 && !props.creating && !submitting && !slash.resolving;
+  const canSubmit = trimmed.length > 0 && !props.creating && !submitting && !atMenu.resolving;
 
   // Server-authoritative ref catalog for the branch selector, fetched lazily
   // the first time the selector opens.
@@ -718,6 +728,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (atMenu.handleKeyDown(event)) return;
     if (appMentions.handleKeyDown(event)) return;
     if (computer.handleKeyDown(event)) return;
     if (browser.handleKeyDown(event)) return;
@@ -856,28 +867,32 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
               <OctantTextarea
                 aria-label="First message"
                 aria-autocomplete="list"
-                aria-expanded={computer.open || browser.open || slash.open}
+                aria-expanded={atMenu.open || computer.open || browser.open || slash.open}
                 aria-controls={
-                  appMentions.open.length > 1
-                    ? appMentions.listId
-                    : computer.open
-                      ? computer.listId
-                      : browser.open
-                        ? browser.listId
-                        : slash.open
-                          ? slash.listId
-                          : undefined
+                  atMenu.open
+                    ? atMenu.listId
+                    : appMentions.open.length > 1
+                      ? appMentions.listId
+                      : computer.open
+                        ? computer.listId
+                        : browser.open
+                          ? browser.listId
+                          : slash.open
+                            ? slash.listId
+                            : undefined
                 }
                 aria-activedescendant={
-                  appMentions.open.length > 1
-                    ? `${appMentions.listId}-${appMentions.open[appMentions.active]?.kind ?? ""}`
-                    : computer.open
-                      ? `${computer.listId}-computer`
-                      : browser.open
-                        ? `${browser.listId}-browser`
-                        : slash.active === undefined
-                          ? undefined
-                          : `${slash.listId}-${slash.active.id}`
+                  atMenu.active !== undefined
+                    ? `${atMenu.listId}-${atMenu.active.id}`
+                    : appMentions.open.length > 1
+                      ? `${appMentions.listId}-${appMentions.open[appMentions.active]?.kind ?? ""}`
+                      : computer.open
+                        ? `${computer.listId}-computer`
+                        : browser.open
+                          ? `${browser.listId}-browser`
+                          : slash.active === undefined
+                            ? undefined
+                            : `${slash.listId}-${slash.active.id}`
                 }
                 autoFocus
                 className="composer-input"
@@ -887,12 +902,14 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                   computer.sync(event.target.value, event.currentTarget.selectionStart);
                   browser.sync(event.target.value, event.currentTarget.selectionStart);
                   slash.sync(event.target.value, event.currentTarget.selectionStart);
+                  atMenu.sync(event.target.value, event.currentTarget.selectionStart);
                   mention.sync(event.target.value, event.currentTarget.selectionStart);
                 }}
                 onClick={(event) => {
                   mention.sync(event.currentTarget.value, event.currentTarget.selectionStart);
                   browser.sync(event.currentTarget.value, event.currentTarget.selectionStart);
                   slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+                  atMenu.sync(event.currentTarget.value, event.currentTarget.selectionStart);
                 }}
                 onKeyDown={handleKeyDown}
                 onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
@@ -906,7 +923,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
               />
             }
             typeahead={
-              appMentions.open.length > 1 ? (
+              atMenu.open ? (
+                <ComposerAtTypeahead controller={atMenu} />
+              ) : appMentions.open.length > 1 ? (
                 <ApplicationMentionTypeahead typeahead={appMentions} />
               ) : computer.open ? (
                 <ComputerUseMention controller={computer} surface="typeahead" />

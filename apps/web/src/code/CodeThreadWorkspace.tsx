@@ -136,6 +136,7 @@ import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
 } from "../composer/useComposerSlashCommands";
+import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerAtMenu";
 import { useComposerSuggestionInput } from "../composer/useComposerSuggestionInput";
 import {
   unattachedCapabilityMentionCopy,
@@ -361,7 +362,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       setDraft(next);
       props.controller.setPendingDraft?.(next);
     },
-    onResolveExtensionReference: extensionDraft.resolveReference,
   });
   const appMentions = useApplicationMentionTypeahead([
     { controller: computer, kind: "computer" },
@@ -576,6 +576,25 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   });
   const pathMentionListId = `code-path-mentions-${String(props.threadId)}`;
   const pathMentionOpen = pathMentions.open && !mention.open;
+  const atMenu = useComposerAtMenu({
+    textarea: () => textareaRef.current,
+    draft,
+    onDraftChange: (next) => {
+      draftRevisionRef.current += 1;
+      setDraft(next);
+      props.controller.setPendingDraft?.(next);
+    },
+    onResolveExtensionReference: extensionDraft.resolveReference,
+    apps: [
+      { kind: "computer", controller: computer },
+      { kind: "browser", controller: browser },
+    ],
+    files: {
+      open: pathMentionOpen,
+      candidates: pathMentions.candidates,
+      choose: pathMentions.choose,
+    },
+  });
   const peekAbandoned = attachments.peekAbandoned;
   const markDraftStagedDropped = props.controller.markDraftStagedDropped;
   useEffect(() => {
@@ -616,6 +635,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     computer.sync(value, caret);
     browser.sync(value, caret);
     slash.sync(value, caret);
+    atMenu.sync(value, caret);
     mention.sync(value, caret);
     pathMentions.sync(value, caret);
   }
@@ -732,7 +752,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     trimmed.length > 0 &&
     !compacting &&
     !attachments.busy &&
-    !slash.resolving &&
+    !atMenu.resolving &&
     !queuePreparing &&
     !messageQueue.busy &&
     !messageQueue.uncertain &&
@@ -991,6 +1011,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (suggestionInput.takeOnTab(event)) return;
+    if (atMenu.handleKeyDown(event)) return;
     if (appMentions.handleKeyDown(event)) return;
     if (computer.handleKeyDown(event)) return;
     if (browser.handleKeyDown(event)) return;
@@ -1988,38 +2009,47 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         input={
           <OctantTextarea
             aria-activedescendant={
-              appMentions.open.length > 1
-                ? `${appMentions.listId}-${appMentions.open[appMentions.active]?.kind ?? ""}`
-                : computer.open
-                  ? `${computer.listId}-computer`
-                  : browser.open
-                    ? `${browser.listId}-browser`
-                    : slash.active !== undefined
-                      ? `${slash.listId}-${slash.active.id}`
-                      : mention.activeCandidate !== undefined
-                        ? `${mentionListId}-${String(mention.activeCandidate.threadId)}`
-                        : pathMentionOpen && pathMentions.activeCandidate !== undefined
-                          ? `${pathMentionListId}-${pathMentions.activeCandidate.path}`
-                          : undefined
+              atMenu.active !== undefined
+                ? `${atMenu.listId}-${atMenu.active.id}`
+                : appMentions.open.length > 1
+                  ? `${appMentions.listId}-${appMentions.open[appMentions.active]?.kind ?? ""}`
+                  : computer.open
+                    ? `${computer.listId}-computer`
+                    : browser.open
+                      ? `${browser.listId}-browser`
+                      : slash.active !== undefined
+                        ? `${slash.listId}-${slash.active.id}`
+                        : mention.activeCandidate !== undefined
+                          ? `${mentionListId}-${String(mention.activeCandidate.threadId)}`
+                          : pathMentionOpen && pathMentions.activeCandidate !== undefined
+                            ? `${pathMentionListId}-${pathMentions.activeCandidate.path}`
+                            : undefined
             }
             aria-autocomplete="list"
             aria-controls={
-              appMentions.open.length > 1
-                ? appMentions.listId
-                : computer.open
-                  ? computer.listId
-                  : browser.open
-                    ? browser.listId
-                    : slash.open
-                      ? slash.listId
-                      : mention.open
-                        ? mentionListId
-                        : pathMentionOpen
-                          ? pathMentionListId
-                          : undefined
+              atMenu.open
+                ? atMenu.listId
+                : appMentions.open.length > 1
+                  ? appMentions.listId
+                  : computer.open
+                    ? computer.listId
+                    : browser.open
+                      ? browser.listId
+                      : slash.open
+                        ? slash.listId
+                        : mention.open
+                          ? mentionListId
+                          : pathMentionOpen
+                            ? pathMentionListId
+                            : undefined
             }
             aria-expanded={
-              computer.open || browser.open || slash.open || mention.open || pathMentionOpen
+              atMenu.open ||
+              computer.open ||
+              browser.open ||
+              slash.open ||
+              mention.open ||
+              pathMentionOpen
             }
             className="composer-input window-no-drag"
             id={`code-thread-composer-${String(thread.id)}`}
@@ -2066,7 +2096,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           />
         }
         typeahead={
-          appMentions.open.length > 1 ? (
+          atMenu.open ? (
+            <ComposerAtTypeahead controller={atMenu} />
+          ) : appMentions.open.length > 1 ? (
             <ApplicationMentionTypeahead typeahead={appMentions} />
           ) : computer.open ? (
             <ComputerUseMention controller={computer} surface="typeahead" />

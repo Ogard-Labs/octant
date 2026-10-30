@@ -1569,8 +1569,13 @@ Coordination is one hop and unavailable, unauthorized, or deleted targets fail
 closed. Work and Code mentions remain read-only. In Work and Code, an `@file`
 mention completes a path inside the thread's bound root; the host refuses a path
 outside that root before reading it. Chat Projects have no filesystem authority,
-so `@file` is absent there. Unknown `@` text stays ordinary text; `@plugin` /
-`$skill` addressing is unchanged. Side Chat is a Chat-mode sidecar about
+so `@file` is absent there. Unknown `@` text stays ordinary text. `@` is the one composer
+picker in every composer: it lists the effective snapshot's available skills,
+effective plugin MCP servers, and connectors the person added (a disabled or
+untrusted item is absent), plus the thread's files in Work and Code. Choosing a
+row makes a structured selection chip that the host re-resolves at send; it
+never installs, trusts, enables, or elevates anything. `/` lists commands only,
+and `$skill` stays a typed alias. Side Chat is a Chat-mode sidecar about
 exactly one source thread: ordinary Chat with no inherited Work or Code
 authority and no path that messages, approves, steers, or appends to the
 source. Each turn the host re-resolves the source on the sender's window and

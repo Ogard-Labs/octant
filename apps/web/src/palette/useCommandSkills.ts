@@ -119,6 +119,7 @@ export function useCommandExtensions(
                   reference: `@${slug}/${component.component.id}`,
                   displayName: component.component.displayName,
                   pluginName: packageState.displayName ?? slug,
+                  ...(packageState.addedInSettings === true ? { connector: true as const } : {}),
                 }));
             }),
           ),
@@ -209,7 +210,8 @@ function samePluginServers(
     (server, index) =>
       server.reference === next[index]?.reference &&
       server.displayName === next[index]?.displayName &&
-      server.pluginName === next[index]?.pluginName,
+      server.pluginName === next[index]?.pluginName &&
+      server.connector === next[index]?.connector,
   )
     ? current
     : next;

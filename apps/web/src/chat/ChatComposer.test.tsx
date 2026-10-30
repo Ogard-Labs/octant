@@ -631,7 +631,21 @@ describe("ChatComposer slash commands", () => {
     expect(draft).toHaveValue("/new");
   });
 
-  it("hands a chosen skill to the host resolution path instead of resolving it itself", async () => {
+  it("keeps skills out of the slash list even when the host can resolve them", async () => {
+    const user = userEvent.setup();
+    render(
+      <SlashHarness
+        commands={hostCommands()}
+        onResolveExtensionReference={vi.fn(async () => true)}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("Message"), "/writ");
+
+    expect(screen.queryByRole("option", { name: /Writing review/ })).not.toBeInTheDocument();
+  });
+
+  it("hands a skill chosen from the @ list to the host resolution path instead of resolving it itself", async () => {
     const user = userEvent.setup();
     const onResolveExtensionReference = vi.fn(async () => true);
     render(
@@ -642,8 +656,8 @@ describe("ChatComposer slash commands", () => {
     );
 
     const draft = screen.getByLabelText("Message");
-    await user.type(draft, "/writ");
-    const list = screen.getByRole("listbox", { name: "Commands you can run" });
+    await user.type(draft, "@writ");
+    const list = screen.getByRole("listbox", { name: "Skills, tools, and files you can mention" });
     await user.click(within(list).getByRole("option", { name: /Writing review/ }));
 
     expect(onResolveExtensionReference).toHaveBeenCalledWith(skillReference);
