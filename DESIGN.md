@@ -538,12 +538,11 @@ One quiet line under it, at the detail step in muted ink, says
 "Pick a project, or just start typing". The start screen names no time of day
 and counts nothing: what is running and what waits for review live in the
 sidebar. Once a Code start screen has a Project chosen, its quick tools are
-the Project's own Terminal and Browser as plain rows. While the right dock is
-open for the new task they fill the dock's body, above one muted line, "Other
-tools open once the task starts"; a second column beside the open dock squeezed
-the composer off centre and contradicted the dock. With the dock closed they
-stand as a column on the stage (320px, one hairline, hidden below 1100px).
-Each opens where it stands without starting a thread, the same window-local
+the Project's own Terminal and Browser as plain rows in the right dock's body,
+above one muted line, "Other tools open once the task starts". They live only
+in the dock: a column beside the start screen squeezed the composer off centre
+and contradicted the dock, so with the dock closed the start screen stands
+alone. Each opens in the dock without starting a thread, the same window-local
 Project terminal and browser Zen uses, which no agent can see or reach;
 "Quick tools" returns to the list, and closing the terminal (or leaving the
 start screen) stops its shell, since nothing else could reopen it. The
@@ -1301,8 +1300,7 @@ stage), defined once on every shell in `shell.css`:
 - **An outline button** rests on that card step instead of the page colour
   (`--octant-outline-rest`); its hover and pressed fills stay the control
   fills.
-- **Quick tools** beside a Code start screen are clear, whether a column on
-  the stage or the body of the open dock.
+- **Quick tools** for a Code start screen are clear in the body of the dock.
 - **The Browser** is clear on its own start page, whose rows take the card
   step; a loaded page keeps its opaque canvas.
 

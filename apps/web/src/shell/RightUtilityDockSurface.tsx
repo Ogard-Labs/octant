@@ -182,7 +182,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
           quickToolsProjectId === undefined ? (
             <ShellState state="neutral" title="Tools open once the task starts" />
           ) : (
-            <StartQuickTools inDock projectId={quickToolsProjectId} />
+            <StartQuickTools projectId={quickToolsProjectId} />
           )
         ) : props.resolution.kind === "closed" ? (
           <div className="dock-start">{props.overview}</div>

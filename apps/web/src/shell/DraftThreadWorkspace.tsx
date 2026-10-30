@@ -79,7 +79,7 @@ import {
   type CodeComposerSuggestion,
   type CodeComposerSubmitInput,
 } from "../code/composer/CodeComposerAdapter";
-import { StartQuickTools, StartQuickToolsPlacementContext } from "./StartQuickTools";
+import { StartQuickToolsPlacementContext } from "./StartQuickTools";
 import { useWorktreeRemoteFacts } from "../code/composer/useWorktreeRemoteFacts";
 import { WorkComposerAdapter } from "../work/composer/WorkComposerAdapter";
 import { ProjectCreateDialog } from "../projects/ProjectCreateDialog";
@@ -313,9 +313,8 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   // must keep its former Project without replacing the composer's draft.
   const selectedProjectId = props.onSelectProject === undefined ? localProjectId : props.projectId;
   // A Code start screen hands its Project to the dock, which holds the quick
-  // tools while it is open for this task.
-  const quickToolsPlacement = useContext(StartQuickToolsPlacementContext);
-  const chooseQuickToolsProject = quickToolsPlacement?.chooseProject;
+  // tools while this task waits for its thread.
+  const chooseQuickToolsProject = useContext(StartQuickToolsPlacementContext)?.chooseProject;
   const codeStart = props.mode === "code";
   useEffect(() => {
     if (chooseQuickToolsProject === undefined || !codeStart) return;
@@ -832,14 +831,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     );
     return (
       <>
-        {/* The wrapper is always there, so choosing a Project adds the tools
-            beside the composer without remounting it and losing the draft. */}
-        <div className="draft-thread__with-tools">
-          {composer}
-          {selectedProjectId === undefined || quickToolsPlacement?.inDock === true ? null : (
-            <StartQuickTools projectId={selectedProjectId} />
-          )}
-        </div>
+        {composer}
         {addFolderDialog}
       </>
     );

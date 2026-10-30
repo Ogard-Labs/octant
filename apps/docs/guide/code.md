@@ -22,8 +22,7 @@ A Code Project can remember how new threads should start: in **this Project's cu
 ## Quick tools on the start screen
 
 Once you choose a Project on a Code start screen, **Terminal** and **Browser**
-appear in the right sidebar when it is open, or in a column beside the start
-screen when it is closed (on a window at least 1100px wide). They open the
+appear in the right sidebar. Open the sidebar to use them. They open the
 Project's own terminal and browser right there, before any thread exists. No
 agent can see or use either. **Quick tools** takes you back to the list;
 closing the terminal stops its shell.

@@ -6717,7 +6717,7 @@ function LaunchedShell(
         wideContextOpen={!isNarrow && dockPresentedOpen}
         workspace={
           <StartQuickToolsContext.Provider value={startQuickToolsServices}>
-            <StartQuickToolsPlacementProvider inDock={dockHoldsForCodeDraft && dockPresentedOpen}>
+            <StartQuickToolsPlacementProvider>
               <div className="primary-workspace-layer">
                 <ReaderPagesContainer
                   actions={actions}

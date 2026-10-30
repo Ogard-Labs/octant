@@ -347,7 +347,6 @@ describe("the right sidebar surface", () => {
       <StartQuickToolsContext.Provider value={services}>
         <StartQuickToolsPlacementContext.Provider
           value={{
-            inDock: true,
             projectId: decodeProjectId("30000000-0000-4000-8000-000000000001"),
             chooseProject: vi.fn(),
           }}
