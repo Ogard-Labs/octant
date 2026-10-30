@@ -50,7 +50,6 @@ import type {
   RemotePairingTicketSourceClass,
   ResolvedSidebarMaterial,
   SettlePairedComputerOutcome,
-  SshTargetOperation,
 } from "@octant/contracts/desktop-bridge";
 
 export type {
@@ -93,7 +92,6 @@ export type {
   RemotePairingTicketSourceClass,
   ResolvedSidebarMaterial,
   SettlePairedComputerOutcome,
-  SshTargetOperation,
 } from "@octant/contracts/desktop-bridge";
 
 /**
@@ -227,21 +225,6 @@ export function remoteAccessAdministrationOf(
   };
 }
 
-export interface SshTargetAdministrationBridge {
-  readonly sshTargetRequest: (
-    operation: SshTargetOperation,
-    body?: unknown,
-  ) => Promise<{ readonly status: number; readonly body: unknown }>;
-}
-
-/** The SSH target administration when this window is a desktop window, else nothing. */
-export function sshTargetAdministrationOf(
-  bridge: OctantHostBridge | undefined,
-): SshTargetAdministrationBridge | undefined {
-  const request = bridge?.sshTargetRequest;
-  return request === undefined ? undefined : { sshTargetRequest: request };
-}
-
 /** What a window asks of this host's hub role and hub membership. */
 export type HubAdministrationOperation =
   | "status"
@@ -319,7 +302,6 @@ export interface OctantHostBridge
   extends
     Partial<RemoteAccessAdministrationBridge>,
     Partial<PairedComputersBridge>,
-    Partial<SshTargetAdministrationBridge>,
     Partial<HubAdministrationBridge>,
     Partial<OwnerUnlockBridge> {
   /**

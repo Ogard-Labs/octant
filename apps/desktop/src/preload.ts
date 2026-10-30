@@ -1,7 +1,6 @@
 import type { NativeMenuRequest, NativeMenuOutcome } from "@octant/contracts/shell";
 import { decodeMenuBarOpenThread, type MenuBarOpenThread } from "./menuBar";
 import { isHubAdministrationOperation } from "./hubAdministrationControls";
-import { isSshTargetOperation } from "./sshTargetControls";
 import type {
   OwnerUnlockChallenge,
   OwnerUnlockKeyOutcome,
@@ -936,19 +935,6 @@ export function createHostBridge(
       };
       ipc.on(IPC_CHANNELS.remoteServerPageSign, receive);
       return () => ipc.removeListener(IPC_CHANNELS.remoteServerPageSign, receive);
-    },
-    sshTargetRequest: async (operation: string, body?: unknown) => {
-      if (!isSshTargetOperation(operation)) {
-        throw new TypeError("Invalid SSH target request.");
-      }
-      const answer = (await ipc.invoke(IPC_CHANNELS.sshTargetRequest, operation, body)) as {
-        readonly status?: unknown;
-        readonly body?: unknown;
-      } | null;
-      if (typeof answer?.status !== "number") {
-        throw new Error("Octant SSH target controls are unavailable.");
-      }
-      return { status: answer.status, body: answer.body };
     },
     hubAdministrationRequest: async (operation: string, body?: unknown) => {
       if (!isHubAdministrationOperation(operation)) {

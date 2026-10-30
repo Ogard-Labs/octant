@@ -13,7 +13,6 @@ import {
   ListTodo,
   MessageCircle,
   Monitor,
-  Network,
   Mic,
   PanelLeft,
   Palette,
@@ -85,7 +84,6 @@ const SETTINGS_NAVIGATION_META: Readonly<
   sync: { group: "Privacy & data", icon: FolderSync },
   "remote-access": { group: "Privacy & data", icon: Radio },
   host: { group: "Advanced", icon: Server },
-  "ssh-targets": { group: "Advanced", icon: Network },
   usage: { group: "Advanced", icon: ChartNoAxesColumnIncreasing },
 };
 

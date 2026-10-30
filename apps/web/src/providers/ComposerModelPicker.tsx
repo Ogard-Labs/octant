@@ -1157,8 +1157,5 @@ function compactUnavailableLabel(reason: string | undefined): string {
   if (/tool calling/i.test(reason)) return "Chat only";
   if (/no longer listed/i.test(reason)) return "Unavailable";
   if (/not available/i.test(reason)) return "Unavailable";
-  // A thread on an SSH target refuses such a model outright (an agent with no
-  // runtime path set there read "Limited" here), so none is partly usable.
-  if (/SSH target/.test(reason)) return "Unavailable";
   return "Limited";
 }

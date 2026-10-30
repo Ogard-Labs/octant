@@ -29,12 +29,6 @@ import { resolveProjectCliCommand, runProjectCliCommand } from "./projectCommand
 import { resolveAgentCliCommand, runAgentCliCommand } from "./agentCommand";
 import { runMcpCliCommand } from "./mcpCommand";
 import {
-  executorStartCommand,
-  isExecutorStdioInvocation,
-  runExecutorCommand,
-} from "./executorCommand";
-import { resolveSshTargetCliCommand, runSshTargetCliCommand } from "./sshTargetCommand";
-import {
   readAllStdin,
   readHiddenLineFromTerminal,
   resolveProviderKeyCliCommand,
@@ -91,15 +85,6 @@ async function main(): Promise<number> {
   if (args === undefined) {
     printUsage();
     return 1;
-  }
-  if (args.command === "executor") {
-    // Standard output is the SSH session's protocol from the first byte, so
-    // a wrong invocation is reported on standard error only.
-    if (!isExecutorStdioInvocation(process.argv.slice(3))) {
-      process.stderr.write("Usage: octant executor --stdio\n");
-      return 1;
-    }
-    return await runExecutorCommand(executorStartCommand(import.meta.url, process.execPath));
   }
   if (args.command === "mcp") {
     // Before anything that resolves a data directory or opens a host session:
@@ -317,30 +302,6 @@ async function main(): Promise<number> {
         stderr: process.stderr,
       }),
     );
-  }
-  if (args.command === "ssh-target") {
-    const command = resolveSshTargetCliCommand(args.positional, args.flags);
-    if (command === undefined) {
-      printUsage();
-      return 1;
-    }
-    const prompt =
-      process.stdin.isTTY === true
-        ? createInterface({ input: process.stdin, output: process.stdout })
-        : undefined;
-    try {
-      return await withLocalControlSession((session) =>
-        runSshTargetCliCommand({
-          command,
-          session,
-          stdout: process.stdout,
-          stderr: process.stderr,
-          ask: prompt === undefined ? undefined : (question) => prompt.question(question),
-        }),
-      );
-    } finally {
-      prompt?.close();
-    }
   }
   if (args.command === "pair" || args.command === "auth" || args.command === "listener") {
     const command: RemoteAccessCliCommand | undefined =
@@ -633,21 +594,6 @@ function printUsage(): void {
       "  octant hub apply <offer-id> [--project <project-id>]",
       "  octant hub dismiss <offer-id>",
       "  octant hub auto-apply update-channel|plugin|agent-profile on|off",
-      "  octant ssh-target [list]",
-      "  octant ssh-target add <destination> --executor <path-of-octant-on-target> [--fingerprint <SHA256:...>]",
-      "  octant ssh-target repin <target-id> [--fingerprint <SHA256:...>]",
-      "  octant ssh-target connect|remove <target-id>",
-      "  octant ssh-target runtime <target-id> <provider-instance-id> <path-of-runtime-on-target>",
-      "  octant ssh-target bind <target-id> <remote-root> --name <name>",
-      "  octant ssh-target projects",
-      "  octant ssh-target files <project-id> [directory]",
-      "  octant ssh-target read <project-id> <path>",
-      "  octant ssh-target status <project-id>",
-      "  octant ssh-target diff <project-id> [path]",
-      "  octant ssh-target worktrees",
-      "  octant ssh-target worktree add <project-id> <name>",
-      "  octant ssh-target worktree remove <worktree-id>",
-      "  octant executor --stdio",
       "  octant pair [--source loopback|lan-private|tailscale]",
       "  octant pair requests",
       "  octant pair approve|deny <ticket-id>",

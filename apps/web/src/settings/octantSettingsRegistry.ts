@@ -1216,40 +1216,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "ssh-targets",
-      label: "SSH targets",
-      scope: "host",
-      // Shown only in a desktop window: a paired browser cannot administer targets.
-      keywords:
-        "ssh target remote machine server devbox host key fingerprint pin executor attest confinement bubblewrap connect remote folder project worktree terminal shell",
-      settings: [
-        {
-          id: settingId("ssh-target-add"),
-          label: "Add an SSH target",
-          scope: "host",
-          keywords: "add register ssh target destination host key fingerprint pin executor",
-        },
-        {
-          id: settingId("ssh-targets-list"),
-          label: "SSH targets",
-          scope: "host",
-          keywords: "connect reconnect re-pin repin remove attestation admitted refused recovery",
-        },
-        {
-          id: settingId("ssh-remote-project-bind"),
-          label: "Bind a remote folder",
-          scope: "host",
-          keywords: "bind remote folder project code root on target",
-        },
-        {
-          id: settingId("ssh-remote-projects"),
-          label: "Remote Projects",
-          scope: "host",
-          keywords: "remote project terminal shell worktree branch open remove",
-        },
-      ],
-    },
-    {
       id: "usage",
       label: "Usage",
       scope: "host",

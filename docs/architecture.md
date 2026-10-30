@@ -862,6 +862,8 @@ Code settings. The renderer preserves its proposed branch as delivery intent wit
 claiming a checked-out branch; detached Git checkouts remain refused. Git-dependent
 actions continue to report unavailable for plain folders.
 
+Remote SSH environments are withdrawn as out of scope (maintainer decision,
+2026-10-29); their entry points are removed and the runtime below goes next.
 A Code Project bound to a folder on a machine this host reaches over SSH is a
 design accepted on 2026-10-26. Its admission policy, the executor, the SSH
 transport, host-key pinning from a local window or the local CLI, Linux
@@ -9101,9 +9103,10 @@ The maintainer authorized the previously held post-preview tracks on
 2026-10-26: mobile maturity (Android internal builds, redacted push, capture
 and voice, public store distribution), a ciphertext-only hosted relay, a full
 LSP / extension host / debugger companion, enterprise directory OAuth and
-cloud-IAM provider identity, disposable Linux desktops for headless hosts, remote SSH development environments, third-party
+cloud-IAM provider identity, disposable Linux desktops for headless hosts, third-party
 provider-driver plugins, and the EU/GDPR compliance package (pending legal
-review). On 2026-10-28 the maintainer added a hub-and-spoke topology under the
+review). Remote SSH development environments were withdrawn as out of scope on
+2026-10-29. On 2026-10-28 the maintainer added a hub-and-spoke topology under the
 same terms ([Hub and spokes](design/hub-and-spokes.md)), including a
 self-hosted wake service that runs in the Octant server on the person's own
 hub; an Octant-operated wake service is not in scope. None of them is part of
