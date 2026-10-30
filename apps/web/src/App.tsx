@@ -5403,6 +5403,7 @@ function LaunchedShell(
     prompt?: string,
     modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
     paneId?: PaneId,
+    extensionSelections?: ReadonlyArray<import("@octant/contracts/extensions").ExtensionSelection>,
   ) {
     if (prompt === undefined || prompt.trim() === "") {
       closeWorkspaceReaders();
@@ -5423,7 +5424,7 @@ function LaunchedShell(
       undefined,
       undefined,
       undefined,
-      undefined,
+      extensionSelections,
       undefined,
       undefined,
       modelOptionValues,
