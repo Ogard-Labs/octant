@@ -87,6 +87,22 @@ describe("readRepository", () => {
       remediation: "repository-access-or-scope-required",
     });
   });
+
+  it("fails closed with the single sign-on remediation when an organization requires authorization", async () => {
+    const run = vi.fn(async () => ({
+      exitCode: 1,
+      stdout: "",
+      stderr:
+        "HTTP 403: Resource protected by organization SAML enforcement. You must grant your token access to this organization.",
+    }));
+    const port = new GhRepositoryCataloguePort({ command: { run } });
+    expect(
+      await port.readRepository({ owner: "atlas", name: "private" }, new AbortController().signal),
+    ).toEqual({
+      kind: "scope-limited",
+      remediation: "sso-authorization-required",
+    });
+  });
 });
 
 describe("listAssignedWork", () => {

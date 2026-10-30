@@ -7,6 +7,7 @@ import type {
   GithubIssueRow,
   GithubRepositoryRow,
 } from "@octant/contracts";
+import { describeGithubRemediation } from "./githubRemediation";
 import { GitHubRepositoryPicker } from "../code/GitHubRepositoryPicker";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -120,7 +121,10 @@ export function CreateFromIssuePicker(props: CreateFromIssuePickerProps) {
         if (response.kind === "unavailable") {
           setIssues({
             kind: "unavailable",
-            message: response.remediation ?? "GitHub issues are unavailable.",
+            message:
+              response.remediation === undefined
+                ? "GitHub issues are unavailable."
+                : describeGithubRemediation(response.remediation),
           });
           return;
         }

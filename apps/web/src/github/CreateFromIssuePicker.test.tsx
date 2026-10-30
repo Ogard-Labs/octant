@@ -114,6 +114,30 @@ describe("Create from issue picker", () => {
     expect(onSelect.mock.calls[0]?.[0]).not.toHaveProperty("body");
   });
 
+  it("says in plain words why a repository's issues are unavailable", async () => {
+    const user = userEvent.setup();
+    const base = makeClient();
+    const client = makeClient(readySnapshot, {
+      readCatalogue: async (request) =>
+        request.kind === "issues"
+          ? {
+              kind: "unavailable",
+              capability: "issues-read",
+              reason: "scope-limited",
+              remediation: "repository-access-or-scope-required",
+            }
+          : base.readCatalogue(request),
+    });
+    render(<CreateFromIssuePicker client={client} onSelect={vi.fn()} />);
+    await user.click(await screen.findByText("octant/octant"));
+    expect(
+      await screen.findByText(
+        "GitHub needs access to this repository, or the token is missing a scope.",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText("repository-access-or-scope-required")).toBeNull();
+  });
+
   it("hides create-from-issue when the plugin is disabled", async () => {
     render(<AvailabilityProbe client={makeClient()} pluginEnabled={false} />);
     expect(await screen.findByText("issues-create-hidden")).toBeVisible();

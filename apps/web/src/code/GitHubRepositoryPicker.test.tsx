@@ -197,6 +197,84 @@ describe("GitHubRepositoryPicker", () => {
     expect(await screen.findByText("octant/repo-1")).toBeInTheDocument();
   });
 
+  it("says in plain words why the catalogue is unavailable instead of showing the code", async () => {
+    const readCatalogue = vi.fn(async (request: GithubCatalogueReadRequest) => {
+      if (request.kind === "recent-repositories") return recents;
+      return {
+        kind: "unavailable",
+        capability: "repository-catalogue",
+        reason: "scope-limited",
+        remediation: "repository-access-or-scope-required",
+      } as GithubCatalogueReadResponse;
+    });
+    render(<GitHubRepositoryPicker client={makeClient({ readCatalogue })} onSelect={vi.fn()} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "GitHub needs access to this repository, or the token is missing a scope.",
+    );
+    expect(screen.queryByText(/repository-access-or-scope-required/)).toBeNull();
+  });
+
+  it("says in plain words why a pasted repository is unavailable and what an access note means", async () => {
+    const user = userEvent.setup();
+    const readCatalogue = vi.fn(async (request: GithubCatalogueReadRequest) => {
+      if (request.kind === "recent-repositories")
+        return { kind: "recent-repositories", rows: [] } as GithubCatalogueReadResponse;
+      if (request.kind === "repository") {
+        return {
+          kind: "unavailable",
+          capability: "repository-catalogue",
+          reason: "scope-limited",
+          remediation: "repository-access-or-scope-required",
+        } as GithubCatalogueReadResponse;
+      }
+      return {
+        kind: "repositories",
+        page: {
+          rows: [
+            repositoryRow(1, {
+              capabilities: [
+                {
+                  kind: "issues-read",
+                  available: false,
+                  remediation: "sso-authorization-required",
+                },
+              ],
+            }),
+          ],
+          sort: "pushed-desc",
+          hasNextPage: false,
+          freshness: { status: "fresh" },
+        },
+      } as GithubCatalogueReadResponse;
+    });
+    render(
+      <GitHubRepositoryPicker
+        client={makeClient({ readCatalogue })}
+        onSelect={vi.fn()}
+        selectedNodeId="R_node1"
+      />,
+    );
+    await screen.findByRole("option", { name: /repo-1/ });
+
+    await user.click(screen.getByRole("button", { name: "Repository details" }));
+    expect(
+      screen.getByText("The organization requires single sign-on authorization for this token."),
+    ).toBeVisible();
+
+    await user.type(
+      screen.getByLabelText("Repository link or owner/repository"),
+      "atlas-org/missing",
+    );
+    await user.click(screen.getByRole("button", { name: "Use repository" }));
+    expect(
+      await screen.findByText(
+        "GitHub needs access to this repository, or the token is missing a scope.",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText(/repository-access-or-scope-required/)).toBeNull();
+  });
+
   it("directs an insecure credential to the recoverable GitHub settings flow", async () => {
     const readCatalogue = vi.fn(async (request: GithubCatalogueReadRequest) => {
       if (request.kind === "recent-repositories") return recents;

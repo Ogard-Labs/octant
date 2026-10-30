@@ -10,6 +10,7 @@ import { Check, Link, RefreshCw, Search } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { OctantInput } from "../ui/base/OctantInput";
+import { describeGithubRemediation } from "../github/githubRemediation";
 import { parseGithubRepositoryReference } from "./githubRepositoryReference";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
@@ -68,6 +69,15 @@ const UNAVAILABLE_FALLBACKS: Readonly<Record<GithubCatalogueUnavailable["reason"
   "invalid-cursor": "The repository page reference expired. Refresh the list.",
   unavailable: "GitHub repositories are unavailable on this host.",
 };
+
+function describeUnavailable(state: {
+  readonly reason: GithubCatalogueUnavailable["reason"];
+  readonly remediation?: string | undefined;
+}): string {
+  return state.remediation === undefined
+    ? UNAVAILABLE_FALLBACKS[state.reason]
+    : describeGithubRemediation(state.remediation);
+}
 
 const DEFAULT_PAGE_SIZE = 30;
 
@@ -235,7 +245,7 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
       const response = await client.readCatalogue({ kind: "repository", ...reference });
       if (operation !== linkGeneration.current) return;
       if (response.kind === "unavailable") {
-        setLinkError(response.remediation ?? UNAVAILABLE_FALLBACKS[response.reason]);
+        setLinkError(describeUnavailable(response));
         return;
       }
       if (response.kind !== "repository") {
@@ -369,9 +379,7 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
 
       {catalogue.kind === "unavailable" ? (
         <>
-          <OctantAlert tone="warning">
-            {catalogue.remediation ?? UNAVAILABLE_FALLBACKS[catalogue.reason]}
-          </OctantAlert>
+          <OctantAlert tone="warning">{describeUnavailable(catalogue)}</OctantAlert>
           <OctantButton
             onClick={() => void loadPage(trimmedQuery)}
             size="sm"
@@ -471,7 +479,7 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
                 .map((capability) => (
                   <div className="github-picker__capability" key={capability.kind}>
                     <dt>Access note</dt>
-                    <dd>{capability.remediation}</dd>
+                    <dd>{describeGithubRemediation(capability.remediation ?? "")}</dd>
                   </div>
                 ))}
             </dl>
