@@ -1007,6 +1007,17 @@ needs and the maintainer approves them. Rejected: allowing all of
 refusing port-using adapters on macOS (it rules out most interpreted-language
 adapters).
 
+Two rules for a package that runs an adapter on macOS, both measured with
+debugpy. It declares `debugPorts: 1` and binds debugpy's `Launcher` listener
+to `{{debugPort}}`, or Seatbelt denies loopback and the adapter cannot reach
+the program. Its interpreter sits where the session's profile can read it: a
+venv inside the checkout (`<checkout>/.venv`) or a system or Homebrew install.
+The profile denies reading `/private` and the home folder and re-allows only
+the checkout and the install folder, so an interpreter under the home folder
+(uv, pyenv, `~/.local`) or under `/private` (a venv in `/private/tmp`) is
+refused as `adapter-refused`: `sandbox-exec` fails with `Operation not
+permitted` and exits 71.
+
 ### Protocol
 
 The Debug Adapter Protocol wire is JSON with a `Content-Length` header on
@@ -1423,9 +1434,10 @@ The rule:
   the session's ports, a child stopped at its breakpoint; with the child
   server port left closed the child never connected back. So children are
   not refused on macOS. Residual: the wrapper depends on a debugpy internal,
-  pinned by the package's own version; and debugpy's parent also opens a
-  `Launcher` listener on a free port, which the macOS confined-program smoke
-  (8d) must cover for the parent session itself.
+  pinned by the package's own version. debugpy's parent also opens a
+  `Launcher` listener; the package binds it to the declared debug port (see
+  the package rules above), and a process test on 2026-10-29 measured the
+  parent session stopping at its breakpoint under Seatbelt.
 - **What the host sends on a child connection.** The closed list is
   unchanged, except that `attach` takes the place of `launch`, sent once. Its
   body is the announced configuration, bounded at 8 KiB, with `connect`
@@ -1516,8 +1528,12 @@ refuses `attach` on the session's own connection and `launch` on a child's
 adding children or changing the announcement quarantines the update
 (`extensionLifecycleService.test.ts`); the panel lists children under the
 session, shows a selected child's stop, and goes back to the program when the
-child is stopped (`RunDebugPanel.test.tsx`). Still to run: real debugpy
-through the session host, and the Mac smoke with 8d.
+child is stopped (`RunDebugPanel.test.tsx`). Real debugpy 1.8.22 on CPython
+3.14 ran through the session host on macOS under Seatbelt (approval-gated
+thread, 2026-10-29): the program stopped at its breakpoint, a child it started
+was announced and stopped at its breakpoint, variables were read, and the
+session ended cleanly. That was a process test, not the packaged app. Still
+to run: the Mac smoke with 8d.
 
 ### Debugger delivery
 
@@ -1597,8 +1613,9 @@ Each sub-slice is its own pull request with this addendum updated in place.
     the session host. It needs no `startDebugging` (above). `ptrace` works
     inside the capsule: the program attached to its own forked child with
     `PTRACE_ATTACH`. The `macos-15` CI job ran the same process test under
-    Seatbelt and passed on 2026-10-27 ([job][macos-ci-2026-10-27]). Still to
-    run: the Mac smoke of 8d.
+    Seatbelt and passed on 2026-10-27 ([job][macos-ci-2026-10-27]). Debugpy
+    itself ran on macOS on 2026-10-29 (child sessions, above; package rules
+    under DB6). Still to run: the Mac smoke of 8d.
 - **8c. Run and debug panel.** Container: yes.
   - Gutter breakpoints, the configuration list with imported proposals and the
     confirmation card, the session toolbar, call stack, variables, the debug
