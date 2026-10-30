@@ -890,74 +890,58 @@ html[data-octant-increased-contrast="true"] .code-diff-pane__warning {
   color: var(--oct-fg);
 }
 
+/* A field and the control that acts on it share one row, so "Use
+   repository" and the refresh control sit beside what they act on instead of
+   hanging under it as loose text. */
+.github-picker__link,
 .github-picker__toolbar {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: var(--oct-space-2);
+  gap: var(--oct-space-1);
+  min-width: 0;
 }
 
 .github-picker__search {
-  flex: 1 1 200px;
+  flex: 1 1 auto;
   min-width: 0;
+}
+
+.github-picker__link > button {
+  flex: 0 0 auto;
 }
 
 .github-picker__listbox {
   margin: 0;
-  padding: var(--oct-space-1);
+  padding: 0;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   max-height: 280px;
   overflow-y: auto;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
 }
 
-.github-picker__group-label {
-  padding: var(--oct-space-1) var(--oct-space-2) 2px;
-  color: var(--oct-meta);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  letter-spacing: 0;
-  text-transform: none;
-}
-
+/* Name first, the facts trailing it in the meta tone on the same line. */
 .github-picker__option {
-  display: flex;
-  flex-wrap: wrap;
   align-items: baseline;
-  justify-content: space-between;
-  gap: var(--oct-space-1) var(--oct-space-3);
-  padding: var(--oct-space-1) var(--oct-space-2);
-  border-radius: var(--oct-radius-sm);
-  cursor: pointer;
 }
 
-/* The bare variant draws nothing, so the option takes the ghost focus fill itself. */
-.github-picker__option:focus-visible {
-  background-color: var(--muted);
-}
-
-.github-picker__option--active,
-.github-picker__option:hover {
-  background: var(--oct-fg-soft);
-}
-
-.github-picker__option[aria-selected="true"] {
-  box-shadow: inset 0 0 0 1px var(--oct-border);
+.github-picker__option--active {
+  background: var(--octant-control-hover);
 }
 
 .github-picker__option-name {
   min-width: 0;
-  overflow-wrap: anywhere;
-  font-weight: var(--oct-weight-display);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .github-picker__option-meta {
   display: inline-flex;
-  flex-wrap: wrap;
+  flex: 0 1 auto;
+  margin-inline-start: auto;
+  min-width: 0;
+  overflow: hidden;
   gap: var(--oct-space-2);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
@@ -1926,31 +1910,6 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
     grid-template-columns: repeat(2, minmax(0, 1fr));
     padding-inline: var(--oct-space-5);
   }
-}
-
-.code-branch-selector__search {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: var(--oct-space-2) var(--oct-space-3);
-  color: var(--octant-text-muted);
-  border-bottom: 1px solid var(--octant-border);
-}
-
-.code-branch-selector__search input {
-  flex: 1;
-  min-width: 0;
-  padding: 0;
-  color: var(--octant-text-primary);
-  background: transparent;
-  border: 0;
-  outline: none;
-  font: inherit;
-  font-size: var(--oct-text-sm);
-}
-
-.code-branch-selector__search input::placeholder {
-  color: var(--octant-text-muted);
 }
 
 .code-thread-workspace {

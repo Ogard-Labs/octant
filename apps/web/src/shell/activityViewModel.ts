@@ -128,6 +128,43 @@ export function writeThreadArrangement(
   }
 }
 
+const FOLDED_STATUS_GROUPS_STORAGE_KEY = "octant.sidebar.folded-status-groups.v1";
+
+/**
+ * The Status groups this window has folded. Session storage keeps the choice
+ * per window, as a folded Project is, and across a reload of that window.
+ */
+export function readFoldedStatusGroups(
+  mode: SidebarActivityMode = "chat",
+  storageHolder: { readonly sessionStorage?: Storage } = globalThis,
+): ReadonlySet<string> {
+  try {
+    const stored: unknown = JSON.parse(
+      storageHolder.sessionStorage?.getItem(`${FOLDED_STATUS_GROUPS_STORAGE_KEY}.${mode}`) ?? "[]",
+    );
+    return new Set(
+      Array.isArray(stored) ? stored.filter((id): id is string => typeof id === "string") : [],
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+export function writeFoldedStatusGroups(
+  folded: ReadonlySet<string>,
+  mode: SidebarActivityMode = "chat",
+  storageHolder: { readonly sessionStorage?: Storage } = globalThis,
+): void {
+  try {
+    storageHolder.sessionStorage?.setItem(
+      `${FOLDED_STATUS_GROUPS_STORAGE_KEY}.${mode}`,
+      JSON.stringify([...folded]),
+    );
+  } catch {
+    // Presentation persistence is best-effort; the current window still folds.
+  }
+}
+
 /**
  * Sidebar Search is an in-place filter of the rows already on screen.
  * Project, Recents, and Unfiled are folder words on a thread, so a query

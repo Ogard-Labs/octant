@@ -582,8 +582,11 @@ on the left; the context ring, model and microphone on the right, next to send).
 The model button names a chosen reasoning effort after the model in muted ink
 ("GPT-6 Astra Medium"); the provider default names none. Where the thread runs
 (Project, base branch, checkout, Environment, repository) is the first row
-inside the card, above the prompt, as small rounded chips on a faint fill with
-no outline, so the composer stays a single object. On a start screen the
+inside the card, above the prompt, as quiet chips set together from the left,
+the first label lined up with the prompt's text: meta ink and no fill at rest,
+a fill only under the pointer or while the chip's menu is open, the same as
+the access and model controls under the prompt. Plan meters keep the right
+end of that row. The composer stays a single object. On a start screen the
 Project chooser stands just above the card's top-left edge as plain text,
 lifted out of the row so it never pushes the prompt down. Code's
 base-branch chip is absent until a Project is chosen: with no Project it
@@ -594,6 +597,24 @@ list ("Create from…") floats over the page. A thread's own follow-up
 composer keeps its context strip beneath the card. Nothing about delivery is
 asked up front; it is derived from the chips and shown on the thread once it
 exists.
+
+**Composer popups.** Every popup the composer opens (Project, base branch,
+checkout, Create from…, access, model) uses one recipe. The face is the
+popover fill with the overlay shadow and a 12px corner, a 6px inset, and it
+fades and settles in from 98% over 150ms from the side it opens on (instant
+under reduced motion). A search field is `.octant-popover-search`: a filled
+32px field with a leading 14px icon and no border; it takes focus as the popup
+opens, so it brightens rather than drawing the keyboard edge. Rows are
+`.octant-popover-option`: one line, at least 30px, an icon, the name, and any
+detail (a folder, visibility, state) trailing in the meta ink and cut from the
+end. A choice is a check mark at the row's end and never a fill; a fill means
+only that the pointer or the keyboard is on the row. Group headings are
+`.octant-popover-group` (12px, medium, meta ink, sentence case) and status
+lines `.octant-popover-empty`. A control that acts on a field sits on the
+field's row ("Use repository", the refresh icon), never under it. A popup is
+capped to the room on the side it opens on; only its list scrolls, and the
+ways to add something (New Project from folder…, from GitHub) stay pinned
+under the list.
 
 **New task**, in every mode, is the question and the composer and nothing
 else; Chat and Work add one row of outline starter chips only before the
@@ -697,10 +718,16 @@ it, so the prompt and the recent-thread list read on the plain page; in the
 light theme it fades out sooner, because dark text over a pale picture has
 less contrast headroom than light text over a dark one. A person
 may instead put the ground behind every page, from the workspace's leading
-edge, and under the sidebar too when they ask for it (see Shapes and depth). Conversations
-soften it beneath one continuous reading veil, the sheet colour at 80%, so it
-shows at about a fifth of its strength behind a thread and agent replies
-remain bare prose (0155). Increased contrast turns the ground off; reduced motion
+edge, and under the sidebar too when they ask for it (see Shapes and depth). Every
+surface that shows text or information softens it beneath one continuous
+reading veil, the sheet colour at 80%, so it shows at about a fifth of its
+strength and agent replies remain bare prose (0155): a thread, every other pane
+(a Project's page, Settings, a file, a preview), and every destination page
+(Inbox, Board, Archive, Review, Projects, Agents, Automations, Artifacts, Image
+generator). A start screen (a welcome or a new thread) is the one exception and
+stays open on the ground. The veil is one rule in `surface.css` keyed on the
+pane kind and the destination layers, never a colour per screen; a page drawn
+over the panes clears their veil so the two never stack. Increased contrast turns the ground off; reduced motion
 shows an animated picture's still frame. It is chosen in Settings ›
 Appearance › Background. The phone shares the same pictures and print effect under
 Appearance › Background.
@@ -1121,7 +1148,9 @@ meta ink with a 20px gap above, so a label never reads as one more row. A
 thread row that carries a facts line is two lines of type and takes 8px above
 and below them (about 56px). Hover-only actions (add, more, pin, archive,
 and a tab's pin and close) take no width until their row is hovered or
-focused. Icon sizes are 16/19/22px for small/medium/large actions; touch
+focused. A section heading's add and more controls are the exception: the
+list's view and filter controls share that row, so they keep their width while
+hidden and only fade in, and nothing beside them moves. Icon sizes are 16/19/22px for small/medium/large actions; touch
 surfaces keep 44px targets. The workspace and Settings share the saved sidebar
 width, defaulting to 280px (wide enough to read a thread's title rather than
 guess it); narrow Settings layouts retain their responsive
@@ -1323,8 +1352,9 @@ Controls keep their own opaque fills (a switch thumb, a filled or secondary
 button, a segmented track), and menus, popovers, and dialogs keep the opaque
 floating surface. Increased contrast and reduced transparency return cards and
 outline buttons to their opaque colours. The ground behind it all steps down
-by what is on screen: a fifth of its strength behind a thread or a
-destination page.
+by what is on screen: a fifth of its strength behind any surface that shows
+text (a thread, any other pane, or a destination page), and only a start
+screen keeps more of it.
 
 Shadow tokens are `--octant-shadow-hairline`, `--octant-shadow-xs`,
 `--octant-shadow-sm`, `--octant-shadow-md`, `--octant-shadow-lg`,

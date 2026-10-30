@@ -141,6 +141,8 @@ export type ShellActions = {
   readonly openDraftThread: ShellController["openDraftThread"];
   readonly openGithubIssues: () => void;
   readonly openImageLibrary: () => void;
+  /** Puts the active pane back on its mode's start screen. */
+  readonly openHome: () => void;
   readonly openInbox: () => void;
   readonly openLinearIssues: () => void;
   readonly openLinkInApp: (

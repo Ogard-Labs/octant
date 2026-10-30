@@ -157,6 +157,8 @@ export function compareAppVersions(left: AppVersion, right: AppVersion): number 
   return comparePrerelease(parsedLeft.prerelease, parsedRight.prerelease);
 }
 
+const BUILD_RING_TAGS: ReadonlyArray<string> = [PREVIEW_PRERELEASE_TAG, CANDIDATE_PRERELEASE_TAG];
+
 function parseVersion(value: string): {
   readonly release: ReadonlyArray<number>;
   readonly prerelease?: ReadonlyArray<string>;
@@ -174,6 +176,23 @@ function splitOnce(value: string, separator: string): [string, string | undefine
 }
 
 function comparePrerelease(left: ReadonlyArray<string>, right: ReadonlyArray<string>): number {
+  // Preview and candidate builds are minted as `<ring>.<YYYYMMDD>.<run>` from
+  // one workflow, so the label only names the feed. Comparing it as text put
+  // every candidate below every preview ("candidate" < "preview"), and an
+  // install that switched from preview to candidate was told it was up to date
+  // beside a newer build. Across the two labels, order by the date and run
+  // alone; equal ones stay equal, so a replay is still refused.
+  const [leftTag, ...leftBuild] = left;
+  const [rightTag, ...rightBuild] = right;
+  if (
+    leftTag !== rightTag &&
+    leftTag !== undefined &&
+    rightTag !== undefined &&
+    BUILD_RING_TAGS.includes(leftTag) &&
+    BUILD_RING_TAGS.includes(rightTag)
+  ) {
+    return comparePrerelease(leftBuild, rightBuild);
+  }
   const length = Math.max(left.length, right.length);
   for (let index = 0; index < length; index += 1) {
     const leftPart = left[index];

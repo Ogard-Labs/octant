@@ -55,6 +55,14 @@ integrated borderless top chrome; a central workspace; and an optional right
 dock. Mode changes alter content, authority, default composition, and density,
 never the navigation grammar. See [decisions/0015-workspace-shell-model.md](../decisions/0015-workspace-shell-model.md).
 
+**Home** leads the places: first in the icon rail, above Inbox, and among the
+sidebar's own actions when no rail stands beside it. It closes any reader and
+puts the active pane back on its mode's start screen (Code Home in Code), and
+it is current while that start screen shows. The `home` keybinding
+(Mod+Shift+H by default) does the same. A New task draft shares the start
+screen's composer scope, so its unsent text comes back with it. Before Home,
+the start screen had no way back once a person left it.
+
 Projects opens its searchable directory in the main workspace. Selecting a Project
 replaces that directory with the Project overview; Projects in primary navigation
 returns to the directory. Neither view adds a second sidebar. Other destinations
@@ -88,9 +96,13 @@ existed is kept). It lists the threads flat under counted headings in the
 order a person acts on them: **Pinned**, **Needs input** (waiting on an
 approval or an answer), **Ready for review** (a finished turn nobody has
 looked at), **Working**, and **Idle** (everything else), newest first within
-each. A thread appears once, under the first heading that holds it. A mode
-with no threads at all shows a short first-run note in Status and the Activity
-feed instead of an empty list: "No threads yet" in the secondary ink, then
+each. A thread appears once, under the first heading that holds it. Each
+heading is a fold button (`aria-expanded`) with its count and a chevron;
+folded, it keeps the count and still shows the thread the workspace has open,
+and a search shows every match. The window remembers each mode's folded
+headings across a reload, as session storage, so other windows keep their own.
+A mode with no threads at all shows a short first-run note in Status and the
+Activity feed instead of an empty list: "No threads yet" in the secondary ink, then
 "Start one from the composer. Your threads gather here." A search or filter
 that matched nothing keeps its own message, which says nothing was deleted.
 

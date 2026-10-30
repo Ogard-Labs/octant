@@ -58,6 +58,7 @@ export interface ModelContextProfile {
 }
 
 const ANTHROPIC_MODELS = "https://docs.anthropic.com/en/docs/about-claude/models/overview";
+const ANTHROPIC_MODELS_CURRENT = "https://platform.claude.com/docs/en/about-claude/models/overview";
 const OPENAI_MODELS = "https://platform.openai.com/docs/models";
 const GEMINI_MODELS = "https://ai.google.dev/gemini-api/docs/models";
 
@@ -69,6 +70,15 @@ const GEMINI_MODELS = "https://ai.google.dev/gemini-api/docs/models";
  * is learned from its first refusal instead, and stays text-only.
  */
 export const MODEL_CONTEXT_PROFILES: ReadonlyArray<ModelContextProfile> = [
+  {
+    // The page's comparison table lists the same 1M window and 128K output for
+    // all four, and says every current model takes image input.
+    names: ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"],
+    contextWindow: 1_000_000,
+    maxOutput: 128_000,
+    acceptsImages: true,
+    reference: ANTHROPIC_MODELS_CURRENT,
+  },
   {
     names: ["claude-opus-4-5"],
     contextWindow: 200_000,

@@ -91,7 +91,8 @@ them again. The page never merges, approves, or comments on a pull request, and 
 deletes work. You can also open it from the command palette with **Review
 finished threads**.
 
-A narrow rail of icons stands to the left of the sidebar: Inbox, Running, To
+A narrow rail of icons stands to the left of the sidebar: **Home** (back to
+the start screen, **⌘/Ctrl+Shift+H**), Inbox, Running, To
 review and Done with their counts, your other places (Board, Pull requests and
 so on), the Activity feed, Projects, **More** (the places you set to Menu only,
 and Customize sidebar), and Settings. **Settings › Sidebar › Sidebar
@@ -115,7 +116,7 @@ recency.
 
 Sidebar thread rows can carry the Project a thread belongs to, its branch, its linked pull request, when it was last updated, and its status mark. **Settings › Sidebar › Thread rows** turns each of those on or off for the view you choose, and the Project view filter menu's **Property visibility** submenu edits the view you are looking at, with **Hide all** clearing it in one action. A row that does not carry a property omits it rather than leaving a gap.
 
-The sidebar opens on **Status**: your threads grouped as Pinned, Needs input, Ready for review, Working, and Idle, with a count on each heading. The switch beside the Project view picker changes to the Projects tree or the Activity feed, and each mode remembers your choice. Before your first thread, the sidebar says so and points you to the composer to start one. A ✓ after a pull request number means its checks pass.
+The sidebar opens on **Status**: your threads grouped as Pinned, Needs input, Ready for review, Working, and Idle, with a count on each heading. Click a heading to fold or unfold its threads; the window remembers which you folded. The switch beside the Project view picker changes to the Projects tree or the Activity feed, and each mode remembers your choice. Before your first thread, the sidebar says so and points you to the composer to start one. A ✓ after a pull request number means its checks pass.
 
 The choice belongs to the view you are looking at. The Projects tree and the Activity feed each keep their own switches: by default the tree shows the branch, pull request, age, and status mark, while the feed shows the Project name and status mark alone. Hiding pull requests in the tree leaves the feed as it was, and the reverse.
 

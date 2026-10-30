@@ -3919,6 +3919,38 @@ describe("App", () => {
     expect(await screen.findByRole("button", { name: "Customize" })).toBeVisible();
   });
 
+  it("brings Code Home back from a New task draft and the Inbox, keeping the unsent text", async () => {
+    const user = userEvent.setup();
+    render(
+      <App
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects({ ...projectBootstrap(), availability: [] })}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={client(codeHomeShellBootstrap())}
+      />,
+    );
+
+    await screen.findByRole("button", { name: "Customize" });
+    expect(screen.getByRole("button", { name: "Home" })).toHaveAttribute("aria-current", "page");
+    await user.click(screen.getByRole("button", { name: "New task" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Customize" })).toBeNull());
+    expect(screen.getByRole("button", { name: "Home" })).not.toHaveAttribute("aria-current");
+    await user.type(screen.getByRole("textbox", { name: "First message" }), "Half a thought");
+
+    await user.click(screen.getByRole("button", { name: "Home" }));
+
+    expect(await screen.findByRole("button", { name: "Customize" })).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue("Half a thought");
+    expect(screen.getByRole("button", { name: "Home" })).toHaveAttribute("aria-current", "page");
+
+    await user.click(screen.getByRole("button", { name: /^Inbox/ }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Customize" })).toBeNull());
+    await user.click(screen.getByRole("button", { name: "Home" }));
+
+    expect(await screen.findByRole("button", { name: "Customize" })).toBeVisible();
+  });
+
   it("keeps the draft composer's chosen Project after a visit to Settings", async () => {
     const user = userEvent.setup();
     const projectApi = projects({ ...projectBootstrap(), availability: [] });

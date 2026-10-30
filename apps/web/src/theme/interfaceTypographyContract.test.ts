@@ -147,12 +147,12 @@ describe("interface typography contract", () => {
     }
   });
 
-  it("keeps the create-from-issue hint on the interface type scale", () => {
-    const source = readFileSync(resolve(cssRoot, "shell.css"), "utf8");
+  it("keeps the popup status line on the interface type scale", () => {
+    const source = readFileSync(resolve(cssRoot, "components.css"), "utf8");
     const block = cssBlocks(source).find(
-      (candidate) => candidate.selector.trim() === ".create-from-issue__hint",
+      (candidate) => candidate.selector.trim() === ".octant-popover-empty",
     );
-    expect(block, ".create-from-issue__hint must have a typography rule").toBeDefined();
+    expect(block, ".octant-popover-empty must have a typography rule").toBeDefined();
     expect(block?.declarations).toMatch(/font-size:\s*var\(--oct-text-(?:xs|detail|sm)\)/);
     expect(block?.declarations).not.toMatch(/font-size:\s*\d+px/);
     expect(block?.declarations).not.toMatch(/font-size:\s*[\d.]+rem/);

@@ -423,9 +423,11 @@ describe("WindowChrome", () => {
       '.project-section[data-empty="true"] .project-section__header-actions',
     );
     expect(revealed).toContain("opacity: 1;");
-    expect(revealed).toContain("width: auto;");
-    // With Projects present the controls stay hover-only.
-    expect(cssRule(".project-section__header-actions")).toContain("opacity: 0;");
+    // With Projects present the controls stay hover-only, but keep their
+    // width while hidden, so the list tools beside them never slide.
+    const resting = cssRule(".project-section__header-actions");
+    expect(resting).toContain("opacity: 0;");
+    expect(resting).not.toContain("width: 0;");
     // The host is a select when there is more than one, and a select sets its
     // own size, so the tray's size has to name it too.
     expect(styles).toMatch(
@@ -771,6 +773,29 @@ describe("WindowChrome", () => {
     expect(flattened).toContain(
       ".shell--material-translucent.shell-frame .workspace-pane :is(.chat-workspace, .work-thread-workspace, .code-thread-workspace) { background: transparent; }",
     );
+  });
+
+  it("puts every page and pane that shows text on the veil, leaving only start screens open", () => {
+    // The Image generator and the Projects list drew their text straight on
+    // the ground while a thread read on the veil.
+    const railSource = readFileSync(
+      resolve(process.cwd(), "src/shell/WorkspaceRailLayers.tsx"),
+      "utf8",
+    );
+    const layers = [
+      ...new Set([...railSource.matchAll(/className="([a-z-]+-layer)"/g)].map((match) => match[1])),
+    ];
+    const flattened = styles.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\s+/g, " ");
+    const veiled =
+      /\.shell--app-backdrop\.shell-frame :is\( (\.workspace-pane:not\([^)]*\), \.primary-workspace-layer > :is\([^)]*\)) \) \{ --octant-thread-veil: var\(--octant-sheet-surface\);/.exec(
+        flattened,
+      )?.[1] ?? "";
+    expect(veiled).toContain(
+      '.workspace-pane:not([data-surface-kind="welcome"], [data-surface-kind="draft-thread"])',
+    );
+    for (const layer of [...layers, "projects-page-layer"]) {
+      expect(veiled, `${layer ?? ""} draws its text on the ground`).toContain(`.${layer ?? ""}`);
+    }
   });
 
   it("keeps glass on input surfaces without enclosing agent replies", () => {

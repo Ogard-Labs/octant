@@ -269,6 +269,7 @@ import {
   useSidebarVibrancySupported,
   writeSidebarCollapsed,
 } from "./shell/useShellPresentation";
+import { useHomeShortcut } from "./shell/useHomeShortcut";
 import { useSidebarToggleShortcut } from "./shell/useSidebarToggleShortcut";
 import { PlanUsageProvider } from "./usage/PlanUsageContext";
 import { RailUsageRings } from "./usage/RailUsageRings";
@@ -1144,6 +1145,7 @@ function LaunchedShell(
       [presentedSidebarCollapsed, setSidebarCollapsedPersistent],
     ),
   );
+  useHomeShortcut(openHome);
   // A count tile on the collapsed rail asks for a list the rail cannot show,
   // so it expands the sidebar first; an open sidebar only switches its list.
   const openSidebarList = useCallback(
@@ -4557,6 +4559,7 @@ function LaunchedShell(
       openDraftThread: controller.openDraftThread,
       openGithubIssues,
       openImageLibrary,
+      openHome,
       openInbox,
       openLinearIssues,
       openLinkInApp,
@@ -4746,6 +4749,13 @@ function LaunchedShell(
     agentsCenterOpen ||
     artifactLibraryOpen ||
     imageLibraryOpen;
+  const homeActive =
+    !readerOpen &&
+    controller.workspace !== undefined &&
+    findWorkspacePane(
+      controller.workspace.layouts[activeMode],
+      controller.workspace.activePaneIds[activeMode],
+    )?.surface.kind === "welcome";
   const projectsDestinationActive =
     projectsListOpen || (selectedProjectTabId !== undefined && !readerOpen);
   const activeSidebarDestination: SidebarNavigationDescriptorId | undefined =
@@ -5501,6 +5511,23 @@ function LaunchedShell(
     if (!hasProject) {
       void controller.openDraftThread(mode);
     }
+  }
+
+  // Home puts the active pane back on its mode's start screen — Code Home in
+  // Code — after a reader, a thread, or Settings took it. Nothing else led
+  // back once a person left it. A New task draft shares the start screen's
+  // composer scope, so its unsent text comes back with it.
+  function openHome() {
+    closeWorkspaceReaders();
+    const workspace = controller.workspace;
+    if (workspace === undefined) return;
+    const paneId = workspace.activePaneIds[activeMode];
+    const surface = findWorkspacePane(workspace.layouts[activeMode], paneId)?.surface;
+    if (surface?.kind === "welcome") return;
+    void controller.replacePaneSurface(
+      paneId,
+      workspaceWelcomeSurface(activeMode, decodeWorkspaceTabId(crypto.randomUUID())),
+    );
   }
 
   // Code lands on Code Home with nothing chosen. Code's welcome tab already
@@ -6652,6 +6679,7 @@ function LaunchedShell(
               activeMode={activeMode}
               {...(activeProjectId === undefined ? {} : { activeProjectId })}
               {...(activeSidebarDestination === undefined ? {} : { activeSidebarDestination })}
+              homeActive={homeActive}
               {...(activeWorkThreadId === undefined ? {} : { activeWorkThreadId })}
               allProjects={projectController.allProjects}
               archivedProjects={projectController.archivedProjects}

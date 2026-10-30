@@ -427,13 +427,18 @@
    earlier in-card band read as a second box and a rear tray peeking out above
    had let a repository list push the prompt down the page; chips with no band
    behind them avoid both. */
+/* The chips start where the prompt's text starts: the row is pulled in by a
+   chip's own inset, so the first label lines up with "Ask anything…" under
+   it. The chips sit together from the left; spread to both ends they read as
+   two unrelated groups with a hole in the middle. */
 .composer-tray--inside {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--oct-space-1) var(--oct-space-3);
-  padding: var(--oct-space-3) var(--oct-composer-gutter) 0;
+  justify-content: flex-start;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-3) var(--oct-composer-gutter) 0
+    calc(var(--oct-composer-gutter) - var(--oct-space-2));
   color: var(--oct-meta);
 }
 
@@ -441,18 +446,10 @@
 .composer-tray__trailing {
   display: inline-flex;
   min-width: 0;
+  flex: 0 1 auto;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 8px;
-}
-
-.composer-tray__leading {
-  flex: 1 1 auto;
-}
-
-.composer-tray__trailing {
-  flex: 0 1 auto;
-  justify-content: flex-end;
+  gap: var(--oct-space-1);
 }
 
 .composer-tray .host-selector__health {
@@ -465,12 +462,13 @@
 }
 
 /* Every tray control shares one trigger size: icon, label, chevron. */
-.composer-tray__item {
+.composer-tray__item,
+.composer-tray .create-from-issue-control__bar > [data-slot="popover-trigger"] {
   display: inline-flex;
   align-items: center;
   gap: var(--oct-space-1);
-  min-height: 24px;
-  height: 24px;
+  min-height: 26px;
+  height: 26px;
   padding: 0 var(--oct-space-2);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
@@ -488,16 +486,15 @@
   font-size: var(--oct-text-xs);
 }
 
-/* Inside the card each control is a small rounded chip on a faint fill, so
-   it reads as a choice made rather than as a field. The chip is painted on
-   the plain element that holds the control, never on the trigger: the
-   triggers are shared button and select recipes a feature stylesheet may size
-   but not repaint. It carries no outline: three outlined chips over the
-   prompt read as a row of form fields, louder than the message under them. */
+/* Inside the card each control is a quiet chip: the meta tone at rest, a
+   fill only under the pointer or while its menu is open, the same as the
+   access and model controls in the row under the prompt. Filled pills at rest
+   made the row above the prompt louder than the message and its own controls,
+   and a filled "Create from…" beside ghost ones looked like a second kind of
+   control. */
 .composer-tray--inside .composer-tray__leading > *,
 .composer-tray--inside .composer-tray__trailing > * {
-  border-radius: var(--oct-radius-pill);
-  background: color-mix(in oklab, var(--oct-fg) 6%, transparent);
+  border-radius: var(--oct-radius-sm);
 }
 
 /* The Project a new thread will run in is the start screen's first choice, so
@@ -530,12 +527,6 @@
   font-size: var(--oct-text-xs);
   line-height: 1.4;
   text-align: center;
-}
-
-@media (max-width: 920px) {
-  .composer-tray__trailing {
-    justify-content: flex-start;
-  }
 }
 
 /* At phone width the tray stays on one row while it fits, which keeps
@@ -900,20 +891,37 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
    not pull at the transcript. Opaque is the fallback, including when
    transparency is reduced.
 
-   The surface belongs to the pane that holds a thread, not to whichever view
-   the pane is showing at the moment. Painted on the conversation view alone,
-   the "Loading Code thread" state that stands in for it while the thread
-   loads had no surface at all, and the picture showed straight through. It
-   starts below the title band, which belongs to the window frame.
+   Every surface that shows text or information reads on this veil, not only
+   a thread: the Image generator, the Projects list, and a Project's page drew
+   their text straight on the ground, and a photo ran through the letters
+   (October 2026). Only a start screen (a welcome or a new thread) stays open
+   on the ground; its reading column has a wash of its own above. One list
+   names them, so a new page or pane kind reads on the veil without a rule of
+   its own.
+
+   The surface belongs to the pane, not to whichever view the pane is showing
+   at the moment. Painted on the conversation view alone, the "Loading Code
+   thread" state that stands in for it while the thread loads had no surface
+   at all, and the picture showed straight through. It starts below the title
+   band, which belongs to the window frame.
 
    The veil is the sheet's colour, not the stage's. On a black (OLED) ground
    the stage colour turned every thread into a black hole inside the grey
-   sheet, while the pages around it (Board, Inbox) read grey over the ground. */
+   sheet. */
 .shell--app-backdrop.shell-frame
-  .workspace-pane:is(
-    [data-surface-kind="chat-thread"],
-    [data-surface-kind="work-thread"],
-    [data-surface-kind="code-overview"]
+  :is(
+    .workspace-pane:not([data-surface-kind="welcome"], [data-surface-kind="draft-thread"]),
+    .primary-workspace-layer
+      > :is(
+        .inbox-layer,
+        .code-board-layer,
+        .archive-layer,
+        .review-layer,
+        .projects-page-layer,
+        .agents-center-layer,
+        .automation-center-layer,
+        .artifact-library-layer
+      )
   ) {
   --octant-thread-veil: var(--octant-sheet-surface);
   background: linear-gradient(
@@ -926,13 +934,42 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 @media (prefers-reduced-transparency: no-preference) {
   html:not([data-octant-reduced-transparency="true"])
     .shell--app-backdrop.shell-frame
-    .workspace-pane:is(
-      [data-surface-kind="chat-thread"],
-      [data-surface-kind="work-thread"],
-      [data-surface-kind="code-overview"]
+    :is(
+      .workspace-pane:not([data-surface-kind="welcome"], [data-surface-kind="draft-thread"]),
+      .primary-workspace-layer
+        > :is(
+          .inbox-layer,
+          .code-board-layer,
+          .archive-layer,
+          .review-layer,
+          .projects-page-layer,
+          .agents-center-layer,
+          .automation-center-layer,
+          .artifact-library-layer
+        )
     ) {
     --octant-thread-veil: color-mix(in srgb, var(--octant-sheet-surface) 80%, transparent);
   }
+}
+
+/* A destination page covers every pane, so the veil of a thread left open
+   beneath it would lay a second one under the page's own and wash the ground
+   out entirely. Under a page the panes stay clear. */
+.shell--app-backdrop.shell-frame
+  .primary-workspace-layer:has(
+    > :is(
+      .inbox-layer,
+      .code-board-layer,
+      .archive-layer,
+      .review-layer,
+      .projects-page-layer,
+      .agents-center-layer,
+      .automation-center-layer,
+      .artifact-library-layer
+    )
+  )
+  .workspace-pane {
+  background: transparent;
 }
 
 /* A thread's own container painted the theme's opaque workspace colour over
@@ -950,53 +987,51 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 }
 
 /* Under Glass the sheet is nearly clear, so an 80% veil of it could not quiet
-   the ground: its letters ran crisp behind the transcript. While a thread is
-   on screen the ground itself steps down to about the strength the veil
-   leaves it on an opaque sheet. A backdrop blur behind the thread was tried
-   first: a browser frosted the letters, but the packaged window, whose glass
-   is the system's, drew them sharp. */
+   the ground: its letters ran crisp behind the transcript, and on a
+   destination page "Describe with Octant" sat on a column of glyphs. While
+   any reading surface is on screen the ground itself steps down to about the
+   strength the veil leaves it on an opaque sheet; a third was tried first and
+   the To review list still read as names printed over a character ground
+   (walk-through, October 2026). A backdrop blur behind the thread was tried
+   too: a browser frosted the letters, but the packaged window, whose glass is
+   the system's, drew them sharp. */
 .shell--app-backdrop.shell--material-translucent.shell-frame:has(
-    .workspace-pane:is(
-      [data-surface-kind="chat-thread"],
-      [data-surface-kind="work-thread"],
-      [data-surface-kind="code-overview"]
+    :is(
+      .workspace-pane:not([data-surface-kind="welcome"], [data-surface-kind="draft-thread"]),
+      .primary-workspace-layer
+        > :is(
+          .inbox-layer,
+          .code-board-layer,
+          .archive-layer,
+          .review-layer,
+          .projects-page-layer,
+          .agents-center-layer,
+          .automation-center-layer,
+          .artifact-library-layer
+        )
     )
   )
   > .app-backdrop[data-placement="shell"] {
   opacity: 0.2;
 }
 
-/* A destination page is cards and lines of text on the same clear sheet, and
-   its letters ran crisp through both: "Describe with Octant" sat on a column
-   of glyphs. At a third of its strength the To review list still read as
-   names printed over a character ground (walk-through, October 2026), so a
-   page takes the thread's fifth. Named after the thread rule, so a page
-   opened over a thread wins. */
-.shell--app-backdrop.shell--material-translucent.shell-frame:has(
-    .primary-workspace-layer
-      > :is(
-        .inbox-layer,
-        .code-board-layer,
-        .archive-layer,
-        .review-layer,
-        .projects-page-layer,
-        .agents-center-layer,
-        .automation-center-layer,
-        .artifact-library-layer
-      )
-  )
-  > .app-backdrop[data-placement="shell"] {
-  opacity: 0.2;
-}
-
-/* Where the pane meets the sheet's rounded corner, its veil rounds with it. */
+/* Where the veil meets the sheet's rounded corner, it rounds with it. */
 @media (min-width: 681px) {
   .shell--app-backdrop.shell-frame
     > .workspace-layer:not(.workspace-layer--wide-context-open, .workspace-layer--bottom-panel-open)
-    .workspace-pane:is(
-      [data-surface-kind="chat-thread"],
-      [data-surface-kind="work-thread"],
-      [data-surface-kind="code-overview"]
+    :is(
+      .workspace-pane:not([data-surface-kind="welcome"], [data-surface-kind="draft-thread"]),
+      .primary-workspace-layer
+        > :is(
+          .inbox-layer,
+          .code-board-layer,
+          .archive-layer,
+          .review-layer,
+          .projects-page-layer,
+          .agents-center-layer,
+          .automation-center-layer,
+          .artifact-library-layer
+        )
     ) {
     border-bottom-right-radius: var(--oct-radius-md);
   }

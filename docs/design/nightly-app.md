@@ -146,6 +146,11 @@ The apps differ only in what macOS and Linux need to keep two apps apart:
 - `octant` and `octant-nightly` both reach the one running host.
 - Install from Settings refuses a build whose signature, hash, or code
   signature does not verify. Remove leaves the data untouched.
+- Preview and candidate builds are versioned `<base>-<ring>.<YYYYMMDD>.<run>`
+  by one workflow, so the updater orders them by date and then run, ignoring
+  the ring label. A candidate newer than the installed preview is offered after
+  a ring switch; switching back offers nothing until a preview build is newer
+  than the installed candidate. Equal or older builds are never offered.
 - Octant offers only stable updates. Nightly offers preview and candidate, and
   refuses a feed signed for `stable`.
 

@@ -6,7 +6,9 @@ import type {
   GithubRepositoryRow,
   GithubRepositoryVisibility,
 } from "@octant/contracts";
+import { Check, Link, RefreshCw, Search } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { OctantInput } from "../ui/base/OctantInput";
 import { parseGithubRepositoryReference } from "./githubRepositoryReference";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -284,26 +286,58 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
 
   return (
     <div className="github-picker">
+      <div className="github-picker__toolbar">
+        <label className="octant-popover-search github-picker__search">
+          <Search aria-hidden="true" size={14} />
+          <OctantInput
+            aria-label="Search GitHub repositories"
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setActiveIndex(undefined);
+            }}
+            placeholder="Search repositories…"
+            type="search"
+            unstyled
+            value={query}
+          />
+        </label>
+        <OctantTooltip label="Refresh repositories">
+          <OctantButton
+            aria-label="Refresh repositories"
+            onClick={() => void loadPage(trimmedQuery, { refresh: true })}
+            size="icon"
+            type="button"
+            variant="ghost"
+          >
+            <RefreshCw aria-hidden="true" size={14} />
+          </OctantButton>
+        </OctantTooltip>
+      </div>
+
       <form
         className="github-picker__link"
         noValidate
         onSubmit={(event) => void resolveLink(event)}
       >
-        <OctantInput
-          aria-label="Repository link or owner/repository"
-          onChange={(event) => {
-            setLinkInput(event.target.value);
-            setLinkError(undefined);
-          }}
-          placeholder="owner/repository or GitHub URL"
-          type="text"
-          value={linkInput}
-        />
+        <label className="octant-popover-search github-picker__search">
+          <Link aria-hidden="true" size={14} />
+          <OctantInput
+            aria-label="Repository link or owner/repository"
+            onChange={(event) => {
+              setLinkInput(event.target.value);
+              setLinkError(undefined);
+            }}
+            placeholder="owner/repository or GitHub URL"
+            type="text"
+            unstyled
+            value={linkInput}
+          />
+        </label>
         <OctantButton
           disabled={linkBusy || linkInput.trim() === ""}
           size="sm"
           type="submit"
-          variant="secondary"
+          variant="ghost"
         >
           {linkBusy ? "Resolving…" : "Use repository"}
         </OctantButton>
@@ -313,29 +347,11 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
           {linkError}
         </OctantAlert>
       )}
-      <div className="github-picker__toolbar">
-        <OctantInput
-          aria-label="Search GitHub repositories"
-          className="github-picker__search"
-          onChange={(event) => {
-            setQuery(event.target.value);
-            setActiveIndex(undefined);
-          }}
-          placeholder="Search repositories…"
-          type="search"
-          value={query}
-        />
-        <OctantButton
-          onClick={() => void loadPage(trimmedQuery, { refresh: true })}
-          size="sm"
-          type="button"
-          variant="secondary"
-        >
-          Refresh repositories
-        </OctantButton>
-      </div>
-
-      {catalogue.kind === "loading" ? <p role="status">Loading repositories…</p> : null}
+      {catalogue.kind === "loading" ? (
+        <p className="octant-popover-empty" role="status">
+          Loading repositories…
+        </p>
+      ) : null}
 
       {catalogue.kind === "error" ? (
         <>
@@ -378,7 +394,7 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
             </p>
           ) : null}
           {options.length === 0 ? (
-            <p className="github-picker__note" role="status">
+            <p className="octant-popover-empty" role="status">
               No repositories match.
             </p>
           ) : (
@@ -393,7 +409,7 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
               tabIndex={0}
             >
               {showRecents ? (
-                <li aria-hidden="true" className="github-picker__group-label">
+                <li aria-hidden="true" className="octant-popover-group">
                   Recent
                 </li>
               ) : null}
@@ -478,7 +494,7 @@ function RepositoryOption(props: {
   return (
     <>
       {props.showAllLabel ? (
-        <li aria-hidden="true" className="github-picker__group-label">
+        <li aria-hidden="true" className="octant-popover-group">
           All repositories
         </li>
       ) : null}
@@ -486,8 +502,8 @@ function RepositoryOption(props: {
         aria-selected={props.selected}
         className={
           props.active
-            ? "github-picker__option github-picker__option--active"
-            : "github-picker__option"
+            ? "octant-popover-option github-picker__option github-picker__option--active"
+            : "octant-popover-option github-picker__option"
         }
         id={props.id}
         onClick={props.onClick}
@@ -501,6 +517,14 @@ function RepositoryOption(props: {
           {row.defaultBranch === undefined ? null : <span>{row.defaultBranch}</span>}
           <span>{row.viewerPermission}</span>
         </span>
+        {props.selected ? (
+          <Check
+            aria-hidden="true"
+            className="octant-popover-option__check"
+            size={14}
+            strokeWidth={2}
+          />
+        ) : null}
       </li>
     </>
   );

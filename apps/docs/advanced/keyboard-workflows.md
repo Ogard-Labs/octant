@@ -90,6 +90,7 @@ The remappable set:
 - **Show context usage** — **⌘/Ctrl+Shift+U**
 - **Toggle Zen mode** — **⌘/Ctrl+Shift+Z**
 - **Show or hide the sidebar** — **⌘/Ctrl+\\**
+- **Go to the home screen** — **⌘/Ctrl+Shift+H**
 - **Show the next focus space** — **⌘/Ctrl+Alt+]**
 - **Show the previous focus space** — **⌘/Ctrl+Alt+[**
 - **Find a file by name** — **⌘/Ctrl+P**, in the active Code thread

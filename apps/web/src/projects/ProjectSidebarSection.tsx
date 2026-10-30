@@ -114,6 +114,8 @@ import {
 import {
   EARLIER_ACTIVITY_GROUP_ID,
   buildSidebarActivityView,
+  readFoldedStatusGroups,
+  writeFoldedStatusGroups,
   matchesSidebarSearch,
   buildSidebarStatusView,
   readThreadArrangement,
@@ -794,6 +796,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
               actions={props.threadActions ?? {}}
               counted={arrangement === "status"}
               groups={activity.groups}
+              mode={activityMode}
               lineageThreads={everyListedThread ?? []}
               onSelectThread={props.onSelectThread!}
               searching={searching}
@@ -1403,6 +1406,8 @@ function ActivityThreadList(props: {
   readonly searching?: boolean;
   /** Status groups say how many threads each holds; the feed's days do not. */
   readonly counted?: boolean;
+  /** Whose folded Status groups this window remembers. */
+  readonly mode?: SidebarActivityMode;
 }) {
   // Every other group is bounded by its day. "Earlier" is everything older than
   // a week, so it is the one group that only grows, and left open it pushed the
@@ -1415,6 +1420,20 @@ function ActivityThreadList(props: {
   // it: neither the match nor the line that says nothing matched.
   const earlierShown = earlierOpen || props.searching === true;
   const earlierThreadsId = useId();
+  // Every Status group folds. "Idle" alone held sixteen threads under "Ready for
+  // review 1" and left no way to put them aside; the window remembers each
+  // fold, so a reload or a switch back from the feed keeps it.
+  const mode = props.mode ?? "chat";
+  const [foldedStatusGroups, setFoldedStatusGroups] = useState(() => readFoldedStatusGroups(mode));
+  useEffect(() => setFoldedStatusGroups(readFoldedStatusGroups(mode)), [mode]);
+  const groupThreadsId = useId();
+  function toggleStatusGroup(groupId: string) {
+    const next = new Set(foldedStatusGroups);
+    if (next.has(groupId)) next.delete(groupId);
+    else next.add(groupId);
+    setFoldedStatusGroups(next);
+    writeFoldedStatusGroups(next, mode);
+  }
   if (props.groups.length === 0) {
     // A first run read a lone "No threads in this mode." in small type at the
     // top of an otherwise blank sidebar: it said what was missing but not what
@@ -1433,9 +1452,14 @@ function ActivityThreadList(props: {
   return (
     <div className="activity-nav">
       {props.groups.map((group) => {
-        const folds = group.id === EARLIER_ACTIVITY_GROUP_ID;
+        const statusFold = props.counted === true;
+        const folds = statusFold || group.id === EARLIER_ACTIVITY_GROUP_ID;
+        const shown = statusFold
+          ? props.searching === true || !foldedStatusGroups.has(group.id)
+          : earlierShown;
+        const threadsId = statusFold ? `${groupThreadsId}-${group.id}` : earlierThreadsId;
         const threads =
-          !folds || earlierShown
+          !folds || shown
             ? group.threads
             : group.threads.filter((thread) => thread.navigationId === props.activeThreadId);
         return (
@@ -1443,10 +1467,12 @@ function ActivityThreadList(props: {
             {folds ? (
               <h2 className="sidebar-section">
                 <OctantButton
-                  aria-controls={earlierThreadsId}
-                  aria-expanded={earlierShown}
+                  aria-controls={threadsId}
+                  aria-expanded={shown}
                   className="activity-nav__fold"
-                  onClick={() => setEarlierOpen((open) => !open)}
+                  onClick={() =>
+                    statusFold ? toggleStatusGroup(group.id) : setEarlierOpen((open) => !open)
+                  }
                   type="button"
                   variant="link"
                 >
@@ -1455,15 +1481,10 @@ function ActivityThreadList(props: {
                   <ChevronRight aria-hidden="true" size={12} strokeWidth={1.8} />
                 </OctantButton>
               </h2>
-            ) : props.counted === true ? (
-              <h2 className="sidebar-section">
-                {group.label}
-                <span className="activity-nav__fold-count">{group.threads.length}</span>
-              </h2>
             ) : (
               <h2 className="sidebar-section">{group.label}</h2>
             )}
-            <div className="activity-nav__threads" id={folds ? earlierThreadsId : undefined}>
+            <div className="activity-nav__threads" id={folds ? threadsId : undefined}>
               {threads.map((thread) => (
                 <ActivityThreadButton
                   actions={props.actions}
