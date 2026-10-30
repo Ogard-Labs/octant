@@ -1,7 +1,6 @@
 import type { EnvironmentSelection } from "@octant/client-runtime/environment-selection";
 import type { FederatedHostState } from "@octant/client-runtime";
 import { EnvironmentFilter } from "./EnvironmentFilter";
-import type { OctantMode } from "@octant/contracts/modes";
 import { enabledModes } from "@octant/domain/mode-policy";
 import type { SettingsDeepLink } from "@octant/contracts";
 import type { ShellSettings, WindowWorkspace } from "@octant/contracts/shell";

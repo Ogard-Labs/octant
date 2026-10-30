@@ -20,7 +20,7 @@ import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
-import { CanvasEventStore, CanvasEventStoreError } from "./canvasEventStore";
+import { CanvasEventStore } from "./canvasEventStore";
 import { canvasOutsideContentWriters, markCanvasReader } from "./canvasOutsideContentMark";
 
 const now = "2026-10-14T12:00:00.000Z";

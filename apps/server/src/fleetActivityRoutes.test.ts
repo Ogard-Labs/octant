@@ -75,7 +75,7 @@ describe("fleet activity route", () => {
         waitingChild("child-question", "2026-10-06T08:03:00.000Z"),
       ],
     });
-    expect((await (await route(request()))?.json()).threads).toEqual([
+    expect((await (await route(request()))!.json()).threads).toEqual([
       {
         mode: "work",
         threadId: workThread,

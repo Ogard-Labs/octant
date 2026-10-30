@@ -128,7 +128,7 @@ describe("direct sending on the hub", () => {
     );
     const after = await handle(statusRequest());
 
-    expect(((await before?.json()) as { directPush: unknown }).directPush).toEqual({
+    expect(((await before!.json()) as { directPush: unknown }).directPush).toEqual({
       enabled: false,
       environment: "production",
       ios: "not-stored",
@@ -136,7 +136,7 @@ describe("direct sending on the hub", () => {
     });
     expect(await enabled?.json()).toEqual({ status: "changed" });
     expect(await environment?.json()).toEqual({ status: "changed" });
-    expect(((await after?.json()) as { directPush: unknown }).directPush).toEqual({
+    expect(((await after!.json()) as { directPush: unknown }).directPush).toEqual({
       enabled: true,
       environment: "development",
       ios: "not-stored",

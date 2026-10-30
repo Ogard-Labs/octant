@@ -2432,9 +2432,10 @@ describe("CodeOperationRuntime", () => {
       { label: "src/a.ts", description: "The entry point" },
       { label: "src/b.ts" },
     ]);
-    await offer("crowded", [
-      ...Array.from({ length: 40 }, (_, index) => ({ label: `option-${index}` })),
-    ]);
+    await offer(
+      "crowded",
+      Array.from({ length: 40 }, (_, index) => ({ label: `option-${index}` })),
+    );
     await offer("long", [{ label: "y".repeat(1_024 * 2) }]);
     await offer("free-text", []);
 

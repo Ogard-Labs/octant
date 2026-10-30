@@ -2276,7 +2276,6 @@ async function sweepStaleCaptures(
  */
 const MAX_CAPTURE_BYTES = MAX_APPLE_ARTIFACT_BYTES;
 const MEDIA_SIGNATURE = [0x66, 0x74, 0x79, 0x70] as const;
-const MINIMUM_CAPTURE_BYTES = 16;
 const RECORDING_START_GRACE_MS = 750;
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] as const;
 

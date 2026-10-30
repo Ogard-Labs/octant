@@ -1060,7 +1060,7 @@ describe("octant agent Chat lead question", () => {
   function chatView(state: "parked" | "answered") {
     const digest = "a".repeat(64);
     const base = chatThreadOpening(threadId, { path: `/api/chat/threads/${threadId}` } as never);
-    const thread = (base?.body as { thread: Record<string, unknown> }).thread;
+    const thread = (base!.body as { thread: Record<string, unknown> }).thread;
     return {
       thread: { ...thread, version: 4 },
       turns: [

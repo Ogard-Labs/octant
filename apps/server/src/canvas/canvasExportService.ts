@@ -31,7 +31,6 @@ import {
   type CanvasExportPictureFormat,
   type CanvasExportPrepareRequest,
   type CanvasExportPrepareResult,
-  type CanvasExportRecorded,
   type CanvasExportRefusal,
   type CanvasExportRenderedOutput,
   type CanvasExportTargetId,

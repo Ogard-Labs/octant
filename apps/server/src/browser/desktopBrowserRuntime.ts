@@ -1,5 +1,4 @@
 import type {
-  BrowserActionRequest,
   BrowserContextId,
   BrowserContextPolicy,
   BrowserThreadId,

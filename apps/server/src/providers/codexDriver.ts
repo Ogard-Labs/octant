@@ -2019,7 +2019,7 @@ async function resolveCodexLaunchEnvironment(
     if (!(await options.credentialResolver.has(String(options.instanceId)))) return base;
     const value = await options.credentialResolver.resolve(String(options.instanceId));
     if (value.trim().length === 0) return base;
-    return { ...(base ?? {}), OPENAI_API_KEY: value };
+    return { ...base, OPENAI_API_KEY: value };
   } catch {
     return base;
   }

@@ -145,9 +145,11 @@ describe("thread purge sweep", () => {
       for (const scope of outcome.retained) retained.add(scope);
     }
 
-    const hits = scanHost(harness.connection, harness.directory, [
-      ...Object.values(threads).flatMap((thread) => [thread.id, thread.marker]),
-    ]);
+    const hits = scanHost(
+      harness.connection,
+      harness.directory,
+      Object.values(threads).flatMap((thread) => [thread.id, thread.marker]),
+    );
     const unexplained = hits.filter((hit) => {
       const scope = classifyHit(hit);
       return scope === undefined || !retained.has(scope);

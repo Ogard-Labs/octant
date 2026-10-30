@@ -1056,7 +1056,7 @@ export class ProviderCapacityScheduler {
   }
 
   #notifyCapacityFreed(providerInstanceId: ProviderInstanceId): void {
-    for (const listener of [...this.#capacityFreedListeners]) listener(providerInstanceId);
+    for (const listener of Array.from(this.#capacityFreedListeners)) listener(providerInstanceId);
   }
 
   #removeQueued(record: ReservationRecord): void {

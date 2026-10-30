@@ -1,4 +1,4 @@
-import type { AgentRun, AgentRunAuthority } from "@octant/contracts";
+import type { AgentRunAuthority } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
 import {
   currentParentAuthorityForWaiter,

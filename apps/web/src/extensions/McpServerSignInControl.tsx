@@ -67,7 +67,6 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
       cancelled = true;
     };
     // The target is the two ids; a new object each render must not re-ask.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, extensionId, componentId]);
 
   useEffect(() => {
@@ -77,7 +76,6 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
       void ask({ kind: "poll", ...target, attemptId });
     }, props.pollIntervalMs ?? 2_000);
     return () => clearTimeout(polling.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, ask, props.pollIntervalMs]);
 
   if (view === undefined || view.kind === "not-applicable") return null;
