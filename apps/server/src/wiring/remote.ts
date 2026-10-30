@@ -909,7 +909,7 @@ export function wireRemote(deps: RemoteDependencies) {
         : { store: credentialResolver, readStored: (id) => credentialBroker.resolve(id) },
     journal: providerKeyChangeJournal,
     reprobe: async (windowId, instance) => {
-      await providerService.probe(windowId, instance.id);
+      await providerService.probe(windowId, instance.id, { fresh: true });
     },
     removeProvider: async (windowId, instance) => {
       try {

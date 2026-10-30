@@ -1462,14 +1462,18 @@ export class ProviderService implements ProviderServiceApi {
     }
   }
 
-  async probe(_authenticatedWindowId: WindowId, input: unknown): Promise<ProviderProbeResult> {
+  async probe(
+    _authenticatedWindowId: WindowId,
+    input: unknown,
+    options?: { readonly fresh?: boolean },
+  ): Promise<ProviderProbeResult> {
     let instanceId: ProviderInstanceId;
     try {
       instanceId = decodeProviderInstanceId(input);
     } catch {
       throw this.#invalid("Provider instance ID is invalid.");
     }
-    return this.#probeConfiguredInstance(instanceId);
+    return this.#probeConfiguredInstance(instanceId, options?.fresh === true);
   }
 
   /**
@@ -1479,11 +1483,20 @@ export class ProviderService implements ProviderServiceApi {
    * adding a provider, and a person's own click took 22, 39 and 67 seconds in
    * turn on one slow Azure listing. A probe asked for while one is already
    * running joins it, unless another operation (an enable or a configuration
-   * change) queued after it: that one must be checked afresh.
+   * change) queued after it: that one must be checked afresh. A key change
+   * is written outside that queue, so its caller asks for a fresh probe: a
+   * running one may have read the key store before the change.
    */
-  #probeConfiguredInstance(instanceId: ProviderInstanceId): Promise<ProviderProbeResult> {
+  #probeConfiguredInstance(
+    instanceId: ProviderInstanceId,
+    fresh = false,
+  ): Promise<ProviderProbeResult> {
     const running = this.#probesInFlight.get(instanceId);
-    if (running !== undefined && this.#instanceOperationTails.get(instanceId) === running.tail) {
+    if (
+      !fresh &&
+      running !== undefined &&
+      this.#instanceOperationTails.get(instanceId) === running.tail
+    ) {
       return running.result;
     }
     const result = this.#queueProbe(instanceId);

@@ -493,6 +493,31 @@ describe("ProviderService", () => {
     expect(fixture.append).not.toHaveBeenCalled();
   });
 
+  it("checks again after a key change instead of joining a probe that began before it", async () => {
+    let probes = 0;
+    const releases: Array<() => void> = [];
+    const fixture = serviceFixture({
+      instances: [provider()],
+      probe: () => {
+        probes += 1;
+        return new Promise<ReturnType<typeof observation>>((resolve) => {
+          releases.push(() => resolve(observation()));
+        });
+      },
+    });
+
+    const early = fixture.service.probe(windowId, instanceId);
+    await vi.waitFor(() => expect(probes).toBe(1));
+    const joined = fixture.service.probe(windowId, instanceId);
+    const afterKeyChange = fixture.service.probe(windowId, instanceId, { fresh: true });
+
+    releases[0]?.();
+    await vi.waitFor(() => expect(probes).toBe(2));
+    releases[1]?.();
+    await Promise.all([early, joined, afterKeyChange]);
+    expect(probes).toBe(2);
+  });
+
   it("persists provider residency tags without invalidating its model catalog", async () => {
     const fixture = serviceFixture({
       instances: [provider()],
