@@ -141,6 +141,11 @@ import {
   type HostIdentitySigningService,
 } from "./hostIdentityKeychain";
 import {
+  makeOwnerUnlockKeyService,
+  type OwnerUnlockChallenge,
+  type OwnerUnlockKeyService,
+} from "./ownerUnlockKeychain";
+import {
   centeredNativeWindowState,
   createNativeWindowStateStore,
   flushNativeWindowState,
@@ -236,11 +241,6 @@ import {
   sendHubAdministrationOperation,
   type HubAdministrationControlRuntime,
 } from "./hubAdministrationControls";
-import {
-  AppStoreConnectKeyControlFailure,
-  sendAppStoreConnectKeyOperation,
-  type AppStoreConnectKeyControlRuntime,
-} from "./appStoreConnectKeyControls";
 import {
   installPairedComputerIpcHandlers,
   type PageStoragePort,
@@ -537,6 +537,40 @@ export function installHubAdministrationIpcHandlers(options: {
   });
 }
 
+/**
+ * A Mac owner device's unlock key. An owned window may make the key, have it
+ * sign one owner unlock challenge (Touch ID), and forget it. Nothing here
+ * returns the private key or signs text the service did not build itself.
+ */
+export function installOwnerUnlockIpcHandlers(options: {
+  readonly handle: (
+    channel: string,
+    handler: (event: unknown, ...args: readonly unknown[]) => unknown,
+  ) => void;
+  readonly resolveOwnedWindow: (event: unknown) => void;
+  /** Absent when this computer has no Secure Enclave helper (not a Mac). */
+  readonly service: () => OwnerUnlockKeyService | undefined;
+}): void {
+  const unavailable = { status: "refused", kind: "unavailable" } as const;
+  const run = async <T>(
+    event: unknown,
+    use: (service: OwnerUnlockKeyService) => Promise<T>,
+  ): Promise<T | typeof unavailable> => {
+    try {
+      options.resolveOwnedWindow(event);
+    } catch {
+      throw new Error("Octant rejected an unauthorized unlock request.");
+    }
+    const service = options.service();
+    return service === undefined ? unavailable : use(service);
+  };
+  options.handle(IPC_CHANNELS.ownerUnlockMake, (event) => run(event, (s) => s.makeKey()));
+  options.handle(IPC_CHANNELS.ownerUnlockSign, (event, challenge) =>
+    run(event, (s) => s.sign(challenge as OwnerUnlockChallenge)),
+  );
+  options.handle(IPC_CHANNELS.ownerUnlockForget, (event) => run(event, (s) => s.forgetKey()));
+}
+
 export function installRemoteDeviceIpcHandlers(options: {
   readonly handle: (
     channel: string,
@@ -600,37 +634,6 @@ export function installRemoteDeviceIpcHandlers(options: {
   options.handle(IPC_CHANNELS.remoteDeviceReconcileExpired, (event) =>
     run(event, (service) => service.reconcileExpiredDevices()),
   );
-}
-
-/**
- * App Store Connect key entry: an owned window's request goes to the host's
- * local key route it names, with that window's own capability. The key passes
- * through and is neither kept nor logged here.
- */
-export function installAppStoreConnectKeyIpcHandlers(options: {
-  readonly handle: (
-    channel: string,
-    handler: (event: unknown, ...args: readonly unknown[]) => unknown,
-  ) => void;
-  readonly runtimeFor: (event: unknown) => AppStoreConnectKeyControlRuntime;
-}): void {
-  options.handle(IPC_CHANNELS.appStoreConnectKeyRequest, async (event, operation, body) => {
-    let runtime: AppStoreConnectKeyControlRuntime;
-    try {
-      runtime = options.runtimeFor(event);
-    } catch {
-      throw new Error("Octant rejected an unauthorized App Store Connect key request.");
-    }
-    try {
-      return await sendAppStoreConnectKeyOperation(runtime, operation, body);
-    } catch (error) {
-      throw new Error(
-        error instanceof AppStoreConnectKeyControlFailure
-          ? error.message
-          : "Octant could not reach the host.",
-      );
-    }
-  });
 }
 
 function sanitizeRemoteDeviceControlError(error: unknown): Error {
@@ -1664,10 +1667,6 @@ async function startDesktopCredentialBroker(): Promise<CredentialBroker | undefi
     backend.canvasPublicShareSecrets,
     backend.mcpServerCredentials,
     backend.desktopProviderCredentials,
-    backend.appStoreConnectKeys,
-    // The host's per-upload key folders; the broker writes the App Store
-    // Connect key only into one of them, for one upload.
-    join(desktopDataDirectory, "apple-runtime", "distribution-keys"),
   );
 }
 
@@ -2899,6 +2898,21 @@ function resolvePrivateListenerControlService(event: unknown): PrivateListenerCo
   });
 }
 
+let ownerUnlockKeyService: OwnerUnlockKeyService | undefined;
+
+function getOwnerUnlockKeyService(): OwnerUnlockKeyService | undefined {
+  if (process.platform !== "darwin") return undefined;
+  ownerUnlockKeyService ??= makeOwnerUnlockKeyService(
+    resolveKeychainHelperPath({
+      packaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      moduleUrl: import.meta.url,
+    }),
+    { storeScope: desktopHostId },
+  );
+  return ownerUnlockKeyService;
+}
+
 function getHostIdentitySigningService(): HostIdentitySigningService {
   hostIdentitySigningService ??= makeHostIdentitySigningService(
     resolveKeychainHelperPath({
@@ -3010,27 +3024,17 @@ function installIpcHandlers(): void {
       });
     },
   });
+  installOwnerUnlockIpcHandlers({
+    handle: (channel, handler) => ipcMain.handle(channel, handler),
+    resolveOwnedWindow: (event) => void ownedWindowContext(event as IpcMainInvokeEvent),
+    service: getOwnerUnlockKeyService,
+  });
   installHubAdministrationIpcHandlers({
     handle: (channel, handler) => ipcMain.handle(channel, handler),
     runtimeFor: (event) => {
       const context = ownedWindowContext(event as IpcMainInvokeEvent);
       if (activeServerUrl === undefined) {
         throw new HubAdministrationControlFailure("Octant hub controls are unavailable.");
-      }
-      return {
-        serverUrl: activeServerUrl,
-        desktopBridgeSecret,
-        windowCapability: context.capability,
-        fetch: globalThis.fetch,
-      };
-    },
-  });
-  installAppStoreConnectKeyIpcHandlers({
-    handle: (channel, handler) => ipcMain.handle(channel, handler),
-    runtimeFor: (event) => {
-      const context = ownedWindowContext(event as IpcMainInvokeEvent);
-      if (activeServerUrl === undefined) {
-        throw new AppStoreConnectKeyControlFailure("Octant could not reach the host.");
       }
       return {
         serverUrl: activeServerUrl,

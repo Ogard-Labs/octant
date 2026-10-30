@@ -114,7 +114,6 @@ import { ComputerUseSettingsView } from "../settings/ComputerUseSettingsView";
 import { DesktopSpendCapSettings } from "../settings/DesktopSpendCapSettings";
 import type { DesktopPaneClient } from "@octant/client-runtime/desktop-pane-client";
 import { ManagedToolsSettingsView } from "../settings/ManagedToolsSettingsView";
-import { AppStoreConnectKeySection } from "../settings/AppStoreConnectKeySection";
 import { UserProfileSettingsView } from "../profile/UserProfileSettingsView";
 import {
   ScopeIndicator,
@@ -160,6 +159,7 @@ import { ProviderUsageLimitsPanel } from "../usage/ProviderUsageLimitsPanel";
 import {
   pairedComputersOf,
   hubAdministrationOf,
+  ownerUnlockOf,
   remoteAccessAdministrationOf,
   type OctantHostBridge,
 } from "./hostBridge";
@@ -1023,19 +1023,12 @@ function ActiveSectionContent({
           )}
         </>
       );
-    case "device-tools": {
-      const appStoreConnectKeyRequest = props.hostBridge?.appStoreConnectKeyRequest;
+    case "device-tools":
       return (
-        <>
-          <ManagedToolsSettingsView
-            {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
-          />
-          {appStoreConnectKeyRequest === undefined ? null : (
-            <AppStoreConnectKeySection bridge={{ appStoreConnectKeyRequest }} />
-          )}
-        </>
+        <ManagedToolsSettingsView
+          {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
+        />
       );
-    }
     case "providers":
       // The catalog of every provider Octant can set up sits under the ones
       // this host has, so finding and configuring a provider is one page. A
@@ -1178,6 +1171,7 @@ function ActiveSectionContent({
         <RemoteAccessSettingsSection
           bridge={administration}
           hub={hubAdministrationOf(props.hostBridge)}
+          ownerUnlock={ownerUnlockOf(props.hostBridge)}
           pairedComputers={pairedComputersOf(props.hostBridge)}
         />
       ) : (
