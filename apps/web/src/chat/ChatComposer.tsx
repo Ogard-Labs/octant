@@ -1,6 +1,5 @@
 import { useComposerCompacting } from "../context/composerContextMeterScope";
 import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerAtMenu";
-import { ComputerUseMention, useComputerUseMention } from "../computerUse/ComputerUseMention";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import {
   useId,
@@ -38,7 +37,6 @@ import type { ImageGenerationProfileView, ImageGenerationScopeId } from "@octant
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import { ImageGenerationAction } from "../image/ImageGenerationAction";
 import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
-import { pickerGroupCarriesAppManagedTools } from "@octant/domain";
 import { applyComposerCaret } from "../composer/composerThreadDraftStore";
 import { markInteraction, markInteractionAfterPaint } from "../polling/interactionTrace";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -227,28 +225,6 @@ export function ChatComposer(props: ChatComposerProps) {
     },
     [props.onResolveExtensionReference],
   );
-  const computer = useComputerUseMention({
-    textarea: () => messageRef.current,
-    draft: props.draft,
-    onDraftChange: props.onDraftChange,
-    scopeKey: String(props.caretRestoreKey ?? "chat-draft"),
-    ...(props.providerGroups === undefined
-      ? {}
-      : {
-          providerCarriesTools: pickerGroupCarriesAppManagedTools(
-            props.providerGroups,
-            props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
-              ? undefined
-              : {
-                  providerInstanceId: props.selectedProviderInstanceId,
-                  modelId: props.selectedModelId,
-                },
-          ),
-        }),
-    onChoose: () => {
-      void resolveExtensionReference("@computer");
-    },
-  });
 
   const statusId = useId();
   const providerId = useId();
@@ -280,7 +256,6 @@ export function ChatComposer(props: ChatComposerProps) {
     ...(props.onResolveExtensionReference === undefined
       ? {}
       : { onResolveExtensionReference: resolveExtensionReference }),
-    apps: [{ kind: "computer", controller: computer }],
   });
   const [commandToken, setCommandToken] = useState<SlashCommandToken | undefined>(undefined);
   const [activeCommandIndex, setActiveCommandIndex] = useState(0);
@@ -410,7 +385,6 @@ export function ChatComposer(props: ChatComposerProps) {
   }
 
   function syncTokens(draft: string, caretIndex: number | null) {
-    computer.sync(draft, caretIndex);
     atMenu.sync(draft, caretIndex);
     mention.sync(draft, caretIndex);
     syncCommandToken(draft, caretIndex);
@@ -456,7 +430,6 @@ export function ChatComposer(props: ChatComposerProps) {
     if (event.nativeEvent.isComposing) return;
     if (suggestionInput.takeOnTab(event)) return;
     if (atMenu.handleKeyDown(event)) return;
-    if (computer.handleKeyDown(event)) return;
     if (commandOpen && commandMatches.length > 0) {
       if (event.key === "ArrowDown") {
         event.preventDefault();
@@ -651,16 +624,13 @@ export function ChatComposer(props: ChatComposerProps) {
       aria-activedescendant={
         atMenu.active !== undefined
           ? `${atMenu.listId}-${atMenu.active.id}`
-          : computer.open
-            ? `${computer.listId}-computer`
-            : activeCommand !== undefined
-              ? `${commandListId}-${activeCommand.id}`
-              : activeMention === undefined
-                ? undefined
-                : `${mentionListId}-${String(activeMention.threadId)}`
+          : activeCommand !== undefined
+            ? `${commandListId}-${activeCommand.id}`
+            : activeMention === undefined
+              ? undefined
+              : `${mentionListId}-${String(activeMention.threadId)}`
       }
       aria-autocomplete={
-        !computer.available &&
         props.threadMentions === undefined &&
         offeredCommands.length === 0 &&
         props.onResolveExtensionReference === undefined
@@ -670,22 +640,19 @@ export function ChatComposer(props: ChatComposerProps) {
       aria-controls={
         atMenu.open
           ? atMenu.listId
-          : computer.open
-            ? computer.listId
-            : commandOpen
-              ? commandListId
-              : mentionOpen
-                ? mentionListId
-                : undefined
+          : commandOpen
+            ? commandListId
+            : mentionOpen
+              ? mentionListId
+              : undefined
       }
       aria-describedby={statusId}
       aria-expanded={
-        !computer.available &&
         props.threadMentions === undefined &&
         offeredCommands.length === 0 &&
         props.onResolveExtensionReference === undefined
           ? undefined
-          : atMenu.open || computer.open || commandOpen || mentionOpen
+          : atMenu.open || commandOpen || mentionOpen
       }
       className="composer-input window-no-drag"
       onChange={(event) => {
@@ -987,15 +954,7 @@ export function ChatComposer(props: ChatComposerProps) {
           },
         },
       }}
-      typeahead={
-        atMenu.open ? (
-          <ComposerAtTypeahead controller={atMenu} />
-        ) : computer.open ? (
-          <ComputerUseMention controller={computer} surface="typeahead" />
-        ) : (
-          typeahead
-        )
-      }
+      typeahead={atMenu.open ? <ComposerAtTypeahead controller={atMenu} /> : typeahead}
     />
   );
 }
