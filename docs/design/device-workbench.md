@@ -20,7 +20,13 @@ discovery fails, the failure may carry an optional, additive `step` (`xcode`,
 `licence`, `runtime`, or `project`) naming the probe that failed — Xcode
 selection, `xcodebuild -license check`, Simulator listing, or project listing —
 so the setup checklist marks that row and treats earlier rows as passed; a host
-that omits it leaves every row unchecked. An agent's
+that omits it leaves every row unchecked. The tab appears only for a checkout
+with an `.xcodeproj` or `.xcworkspace` at its root, and a project added while the
+thread is open appears without reloading. `xcodebuild` has no option for a bare
+Swift package, so an `octant_apple` request naming `Package.swift` fails at the
+`project` step saying an Xcode project or workspace is needed. A Simulator
+created after discovery is found by reading the device list again when a request
+names it. An agent's
 `octant_apple` `boot`, `run`, or `open` raises that pane once per request
 instead of launching Simulator.app. That request lives only in server memory,
 keyed by thread and served only to the same thread and checkout; it is never

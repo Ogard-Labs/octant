@@ -386,6 +386,14 @@ export class AppleToolchainService {
     context: AppleExecutionContext,
   ): Promise<AppleDiscoveryResult> {
     if (!authorizedDiscovery(request, context)) return unauthorizedFailure();
+    // `xcodebuild` takes a project or a workspace; it has no option for a bare
+    // Swift package, so say so instead of reporting an incomplete host.
+    if (!/\.(xcodeproj|xcworkspace)$/.test(request.projectPath)) {
+      return invalidFailure(
+        "The Simulator needs an Xcode project (.xcodeproj) or workspace (.xcworkspace); a Swift package (Package.swift) alone has none. Add one, then try again.",
+        "project",
+      );
+    }
     let projectPath: string;
     try {
       projectPath = await confinedProjectPath(
@@ -510,6 +518,7 @@ export class AppleToolchainService {
       const prior = this.#findCompletedInput(request, context);
       if (prior !== undefined) return replayedFrom(prior);
     }
+    if (!isBuildRequest(request)) await this.#learnCreatedSimulator(request.simulatorId, context);
     const cached = this.#findDiscovery(request);
     const decision = isBuildRequest(request)
       ? evaluateAppleBuildRequest(
@@ -768,6 +777,48 @@ export class AppleToolchainService {
         await rm(path, { force: true });
       }),
     );
+  }
+
+  /**
+   * A Simulator made after the last discovery is missing from the cached list,
+   * so a request naming it would be refused as an invalid destination. Read the
+   * device list once more before refusing; known Simulators keep their state.
+   */
+  async #learnCreatedSimulator(
+    simulatorId: AppleSimulatorRecord["simulatorId"],
+    context: AppleExecutionContext,
+  ): Promise<void> {
+    const known = (records: ReadonlyArray<AppleSimulatorRecord>) =>
+      records.some((record) => String(record.simulatorId) === String(simulatorId));
+    if (
+      known(this.#lastSimulators) ||
+      [...this.#discovery.values()].some((e) => known(e.simulators))
+    ) {
+      return;
+    }
+    const listed = await this.#command(
+      ["xcrun", "simctl", "list", "devices", "available", "--json"],
+      context,
+      DISCOVERY_TIMEOUT_MS,
+    );
+    if (!succeeded(listed)) return;
+    let fresh: ReadonlyArray<AppleSimulatorRecord>;
+    try {
+      fresh = parseSimulators(text(listed.stdout));
+    } catch {
+      return;
+    }
+    const addMissing = (records: ReadonlyArray<AppleSimulatorRecord>) => [
+      ...records,
+      ...fresh.filter(
+        (record) =>
+          !records.some((owned) => String(owned.simulatorId) === String(record.simulatorId)),
+      ),
+    ];
+    this.#lastSimulators = addMissing(this.#lastSimulators);
+    for (const [key, entry] of this.#discovery) {
+      this.#discovery.set(key, { ...entry, simulators: addMissing(entry.simulators) });
+    }
   }
 
   #findDiscovery(
