@@ -92,7 +92,7 @@ describe("draft extension selections", () => {
     const taken: boolean[] = [];
     await act(async () => {
       taken.push(await result.current.resolveReference("@browser"));
-      taken.push(await result.current.resolveReference("@Computer"));
+      taken.push(await result.current.resolveReference("@computer"));
     });
     expect(taken).toEqual([false, false]);
     expect(result.current.receipts).toEqual([]);
@@ -107,13 +107,13 @@ describe("draft extension selections", () => {
     act(() =>
       result.current.restore([
         {
-          reference: "@Browser",
+          reference: "Browser",
           label: "Browser",
           selection: browserUseSelection("older-draft"),
           status: { kind: "selected" },
         },
         {
-          reference: "@Computer",
+          reference: "Computer",
           label: "Computer",
           selection: computerUseSelection("older-draft"),
           status: { kind: "selected" },
@@ -122,13 +122,13 @@ describe("draft extension selections", () => {
     );
     expect(result.current.receipts).toEqual([
       {
-        reference: "@Browser",
-        label: "@Browser",
+        reference: "Browser",
+        label: "Browser",
         status: { kind: "blocked", reason: "not needed; the agent is offered Browser on its own" },
       },
       {
-        reference: "@Computer",
-        label: "@Computer",
+        reference: "Computer",
+        label: "Computer",
         status: { kind: "blocked", reason: "not needed; the agent is offered Computer on its own" },
       },
     ]);
