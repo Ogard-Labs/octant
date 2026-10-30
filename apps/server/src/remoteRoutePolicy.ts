@@ -7,6 +7,7 @@ import {
   MAX_CODE_ATTACHMENT_BYTES,
   MAX_WORK_ATTACHMENT_BYTES,
   OWNER_IDENTITY_KEY_HEADER,
+  OWNER_SESSION_HEADER,
   OWNER_UNLOCK_HEADER,
   REMOTE_SERVER_PROXY_RELAYED,
   REMOTE_SERVER_PROXY_RELAYED_HEADER,
@@ -146,6 +147,7 @@ export const REMOTE_HUB_LINK_ROUTE_IDS = {
   delegate: "hub-link-delegate",
   delegationStatus: "hub-link-delegation-status",
   delegationCancel: "hub-link-delegation-cancel",
+  credentialTransfer: "hub-link-credential-transfer",
 } as const;
 
 const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
@@ -481,6 +483,19 @@ const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
     maxBodyBytes: 4_096,
     maxResponseBytes: 4_096,
   },
+  // The sending host's half of a sign-in copy an owner device started: the key
+  // arrives only against a one-time ticket the owner made on this host.
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.credentialTransfer,
+    match: { kind: "exact", path: "/api/hub/peer/credentials" },
+    surface: "pre-auth",
+    methods: ["POST"],
+    allowQuery: false,
+    allowedRequestHeaders: ["content-type", HUB_LINK_HEADER, HUB_PEER_KEY_HEADER],
+    allowedContentTypes: ["application/json"],
+    maxBodyBytes: 16_384,
+    maxResponseBytes: 4_096,
+  },
   // An owner device's administration of a host, signed like the routes above
   // and checked against the host's own owner list and a fresh unlock.
   {
@@ -493,6 +508,7 @@ const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
       "content-type",
       HUB_LINK_HEADER,
       OWNER_UNLOCK_HEADER,
+      OWNER_SESSION_HEADER,
       OWNER_IDENTITY_KEY_HEADER,
     ],
     allowedContentTypes: ["application/json"],
