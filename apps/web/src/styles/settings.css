@@ -983,6 +983,20 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   height: 32px;
 }
 
+/* A slot holding a warning comes back into the flow at the warning's own
+   height. Held to the 32px strip, a two-line refusal ("This provider CLI is
+   not available on this host. …") showed only the alert's icon and top edge,
+   over the page's tab row, so enabling a provider failed with no reason. A
+   status line still fits the strip and keeps the reserved geometry. */
+.settings-theme-editor > .settings-feedback-slot:first-child:has(.callout),
+.host-settings > .settings-feedback-slot:first-child:has(.callout),
+.settings-view .provider-settings > .provider-settings__message-slot:first-child:has(.callout) {
+  position: static;
+  height: auto;
+  margin-block: 0;
+  overflow: visible;
+}
+
 .provider-settings__message-slot:empty {
   visibility: hidden;
 }
