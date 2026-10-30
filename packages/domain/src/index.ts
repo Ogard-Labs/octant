@@ -75,6 +75,7 @@ export * from "./contextCompaction";
 export * from "./contextPolicy";
 export * from "./modelContextWindow";
 export * from "./diagnosticsPolicy";
+export * from "./credentialShapePolicy";
 export * from "./diagnosticsExportPolicy";
 export * from "./workConfinementPolicy";
 export * from "./workDeliveryPolicy";
