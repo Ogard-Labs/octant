@@ -93,7 +93,11 @@ import { targetHoldsRunningTurn } from "../sshTarget/sshRemoteCodeThreads";
 import { SshRemoteProjectService } from "../sshTarget/sshRemoteProjectService";
 import { SshRemoteTerminalService } from "../sshTarget/sshRemoteTerminalService";
 import type { SshTargetsWiring } from "./sshTargets";
-import { boundHostRuntimeDiagnostics, type HostRuntimeDiagnostics } from "@octant/host-runtime";
+import {
+  boundHostRuntimeDiagnostics,
+  createReleaseFeedVerifier,
+  type HostRuntimeDiagnostics,
+} from "@octant/host-runtime";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
@@ -164,6 +168,7 @@ export type RemoteDependencies = Pick<
   Pick<CanvasWiring, "canvasRoutes" | "canvasPublicShareService"> &
   Pick<
     AutomationWiring,
+    | "automationCommandService"
     | "automationScheduler"
     | "hubPushHandoffSlot"
     | "pushGatewaySetting"
@@ -192,6 +197,7 @@ export function wireRemote(deps: RemoteDependencies) {
     agentMessageService,
     agentRunAdmission,
     authenticatedProductDispatch,
+    automationCommandService,
     automationScheduler,
     browserCaptureStore,
     hubPushHandoffSlot,
@@ -534,8 +540,13 @@ export function wireRemote(deps: RemoteDependencies) {
   });
   // Provisioning is off until the person turns it on in the hub's window, and a spoke
   // holds an offer only if its hub grant ticks Provision. Each kind applies through the
-  // service the person would use themselves; the host has no routine builder, so a
-  // routine offer is refused as a kind this host cannot apply.
+  // service the person would use themselves; a routine is built here from the Project
+  // the person names, through the Automation command service, and left paused.
+  const agentProfileService = new AgentProfileService({
+    persistence,
+    uuid: randomUUID,
+    clock: () => new Date().toISOString(),
+  });
   const provisionService = new ProvisionService({
     state: hubStateStore,
     identity: resolveHubIdentity,
@@ -554,14 +565,43 @@ export function wireRemote(deps: RemoteDependencies) {
         setReleaseRing: (ring) => shellService.setReleaseRing(ring),
       },
       extensions: { execute: (command) => extensionApiService.execute(command) },
-      profiles: new AgentProfileService({
-        persistence,
-        uuid: randomUUID,
-        clock: () => new Date().toISOString(),
-      }),
+      profiles: agentProfileService,
       providers: providerService,
       userScopeRef: OCTANT_LOCAL_ACTOR_ID,
       uuid: randomUUID,
+      verifyUpdateSignature: createReleaseFeedVerifier().verify,
+      routine: {
+        hostId: String(LOCAL_HOST_ID),
+        actorId: OCTANT_LOCAL_ACTOR_ID,
+        authorScopeId: ROUTINE_HOST_SCOPE_ID,
+        workProject: (projectId) => {
+          const project = persistence
+            .readProjects()
+            .find((candidate) => String(candidate.id) === projectId);
+          if (project?.type !== "work" || project.lifecycle !== "active") return undefined;
+          const bindingRevisionId = project.bindingHistory.at(-1)?.revisionId;
+          if (bindingRevisionId === undefined) return undefined;
+          return {
+            projectId: String(project.id),
+            name: project.name,
+            projectVersion: project.version,
+            bindingRevisionId: String(bindingRevisionId),
+          };
+        },
+        profiles: () => agentProfileService.list(),
+        workModel: () => {
+          const settings = workThreadProjection.settings();
+          return settings?.defaultProviderInstanceId === undefined ||
+            settings.defaultModelId === undefined
+            ? undefined
+            : {
+                instanceId: String(settings.defaultProviderInstanceId),
+                modelId: String(settings.defaultModelId),
+              };
+        },
+        automations: automationCommandService,
+        clock: () => new Date().toISOString(),
+      },
     }),
     record: recordHubMembership,
     now: Date.now,

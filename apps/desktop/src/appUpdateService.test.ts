@@ -7,6 +7,7 @@ import {
   OCTANT_UPDATE_CHECK_INFERENCE,
 } from "@octant/contracts/app-updates";
 import { canonicalReleaseBytes } from "@octant/domain";
+import { RELEASE_TRUSTED_KEYS } from "@octant/host-runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createFeedVerifier,
@@ -1005,6 +1006,12 @@ describe("what an update check discloses", () => {
       expect(OCTANT_UPDATE_TRUSTED_KEYS[ring]).toContain(OCTANT_UPDATE_PREVIEW_PUBLIC_KEY);
       expect(OCTANT_UPDATE_TRUSTED_KEYS[ring]).toContain(OCTANT_UPDATE_PUBLIC_KEY);
     }
+  });
+
+  it("trusts the same release keys a headless host reads", () => {
+    // The release tooling rewrites the keys in appUpdateFeed.ts; a rotation that
+    // misses the shared list would leave a hub refusing feeds the app accepts.
+    expect(OCTANT_UPDATE_TRUSTED_KEYS).toEqual(RELEASE_TRUSTED_KEYS);
   });
 
   it("refuses to fetch a feed over plain HTTP", async () => {

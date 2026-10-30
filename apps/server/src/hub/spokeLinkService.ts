@@ -13,6 +13,7 @@ import {
   decodeHubJoinResponse,
   type AuditActingPrincipal,
   type HubGrant,
+  type HubFollowReason,
   type HubGrantItem,
   type HeldMember,
   type HubGuestAdmissionRequest,
@@ -33,6 +34,7 @@ import {
   admitNewMember,
   authorizeHubRequest,
   authorizePeer,
+  decideHubFollow,
   decideRosterReplacement,
   defaultHubGrant,
   evaluateDeviceRegistration,
@@ -43,6 +45,7 @@ import {
   newMemberConfirmationSigningPayload,
   reconcileHeldGrants,
   type AuthorizedPeer,
+  type HubFollowDecision,
   type NewMemberAdmission,
   type RosterReplacement,
 } from "@octant/domain";
@@ -71,6 +74,16 @@ import { originIsPrivate, readPrivateListener } from "./privateListenerReading";
 const decodeMemberId = Schema.decodeUnknownSync(HubMemberIdSchema);
 const decodeAlertId = Schema.decodeUnknownSync(NewMemberAlertId);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
+export type NewHubRefusal =
+  | "not-a-spoke"
+  | "hub-revoked"
+  | "not-a-named-standby"
+  | "hub-unreachable"
+  | "hub-answer-invalid"
+  | "roster-not-newer";
+
+type HubFollowRefusal = Extract<HubFollowDecision, { status: "refused" }>["kind"];
+
 /** Alerts a spoke keeps; the oldest go first once a person leaves them undismissed. */
 const MAX_ALERTS = 64;
 
@@ -191,6 +204,7 @@ export interface SpokeLinkOptions {
     readonly memberId?: HubMemberId;
     readonly sequence?: number;
     readonly items?: ReadonlyArray<HubGrantItem>;
+    readonly followReason?: HubFollowReason;
   }) => void;
   readonly serverBuildVersion: string;
   readonly now: () => number;
@@ -950,16 +964,50 @@ export class SpokeLinkService {
     principal: AuditActingPrincipal,
   ): Promise<
     | { readonly status: "accepted"; readonly sequence: number }
-    | {
-        readonly status: "refused";
-        readonly kind:
-          | "not-a-spoke"
-          | "hub-revoked"
-          | "not-a-named-standby"
-          | "hub-unreachable"
-          | "hub-answer-invalid"
-          | "roster-not-newer";
-      }
+    | { readonly status: "refused"; readonly kind: NewHubRefusal | HubFollowRefusal }
+  > {
+    return this.#takeNewHub(hubMemberId, { principal });
+  }
+
+  /**
+   * Takes a promoted standby as the hub without a person, for a spoke whose
+   * person ticked Standby. The old hub must have been silent for the whole
+   * failover time and every rule `decideHubFollow` states must hold. The
+   * spoke's own grant, peer grants, and owners carry over unchanged, so the
+   * new hub gets exactly what the old one had. A spoke that did not tick
+   * Standby does nothing here and waits for `acceptNewHub` in its own window.
+   */
+  async followPromotedHub(input: {
+    readonly silentForMs: number;
+    readonly failoverAfterMs: number;
+  }): Promise<
+    | { readonly status: "followed"; readonly sequence: number }
+    | { readonly status: "refused"; readonly kind: NewHubRefusal | HubFollowRefusal }
+  > {
+    const link = this.#options.state.load().link;
+    if (link === undefined) return { status: "refused", kind: "not-a-spoke" };
+    if (link.removed === true) return { status: "refused", kind: "hub-revoked" };
+    if (authorizeHubRequest({ grant: link.grant, item: "standby" }).status === "refused") {
+      return { status: "refused", kind: "standby-not-granted" };
+    }
+    let last: NewHubRefusal | HubFollowRefusal = "not-a-named-standby";
+    for (const id of hubSignedAnchor(link)?.roster.standbyOrder ?? []) {
+      if (String(id) === String(link.selfMemberId)) continue;
+      const taken = await this.#takeNewHub(String(id), { follow: input });
+      if (taken.status === "accepted") return { status: "followed", sequence: taken.sequence };
+      last = taken.kind;
+    }
+    return { status: "refused", kind: last };
+  }
+
+  async #takeNewHub(
+    hubMemberId: string,
+    by:
+      | { readonly principal: AuditActingPrincipal }
+      | { readonly follow: { readonly silentForMs: number; readonly failoverAfterMs: number } },
+  ): Promise<
+    | { readonly status: "accepted"; readonly sequence: number }
+    | { readonly status: "refused"; readonly kind: NewHubRefusal | HubFollowRefusal }
   > {
     const state = this.#options.state.load();
     const link = state.link;
@@ -1027,6 +1075,20 @@ export class SpokeLinkService {
     if (roster.roster.sequence <= current.roster.roster.sequence) {
       return { status: "refused", kind: "roster-not-newer" };
     }
+    // Judged on the state read now, so a grant the person narrowed meanwhile counts.
+    if ("follow" in by) {
+      const decision = decideHubFollow({
+        anchor: hubSignedAnchor(current),
+        heldSequence: current.roster.roster.sequence,
+        selfMemberId: current.selfMemberId,
+        grant: current.grant,
+        candidate: roster,
+        promoterKeyFingerprint: publicKeyFingerprint(facts.identityPublicKey),
+        silentForMs: by.follow.silentForMs,
+        failoverAfterMs: by.follow.failoverAfterMs,
+      });
+      if (decision.status === "refused") return decision;
+    }
     const { hubSignedRoster: _anchor, standIn: _standIn, ...rest } = current;
     const switched = this.#installRoster(
       latest,
@@ -1047,9 +1109,10 @@ export class SpokeLinkService {
     if (switched.status === "refused") return { status: "refused", kind: "hub-answer-invalid" };
     this.#options.record({
       change: "new-hub-accepted",
-      actingPrincipal: principal,
+      actingPrincipal: "principal" in by ? by.principal : { kind: "hub", memberId: facts.memberId },
       memberId: facts.memberId,
       sequence: roster.roster.sequence,
+      ...("follow" in by ? { followReason: "standby-granted-hub-silent" as const } : {}),
     });
     return { status: "accepted", sequence: roster.roster.sequence };
   }
