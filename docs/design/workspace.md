@@ -55,6 +55,14 @@ integrated borderless top chrome; a central workspace; and an optional right
 dock. Mode changes alter content, authority, default composition, and density,
 never the navigation grammar. See [decisions/0015-workspace-shell-model.md](../decisions/0015-workspace-shell-model.md).
 
+**Home** leads the places: first in the icon rail, above Inbox, and among the
+sidebar's own actions when no rail stands beside it. It closes any reader and
+puts the active pane back on its mode's start screen (Code Home in Code), and
+it is current while that start screen shows. The `home` keybinding
+(Mod+Shift+H by default) does the same. A New task draft shares the start
+screen's composer scope, so its unsent text comes back with it. Before Home,
+the start screen had no way back once a person left it.
+
 Projects opens its searchable directory in the main workspace. Selecting a Project
 replaces that directory with the Project overview; Projects in primary navigation
 returns to the directory. Neither view adds a second sidebar. Other destinations

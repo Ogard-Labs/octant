@@ -73,6 +73,7 @@ export interface SidebarContainerProps {
     | "openDraftInProject"
     | "openGithubIssues"
     | "openImageLibrary"
+    | "openHome"
     | "openInbox"
     | "openLinearIssues"
     | "openNavigator"
@@ -118,6 +119,8 @@ export interface SidebarContainerProps {
   readonly activeMode: OctantMode;
   readonly activeProjectId?: ProjectId;
   readonly activeSidebarDestination?: SidebarNavigationDescriptorId;
+  /** Whether the active pane shows its mode's start screen with no reader over it. */
+  readonly homeActive: boolean;
   readonly activeWorkThreadId?: string;
   readonly allProjects: ProjectController["allProjects"];
   readonly archivedProjects: ProjectController["archivedProjects"];
@@ -225,6 +228,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
     sidebarListRequest,
     sidebarRail,
     sidebarRailBeside,
+    homeActive,
     railUsage,
     sidebarTileCounts,
     threadErrorMessage,
@@ -245,6 +249,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
     openDraftInActiveProject,
     openDraftInProject,
     openImageLibrary,
+    openHome,
     openInbox,
     openNavigator,
     openProjectContextHealth,
@@ -546,6 +551,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
             },
           }
         : {})}
+      home={{ onOpen: openHome, active: homeActive }}
       onAddFolder={() => openProjectCreate()}
       onOpenArchive={openArchive}
       nativeHost={hostReservesTitlebarInset}

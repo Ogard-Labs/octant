@@ -91,7 +91,8 @@ them again. The page never merges, approves, or comments on a pull request, and 
 deletes work. You can also open it from the command palette with **Review
 finished threads**.
 
-A narrow rail of icons stands to the left of the sidebar: Inbox, Running, To
+A narrow rail of icons stands to the left of the sidebar: **Home** (back to
+the start screen, **⌘/Ctrl+Shift+H**), Inbox, Running, To
 review and Done with their counts, your other places (Board, Pull requests and
 so on), the Activity feed, Projects, **More** (the places you set to Menu only,
 and Customize sidebar), and Settings. **Settings › Sidebar › Sidebar
