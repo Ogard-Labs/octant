@@ -73,7 +73,7 @@ const limits: LinkedThreadLimitSnapshot = {
   },
 };
 
-function handler() {
+function handler(maxJsonBodySize?: number) {
   const service = new LinkedThreadService({
     creation: {
       create: async ({ targets }) =>
@@ -104,11 +104,42 @@ function handler() {
   return createLinkedThreadRouteHandler({
     service,
     windowAuthorityStore: store,
+    ...(maxJsonBodySize === undefined ? {} : { maxJsonBodySize }),
     now: () => Date.now(),
   });
 }
 
+const previewCommand = {
+  kind: "linked-thread-prompt-preview",
+  requestId: "33333333-3333-4333-8333-333333333333",
+  requestFingerprint: "a".repeat(64),
+  prompt: "/review 2 threads Review the migration plan.",
+  sourceThreadId: "11111111-1111-4111-8111-111111111111",
+  sourceScope: scope,
+  sourceVersion: 2,
+  contextSnapshotId: "44444444-4444-4444-8444-444444444444",
+  targetScope: scope,
+  requestedAuthority: authority,
+  nestingDepth: 1,
+};
+
 describe("createLinkedThreadRouteHandler", () => {
+  it("refuses an oversized command body that does not declare its length", async () => {
+    const body = JSON.stringify(previewCommand);
+    const route = handler(body.length - 1);
+    const request = new Request("http://127.0.0.1/api/linked-threads/commands", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-octant-window-capability": capability },
+      body,
+    });
+    expect(request.headers.get("content-length")).toBeNull();
+
+    const response = await route(request);
+
+    expect(response?.status).toBe(400);
+    expect((await response?.json())?.code).toBe("invalid");
+  });
+
   it("proposes and confirms linked-thread fan-out through the command route", async () => {
     const route = handler();
     const proposed = await route(

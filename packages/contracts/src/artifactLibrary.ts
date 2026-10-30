@@ -37,17 +37,94 @@ export const ArtifactKind = Schema.Literal(
 );
 export type ArtifactKind = typeof ArtifactKind.Type;
 
+/** The shapes and text the host's artifact renderer draws, and nothing else. */
+const PREVIEW_ELEMENTS: ReadonlySet<string> = new Set([
+  "svg",
+  "g",
+  "rect",
+  "circle",
+  "line",
+  "path",
+  "polygon",
+  "polyline",
+  "text",
+]);
+
+/** Presentation attributes only: none of these can name a URL or run script. */
+const PREVIEW_ATTRIBUTES: ReadonlySet<string> = new Set([
+  "xmlns",
+  "viewBox",
+  "role",
+  "class",
+  "transform",
+  "x",
+  "y",
+  "x1",
+  "y1",
+  "x2",
+  "y2",
+  "cx",
+  "cy",
+  "r",
+  "rx",
+  "width",
+  "height",
+  "d",
+  "points",
+  "fill",
+  "fill-opacity",
+  "opacity",
+  "stroke",
+  "stroke-width",
+  "stroke-dasharray",
+  "stroke-linecap",
+  "stroke-linejoin",
+  "font-family",
+  "font-size",
+  "font-style",
+  "font-weight",
+  "text-anchor",
+  "dominant-baseline",
+]);
+
+const PREVIEW_TAG = /<\/?([a-zA-Z][a-zA-Z0-9-]*)((?:\s+[a-zA-Z][a-zA-Z0-9:-]*="[^"<>]*")*)\s*\/?>/y;
+const PREVIEW_ATTRIBUTE = /([a-zA-Z][a-zA-Z0-9:-]*)="([^"]*)"/g;
+
+/**
+ * Whether markup is an SVG the renderer could have drawn: allow-listed elements
+ * and attributes, double-quoted values with no `url(`, and every `<` opening one
+ * of those tags. Cards insert the markup as HTML, so a deny-list (the earlier
+ * `<script` check) still let event-handler attributes, `javascript:` links,
+ * `foreignObject`, and external references through.
+ */
+function isInertSvg(markup: string): boolean {
+  if (!markup.startsWith("<svg")) return false;
+  let index = 0;
+  while ((index = markup.indexOf("<", index)) !== -1) {
+    PREVIEW_TAG.lastIndex = index;
+    const tag = PREVIEW_TAG.exec(markup);
+    if (tag === null || !PREVIEW_ELEMENTS.has(tag[1] ?? "")) return false;
+    for (const [, name = "", value = ""] of (tag[2] ?? "").matchAll(PREVIEW_ATTRIBUTE)) {
+      const allowed = PREVIEW_ATTRIBUTES.has(name) || /^data-[a-z-]+$/.test(name);
+      if (!allowed || /url\s*\(/i.test(value)) return false;
+    }
+    index = PREVIEW_TAG.lastIndex;
+  }
+  return true;
+}
+
 /**
  * A drawn preview of an artifact, rendered by the host.
  *
  * The markup is a self-contained SVG fragment with no external references, so a
- * card can draw it without fetching anything and without running script.
+ * card can draw it without fetching anything and without running script. The
+ * contract enforces that shape rather than trusting every producer to keep it.
  */
 export const ArtifactPreview = Schema.Struct({
   format: Schema.Literal("svg"),
   markup: Schema.String.pipe(
     Schema.maxLength(MAX_ARTIFACT_PREVIEW_CHARACTERS),
-    Schema.filter((value) => value.startsWith("<svg") && !/<\s*script/i.test(value)),
+    Schema.filter(isInertSvg),
   ),
 }).annotations(strict);
 export type ArtifactPreview = typeof ArtifactPreview.Type;

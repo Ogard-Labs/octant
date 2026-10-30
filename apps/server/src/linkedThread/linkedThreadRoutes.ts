@@ -91,7 +91,11 @@ async function readJsonBody(request: Request, limit: number): Promise<unknown> {
   const contentLength = Number(request.headers.get("content-length") ?? "0");
   if (!Number.isFinite(contentLength) || contentLength > limit)
     throw new Error("Request body is too large.");
-  return JSON.parse(await request.text()) as unknown;
+  // A body sent without content-length declares nothing, so the read itself is
+  // measured too.
+  const text = await request.text();
+  if (Buffer.byteLength(text, "utf8") > limit) throw new Error("Request body is too large.");
+  return JSON.parse(text) as unknown;
 }
 
 function corsHeaders(origin: string | null): HeadersInit {

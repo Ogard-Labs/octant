@@ -19,6 +19,23 @@ function definition(blocks: ReadonlyArray<CanvasBlock>, title = "Launch plan") {
   return { title, blocks };
 }
 
+function libraryEntryWithPreview(markup: string) {
+  return decodeArtifactLibraryEntry({
+    canvasId: "10000000-0000-4000-8000-000000000001",
+    projectId: "20000000-0000-4000-8000-000000000001",
+    projectName: "Storefront",
+    mode: "work",
+    kind: "chart",
+    title: "Launch plan",
+    versionCount: 1,
+    currentVersionId: "30000000-0000-4000-8000-000000000001",
+    currentSequence: 1,
+    updatedAt: "2026-08-18T09:00:00.000Z",
+    shared: false,
+    preview: { format: "svg", markup },
+  });
+}
+
 function exampleChart(chartType: string) {
   const block = chartExampleBlocks.find((candidate) => candidate.chartType === chartType);
   if (block === undefined) throw new Error(`${chartType} example is missing.`);
@@ -143,22 +160,35 @@ describe("drawing a preview of an artifact", () => {
   });
 
   it("produces a preview the contract will accept", () => {
-    const entry = decodeArtifactLibraryEntry({
-      canvasId: "10000000-0000-4000-8000-000000000001",
-      projectId: "20000000-0000-4000-8000-000000000001",
-      projectName: "Storefront",
-      mode: "work",
-      kind: "chart",
-      title: "Launch plan",
-      versionCount: 1,
-      currentVersionId: "30000000-0000-4000-8000-000000000001",
-      currentSequence: 1,
-      updatedAt: "2026-08-18T09:00:00.000Z",
-      shared: false,
-      preview: { format: "svg", markup: renderArtifactThumbnail(definition([chart])) },
-    });
+    const pictures = [
+      [chart],
+      chartExampleBlocks,
+      opsDashboardExampleBlocks,
+      [releaseMindmapBlock],
+      [settingsScreenExampleBlock],
+      [supportFlowBlock],
+      [notificationStatesExampleBlock],
+    ].map((blocks) => renderArtifactThumbnail(definition(blocks)));
+    for (const markup of pictures.filter((picture) => picture.length > 0)) {
+      expect(() => libraryEntryWithPreview(markup)).not.toThrow();
+    }
+  });
 
-    expect(entry.preview?.format).toBe("svg");
+  it("refuses a preview that could run script or reach outside the picture", () => {
+    const hostile = [
+      '<svg><rect onload="alert(1)"/></svg>',
+      '<svg><a href="javascript:alert(1)"><rect/></a></svg>',
+      '<svg><image href="https://example.com/x.png"/></svg>',
+      '<svg><foreignObject><img src="x" onerror="alert(1)"/></foreignObject></svg>',
+      '<svg><rect style="fill:url(https://example.com/x)"/></svg>',
+      '<svg><rect fill="url(https://example.com/x#a)"/></svg>',
+      "<svg><!-- --><rect/></svg>",
+      "<svg><rect x=1 /></svg>",
+      "<svg><rect/></svg><img src=x>",
+    ];
+    for (const markup of hostile) {
+      expect(() => libraryEntryWithPreview(markup), markup).toThrow();
+    }
   });
 
   it("gives up rather than emitting a picture too large to carry", () => {
