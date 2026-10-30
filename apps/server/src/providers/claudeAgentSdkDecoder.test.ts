@@ -283,6 +283,35 @@ describe("Runtime compaction", () => {
     );
   });
 
+  // Captured from Claude Code 2.1.308: it sent this note before and during a
+  // turn, and refusing it failed the session at startup.
+  const devIntent = {
+    type: "system",
+    subtype: "dev_intent",
+    kind: "turn",
+    trigger: "user_message",
+    uuid: "u-1",
+    session_id: "session-1",
+  };
+
+  it("drops the runtime's dev-intent note, before and after it initializes", () => {
+    expect(
+      decodeMessage(devIntent, openInput, {
+        kind: "initializing",
+        acceptedModels: new Set<string>(),
+      }),
+    ).toEqual({
+      kind: "ignored",
+    });
+    expect(decodeMessage(devIntent, openInput, active)).toEqual({ kind: "ignored" });
+  });
+
+  it("refuses a dev-intent note that carries fields it does not know", () => {
+    expect(refusal({ ...devIntent, allow_tools: ["Bash"] })).toBe(
+      "Claude returned an unsupported runtime message.",
+    );
+  });
+
   it("refuses a system message it does not know without quoting its subtype", () => {
     expect(
       refusal({
