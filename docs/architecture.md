@@ -30,19 +30,13 @@ The design rests on a small set of invariants that every package obeys:
   on. Remote access is host-to-device over the user's
   own network; traffic among a person's own hub and spokes there is not a
   third-party call ([Hub and spokes](design/hub-and-spokes.md), designed and
-  not built). Five host-initiated
+  not built). Four host-initiated
   HTTPS calls exist in code: desktop update checks against a signed feed, managed
   device-tool update checks against the npm registry, server marketplace
   fetches when the person searches, inspects, previews, or installs from the
   catalog, calls to the public Canvas share service when the person
   publishes, updates, or revokes a public link (and the host retries a revoke
-  it could not complete), and App Store Connect API requests to
-  `api.appstoreconnect.apple.com` only (no other host, no redirect) when a
-  person checks, submits for App Review, or releases a version of their own
-  app, from the Apple workbench or by asking the thread's agent. The first four have a Settings off switch; App Store Connect is
-  reached only from a person's action, and a host with no App Store Connect key
-  makes no request ([Apple physical devices and distribution](design/apple-devices.md#distribution)).
-  The switches: Public links starts
+  it could not complete). Each has a Settings off switch. The switches: Public links starts
   off and off means no share-service request except finishing a revoke; marketplace off means no catalog
   request; Updates off disables automatic update checks (manual Check for
   updates may still contact the signed feed); device tools' automatic updates
@@ -700,49 +694,22 @@ address (Allow input never covers it), and evidence keeps only the origin. **Rot
 and landscape for a person who asked; it is an effect confirmed on its own
 (Allow input never covers it). Pane states, discovery, capture, input
 delivery, keyboard layouts, and the managed streaming tools are specified in
-[Device workbench](design/device-workbench.md). Physical Apple devices,
-their person-confirmed leases and signing custody, and person-confirmed upload
-to App Store Connect are the design accepted on 2026-10-26, being implemented
-slice by slice, in
-[Apple physical devices and distribution](design/apple-devices.md). The host
-already discovers paired iPhones and iPads through `devicectl`, keeps the
-UDID, serial number, and ECID to itself, and holds a lease only after a person
-at the Mac confirms it. Inside a lease it builds the thread's app unsigned,
-signs it for development in a host-owned step with the person's own keychain
-identity for the team (never `-allowProvisioningUpdates`), installs only that
-product, launches it under a console session it holds, and stops only that
-session; each effect follows the thread's posture like a Simulator effect.
-It also captures a leased device's screen with the selected Xcode's own
-tooling, a read like a Simulator screenshot, and the Apple workbench's
-**Physical devices** section shows the picker, setup checklist, lease
-confirmation, and that latest screenshot; a physical device has no live view.
-The agent's `octant_apple` asks for the same lease, effects, screenshots, and
-console reads through the same device policy; its lease and device-effect
-asks are answered in the thread by a person at the Mac only, never by a paired
-device.
-`/api/apple/devices` is readable by a paired device, and
-`/api/apple/device-leases`, `/api/apple/device-actions`, and
-`/api/apple/device-screenshots` (the pixels of a thread's latest device
-screenshot) are local-only. The App Store Connect API key for distribution has
-its own credential broker family with no read-back route, entered only
-through the local-only `/api/desktop/app-store-connect-key/` routes from a
-desktop window or `octant apple key`. The Current Release Boundary admits
-distribution since 2026-10-28, so key entry is open on a Mac, and each
-upload, submission, and release is a local person's confirmed act under the
-distribution rules of that specification. A person in the Apple workbench (through
-the local-only `/api/apple/distribution-preparations` and
-`/api/apple/distribution`), or the thread's agent, can ask to upload its app: the host reads the exact build and App Store signature, a person at
-the Mac confirms that build, and only then is the project archived unsigned,
-signed by `xcodebuild -exportArchive`, and uploaded with `xcrun altool`, using
-a key file the credential broker writes for that one upload and removes; the
-server never reads the key. The same person, or the agent when the person asks, can submit
-the version App Store Connect holds for the project for App Review, or release
-a version approved and waiting for a manual release: the host reads the
-version from App Store Connect (local-only `/api/apple/distribution-versions`),
-a person at the Mac confirms that exact version, and only then is it submitted
-or released through `/api/apple/distribution`. Each App Store Connect API
-request carries a token the credential broker signs (see "App Store Connect
-request signing" under [security and authority](#security-and-authority)).
+[Device workbench](design/device-workbench.md). Octant drives the iOS
+Simulator only. Physical iPhones and iPads, and App Store Connect upload,
+submission, and release, are out of scope (maintainer decision, 2026-10-29):
+the host runs no `devicectl`, signs nothing for a device, and serves no
+`/api/apple/devices`, `/api/apple/device-*`, or `/api/apple/distribution*`
+route, and `octant_apple` offers no device or distribution operation. An agent
+that needs a device or the store uses its own provider tools under the thread's
+ordinary sandbox and approvals. Journals that hold `validation.*` events with
+`apple-device-*` or `apple-distribution-*` step ids from earlier releases
+still replay unchanged: those events are generic validation records.
+Files the removed feature wrote stay in place and nothing reads them:
+`device-identities.json`, `signing/`, `devicectl/`, `device-captures/`, and
+`distribution-keys/` under the data directory's `apple-runtime/` folder. Every
+Apple launch is still denied `signing/`, `devicectl/`, `device-captures/`, and
+`distribution-keys/`, because they may hold device listings, entitlements, or
+a key file; a person can delete them.
 
 On an approval-gated thread, **Allow input** is the confirmation that opens
 that destination; clicks, typing, Home, and Lock never raise it
@@ -7507,19 +7474,6 @@ mechanisms are:
   reads its product from the same directory without write access; XCTest
   results also land inside it. Simulator captures remain isolated in their own
   private directory and are writable only by the capture launch.
-  A physical device build follows the same rule with signing off. Its
-  signing step is a separate pair of host-owned launches, `security
-find-identity` and `codesign`, through a port with no network; `codesign`
-  may write only the one app bundle it signs and read only the private
-  directory holding that signature's entitlements, which every other Apple
-  launch is denied, as `devicectl`'s answer directory is. A device install
-  reads its product without write access. A device screenshot lands in its
-  own private `device-captures` directory, which every other Apple launch is
-  denied and only the capture launch may write, like a Simulator capture.
-  None of these launches carries a
-  keychain or CoreDevice grant yet: each one the maintainer's device smoke
-  shows a launch needs is measured then and added to this list, never to the
-  shared profile.
 
 - **Provider capability matrix ("degraded on").** Claude Code and Codex are the
   first-class providers: the two subscription coding runtimes the product is
@@ -9101,10 +9055,8 @@ release steps of their own.
 The maintainer authorized the previously held post-preview tracks on
 2026-10-26: mobile maturity (Android internal builds, redacted push, capture
 and voice, public store distribution), a ciphertext-only hosted relay, a full
-LSP / extension host / debugger companion, Apple physical devices and then
-TestFlight and App Store distribution of a person's own apps, enterprise
-directory OAuth and cloud-IAM provider identity, disposable Linux desktops for
-headless hosts, third-party
+LSP / extension host / debugger companion, enterprise directory OAuth and
+cloud-IAM provider identity, disposable Linux desktops for headless hosts, third-party
 provider-driver plugins, and the EU/GDPR compliance package (pending legal
 review). On 2026-10-28 the maintainer added a hub-and-spoke topology under the
 same terms ([Hub and spokes](design/hub-and-spokes.md)), including a
@@ -9116,12 +9068,8 @@ owning specification documents its authority, privacy, and release
 boundaries. The authorization covers design and implementation; creating an
 account, spending money, submitting to a store, deploying a hosted service, or
 weakening an invariant in this document each still needs a separate explicit
-maintainer action. App Store distribution of a person's own apps was admitted
-on 2026-10-28 ([Apple devices, decision 7](design/apple-devices.md#maintainer-decisions)):
-Octant may upload a person's build, submit a version for App Review, and
-release an approved version, each only when a local person confirms that exact
-build or version; admitting it creates no account and submits nothing on its
-own. The earlier holds and their start gates
+maintainer action. Apple physical devices and App Store distribution are out of
+scope (2026-10-29). The earlier holds and their start gates
 remain as rationale in [release-boundary holds](release-boundary-holds.md).
 The connector / OAuth marketplace hold was lifted on 2026-10-20 under the
 [Connectors and user-added MCP servers](#extensions-and-skills) rules: a

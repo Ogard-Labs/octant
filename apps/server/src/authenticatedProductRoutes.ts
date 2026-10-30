@@ -328,13 +328,6 @@ export function classifyProductAction(request: Request): string | undefined {
     if (method === "POST" && path === "/api/browser/approvals") return "browser.interact";
     return method === "GET" || method === "HEAD" ? "settings.read-non-secret" : undefined;
   }
-  // A paired device may discover the host's physical devices and read one's
-  // status for a thread it can open. The route re-derives the actor from the
-  // bound principal and the device policy refuses every other kind from a
-  // paired device; starting or releasing a lease is on a local-only route.
-  if (path === "/api/apple/devices") {
-    return method === "POST" ? "project.overview.read" : undefined;
-  }
   if (
     path === "/api/agent-profiles" ||
     path.startsWith("/api/agent-profiles/") ||

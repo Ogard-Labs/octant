@@ -64,8 +64,6 @@ interface ThreadNotificationFact {
   readonly threadId: string;
   readonly kind: RemotePushNotificationKind;
   readonly runId: string;
-  /** The host's mark on an approval only a person at one of its windows answers. */
-  readonly localPersonOnly?: true;
 }
 
 interface CommittedFact {
@@ -102,7 +100,6 @@ const CodeOperationEventRecorded = Schema.Struct({
     Schema.Struct({
       kind: Schema.Literal("approval-requested"),
       approvalId: Id,
-      localPersonOnly: Schema.optional(Schema.Literal(true)),
     }),
     Schema.Struct({ kind: Schema.Literal("input-requested"), requestId: RequestId }),
   ),
@@ -170,13 +167,10 @@ function threadNotificationFactOf(event: CommittedFact): ThreadNotificationFact 
       if (frame.event.kind === "input-requested") {
         return fact(frame.threadId, "waiting", frame.event.requestId);
       }
-      // A local-only approval stays an approval for the phone's preference,
-      // dedupe, and receipt; only what the phone is shown changes.
       return {
         threadId: frame.threadId,
         kind: "approval-needed",
         runId: frame.event.approvalId,
-        ...(frame.event.localPersonOnly === true ? { localPersonOnly: true as const } : {}),
       };
     }
     // The harness session aggregate is keyed by its thread.
@@ -301,7 +295,6 @@ export class ThreadNotificationDeliveryService {
         computerLabel: this.#computerLabel(),
         threadTitle: thread.title,
         threadTitles: destination.preferences.threadTitles,
-        ...(observed.localPersonOnly === true ? { localPersonOnly: true as const } : {}),
       }),
     });
     if (sealed.status === "refused") {

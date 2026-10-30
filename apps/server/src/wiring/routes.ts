@@ -66,7 +66,7 @@ export type RoutesDependencies = Pick<ServerStart, "latencyStats" | "persistence
     | "providerUsageLimitsRoutes"
   > &
   Pick<BrowserWiring, "productFeedbackRoutes"> &
-  Pick<CodeRuntimeWiring, "androidToolchainRoutes" | "appleDeviceRoutes" | "appleToolchainRoutes"> &
+  Pick<CodeRuntimeWiring, "androidToolchainRoutes" | "appleToolchainRoutes"> &
   Pick<
     CodeToolingWiring,
     | "codeCheckoutOpenRoutes"
@@ -141,7 +141,6 @@ export function wireRoutes(deps: RoutesDependencies) {
     agentRunRouteDependencies,
     agentRunSettingsRoutes,
     androidToolchainRoutes,
-    appleDeviceRoutes,
     appleToolchainRoutes,
     artifactLibraryRoutes,
     artifactMirrorRoutes,
@@ -266,7 +265,6 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await previewHandoffBridgeRoutes(request)) ??
     (await codeRoutes(request)) ??
     (await appleToolchainRoutes(request)) ??
-    (await appleDeviceRoutes(request)) ??
     (await androidToolchainRoutes(request)) ??
     (await providerRoutes(request)) ??
     (await providerOAuthRoutes(request)) ??

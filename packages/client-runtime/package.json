@@ -10,7 +10,6 @@
     "./agent-message-client": "./src/agentMessageClient.ts",
     "./automation-notification-client": "./src/automationNotificationClient.ts",
     "./apple-toolchain-client": "./src/appleToolchainClient.ts",
-    "./apple-device-client": "./src/appleDeviceClient.ts",
     "./android-toolchain-client": "./src/androidToolchainClient.ts",
     "./chat-client": "./src/chatClient.ts",
     "./browser-automation-client": "./src/browserAutomationClient.ts",
