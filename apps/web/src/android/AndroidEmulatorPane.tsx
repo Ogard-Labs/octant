@@ -21,6 +21,7 @@ import type { OctantHostBridge } from "../shell/hostBridge";
 import type { CodeController } from "../code/useCodeController";
 import type { DeviceInputIntent } from "../device/deviceInput";
 import {
+  deviceActorWord,
   deviceFailureDetail,
   deviceProblemFor,
   deviceWord,
@@ -544,6 +545,9 @@ function androidDiagnostics(input: {
           id: `${String(item.actionId)}:${item.completedAt}`,
           label: deviceWord(item.kind),
           outcome: deviceWord(item.outcome),
+          ...(item.requestedBy === undefined
+            ? {}
+            : { requestedBy: deviceActorWord(item.requestedBy) }),
           ...(first === undefined ? {} : { detail: first.message }),
         };
       }),

@@ -1,4 +1,5 @@
 import { isDeviceOpenUrl } from "@octant/contracts/device-host";
+import type { EventActor } from "@octant/contracts";
 
 /**
  * The platform-neutral picture of one device pane. The iOS Simulator and the
@@ -161,6 +162,8 @@ export interface DeviceDiagnostics {
     readonly id: string;
     readonly label: string;
     readonly outcome: string;
+    /** Who asked: "Agent" or "You", so an agent's swipe is not mistaken for a person's tap. */
+    readonly requestedBy?: string;
     readonly detail?: string;
   }>;
 }
@@ -368,4 +371,18 @@ export function deviceFailureDetail(
 export function deviceWord(value: string): string {
   const words = value.split("-").join(" ");
   return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+}
+
+/** Who asked for an action, in the words a Diagnostics row shows. */
+export function deviceActorWord(actor: EventActor): string {
+  switch (actor.kind) {
+    case "agent":
+      return "Agent";
+    case "local-user":
+      return "You";
+    case "remote-device":
+      return "Remote device";
+    case "system":
+      return "Octant";
+  }
 }

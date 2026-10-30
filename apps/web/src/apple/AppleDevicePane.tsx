@@ -1,6 +1,7 @@
 import type { AppleSimulatorRecord } from "@octant/contracts/apple-toolchain";
 import type { DeviceInputIntent } from "../device/deviceInput";
 import {
+  deviceActorWord,
   deviceFailureDetail,
   deviceProblemFor,
   deviceWord,
@@ -421,6 +422,9 @@ function appleDiagnostics(props: AppleWorkbenchPaneProps): DeviceDiagnostics {
         id: `${String(item.actionId)}:${item.completedAt}`,
         label: deviceWord(item.kind),
         outcome: deviceWord(item.outcome),
+        ...(item.requestedBy === undefined
+          ? {}
+          : { requestedBy: deviceActorWord(item.requestedBy) }),
         ...(first === undefined ? {} : { detail: first.message }),
       };
     });

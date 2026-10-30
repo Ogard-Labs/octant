@@ -572,6 +572,28 @@ describe("DevicePane", () => {
     expect(screen.getByRole("button", { name: "iPhone 17 screen" })).toBeDisabled();
   });
 
+  it("names who asked on each recent line in Diagnostics", async () => {
+    const user = userEvent.setup();
+    pane({
+      diagnostics: {
+        facts: [],
+        running: [],
+        recent: [
+          { id: "1", label: "Swipe", outcome: "Succeeded", requestedBy: "Agent" },
+          { id: "2", label: "Tap", outcome: "Succeeded", requestedBy: "You" },
+        ],
+      },
+    });
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Diagnostics" }));
+    const rows = within(screen.getByRole("region", { name: "Diagnostics" })).getAllByRole(
+      "listitem",
+    );
+    expect(rows[0]).toHaveTextContent("SwipeSucceededAgent");
+    expect(rows[1]).toHaveTextContent("TapSucceededYou");
+  });
+
   it("opens Diagnostics with the reason behind a line", async () => {
     const user = userEvent.setup();
     pane({
