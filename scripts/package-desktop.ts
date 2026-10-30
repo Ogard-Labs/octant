@@ -865,6 +865,7 @@ export function validatePackagedPayload(
     }
   }
   validateBundledInternalRuntime(entries);
+  validateSandboxedPreloads(entries);
   validateCodeWebAssets(entries.map((entry) => entry.path));
 }
 
@@ -879,6 +880,31 @@ export function validateBundledInternalRuntime(entries: ReadonlyArray<PackagedPa
     throw new Error(
       `Packaged payload contains an unresolved internal runtime import in ${entry.path}.`,
     );
+  }
+}
+
+const SANDBOXED_PRELOAD_PATHS = new Set(
+  [DESKTOP_PRELOAD_FILENAME, CODE_APPROVAL_PRELOAD_FILENAME, CANVAS_PROTOTYPE_PRELOAD_FILENAME].map(
+    (filename) => `apps/desktop/dist/${filename}`,
+  ),
+);
+const PRELOAD_REQUIRE = /\brequire\s*\(\s*["']([^"']+)["']\s*\)/g;
+
+/**
+ * Every Octant window runs its preload sandboxed, where `require` resolves
+ * electron and nothing else. A preload that requires any other module throws
+ * before it exposes its bridge: an external `effect` import once left every
+ * window without its launch credential, stuck on "Open Octant from the
+ * desktop app".
+ */
+export function validateSandboxedPreloads(entries: ReadonlyArray<PackagedPayloadEntry>): void {
+  for (const entry of entries) {
+    if (entry.content === undefined || !SANDBOXED_PRELOAD_PATHS.has(entry.path)) continue;
+    for (const match of entry.content.matchAll(PRELOAD_REQUIRE)) {
+      if (match[1] !== "electron") {
+        throw new Error(`Sandboxed preload ${entry.path} loads ${match[1]}, which it cannot.`);
+      }
+    }
   }
 }
 

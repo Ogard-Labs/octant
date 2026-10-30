@@ -1,6 +1,5 @@
 import type { NativeMenuRequest, NativeMenuOutcome } from "@octant/contracts/shell";
 import { decodeMenuBarOpenThread, type MenuBarOpenThread } from "./menuBar";
-import { isHubAdministrationOperation } from "./hubAdministrationControls";
 import type {
   OwnerUnlockChallenge,
   OwnerUnlockKeyOutcome,
@@ -937,7 +936,10 @@ export function createHostBridge(
       return () => ipc.removeListener(IPC_CHANNELS.remoteServerPageSign, receive);
     },
     hubAdministrationRequest: async (operation: string, body?: unknown) => {
-      if (!isHubAdministrationOperation(operation)) {
+      // Main refuses an unknown operation; the preload stays free of the
+      // operation table because its body decoders pull in npm modules a
+      // sandboxed preload cannot require.
+      if (typeof operation !== "string") {
         throw new TypeError("Invalid hub request.");
       }
       const answer = (await ipc.invoke(IPC_CHANNELS.hubAdministrationRequest, operation, body)) as {

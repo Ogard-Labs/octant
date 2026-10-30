@@ -2,7 +2,11 @@ import { execFileSync } from "node:child_process";
 import { readFile, mkdtemp, mkdir, writeFile, access, rm, readdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import { DESKTOP_PRELOAD_FILENAME } from "../apps/desktop/src/runtimePaths";
+import {
+  CANVAS_PROTOTYPE_PRELOAD_FILENAME,
+  CODE_APPROVAL_PRELOAD_FILENAME,
+  DESKTOP_PRELOAD_FILENAME,
+} from "../apps/desktop/src/runtimePaths";
 import {
   DESKTOP_INTERNAL_RUNTIME_PATTERN,
   DESKTOP_PRELOAD_FORMAT,
@@ -54,6 +58,7 @@ import {
   validatePackagedPayload,
   resolveReleaseVersion,
   validateBundledInternalRuntime,
+  validateSandboxedPreloads,
   validatePackagedRuntimeImports,
   validateCodeWebAssets,
   validateLinuxNativePayloadAllowlist,
@@ -903,6 +908,35 @@ describe("desktop packaging boundary", () => {
       validateBundledInternalRuntime([
         { path: "apps/server/dist/main.mjs", content: 'import "effect";' },
         { path: "apps/desktop/dist/main.mjs", content: 'import "electron";' },
+      ]),
+    ).not.toThrow();
+  });
+
+  it("refuses a sandboxed preload that loads anything but electron", () => {
+    // A sandboxed preload can require only electron; an external `effect`
+    // import left the window without its bridge, so it never signed in.
+    for (const filename of [
+      DESKTOP_PRELOAD_FILENAME,
+      CODE_APPROVAL_PRELOAD_FILENAME,
+      CANVAS_PROTOTYPE_PRELOAD_FILENAME,
+    ]) {
+      expect(() =>
+        validateSandboxedPreloads([
+          {
+            path: `apps/desktop/dist/${filename}`,
+            content: 'const electron = require("electron");\nlet effect = require("effect");',
+          },
+        ]),
+      ).toThrow(`Sandboxed preload apps/desktop/dist/${filename} loads effect`);
+    }
+
+    expect(() =>
+      validateSandboxedPreloads([
+        {
+          path: `apps/desktop/dist/${DESKTOP_PRELOAD_FILENAME}`,
+          content: 'let electron = require("electron");',
+        },
+        { path: "apps/desktop/dist/main.mjs", content: 'const effect = require("effect");' },
       ]),
     ).not.toThrow();
   });
