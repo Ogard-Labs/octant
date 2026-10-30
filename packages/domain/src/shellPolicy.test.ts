@@ -2114,7 +2114,7 @@ describe("code environment projection", () => {
       controllerStatus: "idle",
     });
     expect(projection.identity.status).toBe("unavailable");
-    expect(projection.identity.detail).toBe("No project");
+    expect(projection.identity.detail).toBe("No Project");
   });
 
   it("reports an unavailable identity when the observation is unavailable", () => {

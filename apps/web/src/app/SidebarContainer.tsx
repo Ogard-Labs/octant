@@ -667,11 +667,11 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
                 ? {
                     addProjectLabel: "chat-project" as const,
                     onAddProject: () => openProjectCreate(),
-                    unfiledLabel: "No project" as const,
+                    unfiledLabel: "No Project" as const,
                   }
                 : {
                     onAddProject: () => openProjectCreate(),
-                    unfiledLabel: "No project" as const,
+                    unfiledLabel: "No Project" as const,
                   })}
               onArchive={(projectId) => void actions.setProjectArchived(projectId, true)}
               onColorChange={(projectId, color) => {

@@ -84,7 +84,7 @@ failure the picker shows with Retry, and Retry re-issues the same folder and
 search rather than restarting at the root.
 
 The Project tree places each active thread under its listed Project or under
-**No project**, never both. No project is a collapsible folder row following
+**No Project**, never both. No Project is a collapsible folder row following
 the Projects with no horizontal divider or separate section heading. It is
 absent when empty and does not create a Project or filesystem authority.
 Sidebar search reveals matches inside collapsed groups and restores their

@@ -95,7 +95,7 @@ export function ShellDialogHost(props: ShellDialogHostProps) {
           mode={props.mode}
           threads={props.searchThreads}
           projects={props.searchProjects}
-          unfiledLabel="No project"
+          unfiledLabel="No Project"
           listing={props.searchListing}
           {...(props.mode === "chat"
             ? {

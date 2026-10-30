@@ -79,7 +79,7 @@ type MenuEntry = ComposerProjectEntry | { readonly kind: "add-github" };
 
 export const NEW_PROJECT_FROM_FOLDER_LABEL = "New Project from folder…";
 export const NEW_PROJECT_FROM_GITHUB_LABEL = "New Project from GitHub repository…";
-export const START_IN_DEFAULT_FOLDER_LABEL = "No project";
+export const START_IN_DEFAULT_FOLDER_LABEL = "No Project";
 export const UNFILED_THREAD_LABEL = "No Project";
 
 /**

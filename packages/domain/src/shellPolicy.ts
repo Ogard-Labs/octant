@@ -584,7 +584,7 @@ function deriveCodeEnvironmentIdentity(
     return buildCompactIdentity({
       host: LOCAL_HOST_ID,
       label: projectName,
-      detail: "No project",
+      detail: "No Project",
       status: "unavailable",
     });
   }

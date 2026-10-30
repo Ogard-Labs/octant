@@ -99,7 +99,7 @@ Work's default model in Work settings, or the model the Code composer
 remembers. You can change the model for any task in the composer.
 
 On an empty Code screen, **Add a folder** opens Project setup. A task can
-also start with **No project**, in the default folder, `~/Octant` unless you
+also start with **No Project**, in the default folder, `~/Octant` unless you
 choose another in Settings: Work always offers it, and Code offers it once
 **Code needs a Git repository** is off in **Code settings**, the same switch
 that lets Code use any plain folder. While it is on, the screen explains this

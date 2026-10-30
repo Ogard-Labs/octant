@@ -23,13 +23,13 @@ describe("review entries", () => {
     const entries = buildReviewEntries({
       threads: rows.map((row) => ({ mode: "code" as const, thread: row })),
       projectNames: new Map([["p1", "Octant"]]),
-      unfiledLabel: "No project",
+      unfiledLabel: "No Project",
     });
 
     expect(entries.map((entry) => entry.threadId)).toEqual(["finished", "asks"]);
     expect(entries.length).toBe(countSidebarTiles(rows, new Date()).toReview);
     expect(entries[0]).toMatchObject({ mode: "code", projectName: "Octant" });
-    expect(entries[1]).toMatchObject({ projectName: "No project" });
+    expect(entries[1]).toMatchObject({ projectName: "No Project" });
   });
 
   it("keeps each thread's own kind so Chat threads stay Chat", () => {
@@ -39,7 +39,7 @@ describe("review entries", () => {
         { mode: "work", thread: thread({ threadId: "w", unread: true }) },
       ],
       projectNames: new Map(),
-      unfiledLabel: "No project",
+      unfiledLabel: "No Project",
     });
 
     expect(entries.map(reviewEntryKey)).toEqual(["chat:c", "work:w"]);

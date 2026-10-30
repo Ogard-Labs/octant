@@ -290,7 +290,7 @@ export interface ProjectSidebarSectionProps {
   /** Absent when the host cannot accept a thread rename, which hides the affordance. */
   readonly onRenameThread?: (threadId: string, title: string) => void;
   readonly projects: ReadonlyArray<ProjectSummary>;
-  readonly unfiledLabel?: "No project" | "Unfiled" | "Recents" | "Chats";
+  readonly unfiledLabel?: "No Project" | "Unfiled" | "Recents" | "Chats";
   readonly threads?: ReadonlyArray<ChatThreadNavigationItem>;
   readonly threadGroups?: Readonly<Record<ThreadGroupId, ReadonlyArray<ChatThreadNavigationItem>>>;
   readonly threadStatus?: "loading" | "ready" | "unavailable";
@@ -376,7 +376,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
   const snoozedThreads = everyListedThread?.filter((thread) => thread.shelf === "snoozed") ?? [];
   const completedThreads =
     everyListedThread?.filter((thread) => thread.shelf === "completed") ?? [];
-  const unfiledLabel = props.unfiledLabel ?? "No project";
+  const unfiledLabel = props.unfiledLabel ?? "No Project";
   const [unfiledCollapsed, setUnfiledCollapsed] = useState(false);
   const unfiledThreadsId = useId();
   const unfiledExpanded = searching || !unfiledCollapsed;
@@ -455,7 +455,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
   const visibleProjectIds = new Set(visibleProjects.map((project) => String(project.id)));
   // A thread filed in no Project (a Chat started without one, a Code thread
   // in the default folder) belongs to no view but All Projects, which keeps it
-  // under No project rather than hiding it because no Project names it.
+  // under No Project rather than hiding it because no Project names it.
   const allProjectsView = projectViewState?.activeViewId === ALL_CODE_PROJECTS_VIEW_ID;
   const viewScopedThreads =
     currentFilters === undefined || timeFilteredThreads === undefined

@@ -492,7 +492,7 @@ describe("CodeThreadEnvironment", () => {
       "data-environment-status",
       "unavailable",
     );
-    expect(screen.getByText("Code · No project")).toBeVisible();
+    expect(screen.getByText("Code · No Project")).toBeVisible();
   });
 
   it("keeps open state as renderer state and closes when the pane is no longer active", async () => {

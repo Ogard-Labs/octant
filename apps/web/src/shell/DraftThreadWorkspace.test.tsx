@@ -943,7 +943,7 @@ describe("DraftThreadWorkspace", () => {
     expect(screen.queryByText(/Code needs a Git repository/)).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
-    const row = screen.getByRole("option", { name: /^No project/ });
+    const row = screen.getByRole("option", { name: /^No Project/ });
     expect(row).not.toHaveAttribute("aria-disabled", "true");
     expect(row).toHaveTextContent("/Users/ada/Octant/Code");
     await user.click(row);
@@ -962,7 +962,7 @@ describe("DraftThreadWorkspace", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
-    const row = screen.getByRole("option", { name: /^No project/ });
+    const row = screen.getByRole("option", { name: /^No Project/ });
     expect(row).toHaveTextContent("/Users/ada/Octant/Work");
     expect(row.textContent ?? "").not.toContain("//Work");
   });
