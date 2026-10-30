@@ -21,6 +21,8 @@ import {
   decodeHubProposalDecisionRequest,
   decodeHubProvisionSwitchRequest,
   decodeHubPushSwitchRequest,
+  decodeHubSignInAsk,
+  decodeHubSignInDecisionRequest,
   decodeHubStandbyOrderRequest,
   decodeHubWakeHardwareAddressRequest,
   decodeHubWakeSwitchRequest,
@@ -36,9 +38,11 @@ import type { FailoverService } from "./failoverService";
 import type { HubService } from "./hubService";
 import type { ProvisionService } from "./provisionService";
 import type { PushService } from "./pushService";
+import type { SignInService } from "./signInService";
 import type { SpokeLinkService } from "./spokeLinkService";
 import type { SpokeProvisionService } from "./spokeProvisionService";
 import type { SpokePushService } from "./spokePushService";
+import type { SpokeSignInService } from "./spokeSignInService";
 import type { SpokeWakeService } from "./spokeWakeService";
 import type { TailscaleCertificateService } from "./tailscaleCertificate";
 import type { WakeService } from "./wakeService";
@@ -92,6 +96,12 @@ export const HUB_ADMINISTRATION_ROUTES = {
   provisionApply: "/api/desktop/hub/provision/apply",
   provisionDismiss: "/api/desktop/hub/provision/dismiss",
   provisionAutoApply: "/api/desktop/hub/provision/auto-apply",
+  /** The hub's window asks one spoke to sign in to a provider account. */
+  signInAsk: "/api/desktop/hub/sign-in/ask",
+  /** A spoke's own window accepts, declines, or checks a sign-in request. */
+  signInAccept: "/api/desktop/hub/sign-in/accept",
+  signInDecline: "/api/desktop/hub/sign-in/decline",
+  signInCheck: "/api/desktop/hub/sign-in/check",
 } as const;
 
 type RouteValue = (typeof HUB_ADMINISTRATION_ROUTES)[keyof typeof HUB_ADMINISTRATION_ROUTES];
@@ -108,6 +118,8 @@ export interface HubAdministrationRouteOptions {
   readonly spokePush: SpokePushService;
   readonly provision: ProvisionService;
   readonly spokeProvision: SpokeProvisionService;
+  readonly signIn: SignInService;
+  readonly spokeSignIn: SpokeSignInService;
   readonly certificate: TailscaleCertificateService;
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
@@ -160,6 +172,7 @@ export function createHubAdministrationRouteHandler(
         wake: { hub: options.wake.status(), spoke: options.spokeWake.status() },
         push: { hub: options.push.status(), spoke: { handing: options.spokePush.granted() } },
         provision: { hub: options.provision.status(), spoke: options.spokeProvision.view() },
+        signIn: { hub: options.signIn.status(), spoke: options.spokeSignIn.view() },
       });
     }
     if (route === HUB_ADMINISTRATION_ROUTES.heldMembers) {
@@ -326,6 +339,22 @@ export function createHubAdministrationRouteHandler(
         case HUB_ADMINISTRATION_ROUTES.provisionAutoApply: {
           const value = decodeHubAutoApplyRequest(parseJson(request, body.text));
           return outcome(options.spokeProvision.setAutoApply(value.kind, value.enabled));
+        }
+        case HUB_ADMINISTRATION_ROUTES.signInAsk: {
+          const value = decodeHubSignInAsk(parseJson(request, body.text));
+          return outcome(await options.signIn.ask(value, WINDOW_PRINCIPAL));
+        }
+        case HUB_ADMINISTRATION_ROUTES.signInAccept: {
+          const value = decodeHubSignInDecisionRequest(parseJson(request, body.text));
+          return outcome(options.spokeSignIn.accept(value.requestId, WINDOW_PRINCIPAL));
+        }
+        case HUB_ADMINISTRATION_ROUTES.signInDecline: {
+          const value = decodeHubSignInDecisionRequest(parseJson(request, body.text));
+          return outcome(await options.spokeSignIn.decline(value.requestId, WINDOW_PRINCIPAL));
+        }
+        case HUB_ADMINISTRATION_ROUTES.signInCheck: {
+          const value = decodeHubSignInDecisionRequest(parseJson(request, body.text));
+          return outcome(await options.spokeSignIn.check(value.requestId, WINDOW_PRINCIPAL));
         }
         case HUB_ADMINISTRATION_ROUTES.wakeHardwareAddress: {
           const value = decodeHubWakeHardwareAddressRequest(parseJson(request, body.text));

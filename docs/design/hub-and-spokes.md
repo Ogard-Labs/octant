@@ -66,14 +66,19 @@ hub's own switch, offers as data, proposals the spoke's person applies or
 dismisses, and applying on arrival for three kinds), read narrowly as the last
 item of slice 10 records; it has run only between hosts on loopback with fake
 services behind each kind, though a real host now builds a routine offer and
-checks a mirrored feed against the shared release keys. After this slice every delivery-plan slice is built. What remains is
+checks a mirrored feed against the shared release keys. Hub-started sign-in is
+built (the Sign-in grant item, a request the hub relays and a spoke's person
+accepts, and one outcome word back), read narrowly as the delivery plan's
+closing note records; it has run only between hosts on loopback with a fake
+view of the provider's own app, never against a real provider sign-in. After this slice every delivery-plan slice is built. What remains is
 the maintainer's: the live checks the slices name (a real Wake-on-LAN wake, a
 delivery to a real phone, a phone, passkey, and Touch ID run, a failover on a
-real network, a browser against a real hub), Windows, and the post-preview
+real network, a browser against a real hub, a real Claude or Codex sign-in on a
+second computer started from the hub), Windows, and the post-preview
 tracks.
 The hub uses only the Roster and Status grant items, the Owners item for
 owner devices, the Standby item for naming a standby, the Wake item for the
-wake service, the Push item for push, and the Provision item for offers. The maintainer
+wake service, the Push item for push, the Provision item for offers, and the Sign-in item for sign-in requests. The maintainer
 asked for this design and authorized it as post-preview, design-first work on
 2026-10-28, and set its shape the same day: a running instance enabled as hub,
 members paired by QR or manual code over a private network such as Tailscale,
@@ -387,17 +392,18 @@ ticked by default, the person on the spoke can change every item, and the
 spoke checks it on every hub request. A standby hub acting as hub uses the
 same grant only on spokes that ticked Standby:
 
-| Hub grant item | Lets the hub                                                                                                                                                                                         |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Roster         | The hub's signed list of members; its fields are listed once, under [Discovery](#spoke-to-spoke-discovery-and-delegation)                                                                            |
-| Status         | Read host resources, running threads' titles and states, waiting approvals (count and kind), and update status, the same read a paired device has                                                    |
-| Introduce      | Introduce other members to this spoke; each becomes a full member here (decision H2). Ticked by default                                                                                              |
-| Wake           | Hold this spoke's routine wake times and wake it (see [Wake service](#wake-service))                                                                                                                 |
-| Owners         | Let the person's owner devices act on this spoke with a window's powers after a fresh unlock (see [Owner devices](#owner-devices)). Ticked by default                                                |
-| Standby        | Let a standby hub the person named use this same grant while it stands in for the hub (see [Failover](#failover))                                                                                    |
-| Push           | Receive this spoke's sealed phone notifications and send them through the hub's push sender                                                                                                          |
-| Provision      | Offer configuration (below). Every offer lands on the spoke as a proposal the person on the spoke applies, unless the person turned on auto-apply for that kind of offer ([decision H5](#decisions)) |
-| Act            | Act on the spoke as a paired device would, within the Projects the person names: create threads, send turns, answer questions. Approvals stay on the spoke (below)                                   |
+| Hub grant item | Lets the hub                                                                                                                                                                                          |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Roster         | The hub's signed list of members; its fields are listed once, under [Discovery](#spoke-to-spoke-discovery-and-delegation)                                                                             |
+| Status         | Read host resources, running threads' titles and states, waiting approvals (count and kind), and update status, the same read a paired device has                                                     |
+| Introduce      | Introduce other members to this spoke; each becomes a full member here (decision H2). Ticked by default                                                                                               |
+| Wake           | Hold this spoke's routine wake times and wake it (see [Wake service](#wake-service))                                                                                                                  |
+| Owners         | Let the person's owner devices act on this spoke with a window's powers after a fresh unlock (see [Owner devices](#owner-devices)). Ticked by default                                                 |
+| Standby        | Let a standby hub the person named use this same grant while it stands in for the hub (see [Failover](#failover))                                                                                     |
+| Push           | Receive this spoke's sealed phone notifications and send them through the hub's push sender                                                                                                           |
+| Provision      | Offer configuration (below). Every offer lands on the spoke as a proposal the person on the spoke applies, unless the person turned on auto-apply for that kind of offer ([decision H5](#decisions))  |
+| Sign-in        | Ask this spoke's person to sign in to a provider account on this spoke. Nothing starts until a person on the spoke accepts; the hub learns one outcome word (see [Shared sign-ins](#shared-sign-ins)) |
+| Act            | Act on the spoke as a paired device would, within the Projects the person names: create threads, send turns, answer questions. Approvals stay on the spoke (below)                                    |
 
 **Provisioning** offers are data, never code paths. The kinds are: an update
 channel (the hub may mirror the signed update feed, because the feed signature,
@@ -603,11 +609,29 @@ another, so the person signs in once:
   the person removes each one, or chooses **Remove everywhere**, which asks
   each reachable host to delete its copy and lists the ones it could not
   reach. A leaked key still needs rotating at the provider.
-- **Not copied yet.** Subscription sign-ins held by a provider's own app (for
-  example a Claude or Codex account login) stay per machine until each
-  provider's terms and token binding are checked
-  ([decision H6](#decisions)). Delegated work never carries a sign-in;
-  it uses what the receiving host holds.
+- **Never copied.** Subscription sign-ins held by a provider's own app (for
+  example a Claude or Codex account login) are never copied
+  ([decision H6](#decisions)). These tokens refresh, so a copy and its source
+  would log each other out, and the provider's terms are unchecked. Delegated
+  work never carries a sign-in; it uses what the receiving host holds.
+- **Hub-started sign-in.** Instead, an owner can ask a spoke to sign in
+  itself. A window on the hub, or an owner device with a fresh administration
+  unlock on the hub, asks one spoke to sign in to one kind of provider account
+  (a Claude or Codex account). The hub relays only the kind and a request id
+  over the signed member link; it never signs in for a spoke, and a peer, a
+  guest, an agent, and a routine cannot send the request. A spoke holds the
+  request only if its person ticked the Sign-in grant item (off by default), and
+  then shows it as a question. Nothing starts until a person in that spoke's own
+  window, or that spoke's own owner device after an unlock, accepts. Accepting
+  shows the provider's own sign-in command on the spoke, which the person runs
+  in a terminal there; any code or address the provider prints appears only in
+  that terminal. No token, code, address, or account name reaches the hub, the
+  journal, or an answer. When the request ends, the spoke tells the hub one word:
+  `signed-in`, `declined`, `expired`, or `failed`, which the hub shows beside the
+  member. A spoke refuses a request when the grant is off, the kind is unknown
+  or has no provider there, the account is already signed in, a request for that
+  account is already open, or the requester has sent three in an hour; a request
+  lapses ten minutes after it arrives.
 
 ### Spoke-to-spoke discovery and delegation
 
@@ -906,7 +930,7 @@ choice to the design, the design's recommendation was taken.
 | H3  | When a member leaves or is removed, are its peer grants dropped?            | Dropped on leave and on a removal seen in a newer roster; kept while the hub is merely unreachable                                                                                                                                                                                                               |
 | H4  | One hub per spoke, or several?                                              | One active hub. A standby takes over the roster and coordination only while the hub is down                                                                                                                                                                                                                      |
 | H5  | May the hub's provisioning offers apply on a spoke without asking?          | Per kind (update channel, untrusted plugin install, profile without secrets), off by default; a routine always asks                                                                                                                                                                                              |
-| H6  | Can a subscription sign-in held by a provider's own app be copied?          | Not yet; each machine signs in to its subscription itself until each provider's terms and token binding are checked. API keys copy already                                                                                                                                                                       |
+| H6  | Can a subscription sign-in held by a provider's own app be copied?          | Never; these tokens refresh, so a copy and its source would log each other out, and the provider's terms are unchecked. Each machine signs in itself, and the hub can ask a spoke to start that sign-in (hub-started sign-in); the person finishes it on the spoke. API keys copy already                        |
 | H7  | Which push path does the hub support first?                                 | Forward to the push gateway from Mobile maturity; direct sending only once self-building the phone app is documented                                                                                                                                                                                             |
 | H8  | Where do the hub's services live?                                           | In the Octant server (`apps/server`). The roster and failover are on with the hub role; the wake service and push sender are each off until turned on                                                                                                                                                            |
 | H10 | May a standby add or remove members while standing in?                      | Yes; the hub takes the changes back on return, and removal wins                                                                                                                                                                                                                                                  |
@@ -1361,6 +1385,44 @@ maintainer's hardware, or names the maintainer gate.
       gained the six provisioning operations, each decoded against its contract.
       Settings makes only stable and preview channel offers; the other kinds are
       offered with `octant hub offer`.
+
+**Hub-started sign-in** closes the gap [decision H6](#decisions) left. It is not
+a numbered slice. Built, with these narrower readings:
+
+- **The sign-in runs outside Octant.** A host has no server-run Claude or Codex
+  login today; Settings shows the provider's own command and the person runs it
+  in a terminal. So accepting shows that command on the spoke, and the spoke
+  reads only whether the provider's own app is now signed in (the same probe as
+  Check the connection). It never runs a login and never reads a token. Because
+  of that, a request is ended by the person choosing **Check sign-in** (or by
+  the ten minutes passing), not by the server watching the terminal.
+- **Closed kinds.** A request names `claude-subscription` or `codex-subscription`
+  and nothing else; the delivery reads the kind as text, so a spoke refuses an
+  unknown one by name (`unknown-kind`). A spoke with no enabled provider row for
+  the kind refuses the same way, and a Claude API-key row never counts as a
+  subscription sign-in.
+- **The requester is the hub's key.** A spoke can verify only the hub that
+  relayed a request, not the window or owner device behind it, so the hourly
+  limit counts requests from the hub's key. Refusals after the grant check count
+  toward it, so asking cannot be used to probe whether an account is signed in.
+- **The ten minutes cover the whole request.** A request lapses ten minutes after
+  it arrives, accepted or not, and the spoke reports `expired`. Lapses are
+  settled by a thirty-second tick and whenever the spoke's Settings is read; an
+  outcome word the hub could not take is kept and sent again on the next tick.
+- **A sibling of the alert list, not a new-member alert.** The existing alerts
+  are about new members and offer Remove, Confirm, and Dismiss. A sign-in request
+  has its own list in the same Settings view, with Accept and Decline, and its own
+  owner-device routes (list, accept, decline, check). An owner device acts on a
+  spoke only after an administration unlock, and the hub itself is refused there.
+- **No phone screen, no `octant hub` command, no notification yet.** The hub's
+  window and owner-device routes can ask, and Settings shows the request on the
+  spoke, but the phone app has no screen for it, the CLI has no command, and no
+  system notification is raised.
+- **What is journaled.** On the hub: the request, a refusal's reason word, and
+  the outcome word received. On the spoke: the request, a refusal, the decision,
+  and how it ended with the outcome word. Only the request id, the kind, and the
+  words are written; the schema has no field for a token, a code, an address, or
+  an account name.
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.

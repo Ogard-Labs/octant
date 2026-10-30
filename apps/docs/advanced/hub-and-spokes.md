@@ -298,15 +298,18 @@ spoke. Only the spoke can change it.
 | Standby   | Let a standby hub you named take over the roster while the hub is down.                   |
 | Push      | Send this computer's phone notifications through the hub.                                 |
 | Provision | Offer settings as proposals that you apply.                                               |
+| Sign-in   | Ask you to sign in to a Claude or Codex account here. Nothing starts until you accept.    |
 | Act       | Act here as a paired device would, in Projects you name.                                  |
 
 Ticking an item records your choice. In this release the hub can use only
-Roster, Status, Wake, Push, and Provision. Wake works only once you turn on the
+Roster, Status, Wake, Push, Provision, and Sign-in. Wake works only once you turn on the
 hub's wake service (see [Wake a sleeping computer](#wake-a-sleeping-computer)).
 Push works only once you turn on the hub's push sender (see
 [Send phone notifications through the hub](#send-phone-notifications-through-the-hub)).
 Provision works only once you turn on the hub's offers (see
-[Offer settings from the hub](#offer-settings-from-the-hub)). Owners works for your own owner devices (see
+[Offer settings from the hub](#offer-settings-from-the-hub)). Sign-in works for a
+request from the hub's window or your owner device (see
+[Ask a computer to sign in](#ask-a-computer-to-sign-in)). Owners works for your own owner devices (see
 [Owner devices](#owner-devices)). Introduce makes this computer accept the other
 spokes and your phones as full members (see
 [Delegate work to another computer](#delegate-work-to-another-computer)).
@@ -592,6 +595,47 @@ This computer applies a routine only where it can build one itself. In this
 release it cannot, so a routine proposal can be read and dismissed but not
 applied yet.
 
+## Ask a computer to sign in
+
+A Claude or Codex account sign-in belongs to the computer that holds it. Octant
+never copies one, because these sign-ins refresh themselves and a copy would log
+the original out. Instead, the hub can ask a computer to sign in on its own. Nothing
+is sent to the hub except one word at the end, and no code, link, or account name
+leaves the computer.
+
+**Ask (the hub).** On the hub, open **Settings → Remote access → Hub**, find the
+computer under **Members**, and choose **Ask to sign in**. Then choose the Claude
+account or the Codex account. You can do this from the hub's window, or from an owner
+device that is unlocked. Phones that joined as guests cannot be asked. The member's
+row then shows one word: waiting for its person, signed in, declined, expired, or
+failed. If the computer refused, the row says why in plain words.
+
+**Take part (a computer).** Tick **Sign-in** in the hub grant (see
+[The hub grant](#the-hub-grant)). It is off by default. A request then appears under
+**Settings → Remote access → Join a hub → Sign-in requests from the hub**. Nothing
+starts until you choose **Accept** in this computer's own window, or on this
+computer's own owner device after an unlock. The hub cannot accept for you.
+
+**Finish the sign-in.** After you accept, Octant shows the provider's own sign-in
+command, for example `claude auth login` or `codex login`. Run it in a terminal on
+this computer and finish the sign-in there. Any code or link the provider prints
+stays in that terminal. Then choose **Check sign-in**. Octant looks only at whether
+the provider's own app is now signed in, and tells the hub the result. **Decline**
+turns the request down.
+
+A computer refuses a request, and tells the hub why, when:
+
+- Sign-in is not ticked in the grant.
+- It has no such account to sign in to. Add the Claude or Codex provider first.
+- The account is already signed in.
+- A request for that account is already waiting.
+- The hub already asked three times this hour.
+
+A request lapses ten minutes after it arrives, and the hub is told it expired. The
+journal on the computer records the request, your answer, and how it ended, and
+never a token, code, link, or account name. A real Claude or Codex sign-in started
+this way on a second computer has not been tried yet.
+
 ## Leave a hub and remove a device
 
 **Leave** is done on the spoke. In **Settings → Remote access → Join a hub**,
@@ -619,8 +663,9 @@ with `octant hub status`.
 A thief who has the phone but not your face, finger, or passcode has only the
 powers of an ordinary member until you remove it.
 
-These are not available yet: sign-in copy between computers and posture changes
-from an owner device. With no standby, a computer whose hub is down or lost keeps
+Claude and Codex account sign-ins are never copied between computers; ask the
+computer to sign in instead (see [Ask a computer to sign in](#ask-a-computer-to-sign-in)).
+Posture changes from an owner device are not available yet. With no standby, a computer whose hub is down or lost keeps
 working on its own. Join the computers to a new hub from each one.
 
 ## Next steps

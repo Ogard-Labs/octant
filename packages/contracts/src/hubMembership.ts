@@ -3,6 +3,7 @@ import { AuditActingPrincipal } from "./auditEvents";
 import { HubGrantItem, HubMemberId, RosterMember, SignedHubRoster } from "./hubAndSpokes";
 import { HubPushReason } from "./hubPush";
 import { HubOfferId, HubOfferKind, HubProvisionMode, HubProvisionReason } from "./hubProvision";
+import { HubSignInKind, HubSignInOutcome, HubSignInReason } from "./hubSignIn";
 import { HUB_WAKE_MAX_SPOKES, HubWakeSpokeTimes } from "./hubWake";
 import { ProviderExecutionPolicy } from "./providers";
 
@@ -64,6 +65,14 @@ export const HubMembershipChange = Schema.Literal(
   "provision-applied",
   "provision-dismissed",
   "provision-refused",
+  "sign-in-asked",
+  "sign-in-ask-refused",
+  "sign-in-requested",
+  "sign-in-refused",
+  "sign-in-accepted",
+  "sign-in-declined",
+  "sign-in-ended",
+  "sign-in-outcome-received",
   "owner-session-opened",
   "owner-posture-changed",
   "credential-ticket-issued",
@@ -123,6 +132,11 @@ export const HubMembershipChangedPayload = Schema.Struct({
   provisionKind: Schema.optional(HubOfferKind),
   provisionMode: Schema.optional(HubProvisionMode),
   provisionReason: Schema.optional(HubProvisionReason),
+  /** For a hub-started sign-in: the request, the kind of account, the outcome word, and why one was refused. Never a token, code, address, or account name. */
+  signInRequestId: Schema.optional(bounded(64)),
+  signInKind: Schema.optional(HubSignInKind),
+  signInOutcome: Schema.optional(HubSignInOutcome),
+  signInReason: Schema.optional(HubSignInReason),
   /**
    * For an owner posture change: the posture the owner device set. For a
    * sign-in copy: the name of the sign-in, never its value, and why one was

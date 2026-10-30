@@ -22,6 +22,7 @@ import type {
   AppReleaseRing,
   HubDelegationRecordedPayload,
   HubMembershipChangedPayload,
+  HubSignInKind,
 } from "@octant/contracts";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
@@ -58,8 +59,10 @@ import { createGatewayPushDeliveryTransport } from "../remote/gatewayPushDeliver
 import { createHubPushDeliveryTransport } from "./hubPushTransport";
 import { ProvisionService } from "./provisionService";
 import { PushService } from "./pushService";
+import { SignInService } from "./signInService";
 import { SpokeProvisionService, type ProvisionHostPorts } from "./spokeProvisionService";
 import { SpokePushService } from "./spokePushService";
+import { SpokeSignInService, type SignInAccountState } from "./spokeSignInService";
 import { SpokeWakeService, type WakeRoutineView } from "./spokeWakeService";
 import { WakeService } from "./wakeService";
 
@@ -169,6 +172,12 @@ export interface HubTestHost {
   readonly spokeProvision: SpokeProvisionService;
   /** What this host's services did with applied offers, and a switch to make them fail. */
   readonly provisioned: ProvisionedByOffer;
+  /** The hub side of hub-started sign-in: the question it relays and the outcome word it keeps. */
+  readonly signIn: SignInService;
+  /** This host's side of hub-started sign-in as a spoke. */
+  readonly spokeSignIn: SpokeSignInService;
+  /** Whether the provider's own app on this host holds each sign-in; a test changes it as the person would in a terminal. */
+  readonly accounts: Record<HubSignInKind, SignInAccountState>;
   /** Starts a new wake service over the same state, as a restart of the server does; `spokeWake` is then the new one. */
   readonly restartSpokeWake: () => SpokeWakeService;
   /** The magic packets this host's wake service sent, as the fake socket saw them. */
@@ -549,6 +558,26 @@ export async function startHubTestHost(input: {
       : { proposalLifetimeMs: input.proposalLifetimeMs }),
     ...(input.maxProposals === undefined ? {} : { maxProposals: input.maxProposals }),
   });
+  const accounts: Record<HubSignInKind, SignInAccountState> = {
+    "claude-subscription": "signed-out",
+    "codex-subscription": "signed-out",
+  };
+  const signIn = new SignInService({
+    state,
+    identity: () => identity,
+    transport,
+    record: (change) => records.push(change),
+    now: wakeNow,
+  });
+  const spokeSignIn = new SpokeSignInService({
+    state,
+    identity: () => identity,
+    transport,
+    spoke,
+    ports: { accountState: async (kind) => accounts[kind] },
+    record: (change) => records.push(change),
+    now: wakeNow,
+  });
   const hubLinkRoutes = createHubLinkRouteHandler({
     hub,
     spoke,
@@ -559,6 +588,8 @@ export async function startHubTestHost(input: {
     spokePush,
     provision,
     spokeProvision,
+    signIn,
+    spokeSignIn,
     ...(input.wakeClock === undefined ? {} : { now: input.wakeClock }),
   });
   const credentials = new TestCredentialBroker();
@@ -587,6 +618,8 @@ export async function startHubTestHost(input: {
     postures,
     credentials: credentialCopy,
     provision: spokeProvision,
+    signIn,
+    spokeSignIn,
     record: (change) => records.push(change),
     now: ownerNow,
   });
@@ -707,6 +740,9 @@ export async function startHubTestHost(input: {
     provision,
     spokeProvision,
     provisioned,
+    signIn,
+    spokeSignIn,
+    accounts,
     magicPackets,
     routines,
     schedulerPokes,

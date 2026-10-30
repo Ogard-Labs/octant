@@ -19,6 +19,9 @@ import { AgentProfileService } from "../agentProfileService";
 import { createProvisionHostPorts } from "../hub/provisionHostPorts";
 import { ProvisionService } from "../hub/provisionService";
 import { SpokeProvisionService } from "../hub/spokeProvisionService";
+import { createSignInHostPorts } from "../hub/signInHostPorts";
+import { SignInService } from "../hub/signInService";
+import { SpokeSignInService } from "../hub/spokeSignInService";
 import { createProviderCredentialRouteHandler } from "../providers/providerCredentialRoutes";
 import { ProviderServiceError } from "../providers/providerService";
 import { providerKeyJournal, reconcileProviderKeyChanges } from "../providers/providerKeyJournal";
@@ -124,6 +127,8 @@ const WAKE_LOOK_MS = 15_000;
 const WAKE_REPORT_MS = 30_000;
 /** How often the push sender forgets old rate marks and hands standbys its switch. */
 const PUSH_LOOK_MS = 60_000;
+/** How often a spoke lets lapsed sign-in requests end and tells the hub any outcome word still owed. */
+const SIGN_IN_LOOK_MS = 30_000;
 const CERTIFICATE_CHECK_MS = 24 * 60 * 60 * 1_000;
 const STARTUP_CERTIFICATE_CHECK_MS = 60 * 1_000;
 
@@ -608,6 +613,26 @@ export function wireRemote(deps: RemoteDependencies) {
     record: recordHubMembership,
     now: Date.now,
   });
+  // Hub-started sign-in: the hub only relays a question and keeps the outcome word. A spoke
+  // holds it only if its hub grant ticks Sign-in, starts nothing until its person accepts,
+  // and reads only whether the provider's own app is signed in.
+  const signInService = new SignInService({
+    state: hubStateStore,
+    identity: resolveHubIdentity,
+    transport: hubTransport,
+    record: recordHubMembership,
+    now: Date.now,
+  });
+  const spokeSignInService = new SpokeSignInService({
+    state: hubStateStore,
+    identity: resolveHubIdentity,
+    transport: hubTransport,
+    spoke: spokeLinkService,
+    ports: createSignInHostPorts({ providers: providerService }),
+    record: recordHubMembership,
+    now: Date.now,
+  });
+  setInterval(() => void spokeSignInService.tick().catch(() => undefined), SIGN_IN_LOOK_MS).unref();
   const tailscaleCertificate = new TailscaleCertificateService({
     setting: createTailscaleCertificateSetting(providerDataDirectory),
     daemon: createTailscaleCliDaemon({
@@ -638,6 +663,8 @@ export function wireRemote(deps: RemoteDependencies) {
     spokePush: spokePushService,
     provision: provisionService,
     spokeProvision: spokeProvisionService,
+    signIn: signInService,
+    spokeSignIn: spokeSignInService,
     certificate: tailscaleCertificate,
     maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
   });
@@ -651,6 +678,8 @@ export function wireRemote(deps: RemoteDependencies) {
     spokePush: spokePushService,
     provision: provisionService,
     spokeProvision: spokeProvisionService,
+    signIn: signInService,
+    spokeSignIn: spokeSignInService,
   });
   // Delegation between spokes: the receiving side starts an ordinary Work
   // thread under this host's own scope, and the sending side checks this host's
@@ -804,6 +833,8 @@ export function wireRemote(deps: RemoteDependencies) {
     }),
     credentials: ownerCredentialCopy,
     provision: spokeProvisionService,
+    signIn: signInService,
+    spokeSignIn: spokeSignInService,
     record: recordHubMembership,
   });
   const localDeviceAdministrationRoutes = createLocalDeviceAdministrationRouteHandler({
