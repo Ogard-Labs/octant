@@ -236,6 +236,8 @@ export function startOctantServer(
       managedWorktreeReceipts,
       nativeHarnessRouter,
       nativeHarnessRoutingStore,
+      remoteDelegation,
+      remoteDelegationHolder,
       runtimeOutsideContentMarks,
       sideTasks,
       spendCeiling,
@@ -480,6 +482,7 @@ export function startOctantServer(
       agentRunParentAuthority,
       nativeHarnessRouter,
       nativeHarnessRoutingStore,
+      remoteDelegation,
       agentRunPersistence,
       codeBoardEventStore,
       codeParentActiveTurn,
@@ -1160,7 +1163,6 @@ export function startOctantServer(
       zenRoutes,
     });
     const {
-      appStoreConnectKeyRoutes,
       composeHostDiagnostics,
       externalContentRoutes,
       hostControlRoutes,
@@ -1198,6 +1200,7 @@ export function startOctantServer(
       languageServerApprovals,
       nativeHarnessSessions,
       onWorkTurnCancelled,
+      remoteDelegationHolder,
       options,
       persistence,
       providerDataDirectory,
@@ -1296,7 +1299,6 @@ export function startOctantServer(
                 (await delegationAdministrationRoutes(request)) ??
                 (await sshTargetAdministrationRoutes(request)) ??
                 (await providerCredentialRoutes(request)) ??
-                (await appStoreConnectKeyRoutes(request)) ??
                 (await localDeviceAdministrationRoutes(request)) ??
                 (await hostControlRoutes(request)) ??
                 (await externalContentRoutes(request)) ??

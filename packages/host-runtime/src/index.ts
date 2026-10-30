@@ -66,11 +66,6 @@ export { CONFIGURATION_FAILURE_EXIT_CODE, startupFailureExitCode } from "./start
 export { redactHostRuntimeValue } from "./redaction";
 export { startCredentialBroker, type CredentialBroker } from "./credentialBroker";
 export {
-  ONE_PASSWORD_REFERENCE,
-  type OnePasswordRead,
-  type OnePasswordReadResult,
-} from "./appStoreConnectKeySource";
-export {
   createHostOAuthRuntime,
   isHostOAuthGrantMaterial,
   type HostOAuthBeginResult,

@@ -42,14 +42,16 @@ passkey, or Android. An owner device's one unlock covers five minutes of
 administration (the host keeps the session in memory), copies an API-key
 sign-in between two spokes, reads a Code posture, and applies or dismisses a
 provisioning proposal, read narrowly as slice 5 and slice 10 record; a host
-changes no posture for an owner device yet, and a Mac Touch ID unlock key is not
-built. The wake service is built (the hub's own
+changes no posture for an owner device yet. A Mac's Touch ID unlock key is built
+(a Secure Enclave key made through the desktop's native helper and registered
+when the Mac joins a hub, read narrowly as slice 5 records); the real Touch ID
+prompt has not been run. The wake service is built (the hub's own
 switch, spokes reporting opaque routine times, the Wake-on-LAN packet and signed
 nudge, standbys holding the times), read narrowly as the last item of slice 8
 records; it has run only between hosts on loopback with a fake socket, and a real
 Wake-on-LAN wake of a sleeping Mac has not been tried. Delegation is
-built for Work Projects, read narrowly as the last item of the delivery plan's
-slice 6 records. Failover is built (a named standby, member switching, stand-in,
+built for Work Projects, including an agent's own helper request that names a
+member, read narrowly as the last item of the delivery plan's slice 6 records. Failover is built (a named standby, member switching, stand-in,
 step-down with merge-back, and promotion, which spokes that ticked Standby
 follow without a person), read narrowly as the last item of
 slice 7 records; it has run only between hosts on loopback, with the hub
@@ -1010,6 +1012,30 @@ maintainer's hardware, or names the maintainer gate.
    - **No window for these yet.** The server routes and the client-runtime calls
      (`openSession`, `readPosture`, `changePosture`, `copyApiKeySignIn`) are built;
      the Settings rows and the phone screens that call them are not.
+   - **A Mac's unlock key is built and has one door.** The desktop's native
+     Keychain helper makes a P-256 key in the Secure Enclave whose access
+     control needs the person present (Touch ID, falling back to the account
+     password) and keeps only the key's enclave-bound blob in the Keychain. The
+     window's bridge has three calls: make the key (the public key comes back),
+     sign one owner unlock challenge, and forget the key. `sign` takes the
+     host's challenge fields and the desktop builds the unlock text itself; a
+     path outside the owner routes, a method other than GET or POST, a field
+     with a line break, or any extra field is refused, so the bridge signs no
+     other text. A Mac with no Secure Enclave, or with no Touch ID or password
+     set, refuses with `unavailable`; it never makes a software key. Joining a
+     hub from the desktop makes the key and presents its public half at the end
+     of the join, and the hub keeps it only for an owner code; a join that ends
+     without joining, and leaving the hub, forget the key. The key is made on
+     every desktop join because the joining side cannot tell an owner code from
+     another; an unused key of a non-owner join stays until the Mac leaves. The
+     Mac's key signs the unlock text only: a new-member confirmation needs a
+     phone's or a browser's key, and a Touch ID prompt that is declined reads as
+     a cancelled unlock. No desktop screen acts as an owner on another
+     computer yet (a desktop window already holds its own host's powers), so
+     the signer (`desktopUnlockSigner` in client-runtime) is built and tested
+     with a software key but has no caller beyond the join. Not run: the real
+     Touch ID prompt and a signed, packaged helper on a real Mac are a
+     maintainer gate.
 
 6. **Delegation.** Remote child runs from A to B with the peer grant, `peer:A`
    principal, approvals on B, results as data, and cancel. Acceptance: B
@@ -1035,9 +1061,30 @@ maintainer's hardware, or names the maintainer gate.
      the default model the Work settings name.
    - Artifact references are empty: a Work turn reports the paths it changed, not
      content digests.
-   - An agent's helper request carries no target member yet. The delegating service
-     is started, read, and cancelled through loopback administration routes on A.
-     Wiring a target member into the agent tool surface is a seam change of its own.
+   - An agent's helper request carries an optional target member (a roster member
+     id), on the `octant_agents` tool and the native harness `delegate` tool alike.
+     It also carries `targetProjectId`, required with a member: Projects get their
+     own ids on each host, so the parent's Project id on A means nothing on B and is
+     never sent. A cannot list B's Projects (the grant naming them is held on B),
+     so the agent is given the id by the person and B checks it against that grant
+     as it does for the loopback routes. A missing one answers
+     `remote-delegation-project-required`; one B does not have or the grant does not
+     cover answers as the member's refusal.
+     It reaches the same delegating service the loopback routes use, so the parent
+     check, the peer-grant clamp, `peer:A` on B, approvals on B, the framed and
+     tainting result, and the cancel on a stopped turn are one set of rules. The
+     request takes a task only: a model, `after`, or the parent's conversation is
+     refused. The posture is always Work's approval-gated, clamped by the parent
+     and the grant, never chosen by the agent. Only a Work thread in a Work Project
+     may name a member; a Chat or Code parent, a Project that is not a Work Project,
+     Work turned off, no hub membership, an unknown member, a paused parent, and a
+     member that refuses (no grant for this host, or a grant that does not cover the
+     request) each answer as a refusal value, and the target's own words are not
+     repeated to the model. Capabilities report `remoteDelegation` honestly. The
+     agent receives the request id; reading the result and cancelling a single
+     request stay on the loopback routes (a stopped parent turn still cancels them),
+     and a driver whose tool surface is not one of these two has no way to name a
+     member.
 
 7. **Failover.** Standby order, roster and wake-time copies, stand-in and
    step-down. Acceptance: members switch after the set time and return when

@@ -69,6 +69,7 @@ export * from "./remotePairingClient";
 export * from "./appPairingCode";
 export * from "./hubGuestClient";
 export * from "./hubOwnerClient";
+export * from "./desktopOwnerUnlock";
 export * from "./ownerAlerts";
 export { base64UrlEncode } from "./hubLinkSigning";
 export * from "./remoteListenerTrust";
