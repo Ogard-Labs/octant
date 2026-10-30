@@ -75,13 +75,120 @@
 .octant-menu__popup,
 .octant-dialog__popup,
 .window-chrome__disclosure,
-.composer-folder-selector__menu,
 .project-dialog,
 .folder-picker {
   background: var(--popover);
   border: 1px solid var(--border);
   box-shadow: var(--octant-shadow-pop);
   backdrop-filter: none;
+}
+
+/*
+ * The popup recipe the composer's pickers share: one search field, one row,
+ * one group heading, one empty line. Before it, the Project picker drew a
+ * bordered field that wore the keyboard edge on open, the branch picker an
+ * underlined one and the model picker a filled one; rows ran 26 to 50px tall
+ * and two pickers tinted the chosen row. A choice now shows as a check mark
+ * alone, so a fill under a row only ever means "the pointer or the keyboard
+ * is here".
+ */
+.octant-popover-search {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-height: 32px;
+  padding: 0 var(--oct-space-3);
+  color: var(--octant-text-muted);
+  background: var(--octant-control);
+  border-radius: var(--oct-radius-sm);
+  cursor: text;
+}
+
+/* The field takes focus as the popup opens, so the caret already says where
+   typing goes. The whole field brightens instead of the input drawing the
+   global keyboard edge, which on open read as a ring around a field nobody
+   had chosen. */
+.octant-popover-search:focus-within {
+  color: var(--octant-text-primary);
+  background: var(--octant-control-hover);
+}
+
+.octant-popover-search input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0;
+  color: var(--octant-text-primary);
+  background: transparent;
+  border: 0;
+  outline: none;
+  font: inherit;
+  font-size: var(--oct-text-sm);
+}
+
+.octant-popover-search input::placeholder {
+  color: var(--octant-text-muted);
+}
+
+.octant-popover-group {
+  margin: 0;
+  padding: var(--oct-space-2) var(--oct-space-2) var(--oct-space-1);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+}
+
+.octant-popover-option {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 30px;
+  padding: var(--oct-space-1) var(--oct-space-2);
+  color: var(--oct-fg);
+  background: transparent;
+  border: 0;
+  border-radius: var(--oct-radius-sm);
+  font: inherit;
+  font-size: var(--oct-text-sm);
+  font-weight: 400;
+  text-align: start;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.octant-popover-option > svg {
+  flex: 0 0 auto;
+  color: var(--oct-muted);
+}
+
+.octant-popover-option:hover {
+  background: var(--octant-control-hover);
+}
+
+.octant-popover-option[aria-disabled="true"],
+.octant-popover-option:disabled {
+  color: var(--octant-text-secondary);
+  cursor: not-allowed;
+}
+
+.octant-popover-option[aria-disabled="true"]:hover {
+  background: transparent;
+}
+
+.octant-popover-option__check {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+  color: var(--oct-fg);
+}
+
+.octant-popover-empty {
+  margin: 0;
+  padding: var(--oct-space-2);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
 }
 
 .project-dialog {

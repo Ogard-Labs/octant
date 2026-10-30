@@ -7,6 +7,10 @@ import { cn } from "./utils";
  * for things that genuinely float. `--octant-shadow-overlay` already carries a
  * 1px hairline inside the token, so it needs no separate border or ring; the
  * style adds one because its own shadow does not.
+ *
+ * It fades and settles in from 98% over 150ms from the side it opens on, the
+ * same as menus, so a picker no longer pops in at full size; reduced motion
+ * keeps the instant swap.
  */
 
 export function Popover(props: ComponentProps<typeof PopoverPrimitive.Root>) {
@@ -44,7 +48,7 @@ export function PopoverPopup({
   return (
     <PopoverPrimitive.Popup
       className={cn(
-        "z-50 rounded-xl bg-popover p-2.5 text-sm text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
+        "z-50 origin-(--transform-origin) rounded-xl bg-popover p-2.5 text-sm text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none transition-[opacity,scale] duration-150 ease-out data-ending-style:scale-98 data-ending-style:opacity-0 data-starting-style:scale-98 data-starting-style:opacity-0 motion-reduce:transition-none",
         className,
       )}
       data-slot="popover-content"

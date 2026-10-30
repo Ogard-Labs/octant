@@ -562,8 +562,11 @@ on the left; the context ring, model and microphone on the right, next to send).
 The model button names a chosen reasoning effort after the model in muted ink
 ("GPT-6 Astra Medium"); the provider default names none. Where the thread runs
 (Project, base branch, checkout, Environment, repository) is the first row
-inside the card, above the prompt, as small rounded chips on a faint fill with
-no outline, so the composer stays a single object. On a start screen the
+inside the card, above the prompt, as quiet chips set together from the left,
+the first label lined up with the prompt's text: meta ink and no fill at rest,
+a fill only under the pointer or while the chip's menu is open, the same as
+the access and model controls under the prompt. Plan meters keep the right
+end of that row. The composer stays a single object. On a start screen the
 Project chooser stands just above the card's top-left edge as plain text,
 lifted out of the row so it never pushes the prompt down. Code's
 base-branch chip is absent until a Project is chosen: with no Project it
@@ -574,6 +577,24 @@ list ("Create from…") floats over the page. A thread's own follow-up
 composer keeps its context strip beneath the card. Nothing about delivery is
 asked up front; it is derived from the chips and shown on the thread once it
 exists.
+
+**Composer popups.** Every popup the composer opens (Project, base branch,
+checkout, Create from…, access, model) uses one recipe. The face is the
+popover fill with the overlay shadow and a 12px corner, a 6px inset, and it
+fades and settles in from 98% over 150ms from the side it opens on (instant
+under reduced motion). A search field is `.octant-popover-search`: a filled
+32px field with a leading 14px icon and no border; it takes focus as the popup
+opens, so it brightens rather than drawing the keyboard edge. Rows are
+`.octant-popover-option`: one line, at least 30px, an icon, the name, and any
+detail (a folder, visibility, state) trailing in the meta ink and cut from the
+end. A choice is a check mark at the row's end and never a fill; a fill means
+only that the pointer or the keyboard is on the row. Group headings are
+`.octant-popover-group` (12px, medium, meta ink, sentence case) and status
+lines `.octant-popover-empty`. A control that acts on a field sits on the
+field's row ("Use repository", the refresh icon), never under it. A popup is
+capped to the room on the side it opens on; only its list scrolls, and the
+ways to add something (New Project from folder…, from GitHub) stay pinned
+under the list.
 
 **New task**, in every mode, is the question and the composer and nothing
 else; Chat and Work add one row of outline starter chips only before the

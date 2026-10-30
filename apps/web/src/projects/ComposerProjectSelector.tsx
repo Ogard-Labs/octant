@@ -1,7 +1,7 @@
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { GithubCloneClient } from "@octant/client-runtime/github-clone-client";
 import type { ProjectId } from "@octant/contracts/projects";
-import { ArrowLeft, Check, FolderGit2, FolderOpen, FolderPlus } from "lucide-react";
+import { ArrowLeft, Check, FolderGit2, FolderOpen, FolderPlus, Search } from "lucide-react";
 import {
   lazy,
   Suspense,
@@ -226,8 +226,8 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
     });
   }, [open, view]);
 
-  const optionClass = (index: number, selected = false) =>
-    `composer-folder-selector__option${index === activeIndex ? " composer-folder-selector__option--active" : ""}${selected ? " composer-folder-selector__option--selected" : ""}`;
+  const optionClass = (index: number) =>
+    `octant-popover-option composer-folder-selector__option${index === activeIndex ? " composer-folder-selector__option--active" : ""}`;
 
   return (
     <div className="composer-folder-selector">
@@ -271,7 +271,7 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
               </div>
               <Suspense
                 fallback={
-                  <p className="composer-folder-selector__empty" role="status">
+                  <p className="octant-popover-empty" role="status">
                     Loading GitHub…
                   </p>
                 }
@@ -288,131 +288,131 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
             </>
           ) : (
             <>
-              <OctantInput
-                aria-activedescendant={
-                  activeIndex < 0 ? undefined : `${listboxId}-option-${activeIndex}`
-                }
-                aria-controls={listboxId}
-                aria-expanded="true"
-                aria-label="Search Projects"
-                className="composer-folder-selector__search"
-                onChange={(e) => {
-                  setQuery(e.target.value);
-                  setActiveIndex(-1);
-                }}
-                placeholder="Search Projects…"
-                ref={searchRef}
-                role="combobox"
-                type="search"
-                value={query}
-              />
+              <label className="octant-popover-search">
+                <Search aria-hidden="true" size={14} />
+                <OctantInput
+                  aria-activedescendant={
+                    activeIndex < 0 ? undefined : `${listboxId}-option-${activeIndex}`
+                  }
+                  aria-controls={listboxId}
+                  aria-expanded="true"
+                  aria-label="Search Projects"
+                  onChange={(e) => {
+                    setQuery(e.target.value);
+                    setActiveIndex(-1);
+                  }}
+                  placeholder="Search Projects…"
+                  ref={searchRef}
+                  role="combobox"
+                  type="search"
+                  unstyled
+                  value={query}
+                />
+              </label>
               <div aria-label="Project options" id={listboxId} role="listbox">
-                {savedEntries.length === 0 ? (
-                  <p className="composer-folder-selector__empty" role="status">
-                    {query.trim() === "" ? "No Projects yet." : "No Projects match your search."}
-                  </p>
-                ) : (
-                  <p aria-hidden="true" className="composer-folder-selector__group">
-                    Projects
-                  </p>
-                )}
-                {savedEntries.map((entry, index) => {
-                  const isSelected = String(entry.projectId) === String(props.selection?.projectId);
-                  return (
-                    <OctantButton
-                      aria-selected={isSelected}
-                      className={optionClass(index, isSelected)}
-                      id={`${listboxId}-option-${index}`}
-                      key={String(entry.projectId)}
-                      onClick={() => activate(entry)}
-                      role="option"
-                      title={entry.rootPath}
-                      type="button"
-                      variant="ghost"
-                    >
-                      <FolderOpen aria-hidden="true" size={14} strokeWidth={1.8} />
-                      <span className="composer-folder-selector__option-copy">
-                        <span className="composer-folder-selector__option-name">
-                          {entry.displayName}
-                        </span>
-                        {entry.rootPath === "" ? null : (
-                          <span className="composer-folder-selector__option-path">
-                            {entry.rootPath}
-                          </span>
-                        )}
-                      </span>
-                      {isSelected ? (
-                        <Check
-                          aria-hidden="true"
-                          className="composer-folder-selector__check"
-                          size={14}
-                          strokeWidth={2}
-                        />
-                      ) : null}
-                    </OctantButton>
-                  );
-                })}
-                {actionEntries.length === 0 ? null : (
-                  <p aria-hidden="true" className="composer-folder-selector__group">
-                    New Project
-                  </p>
-                )}
-                {actionEntries.map((entry, offset) => {
-                  const index = savedEntries.length + offset;
-                  const isSelected = entry.kind === "unfiled" && props.selection === undefined;
-                  const label =
-                    entry.kind === "add-github"
-                      ? NEW_PROJECT_FROM_GITHUB_LABEL
-                      : entry.kind === "unfiled"
-                        ? UNFILED_THREAD_LABEL
-                        : entry.kind === "default-folder"
-                          ? START_IN_DEFAULT_FOLDER_LABEL
-                          : NEW_PROJECT_FROM_FOLDER_LABEL;
-                  const refused = entry.kind === "default-folder" && entry.disabled === true;
-                  return (
-                    <OctantButton
-                      aria-selected={isSelected}
-                      {...(refused ? { "aria-disabled": true } : {})}
-                      className={optionClass(index, isSelected)}
-                      id={`${listboxId}-option-${index}`}
-                      key={entry.kind}
-                      onClick={() => activate(entry)}
-                      role="option"
-                      {...(entry.kind === "default-folder"
-                        ? { title: entry.disabledReason ?? entry.rootPath }
-                        : {})}
-                      type="button"
-                      variant="ghost"
-                    >
-                      {entry.kind === "add-github" ? (
-                        <FolderGit2 aria-hidden="true" size={14} strokeWidth={1.8} />
-                      ) : entry.kind === "default-folder" || entry.kind === "unfiled" ? (
+                <div className="composer-folder-selector__saved">
+                  {savedEntries.length === 0 ? (
+                    <p className="octant-popover-empty" role="status">
+                      {query.trim() === "" ? "No Projects yet." : "No Projects match your search."}
+                    </p>
+                  ) : (
+                    <p aria-hidden="true" className="octant-popover-group">
+                      Projects
+                    </p>
+                  )}
+                  {savedEntries.map((entry, index) => {
+                    const isSelected =
+                      String(entry.projectId) === String(props.selection?.projectId);
+                    return (
+                      <OctantButton
+                        aria-selected={isSelected}
+                        className={optionClass(index)}
+                        id={`${listboxId}-option-${index}`}
+                        key={String(entry.projectId)}
+                        onClick={() => activate(entry)}
+                        role="option"
+                        title={entry.rootPath}
+                        type="button"
+                        variant="ghost"
+                      >
                         <FolderOpen aria-hidden="true" size={14} strokeWidth={1.8} />
-                      ) : (
-                        <FolderPlus aria-hidden="true" size={14} strokeWidth={1.8} />
-                      )}
-                      <span className="composer-folder-selector__option-copy">
-                        <span className="composer-folder-selector__option-name">{label}</span>
-                        {entry.kind === "unfiled" ? (
-                          <span className="composer-folder-selector__option-path">
-                            Start an unfiled thread
+                        <span className="composer-folder-selector__option-copy">
+                          <span className="composer-folder-selector__option-name">
+                            {entry.displayName}
                           </span>
-                        ) : entry.kind === "default-folder" ? (
-                          <>
+                          {entry.rootPath === "" ? null : (
                             <span className="composer-folder-selector__option-path">
                               {entry.rootPath}
                             </span>
-                            {entry.disabledReason === undefined ? null : (
-                              <span className="composer-folder-selector__option-reason">
-                                {entry.disabledReason}
-                              </span>
-                            )}
-                          </>
+                          )}
+                        </span>
+                        {isSelected ? (
+                          <Check
+                            aria-hidden="true"
+                            className="octant-popover-option__check"
+                            size={14}
+                            strokeWidth={2}
+                          />
                         ) : null}
-                      </span>
-                    </OctantButton>
-                  );
-                })}
+                      </OctantButton>
+                    );
+                  })}
+                </div>
+                {actionEntries.length === 0 ? null : (
+                  <div className="composer-folder-selector__actions">
+                    {actionEntries.map((entry, offset) => {
+                      const index = savedEntries.length + offset;
+                      const isSelected = entry.kind === "unfiled" && props.selection === undefined;
+                      const label =
+                        entry.kind === "add-github"
+                          ? NEW_PROJECT_FROM_GITHUB_LABEL
+                          : entry.kind === "unfiled"
+                            ? UNFILED_THREAD_LABEL
+                            : entry.kind === "default-folder"
+                              ? START_IN_DEFAULT_FOLDER_LABEL
+                              : NEW_PROJECT_FROM_FOLDER_LABEL;
+                      const refused = entry.kind === "default-folder" && entry.disabled === true;
+                      return (
+                        <OctantButton
+                          aria-selected={isSelected}
+                          {...(refused ? { "aria-disabled": true } : {})}
+                          className={optionClass(index)}
+                          id={`${listboxId}-option-${index}`}
+                          key={entry.kind}
+                          onClick={() => activate(entry)}
+                          role="option"
+                          {...(entry.kind === "default-folder"
+                            ? { title: entry.disabledReason ?? entry.rootPath }
+                            : {})}
+                          type="button"
+                          variant="ghost"
+                        >
+                          {entry.kind === "add-github" ? (
+                            <FolderGit2 aria-hidden="true" size={14} strokeWidth={1.8} />
+                          ) : entry.kind === "default-folder" || entry.kind === "unfiled" ? (
+                            <FolderOpen aria-hidden="true" size={14} strokeWidth={1.8} />
+                          ) : (
+                            <FolderPlus aria-hidden="true" size={14} strokeWidth={1.8} />
+                          )}
+                          <span className="composer-folder-selector__option-copy">
+                            <span className="composer-folder-selector__option-name">{label}</span>
+                            {entry.kind === "unfiled" ? (
+                              <span className="composer-folder-selector__option-path">
+                                Start an unfiled thread
+                              </span>
+                            ) : entry.kind === "default-folder" ? (
+                              // A refused row says why in the path's place, so the row
+                              // stays one line; the full reason is also its title.
+                              <span className="composer-folder-selector__option-path">
+                                {entry.disabledReason ?? entry.rootPath}
+                              </span>
+                            ) : null}
+                          </span>
+                        </OctantButton>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </>
           )}

@@ -427,13 +427,18 @@
    earlier in-card band read as a second box and a rear tray peeking out above
    had let a repository list push the prompt down the page; chips with no band
    behind them avoid both. */
+/* The chips start where the prompt's text starts: the row is pulled in by a
+   chip's own inset, so the first label lines up with "Ask anything…" under
+   it. The chips sit together from the left; spread to both ends they read as
+   two unrelated groups with a hole in the middle. */
 .composer-tray--inside {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--oct-space-1) var(--oct-space-3);
-  padding: var(--oct-space-3) var(--oct-composer-gutter) 0;
+  justify-content: flex-start;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-3) var(--oct-composer-gutter) 0
+    calc(var(--oct-composer-gutter) - var(--oct-space-2));
   color: var(--oct-meta);
 }
 
@@ -441,18 +446,10 @@
 .composer-tray__trailing {
   display: inline-flex;
   min-width: 0;
+  flex: 0 1 auto;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 8px;
-}
-
-.composer-tray__leading {
-  flex: 1 1 auto;
-}
-
-.composer-tray__trailing {
-  flex: 0 1 auto;
-  justify-content: flex-end;
+  gap: var(--oct-space-1);
 }
 
 .composer-tray .host-selector__health {
@@ -465,12 +462,13 @@
 }
 
 /* Every tray control shares one trigger size: icon, label, chevron. */
-.composer-tray__item {
+.composer-tray__item,
+.composer-tray .create-from-issue-control__bar > [data-slot="popover-trigger"] {
   display: inline-flex;
   align-items: center;
   gap: var(--oct-space-1);
-  min-height: 24px;
-  height: 24px;
+  min-height: 26px;
+  height: 26px;
   padding: 0 var(--oct-space-2);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
@@ -488,16 +486,15 @@
   font-size: var(--oct-text-xs);
 }
 
-/* Inside the card each control is a small rounded chip on a faint fill, so
-   it reads as a choice made rather than as a field. The chip is painted on
-   the plain element that holds the control, never on the trigger: the
-   triggers are shared button and select recipes a feature stylesheet may size
-   but not repaint. It carries no outline: three outlined chips over the
-   prompt read as a row of form fields, louder than the message under them. */
+/* Inside the card each control is a quiet chip: the meta tone at rest, a
+   fill only under the pointer or while its menu is open, the same as the
+   access and model controls in the row under the prompt. Filled pills at rest
+   made the row above the prompt louder than the message and its own controls,
+   and a filled "Create from…" beside ghost ones looked like a second kind of
+   control. */
 .composer-tray--inside .composer-tray__leading > *,
 .composer-tray--inside .composer-tray__trailing > * {
-  border-radius: var(--oct-radius-pill);
-  background: color-mix(in oklab, var(--oct-fg) 6%, transparent);
+  border-radius: var(--oct-radius-sm);
 }
 
 /* The Project a new thread will run in is the start screen's first choice, so
@@ -530,12 +527,6 @@
   font-size: var(--oct-text-xs);
   line-height: 1.4;
   text-align: center;
-}
-
-@media (max-width: 920px) {
-  .composer-tray__trailing {
-    justify-content: flex-start;
-  }
 }
 
 /* At phone width the tray stays on one row while it fits, which keeps

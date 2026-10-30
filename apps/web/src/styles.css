@@ -5264,44 +5264,11 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   flex-direction: column;
 }
 
+/* The field is the shared popover search; here it keeps its inset under the
+   catalog rail. */
 .composer-model-picker__search {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   flex: 0 0 auto;
-  min-height: 32px;
   margin: var(--oct-space-2) var(--oct-space-2) var(--oct-space-1);
-  padding: 0 var(--oct-space-3);
-  color: var(--octant-text-muted);
-  background: var(--octant-control);
-  border-radius: var(--oct-radius-sm);
-}
-
-/* The whole row is the field, icon included. The global focus fill painted
-   a second box on the bare input, whose text then sat on that box's edge. */
-.composer-model-picker__search:focus-within {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
-}
-
-.composer-model-picker .composer-model-picker__search input:focus-visible {
-  background: transparent;
-}
-
-.composer-model-picker__search input {
-  flex: 1;
-  min-width: 0;
-  padding: 0;
-  color: var(--octant-text-primary);
-  background: transparent;
-  border: 0;
-  outline: none;
-  font: inherit;
-  font-size: var(--oct-text-sm);
-}
-
-.composer-model-picker__search input::placeholder {
-  color: var(--octant-text-muted);
 }
 
 /* Catalogs wrap onto as many short rows as they need, so every one is on
