@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { BROWSER_TOOL_HOST_LINE } from "@octant/plugin-host/browser-use";
 import { decodeWorkThreadId } from "@octant/contracts";
 import { includeWorkToolDefinitions, planWorkTurnContext } from "./workTurnContext";
 
@@ -271,6 +272,7 @@ describe("planWorkTurnContext", () => {
     });
     if (withoutCanvas.kind !== "ok") throw new Error("The instructions fit their budget");
     expect(withoutCanvas.context).toEqual([
+      { kind: "instructions", text: BROWSER_TOOL_HOST_LINE },
       { kind: "instructions", text: expect.stringContaining("Octant's Files") },
     ]);
     expect(JSON.stringify(withoutCanvas.context)).not.toContain("octant_canvas");

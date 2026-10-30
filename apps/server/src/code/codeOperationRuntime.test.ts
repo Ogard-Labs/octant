@@ -46,7 +46,7 @@ import type {
   ProviderSessionHandle,
   ProviderSessionStart,
 } from "@octant/provider-sdk/driver";
-import { browserUseSelection } from "@octant/plugin-host/browser-use";
+import { BROWSER_TOOL_HOST_LINE, browserUseSelection } from "@octant/plugin-host/browser-use";
 import { computerUseSelection } from "@octant/plugin-host/computer-use";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
@@ -2056,7 +2056,7 @@ describe("CodeOperationRuntime", () => {
     },
   );
 
-  it("adds fixed Browser guidance when the task explicitly selects Browser", async () => {
+  it("tells the agent about Browser in one host line on a Code turn with no selection", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const provider = providerConnection(queue);
     const authority = decodeToolActionAuthority({
@@ -2091,19 +2091,15 @@ describe("CodeOperationRuntime", () => {
         checkoutId,
         sessionId,
         prompt: fixture.prompt,
-        extensionSelections: [browserUseSelection("code-browser-guidance")],
       });
       await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
-      expect(provider.send).toHaveBeenCalledWith(
-        expect.objectContaining({
-          context: expect.arrayContaining([
-            expect.objectContaining({
-              kind: "instructions",
-              text: expect.stringContaining("Octant's built-in Browser"),
-            }),
-          ]),
-        }),
-      );
+      const sent = vi.mocked(provider.send).mock.calls[0]?.[0];
+      expect(sent?.tools?.map(({ name }) => name)).toContain("octant_browser");
+      expect(
+        sent?.context?.filter(
+          (block) => block.kind === "instructions" && block.text === BROWSER_TOOL_HOST_LINE,
+        ),
+      ).toHaveLength(1);
     } finally {
       fixture.close();
     }
@@ -6682,7 +6678,7 @@ function providerEvent(
     ...value,
   } as ProviderRuntimeEvent;
 }
-it("names why a turn whose provider cannot carry an app-managed tool was refused", async () => {
+it("ignores an older Browser selection on a provider without app tools and starts the turn", async () => {
   const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
   const provider = providerConnection(queue);
   const authority = decodeToolActionAuthority({
@@ -6711,32 +6707,23 @@ it("names why a turn whose provider cannot carry an app-managed tool was refused
     },
   });
   try {
-    // A refusal the person can act on: without the sentence, the composer
-    // could only say "The provider turn could not be started."
-    await expect(
-      fixture.runtime.execute(windowId, {
-        kind: "start-provider-turn",
-        operationId: operationId(76),
-        threadId,
-        checkoutId,
-        sessionId,
-        prompt: fixture.prompt,
-        extensionSelections: [browserUseSelection("code-browser-refusal")],
-      }),
-    ).resolves.toMatchObject({
-      kind: "provider-turn-state",
-      state: "failed",
-      failure: {
-        category: "failed",
-        message:
-          "This provider cannot carry Octant's Browser tool. Check the provider's connection in Settings, then retry without the Browser selection.",
-      },
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operationId(76),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+      extensionSelections: [browserUseSelection("code-browser-refusal")],
     });
+    await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+    const sent = vi.mocked(provider.send).mock.calls[0]?.[0];
+    expect(sent?.tools?.map(({ name }) => name) ?? []).not.toContain("octant_browser");
+    expect(JSON.stringify(sent?.context ?? [])).not.toContain("octant_browser");
   } finally {
     fixture.close();
   }
 });
-
 it("lets a follow-up open a fresh provider session when a refused turn never reached one", async () => {
   const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
   const connection = providerConnection(queue);

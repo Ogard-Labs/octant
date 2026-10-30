@@ -7,7 +7,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { WorkComposerAdapter } from "./WorkComposerAdapter";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { PickerGroup } from "@octant/domain";
-import { browserUseSelection } from "@octant/plugin-host/browser-use";
+import { decodeExtensionSelection } from "@octant/contracts/extensions";
 import { computerUseSelection } from "@octant/plugin-host/computer-use";
 import {
   createNewTaskDrafts,
@@ -393,9 +393,18 @@ describe("WorkComposerAdapter interactions", () => {
     ]);
     drafts.writeExtensionReceipts("work:pane", [
       {
-        reference: "@Browser",
-        label: "Browser",
-        selection: browserUseSelection("00000000-0000-4000-8000-000000000201"),
+        reference: "@review",
+        label: "Review",
+        selection: decodeExtensionSelection({
+          kind: "plugin",
+          extensionId: "00000000-0000-4000-8000-000000000301",
+          packageId: "00000000-0000-4000-8000-000000000302",
+          componentId: "review",
+          packageVersion: "1.0.0",
+          packageDigest: `sha256:${"a".repeat(64)}`,
+          catalogEpoch: `sha256:${"b".repeat(64)}`,
+          origin: { kind: "draft", reference: "00000000-0000-4000-8000-000000000201" },
+        }),
         status: { kind: "selected" },
       },
     ]);
@@ -412,13 +421,13 @@ describe("WorkComposerAdapter interactions", () => {
     );
     const rendered = render(view);
     expect(screen.getByLabelText("Mentioned threads")).toHaveTextContent("Prior task");
-    expect(screen.getByLabelText("Selected extensions")).toHaveTextContent("Browser");
+    expect(screen.getByLabelText("Selected extensions")).toHaveTextContent("Review");
 
     rendered.unmount();
     render(view);
 
     expect(await screen.findByLabelText("Mentioned threads")).toHaveTextContent("Prior task");
-    expect(screen.getByLabelText("Selected extensions")).toHaveTextContent("Browser");
+    expect(screen.getByLabelText("Selected extensions")).toHaveTextContent("Review");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
     await waitFor(() => expect(onCreateThread).toHaveBeenCalled());
     expect(onCreateThread.mock.calls[0]?.[2]).toEqual([threadId]);
@@ -427,16 +436,16 @@ describe("WorkComposerAdapter interactions", () => {
     ]);
   });
 
-  it("keeps a selected Browser receipt after Settings remounts while tools are blocked", async () => {
+  it("keeps a selected Computer receipt after Settings remounts while tools are blocked", async () => {
     const user = userEvent.setup();
     const onCreateThread = vi.fn();
     const drafts = createNewTaskDrafts();
-    drafts.write("work:pane", "open the site");
+    drafts.write("work:pane", "open the app");
     drafts.writeExtensionReceipts("work:pane", [
       {
-        reference: "@Browser",
-        label: "Browser",
-        selection: browserUseSelection("00000000-0000-4000-8000-000000000201"),
+        reference: "@Computer",
+        label: "Computer",
+        selection: computerUseSelection("00000000-0000-4000-8000-000000000201"),
         status: { kind: "selected" },
       },
     ]);
@@ -471,7 +480,7 @@ describe("WorkComposerAdapter interactions", () => {
     });
     blocked.unmount();
     render(wrap());
-    expect(await screen.findByLabelText("Selected extensions")).toHaveTextContent("Browser");
+    expect(await screen.findByLabelText("Selected extensions")).toHaveTextContent("Computer");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
     await waitFor(() => expect(onCreateThread).toHaveBeenCalled());
     expect(onCreateThread.mock.calls[0]?.[4]).toEqual([

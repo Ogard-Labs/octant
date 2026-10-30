@@ -17,6 +17,7 @@ import {
   documentDeliveryInstructions,
   offersCanvasTool,
 } from "../canvas/canvasDeliveryInstructions";
+import { appToolHostLines } from "../providers/appToolHostLines";
 
 /**
  * Conservative Work input budget used when the selected model has not
@@ -178,17 +179,33 @@ export function includeWorkToolDefinitions(input: {
     artifactToolName: input.artifactToolName,
     canvasOffered: offersCanvasTool(input.tools),
   });
+  // Each offered app tool's host line joins the plan the same way, so a
+  // Browser the turn carries is named without a composer selection.
+  const policyTexts = [
+    ...(deliveryText === undefined
+      ? []
+      : [
+          {
+            text: deliveryText,
+            referenceId:
+              input.artifactToolName === undefined
+                ? "octant-canvas-delivery"
+                : "octant-artifact-delivery",
+          },
+        ]),
+    ...appToolHostLines(input.tools).map((text, index) => ({
+      text,
+      referenceId: `octant-tool-host-line:${index}`,
+    })),
+  ];
   const deliveryEntries: Array<ContextManifest["entries"][number]> = [];
-  if (deliveryText !== undefined) {
-    const deliveryTokens = Math.max(16, Math.ceil(deliveryText.length / 4));
+  for (const policy of policyTexts) {
+    const deliveryTokens = Math.max(16, Math.ceil(policy.text.length / 4));
     const entry = decodeContextEntry({
       id: input.uuid(),
       source: {
         kind: "instruction",
-        referenceId:
-          input.artifactToolName === undefined
-            ? "octant-canvas-delivery"
-            : "octant-artifact-delivery",
+        referenceId: policy.referenceId,
       },
       category: "octant-policy",
       label: "Work instructions",
@@ -209,7 +226,7 @@ export function includeWorkToolDefinitions(input: {
       preview: { redacted: true, label: "octant-policy hidden" },
     });
     deliveryEntries.push(entry);
-    blocks.set(String(entry.id), { kind: "instructions", text: deliveryText });
+    blocks.set(String(entry.id), { kind: "instructions", text: policy.text });
   }
   return reduceWorkContext(
     decodeContextManifest({

@@ -6,14 +6,7 @@ import {
   NewTaskDraftScopeContext,
   useNewTaskPrompt,
 } from "../../composer/useNewTaskPrompt";
-import {
-  ApplicationMentionTypeahead,
-  BrowserUseMention,
-  ComputerUseMention,
-  useApplicationMentionTypeahead,
-  useBrowserUseMention,
-  useComputerUseMention,
-} from "../../computerUse/ComputerUseMention";
+import { ComputerUseMention, useComputerUseMention } from "../../computerUse/ComputerUseMention";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import {
   unattachedCapabilityMentionCopy,
@@ -195,7 +188,6 @@ export interface CodeComposerAdapterProps {
   readonly windowCapability?: string;
   readonly hostBridge?: OctantHostBridge;
   readonly extensionClient?: ExtensionClient;
-  readonly browserAvailable?: boolean;
 }
 
 export interface CodeComposerSuggestion {
@@ -288,24 +280,12 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     ...(selectedFamily === undefined ? {} : { providerFamily: selectedFamily }),
     ...(storedExtensionReceipts.length === 0 ? {} : { initialReceipts: storedExtensionReceipts }),
   });
-  const browser = useBrowserUseMention({
-    textarea: () => textareaRef.current,
-    draft: prompt,
-    onDraftChange: setPrompt,
-    scopeKey: "code-draft",
-    available: props.browserAvailable === true && runtimeCarriesTools,
-    onChoose: () => void extensionDraft.resolveReference("@browser"),
-  });
   const slash = useComposerSlashCommands({
     textarea: () => textareaRef.current,
     draft: prompt,
     onDraftChange: setPrompt,
     onResolveExtensionReference: extensionDraft.resolveReference,
   });
-  const appMentions = useApplicationMentionTypeahead([
-    { controller: computer, kind: "computer" },
-    { controller: browser, kind: "browser" },
-  ]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const composerIdRef = useRef(globalThis.crypto.randomUUID());
   useEffect(() => {
@@ -718,9 +698,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (appMentions.handleKeyDown(event)) return;
     if (computer.handleKeyDown(event)) return;
-    if (browser.handleKeyDown(event)) return;
     if (slash.handleKeyDown(event)) return;
     if (mention.handleKeyDown(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
@@ -822,7 +800,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
             chips={
               <>
                 <ComputerUseMention controller={computer} surface="chips" />
-                <BrowserUseMention controller={browser} surface="chips" />
                 {extensionDraft.receipts.length > 0 ? (
                   <ul aria-label="Selected extensions" className="composer-chips">
                     {extensionDraft.receipts.map((receipt) => (
@@ -856,28 +833,16 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
               <OctantTextarea
                 aria-label="First message"
                 aria-autocomplete="list"
-                aria-expanded={computer.open || browser.open || slash.open}
+                aria-expanded={computer.open || slash.open}
                 aria-controls={
-                  appMentions.open.length > 1
-                    ? appMentions.listId
-                    : computer.open
-                      ? computer.listId
-                      : browser.open
-                        ? browser.listId
-                        : slash.open
-                          ? slash.listId
-                          : undefined
+                  computer.open ? computer.listId : slash.open ? slash.listId : undefined
                 }
                 aria-activedescendant={
-                  appMentions.open.length > 1
-                    ? `${appMentions.listId}-${appMentions.open[appMentions.active]?.kind ?? ""}`
-                    : computer.open
-                      ? `${computer.listId}-computer`
-                      : browser.open
-                        ? `${browser.listId}-browser`
-                        : slash.active === undefined
-                          ? undefined
-                          : `${slash.listId}-${slash.active.id}`
+                  computer.open
+                    ? `${computer.listId}-computer`
+                    : slash.active === undefined
+                      ? undefined
+                      : `${slash.listId}-${slash.active.id}`
                 }
                 autoFocus
                 className="composer-input"
@@ -885,13 +850,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                 onChange={(event) => {
                   setPrompt(event.target.value);
                   computer.sync(event.target.value, event.currentTarget.selectionStart);
-                  browser.sync(event.target.value, event.currentTarget.selectionStart);
                   slash.sync(event.target.value, event.currentTarget.selectionStart);
                   mention.sync(event.target.value, event.currentTarget.selectionStart);
                 }}
                 onClick={(event) => {
                   mention.sync(event.currentTarget.value, event.currentTarget.selectionStart);
-                  browser.sync(event.currentTarget.value, event.currentTarget.selectionStart);
                   slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
                 }}
                 onKeyDown={handleKeyDown}
@@ -906,12 +869,8 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
               />
             }
             typeahead={
-              appMentions.open.length > 1 ? (
-                <ApplicationMentionTypeahead typeahead={appMentions} />
-              ) : computer.open ? (
+              computer.open ? (
                 <ComputerUseMention controller={computer} surface="typeahead" />
-              ) : browser.open ? (
-                <BrowserUseMention controller={browser} surface="typeahead" />
               ) : slash.open ? (
                 <ComposerSlashTypeahead controller={slash} />
               ) : mention.open ? (

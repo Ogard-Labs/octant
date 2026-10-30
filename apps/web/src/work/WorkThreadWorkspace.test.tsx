@@ -1994,19 +1994,18 @@ describe("WorkThreadWorkspace", () => {
     }
   });
 
-  it("does not offer @Browser in a thread whose provider cannot carry the tool", async () => {
+  it("does not offer a Browser chip even when the provider can carry the tool", async () => {
     const user = userEvent.setup();
     const threadClient = {
       bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
       execute: vi.fn(),
     } as unknown as WorkThreadClient;
-    const incapable = { ...providerGroup(), appManagedTools: "unsupported" } as never;
+    const capable = { ...providerGroup(), appManagedTools: "supported" } as never;
 
     render(
       <WorkThreadWorkspace
         hostId={"local" as never}
-        browserAvailable
-        providerGroups={[incapable]}
+        providerGroups={[capable]}
         threadClient={threadClient}
         threadId={threadId}
         title="Draft brief"

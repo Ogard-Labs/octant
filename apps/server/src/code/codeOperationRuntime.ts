@@ -198,11 +198,7 @@ import {
   offersCanvasTool,
 } from "../canvas/canvasDeliveryInstructions";
 import { CodeEvidenceCapacityExceeded } from "./codeEvidenceStore";
-import {
-  BROWSER_SELECTION_GUIDANCE,
-  isBrowserUseSelection,
-  validateBrowserUseSelection,
-} from "@octant/plugin-host/browser-use";
+import { appToolHostLines } from "../providers/appToolHostLines";
 
 type Awaitable<T> = T | Promise<T>;
 
@@ -2369,18 +2365,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     // A thread from a build that could run on a remote machine keeps its
     // remote folder, which this host cannot run a turn in.
     if (this.#isRemoteThread(input.thread)) return failStart(REMOTE_FOLDER_UNSUPPORTED);
-    const browserSelections = command.extensionSelections?.filter(isBrowserUseSelection) ?? [];
-    if (
-      browserSelections.length > 1 ||
-      browserSelections.some((selection) => !validateBrowserUseSelection(selection)) ||
-      (browserSelections.length > 0 &&
-        (this.#options.browserAutomation === undefined ||
-          this.#options.supportsAppManagedTools?.(input.thread) !== true))
-    ) {
-      return failStart(
-        "This provider cannot carry Octant's Browser tool. Check the provider's connection in Settings, then retry without the Browser selection.",
-      );
-    }
     if (command.computerUseDestination !== undefined && command.computerUseSelection === undefined)
       return failStart("A Computer destination needs the Computer selection in the same message.");
     if (
@@ -3619,7 +3603,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const harnessContext = this.#options.nativeHarness?.contextFor(harnessScope) ?? [];
     this.#options.nativeHarness?.turnStarted(harnessScope);
     let endedTurn: TurnEndSummary | undefined;
-    const browserSelected = active.extensionSelections?.some(isBrowserUseSelection) === true;
     const appManagedTools = this.#appManagedTools(active);
     // Only a thread whose person chose the runtime's artifact tool is told to
     // use it; the turn runner starts that thread's session with the same
@@ -3635,9 +3618,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       canvasOffered: offersCanvasTool(appManagedTools?.definitions),
     });
     const hostGuidance = [
-      ...(browserSelected
-        ? [{ kind: "instructions" as const, text: BROWSER_SELECTION_GUIDANCE }]
-        : []),
+      ...appToolHostLines(appManagedTools?.definitions).map((text) => ({
+        kind: "instructions" as const,
+        text,
+      })),
       ...(deliveryInstructions === undefined
         ? []
         : [{ kind: "instructions" as const, text: deliveryInstructions }]),

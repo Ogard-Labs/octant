@@ -1,18 +1,18 @@
 import type { ExtensionSelection } from "@octant/contracts/extensions";
-import { isBrowserUseSelection } from "./browserUsePlugin";
 import { isComputerUseSelection } from "./computerUsePlugin";
 
 /**
  * An app-owned `@` token still present in outgoing draft text without the
- * selection it names. The composers resolve `@Computer` and `@Browser` into
- * structured selections through the typeahead; one that reaches the provider
+ * selection it names. The composers resolve `@Computer` into a structured
+ * selection through the typeahead; one that reaches the provider
  * as plain text describes a capability the turn does not carry and invites
  * the model to improvise around the gap, so a send that still carries one is
- * refused instead.
+ * refused instead. Browser is an offered tool, not a mention, so `@Browser`
+ * is ordinary text.
  */
 export interface UnattachedCapabilityMention {
-  readonly label: "Computer" | "Browser";
-  readonly token: "@computer" | "@browser";
+  readonly label: "Computer";
+  readonly token: "@computer";
 }
 
 const CAPABILITY_MENTION_TOKENS: ReadonlyArray<{
@@ -26,12 +26,6 @@ const CAPABILITY_MENTION_TOKENS: ReadonlyArray<{
     matches: isComputerUseSelection,
     pattern: /(?:^|\s)@computer\b/i,
     token: "@computer",
-  },
-  {
-    label: "Browser",
-    matches: isBrowserUseSelection,
-    pattern: /(?:^|\s)@browser\b/i,
-    token: "@browser",
   },
 ];
 

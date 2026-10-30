@@ -1,11 +1,6 @@
 import { threadCompactionSubject } from "../context/CompactionDivider";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
-import {
-  BrowserUseMention,
-  ComputerUseMention,
-  useBrowserUseMention,
-  useComputerUseMention,
-} from "../computerUse/ComputerUseMention";
+import { ComputerUseMention, useComputerUseMention } from "../computerUse/ComputerUseMention";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import {
   decodeWorkAttachmentId,
@@ -434,7 +429,6 @@ export interface WorkThreadWorkspaceProps {
   readonly windowCapability?: string;
   readonly messageQueueClient?: ThreadMessageQueueClient;
   readonly extensionClient?: ExtensionClient;
-  readonly browserAvailable?: boolean;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
   /** Opens the dock's Canvas tool on this Canvas; a Canvas drawn in the thread offers it. */
   readonly onOpenCanvasInSidebar?: (card: CanvasThreadReferenceCard) => void;
@@ -723,14 +717,6 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     projectId: thread?.projectId ?? projectId ?? null,
     threadId: thread?.id ?? props.threadId,
     ...(providerFamily === undefined ? {} : { providerFamily }),
-  });
-  const browser = useBrowserUseMention({
-    textarea: () => textareaRef.current,
-    draft: composerDraft.text,
-    onDraftChange: (next, caret) => composerDraft.setDraft(next, caret),
-    scopeKey: String(props.threadId),
-    available: props.browserAvailable === true && runtimeCarriesTools,
-    onChoose: () => void extensionDraft.resolveReference("@browser"),
   });
   const slash = useComposerSlashCommands({
     textarea: () => textareaRef.current,
@@ -1769,7 +1755,6 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (suggestionInput.takeOnTab(event)) return;
     if (computer.handleKeyDown(event)) return;
-    if (browser.handleKeyDown(event)) return;
     if (slash.handleKeyDown(event)) return;
     if (mention.handleKeyDown(event)) return;
     if (fileMentions.handleKeyDown(event)) return;
@@ -1786,7 +1771,6 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
 
   function syncMentions(value: string, caret: number | null) {
     computer.sync(value, caret);
-    browser.sync(value, caret);
     slash.sync(value, caret);
     mention.sync(value, caret);
     fileMentions.sync(value, caret);
@@ -2219,7 +2203,6 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         chips={
           <>
             <ComputerUseMention controller={computer} surface="chips" />
-            <BrowserUseMention controller={browser} surface="chips" />
             {extensionDraft.receipts.length > 0 ? (
               <ul aria-label="Selected extensions" className="composer-chips">
                 {extensionDraft.receipts.map((receipt) => (
@@ -2265,24 +2248,14 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           <OctantTextarea
             aria-label="Work prompt"
             aria-autocomplete="list"
-            aria-expanded={computer.open || browser.open || slash.open}
-            aria-controls={
-              computer.open
-                ? computer.listId
-                : browser.open
-                  ? browser.listId
-                  : slash.open
-                    ? slash.listId
-                    : undefined
-            }
+            aria-expanded={computer.open || slash.open}
+            aria-controls={computer.open ? computer.listId : slash.open ? slash.listId : undefined}
             aria-activedescendant={
               computer.open
                 ? `${computer.listId}-computer`
-                : browser.open
-                  ? `${browser.listId}-browser`
-                  : slash.active === undefined
-                    ? undefined
-                    : `${slash.listId}-${slash.active.id}`
+                : slash.active === undefined
+                  ? undefined
+                  : `${slash.listId}-${slash.active.id}`
             }
             autoFocus
             className="composer-input"
@@ -2318,8 +2291,6 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         typeahead={
           computer.open ? (
             <ComputerUseMention controller={computer} surface="typeahead" />
-          ) : browser.open ? (
-            <BrowserUseMention controller={browser} surface="typeahead" />
           ) : slash.open ? (
             <ComposerSlashTypeahead controller={slash} />
           ) : (
