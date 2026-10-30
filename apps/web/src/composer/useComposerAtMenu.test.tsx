@@ -72,6 +72,9 @@ function Harness(props: {
         onKeyDown={(event) => {
           at.handleKeyDown(event);
         }}
+        onKeyUp={(event) => {
+          at.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+        }}
       />
       <ComposerAtTypeahead controller={at} />
       <ComposerSlashTypeahead controller={slash} />
@@ -125,6 +128,16 @@ describe("composer @ menu", () => {
       await pending.promise;
     });
     expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+  });
+
+  it("keeps the arrowed-to row when the key comes back up on the same token", async () => {
+    const user = userEvent.setup();
+    const resolve = vi.fn(async (_reference: string) => true);
+    renderComposer(resolve);
+    const message = screen.getByRole("textbox", { name: "Message" });
+    await user.type(message, "@");
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(resolve).toHaveBeenCalledExactlyOnceWith("@docs/search");
   });
 
   it("offers nothing for an at sign inside a word or an unmatched query", async () => {

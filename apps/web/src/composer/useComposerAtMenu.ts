@@ -121,8 +121,10 @@ export function useComposerAtMenu(input: {
   const active = open ? rows[Math.min(activeIndex, rows.length - 1)] : undefined;
 
   const sync = (draft: string, caret: number | null) => {
-    setToken(caret === null ? undefined : readPathMentionQuery(draft, caret));
-    setActiveIndex(0);
+    const next = caret === null ? undefined : readPathMentionQuery(draft, caret);
+    setToken(next);
+    // Arrow keys fire keyup too; only a different token starts the list over.
+    if (next?.query !== token?.query || next?.start !== token?.start) setActiveIndex(0);
   };
   const choose = (row: AtMenuRow) => {
     if (resolving) return;

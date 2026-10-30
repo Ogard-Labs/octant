@@ -1036,15 +1036,20 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     textareaRef.current?.focus();
   }, [promptRequest]);
   const trimmed = prompt.trim();
-  const canSubmit = trimmed.length > 0 && !props.creating;
+  const canSubmit = trimmed.length > 0 && !props.creating && !atMenu.resolving;
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
-    const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
+    const chosenSelections = extensionDraft.receipts.flatMap((receipt) =>
       receipt.selection === undefined ? [] : [receipt.selection],
     );
+    // The receiving Chat path replaces the Computer selection with any extension list.
+    const extensionSelections =
+      chosenSelections.length === 0 || computer.selection === undefined
+        ? chosenSelections
+        : [computer.selection, ...chosenSelections];
     const afterCreate = (created: boolean | void | Promise<boolean | void>) => {
-      if (extensionSelections.length === 0) return;
+      if (chosenSelections.length === 0) return;
       void Promise.resolve(created).then((accepted) => {
         if (accepted !== false) extensionDraft.clear();
       });
