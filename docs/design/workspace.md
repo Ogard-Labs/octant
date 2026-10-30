@@ -88,9 +88,13 @@ existed is kept). It lists the threads flat under counted headings in the
 order a person acts on them: **Pinned**, **Needs input** (waiting on an
 approval or an answer), **Ready for review** (a finished turn nobody has
 looked at), **Working**, and **Idle** (everything else), newest first within
-each. A thread appears once, under the first heading that holds it. A mode
-with no threads at all shows a short first-run note in Status and the Activity
-feed instead of an empty list: "No threads yet" in the secondary ink, then
+each. A thread appears once, under the first heading that holds it. Each
+heading is a fold button (`aria-expanded`) with its count and a chevron;
+folded, it keeps the count and still shows the thread the workspace has open,
+and a search shows every match. The window remembers each mode's folded
+headings across a reload, as session storage, so other windows keep their own.
+A mode with no threads at all shows a short first-run note in Status and the
+Activity feed instead of an empty list: "No threads yet" in the secondary ink, then
 "Start one from the composer. Your threads gather here." A search or filter
 that matched nothing keeps its own message, which says nothing was deleted.
 

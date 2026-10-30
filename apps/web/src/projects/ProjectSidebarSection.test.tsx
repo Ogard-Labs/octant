@@ -844,6 +844,78 @@ describe("ProjectSidebarSection activity view", () => {
     }
   });
 
+  it("folds a Status group from its heading and keeps it folded when the list mounts again", async () => {
+    const user = userEvent.setup();
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+    const statusSidebar = () => (
+      <ProjectSidebarSection
+        activeThreadId="thread-idle-open"
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        now={new Date("2026-08-14T15:00:00.000Z")}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        onSelectThread={vi.fn()}
+        projects={[chatProjectA]}
+        threads={[
+          {
+            threadId: "thread-working",
+            title: "Update AuroraDocs logos",
+            activity: "working",
+            updatedAt: "2026-08-14T12:00:00.000Z",
+          },
+          {
+            threadId: "thread-idle",
+            title: "Draft release notes",
+            updatedAt: "2026-08-12T10:00:00.000Z",
+          },
+          {
+            threadId: "thread-idle-open",
+            title: "Estimate app rebrand effort",
+            updatedAt: "2026-08-13T18:00:00.000Z",
+          },
+        ]}
+      />
+    );
+
+    try {
+      const { unmount } = render(statusSidebar());
+      const idle = screen.getByRole("button", { name: /^Idle/ });
+      expect(idle).toHaveAttribute("aria-expanded", "true");
+
+      await user.click(idle);
+      expect(idle).toHaveAttribute("aria-expanded", "false");
+      // Folded, the heading still says how many threads it holds.
+      expect(idle).toHaveTextContent("2");
+      expect(screen.queryByRole("button", { name: /Draft release notes/ })).not.toBeInTheDocument();
+      // The thread the workspace is showing never hides behind the fold.
+      expect(screen.getByRole("button", { name: /Estimate app rebrand effort/ })).toBeVisible();
+      // Folding one group leaves the others open.
+      expect(screen.getByRole("button", { name: /^Working/ })).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      );
+      expect(screen.getByRole("button", { name: /Update AuroraDocs logos/ })).toBeVisible();
+
+      unmount();
+      render(statusSidebar());
+      const remembered = screen.getByRole("button", { name: /^Idle/ });
+      expect(remembered).toHaveAttribute("aria-expanded", "false");
+      expect(screen.queryByRole("button", { name: /Draft release notes/ })).not.toBeInTheDocument();
+
+      await user.click(remembered);
+      expect(remembered).toHaveAttribute("aria-expanded", "true");
+      expect(screen.getByRole("button", { name: /Draft release notes/ })).toBeVisible();
+    } finally {
+      window.localStorage.clear();
+      window.sessionStorage.clear();
+    }
+  });
+
   it("toggles a recency inbox that keeps Project attribution and attention glyphs", async () => {
     const user = userEvent.setup();
     const onSelectThread = vi.fn();
