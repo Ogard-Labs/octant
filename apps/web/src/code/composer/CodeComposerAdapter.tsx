@@ -782,7 +782,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     <section aria-label="New Code thread" className="code-composer-adapter">
       <div className="welcome">
         <div className="welcome__heading">
-          <WelcomeHeading />
+          <WelcomeHeading projectChosen={props.projectId !== undefined} />
           {props.projectAvailable === false &&
           props.projectId !== undefined &&
           props.errorMessage === undefined ? (

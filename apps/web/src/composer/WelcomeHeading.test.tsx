@@ -12,6 +12,12 @@ describe("WelcomeHeading", () => {
     expect(screen.queryByText(/running|waiting for your review|Good (morning|evening)/)).toBeNull();
   });
 
+  it("stops asking for a project once one is chosen", () => {
+    render(<WelcomeHeading projectChosen />);
+    expect(screen.getByText("Just start typing")).toBeVisible();
+    expect(screen.queryByText(/Pick a project/)).toBeNull();
+  });
+
   it("draws the aperture mark at 22px above the question", () => {
     const { container } = render(<WelcomeHeading />);
     const mark = container.querySelector("svg.welcome__mark");

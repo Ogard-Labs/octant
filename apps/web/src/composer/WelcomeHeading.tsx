@@ -30,12 +30,18 @@ function OctantMark() {
  * and hands the rest of the page to the composer. Renders into the caller's
  * heading grid.
  */
-export function WelcomeHeading() {
+export function WelcomeHeading(props: { readonly projectChosen?: boolean }) {
   return (
     <Fragment>
       <OctantMark />
       <h1 className="oct-title oct-title--hero welcome__question">{WELCOME_QUESTION}</h1>
-      <p className="oct-row-detail welcome__status">Pick a project, or just start typing</p>
+      {/* With a Project already chosen, asking for one reads as if the choice
+          did not take. */}
+      <p className="oct-row-detail welcome__status">
+        {props.projectChosen === true
+          ? "Just start typing"
+          : "Pick a project, or just start typing"}
+      </p>
     </Fragment>
   );
 }

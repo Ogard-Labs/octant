@@ -405,7 +405,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     <section aria-label="New task" className="work-composer-adapter">
       <div className="welcome">
         <div className="welcome__heading">
-          <WelcomeHeading />
+          <WelcomeHeading projectChosen={props.projectId !== undefined} />
         </div>
         <div className="composer-stack">
           <ThreadComposer
