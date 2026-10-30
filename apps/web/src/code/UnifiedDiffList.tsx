@@ -40,8 +40,12 @@ export function UnifiedDiffList(props: UnifiedDiffListProps) {
             <span className="unified-diff__change">{CHANGE_LABELS[file.change]}</span>
             {file.binary ? null : (
               <span className="unified-diff__counts">
-                <span className="unified-diff__additions">+{file.additions.toLocaleString()}</span>
-                <span className="unified-diff__deletions">−{file.deletions.toLocaleString()}</span>
+                <span className="unified-diff__additions">
+                  +{file.additions.toLocaleString("en")}
+                </span>
+                <span className="unified-diff__deletions">
+                  −{file.deletions.toLocaleString("en")}
+                </span>
               </span>
             )}
             {props.onOpenFile === undefined || file.change === "deleted" ? null : (
@@ -79,7 +83,7 @@ function hunkRows(hunks: ReadonlyArray<DiffHunk>) {
       rows.push(
         <tr className="unified-diff__gap" key={`gap-${String(index)}`}>
           <td colSpan={4}>
-            {unchanged.toLocaleString()} unchanged {unchanged === 1 ? "line" : "lines"}
+            {unchanged.toLocaleString("en")} unchanged {unchanged === 1 ? "line" : "lines"}
           </td>
         </tr>,
       );

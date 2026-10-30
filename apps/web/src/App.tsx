@@ -4299,7 +4299,7 @@ function LaunchedShell(
       buildReviewEntries({
         threads: workingNowThreads,
         projectNames: workingNowProjectNames,
-        unfiledLabel: "No project",
+        unfiledLabel: "No Project",
       }),
     [workingNowProjectNames, workingNowThreads],
   );

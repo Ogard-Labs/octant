@@ -23,6 +23,7 @@ import {
 import { compactionOffer } from "./sessionCompactionPresentation";
 import {
   autoCompactRoom,
+  compactTokenCount,
   contextHealthLabel,
   contextWindowModel,
   contextAccuracyLabel,
@@ -684,7 +685,7 @@ function ThreadTotals(props: { readonly fallback: ComposerContextUsageFallback }
       {fallback.costUsd === undefined ? null : (
         <Fact
           label="Cost"
-          value={new Intl.NumberFormat(undefined, {
+          value={new Intl.NumberFormat("en", {
             style: "currency",
             currency: "USD",
             maximumFractionDigits: 4,
@@ -1177,14 +1178,12 @@ function emptyMessage(status: string): string {
   return "Context is unavailable.";
 }
 
-const tokenNumber = new Intl.NumberFormat(undefined, {
-  notation: "compact",
-  maximumFractionDigits: 1,
-});
-const exactNumber = new Intl.NumberFormat();
+const exactNumber = new Intl.NumberFormat("en");
 
+// The inspector's own shape ("41.2K"), in every locale: with the system
+// locale this read "4,1k of 1 mill." on a Norwegian Mac.
 function compactTokens(tokens: number): string {
-  return tokenNumber.format(tokens);
+  return compactTokenCount(tokens);
 }
 
 function formatTokens(tokens: number): string {

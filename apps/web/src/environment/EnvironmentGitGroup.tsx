@@ -139,8 +139,8 @@ function ChangeCount(props: {
   if (insertions === undefined || deletions === undefined) return null;
   return (
     <span className="environment-git-group__diffstat">
-      <span className="environment-git-group__insertions">{`+${insertions.toLocaleString()}`}</span>
-      <span className="environment-git-group__deletions">{`\u2212${deletions.toLocaleString()}`}</span>
+      <span className="environment-git-group__insertions">{`+${insertions.toLocaleString("en")}`}</span>
+      <span className="environment-git-group__deletions">{`\u2212${deletions.toLocaleString("en")}`}</span>
     </span>
   );
 }

@@ -1,5 +1,6 @@
 import { Gauge } from "lucide-react";
 import { EnvironmentGroup } from "../environment/EnvironmentGroup";
+import { compactTokenCount } from "../context/contextInspectorModel";
 import {
   decodeAggregateVersion,
   type SpendCeilingSnapshot,
@@ -101,20 +102,20 @@ export function ThreadUsagePanel(props: ThreadUsagePanelProps) {
           <dl className="thread-usage__totals">
             <div>
               <dt>Requests</dt>
-              <dd>{summary.totals.totalRequests.toLocaleString()}</dd>
+              <dd>{summary.totals.totalRequests.toLocaleString("en")}</dd>
             </div>
             <div>
               <dt>Input tokens</dt>
-              <dd>{summary.totals.totalInputTokens.toLocaleString()}</dd>
+              <dd>{summary.totals.totalInputTokens.toLocaleString("en")}</dd>
             </div>
             <div>
               <dt>Output tokens</dt>
-              <dd>{summary.totals.totalOutputTokens.toLocaleString()}</dd>
+              <dd>{summary.totals.totalOutputTokens.toLocaleString("en")}</dd>
             </div>
             {summary.requestsWithUnavailableUsage === 0 ? null : (
               <div>
                 <dt>Requests without reported usage</dt>
-                <dd>{summary.requestsWithUnavailableUsage.toLocaleString()}</dd>
+                <dd>{summary.requestsWithUnavailableUsage.toLocaleString("en")}</dd>
               </div>
             )}
           </dl>
@@ -149,9 +150,7 @@ export function ThreadUsagePanel(props: ThreadUsagePanelProps) {
 
 /** "29.9k" for a head that has room for one short figure. */
 function compactTokens(count: number): string {
-  return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(
-    count,
-  );
+  return compactTokenCount(count);
 }
 
 function isThreadType(value: string): value is SpendCeilingThreadType {

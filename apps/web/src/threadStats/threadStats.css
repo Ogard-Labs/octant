@@ -35,8 +35,34 @@
   color: var(--oct-fg);
 }
 
+.thread-stats__figures {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Shifted left by one dot so the dot of whichever figure starts a line falls
+   outside the clipping box above. */
+.thread-stats__figures-row {
+  --thread-stats-dot: calc(var(--oct-space-2) * 2 + 0.4em);
+
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+  margin-inline-start: calc(-1 * var(--thread-stats-dot));
+}
+
 .thread-stats__item {
   white-space: nowrap;
+}
+
+.thread-stats__item::before {
+  content: "·" / "";
+  display: inline-block;
+  width: var(--thread-stats-dot);
+  text-align: center;
 }
 
 .thread-stats__item[data-hinted="true"] {

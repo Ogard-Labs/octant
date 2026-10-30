@@ -728,7 +728,7 @@ function observedChangesLabel(
       : "Working tree clean";
   }
   const files = `${changes.changedPathCount} changed ${changes.changedPathCount === 1 ? "file" : "files"}`;
-  const diffstat = `+${changes.insertions.toLocaleString()} −${changes.deletions.toLocaleString()}`;
+  const diffstat = `+${changes.insertions.toLocaleString("en")} −${changes.deletions.toLocaleString("en")}`;
   return `${files} · ${diffstat} · ${changes.stagedCount} staged · ${changes.committedAhead} committed ahead`;
 }
 

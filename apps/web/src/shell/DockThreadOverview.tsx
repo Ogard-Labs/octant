@@ -209,11 +209,11 @@ export function DockThreadOverview(props: DockThreadOverviewProps) {
               variant="bare"
             >
               <span className="diffstat dock-card__label">
-                <span className="add">{`+${props.changes.insertions.toLocaleString()}`}</span>{" "}
-                <span className="del">{`−${props.changes.deletions.toLocaleString()}`}</span>
+                <span className="add">{`+${props.changes.insertions.toLocaleString("en")}`}</span>{" "}
+                <span className="del">{`−${props.changes.deletions.toLocaleString("en")}`}</span>
               </span>
               <span className="dock-card__meta">
-                {`${props.changes.files.toLocaleString()} ${props.changes.files === 1 ? "file" : "files"}`}
+                {`${props.changes.files.toLocaleString("en")} ${props.changes.files === 1 ? "file" : "files"}`}
               </span>
             </OctantButton>
           )}
@@ -233,7 +233,7 @@ export function DockThreadOverview(props: DockThreadOverviewProps) {
         </DockCard>
       )}
       {outputs.length === 0 ? null : (
-        <DockCard meta={outputs.length.toLocaleString()} title="Outputs">
+        <DockCard meta={outputs.length.toLocaleString("en")} title="Outputs">
           {outputs.map((output) => {
             const Icon = output.kind === "canvas" ? LayoutPanelTop : FileText;
             return (
@@ -306,7 +306,7 @@ function BackgroundTasksCard(props: {
     <DockCard
       {...(props.running.length === 0
         ? {}
-        : { meta: `${props.running.length.toLocaleString()} running` })}
+        : { meta: `${props.running.length.toLocaleString("en")} running` })}
       title="Background tasks"
     >
       {props.running.map((task) => (
@@ -322,7 +322,7 @@ function BackgroundTasksCard(props: {
         >
           <FoldIcon aria-hidden="true" className="dock-card__icon" size={14} strokeWidth={1.7} />
           <span className="dock-card__label dock-card__label--meta">
-            {`${props.finished.length.toLocaleString()} finished`}
+            {`${props.finished.length.toLocaleString("en")} finished`}
           </span>
         </OctantButton>
       )}

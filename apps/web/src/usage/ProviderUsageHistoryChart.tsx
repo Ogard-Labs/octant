@@ -147,7 +147,7 @@ export function ProviderUsageHistoryChart(props: {
                             ?.label ?? row.providerKey,
                         )}
                       </td>
-                      <td>{row.totals.totalTokens.toLocaleString()}</td>
+                      <td>{row.totals.totalTokens.toLocaleString("en")}</td>
                       <td>{cost === undefined ? "Unavailable" : dollars(cost)}</td>
                     </tr>
                   );

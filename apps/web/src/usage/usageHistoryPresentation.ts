@@ -1,13 +1,13 @@
+import { compactTokenCount } from "../context/contextInspectorModel";
+
 export type HistoryMetric = "tokens" | "cost";
 export type HistoryCostBasis = "apiEstimateUsd" | "providerRecordedUsd";
 
 export function compactTokens(value: number): string {
-  return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(
-    value,
-  );
+  return compactTokenCount(value);
 }
 export function dollars(value: number): string {
-  return new Intl.NumberFormat(undefined, {
+  return new Intl.NumberFormat("en", {
     style: "currency",
     currency: "USD",
     currencyDisplay: "narrowSymbol",

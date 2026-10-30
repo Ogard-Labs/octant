@@ -468,7 +468,7 @@ function SectionBody(props: {
   if (section.status === "ready") {
     const items = section.items ?? [];
     if (items.length === 0) {
-      return <SurfaceEmpty title={section.message ?? "Nothing to show."} />;
+      return <SurfaceEmpty title={section.message ?? "Nothing to show"} />;
     }
     return (
       <ul className="surface-list work-overview__items">

@@ -19,7 +19,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCard } from "../ui/base/OctantCard";
 import "./context.css";
 
-const numberFormat = new Intl.NumberFormat();
+const numberFormat = new Intl.NumberFormat("en");
 const dateTimeFormat = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
   timeStyle: "short",

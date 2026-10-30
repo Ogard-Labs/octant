@@ -81,8 +81,8 @@ describe("ThreadSearchOverlay", () => {
     const options = screen.getAllByRole("option");
     expect(options.map((option) => option.textContent)).toEqual([
       "Release checklistOctant",
-      "Release notesNo project",
-      "Release archiveNo projectArchived",
+      "Release notesNo Project",
+      "Release archiveNo ProjectArchived",
     ]);
     expect(screen.queryByText("Release branch")).toBeNull();
   });
@@ -118,7 +118,7 @@ describe("ThreadSearchOverlay", () => {
 
     await user.keyboard("{Enter}");
     expect(onOpenThread).toHaveBeenCalledWith(
-      expect.objectContaining({ threadId: "t3", archived: true, folderLabel: "No project" }),
+      expect.objectContaining({ threadId: "t3", archived: true, folderLabel: "No Project" }),
     );
   });
 

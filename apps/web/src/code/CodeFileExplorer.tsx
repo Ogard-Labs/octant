@@ -243,8 +243,8 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
 
       {incomplete ? (
         <p className="code-file-explorer__status" role="status">
-          Showing the first {MAX_CODE_FILE_EXPLORER_ENTRIES.toLocaleString()} entries. The file tree
-          is incomplete.
+          Showing the first {MAX_CODE_FILE_EXPLORER_ENTRIES.toLocaleString("en")} entries. The file
+          tree is incomplete.
         </p>
       ) : null}
 

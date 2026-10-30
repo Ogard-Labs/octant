@@ -88,7 +88,7 @@ describe("buildThreadSearchResults", () => {
       projects,
     });
 
-    expect(flattenThreadSearchHits(results)[0]?.folderLabel).toBe("No project");
+    expect(flattenThreadSearchHits(results)[0]?.folderLabel).toBe("No Project");
   });
 
   it("groups archived matches after live ones instead of dropping them", () => {

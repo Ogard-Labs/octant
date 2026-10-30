@@ -61,7 +61,7 @@ describe("WorkResearchPanel", () => {
   it("reports an empty Project honestly when ready", () => {
     render(<WorkResearchPanel briefs={[]} status="ready" />);
 
-    expect(screen.getByRole("status")).toHaveTextContent("This Project has no research briefs.");
+    expect(screen.getByRole("status")).toHaveTextContent("This Project has no research briefs");
   });
 
   it("shows each brief question and its provenance counts", () => {

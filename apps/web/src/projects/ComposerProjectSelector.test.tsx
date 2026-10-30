@@ -36,7 +36,7 @@ describe("ComposerProjectSelector", () => {
       />,
     );
     await userEvent.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
-    const row = screen.getByRole("option", { name: /^No project/ });
+    const row = screen.getByRole("option", { name: /^No Project/ });
     expect(row).toHaveTextContent("/Users/ada/Octant/Work");
     await userEvent.click(row);
     expect(onSelect).toHaveBeenCalledWith({
@@ -64,7 +64,7 @@ describe("ComposerProjectSelector", () => {
       />,
     );
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
-    const row = screen.getByRole("option", { name: /^No project/ });
+    const row = screen.getByRole("option", { name: /^No Project/ });
     // Native `disabled` drops the option from keyboard/activedescendant
     // discovery; aria-disabled keeps the inline reason reachable without hover.
     expect(row).toHaveAttribute("aria-disabled", "true");

@@ -151,7 +151,7 @@ function formatChangedFilesLabel(files: ThreadTaskChangedFiles): string {
   const diffstat =
     files.insertions === undefined || files.deletions === undefined
       ? undefined
-      : `+${files.insertions.toLocaleString()} −${files.deletions.toLocaleString()}`;
+      : `+${files.insertions.toLocaleString("en")} −${files.deletions.toLocaleString("en")}`;
   const stale = files.freshness === "stale" ? " · stale" : "";
   return `${count}${diffstat === undefined ? "" : ` ${diffstat}`}${stale}`;
 }

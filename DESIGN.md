@@ -82,6 +82,15 @@ but they do not own a second palette or visual language.
   still asks before writes and commands."
 - **One sentence of help.** A subtitle or row description is one sentence
   that says what the thing does. Longer explanations move to the docs.
+- **Numbers read in English.** Counts, sizes, and token figures use the
+  English separators whatever the system locale ("1,024", "4.1k"), because
+  the words around them are English: on a Norwegian Mac the dock read "4,1k
+  of 1 mill." beside a stats line reading "7.9k". A short token count in the context meter and Usage is
+  `compactTokenCount` ("41.2K", "1.2M"). Dates
+  and times still follow the locale, and a Canvas block keeps its own format.
+- **Empty states are short phrases.** An empty state's title has no closing
+  period ("Nothing archived", "No Projects match this view"); its detail line
+  is a sentence and keeps one.
 - **Name the host's computer from the host.** Copy about where something is
   kept or runs on the host says "this Mac" and "Keychain" only when the host
   reports macOS, and "this computer" and "credential store" otherwise. The
@@ -1457,7 +1466,7 @@ The directory provides search and All, Chat, Work, and Code filters. Project
 detail is thread-first, with memory, provider access, and canvases in compact
 expandable rows below the primary work. A Work Project other than the default
 folder also has a **Status file** row whose switch sits in place of the expand
-control: off by default, its copy says what turning it on keeps in the folder. Threads without a listed Project appear once in **No project**, a collapsible
+control: off by default, its copy says what turning it on keeps in the folder. Threads without a listed Project appear once in **No Project**, a collapsible
 folder row in the Project tree with the same nested-thread layout as Projects.
 It has no horizontal divider or separate section heading and is absent when empty.
 It is a navigation group, not a persisted Project. Rows are hairline rails, never cards;

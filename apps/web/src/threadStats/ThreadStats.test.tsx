@@ -107,15 +107,26 @@ function Harness(props: {
   );
 }
 
+// The dots between figures are drawn by CSS, so the figures are read one by one.
+function figures(line: HTMLElement): ReadonlyArray<string> {
+  return Array.from(line.querySelectorAll(".thread-stats__item"), (item) => item.textContent);
+}
+
 describe("the thread stats line", () => {
   it("states every reported figure under the composer", () => {
     const record = turn();
     render(<Harness summary={summaryOf([record])} />);
 
     const line = screen.getByTestId("thread-stats-line");
-    expect(line).toHaveTextContent(
-      "1 turn · ↑ 48k in · ↓ 3.1k out · cache 92% · 41 tok/s · 0.9 s first token · $0.01 est.",
-    );
+    expect(figures(line)).toEqual([
+      "1 turn",
+      "↑ 48k in",
+      "↓ 3.1k out",
+      "cache 92%",
+      "41 tok/s",
+      "0.9 s first token",
+      "$0.01 est.",
+    ]);
   });
 
   it("leads with the provider's account windows as the share left", () => {
@@ -234,7 +245,7 @@ describe("the thread stats line", () => {
     render(<Harness summary={summaryOf([record])} />);
 
     const line = screen.getByTestId("thread-stats-line");
-    expect(line).toHaveTextContent("↑ 48k in · ↓ 3.1k out · cache 92%");
+    expect(figures(line).join(" · ")).toContain("↑ 48k in · ↓ 3.1k out · cache 92%");
     expect(line).not.toHaveTextContent("tok/s");
     expect(line).not.toHaveTextContent("first token");
   });
@@ -304,7 +315,7 @@ describe("the stats line in a thread's composer", () => {
     const surface = container.querySelector(".thread-composer__surface");
     const line = screen.getByTestId("thread-stats-line");
     expect(surface?.nextElementSibling).toBe(line);
-    expect(line).toHaveTextContent("↑ 48k in · ↓ 3.1k out · cache 92%");
+    expect(figures(line).join(" · ")).toContain("↑ 48k in · ↓ 3.1k out · cache 92%");
     expect(within(line).queryByText("5h")).not.toBeInTheDocument();
     const strip = container.querySelector(".thread-composer__strip");
     expect(strip).toHaveTextContent("Project · branch");

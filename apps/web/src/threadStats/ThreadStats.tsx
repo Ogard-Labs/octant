@@ -1,6 +1,6 @@
 import { threadStats, threadStatsInputOf, type ThreadStat } from "@octant/domain";
 import { EyeOff } from "lucide-react";
-import { Fragment, useMemo } from "react";
+import { useMemo } from "react";
 import { useComposerContextMeterScope } from "../context/composerContextMeterScope";
 import { composerLimitWindows, type ComposerLimitWindow } from "../context/composerLimitWindows";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -89,24 +89,28 @@ function ThreadStatsLine(props: {
           {" · "}
         </span>
       ) : null}
-      {props.stats.map((stat, index) => (
-        <Fragment key={stat.key}>
-          {index === 0 ? null : (
-            <span aria-hidden="true" className="thread-stats__separator">
-              {" · "}
-            </span>
-          )}
-          {stat.hint === undefined ? (
-            <span className="thread-stats__item">{stat.text}</span>
-          ) : (
-            <OctantTooltip label={stat.hint} side="top">
-              <span className="thread-stats__item" data-hinted="true">
-                {stat.text}
-              </span>
-            </OctantTooltip>
-          )}
-        </Fragment>
-      ))}
+      {props.stats.length === 0 ? null : (
+        // Each figure draws its own leading dot, and this box clips whatever
+        // sits at its left edge, so a wrapped line never opens on a lone
+        // separator (seen with the dock open beside a thread).
+        <span className="thread-stats__figures">
+          <span className="thread-stats__figures-row">
+            {props.stats.map((stat) =>
+              stat.hint === undefined ? (
+                <span className="thread-stats__item" key={stat.key}>
+                  {stat.text}
+                </span>
+              ) : (
+                <OctantTooltip key={stat.key} label={stat.hint} side="top">
+                  <span className="thread-stats__item" data-hinted="true">
+                    {stat.text}
+                  </span>
+                </OctantTooltip>
+              ),
+            )}
+          </span>
+        </span>
+      )}
     </>
   );
   return (

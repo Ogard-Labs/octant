@@ -220,7 +220,7 @@ export function InboxView(props: InboxViewProps) {
         {attentionItems.length === 0 && decisionRows.length === 0 ? (
           <SurfaceEmpty
             icon={<Inbox size={20} strokeWidth={1.5} />}
-            title="No thread is waiting on you."
+            title="No thread is waiting on you"
             {...(props.onOpenBoard === undefined
               ? {}
               : {
@@ -270,7 +270,7 @@ export function InboxView(props: InboxViewProps) {
               {github.message}
             </OctantAlert>
           ) : github.page.items.length === 0 ? (
-            <SurfaceEmpty title="Nothing is assigned to you." />
+            <SurfaceEmpty title="Nothing is assigned to you" />
           ) : (
             <>
               {github.page.freshness.status === "stale" ? (
@@ -323,7 +323,7 @@ export function InboxView(props: InboxViewProps) {
               {linear.message}
             </OctantAlert>
           ) : linear.page.rows.length === 0 ? (
-            <SurfaceEmpty title="No Linear issues are assigned to you." />
+            <SurfaceEmpty title="No Linear issues are assigned to you" />
           ) : (
             <>
               {linear.page.hasNextPage ? (

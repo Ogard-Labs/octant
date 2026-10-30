@@ -28,7 +28,7 @@ describe("ProjectsDirectory", () => {
       within(directory).getByRole("searchbox", { name: "Search Projects" }),
       "missing",
     );
-    expect(within(directory).getByRole("status")).toHaveTextContent("No Projects match this view.");
+    expect(within(directory).getByRole("status")).toHaveTextContent("No Projects match this view");
     await user.click(within(directory).getByRole("button", { name: "Clear filters" }));
     expect(within(directory).getByRole("button", { name: /Octant, Code Project/ })).toBeVisible();
   });

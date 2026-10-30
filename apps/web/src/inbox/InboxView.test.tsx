@@ -119,7 +119,7 @@ describe("InboxView decisions", () => {
     const row = await screen.findByRole("group", { name: "Fix the parser asks you to decide" });
     await user.click(within(row).getByRole("button", { name: /Wait for review/ }));
     expect(await within(row).findByRole("status")).toHaveTextContent("A turn is already running.");
-    expect(screen.queryByText("No thread is waiting on you.")).not.toBeInTheDocument();
+    expect(screen.queryByText("No thread is waiting on you")).not.toBeInTheDocument();
   });
 });
 
@@ -138,7 +138,7 @@ describe("InboxView waiting subagents", () => {
     expect(within(row).getByText("Research subagent needs your approval")).toBeInTheDocument();
     expect(within(row).getByText("octant")).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Fix the parser asks you to decide" })).toBeVisible();
-    expect(screen.queryByText("No thread is waiting on you.")).not.toBeInTheDocument();
+    expect(screen.queryByText("No thread is waiting on you")).not.toBeInTheDocument();
     expect(within(row).queryByRole("button", { name: /Approve|Deny/ })).toBeNull();
 
     await user.click(within(row).getByRole("button", { name: "Review request" }));
@@ -158,7 +158,7 @@ describe("InboxView waiting agent approvals", () => {
 
     const row = await screen.findByRole("group", { name: "Quarterly report needs your approval" });
     expect(within(row).getByText("edit: summary.md")).toBeInTheDocument();
-    expect(screen.queryByText("No thread is waiting on you.")).not.toBeInTheDocument();
+    expect(screen.queryByText("No thread is waiting on you")).not.toBeInTheDocument();
     expect(within(row).queryByRole("button", { name: /Approve|Deny/ })).toBeNull();
 
     await user.click(within(row).getByRole("button", { name: "Review request" }));
@@ -260,7 +260,7 @@ describe("InboxView", () => {
       />,
     );
 
-    expect(screen.getByRole("status")).toHaveTextContent("No thread is waiting on you.");
+    expect(screen.getByRole("status")).toHaveTextContent("No thread is waiting on you");
     await user.click(screen.getByRole("button", { name: "Open the Board" }));
     expect(onOpenBoard).toHaveBeenCalledOnce();
   });

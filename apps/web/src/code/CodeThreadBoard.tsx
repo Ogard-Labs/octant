@@ -724,7 +724,7 @@ function cardFacts(
     const count = card.changedFiles.changedPathCount;
     facts.push({
       key: "files",
-      text: `${count} ${count === 1 ? "file" : "files"} +${card.changedFiles.insertions.toLocaleString()} −${card.changedFiles.deletions.toLocaleString()}`,
+      text: `${count} ${count === 1 ? "file" : "files"} +${card.changedFiles.insertions.toLocaleString("en")} −${card.changedFiles.deletions.toLocaleString("en")}`,
     });
   }
   facts.push({

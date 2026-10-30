@@ -286,8 +286,8 @@ export function ProviderUsageHistoryWorkspace(props: {
                   ? "Refresh to try again"
                   : "Collecting usage"
                 : busy && data.fromLastRead !== true
-                  ? `${data.totals.sessionCount.toLocaleString()} sessions so far`
-                  : `${data.totals.sessionCount.toLocaleString()} sessions`}
+                  ? `${data.totals.sessionCount.toLocaleString("en")} sessions so far`
+                  : `${data.totals.sessionCount.toLocaleString("en")} sessions`}
               {metric === "cost"
                 ? ` · ${costBasis === "apiEstimateUsd" ? "API-equivalent estimate" : "Provider-recorded cost"}`
                 : " · processed tokens"}
@@ -302,7 +302,7 @@ export function ProviderUsageHistoryWorkspace(props: {
                       aria-hidden="true"
                     />
                     {historyProviderName(provider.key, provider.label)}
-                    <small>{provider.totals.sessionCount.toLocaleString()} sessions</small>
+                    <small>{provider.totals.sessionCount.toLocaleString("en")} sessions</small>
                   </span>
                   <span>{displayValue(metricValue(provider, metric, costBasis), metric)}</span>
                 </li>
@@ -330,11 +330,11 @@ export function ProviderUsageHistoryWorkspace(props: {
                 ) : null}
                 <p>
                   {data.cost.unpricedRecordCount > 0
-                    ? `${data.cost.unpricedRecordCount.toLocaleString()} ${data.cost.unpricedRecordCount === 1 ? "request without pricing" : "requests without pricing"}. `
+                    ? `${data.cost.unpricedRecordCount.toLocaleString("en")} ${data.cost.unpricedRecordCount === 1 ? "request without pricing" : "requests without pricing"}. `
                     : ""}
                   {selectedPricedCount === undefined
                     ? ""
-                    : `${selectedPricedCount.toLocaleString()} of ${data.totals.requestCount.toLocaleString()} requests priced in this view. `}
+                    : `${selectedPricedCount.toLocaleString("en")} of ${data.totals.requestCount.toLocaleString("en")} requests priced in this view. `}
                   Costs are in USD and reflect the selected source, not a subscription invoice.
                 </p>
               </div>
@@ -451,7 +451,7 @@ export function ProviderUsageHistoryWorkspace(props: {
           {data !== undefined && data.totals.requestCount === 0 ? (
             <SurfaceEmpty
               detail="Check the source coverage below."
-              title="No provider history was found in this period."
+              title="No provider history was found in this period"
             />
           ) : null}
         </HistoryBlock>
@@ -517,7 +517,7 @@ function Metric(props: {
           : props.format === "money"
             ? dollars(props.value)
             : props.format === "percent"
-              ? new Intl.NumberFormat(undefined, {
+              ? new Intl.NumberFormat("en", {
                   style: "percent",
                   maximumFractionDigits: 1,
                 }).format(props.value)
@@ -526,8 +526,8 @@ function Metric(props: {
       {props.detail === undefined ? null : <small>{props.detail}</small>}
       {partial && props.value !== undefined ? (
         <small>
-          {props.coverage?.measured.toLocaleString()} of {props.coverage?.total.toLocaleString()}{" "}
-          requests measured
+          {props.coverage?.measured.toLocaleString("en")} of{" "}
+          {props.coverage?.total.toLocaleString("en")} requests measured
         </small>
       ) : null}
     </div>
@@ -563,7 +563,7 @@ function HistoryRow(props: {
       <td>
         {value === undefined || props.total === undefined || props.total === 0
           ? "—"
-          : new Intl.NumberFormat(undefined, {
+          : new Intl.NumberFormat("en", {
               style: "percent",
               maximumFractionDigits: 1,
               minimumFractionDigits: 1,

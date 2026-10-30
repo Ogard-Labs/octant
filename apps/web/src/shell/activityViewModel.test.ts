@@ -100,7 +100,7 @@ describe("buildSidebarActivityView", () => {
       label: "Yesterday",
       threads: [
         expect.objectContaining({
-          projectName: "No project",
+          projectName: "No Project",
           threadId: "yesterday",
         }),
       ],
@@ -165,7 +165,7 @@ describe("buildSidebarActivityView", () => {
       label: "Earlier",
       threads: [
         expect.objectContaining({
-          projectName: "No project",
+          projectName: "No Project",
           threadId: "undated",
         }),
       ],
