@@ -18,6 +18,7 @@ import {
   authorizeOwnerRequest,
   authorizePeer,
   clampDelegation,
+  decideHubFollow,
   decideRosterReplacement,
   decideStandIn,
   decideStandInHandback,
@@ -28,7 +29,9 @@ import {
   mergeStandInMembership,
   newMemberConfirmationSigningPayload,
   orderStandbys,
+  OWNER_ADMINISTRATION_SESSION_MS,
   OWNER_UNLOCK_LIFETIME_MS,
+  ownerPostureUnlockClass,
   ownerUnlockSigningPayload,
   reconcileHeldGrants,
   type StandInMembershipChanges,
@@ -527,6 +530,88 @@ describe("decideStandIn", () => {
   });
 });
 
+describe("decideHubFollow", () => {
+  const anchor = signed(roster(5, baseMembers, [2]));
+  // Standby 2 promoted itself: it signs as hub, the old hub is gone, the order is empty.
+  const promoted = (sequence = 6, members: ReadonlyArray<RosterMember> = promotedMembers) =>
+    signed(roster(sequence, members, []), "hub", 2);
+  const promotedMembers = [member(2, "hub"), member(3, "spoke"), member(4, "guest")];
+  const decide = (overrides: Partial<Parameters<typeof decideHubFollow>[0]> = {}) =>
+    decideHubFollow({
+      anchor,
+      heldSequence: 5,
+      selfMemberId: memberId(3),
+      grant: { items: ["roster", "standby"], actProjects: [] },
+      candidate: promoted(),
+      promoterKeyFingerprint: key(2),
+      silentForMs: 300_000,
+      failoverAfterMs: 300_000,
+      ...overrides,
+    });
+  const kind = (result: ReturnType<typeof decideHubFollow>) =>
+    result.status === "refused" ? result.kind : result.status;
+
+  it("follows a named standby's promotion for a spoke that ticked Standby once the old hub has been silent", () => {
+    expect(kind(decide())).toBe("follow");
+  });
+
+  it("leaves a spoke that did not tick Standby to accept the new hub itself", () => {
+    expect(kind(decide({ grant: { items: ["roster"], actProjects: [] } }))).toBe(
+      "standby-not-granted",
+    );
+    expect(kind(decide({ grant: undefined }))).toBe("standby-not-granted");
+  });
+
+  it("does not follow for a spoke that ticked Standby but unticked Roster", () => {
+    expect(kind(decide({ grant: { items: ["standby"], actProjects: [] } }))).toBe(
+      "roster-not-granted",
+    );
+  });
+
+  it("refuses a promotion from a member the last hub-signed roster did not name as standby", () => {
+    expect(kind(decide({ candidate: signed(roster(6, promotedMembers, []), "hub", 4) }))).toBe(
+      "not-signed-as-hub",
+    );
+    const impostor = [member(4, "hub"), member(3, "spoke")];
+    expect(kind(decide({ candidate: signed(roster(6, impostor, []), "hub", 4) }))).toBe(
+      "not-a-named-standby",
+    );
+    expect(kind(decide({ anchor: signed(roster(5, baseMembers, [])) }))).toBe(
+      "not-a-named-standby",
+    );
+    expect(kind(decide({ anchor: undefined }))).toBe("no-hub-roster");
+  });
+
+  it("refuses a promotion signed by a standby, or one that does not make the signer the hub", () => {
+    expect(kind(decide({ candidate: signed(roster(6, promotedMembers, []), "standby", 2) }))).toBe(
+      "not-signed-as-hub",
+    );
+    const stillStandby = [member(1, "hub"), member(2, "standby-hub"), member(3, "spoke")];
+    expect(kind(decide({ candidate: signed(roster(6, stillStandby, [2]), "hub", 2) }))).toBe(
+      "not-signed-as-hub",
+    );
+  });
+
+  it("refuses a key that is not the one the last hub-signed roster fingerprints", () => {
+    expect(kind(decide({ promoterKeyFingerprint: key(9) }))).toBe("key-mismatch");
+  });
+
+  it("refuses a roster whose sequence does not move forward", () => {
+    expect(kind(decide({ candidate: promoted(5) }))).toBe("stale-sequence");
+    expect(kind(decide({ candidate: promoted(4) }))).toBe("stale-sequence");
+  });
+
+  it("refuses a roster that does not list this spoke", () => {
+    expect(kind(decide({ candidate: promoted(6, [member(2, "hub"), member(4, "guest")]) }))).toBe(
+      "self-not-listed",
+    );
+  });
+
+  it("refuses while the old hub has not been silent for the whole failover time", () => {
+    expect(kind(decide({ silentForMs: 299_999 }))).toBe("hub-seen-recently");
+  });
+});
+
 describe("reconcileHeldGrants", () => {
   const held = roster(5, baseMembers);
   const laptopGrant = grant();
@@ -761,6 +846,48 @@ describe("authorizeOwnerRequest", () => {
       status: "refused",
       kind: "identity-mismatch",
     });
+  });
+
+  it("lets an open session cover an administration action but never an own-unlock one", () => {
+    expect(ask({ unlock: "session", unlockClass: "administration" }).status).toBe("allowed");
+    expect(ask({ unlock: "session", unlockClass: "own" })).toEqual({
+      status: "refused",
+      kind: "own-unlock-required",
+    });
+    expect(ask({ unlock: "session" })).toEqual({
+      status: "refused",
+      kind: "own-unlock-required",
+    });
+    expect(ask({ unlock: "fresh", unlockClass: "own" }).status).toBe("allowed");
+  });
+
+  it("still refuses a session from the hub, from a stranger, and where Owners is unticked", () => {
+    const session = { unlock: "session", unlockClass: "administration" } as const;
+    expect(ask({ ...session, memberId: memberId(1), identityKeyFingerprint: key(1) }).status).toBe(
+      "refused",
+    );
+    expect(ask({ ...session, memberId: memberId(5), identityKeyFingerprint: key(5) })).toEqual({
+      status: "refused",
+      kind: "not-an-owner",
+    });
+    expect(ask({ ...session, grant: undefined })).toEqual({
+      status: "refused",
+      kind: "owners-not-honored",
+    });
+  });
+});
+
+describe("the administration session", () => {
+  it("lasts five minutes, longer than one challenge", () => {
+    expect(OWNER_ADMINISTRATION_SESSION_MS).toBe(300_000);
+    expect(OWNER_ADMINISTRATION_SESSION_MS).toBeGreaterThan(OWNER_UNLOCK_LIFETIME_MS);
+  });
+
+  it("keeps Full access out of a session and lets every other posture in", () => {
+    expect(ownerPostureUnlockClass("full-access")).toBe("own");
+    for (const posture of ["auto-accept-edits", "approval-gated", "plan"]) {
+      expect(ownerPostureUnlockClass(posture)).toBe("administration");
+    }
   });
 });
 

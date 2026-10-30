@@ -134,13 +134,14 @@ export class AutomationCommandService {
       });
     }
     const now = this.#now();
+    const paused = command.initialLifecycle === "paused";
     const definition = validateAutomationDefinition(
       decodeAutomationDefinition({
         id: command.automationId,
         ...command.definition,
-        lifecycle: "enabled",
+        lifecycle: paused ? "paused" : "enabled",
         definitionRevision: 1,
-        ...this.#dueState(command.definition.trigger),
+        ...(paused ? { nextDueAt: null } : this.#dueState(command.definition.trigger)),
         createdBy: command.principal,
         updatedBy: command.principal,
         version: 1,

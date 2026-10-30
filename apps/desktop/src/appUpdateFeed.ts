@@ -1,4 +1,5 @@
-import { createHash, createPublicKey, timingSafeEqual, verify, type KeyObject } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
+import { createReleaseFeedVerifier, type ReleaseFeedVerifier } from "@octant/host-runtime";
 import { type AppReleaseRing, OCTANT_UPDATE_CHECK_DISCLOSURE } from "@octant/contracts/app-updates";
 
 /**
@@ -148,58 +149,17 @@ function isHttpsUrl(value: string): boolean {
   }
 }
 
-export interface FeedVerifier {
-  /**
-   * Whether this signature is one a key trusted for `ring` produced over these
-   * exact bytes.
-   */
-  readonly verify: (message: Uint8Array, signature: string, ring: AppReleaseRing) => boolean;
-  /** Whether any usable key is configured for this ring at all. */
-  readonly configured: (ring: AppReleaseRing) => boolean;
-}
+export type FeedVerifier = ReleaseFeedVerifier;
 
 /**
- * Ed25519 verification against the compiled-in release keys of each ring.
- *
- * Fails closed in every direction: no key for the ring, an unusable key, a
- * malformed signature, or a signature over different bytes all return false.
- * Nothing here can be persuaded to return true by the document it is checking.
+ * Ed25519 verification against the compiled-in release keys of each ring. The
+ * check itself is shared with a headless host, so the two cannot disagree on
+ * what a valid signature is; only the keys named above are this app's own.
  */
 export function createFeedVerifier(
   trustedKeys: Readonly<Record<AppReleaseRing, ReadonlyArray<string>>> = OCTANT_UPDATE_TRUSTED_KEYS,
 ): FeedVerifier {
-  const keysFor = (ring: AppReleaseRing): ReadonlyArray<KeyObject> =>
-    trustedKeys[ring].flatMap((publicKeyBase64) => {
-      const key = parsePublicKey(publicKeyBase64);
-      return key === undefined ? [] : [key];
-    });
-  return {
-    configured: (ring) => keysFor(ring).length > 0,
-    verify: (message, signature, ring) =>
-      keysFor(ring).some((key) => {
-        try {
-          return verify(null, message, key, Buffer.from(signature, "base64"));
-        } catch {
-          return false;
-        }
-      }),
-  };
-}
-
-function parsePublicKey(publicKeyBase64: string): KeyObject | undefined {
-  if (publicKeyBase64 === "") return undefined;
-  try {
-    const key = createPublicKey({
-      key: Buffer.from(publicKeyBase64, "base64"),
-      format: "der",
-      type: "spki",
-    });
-    // An unusable key is the same as no key, which keeps "we cannot check"
-    // from ever reading as "it checked out".
-    return key.asymmetricKeyType === "ed25519" ? key : undefined;
-  } catch {
-    return undefined;
-  }
+  return createReleaseFeedVerifier(trustedKeys);
 }
 
 export interface FeedFetchResult {

@@ -137,3 +137,58 @@ describe("an owner's unlock", () => {
     expect(service.issue({ ownerMemberId: OWNER, request }).status).toBe("issued");
   });
 });
+
+describe("the administration session", () => {
+  const other = "33333333-3333-4333-8333-333333333333";
+  const open = () => {
+    const clock = { now: 1_000_000 };
+    const service = new OwnerUnlockService({ now: () => clock.now, hostMemberId: () => HOST });
+    const session = service.openSession({ ownerMemberId: OWNER, ownerListStamp: "list-1" });
+    if (session === undefined) throw new Error("No session.");
+    const check = (overrides: { owner?: string; stamp?: string } = {}) =>
+      service.checkSession({
+        sessionId: session.sessionId,
+        ownerMemberId: overrides.owner ?? OWNER,
+        ownerListStamp: overrides.stamp ?? "list-1",
+      });
+    return { clock, service, session, check };
+  };
+
+  it("lasts exactly five minutes from the moment it opened", () => {
+    const { clock, session, check } = open();
+
+    expect(session.expiresAt).toBe(1_000_000 + 5 * 60_000);
+    clock.now += 5 * 60_000;
+    expect(check()).toEqual({ status: "open" });
+    clock.now += 1;
+    expect(check()).toEqual({ status: "refused", kind: "session-expired" });
+    expect(check()).toEqual({ status: "refused", kind: "no-such-session" });
+  });
+
+  it("belongs to the owner it opened for and to the owner list it opened against", () => {
+    const { check } = open();
+
+    expect(check({ owner: other })).toEqual({ status: "refused", kind: "session-wrong-owner" });
+    expect(check({ stamp: "list-2" })).toEqual({
+      status: "refused",
+      kind: "session-owner-changed",
+    });
+    expect(check()).toEqual({ status: "refused", kind: "no-such-session" });
+  });
+
+  it("is replaced when the same owner opens another, and ends when the owner is revoked", () => {
+    const { service, session, check } = open();
+    const second = service.openSession({ ownerMemberId: OWNER, ownerListStamp: "list-1" });
+
+    expect(second?.sessionId).not.toBe(session.sessionId);
+    expect(check()).toEqual({ status: "refused", kind: "no-such-session" });
+    service.revokeOwner(OWNER);
+    expect(
+      service.checkSession({
+        sessionId: second?.sessionId ?? "",
+        ownerMemberId: OWNER,
+        ownerListStamp: "list-1",
+      }),
+    ).toEqual({ status: "refused", kind: "no-such-session" });
+  });
+});

@@ -887,6 +887,9 @@ export const AutomationCommand = Schema.Union(
     kind: Schema.Literal("create-automation"),
     ...AutomationCommandFields,
     definition: AutomationDefinitionDraft,
+    // Omitted means enabled. A routine that must not run until a person resumes
+    // it is journaled paused from its first event, never created then paused.
+    initialLifecycle: Schema.optional(Schema.Literal("paused")),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("update-automation"),
