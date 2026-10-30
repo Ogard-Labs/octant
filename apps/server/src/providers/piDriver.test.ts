@@ -764,6 +764,27 @@ describe("Pi provider driver", () => {
     }
   });
 
+  it("carries a read-only app-managed tool through a Plan turn on a verified Pi release", async () => {
+    const tools = [
+      { name: "octant_code_diagnostics", inputSchema: { type: "object", properties: {} } },
+    ];
+    const { driver, starts } = fixture("1.1.0");
+    const scope = await Effect.runPromise(Scope.make());
+    const connection = await Effect.runPromise(
+      driver
+        .acquire({ instanceId, projectRoot: root, mode: "code" })
+        .pipe(Effect.provideService(Scope.Scope, scope)),
+    );
+    await Effect.runPromise(
+      connection.start({ sessionId, modelId, executionPolicy: "plan", tools }),
+    );
+    expect(starts.at(-1)?.tools).toEqual(tools);
+    await expect(
+      Effect.runPromise(connection.send({ sessionId, prompt: "diagnose", attachments: [], tools })),
+    ).resolves.toBeUndefined();
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+  });
+
   it("refuses an app-managed session on an unverified Pi runtime", async () => {
     const { driver } = fixture();
     const scope = await Effect.runPromise(Scope.make());
@@ -1058,7 +1079,18 @@ describe("Pi provider driver", () => {
           executionPolicy: "plan",
         }),
       );
+      // Without the caller's Plan-filtered set, Plan falls back to no tools
+      // rather than the full catalogue the session was first opened with.
       expect(starts.at(-1)?.tools).toBeUndefined();
+      await Effect.runPromise(
+        connection.resume({
+          sessionId,
+          resumeCursor: handle.resumeCursor!,
+          executionPolicy: "plan",
+          tools: [tool],
+        }),
+      );
+      expect(starts.at(-1)?.tools).toEqual([tool]);
       await Effect.runPromise(connection.stop(sessionId));
       await Effect.runPromise(Scope.close(scope, Exit.void));
     },
