@@ -89,6 +89,13 @@ export const HubWakeReason = Schema.Literal(
 export type HubWakeReason = typeof HubWakeReason.Type;
 
 /**
+ * Why a spoke took a promoted standby as its hub without a person. The journal
+ * keeps this word beside the change.
+ */
+export const HubFollowReason = Schema.Literal("standby-granted-hub-silent");
+export type HubFollowReason = typeof HubFollowReason.Type;
+
+/**
  * What the journal keeps of a membership change: who petitioned, what changed,
  * and which member and roster sequence it concerned. Keys, pins, and codes
  * stay out.
@@ -105,6 +112,8 @@ export const HubMembershipChangedPayload = Schema.Struct({
   wakeCount: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   /** For a wake change: why a nudge came to nothing. */
   wakeReason: Schema.optional(HubWakeReason),
+  /** For a new hub accepted without a person: why. */
+  followReason: Schema.optional(HubFollowReason),
   /** For a push forward or refusal: the size of the delivery request in bytes, never its content. */
   pushBytes: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   /** For a push refusal: why. */

@@ -7,7 +7,8 @@
 // and a routine authored by the spoke's own principal. The mirrored update feed
 // is signed with a key the spoke trusts, so the signature check is the real one.
 
-import { generateKeyPairSync, sign, verify, type KeyObject } from "node:crypto";
+import { generateKeyPairSync, sign, type KeyObject } from "node:crypto";
+import { createReleaseFeedVerifier } from "@octant/host-runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   decodeHubOfferBody,
@@ -172,12 +173,10 @@ function feedSigner() {
       signature: sign(null, canonicalReleaseBytes(signed.release), key).toString("base64"),
     };
   };
-  const trusts = (publicKey: KeyObject) => (message: Uint8Array, signature: string) => {
-    try {
-      return verify(null, message, publicKey, Buffer.from(signature, "base64"));
-    } catch {
-      return false;
-    }
+  // The same check a headless host runs, with this key as the one every ring trusts.
+  const trusts = (publicKey: KeyObject) => {
+    const der = publicKey.export({ format: "der", type: "spki" }).toString("base64");
+    return createReleaseFeedVerifier({ stable: [der], preview: [der], candidate: [der] }).verify;
   };
   return { keys, release, signFeed, trusts };
 }

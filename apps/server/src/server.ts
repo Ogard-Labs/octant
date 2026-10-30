@@ -997,6 +997,7 @@ export function startOctantServer(
     const {
       automationNotificationRoutes,
       automationRoutes,
+      automationCommandService,
       automationScheduler,
       completedThreadArchiveSweep,
       hasPushStanding,
@@ -1192,6 +1193,7 @@ export function startOctantServer(
       threadExportService,
       agentMessageService,
       authenticatedProductDispatch,
+      automationCommandService,
       automationScheduler,
       browserCaptureStore,
       canvasRoutes,
