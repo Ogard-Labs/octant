@@ -9,6 +9,15 @@ builds on: [modes and checkout binding](../architecture.md#modes-chat-work-and-c
 [persistence](../architecture.md#persistence), and
 [security and authority](../architecture.md#security-and-authority).
 
+**Withdrawn 2026-10-29 (maintainer decision): out of scope.** An agent that
+needs another machine uses its own provider tools, and Octant on a person's
+other computers joins a hub. The entry points are removed: Settings › SSH
+targets, the remote Projects sidebar group, the composer and Project selector
+offers, the desktop bridge, and the `octant ssh-target` and `octant executor`
+commands. The runtime, its seams, and its stored data are removed next; until
+then the server code below stays but nothing reaches it. The rest of this
+document describes the feature as it was built.
+
 **Delivery state.** Accepted 2026-10-26. Slices 2, 3, 4, and 5 are built. Slice 2
 is the admission policy and contracts: the schemas in
 `packages/contracts/src/sshTarget.ts` and the pure decision in
