@@ -92,6 +92,7 @@ import {
   takeReplacedProcessId,
   waitForReplacedProcessExit,
 } from "./portableImageUpdate";
+import { createQuitShortcutGuard } from "./quitShortcutGuard";
 import { buildApplicationMenuTemplate } from "./applicationMenu";
 import { resolveUpdateFeedBaseUrl } from "./appUpdateFeed";
 import {
@@ -4287,16 +4288,27 @@ function recoverWindowAfterRendererExit(reason: string): void {
   requestActiveWindow();
 }
 
+const quitShortcutGuard = createQuitShortcutGuard({
+  now: () => performance.now(),
+  showNotice: () => {
+    const window = BrowserWindow.getFocusedWindow() ?? mainWindow;
+    if (window === undefined || window.isDestroyed()) return false;
+    window.webContents.send(IPC_CHANNELS.quitShortcutHint);
+    return true;
+  },
+  quit: () => {
+    quitCanPrompt = true;
+    app.quit();
+  },
+});
+
 function installApplicationMenu(): void {
   if (process.platform !== "darwin") return;
   Menu.setApplicationMenu(
     Menu.buildFromTemplate(
       buildApplicationMenuTemplate({
         appName: app.name,
-        onQuit: () => {
-          quitCanPrompt = true;
-          app.quit();
-        },
+        onQuit: (request) => quitShortcutGuard.request(request),
         onOpenSettings: () => {
           const window = BrowserWindow.getFocusedWindow() ?? mainWindow;
           if (window === undefined || window.isDestroyed()) return;

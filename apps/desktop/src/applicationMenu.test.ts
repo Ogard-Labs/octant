@@ -39,7 +39,9 @@ describe("native application menu", () => {
       : undefined;
     expect(quit?.accelerator).toBe("CmdOrCtrl+Q");
     quit?.click?.({} as never, {} as never, {} as never);
-    expect(onQuit).toHaveBeenCalledOnce();
+    quit?.click?.({} as never, {} as never, { triggeredByAccelerator: true } as never);
+    expect(onQuit).toHaveBeenNthCalledWith(1, { viaShortcut: false });
+    expect(onQuit).toHaveBeenNthCalledWith(2, { viaShortcut: true });
   });
 
   it("retains the standard File, Edit, View, and Window menus", () => {

@@ -318,6 +318,7 @@ export interface OctantHostBridge {
   ) => () => void;
   readonly subscribeCodeDeepLinks: (listener: (target: unknown) => void) => () => void;
   readonly subscribeOpenSettings: (listener: () => void) => () => void;
+  readonly subscribeQuitShortcutHint: (listener: () => void) => () => void;
   readonly subscribeStartNewAgent: (listener: () => void) => () => void;
   /**
    * Pairs with another computer from its pasted app pairing code. Main reads
@@ -888,6 +889,11 @@ export function createHostBridge(
       const receive: SettingsOpenListener = () => listener();
       ipc.on(IPC_CHANNELS.openSettings, receive);
       return () => ipc.removeListener(IPC_CHANNELS.openSettings, receive);
+    },
+    subscribeQuitShortcutHint: (listener: () => void) => {
+      const receive: SettingsOpenListener = () => listener();
+      ipc.on(IPC_CHANNELS.quitShortcutHint, receive);
+      return () => ipc.removeListener(IPC_CHANNELS.quitShortcutHint, receive);
     },
     subscribeStartNewAgent: (listener: () => void) => {
       const receive: AgentStartListener = () => listener();

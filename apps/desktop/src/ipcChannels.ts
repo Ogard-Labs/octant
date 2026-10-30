@@ -58,6 +58,7 @@ export const DESKTOP_IPC_CHANNELS = {
   openCodeCheckoutInApplication: "octant:code:open-checkout-in-application",
   openInNewWindow: "octant:window:open-project",
   openSettings: "octant:menu:open-settings",
+  quitShortcutHint: "octant:menu:quit-shortcut-hint",
   previewHandoff: "octant:preview:handoff",
   requestCodeOperationApproval: "octant:code:request-operation-approval",
   updateCodeOperationApprovalAnchor: "octant:code:update-operation-approval-anchor",

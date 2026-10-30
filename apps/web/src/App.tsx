@@ -513,6 +513,9 @@ const NO_CODE_THREADS: ReadonlyArray<never> = [];
 const NO_CODE_CHECKOUTS: ReadonlyArray<never> = [];
 const NO_COMPUTER_SNAPSHOTS: ReadonlyArray<never> = [];
 
+// Matches the desktop's double-press window for ⌘Q.
+const QUIT_HINT_VISIBLE_MS = 1500;
+
 export function App(props: AppProps) {
   const [locationLaunch] = useState(() =>
     launchFromLocation(window.location.href, tabLaunchMemory()),
@@ -1563,6 +1566,7 @@ function LaunchedShell(
   // The row menu closes before this operation finishes. Keep its progress or
   // result available until the user dismisses it or a later operation replaces it.
   const [threadExportNotice, setThreadExportNotice] = useState<string>();
+  const [quitHintVisible, setQuitHintVisible] = useState(false);
   // The palette opens on what is waiting for the person. It reads the host's
   // list each time it opens, and only where the host lists it at all.
   const pendingRequests = usePendingRequests(pendingRequestClient);
@@ -2387,6 +2391,16 @@ function LaunchedShell(
       latest.startNewThreadDraft(latest.workspace?.activeMode ?? "chat");
     });
   }, [props.hostBridge?.subscribeStartNewAgent]);
+  useEffect(() => {
+    const subscribe = props.hostBridge?.subscribeQuitShortcutHint;
+    if (subscribe === undefined) return;
+    return subscribe(() => setQuitHintVisible(true));
+  }, [props.hostBridge?.subscribeQuitShortcutHint]);
+  useEffect(() => {
+    if (!quitHintVisible) return;
+    const timer = setTimeout(() => setQuitHintVisible(false), QUIT_HINT_VISIBLE_MS);
+    return () => clearTimeout(timer);
+  }, [quitHintVisible]);
   useEffect(() => {
     const subscribe = props.hostBridge?.subscribeOpenSettings;
     if (subscribe === undefined) return;
@@ -7122,7 +7136,7 @@ function LaunchedShell(
           projectAnnouncementSequence={projectController.announcementSequence}
         />
       </ShellFrame>
-      {threadExportNotice !== undefined || updateReadyNotice ? (
+      {threadExportNotice !== undefined || updateReadyNotice || quitHintVisible ? (
         <div className="toast-stack">
           {updateReadyNotice ? (
             <OctantToast
@@ -7135,6 +7149,13 @@ function LaunchedShell(
               onDismiss={dismissUpdateReadyNotice}
               title="Update downloaded"
               tone="success"
+            />
+          ) : null}
+          {quitHintVisible ? (
+            <OctantToast
+              detail="Press ⌘Q again to quit Octant"
+              onDismiss={() => setQuitHintVisible(false)}
+              title="Quit Octant?"
             />
           ) : null}
           {threadExportNotice === undefined ? null : (

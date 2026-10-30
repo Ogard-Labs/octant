@@ -333,6 +333,7 @@ describe("desktop preload bridge", () => {
       "subscribeMenuBarTask",
       "subscribeOpenSettings",
       "subscribeProjectWindowCapability",
+      "subscribeQuitShortcutHint",
       "subscribeRemoteServerPageSigning",
       "subscribeResolvedMaterial",
       "subscribeResolvedSidebarVibrancy",
@@ -971,6 +972,28 @@ describe("desktop preload bridge", () => {
     expect(listener).toHaveBeenCalledOnce();
     expect(ipc.on).toHaveBeenCalledWith(IPC_CHANNELS.openSettings, registered);
     expect(ipc.removeListener).toHaveBeenCalledWith(IPC_CHANNELS.openSettings, registered);
+  });
+
+  it("forwards the quit shortcut hint through its fixed channel", () => {
+    let registered: ((event: unknown) => void) | undefined;
+    const ipc: IpcRendererPort = {
+      invoke: vi.fn(),
+      on: vi.fn((_channel, listener) => {
+        registered = listener as (event: unknown) => void;
+      }),
+      removeListener: vi.fn(),
+    };
+    const listener = vi.fn();
+    const unsubscribe = createHostBridge(ipc, projectWindowCapability).subscribeQuitShortcutHint(
+      listener,
+    );
+
+    registered?.({});
+    unsubscribe();
+
+    expect(listener).toHaveBeenCalledOnce();
+    expect(ipc.on).toHaveBeenCalledWith(IPC_CHANNELS.quitShortcutHint, registered);
+    expect(ipc.removeListener).toHaveBeenCalledWith(IPC_CHANNELS.quitShortcutHint, registered);
   });
 
   it("maps private listener status and enable/disable through fixed channels without secrets", async () => {

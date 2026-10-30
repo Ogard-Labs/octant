@@ -3,7 +3,8 @@ import type { MenuItemConstructorOptions } from "electron";
 export interface ApplicationMenuOptions {
   readonly appName: string;
   readonly onOpenSettings: () => void;
-  readonly onQuit: () => void;
+  /** `viaShortcut` is true when the ⌘Q accelerator, not a pointer click, chose Quit. */
+  readonly onQuit: (request: { readonly viaShortcut: boolean }) => void;
 }
 
 /** Standard macOS application menu plus Octant's shared Settings surface. */
@@ -33,7 +34,8 @@ export function buildApplicationMenuTemplate(
         // event-driven termination that nobody can answer.
         {
           accelerator: "CmdOrCtrl+Q",
-          click: options.onQuit,
+          click: (_item, _window, event) =>
+            options.onQuit({ viaShortcut: event?.triggeredByAccelerator === true }),
           label: `Quit ${options.appName}`,
         },
       ],
