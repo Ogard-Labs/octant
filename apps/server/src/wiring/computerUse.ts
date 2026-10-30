@@ -578,6 +578,25 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     offeredDesktopProviders: () => leasableProvidersOf(desktopLeases.destination()),
     stopComputerSettingsWatch,
     stopDesktopLeases,
+    /**
+     * Where a send that names no destination acts on a host with no screen of
+     * its own: the thread's one running desktop, if it has exactly one.
+     */
+    threadDesktopDestination: (thread: { readonly id: unknown }) => {
+      if (desktopLeases.destination().status !== "leasable") return undefined;
+      const running = persistence.desktopLeaseProjection
+        .list()
+        .filter(
+          ({ lease }) =>
+            lease.state === "ready" &&
+            lease.owner.mode === "code" &&
+            String(lease.owner.threadId) === String(thread.id),
+        );
+      const [only] = running;
+      return running.length === 1 && only !== undefined
+        ? ({ kind: "desktop-lease", leaseId: only.lease.leaseId } as const)
+        : undefined;
+    },
     webAssets,
   };
 }

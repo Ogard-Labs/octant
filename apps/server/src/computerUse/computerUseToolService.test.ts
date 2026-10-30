@@ -72,6 +72,8 @@ function fixture(overrides?: {
   readonly namesSources?: boolean;
   /** The owner the turn's tool is offered to; this Mac's approval-gated Chat by default. */
   readonly toolOwner?: ComputerUseOwner;
+  /** A host with no screen of its own, whose only destination is a lease. */
+  readonly leasableOnly?: boolean;
   /** Reads the thread's real outside-content mark in place of the fixture's flag. */
   readonly marks?: {
     readonly ingested: () => boolean;
@@ -102,10 +104,19 @@ function fixture(overrides?: {
         update: "current",
       }),
       configure: async () => {},
-      reserve: async () => true,
+      reserve: async () => overrides?.leasableOnly !== true,
       execute,
       release,
     },
+    ...(overrides?.leasableOnly === true
+      ? {
+          destination: () => ({
+            status: "leasable" as const,
+            kind: "disposable-desktop" as const,
+            leasable: [],
+          }),
+        }
+      : {}),
     settings: () => settings,
     authority: () => authority,
     ownerIsCurrent: () => current,
@@ -626,6 +637,24 @@ describe("Computer offered on every eligible turn", () => {
     const f = fixture();
     try {
       expect(f.tools.definitions.map((definition) => definition.name)).toEqual(["octant_computer"]);
+    } finally {
+      await f.service.close();
+    }
+  });
+
+  it("tells a host with no screen to start a desktop instead of asking for macOS permissions", async () => {
+    const f = fixture({ leasableOnly: true });
+    try {
+      const outcome = await f.tools.execute({
+        name: "octant_computer",
+        inputJson: '{"operation":"apps"}',
+      });
+      expect(outcome).toMatchObject({
+        isError: true,
+        result: { kind: "refused", reason: "no-destination" },
+      });
+      expect(JSON.stringify(outcome)).toContain("Desktop tab");
+      expect(JSON.stringify(outcome)).not.toContain("macOS");
     } finally {
       await f.service.close();
     }

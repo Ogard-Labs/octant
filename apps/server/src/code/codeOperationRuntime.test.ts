@@ -5981,6 +5981,9 @@ function runtimeFixture(options: {
   browserAutomation?: Parameters<typeof createCodeOperationRuntime>[0]["browserAutomation"];
   appleToolchain?: Parameters<typeof createCodeOperationRuntime>[0]["appleToolchain"];
   computerUseTools?: Parameters<typeof createCodeOperationRuntime>[0]["computerUseTools"];
+  threadDesktopDestination?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["threadDesktopDestination"];
   resolveSelectedExtensions?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["resolveSelectedExtensions"];
@@ -6284,6 +6287,9 @@ function runtimeFixture(options: {
       environment: {},
     }),
     resolveProviderDriver: options.resolveProviderDriver ?? (async () => options.provider),
+    ...(options.threadDesktopDestination === undefined
+      ? {}
+      : { threadDesktopDestination: options.threadDesktopDestination }),
     ...(options.computerUseTools === undefined
       ? {}
       : { computerUseTools: options.computerUseTools }),
@@ -7695,6 +7701,68 @@ it("records an agent message delivered once the provider accepted the turn that 
   await vi.waitFor(() => expect(lost.fixture.runtimeWorks().at(-1)?.state).toBe("failed"));
   expect(lost.confirmAgentMessagesDelivered).not.toHaveBeenCalled();
   lost.fixture.close();
+});
+
+it("binds the Computer tool to the thread's running desktop when the send names none", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const connection = providerConnection(queue);
+  const bindings: Array<
+    Parameters<NonNullable<Parameters<typeof createCodeOperationRuntime>[0]["computerUseTools"]>>[0]
+  > = [];
+  const destination = {
+    kind: "desktop-lease" as const,
+    leaseId: decodeDesktopLeaseId("95000000-0000-4000-8000-000000000002"),
+  };
+  const fixture = runtimeFixture({
+    provider: providerDriver(connection),
+    supportsAppManagedTools: true,
+    threadDesktopDestination: () => destination,
+    computerUseTools: (input) => {
+      bindings.push(input);
+      return {
+        definitions: [{ name: "octant_computer", inputSchema: { type: "object" } }],
+        execute: async () => ({ result: { kind: "apps", apps: [] } }),
+      };
+    },
+  });
+  await fixture.runtime.execute(windowId, {
+    kind: "start-provider-turn",
+    operationId: operationId(90),
+    threadId,
+    checkoutId,
+    sessionId,
+    prompt: fixture.prompt,
+  });
+  await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+  expect(bindings.map((binding) => binding.destination)).toEqual([destination, destination]);
+  await fixture.runtime.close();
+  fixture.close();
+});
+
+it("starts a turn without Computer when the thread's running desktop cannot be bound to it", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const connection = providerConnection(queue);
+  const fixture = runtimeFixture({
+    provider: providerDriver(connection),
+    supportsAppManagedTools: true,
+    threadDesktopDestination: () => ({
+      kind: "desktop-lease" as const,
+      leaseId: decodeDesktopLeaseId("95000000-0000-4000-8000-000000000002"),
+    }),
+    // Plan, or a tool allowlist without Computer, offers no tool set.
+    computerUseTools: () => undefined,
+  });
+  await fixture.runtime.execute(windowId, {
+    kind: "start-provider-turn",
+    operationId: operationId(91),
+    threadId,
+    checkoutId,
+    sessionId,
+    prompt: fixture.prompt,
+  });
+  await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+  await fixture.runtime.close();
+  fixture.close();
 });
 
 it("binds the Computer tool to the desktop the send named and asks its approvals in the thread", async () => {

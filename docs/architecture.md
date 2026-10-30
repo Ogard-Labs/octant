@@ -455,7 +455,8 @@ ignored; the composers drop it from a restored draft with a note.
   tokens or fewer, saying what the tool is for, that it asks first, and that
   what it reads is data. Detail stays behind the tool's `help` or `describe`.
 - **Destination.** A send names a disposable desktop by its destination alone;
-  without one, Computer acts on this Mac.
+  without one, Computer acts on this Mac, or on a screenless host's one running
+  desktop of the thread.
 
 Dropping the chip widens what an agent may _ask_ for, since any eligible turn
 can request control, including one that has read hostile content. The
