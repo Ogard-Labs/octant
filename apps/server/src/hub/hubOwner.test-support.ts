@@ -10,11 +10,27 @@ import {
   sign as cryptoSign,
   type KeyObject,
 } from "node:crypto";
-import { OWNER_IDENTITY_KEY_HEADER, OWNER_UNLOCK_HEADER } from "@octant/contracts";
+import { Schema } from "effect";
+import {
+  OWNER_IDENTITY_KEY_HEADER,
+  OWNER_SESSION_HEADER,
+  OWNER_UNLOCK_HEADER,
+  ProviderInstance,
+  type OwnerPosture,
+  type OwnerPostureChangeRequest,
+  type OwnerPostureSubject,
+} from "@octant/contracts";
 import { ownerUnlockSigningPayload } from "@octant/domain";
 import { publicKeyFingerprint } from "./hubCrypto";
 import type { HubTestHost, HubTestNetwork } from "./hubHost.test-support";
 import { HUB_LINK_HEADER, signHubLinkRequest } from "./hubLink";
+import { createProviderCredentialCopyBroker } from "./ownerCredentialBroker";
+import type {
+  CredentialCopyBroker,
+  CredentialReadResult,
+  CredentialStoreResult,
+} from "./ownerCredentialCopy";
+import type { OwnerPostureChange, OwnerPostureHost, OwnerPostureRead } from "./ownerPostureHost";
 import { createPinnedHubTransport } from "./pinnedHubTransport";
 
 export interface SoftwareAuthenticator {
@@ -109,6 +125,8 @@ export async function ownerCall(input: {
   readonly unlock?: OwnerUnlockChoice;
   /** Send the request without the identity key header, as a client that forgot it would. */
   readonly omitIdentityKey?: true;
+  /** An administration session id to present beside the signed request, instead of a challenge answer. */
+  readonly session?: string;
 }): Promise<OwnerCallResult> {
   const method = input.method ?? "POST";
   const body = input.body === undefined ? "" : JSON.stringify(input.body);
@@ -128,7 +146,9 @@ export async function ownerCall(input: {
       method: sendMethod,
       path: route,
       body: text,
-      now: Date.now(),
+      // Signed on the host's clock, so a test that moves it past the minutes an
+      // unlock session lasts is not refused as stale before the session is judged.
+      now: Date.now() + target.clock.offset,
     });
     const response = await fetchPinned(`${target.origin}${route}`, {
       method: sendMethod,
@@ -139,6 +159,9 @@ export async function ownerCall(input: {
           : { [OWNER_IDENTITY_KEY_HEADER]: device.hostPublicKey }),
         ...(sendMethod === "GET" ? {} : { "content-type": "application/json" }),
         ...(proof === undefined ? {} : { [OWNER_UNLOCK_HEADER]: proof }),
+        ...(input.session === undefined || route === "/api/hub/owner/challenge"
+          ? {}
+          : { [OWNER_SESSION_HEADER]: input.session }),
       },
       ...(sendMethod === "GET" ? {} : { body: text }),
     });
@@ -185,4 +208,106 @@ export async function ownerCall(input: {
   }
   const answered = await send(input.route, method, body, proofHeader);
   return proofHeader === undefined ? answered : { ...answered, proofHeader };
+}
+
+/**
+ * A host's credential broker as a test sees it: which rows exist, what they hold,
+ * and which are subscription sign-ins. It is the real copy broker over an
+ * in-memory store whose reads and writes take a turn, so two copies that race
+ * for one row meet the same gap a keychain gives them.
+ */
+export class TestCredentialBroker implements CredentialCopyBroker {
+  /** Provider rows that send an API key, by the name a copy uses. */
+  readonly providers = new Set<string>();
+  /** Sign-ins a provider's own app holds; a copy of one is refused. */
+  readonly subscriptions = new Set<string>();
+  readonly keys = new Map<string, string>();
+  readonly stores: string[] = [];
+  readonly #broker: CredentialCopyBroker = createProviderCredentialCopyBroker({
+    readProviderInstances: () => [
+      ...[...this.providers].map((id) => testProviderInstance(id, "api-key")),
+      ...[...this.subscriptions].map((id) => testProviderInstance(id, "subscription")),
+    ],
+    credentials: {
+      has: async (name) => {
+        await nextTurn();
+        return this.keys.has(name);
+      },
+      readStored: async (name) => this.keys.get(name) ?? "",
+      set: async (name, value) => {
+        await nextTurn();
+        this.keys.set(name, value);
+        this.stores.push(name);
+      },
+      delete: async (name) => {
+        this.keys.delete(name);
+      },
+    },
+  });
+
+  read(name: string): Promise<CredentialReadResult> {
+    return this.#broker.read(name);
+  }
+
+  store(name: string, value: string): Promise<CredentialStoreResult> {
+    return this.#broker.store(name, value);
+  }
+}
+
+const nextTurn = () => new Promise<void>((resolve) => setTimeout(resolve, 1));
+const decodeProviderInstance = Schema.decodeUnknownSync(ProviderInstance);
+
+function testProviderInstance(id: string, authentication: "api-key" | "subscription") {
+  const at = "2026-10-30T00:00:00.000Z";
+  return decodeProviderInstance({
+    id,
+    displayName: "Claude",
+    driverKind: "claude",
+    configuration: { kind: "claude-agent-sdk", binaryPath: "/usr/bin/claude", authentication },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1,
+    createdAt: at,
+    updatedAt: at,
+  });
+}
+
+/** A host's postures as a test sees them: seeded by subject, and every accepted change recorded. */
+export class TestPostureHost implements OwnerPostureHost {
+  readonly postures = new Map<string, OwnerPosture>();
+  readonly changes: OwnerPostureChangeRequest[] = [];
+
+  seed(posture: OwnerPosture): void {
+    this.postures.set(JSON.stringify(posture.subject), posture);
+  }
+
+  async read(subject: OwnerPostureSubject): Promise<OwnerPostureRead> {
+    const found = this.postures.get(JSON.stringify(subject));
+    return found === undefined
+      ? { status: "refused", kind: "not-found" }
+      : { status: "read", posture: found };
+  }
+
+  async change(request: OwnerPostureChangeRequest): Promise<OwnerPostureChange> {
+    const key = JSON.stringify(request.subject);
+    if (!this.postures.has(key)) return { status: "refused", kind: "not-found" };
+    // The host's own rule, as a window meets it: a thread keeps Full access only
+    // where its Project remembers it. The test host has no Projects, so it asks
+    // for the default to be set on the Project first.
+    if (
+      request.subject.kind === "code-thread" &&
+      request.posture === "full-access" &&
+      request.persistence === "project-default"
+    ) {
+      return { status: "refused", kind: "project-default-not-enabled" };
+    }
+    this.changes.push(request);
+    const next: OwnerPosture = {
+      subject: request.subject,
+      posture: request.posture,
+      persistence: request.persistence,
+    };
+    this.postures.set(key, next);
+    return { status: "changed", posture: next };
+  }
 }

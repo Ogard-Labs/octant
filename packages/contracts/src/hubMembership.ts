@@ -4,6 +4,7 @@ import { HubGrantItem, HubMemberId, RosterMember, SignedHubRoster } from "./hubA
 import { HubPushReason } from "./hubPush";
 import { HubOfferId, HubOfferKind, HubProvisionMode, HubProvisionReason } from "./hubProvision";
 import { HUB_WAKE_MAX_SPOKES, HubWakeSpokeTimes } from "./hubWake";
+import { ProviderExecutionPolicy } from "./providers";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const digest = Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/));
@@ -63,6 +64,12 @@ export const HubMembershipChange = Schema.Literal(
   "provision-applied",
   "provision-dismissed",
   "provision-refused",
+  "owner-session-opened",
+  "owner-posture-changed",
+  "credential-ticket-issued",
+  "credential-copy-sent",
+  "credential-copy-received",
+  "credential-copy-refused",
 );
 export type HubMembershipChange = typeof HubMembershipChange.Type;
 
@@ -116,6 +123,14 @@ export const HubMembershipChangedPayload = Schema.Struct({
   provisionKind: Schema.optional(HubOfferKind),
   provisionMode: Schema.optional(HubProvisionMode),
   provisionReason: Schema.optional(HubProvisionReason),
+  /**
+   * For an owner posture change: the posture the owner device set. For a
+   * sign-in copy: the name of the sign-in, never its value, and why one was
+   * refused.
+   */
+  posture: Schema.optional(ProviderExecutionPolicy),
+  credentialName: Schema.optional(bounded(128)),
+  credentialReason: Schema.optional(bounded(64)),
 }).annotations(strict);
 export type HubMembershipChangedPayload = typeof HubMembershipChangedPayload.Type;
 export const decodeHubMembershipChangedPayload = Schema.decodeUnknownSync(

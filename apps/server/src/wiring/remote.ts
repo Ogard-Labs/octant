@@ -60,6 +60,10 @@ import { createWorkDelegationHost } from "../hub/workDelegationHost";
 import { createHubAdministrationRouteHandler } from "../hub/hubAdministrationRoutes";
 import { createHubLinkRouteHandler } from "../hub/hubLinkRoutes";
 import { createHubOwnerRouteHandler } from "../hub/hubOwnerRoutes";
+import { OwnerCredentialCopyService } from "../hub/ownerCredentialCopy";
+import { createProviderCredentialCopyBroker } from "../hub/ownerCredentialBroker";
+import { createReadingPostureHost } from "../hub/ownerPostureHost";
+import { createPeerCredentialRouteHandler } from "../hub/peerCredentialRoutes";
 import { OwnerUnlockService } from "../hub/ownerUnlock";
 import { createHubMembershipJournal } from "../hub/hubMembershipJournal";
 import { FailoverService } from "../hub/failoverService";
@@ -375,6 +379,7 @@ export function wireRemote(deps: RemoteDependencies) {
           (async (request) =>
             (await hubLinkRoutes(request)) ??
             (await peerDelegationRoutes(request)) ??
+            (await peerCredentialRoutes(request)) ??
             hubOwnerRoutes(request)),
         remoteServerGrants: services.remoteServerGrants ?? remoteServerGrantGatewayPort,
         serve: options.remoteServe ?? serve,
@@ -745,10 +750,50 @@ export function wireRemote(deps: RemoteDependencies) {
         windowId,
       }),
   });
+  // A host with no credential broker has no sign-in to copy from or to.
+  const ownerCredentialCopy = new OwnerCredentialCopyService({
+    broker:
+      credentialBroker === undefined || credentialResolver === undefined
+        ? {
+            read: async () => ({ status: "refused", kind: "unavailable" }),
+            store: async () => ({ status: "refused", kind: "unavailable" }),
+          }
+        : createProviderCredentialCopyBroker({
+            readProviderInstances: () => persistence.readProviderInstances(),
+            credentials: {
+              has: (id) => credentialResolver.has(id),
+              set: (id, credential) => credentialResolver.set(id, credential),
+              delete: (id) => credentialResolver.delete(id),
+              readStored: (id) => credentialBroker.resolve(id),
+            },
+          }),
+    identity: resolveHubIdentity,
+    target: (memberId) => spokeLinkService.memberTarget(memberId),
+    transport: hubTransport,
+    authenticate: (request) => spokeLinkService.authenticatePeer(request),
+    ownerIsCurrent: (ownerMemberId) => {
+      const context = spokeLinkService.ownerContext();
+      return (
+        context !== undefined &&
+        context.owners.some((owner) => String(owner.memberId) === ownerMemberId) &&
+        !context.inactiveDeviceMemberIds.includes(ownerMemberId)
+      );
+    },
+    record: recordHubMembership,
+    now: Date.now,
+  });
+  const peerCredentialRoutes = createPeerCredentialRouteHandler({ copy: ownerCredentialCopy });
   const hubOwnerRoutes = createHubOwnerRouteHandler({
     hub: hubService,
     spoke: spokeLinkService,
     unlock: new OwnerUnlockService({ now: Date.now, hostMemberId: () => hubService.hubMemberId() }),
+    postures: createReadingPostureHost({
+      readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+      readProject: (projectId) => persistence.readProject(projectId),
+    }),
+    credentials: ownerCredentialCopy,
+    provision: spokeProvisionService,
+    record: recordHubMembership,
   });
   const localDeviceAdministrationRoutes = createLocalDeviceAdministrationRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,

@@ -29,7 +29,9 @@ import {
   mergeStandInMembership,
   newMemberConfirmationSigningPayload,
   orderStandbys,
+  OWNER_ADMINISTRATION_SESSION_MS,
   OWNER_UNLOCK_LIFETIME_MS,
+  ownerPostureUnlockClass,
   ownerUnlockSigningPayload,
   reconcileHeldGrants,
   type StandInMembershipChanges,
@@ -844,6 +846,48 @@ describe("authorizeOwnerRequest", () => {
       status: "refused",
       kind: "identity-mismatch",
     });
+  });
+
+  it("lets an open session cover an administration action but never an own-unlock one", () => {
+    expect(ask({ unlock: "session", unlockClass: "administration" }).status).toBe("allowed");
+    expect(ask({ unlock: "session", unlockClass: "own" })).toEqual({
+      status: "refused",
+      kind: "own-unlock-required",
+    });
+    expect(ask({ unlock: "session" })).toEqual({
+      status: "refused",
+      kind: "own-unlock-required",
+    });
+    expect(ask({ unlock: "fresh", unlockClass: "own" }).status).toBe("allowed");
+  });
+
+  it("still refuses a session from the hub, from a stranger, and where Owners is unticked", () => {
+    const session = { unlock: "session", unlockClass: "administration" } as const;
+    expect(ask({ ...session, memberId: memberId(1), identityKeyFingerprint: key(1) }).status).toBe(
+      "refused",
+    );
+    expect(ask({ ...session, memberId: memberId(5), identityKeyFingerprint: key(5) })).toEqual({
+      status: "refused",
+      kind: "not-an-owner",
+    });
+    expect(ask({ ...session, grant: undefined })).toEqual({
+      status: "refused",
+      kind: "owners-not-honored",
+    });
+  });
+});
+
+describe("the administration session", () => {
+  it("lasts five minutes, longer than one challenge", () => {
+    expect(OWNER_ADMINISTRATION_SESSION_MS).toBe(300_000);
+    expect(OWNER_ADMINISTRATION_SESSION_MS).toBeGreaterThan(OWNER_UNLOCK_LIFETIME_MS);
+  });
+
+  it("keeps Full access out of a session and lets every other posture in", () => {
+    expect(ownerPostureUnlockClass("full-access")).toBe("own");
+    for (const posture of ["auto-accept-edits", "approval-gated", "plan"]) {
+      expect(ownerPostureUnlockClass(posture)).toBe("administration");
+    }
   });
 });
 

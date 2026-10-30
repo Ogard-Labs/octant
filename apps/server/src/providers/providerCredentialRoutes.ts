@@ -364,7 +364,7 @@ export function resolveInstance(
 }
 
 /** Only an instance that sends an API key or bearer token has a key to store. */
-function usesStoredKey(instance: ProviderInstance): boolean {
+export function usesStoredKey(instance: ProviderInstance): boolean {
   const configuration: object = instance.configuration;
   if (!("authentication" in configuration)) return false;
   return configuration.authentication === "api-key" || configuration.authentication === "bearer";

@@ -179,6 +179,7 @@ const MAX_REMEMBERED_REMOVALS = 256;
 
 export class HubService {
   readonly #options: HubServiceOptions;
+  #ownerListRevision = 0;
 
   constructor(options: HubServiceOptions) {
     this.#options = options;
@@ -386,6 +387,8 @@ export class HubService {
         readonly owners: ReadonlyArray<HostOwnerRecord>;
         /** Members whose paired device on this hub is revoked or unknown: they hold no owner powers here. */
         readonly inactiveDeviceMemberIds: ReadonlyArray<string>;
+        /** Rises with every owner added or removed since this process started, so an open unlock session ends even when the list ends up as it was. */
+        readonly ownerListRevision: number;
       }
     | undefined {
     const hub = this.#options.state.load().hub;
@@ -394,6 +397,7 @@ export class HubService {
     return {
       roster: hub.roster.roster,
       owners: hub.owners ?? [],
+      ownerListRevision: this.#ownerListRevision,
       // A failed lookup counts as inactive, so owner powers fail closed.
       inactiveDeviceMemberIds: hub.members
         .filter(
@@ -439,6 +443,7 @@ export class HubService {
     });
     if (added.status === "refused") return added;
     this.#options.state.save({ ...current, hub: { ...hub, owners: added.owners } });
+    this.#ownerListRevision += 1;
     for (const candidate of candidates) {
       this.#options.record({
         change: "owner-added",
@@ -458,6 +463,7 @@ export class HubService {
     if (target === undefined) return { status: "refused", kind: "not-an-owner", memberId };
     const remaining = withoutOwner(owners, memberId);
     this.#options.state.save({ ...current, hub: { ...hub, owners: remaining } });
+    this.#ownerListRevision += 1;
     this.#options.record({
       change: "owner-removed",
       actingPrincipal: principal,

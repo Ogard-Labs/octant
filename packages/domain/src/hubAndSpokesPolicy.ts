@@ -656,6 +656,25 @@ export function hubRosterSigningPayload(roster: HubRoster): string {
 export const OWNER_UNLOCK_LIFETIME_MS = 60_000;
 
 /**
+ * How long one verified unlock keeps covering administration screens (decision
+ * H17). It is short enough that a phone left on a table stops being useful
+ * quickly, and long enough to change a handful of settings in one sitting.
+ */
+export const OWNER_ADMINISTRATION_SESSION_MS = 5 * 60_000;
+
+/**
+ * Which unlock an owner action asks for. `administration` is covered by an
+ * open session; `own` (Full access, merge, credential copy, owner changes, and
+ * opening a session itself) always needs a fresh per-request challenge.
+ */
+export type OwnerUnlockClass = "administration" | "own";
+
+/** Full access is the one posture a session cannot reach; every other posture lowers or keeps authority. */
+export function ownerPostureUnlockClass(posture: string): OwnerUnlockClass {
+  return posture === "full-access" ? "own" : "administration";
+}
+
+/**
  * The exact text an owner's unlock key answers for one action. The host
  * issued the challenge for this owner, this method, this path, and this body
  * hash, so a signature for one action opens no other. A WebAuthn assertion
@@ -714,7 +733,8 @@ export type OwnerRequestAuthorization =
         | "not-an-owner"
         | "identity-mismatch"
         | "not-in-roster"
-        | "unlock-required";
+        | "unlock-required"
+        | "own-unlock-required";
     };
 
 /**
@@ -733,8 +753,14 @@ export function authorizeOwnerRequest(input: {
   readonly roster: HubRoster;
   readonly memberId: HubMemberId;
   readonly identityKeyFingerprint: string;
-  /** `not-needed` is for asking the host for a challenge or reading an alert, which change nothing. */
-  readonly unlock: "fresh" | "absent" | "not-needed";
+  /**
+   * `fresh` is a per-request challenge the caller verified; `session` is an
+   * open administration session the caller verified. `not-needed` is for asking
+   * the host for a challenge or reading an alert, which change nothing.
+   */
+  readonly unlock: "fresh" | "session" | "absent" | "not-needed";
+  /** What the action asks for; an action that does not say is treated as `own`. */
+  readonly unlockClass?: OwnerUnlockClass;
 }): OwnerRequestAuthorization {
   const listed = input.roster.members.find((member) => sameId(member.memberId, input.memberId));
   if (listed?.role === "hub" || listed?.role === "standby-hub") {
@@ -756,5 +782,8 @@ export function authorizeOwnerRequest(input: {
     };
   }
   if (input.unlock === "absent") return { status: "refused", kind: "unlock-required" };
+  if (input.unlock === "session" && (input.unlockClass ?? "own") === "own") {
+    return { status: "refused", kind: "own-unlock-required" };
+  }
   return { status: "allowed", entry: honored.entry };
 }
