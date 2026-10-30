@@ -20,8 +20,6 @@ import { createProvisionHostPorts } from "../hub/provisionHostPorts";
 import { ProvisionService } from "../hub/provisionService";
 import { SpokeProvisionService } from "../hub/spokeProvisionService";
 import { createProviderCredentialRouteHandler } from "../providers/providerCredentialRoutes";
-import { makeAppStoreConnectKeyBrokerClient } from "../providers/credentialBrokerClient";
-import { createAppStoreConnectKeyRouteHandler } from "../apple/appStoreConnectKeyRoutes";
 import { ProviderServiceError } from "../providers/providerService";
 import { providerKeyJournal, reconcileProviderKeyChanges } from "../providers/providerKeyJournal";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -49,6 +47,7 @@ import { createHostControlRouteHandler } from "../hostControlRoutes";
 import { desktopCredentialStore } from "../hostDataMap";
 import { ThreadRetentionService } from "../threadRetentionService";
 import { createLiveHostExportService } from "../hostExportService";
+import { createAgentRemoteDelegation } from "../hub/agentRemoteDelegation";
 import { createDelegationAdministrationRouteHandler } from "../hub/delegationAdministrationRoutes";
 import { createDelegationJournal } from "../hub/delegationJournal";
 import { createDelegationStateStore } from "../hub/delegationStateStore";
@@ -128,7 +127,10 @@ export type RemoteDependencies = Pick<
   "options" | "persistence" | "serve" | "startedAt" | "version"
 > &
   Pick<AuthorityWiring, "browserCaptureStore" | "windowAuthorityStore"> &
-  Pick<AgentRunsWiring, "agentRunAdmission" | "externalContentIngestionStore"> &
+  Pick<
+    AgentRunsWiring,
+    "agentRunAdmission" | "externalContentIngestionStore" | "remoteDelegationHolder"
+  > &
   Pick<HarnessStateWiring, "nativeHarnessSessions"> &
   Pick<IntegrationsWiring, "agentMessageService" | "toolEgressRules"> &
   Pick<ComputerUseWiring, "webAssets"> &
@@ -195,6 +197,7 @@ export function wireRemote(deps: RemoteDependencies) {
     browserCaptureStore,
     hubPushHandoffSlot,
     nativeHarnessSessions,
+    remoteDelegationHolder,
     canvasPublicShareService,
     canvasRoutes,
     chatAttachmentStore,
@@ -722,6 +725,15 @@ export function wireRemote(deps: RemoteDependencies) {
     record: recordDelegation,
     now: Date.now,
   });
+  // An agent's helper request that names a member starts the same delegation.
+  remoteDelegationHolder.port = createAgentRemoteDelegation({
+    delegation: delegatingSpoke,
+    readProject: (projectId) => persistence.readProject(decodeProjectId(projectId)),
+    isWorkEnabled: () =>
+      enabledModes(persistence.readShellSettings()?.settings ?? defaultShellSettings()).includes(
+        "work",
+      ),
+  });
   // A result arrives without anyone asking for it: the host reads each open
   // delegation now and then. With none sent, a pass reads nothing.
   setInterval(() => void delegatingSpoke.trackOpen().catch(() => undefined), 5_000).unref();
@@ -836,19 +848,6 @@ export function wireRemote(deps: RemoteDependencies) {
         throw error;
       }
     },
-  });
-  const appStoreConnectKeyRoutes = createAppStoreConnectKeyRouteHandler({
-    desktopBridgeSecret: options.desktopBridgeSecret,
-    windowAuthorityStore,
-    macos: process.platform === "darwin",
-    distributionEnabled: true,
-    keys:
-      options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
-        ? undefined
-        : makeAppStoreConnectKeyBrokerClient({
-            url: options.credentialBrokerUrl,
-            token: options.credentialBrokerToken,
-          }),
   });
   const privateListenerSetting = createPrivateListenerSetting(providerDataDirectory);
   const privateListenerAdministrationRoutes = createPrivateListenerAdministrationRouteHandler({
@@ -1067,7 +1066,6 @@ export function wireRemote(deps: RemoteDependencies) {
     }),
   });
   return {
-    appStoreConnectKeyRoutes,
     composeHostDiagnostics,
     delegationAdministrationRoutes,
     externalContentRoutes,

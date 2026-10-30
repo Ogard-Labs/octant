@@ -25,8 +25,6 @@ export type DesktopCredentialBackend =
       readonly mcpServerCredentials: CredentialStore;
       /** Cloud desktop providers' API keys, in their own Keychain service. */
       readonly desktopProviderCredentials: CredentialStore;
-      /** The App Store Connect API key, in its own Keychain service; distribution is macOS-only. */
-      readonly appStoreConnectKeys: CredentialStore;
     }
   | {
       readonly kind: "secret-service";
@@ -42,7 +40,6 @@ export type DesktopCredentialBackend =
       readonly mcpServerCredentials: CredentialStore;
       /** Cloud desktop providers' API keys, under their own attribute. */
       readonly desktopProviderCredentials: CredentialStore;
-      readonly appStoreConnectKeys?: undefined;
     }
   | {
       readonly kind: "credential-manager";
@@ -53,7 +50,6 @@ export type DesktopCredentialBackend =
       readonly canvasPublicShareSecrets?: undefined;
       readonly mcpServerCredentials?: undefined;
       readonly desktopProviderCredentials?: undefined;
-      readonly appStoreConnectKeys?: undefined;
     }
   | {
       readonly kind: "unavailable";
@@ -64,7 +60,6 @@ export type DesktopCredentialBackend =
       readonly canvasPublicShareSecrets?: undefined;
       readonly mcpServerCredentials?: undefined;
       readonly desktopProviderCredentials?: undefined;
-      readonly appStoreConnectKeys?: undefined;
     };
 
 /**
@@ -108,10 +103,6 @@ export async function resolveDesktopCredentialBackend(options: {
       desktopProviderCredentials: makeKeychainCredentialStore(options.keychainHelperPath, {
         storeScope: options.storeScope,
         namespace: "desktop-provider-credential",
-      }),
-      appStoreConnectKeys: makeKeychainCredentialStore(options.keychainHelperPath, {
-        storeScope: options.storeScope,
-        namespace: "app-store-connect-key",
       }),
     };
   }
