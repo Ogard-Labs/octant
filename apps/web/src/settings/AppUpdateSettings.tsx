@@ -196,7 +196,7 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
       )}
 
       <SettingRow
-        description="Stable is the released build; Preview is a nightly build of what has been merged; Candidate is a one-off build run by hand. Switching takes effect at the next check."
+        description="Stable is the released build; Preview is a one-off build run by hand; Nightly is a scheduled build of what has been merged. Switching takes effect at the next check."
         label="Release ring"
         scope="app"
         settingId="app-update-ring"
@@ -212,8 +212,12 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
           value={[state?.ring ?? "stable"]}
         >
           <OctantToggleGroupItem value="stable">Stable</OctantToggleGroupItem>
-          <OctantToggleGroupItem value="preview">Preview</OctantToggleGroupItem>
-          <OctantToggleGroupItem value="candidate">Candidate</OctantToggleGroupItem>
+          {/* The labels are not the ring ids: the scheduled `preview` ring reads
+              as Nightly and the hand-run `candidate` ring as Preview. The ids
+              stay, because they name the update feed paths and version tags
+              that installed builds already follow. */}
+          <OctantToggleGroupItem value="candidate">Preview</OctantToggleGroupItem>
+          <OctantToggleGroupItem value="preview">Nightly</OctantToggleGroupItem>
         </OctantToggleGroup>
       </SettingRow>
 

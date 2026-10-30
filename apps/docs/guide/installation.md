@@ -230,21 +230,21 @@ Octant publishes three streams, and you pick one in
 **Settings → General → Updates**:
 
 - **Stable** — the released build. This is where a normal install stays.
-- **Preview** — a nightly build of whatever has been merged. Newer, less
-  settled, and a separate download.
-- **Candidate** — a one-off build produced by hand from a chosen ref, signed
+- **Preview** — a one-off build produced by hand from a chosen ref, signed
   and notarized exactly as a nightly is. It has no schedule and no followers:
   its feed changes only when someone runs that build, so a branch can be
   update-tested through the real feed path — signature, hash and wrong-ring
-  refusals included — without offering that branch to everyone on the nightly
-  ring.
+  refusals included — without offering that branch to everyone on Nightly.
+- **Nightly** — a scheduled build of whatever has been merged. Newer, less
+  settled, and a separate download.
 
-A preview version reads like `0.2.0-preview.20260828.4` and a candidate like
+Version numbers still carry the rings' internal names. A Nightly version
+reads like `0.2.0-preview.20260828.4` and a Preview like
 `0.2.0-candidate.20260828.12`. Each sorts _below_ the `0.2.0` it leads to.
-That is what makes the handover work without any special case: a preview
+That is what makes the handover work without any special case: a Nightly
 install moves onto stable the day stable catches up, and Octant never offers
-you an older version than the one you are running. So switching from preview
-back to stable leaves you where you are until the next stable release passes
+you an older version than the one you are running. So switching from Nightly
+back to Stable leaves you where you are until the next stable release passes
 you.
 
 Each ring is its own signed feed, and the ring is inside the signature. A
