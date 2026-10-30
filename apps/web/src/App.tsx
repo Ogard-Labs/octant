@@ -4751,6 +4751,8 @@ function LaunchedShell(
     imageLibraryOpen;
   const homeActive =
     !readerOpen &&
+    !controller.settingsOpen &&
+    !usageOpen &&
     controller.workspace !== undefined &&
     findWorkspacePane(
       controller.workspace.layouts[activeMode],
@@ -5515,15 +5517,29 @@ function LaunchedShell(
 
   // Home puts the active pane back on its mode's start screen — Code Home in
   // Code — after a reader, a thread, or Settings took it. Nothing else led
-  // back once a person left it. A New task draft shares the start screen's
-  // composer scope, so its unsent text comes back with it.
+  // back once a person left it. Code Home shares the New task draft's
+  // composer scope, so unsent text comes back with it. Work and Chat start
+  // screens have no such composer: there, unsent text lands Home on the New
+  // task draft that holds it rather than on a screen that would hide it.
   function openHome() {
     closeWorkspaceReaders();
+    controller.closeSettings();
+    setUsageOpen(false);
     const workspace = controller.workspace;
     if (workspace === undefined) return;
     const paneId = workspace.activePaneIds[activeMode];
     const surface = findWorkspacePane(workspace.layouts[activeMode], paneId)?.surface;
     if (surface?.kind === "welcome") return;
+    if (activeMode !== "code") {
+      const scope = `${activeMode}:${String(paneId)}`;
+      if (
+        newTaskDrafts.read(scope).trim().length > 0 ||
+        newTaskDrafts.readImages(scope).length > 0
+      ) {
+        if (surface?.kind !== "draft-thread") void controller.openDraftThread(activeMode);
+        return;
+      }
+    }
     void controller.replacePaneSurface(
       paneId,
       workspaceWelcomeSurface(activeMode, decodeWorkspaceTabId(crypto.randomUUID())),

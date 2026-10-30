@@ -55,7 +55,8 @@ composer it shows prompt suggestions, cards about what is happening now, and
 your **Up next** and **Continue** lists. To get back to it from a thread, a page
 such as the Inbox, or a New task, click **Home** (the house) at the top of the
 icon rail, or press **⌘/Ctrl+Shift+H**. Text you had typed but not sent is
-still in the composer. In Work, Home goes back to Work's start screen. **Working now** lists what is running across your Projects:
+still in the composer. In Work, Home goes back to Work's start screen, or to
+your unsent New task if you had started typing one. **Working now** lists what is running across your Projects:
 each row has the provider mark, the thread's title, a line saying what it is
 doing, and a time. A command or tool shows as it runs, such as `Command: bun run
 test`, or the row says it is waiting for your approval or an answer. The time is

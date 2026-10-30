@@ -3951,6 +3951,42 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Home" }));
 
     expect(await screen.findByRole("button", { name: "Customize" })).toBeVisible();
+
+    await openSettingsFromSidebar(user);
+    await screen.findByRole("heading", { level: 1, name: "General" });
+    await user.keyboard("{Meta>}{Shift>}h{/Shift}{/Meta}");
+
+    expect(await screen.findByRole("button", { name: "Customize" })).toBeVisible();
+    expect(screen.queryByRole("heading", { level: 1, name: "General" })).toBeNull();
+  });
+
+  it("brings back a Work New task draft's unsent text from the Inbox", async () => {
+    const user = userEvent.setup();
+    render(
+      <App
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects({ ...projectBootstrap(), availability: [] })}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={client({
+          ...bootstrap(),
+          workspace: applyWorkspaceOperation(bootstrap().workspace, {
+            kind: "set-active-mode",
+            mode: "work",
+          }),
+        })}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "New task" }));
+    await user.type(await screen.findByRole("textbox", { name: "First message" }), "Work note");
+    await user.click(screen.getByRole("button", { name: /^Inbox/ }));
+    await waitFor(() =>
+      expect(screen.queryByRole("textbox", { name: "First message" })).toBeNull(),
+    );
+    await user.click(screen.getByRole("button", { name: "Home" }));
+
+    expect(await screen.findByRole("textbox", { name: "First message" })).toHaveValue("Work note");
   });
 
   it("keeps the draft composer's chosen Project after a visit to Settings", async () => {

@@ -57,10 +57,12 @@ never the navigation grammar. See [decisions/0015-workspace-shell-model.md](../d
 
 **Home** leads the places: first in the icon rail, above Inbox, and among the
 sidebar's own actions when no rail stands beside it. It closes any reader and
-puts the active pane back on its mode's start screen (Code Home in Code), and
-it is current while that start screen shows. The `home` keybinding
-(Mod+Shift+H by default) does the same. A New task draft shares the start
-screen's composer scope, so its unsent text comes back with it. Before Home,
+Settings and puts the active pane back on its mode's start screen (Code Home
+in Code), and it is current while that start screen shows. The `home`
+keybinding (Mod+Shift+H by default) does the same. Code Home shares the New
+task draft's composer scope, so unsent text comes back with it; Work and Chat
+start screens have no such composer, so there a draft holding unsent text is
+where Home lands. Before Home,
 the start screen had no way back once a person left it.
 
 Projects opens its searchable directory in the main workspace. Selecting a Project
