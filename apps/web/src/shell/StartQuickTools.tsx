@@ -73,7 +73,8 @@ export function StartQuickToolsPlacementProvider(props: {
       return next;
     });
   }, []);
-  const projectId = props.activeDraftScope === undefined ? undefined : chosen.get(props.activeDraftScope);
+  const projectId =
+    props.activeDraftScope === undefined ? undefined : chosen.get(props.activeDraftScope);
   const placement = useMemo<StartQuickToolsPlacement>(
     () => ({ projectId, chooseProject }),
     [projectId, chooseProject],

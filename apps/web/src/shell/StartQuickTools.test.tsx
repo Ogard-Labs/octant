@@ -34,7 +34,9 @@ function SplitDrafts(props: { readonly active: string; readonly withSecond: bool
   return (
     <StartQuickToolsPlacementProvider activeDraftScope={props.active}>
       <DraftRegistration projectId={projectId} scope="code:left" />
-      {props.withSecond ? <DraftRegistration projectId={otherProjectId} scope="code:right" /> : null}
+      {props.withSecond ? (
+        <DraftRegistration projectId={otherProjectId} scope="code:right" />
+      ) : null}
       <DockProject />
     </StartQuickToolsPlacementProvider>
   );
