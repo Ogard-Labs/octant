@@ -11,7 +11,7 @@ credentials. The preview includes no signed Intel, Windows, or Linux
 packaging; a Linux x64 AppImage can be built locally as an unsigned dogfood
 artifact. An AppImage launch can update itself from the signed feed when the
 file is writable. A package, archive, or non-writable location cannot.
-Physical Apple devices, TestFlight, and App Store distribution are
+TestFlight and public store distribution of the mobile client are
 post-preview. This page records what that means for compatibility and
 migration.
 

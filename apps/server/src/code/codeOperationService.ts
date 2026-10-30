@@ -748,12 +748,6 @@ export interface CodeOperationTurnPort {
     readonly checkoutRoot: string;
     readonly approvalId: string;
     readonly decision: "approved" | "denied";
-    /**
-     * Who answered: a person at a window on this Mac, or anyone else (a
-     * paired device, or a caller no window vouched for). Some requests only
-     * the first may settle.
-     */
-    readonly answeredBy?: "local-window" | "remote-device";
   }) => Promise<CodeOperationTurnResult>;
   readonly cancel: (input: {
     readonly thread: CodeThread;
@@ -2850,8 +2844,6 @@ export class CodeOperationService {
             checkoutRoot: root.checkoutRoot,
             approvalId: command.approvalId,
             decision: command.decision,
-            // Only the local window's own route speaks as `user`.
-            answeredBy: initiator === "user" ? "local-window" : "remote-device",
           }),
         );
       case "cancel-provider-turn": {
