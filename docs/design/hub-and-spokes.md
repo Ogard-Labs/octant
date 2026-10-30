@@ -59,8 +59,8 @@ phone, and it never sends to Apple or Google itself. Provisioning is built (the
 hub's own switch, offers as data, proposals the spoke's person applies or
 dismisses, and applying on arrival for three kinds), read narrowly as the last
 item of slice 10 records; it has run only between hosts on loopback with fake
-services behind each kind, and a routine proposal cannot be applied on a real
-host yet. After this slice every delivery-plan slice is built. What remains is
+services behind each kind, though a real host now builds a routine offer and
+checks a mirrored feed against the shared release keys. After this slice every delivery-plan slice is built. What remains is
 the maintainer's: the live checks the slices name (a real Wake-on-LAN wake, a
 delivery to a real phone, a phone, passkey, and Touch ID run, a failover on a
 real network, a browser against a real hub), Windows, and the post-preview
@@ -1223,22 +1223,31 @@ maintainer's hardware, or names the maintainer gate.
     - **Narrower than the grant text.** A profile that asks for Full access or a
       remembered permission is refused, because only a person on the spoke chooses
       those. The candidate channel is followed on an offer only by a spoke already
-      on it. The update-feed mirror's signature is checked with the release keys the
-      host holds; a host with none refuses a mirrored offer. The server wiring holds
-      no release keys yet (they are compiled into the desktop app), so a real host
-      refuses mirrored offers until the desktop hands them over. The verified feed
-      is kept as the document the hub served; the desktop updater does not read it.
+      on it. The update-feed mirror's signature is checked with the release public
+      keys; a host with none refuses a mirrored offer. The server reads them from
+      `@octant/host-runtime`, the same check the desktop updater runs, so a headless
+      hub verifies a mirrored feed too, and a feed whose signature fails is refused.
+      The desktop keeps its own copy of the key literals because the release
+      tooling rewrites them there; a desktop test requires the two lists to agree.
+      The verified feed is kept as the document the hub served; the desktop updater
+      does not read it.
     - **Endpoint rows ask (the H5 reading).** H5 lists three kinds that may apply
       on arrival: an update channel, an untrusted plugin install, and a profile
       without secrets. An endpoint row is not among them, so it always asks, as a
       routine does; the request that sets applying on arrival names only the three.
-    - **A routine needs a Project and a builder.** A routine offer names no
-      Project, host, profile, or authority. The person binds it to a Project when
-      applying it (`octant hub apply <id> --project <id>`; Settings points to that).
-      Building the definition needs the editor's receipts, which only a window
-      builds today, so the host's service for the kind refuses it
-      (`kind-unsupported`) until that builder moves to the server. The apply path is
-      proven with a fake service that records the principal.
+    - **A routine needs a Project.** A routine offer names no Project, host,
+      profile, or authority. The person binds it to a Project when applying it
+      (`octant hub apply <id> --project <id>`; Settings points to that). The server
+      builds the definition itself and creates it through the Automation command
+      service a window uses. It reads narrowly: only an active Work Project binds
+      (a Code routine needs a checkout only a window prepares, so it is refused as
+      `kind-unsupported`); the profile is the first approval-gated one compatible
+      with Work, and the model is Work's own default, so a host with neither refuses
+      (`apply-failed`) rather than widen anything; authority is Work's, with no
+      shell or Git; and the routine is journaled paused from its first event (one create
+      command with a paused initial state, never a create then a pause), so it runs
+      only after the person resumes it in Automation Center. It is recorded under the host's own
+      scope, never the hub's. The receipt derivations repeat the editor's.
     - **Journal.** Offers made and withdrawn, proposals received, applied (the
       principal and whether a person or the standing choice did it), dismissed, and
       refused, each with a reason word and never an offer's text. Applying on arrival

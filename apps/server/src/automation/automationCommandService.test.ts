@@ -138,6 +138,19 @@ describe("automation command service", () => {
     });
   });
 
+  it("creates a definition paused from its first journaled event when asked", () => {
+    const { service, projection } = createHarness();
+    const result = service.execute(
+      createCommand(automationId("3002"), { initialLifecycle: "paused" }),
+    );
+    expect(result.kind).toBe("automation-created");
+    expect(projection.getDefinition(automationId("3002"))).toMatchObject({
+      lifecycle: "paused",
+      nextDueAt: null,
+      version: 1,
+    });
+  });
+
   it("creates weekly-local definitions with durable resolution evidence", () => {
     const { service } = createHarness();
     const result = service.execute(
