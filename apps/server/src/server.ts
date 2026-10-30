@@ -182,7 +182,6 @@ export function startOctantServer(
       agentRunParentAuthority,
       agentRunPersistence,
       androidInputGrants,
-      appleDeviceLeases,
       bindingReceiptStore,
       browserCaptureStore,
       browserCaptures,
@@ -620,22 +619,12 @@ export function startOctantServer(
     });
     const {
       androidToolchainService,
-      appleDeviceService,
       appleToolchainService,
       bindDeviceApprovals,
       recordAppleEvidence,
     } = yield* wireDevices({
       androidInputGrants,
-      appleDeviceLeases,
       codeSessionAuthority,
-      ...(options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
-        ? {}
-        : {
-            credentialBroker: {
-              url: options.credentialBrokerUrl,
-              token: options.credentialBrokerToken,
-            },
-          }),
       persistence,
       projectService,
       providerDataDirectory,
@@ -645,7 +634,6 @@ export function startOctantServer(
     });
     const {
       androidToolchainRoutes,
-      appleDeviceRoutes,
       appleToolchainRoutes,
       baseRouteCodeService,
       codeCompletedThreadSource,
@@ -670,7 +658,6 @@ export function startOctantServer(
       androidToolchainService,
       bindDeviceApprovals,
       buildCodeService,
-      appleDeviceService,
       appleToolchainService,
       browserAuthority,
       canAccessCodeProject,
@@ -1089,7 +1076,6 @@ export function startOctantServer(
       agentRunRouteDependencies,
       agentRunSettingsRoutes,
       androidToolchainRoutes,
-      appleDeviceRoutes,
       appleToolchainRoutes,
       artifactLibraryRoutes,
       artifactMirrorRoutes,

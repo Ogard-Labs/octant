@@ -23,21 +23,6 @@ export function nativeCodeWorkspaceApprovals(
   const request0 = async (
     appleRequest: Parameters<NonNullable<CodeWorkspaceApprovals["apple"]>>[0],
   ) => await request({ effect: { kind: "apple-action", request: appleRequest } as never });
-  const requestDeviceLease = async (
-    deviceRequest: Parameters<NonNullable<CodeWorkspaceApprovals["appleDeviceLease"]>>[0],
-  ) => await request({ effect: { kind: "apple-device-lease", request: deviceRequest } as never });
-  const requestUpload = async (
-    uploadRequest: Parameters<NonNullable<CodeWorkspaceApprovals["appleUpload"]>>[0],
-  ) =>
-    await request({
-      effect: { kind: "apple-distribution-upload", request: uploadRequest } as never,
-    });
-  const requestStoreVersion = async (
-    versionRequest: Parameters<NonNullable<CodeWorkspaceApprovals["appleStoreVersion"]>>[0],
-  ) =>
-    await request({
-      effect: { kind: "apple-distribution-version", request: versionRequest } as never,
-    });
   const requestAndroid = async (
     androidRequest: Parameters<NonNullable<CodeWorkspaceApprovals["android"]>>[0],
   ) => await request({ effect: { kind: "android-action", request: androidRequest } as never });
@@ -53,13 +38,6 @@ export function nativeCodeWorkspaceApprovals(
     // An Apple action is confirmed by the action it would run, not by the pane
     // that asked, so the host prompt names the same effect it will authorize.
     apple: async (request) => await request0(request),
-    // Letting a thread use a paired phone is the desktop app's confirmation,
-    // named by the device and the thread, under every posture.
-    appleDeviceLease: async (request) => await requestDeviceLease(request),
-    // An upload is confirmed by the exact build it sends, under every posture.
-    appleUpload: async (request) => await requestUpload(request),
-    // A submission or release is confirmed by the exact version, under every posture.
-    appleStoreVersion: async (request) => await requestStoreVersion(request),
     // Android Allow input is the same native confirmation, named by the
     // emulator action it authorizes.
     android: async (request) => await requestAndroid(request),

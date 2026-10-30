@@ -22,7 +22,6 @@ import { SpokeProvisionService } from "../hub/spokeProvisionService";
 import { createProviderCredentialRouteHandler } from "../providers/providerCredentialRoutes";
 import { makeAppStoreConnectKeyBrokerClient } from "../providers/credentialBrokerClient";
 import { createAppStoreConnectKeyRouteHandler } from "../apple/appStoreConnectKeyRoutes";
-import { APPLE_DISTRIBUTION_ADMITTED } from "../apple/appleDeviceService";
 import { ProviderServiceError } from "../providers/providerService";
 import { providerKeyJournal, reconcileProviderKeyChanges } from "../providers/providerKeyJournal";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -848,7 +847,7 @@ export function wireRemote(deps: RemoteDependencies) {
     desktopBridgeSecret: options.desktopBridgeSecret,
     windowAuthorityStore,
     macos: process.platform === "darwin",
-    distributionEnabled: APPLE_DISTRIBUTION_ADMITTED,
+    distributionEnabled: true,
     keys:
       options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
         ? undefined

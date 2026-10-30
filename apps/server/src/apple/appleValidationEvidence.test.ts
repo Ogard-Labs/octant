@@ -72,32 +72,4 @@ describe("composeAppleValidationEvents", () => {
     expect(composed.record.redacted).toBe(true);
     expect(JSON.stringify(composed)).not.toContain("secret");
   });
-
-  it("journals a physical device's signed build under a device step, with the identity that signed it", () => {
-    const signedNote =
-      "Signed sh.octant.SimulatorFixture for development with identity 0123456789ABCDEF0123456789ABCDEF01234567 of team A1B2C3D4E5.";
-    const composed = composeAppleValidationEvents({
-      evidence: {
-        ...evidence,
-        kind: "build",
-        outcome: "succeeded",
-        deviceId: "b1000000-0000-4000-8000-000000000006",
-        requestedBy: { kind: "local-user", actorId: "b1000000-0000-4000-8000-000000000007" },
-        bundleIdentifier: "sh.octant.SimulatorFixture",
-        product: "apple-device-product-b1000000-0000-4000-8000-000000000001",
-        signing: { teamId: "A1B2C3D4E5", identity: "0123456789ABCDEF0123456789ABCDEF01234567" },
-        diagnostics: [{ severity: "note", message: signedNote }],
-        artifacts: [{ kind: "log", reference: "apple-device-log-safe" }],
-      },
-      startedAt: "2026-07-27T20:00:00.000Z",
-      newId: () => "b1000000-0000-4000-8000-000000000005",
-    });
-    expect(composed.plan.steps).toMatchObject([{ stepId: "apple-device-build" }]);
-    expect(composed.record).toMatchObject({
-      outcome: "passed",
-      detail: `note: ${signedNote}`,
-      redacted: false,
-      source: { kind: "apple-build", reference: "apple-device-log-safe" },
-    });
-  });
 });

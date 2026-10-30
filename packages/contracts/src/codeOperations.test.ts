@@ -7,7 +7,6 @@ import {
   MAX_CODE_CONVERSATION_PAGE_SIZE,
   MAX_CODE_TURN_CHANGED_PATHS,
   decodeCodeOperationCommand,
-  CodeOperationStreamFrame,
   decodeCodeOperationEventFrame,
   decodeCodeEvidenceBatchRequest,
   decodeCodeOperationStreamFrame,
@@ -37,7 +36,6 @@ import {
   MAX_CODE_EVIDENCE_BATCH_ITEMS,
   MAX_CODE_TERMINAL_LIVE_FRAME_BYTES,
 } from "./codeOperations";
-import { decodeHostAnswer } from "./hostAnswer";
 import { MAX_THREAD_MENTIONS_PER_TURN } from "./threadMentionIdentity";
 
 const ids = {
@@ -213,86 +211,6 @@ describe("Code operation contracts", () => {
       },
     });
     expect(request.effect.kind).toBe("apple-action");
-  });
-
-  it("asks a person to confirm only the start or move of a device lease", () => {
-    const useDevice = {
-      actionId: "d0000000-0000-4000-8000-000000000001",
-      correlationId: "d0000000-0000-4000-8000-000000000002",
-      authority: {
-        hostId: "d0000000-0000-4000-8000-000000000003",
-        mode: "code",
-        projectId: "d0000000-0000-4000-8000-000000000004",
-        providerInstanceId: "d0000000-0000-4000-8000-000000000005",
-        extension: { kind: "core" },
-      },
-      threadId: "d0000000-0000-4000-8000-000000000006",
-      checkoutId: "d0000000-0000-4000-8000-000000000007",
-      kind: "use-device",
-      requestedBy: { kind: "local-user", actorId: "d0000000-0000-4000-8000-000000000010" },
-      deviceId: "d0000000-0000-4000-8000-000000000008",
-      timeoutMs: 30_000,
-      approval: { kind: "approved", approvalId: "d0000000-0000-4000-8000-000000000009" },
-    };
-    expect(
-      decodeCodeOperationApprovalRequest({
-        effect: { kind: "apple-device-lease", request: useDevice },
-      }).effect.kind,
-    ).toBe("apple-device-lease");
-    for (const kind of ["release-device", "status", "uninstall"]) {
-      expect(() =>
-        decodeCodeOperationApprovalRequest({
-          effect: {
-            kind: "apple-device-lease",
-            request: {
-              ...useDevice,
-              kind,
-              ...(kind === "uninstall" ? { bundleIdentifier: "app.octant.fixture" } : {}),
-            },
-          },
-        }),
-      ).toThrow();
-    }
-  });
-
-  it("asks for a one-use approval of each device build, run, install, launch, and terminate only", () => {
-    const deviceAction = {
-      actionId: "d0000000-0000-4000-8000-000000000001",
-      correlationId: "d0000000-0000-4000-8000-000000000002",
-      authority: {
-        hostId: "d0000000-0000-4000-8000-000000000003",
-        mode: "code",
-        projectId: "d0000000-0000-4000-8000-000000000004",
-        providerInstanceId: "d0000000-0000-4000-8000-000000000005",
-        extension: { kind: "core" },
-      },
-      threadId: "d0000000-0000-4000-8000-000000000006",
-      checkoutId: "d0000000-0000-4000-8000-000000000007",
-      requestedBy: { kind: "local-user", actorId: "d0000000-0000-4000-8000-000000000010" },
-      deviceId: "d0000000-0000-4000-8000-000000000008",
-      projectPath: "App.xcodeproj",
-      teamId: "A1B2C3D4E5",
-      artifact: "apple-device-product-1",
-      bundleIdentifier: "sh.octant.Fixture",
-      timeoutMs: 30_000,
-      approval: { kind: "approved", approvalId: "d0000000-0000-4000-8000-000000000009" },
-    };
-    for (const kind of ["build", "run", "install", "launch", "terminate"]) {
-      expect(
-        decodeCodeOperationApprovalRequest({
-          effect: { kind: "apple-device-action", request: { ...deviceAction, kind } },
-        }).effect.kind,
-      ).toBe("apple-device-action");
-    }
-    // A read needs no approval, a lease is its own confirmation, and the
-    // person-only and distribution steps are not approved this way.
-    for (const kind of ["logs", "use-device", "uninstall", "provisioning-update"]) {
-      expect(() =>
-        decodeCodeOperationApprovalRequest({
-          effect: { kind: "apple-device-action", request: { ...deviceAction, kind } },
-        }),
-      ).toThrow();
-    }
   });
 
   it("decodes a core Android emulator action as a bounded one-shot approval effect", () => {
@@ -923,7 +841,7 @@ describe("Code operation contracts", () => {
     ).toMatchObject({ kind: "terminal-state-changed", state: "exited", exitCode: 0 });
   });
 
-  it("marks an approval only a person at the host's own windows may answer, and still replays one journaled before the mark", () => {
+  it("still replays an approval journaled with the retired local-window mark", () => {
     const asked = {
       threadId: ids.thread,
       operationId: ids.operation,
@@ -933,14 +851,12 @@ describe("Code operation contracts", () => {
         kind: "approval-requested",
         approvalId: ids.approval,
         action: "provider-tool",
-        summary: "Let this thread use Henrik's iPhone?",
+        summary: "Let this thread use the device?",
       },
     } as const;
     expect(decodeCodeOperationEventFrame(asked)).toEqual(asked);
     const localOnly = { ...asked, event: { ...asked.event, localPersonOnly: true } } as const;
     expect(decodeCodeOperationEventFrame(localOnly)).toEqual(localOnly);
-    // A paired client reads the mark from the host's answer, never drops it.
-    expect(decodeHostAnswer(CodeOperationStreamFrame)(localOnly)).toEqual(localOnly);
     // The mark is present or absent; it never says "anyone may answer".
     expect(() =>
       decodeCodeOperationEventFrame({
