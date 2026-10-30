@@ -141,6 +141,11 @@ import {
   type HostIdentitySigningService,
 } from "./hostIdentityKeychain";
 import {
+  makeOwnerUnlockKeyService,
+  type OwnerUnlockChallenge,
+  type OwnerUnlockKeyService,
+} from "./ownerUnlockKeychain";
+import {
   centeredNativeWindowState,
   createNativeWindowStateStore,
   flushNativeWindowState,
@@ -535,6 +540,40 @@ export function installHubAdministrationIpcHandlers(options: {
       );
     }
   });
+}
+
+/**
+ * A Mac owner device's unlock key. An owned window may make the key, have it
+ * sign one owner unlock challenge (Touch ID), and forget it. Nothing here
+ * returns the private key or signs text the service did not build itself.
+ */
+export function installOwnerUnlockIpcHandlers(options: {
+  readonly handle: (
+    channel: string,
+    handler: (event: unknown, ...args: readonly unknown[]) => unknown,
+  ) => void;
+  readonly resolveOwnedWindow: (event: unknown) => void;
+  /** Absent when this computer has no Secure Enclave helper (not a Mac). */
+  readonly service: () => OwnerUnlockKeyService | undefined;
+}): void {
+  const unavailable = { status: "refused", kind: "unavailable" } as const;
+  const run = async <T>(
+    event: unknown,
+    use: (service: OwnerUnlockKeyService) => Promise<T>,
+  ): Promise<T | typeof unavailable> => {
+    try {
+      options.resolveOwnedWindow(event);
+    } catch {
+      throw new Error("Octant rejected an unauthorized unlock request.");
+    }
+    const service = options.service();
+    return service === undefined ? unavailable : use(service);
+  };
+  options.handle(IPC_CHANNELS.ownerUnlockMake, (event) => run(event, (s) => s.makeKey()));
+  options.handle(IPC_CHANNELS.ownerUnlockSign, (event, challenge) =>
+    run(event, (s) => s.sign(challenge as OwnerUnlockChallenge)),
+  );
+  options.handle(IPC_CHANNELS.ownerUnlockForget, (event) => run(event, (s) => s.forgetKey()));
 }
 
 export function installRemoteDeviceIpcHandlers(options: {
@@ -2894,6 +2933,21 @@ function resolvePrivateListenerControlService(event: unknown): PrivateListenerCo
   });
 }
 
+let ownerUnlockKeyService: OwnerUnlockKeyService | undefined;
+
+function getOwnerUnlockKeyService(): OwnerUnlockKeyService | undefined {
+  if (process.platform !== "darwin") return undefined;
+  ownerUnlockKeyService ??= makeOwnerUnlockKeyService(
+    resolveKeychainHelperPath({
+      packaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      moduleUrl: import.meta.url,
+    }),
+    { storeScope: desktopHostId },
+  );
+  return ownerUnlockKeyService;
+}
+
 function getHostIdentitySigningService(): HostIdentitySigningService {
   hostIdentitySigningService ??= makeHostIdentitySigningService(
     resolveKeychainHelperPath({
@@ -3019,6 +3073,11 @@ function installIpcHandlers(): void {
         fetch: globalThis.fetch,
       };
     },
+  });
+  installOwnerUnlockIpcHandlers({
+    handle: (channel, handler) => ipcMain.handle(channel, handler),
+    resolveOwnedWindow: (event) => void ownedWindowContext(event as IpcMainInvokeEvent),
+    service: getOwnerUnlockKeyService,
   });
   installHubAdministrationIpcHandlers({
     handle: (channel, handler) => ipcMain.handle(channel, handler),

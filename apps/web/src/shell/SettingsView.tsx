@@ -160,6 +160,7 @@ import { ProviderUsageLimitsPanel } from "../usage/ProviderUsageLimitsPanel";
 import {
   pairedComputersOf,
   hubAdministrationOf,
+  ownerUnlockOf,
   remoteAccessAdministrationOf,
   sshTargetAdministrationOf,
   type OctantHostBridge,
@@ -1172,6 +1173,7 @@ function ActiveSectionContent({
         <RemoteAccessSettingsSection
           bridge={administration}
           hub={hubAdministrationOf(props.hostBridge)}
+          ownerUnlock={ownerUnlockOf(props.hostBridge)}
           pairedComputers={pairedComputersOf(props.hostBridge)}
         />
       ) : (

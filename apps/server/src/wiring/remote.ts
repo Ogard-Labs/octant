@@ -47,6 +47,7 @@ import { createHostControlRouteHandler } from "../hostControlRoutes";
 import { desktopCredentialStore } from "../hostDataMap";
 import { ThreadRetentionService } from "../threadRetentionService";
 import { createLiveHostExportService } from "../hostExportService";
+import { createAgentRemoteDelegation } from "../hub/agentRemoteDelegation";
 import { createDelegationAdministrationRouteHandler } from "../hub/delegationAdministrationRoutes";
 import { createDelegationJournal } from "../hub/delegationJournal";
 import { createDelegationStateStore } from "../hub/delegationStateStore";
@@ -131,7 +132,10 @@ export type RemoteDependencies = Pick<
   "options" | "persistence" | "serve" | "startedAt" | "version"
 > &
   Pick<AuthorityWiring, "browserCaptureStore" | "windowAuthorityStore"> &
-  Pick<AgentRunsWiring, "agentRunAdmission" | "externalContentIngestionStore"> &
+  Pick<
+    AgentRunsWiring,
+    "agentRunAdmission" | "externalContentIngestionStore" | "remoteDelegationHolder"
+  > &
   Pick<HarnessStateWiring, "nativeHarnessSessions"> &
   Pick<IntegrationsWiring, "agentMessageService" | "toolEgressRules"> &
   Pick<ComputerUseWiring, "webAssets"> &
@@ -199,6 +203,7 @@ export function wireRemote(deps: RemoteDependencies) {
     browserCaptureStore,
     hubPushHandoffSlot,
     nativeHarnessSessions,
+    remoteDelegationHolder,
     canvasPublicShareService,
     canvasRoutes,
     chatAttachmentStore,
@@ -725,6 +730,15 @@ export function wireRemote(deps: RemoteDependencies) {
     },
     record: recordDelegation,
     now: Date.now,
+  });
+  // An agent's helper request that names a member starts the same delegation.
+  remoteDelegationHolder.port = createAgentRemoteDelegation({
+    delegation: delegatingSpoke,
+    readProject: (projectId) => persistence.readProject(decodeProjectId(projectId)),
+    isWorkEnabled: () =>
+      enabledModes(persistence.readShellSettings()?.settings ?? defaultShellSettings()).includes(
+        "work",
+      ),
   });
   // A result arrives without anyone asking for it: the host reads each open
   // delegation now and then. With none sent, a pass reads nothing.

@@ -18,6 +18,7 @@ import {
   type PeerGrant,
 } from "@octant/contracts";
 import type { DelegationProjectAuthority } from "@octant/domain";
+import { createAgentRemoteDelegation } from "./agentRemoteDelegation";
 import { EXTERNAL_CONTENT_FRAME_CLOSE } from "../context/externalContentFraming";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import {
@@ -46,6 +47,8 @@ const decodeProjectId = Schema.decodeUnknownSync(ProjectId);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 const PROJECT = decodeProjectId("11111111-1111-4111-8111-111111111111");
 const OTHER_PROJECT = decodeProjectId("22222222-2222-4222-8222-222222222222");
+/** The parent's Project on A: Projects have their own ids on each host, so B does not know it. */
+const PARENT_PROJECT_ON_A = decodeProjectId("44444444-4444-4444-8444-444444444444");
 const PARENT_THREAD = "33333333-3333-4333-8333-333333333333";
 const OTHER_THREAD = "55555555-5555-4555-8555-555555555555";
 
@@ -1707,6 +1710,132 @@ describe("delegation administration on the delegating spoke", () => {
     expect(noCapability?.status).toBe(401);
     expect(withOrigin?.status).toBe(401);
     expect(overTheListener?.status).toBe(401);
+    expect(child.started).toHaveLength(0);
+  });
+});
+
+describe("an agent's helper request that names another member", () => {
+  function agentPort(
+    a: HubTestHost,
+    options: { readonly workEnabled?: boolean; readonly projectType?: "work" | "code" } = {},
+  ) {
+    return createAgentRemoteDelegation({
+      delegation: a.delegating,
+      readProject: () => ({ type: options.projectType ?? "work" }),
+      isWorkEnabled: () => options.workEnabled ?? true,
+    });
+  }
+  const request = (
+    b: HubTestHost,
+    overrides: { readonly mode?: "work" | "chat" | "code" } = {},
+  ) => ({
+    parentThreadId: PARENT_THREAD,
+    windowId: "window-a",
+    mode: overrides.mode ?? ("work" as const),
+    projectId: String(PARENT_PROJECT_ON_A),
+    targetMemberId: b.hostId,
+    targetProjectId: String(PROJECT),
+    task: "Summarize the open questions in the notes folder.",
+  });
+
+  it("starts a remote child through the delegating service and records its result as outside content", async () => {
+    const { a, b, child, parent } = await threeHosts();
+
+    const started = await agentPort(a).start(request(b));
+
+    if (started.status !== "delegated-remote") throw new Error(JSON.stringify(started));
+    expect(started.authority).toEqual({ mode: "work", posture: "approval-gated" });
+    expect(child.started).toHaveLength(1);
+    expect(
+      a.delegating.listForParent(PARENT_THREAD).map((entry) => String(entry.requestId)),
+    ).toEqual([started.requestId]);
+
+    child.finish("The notes list two open questions.");
+    const read = await a.delegating.refresh(started.requestId);
+
+    if (read.status !== "completed") throw new Error(JSON.stringify(read));
+    expect(read.framedText).toContain("The notes list two open questions.");
+    expect(parent.ingested).toHaveLength(1);
+  });
+
+  it("refuses a Chat or Code parent and a Project that is not a Work Project", async () => {
+    const { a, b, child } = await threeHosts();
+
+    const chat = await agentPort(a).start(request(b, { mode: "chat" }));
+    const code = await agentPort(a).start(request(b, { mode: "code" }));
+    const codeProject = await agentPort(a, { projectType: "code" }).start(request(b));
+
+    for (const refused of [chat, code, codeProject]) {
+      expect(refused).toMatchObject({ status: "refused", reason: "remote-delegation-work-only" });
+    }
+    expect(child.started).toHaveLength(0);
+  });
+
+  it("refuses when Work is turned off, the member is unknown, or this host has no hub", async () => {
+    const { a, b, child } = await threeHosts();
+    const alone = await startHubTestHost({
+      name: "Alone",
+      address: "100.101.102.110",
+      network: new HubTestNetwork(),
+      cleanups,
+      parent: parentRules().port,
+    });
+
+    const workOff = await agentPort(a, { workEnabled: false }).start(request(b));
+    const unknown = await agentPort(a).start({ ...request(b), targetMemberId: randomUUID() });
+    const notAUuid = await agentPort(a).start({ ...request(b), targetMemberId: "everyone" });
+    const noHub = await agentPort(alone).start(request(b));
+
+    expect(workOff).toMatchObject({ status: "refused", reason: "work-disabled" });
+    expect(unknown).toMatchObject({ status: "refused", reason: "not-in-roster" });
+    expect(notAUuid).toMatchObject({ status: "refused", reason: "not-in-roster" });
+    expect(noHub).toMatchObject({ status: "refused", reason: "not-a-spoke" });
+    expect(child.started).toHaveLength(0);
+  });
+
+  it("refuses a paused parent and never runs above the parent's own posture", async () => {
+    const paused = await threeHosts({
+      parent: parentRules({ status: "refused", kind: "session-paused" }),
+    });
+    const planOnly = await threeHosts({
+      parent: parentRules({ status: "allowed", ceiling: "plan" }),
+    });
+
+    const pausedAnswer = await agentPort(paused.a).start(request(paused.b));
+    const aboveParent = await agentPort(planOnly.a).start(request(planOnly.b));
+
+    expect(pausedAnswer).toMatchObject({ status: "refused", reason: "session-paused" });
+    expect(aboveParent).toMatchObject({ status: "refused", reason: "authority-above-parent" });
+    expect(paused.child.started).toHaveLength(0);
+    expect(planOnly.child.started).toHaveLength(0);
+  });
+
+  it("refuses a Project the member does not have, including this host's own id for the parent's Project", async () => {
+    const { a, b, child } = await threeHosts();
+
+    const fromThisHost = await agentPort(a).start({
+      ...request(b),
+      targetProjectId: String(PARENT_PROJECT_ON_A),
+    });
+    const outsideGrant = await agentPort(a).start({
+      ...request(b),
+      targetProjectId: String(OTHER_PROJECT),
+    });
+
+    for (const refused of [fromThisHost, outsideGrant]) {
+      expect(refused).toMatchObject({ status: "refused", reason: "target-refused" });
+    }
+    expect(child.started).toHaveLength(0);
+  });
+
+  it("reports a member without a delegation grant as a refusal without repeating its words", async () => {
+    const { a, b, child } = await threeHosts();
+    setGrantHeldBy(b, a, (grant) => ({ memberId: grant.memberId, readStatus: true }));
+
+    const refused = await agentPort(a).start(request(b));
+
+    expect(refused).toMatchObject({ status: "refused", reason: "target-refused" });
+    expect(JSON.stringify(refused)).not.toContain("delegation-not-granted");
     expect(child.started).toHaveLength(0);
   });
 });
