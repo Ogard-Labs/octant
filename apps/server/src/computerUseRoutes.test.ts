@@ -141,4 +141,31 @@ describe("computer-use lifecycle routes", () => {
     expect(denied?.status).toBe(403);
     await expect(denied?.json()).resolves.toMatchObject({ category: "approval-denied" });
   });
+
+  it("refuses an approval that arrives over the network instead of from a window on this Mac", async () => {
+    const { handle, runtime } = fixture();
+    const decision = {
+      ...scope,
+      actionId: view.pendingApproval?.actionId,
+      approvalId: view.pendingApproval?.approvalId,
+      decision: "approved",
+    };
+    const remote = new Request("http://octant-mac.tailnet.example/api/computer-use/approvals", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-octant-window-capability": capability,
+        origin: "http://octant-mac.tailnet.example",
+      },
+      body: JSON.stringify(decision),
+    });
+    expect((await handle(remote))?.status).toBe(400);
+    // A window this host never registered, such as a paired device's, has no
+    // capability to present.
+    const unregistered = await handle(
+      request("/api/computer-use/approvals", decision, "B".repeat(43)),
+    );
+    expect(unregistered?.status).toBe(401);
+    expect(runtime.decide).not.toHaveBeenCalled();
+  });
 });

@@ -2,14 +2,6 @@ import { threadCompactionSubject } from "../context/CompactionDivider";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
 import type { ProviderModelOptionValues, ThreadDocumentDelivery } from "@octant/contracts";
 import {
-  ApplicationMentionTypeahead,
-  BrowserUseMention,
-  ComputerUseMention,
-  useApplicationMentionTypeahead,
-  useBrowserUseMention,
-  useComputerUseMention,
-} from "../computerUse/ComputerUseMention";
-import {
   MAX_CODE_THREAD_TITLE_LENGTH,
   type CodeApprovalId,
   type CodeThread,
@@ -22,7 +14,6 @@ import {
   clampTurnAccessPosture,
   decidesCodeEffectsByApproval,
   harnessAsksUnderSessionFullAccess,
-  pickerGroupCarriesAppManagedTools,
   startedCodeThreadPickerGroups,
   type PickerGroup,
 } from "@octant/domain";
@@ -136,11 +127,8 @@ import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
 } from "../composer/useComposerSlashCommands";
+import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerAtMenu";
 import { useComposerSuggestionInput } from "../composer/useComposerSuggestionInput";
-import {
-  unattachedCapabilityMentionCopy,
-  unattachedCapabilityMentions,
-} from "@octant/plugin-host/capability-mentions";
 
 export type CodeAttachmentClient = Pick<
   CodeClient,
@@ -264,7 +252,6 @@ export interface CodeThreadWorkspaceProps {
   readonly windowCapability?: string;
   readonly messageQueueClient?: ThreadMessageQueueClient;
   readonly extensionClient?: ExtensionClient;
-  readonly browserAvailable?: boolean;
 }
 
 /**
@@ -306,26 +293,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // an acknowledged message leaves the composer, so an async mention lookup cannot
   // erase a newer draft typed while that lookup is pending.
   const draftRevisionRef = useRef(0);
-  const runtimeCarriesTools = pickerGroupCarriesAppManagedTools(
-    props.providerGroups ?? [],
-    view === undefined
-      ? undefined
-      : { providerInstanceId: view.thread.providerInstanceId, modelId: view.thread.modelId },
-  );
-  const computer = useComputerUseMention({
-    textarea: () => textareaRef.current,
-    draft,
-    scopeKey: String(props.threadId),
-    providerCarriesTools: runtimeCarriesTools,
-    onDraftChange: (next) => {
-      draftRevisionRef.current += 1;
-      setDraft(next);
-      props.controller.setPendingDraft?.(next);
-    },
-    onSelectionEdited: () => {
-      draftRevisionRef.current += 1;
-    },
-  });
   const providerFamily: ExtensionProviderFamily | undefined = providerFamilyForThread(
     props.providerGroups,
     view?.thread.providerInstanceId,
@@ -333,25 +300,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
     mode: "code",
-    providerCarriesTools: runtimeCarriesTools,
     projectId: view?.thread.projectId ?? null,
     threadId: view === undefined ? props.threadId : view.thread.id,
     ...(providerFamily === undefined ? {} : { providerFamily }),
-  });
-  const browser = useBrowserUseMention({
-    textarea: () => textareaRef.current,
-    draft,
-    onDraftChange: (next) => {
-      draftRevisionRef.current += 1;
-      setDraft(next);
-      props.controller.setPendingDraft?.(next);
-    },
-    scopeKey: String(props.threadId),
-    available: props.browserAvailable === true && runtimeCarriesTools,
-    onChoose: () => void extensionDraft.resolveReference("@browser"),
-    onSelectionEdited: () => {
-      draftRevisionRef.current += 1;
-    },
   });
   const slash = useComposerSlashCommands({
     textarea: () => textareaRef.current,
@@ -361,12 +312,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       setDraft(next);
       props.controller.setPendingDraft?.(next);
     },
-    onResolveExtensionReference: extensionDraft.resolveReference,
   });
-  const appMentions = useApplicationMentionTypeahead([
-    { controller: computer, kind: "computer" },
-    { controller: browser, kind: "browser" },
-  ]);
   const activeThreadKeyRef = useRef(String(props.threadId));
   activeThreadKeyRef.current = String(props.threadId);
   const [providerChanging, setProviderChanging] = useState(false);
@@ -576,6 +522,21 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   });
   const pathMentionListId = `code-path-mentions-${String(props.threadId)}`;
   const pathMentionOpen = pathMentions.open && !mention.open;
+  const atMenu = useComposerAtMenu({
+    textarea: () => textareaRef.current,
+    draft,
+    onDraftChange: (next) => {
+      draftRevisionRef.current += 1;
+      setDraft(next);
+      props.controller.setPendingDraft?.(next);
+    },
+    onResolveExtensionReference: extensionDraft.resolveReference,
+    files: {
+      open: pathMentionOpen,
+      candidates: pathMentions.candidates,
+      choose: pathMentions.choose,
+    },
+  });
   const peekAbandoned = attachments.peekAbandoned;
   const markDraftStagedDropped = props.controller.markDraftStagedDropped;
   useEffect(() => {
@@ -613,9 +574,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   });
 
   function syncMentions(value: string, caret: number | null) {
-    computer.sync(value, caret);
-    browser.sync(value, caret);
     slash.sync(value, caret);
+    atMenu.sync(value, caret);
     mention.sync(value, caret);
     pathMentions.sync(value, caret);
   }
@@ -732,7 +692,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     trimmed.length > 0 &&
     !compacting &&
     !attachments.busy &&
-    !slash.resolving &&
+    !atMenu.resolving &&
     !queuePreparing &&
     !messageQueue.busy &&
     !messageQueue.uncertain &&
@@ -868,18 +828,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   async function submitFollowUp() {
     if (!canSend || queuePreparingRef.current) return;
     const draftRevision = draftRevisionRef.current;
-    const computerUseSelection = computer.selection;
     const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
       receipt.selection === undefined ? [] : [receipt.selection],
     );
-    const unattachedMentions = unattachedCapabilityMentions(trimmed, [
-      ...extensionSelections,
-      ...(computerUseSelection === undefined ? [] : [computerUseSelection]),
-    ]);
-    if (unattachedMentions.length > 0) {
-      setSendNotice(unattachedCapabilityMentionCopy(unattachedMentions));
-      return;
-    }
     setSendNotice(undefined);
     setImageSaveMessage(undefined);
     const originThreadKey = String(props.threadId);
@@ -910,12 +861,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             threadMentionIds,
             fileMentionPaths,
             extensionSelections,
-            ...(computerUseSelection === undefined ? {} : { computerUseSelection }),
           },
           () => {
             attachments.acceptQueueClaim(captured);
             if (!mountedRef.current || activeThreadKeyRef.current !== originThreadKey) return;
-            computer.consume(computerUseSelection);
             if (draftRevisionRef.current === draftRevision) {
               setDraft("");
               props.controller.setPendingDraft?.("");
@@ -948,14 +897,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       fileMentionPaths,
       access,
     ];
-    if (computerUseSelection !== undefined) {
-      sendArguments[5] = false;
-      sendArguments[6] = computerUseSelection;
-    }
     if (extensionSelections.length > 0) sendArguments[7] = extensionSelections;
     const sent = await props.controller.sendFollowUp(...sendArguments);
     if (sent) {
-      computer.consume(computerUseSelection);
       attachments.takeForSend();
       // Only the draft that was sent is cleared: typing during the awaited send
       // bumps the revision, and that newer draft stays. The host keeps the
@@ -991,9 +935,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (suggestionInput.takeOnTab(event)) return;
-    if (appMentions.handleKeyDown(event)) return;
-    if (computer.handleKeyDown(event)) return;
-    if (browser.handleKeyDown(event)) return;
+    if (atMenu.handleKeyDown(event)) return;
     if (slash.handleKeyDown(event)) return;
     if (mention.handleKeyDown(event)) return;
     if (pathMentions.handleKeyDown(event)) return;
@@ -1903,8 +1845,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
              * removal here: rendering a control whose sidecar this workspace
              * cannot open would mint a thread the user never sees.
              */}
-            <ComputerUseMention controller={computer} surface="chips" />
-            <BrowserUseMention controller={browser} surface="chips" />
             {extensionDraft.receipts.length > 0 ? (
               <ul aria-label="Selected extensions" className="composer-chips">
                 {extensionDraft.receipts.map((receipt) => (
@@ -1988,39 +1928,29 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         input={
           <OctantTextarea
             aria-activedescendant={
-              appMentions.open.length > 1
-                ? `${appMentions.listId}-${appMentions.open[appMentions.active]?.kind ?? ""}`
-                : computer.open
-                  ? `${computer.listId}-computer`
-                  : browser.open
-                    ? `${browser.listId}-browser`
-                    : slash.active !== undefined
-                      ? `${slash.listId}-${slash.active.id}`
-                      : mention.activeCandidate !== undefined
-                        ? `${mentionListId}-${String(mention.activeCandidate.threadId)}`
-                        : pathMentionOpen && pathMentions.activeCandidate !== undefined
-                          ? `${pathMentionListId}-${pathMentions.activeCandidate.path}`
-                          : undefined
+              atMenu.active !== undefined
+                ? `${atMenu.listId}-${atMenu.active.id}`
+                : slash.active !== undefined
+                  ? `${slash.listId}-${slash.active.id}`
+                  : mention.activeCandidate !== undefined
+                    ? `${mentionListId}-${String(mention.activeCandidate.threadId)}`
+                    : pathMentionOpen && pathMentions.activeCandidate !== undefined
+                      ? `${pathMentionListId}-${pathMentions.activeCandidate.path}`
+                      : undefined
             }
             aria-autocomplete="list"
             aria-controls={
-              appMentions.open.length > 1
-                ? appMentions.listId
-                : computer.open
-                  ? computer.listId
-                  : browser.open
-                    ? browser.listId
-                    : slash.open
-                      ? slash.listId
-                      : mention.open
-                        ? mentionListId
-                        : pathMentionOpen
-                          ? pathMentionListId
-                          : undefined
+              atMenu.open
+                ? atMenu.listId
+                : slash.open
+                  ? slash.listId
+                  : mention.open
+                    ? mentionListId
+                    : pathMentionOpen
+                      ? pathMentionListId
+                      : undefined
             }
-            aria-expanded={
-              computer.open || browser.open || slash.open || mention.open || pathMentionOpen
-            }
+            aria-expanded={atMenu.open || slash.open || mention.open || pathMentionOpen}
             className="composer-input window-no-drag"
             id={`code-thread-composer-${String(thread.id)}`}
             onChange={(event) => {
@@ -2066,12 +1996,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           />
         }
         typeahead={
-          appMentions.open.length > 1 ? (
-            <ApplicationMentionTypeahead typeahead={appMentions} />
-          ) : computer.open ? (
-            <ComputerUseMention controller={computer} surface="typeahead" />
-          ) : browser.open ? (
-            <BrowserUseMention controller={browser} surface="typeahead" />
+          atMenu.open ? (
+            <ComposerAtTypeahead controller={atMenu} />
           ) : slash.open ? (
             <ComposerSlashTypeahead controller={slash} />
           ) : (

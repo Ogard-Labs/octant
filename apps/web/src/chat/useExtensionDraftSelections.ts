@@ -1,6 +1,5 @@
-import { useComputerUseEnabled } from "../computerUse/ComputerUseMention";
-import { computerUseSelection, isComputerUseSelection } from "@octant/plugin-host/computer-use";
-import { browserUseSelection, isBrowserUseSelection } from "@octant/plugin-host/browser-use";
+import { isComputerUseSelection } from "@octant/plugin-host/computer-use";
+import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { ChatThread } from "@octant/contracts/chat";
 import type { OctantMode } from "@octant/contracts/modes";
@@ -20,13 +19,30 @@ import {
 import { buildSkillCatalog, filterSkillCatalogForScope } from "@octant/plugin-host/skills";
 import { parseComposerReference } from "@octant/plugin-host/composer";
 import { sourceQualifiedSkillId } from "@octant/plugin-host/model";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Schema } from "effect";
 import type { ComposerExtensionSelection } from "../composer/composerExtensionSelection";
 
 type DraftSelectionClient = Pick<ExtensionClient, "snapshot" | "effectiveState">;
 const NO_RECEIPTS: ReadonlyArray<ComposerExtensionSelection> = [];
-const NO_OCTANT_TOOLS = "no Octant tools on this runtime";
+/**
+ * A draft written before Browser and Computer became offered tools may still
+ * hold one of their selections. The selection is dropped, and a removable
+ * note says why, so the person is not left wondering where the chip went.
+ */
+function withoutOfferedToolSelections(
+  receipts: ReadonlyArray<ComposerExtensionSelection>,
+): ReadonlyArray<ComposerExtensionSelection> {
+  return receipts.map((receipt) =>
+    receipt.selection === undefined
+      ? receipt
+      : isBrowserUseSelection(receipt.selection)
+        ? blockedReceipt("Browser", "not needed; the agent is offered Browser on its own")
+        : isComputerUseSelection(receipt.selection)
+          ? blockedReceipt("Computer", "not needed; the agent is offered Computer on its own")
+          : receipt,
+  );
+}
 
 export function useExtensionDraftSelections(options: {
   readonly client?: DraftSelectionClient;
@@ -35,18 +51,9 @@ export function useExtensionDraftSelections(options: {
   readonly mode?: OctantMode;
   readonly projectId?: string | null;
   readonly threadId?: string | null;
-  /**
-   * Whether the thread's runtime carries Octant's tools, from its reported
-   * capabilities. Browser and Computer reach the agent only as Octant tools,
-   * so a typed reference on a runtime without them is blocked rather than
-   * selected for a send the host would refuse.
-   */
-  readonly providerCarriesTools?: boolean;
   /** Receipts restored with a persisted new-task draft after Settings unmounts. */
   readonly initialReceipts?: ReadonlyArray<ComposerExtensionSelection>;
 }) {
-  const computerEnabled = useComputerUseEnabled();
-  const providerCarriesTools = options.providerCarriesTools !== false;
   const mode = options.mode ?? "chat";
   const projectId = options.thread?.projectId ?? options.projectId ?? null;
   const threadId = options.thread?.id ?? options.threadId ?? null;
@@ -66,25 +73,11 @@ export function useExtensionDraftSelections(options: {
     byScope:
       options.initialReceipts === undefined || options.initialReceipts.length === 0
         ? new Map()
-        : new Map([[scopeKey, options.initialReceipts]]),
+        : new Map([[scopeKey, withoutOfferedToolSelections(options.initialReceipts)]]),
   }));
   const stagedReceipts =
     state.client === options.client ? (state.byScope.get(scopeKey) ?? NO_RECEIPTS) : NO_RECEIPTS;
-  // Browser or Computer staged before the thread moved to a runtime without
-  // Octant's tools would still ride the next send, which the host refuses, so
-  // it is shown blocked and carries no selection while that runtime is chosen.
-  const receipts = useMemo(
-    () =>
-      providerCarriesTools
-        ? stagedReceipts
-        : stagedReceipts.map((receipt) =>
-            receipt.selection !== undefined &&
-            (isComputerUseSelection(receipt.selection) || isBrowserUseSelection(receipt.selection))
-              ? blockedReceipt(receipt.reference, NO_OCTANT_TOOLS)
-              : receipt,
-          ),
-    [providerCarriesTools, stagedReceipts],
-  );
+  const receipts = stagedReceipts;
 
   // A refused send may restore after the user has opened another Project.
   // Keep that receipt with its original draft, never over the current one.
@@ -129,49 +122,10 @@ export function useExtensionDraftSelections(options: {
       ) => {
         if (isCurrent()) updateReceipts((current) => (isCurrent() ? update(current) : current));
       };
-      if (
-        !providerCarriesTools &&
-        (reference.toLowerCase() === "@computer" || reference.toLowerCase() === "@browser")
-      ) {
-        const label = reference.toLowerCase() === "@computer" ? "@Computer" : "@Browser";
-        commit((current) => upsertReceipt(current, blockedReceipt(label, NO_OCTANT_TOOLS)));
-        return true;
-      }
-      if (reference.toLowerCase() === "@computer") {
-        if (!computerEnabled) {
-          commit((current) =>
-            upsertReceipt(current, blockedReceipt("@Computer", "plugin-disabled")),
-          );
-          return true;
-        }
-        commit((current) =>
-          upsertReceipt(current, {
-            reference: "@Computer",
-            label: "Computer",
-            selection: computerUseSelection(crypto.randomUUID()),
-            status: { kind: "selected" },
-          }),
-        );
-        return true;
-      }
-      if (reference.toLowerCase() === "@browser") {
-        // Browser is a Work/Code capability; Chat never offers it, so a typed
-        // reference is a blocked receipt rather than a selection.
-        commit((current) =>
-          upsertReceipt(
-            current,
-            mode === "chat"
-              ? blockedReceipt("@Browser", "unavailable")
-              : {
-                  reference: "@Browser",
-                  label: "Browser",
-                  selection: browserUseSelection(crypto.randomUUID()),
-                  status: { kind: "selected" },
-                },
-          ),
-        );
-        return true;
-      }
+      // Browser and Computer are tools the host offers on its own, so their
+      // names are text.
+      if (reference.toLowerCase() === "@browser" || reference.toLowerCase() === "@computer")
+        return false;
       if (parseComposerReference(reference).kind === "plain-text") return false;
       if (options.client === undefined || options.providerFamily === undefined) {
         commit((current) => upsertReceipt(current, blockedReceipt(reference, "unavailable")));
@@ -237,17 +191,7 @@ export function useExtensionDraftSelections(options: {
         return true;
       }
     },
-    [
-      computerEnabled,
-      mode,
-      providerCarriesTools,
-      options.client,
-      options.providerFamily,
-      projectId,
-      threadId,
-      scopeKey,
-      updateReceipts,
-    ],
+    [mode, options.client, options.providerFamily, projectId, threadId, scopeKey, updateReceipts],
   );
 
   const remove = useCallback(
@@ -261,7 +205,7 @@ export function useExtensionDraftSelections(options: {
   const restore = useCallback(
     (next: ReadonlyArray<ComposerExtensionSelection>) => {
       invalidate();
-      updateReceipts(() => [...next]);
+      updateReceipts(() => withoutOfferedToolSelections(next));
     },
     [invalidate, updateReceipts],
   );

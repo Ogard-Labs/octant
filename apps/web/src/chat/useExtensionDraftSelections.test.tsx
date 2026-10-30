@@ -4,6 +4,8 @@ import { ExtensionProviderFamily } from "@octant/contracts/extensions";
 import { Schema } from "effect";
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { browserUseSelection } from "@octant/plugin-host/browser-use";
+import { computerUseSelection } from "@octant/plugin-host/computer-use";
 import { useExtensionDraftSelections } from "./useExtensionDraftSelections";
 
 const projectA = "70000000-0000-4000-8000-000000000001";
@@ -57,23 +59,24 @@ describe("draft extension selections", () => {
     expect(result.current.receipts).toEqual([]);
   });
 
-  it("restores a refused selection to its original Project without replacing the active draft", async () => {
+  it("restores a refused selection to its original Project without replacing the active draft", () => {
     const { client } = pendingClient();
     const { result, rerender } = renderHook(
       ({ projectId }) =>
         useExtensionDraftSelections({ client, mode: "code", projectId, providerFamily }),
       { initialProps: { projectId: projectA } },
     );
-    await act(async () => {
-      await result.current.resolveReference("@Browser");
+    const receipt = (reference: string) => ({
+      reference,
+      label: reference,
+      status: { kind: "blocked" as const, reason: "unavailable" },
     });
+    act(() => result.current.restore([receipt("$review")]));
     const original = result.current.receipts;
     const restoreOriginal = result.current.restore;
     act(() => result.current.clear());
     rerender({ projectId: projectB });
-    await act(async () => {
-      await result.current.resolveReference("@Browser");
-    });
+    act(() => result.current.restore([receipt("$deploy")]));
     const active = result.current.receipts;
     act(() => restoreOriginal(original));
     expect(result.current.receipts).toEqual(active);
@@ -81,68 +84,54 @@ describe("draft extension selections", () => {
     expect(result.current.receipts).toEqual(original);
   });
 
-  it("blocks a typed @Browser or @Computer on a runtime that carries no Octant tools", async () => {
+  it("leaves @browser and @computer as text, since both are offered tools", async () => {
     const { client } = pendingClient();
     const { result } = renderHook(() =>
-      useExtensionDraftSelections({
-        client,
-        mode: "code",
-        projectId: projectA,
-        providerFamily,
-        providerCarriesTools: false,
-      }),
+      useExtensionDraftSelections({ client, mode: "code", projectId: projectA, providerFamily }),
     );
+    const taken: boolean[] = [];
     await act(async () => {
-      await result.current.resolveReference("@browser");
-      await result.current.resolveReference("@Computer");
+      taken.push(await result.current.resolveReference("@browser"));
+      taken.push(await result.current.resolveReference("@computer"));
     });
-    expect(result.current.receipts).toEqual([
-      {
-        reference: "@Browser",
-        label: "@Browser",
-        status: { kind: "blocked", reason: "no Octant tools on this runtime" },
-      },
-      {
-        reference: "@Computer",
-        label: "@Computer",
-        status: { kind: "blocked", reason: "no Octant tools on this runtime" },
-      },
-    ]);
+    expect(taken).toEqual([false, false]);
+    expect(result.current.receipts).toEqual([]);
     expect(client.snapshot).not.toHaveBeenCalled();
   });
 
-  it("blocks a staged @Browser, without its selection, once the runtime carries no Octant tools", async () => {
+  it("drops Browser and Computer selections from an older draft and says neither needs one", () => {
     const { client } = pendingClient();
-    const { result, rerender } = renderHook(
-      ({ providerCarriesTools }) =>
-        useExtensionDraftSelections({
-          client,
-          mode: "code",
-          projectId: projectA,
-          providerFamily,
-          providerCarriesTools,
-        }),
-      { initialProps: { providerCarriesTools: true } },
+    const { result } = renderHook(() =>
+      useExtensionDraftSelections({ client, mode: "work", projectId: projectA, providerFamily }),
     );
-    await act(async () => {
-      await result.current.resolveReference("@Browser");
-    });
-    expect(result.current.receipts[0]?.status).toEqual({ kind: "selected" });
-    rerender({ providerCarriesTools: false });
+    act(() =>
+      result.current.restore([
+        {
+          reference: "Browser",
+          label: "Browser",
+          selection: browserUseSelection("older-draft"),
+          status: { kind: "selected" },
+        },
+        {
+          reference: "Computer",
+          label: "Computer",
+          selection: computerUseSelection("older-draft"),
+          status: { kind: "selected" },
+        },
+      ]),
+    );
     expect(result.current.receipts).toEqual([
       {
-        reference: "@Browser",
-        label: "@Browser",
-        status: { kind: "blocked", reason: "no Octant tools on this runtime" },
+        reference: "Browser",
+        label: "Browser",
+        status: { kind: "blocked", reason: "not needed; the agent is offered Browser on its own" },
+      },
+      {
+        reference: "Computer",
+        label: "Computer",
+        status: { kind: "blocked", reason: "not needed; the agent is offered Computer on its own" },
       },
     ]);
-    // The blocked chip has no selection, so persisting `receipts` would drop
-    // the staged Browser choice across a Settings remount. `stagedReceipts`
-    // keeps the original so the next runtime that carries tools can send it.
-    expect(result.current.stagedReceipts[0]?.status).toEqual({ kind: "selected" });
-    expect(result.current.stagedReceipts[0]?.selection).toBeDefined();
-    rerender({ providerCarriesTools: true });
-    expect(result.current.receipts[0]?.status).toEqual({ kind: "selected" });
   });
 
   it("refuses an invalid Project identity without querying a broader scope", async () => {

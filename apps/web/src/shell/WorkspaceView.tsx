@@ -242,6 +242,7 @@ export interface WorkspaceViewProps {
     prompt?: string,
     modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
     paneId?: PaneId,
+    extensionSelections?: ReadonlyArray<import("@octant/contracts/extensions").ExtensionSelection>,
   ) => void;
   readonly onCreateChatProjectThread?: (
     projectId: ProjectId,
@@ -1166,7 +1167,6 @@ function renderCodeTab(
           ? {}
           : { appleToolchainClient: props.appleToolchainClient })}
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
-        {...(browserAutomationClient === undefined ? {} : { browserAvailable: true })}
         controller={codeController}
         holdAccessNotice={props.codeControllers.holdAccessNotice}
         onOpenCodeThread={props.onOpenCodeThread}
@@ -1518,7 +1518,6 @@ function renderNonCodeTab(
           {...(props.extensionClient === undefined
             ? {}
             : { extensionClient: props.extensionClient })}
-          browserAvailable={props.browserAutomationClient !== undefined}
           {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
           {...(props.githubClient === undefined ? {} : { githubClient: props.githubClient })}
           {...(props.githubCloneClient === undefined
@@ -1839,7 +1838,6 @@ function renderNonCodeTab(
                 {...(props.extensionClient === undefined
                   ? {}
                   : { extensionClient: props.extensionClient })}
-                browserAvailable={props.browserAutomationClient !== undefined}
                 {...(props.onOpenCanvasReference === undefined
                   ? {}
                   : { onOpenCanvas: props.onOpenCanvasReference })}
@@ -2263,8 +2261,15 @@ function renderNonCodeTab(
           {...(props.chatWelcomeCreating === undefined
             ? {}
             : { creating: props.chatWelcomeCreating })}
-          onCreateChat={(prompt, modelOptionValues) => {
-            props.onCreateChat(prompt, modelOptionValues, paneId);
+          {...(props.extensionClient === undefined
+            ? {}
+            : { extensionClient: props.extensionClient })}
+          onCreateChat={(prompt, modelOptionValues, extensionSelections) => {
+            if (extensionSelections === undefined) {
+              props.onCreateChat(prompt, modelOptionValues, paneId);
+            } else {
+              props.onCreateChat(prompt, modelOptionValues, paneId, extensionSelections);
+            }
           }}
           providerGroups={props.draftProviderGroups ?? []}
           {...(props.draftSelectedProviderInstanceId === undefined

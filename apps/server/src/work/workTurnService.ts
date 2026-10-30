@@ -73,11 +73,8 @@ import {
   type ThreadWorkingDirectory,
   type WindowId,
 } from "@octant/contracts";
-import {
-  BROWSER_SELECTION_GUIDANCE,
-  isBrowserUseSelection,
-  validateBrowserUseSelection,
-} from "@octant/plugin-host/browser-use";
+import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
+import { isComputerUseSelection } from "@octant/plugin-host/computer-use";
 import type { ProviderDriver, ProviderSessionHandle } from "@octant/provider-sdk/driver";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import type {
@@ -306,7 +303,6 @@ export interface WorkTurnServiceDependencies {
     readonly thread: WorkThread;
     readonly projectRoot: string;
     readonly windowId: WindowId;
-    readonly computerUseSelection?: import("@octant/contracts/extensions").ExtensionSelection;
   }) => AppManagedToolSet | undefined;
   /** The harness around a turn: stable instructions in front, the reply observed after. */
   /**
@@ -834,7 +830,9 @@ export class WorkTurnService {
     }
 
     const selections =
-      command.extensionSelections?.filter((selection) => !isBrowserUseSelection(selection)) ?? [];
+      command.extensionSelections?.filter(
+        (selection) => !isBrowserUseSelection(selection) && !isComputerUseSelection(selection),
+      ) ?? [];
     const pinnedExtensionIds =
       thread === undefined ? [] : (this.#pinnedExtensionIds?.(String(thread.projectId)) ?? []);
     let skillContext: ReadonlyArray<ProviderContextBlock> = [];
@@ -968,18 +966,6 @@ export class WorkTurnService {
       createdAt: this.#clock(),
       safeInputBudget: this.#safeInputBudgetTokens,
       contributions: [
-        ...(command.extensionSelections?.some(isBrowserUseSelection) === true
-          ? [
-              {
-                text: BROWSER_SELECTION_GUIDANCE,
-                sourceKind: "instruction",
-                referenceId: "octant-browser-guidance",
-                category: "octant-policy",
-                posture: "required",
-                block: { kind: "instructions", text: BROWSER_SELECTION_GUIDANCE },
-              } as const,
-            ]
-          : []),
         ...harnessContext.map(
           (block, index): WorkTurnContextContribution => ({
             text: block.text,
@@ -1454,48 +1440,11 @@ export class WorkTurnService {
             thread: input.thread,
             projectRoot: input.projectRoot,
             windowId: input.windowId,
-            ...(input.command.computerUseSelection === undefined
-              ? {}
-              : { computerUseSelection: input.command.computerUseSelection }),
           });
     const appManagedTools =
       input.extensionTools === undefined
         ? hostTools
         : combineAppManagedToolSets(hostTools, input.extensionTools);
-    if (
-      input.command.computerUseSelection !== undefined &&
-      !appManagedTools?.definitions.some((definition) => definition.name === "octant_computer")
-    ) {
-      this.#refuseTurn(input.command, {
-        category: "unsupported",
-        message:
-          "Computer use is unavailable for this provider or task. Check Computer use in Settings.",
-      });
-      return;
-    }
-    const browserSelections =
-      input.command.extensionSelections?.filter(isBrowserUseSelection) ?? [];
-    if (
-      browserSelections.length > 1 ||
-      browserSelections.some((selection) => !validateBrowserUseSelection(selection))
-    ) {
-      this.#refuseTurn(input.command, {
-        category: "unavailable",
-        message: "Browser selection is invalid or stale.",
-      });
-      return;
-    }
-    if (browserSelections.length > 0) {
-      if (
-        !appManagedTools?.definitions.some((definition) => definition.name === "octant_browser")
-      ) {
-        this.#refuseTurn(input.command, {
-          category: "unsupported",
-          message: "The selected Browser is unavailable for this provider or task.",
-        });
-        return;
-      }
-    }
     // Only a thread whose person chose the runtime's artifact tool is offered
     // it; every other thread of the account keeps Canvas and its launch keeps
     // every guard. A Work turn never runs in Plan: it runs ask-first or

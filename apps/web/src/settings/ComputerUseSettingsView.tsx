@@ -98,12 +98,7 @@ export function ComputerUseSettingsView(props: {
     <section aria-label="Computer use" id="settings-computer-use">
       <SettingsSection
         title="Plugin"
-        description={
-          <>
-            Add <strong>@Computer</strong> to a task to use this bundled plugin with a supported
-            provider.
-          </>
-        }
+        description="While this is on, agents on a supported provider can use apps on this Mac when a task needs them. Each app asks you first."
       >
         <div className="setgroup">
           <SettingRow

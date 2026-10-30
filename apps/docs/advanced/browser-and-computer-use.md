@@ -82,11 +82,12 @@ Agent control is separate from manual Browser availability. A provider needs a
 verified app-managed tool transport; an authenticated provider or a visible
 Browser tab alone does not prove that transport works.
 
-In a Work or Code composer, type `@Browser` and choose the structured
-Browser mention to tell the selected agent to use Octant's built-in Browser.
-The mention carries a host-owned selection; it never opens an origin or grants
-approval by itself. The existing Browser tool still requests origin approval at
-the first action that needs it. Chat does not offer Browser.
+You do not pick the Browser in the composer. In Work and Code, every turn whose
+provider can carry Octant's tools is offered the Browser, and the agent uses it
+when your request needs a web page: ask "check the pricing page on
+example.com" and it browses. Being offered the tool opens nothing and approves
+nothing: the first time the agent acts on a site, Octant asks you. Chat does
+not offer Browser.
 
 Where supported, Octant registers `octant_browser` when the provider session
 starts. The agent does not need a separate browser skill, a debugging URL, or
@@ -130,7 +131,7 @@ check. Oh My Pi remains unavailable where its driver is probe-only.
 
 Support follows the exact release, not the runtime's name. An OpenCode or Pi
 release Octant has not verified still lists its models, but it reports Octant
-tools as unavailable and the composers do not offer `@Browser`: an OpenCode
+tools as unavailable and its turns are not offered the Browser: an OpenCode
 2.0.28 found on your `PATH` is one such release. A runtime whose connection
 check cannot confirm its transport is treated the same way, and so is an ACP
 agent that does not advertise HTTP MCP, unless Octant verified that exact
@@ -154,25 +155,32 @@ waiting or the page half-open.
   Code, until you forget it under **Settings → Permissions → Remembered
   websites**. Switching the thread's model still asks, because the remembered
   site covers the page, not who drives it.
-- **The provider cannot carry the tool.** The composer does not offer
-  `@Browser`. If you type it anyway, the turn is refused, or ends with a
-  message that the Browser is unavailable for that provider.
+- **The provider cannot carry the tool.** Its turns are not offered the
+  Browser, so the agent answers without it and can say it could not browse.
 
 ## Computer use
 
 Computer access requests show a compact, left-aligned approval card with the
-server-provided application, task scope, and duration. **Deny** and **Approve once**
-remain visible together; the activity footer does not repeat the approval status.
+server-provided application, task scope, and duration, the agent's own reason
+for the action when it gave one, and any outside content the task has read.
+**Deny** and **Approve once** remain visible together; the activity footer does
+not repeat the approval status.
 
 Typing targets an observed text field directly; a preceding background click to
 focus the field is unnecessary. After an application restarts, request its current
 window list rather than reusing earlier window IDs.
 
-Computer use is a bundled plugin for the Apple Silicon macOS desktop app.
-Choose **Computer** from the `@` picker in a Chat, Work, or Code composer, then
-describe what to do. The selected Computer chip gives a supported provider
-the `octant_computer` tool and instructions for using it. Ordinary text that
-mentions a computer does not enable the tool.
+Computer use is a bundled plugin for the Apple Silicon macOS desktop app. You
+do not pick it in the composer: while it is on, every Chat, Work, or Code turn
+on a supported provider is offered the `octant_computer` tool, and the agent
+uses it when your request needs an app, as in "open Notes and add today's
+list". Being offered the tool controls nothing. Plan mode, a provider without
+Octant's tools, or the plugin turned off offers no tool at all.
+
+The first time the agent acts on an app in a task, Octant asks you, even when
+the task has Full access. After the task has read outside content, such as a
+web page, every action asks again, one action at a time, and the card names
+what the task read.
 
 Open **Settings → Computer use** to enable the plugin, set up Accessibility
 and Screen Recording permissions, and check the installed CuaDriver version.

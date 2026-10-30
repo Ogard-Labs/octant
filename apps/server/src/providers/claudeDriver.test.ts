@@ -4003,6 +4003,40 @@ describe("Claude session lifecycle", () => {
     },
   );
 
+  it("checks an account that shows Not checked before its first turn", async () => {
+    const f = harness();
+    f.runtimeRegistry.clearObservedState(instanceId);
+    const acquired = await acquire(f.driver);
+
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+
+    expect(f.process.probeVersion).toHaveBeenCalled();
+    expect(f.runtimeRegistry.observedState(instanceId)?.readiness).toBe("ready");
+    await Effect.runPromise(acquired.connection.stop(sessionId));
+    await acquired.close();
+  });
+
+  it("tells a signed-out account to sign in instead of naming an internal observation", async () => {
+    const f = harness();
+    f.runtimeRegistry.clearObservedState(instanceId);
+    vi.mocked(f.process.probeSubscription).mockReturnValue(Effect.succeed("unauthenticated"));
+    const acquired = await acquire(f.driver);
+
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      ),
+    );
+
+    expect(String(exit)).toContain("unauthenticated");
+    expect(String(exit)).toContain("sign in to this account");
+    expect(String(exit)).not.toContain("verified provider observation");
+    expect(f.opens).toHaveLength(0);
+    await acquired.close();
+  });
+
   it("passes only a declared effort level to the Agent SDK query and drops the rest", async () => {
     const f = harness();
     const acquired = await acquire(f.driver);
@@ -4245,9 +4279,10 @@ describe("Claude session lifecycle", () => {
         }),
       ),
     );
-    expect(String(subsequentStart)).toContain("unsupported");
-    expect(f.opens).toHaveLength(1);
-    expect(f.queries).toHaveLength(1);
+    // The cleared reading is taken again (one probe query), then the session opens.
+    expect(Exit.isSuccess(subsequentStart)).toBe(true);
+    expect(f.opens).toHaveLength(3);
+    expect(f.runtimeRegistry.observedState(instanceId)?.readiness).toBe("ready");
     await acquired.close();
   });
 
@@ -4274,9 +4309,10 @@ describe("Claude session lifecycle", () => {
         }),
       ),
     );
-    expect(String(subsequentStart)).toContain("unsupported");
-    expect(f.opens).toHaveLength(1);
-    expect(f.queries).toHaveLength(1);
+    // The cleared reading is taken again (one probe query), then the session opens.
+    expect(Exit.isSuccess(subsequentStart)).toBe(true);
+    expect(f.opens).toHaveLength(3);
+    expect(f.runtimeRegistry.observedState(instanceId)?.readiness).toBe("ready");
     await acquired.close();
   });
 

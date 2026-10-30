@@ -56,7 +56,7 @@ import {
 } from "@octant/contracts";
 import type { ExtensionSnapshot } from "@octant/contracts/extension-rpc";
 import { browserUseSelection } from "@octant/plugin-host/browser-use";
-import { decodeExtensionSelection } from "@octant/contracts/extensions";
+import { COMPUTER_TOOL_HOST_LINE, computerUseSelection } from "@octant/plugin-host/computer-use";
 import {
   decodeContentSha256,
   decodePreviewContextSelectionId,
@@ -283,7 +283,7 @@ function openFixture(options?: {
         readonly execute: () => Promise<{ readonly result: unknown }>;
       }
     | undefined;
-  readonly resolveUnattachedComputerUseTools?: (input: {
+  readonly resolveComputerUseTools?: (input: {
     readonly windowId: WindowId;
     readonly thread: ChatThread;
   }) =>
@@ -725,9 +725,9 @@ function openFixture(options?: {
     ...(options?.resolveAppManagedTools === undefined
       ? {}
       : { resolveAppManagedTools: options.resolveAppManagedTools }),
-    ...(options?.resolveUnattachedComputerUseTools === undefined
+    ...(options?.resolveComputerUseTools === undefined
       ? {}
-      : { resolveUnattachedComputerUseTools: options.resolveUnattachedComputerUseTools }),
+      : { resolveComputerUseTools: options.resolveComputerUseTools }),
     ...(options?.resolveExtensionSelectionContext === undefined
       ? {}
       : { resolveExtensionSelectionContext: options.resolveExtensionSelectionContext }),
@@ -1233,36 +1233,31 @@ function genericChatStream(text: string): Response {
 }
 
 describe("ChatService", () => {
-  it("refuses a Browser selection in Chat even when the host could expose a Browser tool", async () => {
-    const browserWindow = decodeWindowId("84000000-0000-4000-8000-000000000010");
-    const { service, fakeDriver } = openFixture({
-      resolveAppManagedTools: () => ({
-        definitions: [{ name: "octant_browser", inputSchema: { type: "object", properties: {} } }],
-        execute: async () => ({ result: {} }),
-      }),
-    });
+  it("ignores a Browser selection from an older draft and sends the Chat turn without Browser", async () => {
+    const window = decodeWindowId("84000000-0000-4000-8000-000000000010");
+    const { service, fakeDriver } = openFixture();
     const created = await service.execute({
       kind: "create-chat-thread",
       hostId: "local",
       title: "Browser in Chat",
     });
     if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
-    await expect(
-      service.execute(
-        {
-          kind: "send-chat-turn",
-          threadId: created.thread.id,
-          expectedVersion: created.thread.version,
-          prompt: "Open the docs",
-          extensionSelections: [browserUseSelection("chat-browser-guidance")],
-        },
-        { windowId: browserWindow },
-      ),
-    ).rejects.toMatchObject({ failure: { category: "unsupported" } });
-    expect(fakeDriver.acquireInputs).toHaveLength(0);
-    expect(service.read(created.thread.id).turns).toHaveLength(0);
+    const sent = await service.execute(
+      {
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Open the docs",
+        extensionSelections: [browserUseSelection("chat-browser-guidance")],
+      },
+      { windowId: window },
+    );
+    expect(sent).toMatchObject({ kind: "turn-created" });
+    expect(fakeDriver.sentTurns[0]?.tools.map(({ name }) => name) ?? []).not.toContain(
+      "octant_browser",
+    );
+    expect(JSON.stringify(fakeDriver.sentTurns[0]?.context)).not.toContain("octant_browser");
   });
-
   it("tells the model to deliver kept work as a Canvas only when Chat offers the Canvas tool", async () => {
     const window = decodeWindowId("84000000-0000-4000-8000-000000000013");
     const { service, fakeDriver } = openFixture({
@@ -1400,128 +1395,86 @@ describe("ChatService", () => {
     expect(invalidated.record ?? []).toEqual([]);
   });
 
-  it("registers a refusal-only Computer tool when the send carries no @Computer selection", async () => {
+  it("carries the Computer tool and its host line on a follow-up whose send has no chip", async () => {
     const window = decodeWindowId("84000000-0000-4000-8000-000000000012");
-    const unattachedCalls: string[] = [];
+    const offered: string[] = [];
     const { service, fakeDriver } = openFixture({
-      resolveUnattachedComputerUseTools: () => {
-        unattachedCalls.push("called");
+      resolveComputerUseTools: () => {
+        offered.push("offered");
         return {
           definitions: [{ name: "octant_computer", inputSchema: { type: "object" } }],
-          execute: async () => ({
-            result: {
-              error: "computer-use-not-attached",
-              message: "Tell the user to add @Computer and send again.",
-            },
-            isError: true,
-          }),
+          execute: async () => ({ result: { kind: "apps", apps: [] } }),
         };
       },
     });
     const created = await service.execute({
       kind: "create-chat-thread",
       hostId: "local",
-      title: "Unattached computer",
+      title: "Computer without a chip",
     });
     if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const send = async (prompt: string, expectedVersion: number) =>
+      service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: created.thread.id,
+          expectedVersion: expectedVersion as never,
+          prompt,
+          // A Computer selection from a draft written before the tool was
+          // offered is ignored rather than refused.
+          extensionSelections: [computerUseSelection("older-draft")],
+        },
+        { windowId: window },
+      );
 
-    const sent = await service.execute(
+    const sent = await send("Open Notes", Number(created.thread.version));
+    expect(sent).toMatchObject({ kind: "turn-created" });
+    await vi.waitFor(() => expect(fakeDriver.sentTurns).toHaveLength(1));
+    expect(offered).toHaveLength(1);
+    expect(fakeDriver.sentTurns[0]?.tools.map(({ name }) => name)).toContain("octant_computer");
+    expect(
+      (fakeDriver.sentTurns[0]?.context ?? []).filter(
+        (block) => block.kind === "instructions" && block.text === COMPUTER_TOOL_HOST_LINE,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("offers no Computer tool on a runtime that carries no Octant tools", async () => {
+    const window = decodeWindowId("84000000-0000-4000-8000-000000000015");
+    const offered: string[] = [];
+    const { service, fakeDriver } = openFixture({
+      probe: probeFixture({
+        capabilities: { ...probeFixture().capabilities, appManagedTools: "unsupported" },
+      }),
+      resolveComputerUseTools: () => {
+        offered.push("offered");
+        return {
+          definitions: [{ name: "octant_computer", inputSchema: { type: "object" } }],
+          execute: async () => ({ result: {} }),
+        };
+      },
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "No app tools",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    await service.execute(
       {
         kind: "send-chat-turn",
         threadId: created.thread.id,
         expectedVersion: created.thread.version,
-        prompt: "Follow up without the chip",
+        prompt: "Open Notes",
       },
       { windowId: window },
     );
-
-    expect(sent).toMatchObject({ kind: "turn-created" });
-    expect(unattachedCalls).toHaveLength(1);
-    expect(fakeDriver.sentTurns[0]?.tools.map(({ name }) => name)).toContain("octant_computer");
-  });
-
-  it("refuses an invalid Browser receipt before provider acquisition", async () => {
-    const browserWindow = decodeWindowId("84000000-0000-4000-8000-000000000011");
-    const { service, fakeDriver } = openFixture({
-      resolveAppManagedTools: () => ({
-        definitions: [{ name: "octant_browser", inputSchema: {} }],
-        execute: async () => ({ result: {} }),
-      }),
-    });
-    const created = await service.execute({
-      kind: "create-chat-thread",
-      hostId: "local",
-      title: "Invalid Browser guidance",
-    });
-    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
-    const selection = browserUseSelection("chat-invalid-browser");
-    await expect(
-      service.execute(
-        {
-          kind: "send-chat-turn",
-          threadId: created.thread.id,
-          expectedVersion: created.thread.version,
-          prompt: "Open the docs",
-          extensionSelections: [
-            decodeExtensionSelection({
-              ...selection,
-              catalogEpoch: `sha256:${"f".repeat(64)}`,
-            }),
-          ],
-        },
-        { windowId: browserWindow },
-      ),
-    ).rejects.toMatchObject({ failure: { category: "unsupported" } });
-    expect(fakeDriver.acquireInputs).toHaveLength(0);
-  });
-
-  it("refuses Browser when the selected Chat provider exposes no Browser tool", async () => {
-    const browserWindow = decodeWindowId("84000000-0000-4000-8000-000000000012");
-    const { service, fakeDriver } = openFixture();
-    const created = await service.execute({
-      kind: "create-chat-thread",
-      hostId: "local",
-      title: "Unsupported Browser guidance",
-    });
-    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
-    await expect(
-      service.execute(
-        {
-          kind: "send-chat-turn",
-          threadId: created.thread.id,
-          expectedVersion: created.thread.version,
-          prompt: "Open the docs",
-          extensionSelections: [browserUseSelection("chat-unsupported-browser")],
-        },
-        { windowId: browserWindow },
-      ),
-    ).rejects.toMatchObject({ failure: { category: "unsupported" } });
-    expect(fakeDriver.acquireInputs).toHaveLength(0);
-  });
-
-  it("refuses a Browser-selected Chat turn without a window capability", async () => {
-    const { service, fakeDriver } = openFixture({
-      resolveAppManagedTools: () => ({
-        definitions: [{ name: "octant_browser", inputSchema: { type: "object", properties: {} } }],
-        execute: async () => ({ result: {} }),
-      }),
-    });
-    const created = await service.execute({
-      kind: "create-chat-thread",
-      hostId: "local",
-      title: "Missing Browser window",
-    });
-    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
-    await expect(
-      service.execute({
-        kind: "send-chat-turn",
-        threadId: created.thread.id,
-        expectedVersion: created.thread.version,
-        prompt: "Continue this",
-        extensionSelections: [browserUseSelection("chat-browser-without-window")],
-      }),
-    ).rejects.toMatchObject({ failure: { category: "unsupported" } });
-    expect(fakeDriver.acquireInputs).toHaveLength(0);
+    await vi.waitFor(() => expect(fakeDriver.sentTurns).toHaveLength(1));
+    expect(offered).toEqual([]);
+    expect(fakeDriver.sentTurns[0]?.tools.map(({ name }) => name) ?? []).not.toContain(
+      "octant_computer",
+    );
+    expect(JSON.stringify(fakeDriver.sentTurns[0]?.context ?? [])).not.toContain("octant_computer");
   });
 
   it("honors a pre-admitted thread id for linked Chat creation", async () => {

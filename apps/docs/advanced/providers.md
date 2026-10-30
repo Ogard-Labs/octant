@@ -121,8 +121,7 @@ the page never infers them from what a picker can mention.
 Every transport belongs to one provider connection and ends with it. Octant
 never writes a runtime's MCP or hook configuration to offer its tools. A
 runtime whose transport is not confirmed by its check reports Octant tools as
-not available, and the composers then do not offer **@Browser** or
-**@Computer** for it; a typed reference is shown as blocked.
+not available. Its turns are then offered neither the Browser nor Computer.
 
 ### App-managed browser tools
 

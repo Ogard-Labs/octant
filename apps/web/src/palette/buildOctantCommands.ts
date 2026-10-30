@@ -73,6 +73,8 @@ export interface CommandPluginServer {
   readonly reference: string;
   readonly displayName: string;
   readonly pluginName: string;
+  /** An MCP server the person added in Settings or from Connectors, not a plugin's own. */
+  readonly connector?: true;
 }
 
 const MODE_LABEL: Record<OctantMode, string> = { chat: "Chat", work: "Work", code: "Code" };
@@ -167,9 +169,14 @@ export function buildOctantCommands(sources: OctantCommandSources): ReadonlyArra
     commands.push({
       id: `plugin:${server.reference}`,
       title: server.displayName,
-      group: "Plugins",
-      detail: `MCP server · ${server.pluginName}`,
-      keywords: ["plugin", "mcp", server.pluginName, server.reference],
+      group: server.connector === true ? "Connectors" : "Plugins",
+      detail: server.connector === true ? "Connector" : `MCP server · ${server.pluginName}`,
+      keywords: [
+        server.connector === true ? "connector" : "plugin",
+        "mcp",
+        server.pluginName,
+        server.reference,
+      ],
       action: { kind: "address", reference: server.reference },
     });
   }
