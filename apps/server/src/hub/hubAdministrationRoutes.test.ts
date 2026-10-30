@@ -51,6 +51,8 @@ async function setup(
     spokePush: host.spokePush,
     provision: host.provision,
     spokeProvision: host.spokeProvision,
+    signIn: host.signIn,
+    spokeSignIn: host.spokeSignIn,
     certificate: new TailscaleCertificateService({
       setting: createTailscaleCertificateSetting(host.directory),
       daemon: unreachableTailscaleDaemon,

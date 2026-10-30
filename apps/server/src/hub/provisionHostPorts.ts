@@ -28,7 +28,7 @@ const decodeProfileId = Schema.decodeUnknownSync(AgentProfileId);
 const decodeProviderInstanceId = Schema.decodeUnknownSync(ProviderInstanceId);
 
 /** The window a host-originated provider command names: provider commands use it only to probe, and no window exists here. */
-const HOST_WINDOW_ID = decodeWindowId("00000000-0000-4000-8000-000000000003");
+export const HOST_WINDOW_ID = decodeWindowId("00000000-0000-4000-8000-000000000003");
 
 export interface ProvisionHostDependencies {
   readonly shell: {

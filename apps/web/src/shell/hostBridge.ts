@@ -254,7 +254,11 @@ export type HubAdministrationOperation =
   | "provision-withdraw"
   | "provision-apply"
   | "provision-dismiss"
-  | "provision-auto-apply";
+  | "provision-auto-apply"
+  | "sign-in-ask"
+  | "sign-in-accept"
+  | "sign-in-decline"
+  | "sign-in-check";
 
 /**
  * The loopback hub administration, which only a local window reaches. Absent

@@ -1327,3 +1327,153 @@ describe("HubSettingsSection push sender", () => {
     expect(await screen.findByText("The hub role is off.")).toBeVisible();
   });
 });
+
+describe("HubSettingsSection sign-in requests", () => {
+  const REQUEST = "77777777-7777-4777-8777-777777777777";
+  const hubWithSignIn = (hub: unknown) => ({
+    hub: {
+      enabled: true,
+      roster: {
+        roster: {
+          standbyOrder: [],
+          members: [
+            { memberId: "m-1", name: "Mac mini", role: "hub", owner: false },
+            { memberId: "m-2", name: "Laptop", role: "spoke", owner: false },
+            { memberId: "m-3", name: "Phone", role: "guest", owner: false },
+          ],
+        },
+      },
+    },
+    spoke: { membership: "none" },
+    signIn: { hub, spoke: { accepting: false, requests: [] } },
+  });
+  const spokeSignIn = (spoke: Record<string, unknown>) => ({
+    ...linkedStatus({ items: ["roster", "sign-in"] }),
+    signIn: { hub: [], spoke },
+  });
+
+  it("asks one spoke to sign in to one account kind, and shows the one word that comes back", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderHub({
+      status: {
+        status: 200,
+        body: hubWithSignIn([
+          { memberId: "m-2", requestId: REQUEST, kind: "claude-subscription", result: "declined" },
+        ]),
+      },
+      "sign-in-ask": { status: 200, body: { status: "asked", requestId: REQUEST } },
+    });
+
+    expect(await screen.findByText(/Claude account: declined/)).toBeVisible();
+    // A guest runs no agents and has no account to sign in.
+    expect(screen.queryByRole("button", { name: "Ask Phone to sign in" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Ask Laptop to sign in" }));
+    await user.click(
+      screen.getByRole("button", { name: "Ask Laptop to sign in to its Codex account" }),
+    );
+
+    await waitFor(() =>
+      expect(calls.find((call) => call.operation === "sign-in-ask")?.body).toEqual({
+        memberId: "m-2",
+        kind: "codex-subscription",
+      }),
+    );
+    expect(await screen.findByText(/finishes the sign-in on that computer/)).toBeVisible();
+  });
+
+  it("says plainly why a spoke did not take the request", async () => {
+    const user = userEvent.setup();
+    renderHub({
+      status: { status: 200, body: hubWithSignIn([]) },
+      "sign-in-ask": { status: 409, body: { status: "refused", kind: "sign-in-not-granted" } },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Ask Laptop to sign in" }));
+    await user.click(
+      screen.getByRole("button", { name: "Ask Laptop to sign in to its Claude account" }),
+    );
+
+    expect(await screen.findByText(/did not allow sign-in requests/)).toBeVisible();
+  });
+
+  it("shows a spoke the request with Accept and Decline, and no command until it accepts", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderHub({
+      status: {
+        status: 200,
+        body: spokeSignIn({
+          accepting: true,
+          requests: [
+            {
+              requestId: REQUEST,
+              kind: "claude-subscription",
+              state: "asked",
+              expiresAt: "2026-10-29T10:10:00.000Z",
+            },
+          ],
+        }),
+      },
+      "sign-in-accept": { status: 200, body: { status: "accepted", guidance: "run it" } },
+    });
+
+    const list = await screen.findByRole("list", { name: "Sign-in requests from the hub" });
+    expect(within(list).getByText(/sign in to your Claude account on this computer/)).toBeVisible();
+    expect(within(list).getByText(/Nothing starts until you accept/)).toBeVisible();
+    expect(within(list).queryByText(/auth login/)).toBeNull();
+    await user.click(within(list).getByRole("button", { name: "Accept" }));
+
+    await waitFor(() =>
+      expect(calls.find((call) => call.operation === "sign-in-accept")?.body).toEqual({
+        requestId: REQUEST,
+      }),
+    );
+  });
+
+  it("shows the provider's own command and a check after accepting, and says when it is not signed in yet", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderHub({
+      status: {
+        status: 200,
+        body: spokeSignIn({
+          accepting: true,
+          requests: [
+            {
+              requestId: REQUEST,
+              kind: "codex-subscription",
+              state: "accepted",
+              expiresAt: "2026-10-29T10:10:00.000Z",
+              guidance: "Open a terminal on this computer and run codex login.",
+            },
+          ],
+        }),
+      },
+      "sign-in-check": { status: 200, body: { status: "pending" } },
+    });
+
+    const list = await screen.findByRole("list", { name: "Sign-in requests from the hub" });
+    expect(within(list).getByText(/run codex login/)).toBeVisible();
+    await user.click(within(list).getByRole("button", { name: "Check sign-in" }));
+
+    await waitFor(() =>
+      expect(calls.find((call) => call.operation === "sign-in-check")?.body).toEqual({
+        requestId: REQUEST,
+      }),
+    );
+    expect(await screen.findByText(/Not signed in yet/)).toBeVisible();
+  });
+
+  it("shows a spoke that did not tick Sign-in no requests at all", async () => {
+    renderHub({
+      status: {
+        status: 200,
+        body: {
+          ...linkedStatus({ items: ["roster"] }),
+          signIn: { hub: [], spoke: { accepting: false, requests: [] } },
+        },
+      },
+    });
+
+    await screen.findByText("Hub");
+    expect(screen.queryByText("Sign-in requests from the hub")).toBeNull();
+  });
+});

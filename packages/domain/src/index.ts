@@ -201,6 +201,7 @@ export * from "./outsideContentSources";
 export * from "./trimTrailing";
 export * from "./hubAndSpokesPolicy";
 export * from "./hubProvisionPolicy";
+export * from "./hubSignInPolicy";
 export * from "./hubPushPolicy";
 export * from "./hubWakePolicy";
 export * from "./hubGuestPolicy";

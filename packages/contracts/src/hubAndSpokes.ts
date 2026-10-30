@@ -66,6 +66,7 @@ export const HUB_GRANT_ITEMS = [
   "standby",
   "push",
   "provision",
+  "sign-in",
   "act",
 ] as const;
 export const HubGrantItem = Schema.Literal(...HUB_GRANT_ITEMS);

@@ -18,6 +18,10 @@ import {
   HubOfferId,
   HubProvisionReason,
   HubPushResult,
+  HubSignInKind,
+  HubSignInOutcome,
+  HubSignInReason,
+  HubSignInRequestId,
   HubWakeResult,
   HubWakeSpokeTimes,
   NewMemberAlert,
@@ -186,8 +190,55 @@ export const SpokeProvisionState = Schema.Struct({
 }).annotations(strict);
 export type SpokeProvisionState = typeof SpokeProvisionState.Type;
 
+/**
+ * One request the hub sent a spoke, and the one word the hub holds about how it
+ * ended: still asked, an outcome word the spoke reported, or the reason the
+ * spoke refused it. Nothing of the sign-in itself is ever kept here.
+ */
+export const SignInAskRecord = Schema.Struct({
+  memberId: HubMemberId,
+  requestId: HubSignInRequestId,
+  kind: HubSignInKind,
+  askedAtMs: Schema.Int,
+  outcome: Schema.optional(HubSignInOutcome),
+  refused: Schema.optional(HubSignInReason),
+}).annotations(strict);
+export type SignInAskRecord = typeof SignInAskRecord.Type;
+
+export const HubSignInState = Schema.Struct({
+  asks: Schema.Array(SignInAskRecord),
+}).annotations(strict);
+export type HubSignInState = typeof HubSignInState.Type;
+
+/** A request a spoke holds for its person: asked, then accepted once they say so. */
+export const SignInRequestRecord = Schema.Struct({
+  requestId: HubSignInRequestId,
+  kind: HubSignInKind,
+  receivedAtMs: Schema.Int,
+  expiresAtMs: Schema.Int,
+  state: Schema.Literal("asked", "accepted"),
+  /** The provider's sign-in command for the account this host uses, fixed when the request arrived. */
+  command: Schema.optional(Schema.String),
+}).annotations(strict);
+export type SignInRequestRecord = typeof SignInRequestRecord.Type;
+
+/**
+ * A spoke's side of hub-started sign-in: the requests it holds, when requests
+ * arrived in the last hour (for the limit), and outcome words the hub has not
+ * yet been told.
+ */
+export const SpokeSignInState = Schema.Struct({
+  requests: Schema.Array(SignInRequestRecord),
+  arrivedAtMs: Schema.Array(Schema.Int),
+  unreported: Schema.Array(
+    Schema.Struct({ requestId: HubSignInRequestId, outcome: HubSignInOutcome }).annotations(strict),
+  ),
+}).annotations(strict);
+export type SpokeSignInState = typeof SpokeSignInState.Type;
+
 export const HubSideState = Schema.Struct({
   enabled: Schema.Boolean,
+  signIn: Schema.optional(HubSignInState),
   wake: Schema.optional(HubWakeState),
   push: Schema.optional(HubPushState),
   provision: Schema.optional(HubProvisionState),
@@ -319,6 +370,8 @@ export const HubLinkState = Schema.Struct({
   pushCopy: Schema.optional(Schema.Struct({ enabled: Schema.Boolean }).annotations(strict)),
   /** This spoke's side of provisioning: proposals, auto-apply choices, the verified mirrored feed. */
   provision: Schema.optional(SpokeProvisionState),
+  /** This spoke's side of hub-started sign-in: the requests its person has yet to answer. */
+  signIn: Schema.optional(SpokeSignInState),
 }).annotations(strict);
 export type HubLinkState = typeof HubLinkState.Type;
 

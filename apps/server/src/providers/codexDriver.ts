@@ -7,6 +7,7 @@ import {
   type PermissionPersistence,
   type ProviderExecutionPolicy,
   type ProviderFailure,
+  type ProviderAccountAuthentication,
   type ProviderCapabilities,
   type ProviderInstanceId,
   type ProviderModel,
@@ -995,6 +996,22 @@ function codexBedrockRefusal(
   }
 }
 
+/** `ready` also covers a custom model provider or an API key; only a ChatGPT account is a plan sign-in. */
+function codexAccountAuthentication(
+  accountResult: CodexAccountReadResult,
+): ProviderAccountAuthentication {
+  switch (accountResult.account?.type) {
+    case "chatgpt":
+      return "subscription";
+    case "apiKey":
+      return "api-key";
+    case undefined:
+      return "none";
+    default:
+      return "other";
+  }
+}
+
 function normalizeProbe(
   instanceId: ProviderInstanceId,
   version: string,
@@ -1074,6 +1091,7 @@ function normalizeProbe(
   return decodeProviderProbeResult({
     instanceId,
     readiness: ready ? "ready" : refusal === undefined ? "unauthenticated" : "incompatible",
+    accountAuthentication: codexAccountAuthentication(accountResult),
     processState: "running",
     detectedVersion: version,
     models,
