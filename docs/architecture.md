@@ -9004,7 +9004,10 @@ macOS-only.
   not that the build is current.
 - Rings are `stable` (tags), `preview` (scheduled `main` builds), and
   `candidate` (on-demand builds of a chosen ref, so a test install exercises
-  the real update path) at `<base>/<ring>/<platform>-<arch>.json`. A build's default ring is read from
+  the real update path) at `<base>/<ring>/<platform>-<arch>.json`. Settings labels
+  the rings Stable, Preview (`candidate`), and Nightly (`preview`); the ids
+  stay, since feed paths and version tags that installed builds follow carry
+  them. A build's default ring is read from
   its version; the signed ring field is what separates the streams. The base
   is overridable but must be HTTPS. Stable ships as Octant; preview and
   candidate ship as a second app, Octant Nightly, with its own bundle id, link

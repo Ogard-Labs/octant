@@ -193,7 +193,7 @@ describe("AppUpdateSettings", () => {
     );
   });
 
-  it("moves to the preview ring and tells the host, not only the settings store", () => {
+  it("moves to the Nightly ring and tells the host, not only the settings store", () => {
     // Both matter: the store is what survives a relaunch, and the host is what
     // the next check actually reads a feed from.
     const { host, onReleaseRingChange } = view();
@@ -204,7 +204,7 @@ describe("AppUpdateSettings", () => {
       "true",
     );
 
-    fireEvent.click(within(rings).getByRole("button", { name: "Preview" }));
+    fireEvent.click(within(rings).getByRole("button", { name: "Nightly" }));
 
     expect(onReleaseRingChange).toHaveBeenCalledWith("preview");
     expect(host.setAppUpdateRing).toHaveBeenCalledWith("preview");
