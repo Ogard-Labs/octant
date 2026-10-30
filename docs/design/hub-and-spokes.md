@@ -1391,9 +1391,14 @@ a numbered slice. Built, with these narrower readings:
 
 - **The sign-in runs outside Octant.** A host has no server-run Claude or Codex
   login today; Settings shows the provider's own command and the person runs it
-  in a terminal. So accepting shows that command on the spoke, and the spoke
-  reads only whether the provider's own app is now signed in (the same probe as
-  Check the connection). It never runs a login and never reads a token. Because
+  in a terminal. So accepting shows that command on the spoke, built as
+  Provider Settings builds it from the first enabled row for the kind: that
+  row's binary and, for an isolated account, its account directory. The spoke
+  records it when the request arrives. It reads only whether the provider's own
+  app is now signed in (the same probe as Check the connection), and only a
+  subscription account counts: a ready Codex on an API key or with no OpenAI
+  login is signed-out, and a probe that names no account kind is unavailable.
+  It never runs a login and never reads a token. Because
   of that, a request is ended by the person choosing **Check sign-in** (or by
   the ten minutes passing), not by the server watching the terminal.
 - **Closed kinds.** A request names `claude-subscription` or `codex-subscription`
@@ -1405,6 +1410,9 @@ a numbered slice. Built, with these narrower readings:
   relayed a request, not the window or owner device behind it, so the hourly
   limit counts requests from the hub's key. Refusals after the grant check count
   toward it, so asking cannot be used to probe whether an account is signed in.
+  Admission is checked again after the provider is read, with no wait before the
+  save, so requests that arrive together cannot both pass. A full list (eight)
+  refuses the new request as `rate-limited`; an open request is never dropped.
 - **The ten minutes cover the whole request.** A request lapses ten minutes after
   it arrives, accepted or not, and the spoke reports `expired`. Lapses are
   settled by a thirty-second tick and whenever the spoke's Settings is read; an

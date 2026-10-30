@@ -10,6 +10,7 @@ import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   HubMemberId,
+  HubSignInRequestId,
   decodeHubSignInAsk,
   type HubGrant,
   type HubSignInKind,
@@ -32,6 +33,7 @@ afterEach(async () => {
 
 const window = { kind: "local-window" } as const;
 const decodeMemberId = Schema.decodeUnknownSync(HubMemberId);
+const decodeRequestId = Schema.decodeUnknownSync(HubSignInRequestId);
 const MINUTE = 60_000;
 const CLAUDE: HubSignInKind = "claude-subscription";
 const CODEX: HubSignInKind = "codex-subscription";
@@ -211,6 +213,41 @@ describe("a sign-in request from the hub's window", () => {
     expect(
       changes(laptop, "sign-in-accepted").map((record) => record.actingPrincipal.kind),
     ).toEqual(["local-window"]);
+  });
+
+  it("shows the command for the account this host uses, not a bare one", async () => {
+    const { hub, laptop } = await startPair();
+    laptop.signInCommands[CLAUDE] = "CLAUDE_CONFIG_DIR='/a' '/opt/claude' auth login";
+    const requestId = await askedId(hub, laptop);
+
+    const accepted = laptop.spokeSignIn.accept(requestId, window);
+
+    expect(accepted.status === "accepted" && accepted.guidance).toContain(
+      "run CLAUDE_CONFIG_DIR='/a' '/opt/claude' auth login.",
+    );
+  });
+
+  it("admits one of two requests for the same account that arrive together", async () => {
+    const { hub, laptop } = await startPair();
+    let release: () => void = () => {};
+    laptop.accountGate.current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const sender = decodeMemberId(hub.hostId);
+    const first = laptop.spokeSignIn.receive(sender, {
+      requestId: decodeRequestId("22222222-2222-4222-8222-222222222222"),
+      kind: CLAUDE,
+    });
+    const second = laptop.spokeSignIn.receive(sender, {
+      requestId: decodeRequestId("33333333-3333-4333-8333-333333333333"),
+      kind: CLAUDE,
+    });
+    release();
+
+    const answers = await Promise.all([first, second]);
+
+    expect(answers.map((answer) => answer.status).sort()).toEqual(["asked", "refused"]);
+    expect(held(laptop)).toHaveLength(1);
   });
 
   it("tells the hub declined when the person declines", async () => {

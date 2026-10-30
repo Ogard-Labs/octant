@@ -178,6 +178,10 @@ export interface HubTestHost {
   readonly spokeSignIn: SpokeSignInService;
   /** Whether the provider's own app on this host holds each sign-in; a test changes it as the person would in a terminal. */
   readonly accounts: Record<HubSignInKind, SignInAccountState>;
+  /** The sign-in command this host's provider settings would show for each kind; unset means none. */
+  readonly signInCommands: Partial<Record<HubSignInKind, string>>;
+  /** While set, reading an account waits on it, so a test can interleave requests. */
+  readonly accountGate: { current: Promise<void> | undefined };
   /** Starts a new wake service over the same state, as a restart of the server does; `spokeWake` is then the new one. */
   readonly restartSpokeWake: () => SpokeWakeService;
   /** The magic packets this host's wake service sent, as the fake socket saw them. */
@@ -562,6 +566,8 @@ export async function startHubTestHost(input: {
     "claude-subscription": "signed-out",
     "codex-subscription": "signed-out",
   };
+  const signInCommands: Partial<Record<HubSignInKind, string>> = {};
+  const accountGate: { current: Promise<void> | undefined } = { current: undefined };
   const signIn = new SignInService({
     state,
     identity: () => identity,
@@ -574,7 +580,13 @@ export async function startHubTestHost(input: {
     identity: () => identity,
     transport,
     spoke,
-    ports: { accountState: async (kind) => accounts[kind] },
+    ports: {
+      accountState: async (kind) => {
+        await accountGate.current;
+        return accounts[kind];
+      },
+      signInCommand: async (kind) => signInCommands[kind],
+    },
     record: (change) => records.push(change),
     now: wakeNow,
   });
@@ -743,6 +755,8 @@ export async function startHubTestHost(input: {
     signIn,
     spokeSignIn,
     accounts,
+    signInCommands,
+    accountGate,
     magicPackets,
     routines,
     schedulerPokes,

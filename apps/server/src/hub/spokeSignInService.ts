@@ -8,6 +8,7 @@
 // to the hub. The hub is told one word when the request ends.
 
 import {
+  HUB_SIGN_IN_HOURLY_LIMIT,
   HUB_SIGN_IN_LIFETIME_MS,
   UtcTimestamp,
   type AuditActingPrincipal,
@@ -50,15 +51,20 @@ export type SignInAccountState = "signed-in" | "signed-out" | "unavailable";
  */
 export interface SignInHostPorts {
   readonly accountState: (kind: HubSignInKind) => Promise<SignInAccountState>;
+  /** The provider's own sign-in command for the account this host uses for the kind, if it has one. */
+  readonly signInCommand: (kind: HubSignInKind) => Promise<string | undefined>;
 }
 
-/** The provider's own sign-in command, in plain words, for each kind. */
-const GUIDANCE: Readonly<Record<HubSignInKind, string>> = {
-  "claude-subscription":
-    "Open a terminal on this computer and run claude auth login. Finish the sign-in there, then choose Check sign-in.",
-  "codex-subscription":
-    "Open a terminal on this computer and run codex login. Finish the sign-in there, then choose Check sign-in.",
+/** The bare commands, used only for a request held before its command was recorded. */
+const BARE_COMMAND: Readonly<Record<HubSignInKind, string>> = {
+  "claude-subscription": "claude auth login",
+  "codex-subscription": "codex login",
 };
+
+/** The provider's own sign-in command for the account this host will use, in plain words. */
+function guidanceFor(request: SignInRequestRecord): string {
+  return `Open a terminal on this computer and run ${request.command ?? BARE_COMMAND[request.kind]}. Finish the sign-in there, then choose Check sign-in.`;
+}
 
 export interface SpokeSignInOptions {
   readonly state: HubStatePort;
@@ -115,7 +121,7 @@ export class SpokeSignInService {
         state: request.state,
         receivedAt: decodeTimestamp(new Date(request.receivedAtMs).toISOString()),
         expiresAt: decodeTimestamp(new Date(request.expiresAtMs).toISOString()),
-        ...(request.state === "accepted" ? { guidance: GUIDANCE[request.kind] } : {}),
+        ...(request.state === "accepted" ? { guidance: guidanceFor(request) } : {}),
       })),
     };
   }
@@ -131,19 +137,31 @@ export class SpokeSignInService {
     if (link.removed === true) return { status: "refused", kind: "hub-revoked" };
     this.#settle();
     const principal: AuditActingPrincipal = { kind: "hub", memberId: sender };
+    // The account is read only for a hub that may ask, so a hub without the item learns nothing of it.
+    const kind = delivery.kind;
+    const account: SignInAccountState =
+      this.#granted() && isHubSignInKind(kind) ? await this.#accountState(kind) : "unavailable";
+    const command =
+      account === "signed-out" && isHubSignInKind(kind)
+        ? await this.#signInCommand(kind)
+        : undefined;
+    // Everything below runs without yielding, so the checks and the save see one state. Other
+    // requests may have been admitted, or the grant changed, while the probe was awaited.
+    const live = this.#options.state.load().link;
+    if (live === undefined) return { status: "refused", kind: "not-a-spoke" };
+    if (live.removed === true) return { status: "refused", kind: "hub-revoked" };
+    this.#settle();
     const granted = this.#granted();
     const now = this.#options.now();
     const current = this.#options.state.load().link?.signIn;
     const recent = (current?.arrivedAtMs ?? []).filter((at) => at > now - HOUR_MS);
-    // The account is read only for a hub that may ask, so a hub without the item learns nothing of it.
-    const kind = delivery.kind;
-    const account: SignInAccountState =
-      granted && isHubSignInKind(kind) ? await this.#accountState(kind) : "unavailable";
+    // A full list refuses the new request: an open request is never dropped to make room.
+    const full = (current?.requests ?? []).length >= MAX_REQUESTS;
     const decision = decideSignInAdmission({
       granted,
       kind,
       supportedKinds: account === "unavailable" || !isHubSignInKind(kind) ? [] : [kind],
-      recentRequests: recent.length,
+      recentRequests: full ? HUB_SIGN_IN_HOURLY_LIMIT : recent.length,
       alreadyAsked: (current?.requests ?? []).some(
         (request) => request.kind === kind || String(request.requestId) === delivery.requestId,
       ),
@@ -176,8 +194,9 @@ export class SpokeSignInService {
           receivedAtMs: now,
           expiresAtMs: now + HUB_SIGN_IN_LIFETIME_MS,
           state: "asked" as const,
+          ...(command === undefined ? {} : { command }),
         },
-      ].slice(-MAX_REQUESTS),
+      ],
     }));
     this.#journal("sign-in-requested", principal, delivery.requestId, decision.kind, {});
     return { status: "asked" };
@@ -197,7 +216,7 @@ export class SpokeSignInService {
       }));
       this.#journal("sign-in-accepted", principal, request.requestId, request.kind, {});
     }
-    return { status: "accepted", guidance: GUIDANCE[request.kind] };
+    return { status: "accepted", guidance: guidanceFor(request) };
   }
 
   async decline(
@@ -261,6 +280,14 @@ export class SpokeSignInService {
       return await this.#options.ports.accountState(kind);
     } catch {
       return "unavailable";
+    }
+  }
+
+  async #signInCommand(kind: HubSignInKind): Promise<string | undefined> {
+    try {
+      return await this.#options.ports.signInCommand(kind);
+    } catch {
+      return undefined;
     }
   }
 

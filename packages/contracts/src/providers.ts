@@ -1746,10 +1746,25 @@ export const ProviderObservedDirectoryBinding = Schema.Union(
 );
 export type ProviderObservedDirectoryBinding = typeof ProviderObservedDirectoryBinding.Type;
 
+/**
+ * The kind of account a provider's own app reports it is signed in with, in
+ * one vocabulary for every driver. Only `subscription` is a person's plan
+ * sign-in; `other` is an account the driver cannot name as any of the rest.
+ */
+export const ProviderAccountAuthentication = Schema.Literal(
+  "subscription",
+  "api-key",
+  "none",
+  "other",
+);
+export type ProviderAccountAuthentication = typeof ProviderAccountAuthentication.Type;
+
 export const ProviderObservedState = Schema.Struct({
   instanceId: ProviderInstanceId,
   readiness: ProviderReadiness,
   processState: ProviderProcessState,
+  /** What the probe found the account to be; absent when the driver does not say. */
+  accountAuthentication: Schema.optional(ProviderAccountAuthentication),
   detectedVersion: Schema.optional(Schema.NonEmptyTrimmedString),
   observedProtocol: Schema.optional(OpenAiCompatibleProtocol),
   credentialStatus: Schema.optional(ProviderCredentialStatus),

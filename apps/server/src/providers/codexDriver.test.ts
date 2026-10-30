@@ -713,6 +713,8 @@ describe("Codex driver probe and runtime lifecycle", () => {
       Effect.scoped(makeCodexDriver(optional.options()).probe({ instanceId })),
     );
     expect(optionalProbe.readiness).toBe("ready");
+    // Ready without an OpenAI login is not a subscription sign-in.
+    expect(optionalProbe.accountAuthentication).toBe("none");
 
     // A provider that authenticates outside the OpenAI login answers
     // requiresOpenaiAuth: false whether or not it holds a credential, so the

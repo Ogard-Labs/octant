@@ -217,6 +217,8 @@ export const SignInRequestRecord = Schema.Struct({
   receivedAtMs: Schema.Int,
   expiresAtMs: Schema.Int,
   state: Schema.Literal("asked", "accepted"),
+  /** The provider's sign-in command for the account this host uses, fixed when the request arrived. */
+  command: Schema.optional(Schema.String),
 }).annotations(strict);
 export type SignInRequestRecord = typeof SignInRequestRecord.Type;
 
