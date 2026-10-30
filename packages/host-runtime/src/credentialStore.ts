@@ -20,8 +20,17 @@ const FAILURE_MESSAGES: Readonly<Record<CredentialStoreFailureCategory, string>>
   unavailable: "The secure credential store is unavailable.",
 };
 
+/**
+ * Why an unavailable Linux keyring refused, when its own words say: the
+ * keyring is locked, or the session has no login keyring to keep keys in.
+ */
+export type CredentialStoreFailureCause = "locked" | "no-login-collection";
+
 export class CredentialStoreFailure extends Error {
-  constructor(readonly category: CredentialStoreFailureCategory) {
+  constructor(
+    readonly category: CredentialStoreFailureCategory,
+    override readonly cause?: CredentialStoreFailureCause,
+  ) {
     super(FAILURE_MESSAGES[category]);
     this.name = "CredentialStoreFailure";
   }

@@ -1538,6 +1538,8 @@ const API_KEY_FAILURE_MESSAGES: ReadonlyArray<string> = [
   "The API keys for this provider are too large to store.",
   "That API key is no longer stored.",
   "At least one API key is required.",
+  "Your keyring is locked. Unlock it (open Passwords and Keys and unlock Login), then try again.",
+  "Your session has no Login keyring to keep keys in. Create one named Login in Passwords and Keys, set it as default, then try again.",
   "Octant rejected an invalid API key request.",
   "Octant rejected an unauthorized credential request.",
   "Octant rejected an invalid credential request.",

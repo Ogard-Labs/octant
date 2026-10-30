@@ -70,6 +70,8 @@ export const ENDPOINT_KINDS: ReadonlyArray<EndpointKindPresentation> = [
     urlLabel: "Address",
     urlPlaceholder: "https://api.anthropic.com/v1",
     urlHint: "Usually ends in /v1. Remote addresses need HTTPS.",
+    // Filled in, not left as grey placeholder text that reads as already typed.
+    defaultUrl: "https://api.anthropic.com/v1",
   },
   {
     kind: "ollama",

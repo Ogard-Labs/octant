@@ -181,6 +181,12 @@ function describeRefusal(
   switch (body.category) {
     case "credential-store-unavailable": {
       const outcome = command.action === "remove-provider" ? "removed" : "saved";
+      if (platform === "linux" && body.cause === "locked") {
+        return `Nothing was ${outcome}: your keyring is locked. Unlock it (log in to your desktop session, or open Passwords and Keys and unlock "Login"), then try again.`;
+      }
+      if (platform === "linux" && body.cause === "no-login-collection") {
+        return `Nothing was ${outcome}: your session has no "Login" keyring to keep keys in. Open Passwords and Keys (seahorse), create a keyring named Login, set it as default, then try again.`;
+      }
       return platform === "linux"
         ? `Nothing was ${outcome}: the Octant server has no credential store. Changing a key needs a running Secret Service (org.freedesktop.secrets on your user session bus) and /usr/bin/secret-tool. Start and unlock the keyring, then run \`octant server restart\` and try again.`
         : `Nothing was ${outcome}: this host has no credential store the Octant server can reach. Use the Octant desktop app.`;

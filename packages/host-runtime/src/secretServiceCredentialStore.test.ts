@@ -179,6 +179,31 @@ describe("Secret Service credential store", () => {
     await expect(timeout.delete(providerInstanceId)).rejects.toBeInstanceOf(CredentialStoreFailure);
   });
 
+  it("says a locked keyring is locked and a missing login keyring is missing", async () => {
+    const storing = (stderr: string) =>
+      makeSecretServiceCredentialStore({
+        execute: async () => result({ exitCode: 1, stderr }),
+      }).set(providerInstanceId, credential);
+    await expect(
+      storing("secret-tool: Cannot create an item in a locked collection"),
+    ).rejects.toMatchObject({
+      category: "unavailable",
+      cause: "locked",
+    });
+    await expect(
+      storing("secret-tool: Cannot get secret of a locked object"),
+    ).rejects.toMatchObject({ cause: "locked" });
+    await expect(
+      storing(
+        'secret-tool: Object does not exist at path "/org/freedesktop/secrets/collection/login"',
+      ),
+    ).rejects.toMatchObject({ category: "unavailable", cause: "no-login-collection" });
+    await expect(storing("secret-tool: dbus connection refused")).rejects.toMatchObject({
+      category: "unavailable",
+      cause: undefined,
+    });
+  });
+
   it("requires both a responding Secret Service and the client tool", async () => {
     const commands: string[] = [];
     const available = await probeSecretService(

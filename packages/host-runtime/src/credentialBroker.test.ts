@@ -248,6 +248,24 @@ describe("startCredentialBroker", () => {
     }
   });
 
+  it("tells the caller why a Linux keyring refused, when the store knows", async () => {
+    const locked = await startCredentialBroker({
+      ...memoryStore(),
+      resolve: async () => {
+        throw new CredentialStoreFailure("unavailable", "locked");
+      },
+    });
+    try {
+      const response = await locked.fetchForTest(
+        brokerRequest(locked.url, locked.token, "/v1/credentials/resolve"),
+      );
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ error: "unavailable", cause: "locked" });
+    } finally {
+      await locked.close();
+    }
+  });
+
   it("returns the credential store's own category for a missing or unreadable secret", async () => {
     const missing = await startCredentialBroker({
       ...memoryStore(),

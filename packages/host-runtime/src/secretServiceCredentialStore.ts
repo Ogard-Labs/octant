@@ -1,7 +1,11 @@
 import { execFile, spawn } from "node:child_process";
 import { isAbsolute } from "node:path";
 import { promisify } from "node:util";
-import { CredentialStoreFailure, type CredentialStore } from "./credentialStore";
+import {
+  CredentialStoreFailure,
+  type CredentialStore,
+  type CredentialStoreFailureCause,
+} from "./credentialStore";
 import { isExecutable } from "./executableCheck";
 
 const execFileAsync = promisify(execFile);
@@ -247,7 +251,7 @@ async function probeCommand(
 
 function commandFailure(result: SecretToolCommandResult): CredentialStoreFailure {
   if (isSecretStoreUnavailable(result.stderr)) {
-    return new CredentialStoreFailure("unavailable");
+    return new CredentialStoreFailure("unavailable", secretStoreCause(result.stderr));
   }
   return new CredentialStoreFailure("failed");
 }
@@ -256,8 +260,23 @@ function isMissingSecret(stderr: string): boolean {
   return /no (?:such|matching) secret|not found/i.test(stderr);
 }
 
+/**
+ * secret-tool names a locked collection, and a session whose login keyring was
+ * never created answers that the collection path does not exist; both read as
+ * the same generic refusal unless the cause is kept.
+ */
+function secretStoreCause(stderr: string): CredentialStoreFailureCause | undefined {
+  if (/locked|unlock/i.test(stderr)) return "locked";
+  if (/does not exist|no such (?:object|collection)|nosuchobject/i.test(stderr)) {
+    return "no-login-collection";
+  }
+  return undefined;
+}
+
 function isSecretStoreUnavailable(stderr: string): boolean {
-  return /service|collection|keyring|locked|unlock|dbus|session bus/i.test(stderr);
+  return /service|collection|keyring|locked|unlock|dbus|session bus|does not exist|no such object/i.test(
+    stderr,
+  );
 }
 
 const defaultProbeRunner: SecretServiceProbeRunner = {

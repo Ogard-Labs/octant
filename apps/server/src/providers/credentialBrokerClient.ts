@@ -400,7 +400,14 @@ async function refusedCredential(response: Response): Promise<never> {
   } catch {
     throw brokerFailure();
   }
-  if (!isRecord(body) || typeof body.error !== "string" || Object.keys(body).length !== 1) {
+  const cause =
+    body !== null && typeof body === "object" ? (body as { cause?: unknown }).cause : undefined;
+  const knownCause = cause === "locked" || cause === "no-login-collection" ? cause : undefined;
+  if (
+    !isRecord(body) ||
+    typeof body.error !== "string" ||
+    Object.keys(body).length !== (knownCause === undefined ? 1 : 2)
+  ) {
     throw brokerFailure();
   }
   if (body.error === "missing") {
@@ -413,6 +420,7 @@ async function refusedCredential(response: Response): Promise<never> {
     throw {
       category: "unavailable",
       message: "The provider credential store is unavailable.",
+      ...(knownCause === undefined ? {} : { cause: knownCause }),
     };
   }
   throw brokerFailure();
