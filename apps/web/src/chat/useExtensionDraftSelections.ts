@@ -37,9 +37,9 @@ function withoutOfferedToolSelections(
     receipt.selection === undefined
       ? receipt
       : isBrowserUseSelection(receipt.selection)
-        ? blockedReceipt("@Browser", "not needed; the agent is offered Browser on its own")
+        ? blockedReceipt("Browser", "not needed; the agent is offered Browser on its own")
         : isComputerUseSelection(receipt.selection)
-          ? blockedReceipt("@Computer", "not needed; the agent is offered Computer on its own")
+          ? blockedReceipt("Computer", "not needed; the agent is offered Computer on its own")
           : receipt,
   );
 }

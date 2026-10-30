@@ -72,16 +72,3 @@ export function isBrowserUseSelection(selection: ExtensionSelection): boolean {
       String(selection.packageId) === String(BROWSER_USE_PLUGIN.packageId))
   );
 }
-
-/** Validate every pinned field before a Browser selection reaches a provider. */
-export function validateBrowserUseSelection(selection: ExtensionSelection): boolean {
-  return (
-    selection.kind === "plugin" &&
-    String(selection.extensionId) === String(BROWSER_USE_PLUGIN.extensionId) &&
-    String(selection.packageId) === String(BROWSER_USE_PLUGIN.packageId) &&
-    String(selection.componentId) === "browser" &&
-    String(selection.packageVersion) === String(BROWSER_USE_PLUGIN.version) &&
-    String(selection.packageDigest) === String(BROWSER_USE_PLUGIN.digest) &&
-    String(selection.catalogEpoch) === String(BROWSER_USE_PLUGIN.digest)
-  );
-}

@@ -75,9 +75,9 @@ description: How to test the packaged Octant macOS desktop app end-to-end — la
 - Fresh dir = first-run wizard (About you → Workspace → Providers → Default model → Navigator → first thread). Codex CLI auto-detects Ready; pick GPT-5.6-Luna at the model step. Project picker: "Add a Code folder" → Create Project dialog → macOS picker, navigate with Cmd+Shift+G.
 - CuaDriver versions are downloaded per data dir into `<dir>/computer-use/versions/`; the first session may run the bundled `Resources/native/cua-driver`, later ones a newer downloaded build.
 
-## Computer-use (@Computer) testing
+## Computer-use testing
 
-- The tool is bound per-turn by the @Computer mention chip. Follow-up turns WITHOUT a fresh chip fail instantly ("Tool failed" → agent reports "currently unavailable") — always re-add @Computer before concluding the capability broke.
+- There is no chip: `octant_computer` is offered on every eligible turn (plugin on, a screen bridge, a provider with app tools, not Plan). Ask in plain words ("open Notes"). If the agent says it has no Computer tool, check those four conditions before concluding the capability broke. The first action on each app asks, even under Full access.
 - The SAME pending decision renders on two surfaces: the floating "Allow computer access?" PiP card (top-right of the thread pane) and the "Host-controlled computer use · Waiting for approval" dock aside (bottom-right, `.computer-use-activity`). The aside only shows sessions not currently represented by a visible PiP — open a covering surface (Inbox, Settings, a board) to surface it for the same in-flight decision.
 - Journal evidence for a decision: `computer-use-observation` evidence rows with `$.evidence.detail` — "One-time approval is required" / "User approved this action once" / "User denied the proposed action" / "Visible host action completed". Approvals carry a real 5-minute TTL (post-#779) — an unanswered prompt expires and the turn can die with "Provider completed the turn while tool items were still active."
 - The embedded cua-driver socket + HTTP broker can be probed directly: server pid env has `OCTANT_COMPUTER_USE_BROKER_URL`/`..._TOKEN` (`ps eww <server-pid>`); `cua-driver list-tools --socket <sock>` and `call ... check_permissions '{}'` / `get_accessibility_tree '{}'` answer whether a failure is driver-side or app-side.
@@ -253,9 +253,9 @@ context.usage-reconciled` with no protocol-error payloads.
 - If the signature returns on a future codex bump, suspect a new nullable field — reproduce via
   `codex app-server` stdio initialize + thread/turn calls and compare against `codexProtocol.ts`
   decoders.
-- `codexDriver.ts` advertises `appManagedTools:"supported"` (Codex is the intended @Computer
-  carrier); Vibe refuses @Computer at send-time, so on builds where Codex turns are broken no
-  @Computer turn is possible.
+- `codexDriver.ts` advertises `appManagedTools:"supported"` (Codex is an intended Computer
+  carrier); a runtime without app tools, such as Vibe, is offered no Computer tool, so on builds
+  where Codex and Claude turns are broken no Computer turn is possible.
 - Send-time refusals (e.g. Vibe "cannot carry Octant's Computer tool") degrade after an app restart to the
   generic "Failed — The provider turn failed."; in-band provider errors persist verbatim.
 

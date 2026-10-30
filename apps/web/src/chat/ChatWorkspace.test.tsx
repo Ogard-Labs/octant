@@ -792,7 +792,7 @@ describe("ChatWorkspace", () => {
     expect(screen.getByRole("group", { name: "Browser origin approval" })).toBeInTheDocument();
   });
 
-  it("does not offer @Browser in the composer even when the thread's provider can carry the tool", async () => {
+  it("does not offer a Browser chip in the composer even when the thread's provider can carry the tool", async () => {
     const user = userEvent.setup();
     const browserAutomationClient = { listApprovals: vi.fn(async () => []) };
     function Harness() {
