@@ -27,6 +27,9 @@ import type { DesktopComputerUsePort } from "./desktopComputerUsePort";
 import type { LeasedComputerUsePort } from "./desktopLeaseService";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 
+/** `ComputerUsePendingApproval.summary` rejects anything longer. */
+const APPROVAL_SUMMARY_LIMIT = 512;
+
 const refused = (reason: string, message: string): ComputerControlResult => ({
   kind: "refused",
   reason,
@@ -201,12 +204,20 @@ export function createComputerUseToolService(options: {
       const where = action?.owner.leaseId === undefined ? "" : ` on ${DESKTOP_LABEL}`;
       // Without a chip the person no longer said "use Computer" in the send,
       // so the card carries the agent's own account of why, quoted as its
-      // words rather than stated as a fact.
-      const reason = action?.reason === undefined ? "" : ` The agent says: "${action.reason}"`;
-      if (action !== undefined && options.externalContentIngested(action.owner)) {
-        return `Allow this one action in ${action.appId}${where} for "${options.threadTitle(action.owner).slice(0, 100)}".${reason}`;
-      }
-      return `Allow control of ${action?.appId ?? "this application"}${where} for "${action === undefined ? "this task" : options.threadTitle(action.owner).slice(0, 100)}" for 5 minutes.${reason}`;
+      // words rather than stated as a fact. The whole summary has a contract
+      // limit, so the reason takes only what the rest leaves.
+      const title =
+        action === undefined ? "this task" : options.threadTitle(action.owner).slice(0, 100);
+      const head =
+        action !== undefined && options.externalContentIngested(action.owner)
+          ? `Allow this one action in ${action.appId}${where} for "${title}".`
+          : `Allow control of ${action?.appId ?? "this application"}${where} for "${title}" for 5 minutes.`;
+      const prefix = ' The agent says: "';
+      const room = APPROVAL_SUMMARY_LIMIT - head.length - prefix.length - 2;
+      if (action?.reason === undefined || room < 1) return head.slice(0, APPROVAL_SUMMARY_LIMIT);
+      const reason =
+        action.reason.length > room ? `${action.reason.slice(0, room - 1)}…` : action.reason;
+      return `${head}${prefix}${reason}"`;
     },
     // A marked thread's one-time approval says what marked it. A mark the
     // host reads as present but whose sources it cannot name still says so,

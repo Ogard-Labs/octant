@@ -675,6 +675,26 @@ describe("Computer offered on every eligible turn", () => {
     }
   });
 
+  it("keeps the approval summary within its contract limit for a long reason", async () => {
+    const f = fixture();
+    try {
+      const call = f.tools.execute({
+        name: "octant_computer",
+        inputJson: JSON.stringify({
+          operation: "windows",
+          appId: "com.example.Fixture",
+          reason: "r".repeat(600),
+        }),
+      });
+      const asked = await approvePending(f);
+      expect(asked.summary.length).toBeLessThanOrEqual(512);
+      expect(asked.summary).toContain("The agent says:");
+      expect(await call).toMatchObject({ result: { kind: "windows" } });
+    } finally {
+      await f.service.close();
+    }
+  });
+
   it("asks again for a Computer action once a Browser page entered the thread, naming the page", async () => {
     const connection = openDatabase();
     const runtime = createPhase1RuntimeRegistries();
