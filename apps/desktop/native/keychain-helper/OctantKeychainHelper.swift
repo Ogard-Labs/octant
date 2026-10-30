@@ -31,15 +31,22 @@ private let mcpServerCredentialNamespace = "mcp-server-credential"
 // the desktop recipe's credential reference. A person may replace one.
 private let desktopProviderCredentialService = "app.octant.desktop-provider-credentials.v1"
 private let desktopProviderCredentialNamespace = "desktop-provider-credential"
-// The App Store Connect API key a person enters to distribute their own app
-// lives in a service of its own. A person may replace it.
+// The removed App Store Connect key feature left this service behind. It stays
+// enumerable so a full data purge can still remove a leftover key; nothing
+// reads or writes it.
 private let appStoreConnectKeyService = "app.octant.app-store-connect-keys.v1"
-private let appStoreConnectKeyNamespace = "app-store-connect-key"
 // The Apple and Google push credentials, and the sealing key, of a hub that
 // sends notifications directly live in a service of their own. A person may
 // replace one.
 private let pushPlatformCredentialService = "app.octant.push-platform-credentials.v1"
 private let pushPlatformCredentialNamespace = "push-platform-credential"
+// An owner device's unlock key: a P-256 key made in the Secure Enclave that
+// signs only after the person proves presence (Touch ID or the account
+// password). The Keychain item holds the key's opaque blob, which only this
+// Mac's enclave can use; the private half never leaves the enclave.
+private let ownerUnlockService = "app.octant.owner-unlock-keys.v1"
+private let ownerUnlockNamespace = "app.octant.owner-unlock.v1"
+private let ownerUnlockPrompt = "Unlock this action on your computer"
 private let hostIdentityNamespace = "app.octant.host-identity.v1"
 private let hostIdentityKeyId = "host-identity"
 private let maximumPurgeProviderInstances = 128
@@ -62,6 +69,7 @@ private enum StableError: String, Error {
     case unavailable
     case failed
     case locked
+    case cancelled
 }
 
 // Every Octant-owned Keychain service. Every item also carries an opaque
@@ -78,6 +86,7 @@ private let octantOwnedServices = [
     desktopProviderCredentialService,
     appStoreConnectKeyService,
     pushPlatformCredentialService,
+    ownerUnlockService,
 ]
 
 // A credential namespace of its own: the Keychain service it reaches, the
@@ -111,11 +120,6 @@ private let separateNamespaces: [String: SeparateNamespace] = [
     ),
     desktopProviderCredentialNamespace: SeparateNamespace(
         service: desktopProviderCredentialService,
-        idField: "credentialRef",
-        replaceable: true
-    ),
-    appStoreConnectKeyNamespace: SeparateNamespace(
-        service: appStoreConnectKeyService,
         idField: "credentialRef",
         replaceable: true
     ),
@@ -679,6 +683,130 @@ guard input.count <= maximumMessageBytes,
       let operation = request["operation"] as? String
 else {
     fail(.failed)
+}
+
+// Owner unlock key path: make, sign one text, forget. No operation returns or
+// imports private material, and a Mac without a Secure Enclave or without a
+// password set refuses instead of making a software key.
+private func ownerUnlockAccount(storeScope: String) -> String {
+    "owner-unlock:\(storeScope)"
+}
+
+private func base64URL(_ data: Data) -> String {
+    data.base64EncodedString()
+        .replacingOccurrences(of: "+", with: "-")
+        .replacingOccurrences(of: "/", with: "_")
+        .replacingOccurrences(of: "=", with: "")
+}
+
+private func requireOwnerUnlockHardware() {
+    guard SecureEnclave.isAvailable else { fail(.unavailable) }
+    var error: NSError?
+    guard LAContext().canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
+        fail(.unavailable)
+    }
+}
+
+private func loadOwnerUnlockBlob(storeScope: String) -> Data {
+    var query = baseQuery(
+        service: ownerUnlockService,
+        account: ownerUnlockAccount(storeScope: storeScope),
+        storeScope: storeScope
+    )
+    query[kSecMatchLimit as String] = kSecMatchLimitOne
+    query[kSecReturnData as String] = true
+    var result: CFTypeRef?
+    let status = SecItemCopyMatching(query as CFDictionary, &result)
+    guard status == errSecSuccess else { fail(mapStatus(status)) }
+    guard let blob = result as? Data, !blob.isEmpty else { fail(.missing) }
+    return blob
+}
+
+if request["namespace"] as? String == ownerUnlockNamespace {
+    guard let storeScope = request["storeScope"] as? String, validStoreScope(storeScope) else {
+        fail(.failed)
+    }
+    let account = ownerUnlockAccount(storeScope: storeScope)
+    let commonOwnerKeys: Set<String> = ["version", "namespace", "operation", "storeScope"]
+    switch operation {
+    case "make":
+        guard Set(request.keys) == commonOwnerKeys else { fail(.failed) }
+        requireOwnerUnlockHardware()
+        var accessError: Unmanaged<CFError>?
+        guard let access = SecAccessControlCreateWithFlags(
+            nil,
+            kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly,
+            [.privateKeyUsage, .userPresence],
+            &accessError
+        ) else {
+            fail(.unavailable)
+        }
+        guard let key = try? SecureEnclave.P256.Signing.PrivateKey(accessControl: access) else {
+            fail(.unavailable)
+        }
+        _ = SecItemDelete(
+            baseQuery(service: ownerUnlockService, account: account, storeScope: storeScope)
+                as CFDictionary
+        )
+        var addQuery = baseQuery(service: ownerUnlockService, account: account, storeScope: storeScope)
+        addQuery[kSecValueData as String] = key.dataRepresentation
+        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly
+        let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+        addQuery.removeValue(forKey: kSecValueData as String)
+        guard addStatus == errSecSuccess else { fail(mapStatus(addStatus)) }
+        emit([
+            "version": protocolVersion,
+            "ok": true,
+            "operation": "make",
+            "publicKey": base64URL(key.publicKey.derRepresentation),
+        ])
+    case "sign":
+        guard Set(request.keys) == commonOwnerKeys.union(["payload"]),
+              let payloadBase64 = request["payload"] as? String,
+              let payload = Data(base64Encoded: payloadBase64),
+              !payload.isEmpty
+        else {
+            fail(.failed)
+        }
+        requireOwnerUnlockHardware()
+        let blob = loadOwnerUnlockBlob(storeScope: storeScope)
+        let context = LAContext()
+        context.localizedReason = ownerUnlockPrompt
+        do {
+            let key = try SecureEnclave.P256.Signing.PrivateKey(
+                dataRepresentation: blob,
+                authenticationContext: context
+            )
+            let signature = try key.signature(for: payload)
+            emit([
+                "version": protocolVersion,
+                "ok": true,
+                "operation": "sign",
+                "signature": base64URL(signature.rawRepresentation),
+            ])
+        } catch let error as LAError {
+            switch error.code {
+            case .userCancel, .appCancel, .systemCancel:
+                fail(.cancelled)
+            default:
+                fail(.unavailable)
+            }
+        } catch {
+            fail(.unavailable)
+        }
+    case "forget":
+        guard Set(request.keys) == commonOwnerKeys else { fail(.failed) }
+        let status = SecItemDelete(
+            baseQuery(service: ownerUnlockService, account: account, storeScope: storeScope)
+                as CFDictionary
+        )
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            fail(mapStatus(status))
+        }
+        emit(["version": protocolVersion, "ok": true, "operation": "forget"])
+    default:
+        fail(.failed)
+    }
 }
 
 // Host-identity namespace path

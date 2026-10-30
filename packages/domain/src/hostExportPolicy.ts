@@ -50,13 +50,11 @@ export function hostExportPageLimit(requested: number): number {
 const OMISSIONS: ReadonlyArray<HostExportOmission> = [
   {
     subject: "credentials",
-    reason:
-      "Secrets, tokens, and credential material are unrepresentable, and so are SSH targets' pinned host keys.",
+    reason: "Secrets, tokens, and credential material are unrepresentable.",
   },
   {
     subject: "filesystem-paths",
-    reason:
-      "Host filesystem paths are omitted so the bundle cannot name a local root, and so are SSH destinations, remote users, and remote roots.",
+    reason: "Host filesystem paths are omitted so the bundle cannot name a local root.",
   },
   {
     subject: "attachment-bytes",
@@ -212,7 +210,6 @@ export function assembleHostExportBundle(pages: ReadonlyArray<unknown>): Assembl
   const projectMemory: HostExportBundle["projectMemory"][number][] = [];
   const canvases: HostExportBundle["canvases"][number][] = [];
   const usage: HostExportBundle["usage"][number][] = [];
-  const sshTargets: HostExportBundle["sshTargets"][number][] = [];
   const windows: HostExportBundle["retention"]["windows"][number][] = [];
   const tombstones: HostExportBundle["retention"]["tombstones"][number][] = [];
   let header: HostExportBundle["octant"] | undefined;
@@ -241,7 +238,7 @@ export function assembleHostExportBundle(pages: ReadonlyArray<unknown>): Assembl
     else if (decoded.kind === "project-memory") projectMemory.push(...decoded.projectMemory);
     else if (decoded.kind === "canvases") canvases.push(...decoded.canvases);
     else if (decoded.kind === "settings") settings = decoded.settings;
-    else if (decoded.kind === "ssh-targets") sshTargets.push(...decoded.sshTargets);
+    else if (decoded.kind === "ssh-targets") continue;
     else if (decoded.kind === "usage") usage.push(...decoded.usage);
     else if (decoded.kind === "retention-windows") windows.push(...decoded.windows);
     else if (decoded.kind === "retention-tombstones") tombstones.push(...decoded.tombstones);
@@ -269,7 +266,6 @@ export function assembleHostExportBundle(pages: ReadonlyArray<unknown>): Assembl
       projectMemory,
       canvases,
       settings,
-      sshTargets,
       usage,
       retention: { windows, tombstones },
       omissions,

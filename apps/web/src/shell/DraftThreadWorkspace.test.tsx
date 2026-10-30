@@ -13,7 +13,6 @@ import {
   NewTaskDraftScopeContext,
 } from "../composer/useNewTaskPrompt";
 import { DraftThreadWorkspace } from "./DraftThreadWorkspace";
-import { RemoteCodeProjectsContext } from "../projects/sshRemoteProjectEntries";
 import { OctantCommandProvider } from "../palette/CommandRegistry";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
@@ -627,65 +626,6 @@ describe("DraftThreadWorkspace", () => {
     expect(forwarded?.[0]).toBe("Plan this change");
     expect(forwarded?.[9]).toBe("plan");
     expect(forwarded?.[10]).toBe("current-session");
-  });
-
-  it("offers a Project on an SSH target and, once chosen, the composer that thread can start in", async () => {
-    const user = userEvent.setup();
-    const remoteId = "77777777-7777-4777-8777-777777777777" as ProjectId;
-    const onSelectProject = vi.fn();
-    const remote = {
-      projects: [
-        {
-          projectId: remoteId,
-          name: "Service",
-          location: "build@devbox:/home/build/service",
-          destination: "build@devbox",
-          target: {
-            connection: "connected",
-            admission: [
-              { posture: "plan", decision: { status: "admitted" } },
-              { posture: "approval-gated", decision: { status: "admitted" } },
-            ],
-          },
-        },
-      ],
-      refresh: () => undefined,
-    } as never;
-    const { rerender } = render(
-      <RemoteCodeProjectsContext.Provider value={remote}>
-        <DraftThreadWorkspace
-          {...baseProps}
-          mode="code"
-          projectId={codeProjectId}
-          projects={projects}
-          onSelectProject={onSelectProject}
-        />
-      </RemoteCodeProjectsContext.Provider>,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Project: Octant" }));
-    const option = screen.getByRole("option", { name: /Service/ });
-    expect(option).not.toHaveAttribute("aria-disabled");
-    await user.click(option);
-    expect(onSelectProject).toHaveBeenCalledWith(remoteId);
-
-    rerender(
-      <RemoteCodeProjectsContext.Provider value={remote}>
-        <DraftThreadWorkspace
-          {...baseProps}
-          mode="code"
-          projectId={remoteId}
-          projects={projects}
-          onSelectProject={onSelectProject}
-        />
-      </RemoteCodeProjectsContext.Provider>,
-    );
-    expect(screen.getByRole("button", { name: "Project: Service" })).toBeVisible();
-    expect(screen.getByText("build@devbox:/home/build/service")).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Workspace" })).toBeNull();
-    expect(
-      screen.queryByText("The selected Project is unavailable. Choose another Project."),
-    ).toBeNull();
   });
 
   it("keeps Plan while a remembered access choice resets for a new Project", async () => {

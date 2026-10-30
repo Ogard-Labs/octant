@@ -357,18 +357,6 @@ export function wireContext(deps: ContextDependencies) {
               read: (threadId) => {
                 const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
                 if (thread === undefined || thread.lifecycle !== "active") return undefined;
-                // A remote-bound Project lives in the SSH target store, not the
-                // local catalog, so its thread is named before the Project read
-                // and refused for what it is rather than read as gone.
-                if (persistence.readCodeCheckout(thread.checkoutId)?.kind === "remote-root") {
-                  return {
-                    mode: "code",
-                    projectId: String(thread.projectId),
-                    providerInstanceId: thread.providerInstanceId,
-                    modelId: thread.modelId,
-                    runsOnSshTarget: true,
-                  };
-                }
                 // A Code turn passes its Project's provider policy, so the
                 // compaction passes the same one.
                 const project = persistence.readProject(thread.projectId);

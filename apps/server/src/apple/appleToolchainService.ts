@@ -222,8 +222,8 @@ export interface AppleToolchainServiceOptions {
   readonly captureOwner?: string;
   /**
    * Other host-private directories every launch is denied after its broad
-   * grants, as the capture directory is: the physical device layer's
-   * `devicectl` answers, which name each paired device's hardware identifiers.
+   * grants, as the capture directory is: folders the removed physical-device
+   * feature left in the data directory, which may name paired devices.
    */
   readonly isolatedRoots?: ReadonlyArray<string>;
   readonly writeArtifact?: (reference: string, bytes: Uint8Array) => Promise<void>;

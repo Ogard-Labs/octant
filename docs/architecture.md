@@ -30,19 +30,13 @@ The design rests on a small set of invariants that every package obeys:
   on. Remote access is host-to-device over the user's
   own network; traffic among a person's own hub and spokes there is not a
   third-party call ([Hub and spokes](design/hub-and-spokes.md), designed and
-  not built). Five host-initiated
+  not built). Four host-initiated
   HTTPS calls exist in code: desktop update checks against a signed feed, managed
   device-tool update checks against the npm registry, server marketplace
   fetches when the person searches, inspects, previews, or installs from the
   catalog, calls to the public Canvas share service when the person
   publishes, updates, or revokes a public link (and the host retries a revoke
-  it could not complete), and App Store Connect API requests to
-  `api.appstoreconnect.apple.com` only (no other host, no redirect) when a
-  person checks, submits for App Review, or releases a version of their own
-  app, from the Apple workbench or by asking the thread's agent. The first four have a Settings off switch; App Store Connect is
-  reached only from a person's action, and a host with no App Store Connect key
-  makes no request ([Apple physical devices and distribution](design/apple-devices.md#distribution)).
-  The switches: Public links starts
+  it could not complete). Each has a Settings off switch. The switches: Public links starts
   off and off means no share-service request except finishing a revoke; marketplace off means no catalog
   request; Updates off disables automatic update checks (manual Check for
   updates may still contact the signed feed); device tools' automatic updates
@@ -709,49 +703,28 @@ address (Allow input never covers it), and evidence keeps only the origin. **Rot
 and landscape for a person who asked; it is an effect confirmed on its own
 (Allow input never covers it). Pane states, discovery, capture, input
 delivery, keyboard layouts, and the managed streaming tools are specified in
-[Device workbench](design/device-workbench.md). Physical Apple devices,
-their person-confirmed leases and signing custody, and person-confirmed upload
-to App Store Connect are the design accepted on 2026-10-26, being implemented
-slice by slice, in
-[Apple physical devices and distribution](design/apple-devices.md). The host
-already discovers paired iPhones and iPads through `devicectl`, keeps the
-UDID, serial number, and ECID to itself, and holds a lease only after a person
-at the Mac confirms it. Inside a lease it builds the thread's app unsigned,
-signs it for development in a host-owned step with the person's own keychain
-identity for the team (never `-allowProvisioningUpdates`), installs only that
-product, launches it under a console session it holds, and stops only that
-session; each effect follows the thread's posture like a Simulator effect.
-It also captures a leased device's screen with the selected Xcode's own
-tooling, a read like a Simulator screenshot, and the Apple workbench's
-**Physical devices** section shows the picker, setup checklist, lease
-confirmation, and that latest screenshot; a physical device has no live view.
-The agent's `octant_apple` asks for the same lease, effects, screenshots, and
-console reads through the same device policy; its lease and device-effect
-asks are answered in the thread by a person at the Mac only, never by a paired
-device.
-`/api/apple/devices` is readable by a paired device, and
-`/api/apple/device-leases`, `/api/apple/device-actions`, and
-`/api/apple/device-screenshots` (the pixels of a thread's latest device
-screenshot) are local-only. The App Store Connect API key for distribution has
-its own credential broker family with no read-back route, entered only
-through the local-only `/api/desktop/app-store-connect-key/` routes from a
-desktop window or `octant apple key`. The Current Release Boundary admits
-distribution since 2026-10-28, so key entry is open on a Mac, and each
-upload, submission, and release is a local person's confirmed act under the
-distribution rules of that specification. A person in the Apple workbench (through
-the local-only `/api/apple/distribution-preparations` and
-`/api/apple/distribution`), or the thread's agent, can ask to upload its app: the host reads the exact build and App Store signature, a person at
-the Mac confirms that build, and only then is the project archived unsigned,
-signed by `xcodebuild -exportArchive`, and uploaded with `xcrun altool`, using
-a key file the credential broker writes for that one upload and removes; the
-server never reads the key. The same person, or the agent when the person asks, can submit
-the version App Store Connect holds for the project for App Review, or release
-a version approved and waiting for a manual release: the host reads the
-version from App Store Connect (local-only `/api/apple/distribution-versions`),
-a person at the Mac confirms that exact version, and only then is it submitted
-or released through `/api/apple/distribution`. Each App Store Connect API
-request carries a token the credential broker signs (see "App Store Connect
-request signing" under [security and authority](#security-and-authority)).
+[Device workbench](design/device-workbench.md). Octant drives the iOS
+Simulator only. Physical iPhones and iPads, and App Store Connect upload,
+submission, and release, are out of scope (maintainer decision, 2026-10-29):
+the host runs no `devicectl`, signs nothing for a device, and serves no
+`/api/apple/devices`, `/api/apple/device-*`, or `/api/apple/distribution*`
+route, and `octant_apple` offers no device or distribution operation. An agent
+that needs a device or the store uses its own provider tools under the thread's
+ordinary sandbox and approvals. Journals that hold `validation.*` events with
+`apple-device-*` or `apple-distribution-*` step ids from earlier releases
+still replay unchanged: those events are generic validation records.
+Files the removed feature wrote stay in place and nothing reads them:
+`device-identities.json`, `signing/`, `devicectl/`, `device-captures/`, and
+`distribution-keys/` under the data directory's `apple-runtime/` folder. Every
+Apple launch is still denied `signing/`, `devicectl/`, `device-captures/`, and
+`distribution-keys/`, because they may hold device listings, entitlements, or
+a key file; a person can delete them. The macOS Keychain item
+`app.octant.app-store-connect-keys.v1`, where a person may have saved an App
+Store Connect key, is likewise left in place: nothing reads or writes it, the
+host data map no longer lists it, and the Keychain helper still enumerates it
+so a full data purge removes it. The broker has no
+`/v1/app-store-connect-keys/*` routes and `octant apple key` is gone; a key
+saved in 1Password was only ever a reference and is untouched.
 
 On an approval-gated thread, **Allow input** is the confirmation that opens
 that destination; clicks, typing, Home, and Lock never raise it
@@ -898,42 +871,21 @@ Code settings. The renderer preserves its proposed branch as delivery intent wit
 claiming a checked-out branch; detached Git checkouts remain refused. Git-dependent
 actions continue to report unavailable for plain folders.
 
-A Code Project bound to a folder on a machine this host reaches over SSH is a
-design accepted on 2026-10-26. Its admission policy, the executor, the SSH
-transport, host-key pinning from a local window or the local CLI, Linux
-confinement attestation, binding a remote root with Files, Git status, and
-diff reads through the executor, and the native harness's file tools,
-commands, and egress for a remote-bound Project's turn are built. A Code
-thread can be created in a remote-bound Project through the Code commands, on
-a `remote-root` checkout no local Files, Git, terminal, test, or checkpoint
-path resolves, and the Code turn runtime runs its turns on the native harness
-with that remote tool set alone, or on an ACP agent placed on the target whose
-client file and terminal requests run as those same calls; every other
-provider is refused before anything launches, other Code operations on the
-thread are refused, and Full access is not offered there yet. A restart
-interrupts a remote turn it cut off and withdraws the approvals and
-questions it left pending, a remote thread's session is not compacted, and
-a target is not removed while a thread on it holds a turn. A local desktop window lists such Projects
-in the Code sidebar and the composer and starts their threads: a Code draft
-in one binds the window to it with no folder of this host (`boundRoot` null),
-so root-backed surfaces fail closed, and only the thread's own view opens; a
-paired device reaches them under the Project's authority. A person's
-terminals and managed worktrees on a remote-bound Project are built, from a
-local window (Settings › SSH targets) or the local CLI, under the same
-admission. The provider-sdk seam for placing a
-runtime on a target, its conformance, and the executor's confined runtime
-launches with their own proxy on this host are built, and the ACP driver
-declares placement for a profile whose whole launch can be stated on a
-target (its fixed variables and the Project entries it denies included), at
-the runtime path the person set for it there; GitHub Copilot's profile is the
-first that can, and a local window's composer offers it for a remote Project
-where the target's status lists it placeable and its path is set there. SSH
-targets, their runtime paths, their
-attestation digests, remote bindings, managed worktrees, remote terminals'
-starts and ends, and a placed runtime's egress are journaled. Its
-admission, confinement attestation,
-transport, and how it differs from a paired host are owned by
-[Remote SSH environments](design/remote-ssh-environments.md).
+Code threads do not run on another machine over SSH (maintainer decision,
+2026-10-29): an agent that needs a remote machine reaches it with its own
+`ssh`, and Octant on another computer is a hub-and-spoke member
+([Hub and spokes](design/hub-and-spokes.md)). A journal written by a build that
+could bind a Project to an SSH target still replays: its thirteen event names
+(`ssh-target.*`, `ssh-remote-*`, `provider-runtime-egress.*`) are retired, and
+a thread left on a `remote-root` checkout keeps its history but refuses every
+operation, because its Project is no longer in the catalog and no window opens
+it. A restart interrupts such a thread's turn that was still running and
+withdraws the approvals and questions it left pending. A migration drops the
+five `ssh_*` projection tables, which nothing fills any more. The
+`<data>/ssh-targets/` folder of host-key pin files is left in place and
+listed in the host data map as an unused leftover; Octant never deletes it. An
+export written before the removal still assembles: its `ssh-targets` page is
+read and dropped.
 
 An authorized repository test remains cancellable while the host rediscovers its
 command definition. Cancellation during discovery prevents process launch; runtime
@@ -2412,8 +2364,7 @@ flowchart LR
   can also take one `octant.host-export/1` cut of what this host holds: a thread bundle for
   every thread of every mode, Projects, Project memory, every Canvas (one a
   Chat thread owns outside every Project names no Project), a
-  non-secret settings summary, SSH targets without their destination, host
-  key, or executor path, usage export rows, and retention windows
+  non-secret settings summary, usage export rows, and retention windows
   with purge tombstones. That call is a host-control read on the loopback
   route chain. A remote principal and a paired device are refused, and the
   remote forward list does not carry the path. The same forbidden-key walk
@@ -2624,12 +2575,7 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   `start`, `resume`, `send`, `interrupt`, `stop`, `answerApproval`,
   `answerUserInput`, and `answerTool`, with optional current-turn `steer`. Every driver passes
   the shared conformance harness (chat, child-agent, and context-facts
-  suites) before it is selectable. An acquisition may carry a host-supplied
-  remote placement, which reaches only a driver that declares
-  `remotePlacement` and only through `acquireProviderConnection`, and names
-  the runtime path the person set on the target, the only one the driver may
-  launch; every other driver reports it unsupported and launches nothing
-  ([Provider runtimes on a target](design/remote-ssh-environments.md#provider-runtimes-on-a-target)).
+  suites) before it is selectable.
 - **Probe scheduling.** Operations on one provider instance run one at a time.
   A probe asked for while another probe of that instance is running joins it
   and shares its result, unless an enable or configuration change queued after
@@ -3723,13 +3669,8 @@ server checks it before any side effect:
   - A harness session that is paused (by the advisor, by the person, or for
     recovery) refuses `thread-paused` in every mode, through the same harness
     admission every Chat, Work and Code turn asks before it starts.
-- A Code thread whose root is on an SSH target refuses `runs-on-ssh-target`
-  before any other fact but the principal and the mode. Its runtime starts
-  on the target only through the placement a turn binds on the target's
-  session, and a compaction binds none, so opening its session would start a
-  runtime on this host against the target's path; the Code runtime's
-  compaction session also opens nothing for a remote root
-  ([Remote SSH environments](design/remote-ssh-environments.md#remote-bound-code-threads)).
+- The Code runtime's compaction session opens nothing for a `remote-root`
+  checkout, a folder on another machine that no build runs threads in any more.
 - The summarizer is always the thread's own provider instance and model. The
   command carries no summarizer choice, and the domain's
   `cross-vendor-opt-in-required` refusal stays the guard on the host path.
@@ -4001,7 +3942,7 @@ watched has ended.
   Rebuild, and its `compact-range` remedy runs the same command, labelled
   Compact session; choosing a range is not offered.
 - A permanent refusal (`runtime-cannot-compact`,
-  `runtime-version-unsupported`, `runs-on-ssh-target`, and `remote-client`,
+  `runtime-version-unsupported`, and `remote-client`,
   which no window on a paired device can change) hides the button, and the inspector leaves the
   `compact-range` remedy out; every other refusal (`turn-running`,
   `compaction-running`, `provider-unavailable`, `no-session`,
@@ -5500,24 +5441,6 @@ listener per confined launch:
   connection byte-for-byte to the Unix socket, then runs the command and exits
   with it. The forwarder holds no policy; the token and every decision stay
   with the host proxy.
-- **Commands on an SSH target.** A command of a Project bound to a remote
-  root runs in the same capsule on the target, whose forwarder's socket is
-  the executor's, in its owner-only runtime directory. Each connection the
-  command makes there crosses the SSH session as a stream to this host's
-  proxy for that launch, which decides and journals it exactly as for a local
-  command; the proxy's lookup and connection are made by the target, so the
-  name resolves with the target's resolver and the connection leaves from
-  the target, while the private check and every decision stay here
-  ([Native harness on a target](design/remote-ssh-environments.md#native-harness-on-a-target)).
-- **Provider runtimes on an SSH target.** A runtime placed on a target runs
-  on `proxied` in every posture, Plan included, through a proxy of its own
-  on this host that decides under the runtime rule
-  (`decideProviderRuntimeEgress`): any public name, with no thread or Project
-  rule and nothing proposed, and the same private-address check, so the
-  target's own network and a cloud machine's metadata service stay out of
-  reach. Its records are the `provider-runtime-egress` aggregate and taint no
-  thread
-  ([Runtime placement](design/remote-ssh-environments.md#runtime-placement)).
 - **Environment.** The launch environment adds `HTTPS_PROXY`, `HTTP_PROXY`,
   and `ALL_PROXY` (and their lowercase forms) set to
   `http://octant:<token>@127.0.0.1:<port>`, empty `NO_PROXY`/`no_proxy`, and
@@ -5775,7 +5698,7 @@ where it was or narrows it:
   together with the runtime's directory, so no command can rewrite it. It
   listens on `127.0.0.1:3128` in the private namespace and exits 125 without
   running the command when it cannot listen. A process-denied (Plan) proxied
-  launch, which only a Plan runtime on an SSH target makes, keeps the
+  launch keeps the
   forwarder outside the process-deny filter: the forwarder starts a nested
   Bubblewrap that keeps every mount of the capsule, takes a pid namespace and
   `/proc` of its own (so the command cannot see or trace the forwarder), and
@@ -7062,8 +6985,7 @@ mechanisms are:
   forwarder's nested capsule starts its own Bubblewrap unprivileged
   (Bubblewrap sets `no_new_privs` and mounts the bound program `nosuid`) with
   `--unshare-user`, so it gets a user namespace or fails closed; host-local
-  desktops and SSH executor launches use the restricted capsule, and SSH
-  admission already requires working unprivileged user namespaces.
+  desktops use the restricted capsule.
   The capsule binds `/etc` and `/sys` read-only because
   workloads read them: resolver and `nsswitch` files, TLS roots, `passwd`,
   the dynamic linker cache, `alternatives` links, and login shell startup
@@ -7567,19 +7489,6 @@ mechanisms are:
   reads its product from the same directory without write access; XCTest
   results also land inside it. Simulator captures remain isolated in their own
   private directory and are writable only by the capture launch.
-  A physical device build follows the same rule with signing off. Its
-  signing step is a separate pair of host-owned launches, `security
-find-identity` and `codesign`, through a port with no network; `codesign`
-  may write only the one app bundle it signs and read only the private
-  directory holding that signature's entitlements, which every other Apple
-  launch is denied, as `devicectl`'s answer directory is. A device install
-  reads its product without write access. A device screenshot lands in its
-  own private `device-captures` directory, which every other Apple launch is
-  denied and only the capture launch may write, like a Simulator capture.
-  None of these launches carries a
-  keychain or CoreDevice grant yet: each one the maintainer's device smoke
-  shows a launch needs is measured then and added to this list, never to the
-  shared profile.
 
 - **Provider capability matrix ("degraded on").** Claude Code and Codex are the
   first-class providers: the two subscription coding runtimes the product is
@@ -7599,10 +7508,7 @@ find-identity` and `codesign`, through a port with no network; `codesign`
   that value is refined once the driver probes or runs. A refinement that
   upgrades a declaration (`unavailable` to `supported` after a reply reports
   usage) is the degraded form: the capability exists but is not promised before
-  it is seen. Placement on an SSH target is not a capability and has no row:
-  it is the driver's own `ProviderDriver.remotePlacement` declaration, never a
-  probe. The ACP driver makes it only for a profile whose whole launch can be
-  stated on a target, which among shipped profiles is GitHub Copilot's.
+  it is seen.
 
   | Capability               | Claude Code                                                                       | Codex                                                     | OpenCode                                                                 | Pi                                                                                      | ACP agents                                                                    | Ollama                                                           | Harness endpoints                                                                 | Outside harness endpoints                                        | Oh My Pi                              |
   | ------------------------ | --------------------------------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------- |
@@ -8623,21 +8529,6 @@ find-identity` and `codesign`, through a port with no network; `codesign`
   signs nothing without the secret key. Removing the endpoint, or changing its
   region, portal, account, or role, ends the portal session and deletes the
   grant before the change is journaled.
-- **App Store Connect request signing.** The credential broker signs App
-  Store Connect API tokens itself
-  ([`appStoreConnectKeySource.ts`](../packages/host-runtime/src/appStoreConnectKeySource.ts)):
-  an ES256 JSON Web Token with the key ID in its header and the issuer ID, the
-  `appstoreconnect-v1` audience, and an expiry fifteen minutes after issue in
-  its claims, signed with the platform's crypto. The server's sign request
-  names the App Store Connect credential reference and nothing else, so a
-  caller cannot choose the claims, lifetime, or key; the answer is that one
-  token, which the server sends in one step's requests and never keeps. The
-  key comes from the broker's own App Store Connect family or, when the
-  person saved a 1Password secret reference in its place, from the person's
-  `op read` at the moment the broker signs a token or writes an upload's key
-  file, held for that one operation. `op` missing, signed out, or declined
-  refuses the step as `key-source-unavailable`, with no retry. The reference
-  stays in the broker's store and is never journaled.
 - **Artifact replica membership.** Each replica entry carries a detached
   Ed25519 signature from the device signing key the writing host holds for its
   replica instance, in a credential namespace of its own that provider
@@ -9164,10 +9055,8 @@ release steps of their own.
 The maintainer authorized the previously held post-preview tracks on
 2026-10-26: mobile maturity (Android internal builds, redacted push, capture
 and voice, public store distribution), a ciphertext-only hosted relay, a full
-LSP / extension host / debugger companion, Apple physical devices and then
-TestFlight and App Store distribution of a person's own apps, enterprise
-directory OAuth and cloud-IAM provider identity, disposable Linux desktops for
-headless hosts, remote SSH development environments, third-party
+LSP / extension host / debugger companion, enterprise directory OAuth and
+cloud-IAM provider identity, disposable Linux desktops for headless hosts, third-party
 provider-driver plugins, and the EU/GDPR compliance package (pending legal
 review). On 2026-10-28 the maintainer added a hub-and-spoke topology under the
 same terms ([Hub and spokes](design/hub-and-spokes.md)), including a
@@ -9179,12 +9068,8 @@ owning specification documents its authority, privacy, and release
 boundaries. The authorization covers design and implementation; creating an
 account, spending money, submitting to a store, deploying a hosted service, or
 weakening an invariant in this document each still needs a separate explicit
-maintainer action. App Store distribution of a person's own apps was admitted
-on 2026-10-28 ([Apple devices, decision 7](design/apple-devices.md#maintainer-decisions)):
-Octant may upload a person's build, submit a version for App Review, and
-release an approved version, each only when a local person confirms that exact
-build or version; admitting it creates no account and submits nothing on its
-own. The earlier holds and their start gates
+maintainer action. Apple physical devices and App Store distribution are out of
+scope (2026-10-29). The earlier holds and their start gates
 remain as rationale in [release-boundary holds](release-boundary-holds.md).
 The connector / OAuth marketplace hold was lifted on 2026-10-20 under the
 [Connectors and user-added MCP servers](#extensions-and-skills) rules: a

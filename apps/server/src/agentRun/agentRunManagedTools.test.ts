@@ -12,6 +12,7 @@ import {
 import { AGENT_RUN_PROVIDER_SLOT_WAITING_REASON, evaluateAgentRunCommand } from "@octant/domain";
 import type { AgentRunNativeCapabilityEvidence } from "@octant/domain/agent-run-control-policy";
 import { boundedToolResultJson } from "../providers/toolResultJson";
+import type { RemoteDelegationPort } from "./agentRunDelegation";
 import { createAgentsManagedTools, type AgentsToolTarget } from "./agentRunManagedTools";
 import type { AgentRunControlParentFacts } from "./agentRunControlService";
 import type { AgentRunOrchestrationService } from "./agentRunOrchestrationService";
@@ -22,6 +23,9 @@ const ids = {
   window: "window-1",
   provider: decodeProviderInstanceId("00000000-0000-4000-8000-000000000001"),
   run: "00000000-0000-4000-8000-0000000000a1",
+  project: "00000000-0000-4000-8000-0000000000b1",
+  member: "00000000-0000-4000-8000-0000000000c1",
+  targetProject: "00000000-0000-4000-8000-0000000000b2",
 };
 
 const authority: AgentRunAuthority = {
@@ -90,6 +94,7 @@ function tool(
     runs?: ReadonlyArray<AgentRun>;
     summary?: ReadonlyArray<AgentRunParentSummaryEntry>;
     authorizeCancel?: (run: AgentRun) => boolean;
+    remote?: RemoteDelegationPort;
   } = {},
 ) {
   const calls: string[] = [];
@@ -160,6 +165,8 @@ function tool(
       mode: "chat",
       windowId: ids.window,
       parentThreadId: ids.thread,
+      projectId: ids.project,
+      ...(options.remote === undefined ? {} : { remote: options.remote }),
       listTargets: () => options.targets ?? TARGETS,
       isTainted: () => options.tainted ?? false,
       ...(options.noRouting
@@ -249,6 +256,129 @@ describe("agents managed tools", () => {
       reason: "creation-posture-off",
     });
     expect(calls).toEqual([]);
+  });
+
+  it("hands a helper request that names a member to the remote port, not to local admission", async () => {
+    const asked: Array<Parameters<RemoteDelegationPort["start"]>[0]> = [];
+    const { set, calls } = tool({
+      remote: {
+        start: async (input) => {
+          asked.push(input);
+          return {
+            status: "delegated-remote",
+            requestId: "00000000-0000-4000-8000-0000000000d1",
+            targetMemberId: input.targetMemberId,
+            state: "accepted",
+          };
+        },
+      },
+    });
+
+    const outcome = await call(set, {
+      operation: "delegate",
+      task: "Look",
+      targetMemberId: ids.member,
+      targetProjectId: ids.targetProject,
+    });
+
+    expect(outcome.result).toMatchObject({ status: "delegated-remote", state: "accepted" });
+    expect(asked).toEqual([
+      {
+        parentThreadId: ids.thread,
+        windowId: ids.window,
+        mode: "chat",
+        projectId: ids.project,
+        targetMemberId: ids.member,
+        targetProjectId: ids.targetProject,
+        task: "Look",
+      },
+    ]);
+    expect(calls).toEqual([]);
+  });
+
+  it("refuses a target member without the Project to run in there, and a Project without a member", async () => {
+    const { set, calls } = tool({
+      remote: {
+        start: async () => {
+          throw new Error("must not be asked");
+        },
+      },
+    });
+
+    const noProject = await call(set, {
+      operation: "delegate",
+      task: "Look",
+      targetMemberId: ids.member,
+    });
+    const noMember = await call(set, {
+      operation: "delegate",
+      task: "Look",
+      targetProjectId: ids.targetProject,
+    });
+
+    expect(noProject.result).toMatchObject({
+      status: "refused",
+      reason: "remote-delegation-project-required",
+    });
+    expect(noMember.result).toMatchObject({
+      status: "refused",
+      reason: "remote-delegation-options-unsupported",
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("refuses a target member where the host cannot reach members or the request names local choices", async () => {
+    const remote: RemoteDelegationPort = {
+      start: async () => {
+        throw new Error("must not be asked");
+      },
+    };
+    const without = tool();
+    const withRemote = tool({ remote });
+
+    const unreachable = await call(without.set, {
+      operation: "delegate",
+      task: "Look",
+      targetMemberId: ids.member,
+      targetProjectId: ids.targetProject,
+    });
+    const named = await call(withRemote.set, {
+      operation: "delegate",
+      task: "Look",
+      targetMemberId: ids.member,
+      targetProjectId: ids.targetProject,
+      providerInstanceId: String(ids.provider),
+      modelId: "gpt-4o",
+    });
+    const withContext = await call(withRemote.set, {
+      operation: "delegate",
+      task: "Look",
+      targetMemberId: ids.member,
+      targetProjectId: ids.targetProject,
+      includeParentContext: true,
+    });
+
+    expect(unreachable.result).toMatchObject({
+      status: "refused",
+      reason: "remote-delegation-unavailable",
+    });
+    for (const refused of [named, withContext]) {
+      expect(refused.result).toMatchObject({
+        status: "refused",
+        reason: "remote-delegation-options-unsupported",
+      });
+    }
+  });
+
+  it("does not offer target-member delegation to a Chat thread or a host that cannot reach members", async () => {
+    const remote: RemoteDelegationPort = {
+      start: async () => ({ status: "refused", reason: "x" }),
+    };
+    const chat = await call(tool({ remote }).set, { operation: "capabilities" });
+    const bare = await call(tool().set, { operation: "capabilities" });
+
+    expect(chat.result).toMatchObject({ remoteDelegation: "unavailable" });
+    expect(bare.result).toMatchObject({ remoteDelegation: "unavailable" });
   });
 
   it("refuses to delegate from a thread carrying untrusted content", async () => {

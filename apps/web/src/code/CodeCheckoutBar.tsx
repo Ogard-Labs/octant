@@ -1,4 +1,4 @@
-import { GitBranch, GitPullRequest, Network } from "lucide-react";
+import { GitBranch, GitPullRequest } from "lucide-react";
 import { useCodeCheckout } from "../environment/CodeCheckoutContext";
 import { OctantButton } from "../ui/base/OctantButton";
 
@@ -11,30 +11,8 @@ import { OctantButton } from "../ui/base/OctantButton";
  * them here also gives the one action those facts lead to — raising a pull
  * request — a place to sit next to the evidence for it.
  */
-export function CodeCheckoutBar(props: {
-  readonly onCreatePullRequest?: () => void;
-  /**
-   * `destination:folder` of a thread whose checkout is on an SSH target. This
-   * host reads no branch or diff of it, so the bar names where it is instead.
-   */
-  readonly remoteLocation?: string;
-}) {
+export function CodeCheckoutBar(props: { readonly onCreatePullRequest?: () => void }) {
   const checkout = useCodeCheckout();
-  if (props.remoteLocation !== undefined) {
-    return (
-      <div aria-label="Checkout" className="code-checkout-bar">
-        <span className="code-checkout-bar__identity">
-          <Network aria-hidden="true" size={12} strokeWidth={1.8} />
-          <span
-            className="code-checkout-bar__project"
-            title={`On an SSH target: ${props.remoteLocation}`}
-          >
-            {props.remoteLocation}
-          </span>
-        </span>
-      </div>
-    );
-  }
   // The attached strip is part of the composer even while its metadata is
   // unavailable; returning null collapses its border and shifts the controls.
   if (checkout === undefined) return <div aria-label="Checkout" className="code-checkout-bar" />;

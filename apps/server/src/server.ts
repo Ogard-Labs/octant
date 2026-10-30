@@ -67,9 +67,6 @@ import { wireThreadNotifications } from "./wiring/notifications";
 import { wireWorkRequests } from "./wiring/workRequests";
 import { wireRoutes } from "./wiring/routes";
 import { wireRemote } from "./wiring/remote";
-import { wireSshTargets } from "./wiring/sshTargets";
-import { remoteCodeProjectOf } from "./sshTarget/sshRemoteCodeThreads";
-import type { SshTargetStore } from "./sshTarget/sshTargetStore";
 import { wireReplica } from "./wiring/replica";
 
 export { MAX_CHAT_ATTACHMENT_BYTES };
@@ -182,7 +179,6 @@ export function startOctantServer(
       agentRunParentAuthority,
       agentRunPersistence,
       androidInputGrants,
-      appleDeviceLeases,
       bindingReceiptStore,
       browserCaptureStore,
       browserCaptures,
@@ -237,6 +233,8 @@ export function startOctantServer(
       managedWorktreeReceipts,
       nativeHarnessRouter,
       nativeHarnessRoutingStore,
+      remoteDelegation,
+      remoteDelegationHolder,
       runtimeOutsideContentMarks,
       sideTasks,
       spendCeiling,
@@ -337,10 +335,6 @@ export function startOctantServer(
       windowAuthorityStore,
       workThreadProjection,
     });
-    // SSH targets are wired after the workspace; a window binds to a
-    // remote-bound Project through their store once it exists, and no
-    // request is served before then.
-    const remoteCodeProjectStore: { store?: SshTargetStore } = {};
     const {
       authorizeWorkThreadForWindow,
       codeBoardPlanProgressSource,
@@ -365,13 +359,6 @@ export function startOctantServer(
       workProjectStatusFiles,
       workProjectStatusReader,
     } = yield* wireWorkspace({
-      remoteCodeProjects: {
-        has: (projectId) =>
-          remoteCodeProjectStore.store?.getProject(String(projectId)) !== undefined,
-        holdsThread: (thread) =>
-          remoteCodeProjectStore.store !== undefined &&
-          remoteCodeProjectOf(remoteCodeProjectStore.store, thread) !== undefined,
-      },
       onWindowRevoked,
       bindingReceiptStore,
       githubCapabilityService,
@@ -447,13 +434,6 @@ export function startOctantServer(
       windowAuthorityStore,
       workThreadProjection,
     });
-    const { sshTargetConnections, sshTargetStore } = wireSshTargets({
-      configuredDriverOptions,
-      persistence,
-      providerDataDirectory,
-      version,
-    });
-    remoteCodeProjectStore.store = sshTargetStore;
     const {
       followUpCreation,
       restartContinuation,
@@ -481,6 +461,7 @@ export function startOctantServer(
       agentRunParentAuthority,
       nativeHarnessRouter,
       nativeHarnessRoutingStore,
+      remoteDelegation,
       agentRunPersistence,
       codeBoardEventStore,
       codeParentActiveTurn,
@@ -496,8 +477,6 @@ export function startOctantServer(
       providerDataDirectory,
       runningWorkTurnAccess,
       sideTasks,
-      sshTargetConnections,
-      sshTargetStore,
       threadFollowUpSuggestions,
       toolEgressRules,
       turnMetrics,
@@ -553,7 +532,6 @@ export function startOctantServer(
       persistence,
       projectRootPort,
       projectService,
-      sshTargetStore,
       windowAuthorityStore,
     });
     const {
@@ -620,22 +598,12 @@ export function startOctantServer(
     });
     const {
       androidToolchainService,
-      appleDeviceService,
       appleToolchainService,
       bindDeviceApprovals,
       recordAppleEvidence,
     } = yield* wireDevices({
       androidInputGrants,
-      appleDeviceLeases,
       codeSessionAuthority,
-      ...(options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
-        ? {}
-        : {
-            credentialBroker: {
-              url: options.credentialBrokerUrl,
-              token: options.credentialBrokerToken,
-            },
-          }),
       persistence,
       projectService,
       providerDataDirectory,
@@ -645,7 +613,6 @@ export function startOctantServer(
     });
     const {
       androidToolchainRoutes,
-      appleDeviceRoutes,
       appleToolchainRoutes,
       baseRouteCodeService,
       codeCompletedThreadSource,
@@ -670,7 +637,6 @@ export function startOctantServer(
       androidToolchainService,
       bindDeviceApprovals,
       buildCodeService,
-      appleDeviceService,
       appleToolchainService,
       browserAuthority,
       canAccessCodeProject,
@@ -726,8 +692,6 @@ export function startOctantServer(
       sideTasks,
       simulatorInputGrants,
       spendCeiling,
-      sshTargetConnections,
-      sshTargetStore,
       threadMentionService: (): ThreadMentionService => threadMentionService,
       threadOutsideContentMarks,
     });
@@ -997,6 +961,7 @@ export function startOctantServer(
     const {
       automationNotificationRoutes,
       automationRoutes,
+      automationCommandService,
       automationScheduler,
       completedThreadArchiveSweep,
       hasPushStanding,
@@ -1088,7 +1053,6 @@ export function startOctantServer(
       agentRunRouteDependencies,
       agentRunSettingsRoutes,
       androidToolchainRoutes,
-      appleDeviceRoutes,
       appleToolchainRoutes,
       artifactLibraryRoutes,
       artifactMirrorRoutes,
@@ -1173,7 +1137,6 @@ export function startOctantServer(
       zenRoutes,
     });
     const {
-      appStoreConnectKeyRoutes,
       composeHostDiagnostics,
       externalContentRoutes,
       hostControlRoutes,
@@ -1185,13 +1148,12 @@ export function startOctantServer(
       privateListenerSetting,
       providerCredentialRoutes,
       remoteHost,
-      sshRemoteTerminals,
-      sshTargetAdministrationRoutes,
     } = wireRemote({
       canvasPublicShareService,
       threadExportService,
       agentMessageService,
       authenticatedProductDispatch,
+      automationCommandService,
       automationScheduler,
       browserCaptureStore,
       canvasRoutes,
@@ -1210,6 +1172,7 @@ export function startOctantServer(
       languageServerApprovals,
       nativeHarnessSessions,
       onWorkTurnCancelled,
+      remoteDelegationHolder,
       options,
       persistence,
       providerDataDirectory,
@@ -1219,8 +1182,6 @@ export function startOctantServer(
       remoteServerGrants,
       serve,
       shellService,
-      sshTargetConnections,
-      sshTargetStore,
       codeOperationRuntime,
       startedAt,
       threadMessageQueue,
@@ -1306,9 +1267,7 @@ export function startOctantServer(
                 (await privateListenerAdministrationRoutes(request)) ??
                 (await hubAdministrationRoutes(request)) ??
                 (await delegationAdministrationRoutes(request)) ??
-                (await sshTargetAdministrationRoutes(request)) ??
                 (await providerCredentialRoutes(request)) ??
-                (await appStoreConnectKeyRoutes(request)) ??
                 (await localDeviceAdministrationRoutes(request)) ??
                 (await hostControlRoutes(request)) ??
                 (await externalContentRoutes(request)) ??
@@ -1499,14 +1458,6 @@ export function startOctantServer(
           }
           try {
             zenService.close();
-          } catch (error) {
-            shutdownFailure ??= error;
-          }
-          try {
-            // Remote shells end as stopped, then each executor exits when its
-            // session's input closes.
-            await sshRemoteTerminals.close();
-            sshTargetConnections.close();
           } catch (error) {
             shutdownFailure ??= error;
           }

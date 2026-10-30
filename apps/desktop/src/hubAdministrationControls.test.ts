@@ -75,6 +75,27 @@ describe("hub administration controls", () => {
     expect(calls[1]?.init?.method).toBe("GET");
   });
 
+  it("finishes a join with or without the unlock public key, and refuses anything else in the body", async () => {
+    const { calls, runtime: controls } = runtime(() => Response.json({ status: "joined" }));
+    await sendHubAdministrationOperation(controls, "join-finish", undefined);
+    await sendHubAdministrationOperation(controls, "join-finish", { unlockPublicKey: "a_b-c" });
+    expect(calls.map((call) => call.init?.body)).toEqual([
+      undefined,
+      '{"unlockPublicKey":"a_b-c"}',
+    ]);
+
+    for (const body of [
+      { unlockPublicKey: "not base64url!" },
+      { unlockPublicKey: "a", x: 1 },
+      {},
+    ]) {
+      expect(await sendHubAdministrationOperation(controls, "join-finish", body)).toMatchObject({
+        status: 400,
+      });
+    }
+    expect(calls).toHaveLength(2);
+  });
+
   it("refuses an operation it does not name or a path in its place, sending nothing", async () => {
     const { calls, runtime: controls } = runtime(() => Response.json({}));
     for (const operation of ["../desktop/remote/pairing-tickets", "__proto__", "toString", 7]) {

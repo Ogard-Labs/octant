@@ -33,7 +33,6 @@ describe("SettingsSectionId", () => {
       "sync",
       "remote-access",
       "host",
-      "ssh-targets",
       "usage",
     ]);
   });
@@ -83,6 +82,11 @@ describe("SettingsDeepLink", () => {
       setting: "default-model",
     });
     expect(decode({ section: "image-generation" })).toEqual({ section: "voice" });
+    // A link to the removed SSH targets page.
+    expect(decode({ section: "ssh-targets", setting: "ssh-target-add" })).toEqual({
+      section: "host",
+      setting: "ssh-target-add",
+    });
     expect(Schema.encodeSync(SettingsDeepLink)({ section: "host" })).toEqual({ section: "host" });
   });
 

@@ -10,6 +10,7 @@ import {
 import type {
   HubAdministrationBridge,
   HubAdministrationOperation,
+  OwnerUnlockBridge,
   RemoteAccessAdministrationBridge,
   RemotePendingPairingRequest,
 } from "../shell/hostBridge";
@@ -44,6 +45,12 @@ export interface HubSettingsSectionProps {
     RemoteAccessAdministrationBridge,
     "listRemotePairingRequests" | "approveRemotePairingRequest" | "denyRemotePairingRequest"
   >;
+  /**
+   * This Mac's unlock key (Touch ID or the account password). Joining a hub
+   * makes it and presents its public half, which the hub keeps only when the
+   * code was an owner code. Absent when the desktop has none to offer.
+   */
+  readonly ownerUnlock?: Pick<OwnerUnlockBridge, "ownerUnlockMakeKey" | "ownerUnlockForgetKey">;
   /** Reads the clock so a test can freeze a code's time left. */
   readonly now?: () => number;
 }
@@ -355,8 +362,14 @@ const JOIN_POLL_MS = 2_000;
 /** How often the hub re-reads its pairing requests while a code is live. */
 const PENDING_POLL_MS = 3_000;
 
-export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProps) {
+export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettingsSectionProps) {
   const clock = now ?? (() => Date.now());
+  /** The public half of the unlock key made for the join in progress; the private half never leaves the Secure Enclave. */
+  const unlockPublicKey = useRef<string | undefined>(undefined);
+  const forgetUnlockKey = useCallback(async () => {
+    unlockPublicKey.current = undefined;
+    await ownerUnlock?.ownerUnlockForgetKey().catch(() => undefined);
+  }, [ownerUnlock]);
   const clockRef = useRef(clock);
   clockRef.current = clock;
   const [state, setState] = useState<StatusState>({ kind: "loading" });
@@ -553,6 +566,17 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
       typeof fingerprint === "string" &&
       typeof comparisonCode === "string"
     ) {
+      unlockPublicKey.current = undefined;
+      if (ownerUnlock !== undefined) {
+        const made = await ownerUnlock.ownerUnlockMakeKey().catch(() => undefined);
+        if (made?.status === "done" && made.publicKey !== undefined) {
+          unlockPublicKey.current = made.publicKey;
+        } else {
+          setMessage(
+            "This Mac could not make an unlock key (it needs Touch ID or an account password), so it joins without one and cannot act as an owner.",
+          );
+        }
+      }
       setJoin({ phase: "comparing", hubName, fingerprint, comparisonCode });
     }
   };
@@ -561,6 +585,7 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
     setLeaving(false);
     const reply = await act("leave", undefined, "left", "Octant could not leave the hub.");
     if (reply !== undefined) {
+      await forgetUnlockKey();
       setJoin({ phase: "idle" });
       setJoinCode("");
       setMessage(
@@ -926,7 +951,10 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
     let cancelled = false;
     const ask = async () => {
       try {
-        const reply = await request("join-finish");
+        const reply =
+          unlockPublicKey.current === undefined
+            ? await request("join-finish")
+            : await request("join-finish", { unlockPublicKey: unlockPublicKey.current });
         if (cancelled) return;
         const answer = field(reply.body, "status");
         if (reply.status === 200 && answer === "joined") {
@@ -946,6 +974,8 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
       } catch (error) {
         if (!cancelled) setMessage(failureMessage(error, "Joining the hub failed."));
       }
+      // The join ended without this computer joining, so the key made for it has no hub.
+      void forgetUnlockKey();
       setJoin({ phase: "idle" });
     };
     let timer = setTimeout(() => void ask(), 0);
@@ -953,7 +983,7 @@ export function HubSettingsSection({ hub, pairing, now }: HubSettingsSectionProp
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [join, request]);
+  }, [join, request, forgetUnlockKey]);
 
   // A joined computer keeps editing the grant it already has.
   const linked = status?.link;

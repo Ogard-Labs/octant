@@ -7,6 +7,7 @@ import {
   MAX_CODE_ATTACHMENT_BYTES,
   MAX_WORK_ATTACHMENT_BYTES,
   OWNER_IDENTITY_KEY_HEADER,
+  OWNER_SESSION_HEADER,
   OWNER_UNLOCK_HEADER,
   REMOTE_PUSH_DELIVERY_HEADERS,
   REMOTE_SERVER_PROXY_RELAYED,
@@ -81,20 +82,6 @@ const LOCAL_ONLY_PREFIXES = [
   // Reviewing what a thread read and clearing its outside-content mark is a
   // person's act at this machine.
   "/api/thread-external-content",
-  // Starting, moving, or releasing a physical device's lease is a person's
-  // act at the Mac the device is paired with, and remote clients observe a
-  // device only: building, installing, launching, stopping, and reading an
-  // app's console, and taking a screenshot start at the Mac too. A device
-  // screenshot shows the person's own phone, so its pixels stay with windows
-  // on that Mac.
-  "/api/apple/device-leases",
-  "/api/apple/device-actions",
-  "/api/apple/device-screenshots",
-  // An upload to App Store Connect, and the read of what it would send, are a
-  // local person's acts; no remote principal starts or confirms one.
-  "/api/apple/distribution",
-  "/api/apple/distribution-preparations",
-  "/api/apple/distribution-versions",
 ] as const;
 
 /**
@@ -149,6 +136,7 @@ export const REMOTE_HUB_LINK_ROUTE_IDS = {
   delegate: "hub-link-delegate",
   delegationStatus: "hub-link-delegation-status",
   delegationCancel: "hub-link-delegation-cancel",
+  credentialTransfer: "hub-link-credential-transfer",
 } as const;
 
 const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
@@ -515,6 +503,19 @@ const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
     maxBodyBytes: 4_096,
     maxResponseBytes: 4_096,
   },
+  // The sending host's half of a sign-in copy an owner device started: the key
+  // arrives only against a one-time ticket the owner made on this host.
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.credentialTransfer,
+    match: { kind: "exact", path: "/api/hub/peer/credentials" },
+    surface: "pre-auth",
+    methods: ["POST"],
+    allowQuery: false,
+    allowedRequestHeaders: ["content-type", HUB_LINK_HEADER, HUB_PEER_KEY_HEADER],
+    allowedContentTypes: ["application/json"],
+    maxBodyBytes: 16_384,
+    maxResponseBytes: 4_096,
+  },
   // An owner device's administration of a host, signed like the routes above
   // and checked against the host's own owner list and a fresh unlock.
   {
@@ -527,6 +528,7 @@ const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
       "content-type",
       HUB_LINK_HEADER,
       OWNER_UNLOCK_HEADER,
+      OWNER_SESSION_HEADER,
       OWNER_IDENTITY_KEY_HEADER,
     ],
     allowedContentTypes: ["application/json"],

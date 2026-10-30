@@ -566,7 +566,7 @@ describe("CodeThreadBoard", () => {
     );
   });
 
-  it("says a thread on an SSH target runs there, never in the current checkout", async () => {
+  it("says a thread on a remote folder is not in the current checkout", async () => {
     const loadBoard = vi.fn(async () =>
       view([
         {
@@ -586,7 +586,7 @@ describe("CodeThreadBoard", () => {
 
     const row = (await screen.findByText("Remote thread")).closest(".issuerow");
     if (row === null) throw new Error("Expected the list row");
-    expect(row).toHaveTextContent("On an SSH target");
+    expect(row).toHaveTextContent("Remote folder");
     expect(row).not.toHaveTextContent("Current checkout");
   });
 

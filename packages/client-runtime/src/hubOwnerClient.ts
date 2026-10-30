@@ -15,13 +15,17 @@
 
 import {
   OWNER_IDENTITY_KEY_HEADER,
+  OWNER_SESSION_HEADER,
   OWNER_UNLOCK_HEADER,
   decodeNewMemberConfirmation,
+  decodeOwnerAdministrationSession,
   decodeOwnerChallenge,
   type HeldMember,
   type NewMemberAlert,
   type NewMemberConfirmation,
   type OwnerChallenge,
+  type OwnerPostureChangeRequest,
+  type OwnerPostureSubject,
 } from "@octant/contracts";
 import { newMemberConfirmationSigningPayload, ownerUnlockSigningPayload } from "@octant/domain";
 import type { PinnedListenerTransportPort } from "./appPairingCode";
@@ -43,6 +47,13 @@ const OWNER_ROUTES = {
   alertRemove: "/api/hub/owner/alerts/remove",
   confirmNewMembers: "/api/hub/owner/confirm-new-members",
   confirmMember: "/api/hub/owner/confirm-member",
+  session: "/api/hub/owner/session",
+  postureRead: "/api/hub/owner/posture/read",
+  postureChange: "/api/hub/owner/posture/change",
+  credentialReceive: "/api/hub/owner/credentials/receive",
+  credentialCopy: "/api/hub/owner/credentials/copy",
+  provisionApply: "/api/hub/owner/provision/apply",
+  provisionDismiss: "/api/hub/owner/provision/dismiss",
 } as const;
 
 /** The identity key an owner device joined with, which the host's owner list records. */
@@ -61,6 +72,18 @@ export interface OwnerUnlockAssertion {
   readonly authenticatorData: string;
   readonly clientDataJson: string;
   readonly signature: string;
+}
+
+/**
+ * What a raw key's `sign` throws when the person declines the prompt it raises
+ * itself (a Mac asks for Touch ID at each signature), so a decline reads as a
+ * cancelled unlock rather than an unavailable one.
+ */
+export class OwnerUnlockDeclined extends Error {
+  constructor() {
+    super("The person declined the unlock.");
+    this.name = "OwnerUnlockDeclined";
+  }
 }
 
 /** A raw key, opened after one authentication. `close` drops the key from memory. */
@@ -137,6 +160,43 @@ export interface OwnerClient {
   ) => Promise<OwnerActionResult>;
 }
 
+/**
+ * What an owner device adds beyond alerts and confirmation: the five-minute
+ * administration session, a Code posture, an API-key sign-in copy, and a
+ * provisioning proposal. Kept apart so a screen that only needs alerts is not
+ * handed these.
+ */
+export interface OwnerAdministrationClient {
+  /**
+   * One unlock that covers five minutes of administration screens on this host
+   * (decision H17). The session is kept in memory only; Full access, merge, a
+   * sign-in copy, and an owner change still ask for their own unlock.
+   */
+  readonly openSession: () => Promise<OwnerActionResult>;
+  /** Forgets the session on this device. The host forgets its own at expiry. */
+  readonly endSession: () => void;
+  /** Whether a session this device opened is still inside its five minutes. */
+  readonly hasSession: () => boolean;
+  /** A Code Project's or thread's posture on this host. Covered by a session. */
+  readonly readPosture: (subject: OwnerPostureSubject) => Promise<OwnerActionResult>;
+  /** Changes a posture. Full access asks for its own unlock; any other posture is covered by a session. */
+  readonly changePosture: (request: OwnerPostureChangeRequest) => Promise<OwnerActionResult>;
+  /** The receiving host's half of a sign-in copy; see `copyApiKeySignIn`. */
+  readonly receiveCredential: (input: {
+    readonly sourceMemberId: string;
+    readonly targetCredentialName: string;
+  }) => Promise<OwnerActionResult>;
+  /** The sending host's half of a sign-in copy; see `copyApiKeySignIn`. */
+  readonly sendCredential: (input: {
+    readonly targetMemberId: string;
+    readonly sourceCredentialName: string;
+    readonly ticketId: string;
+  }) => Promise<OwnerActionResult>;
+  /** Applies a provisioning proposal this spoke holds, through the same path its window uses. */
+  readonly applyProposal: (offerId: string, projectId?: string) => Promise<OwnerActionResult>;
+  readonly dismissProposal: (offerId: string) => Promise<OwnerActionResult>;
+}
+
 /** What a signer answers for one text: a raw signature, or a passkey's assertion. */
 type Signed = { readonly signature: string } | OwnerUnlockAssertion;
 
@@ -159,7 +219,9 @@ const stringField = (value: unknown, key: string): string | undefined => {
   return typeof found === "string" ? found : undefined;
 };
 
-export function createOwnerClient(options: OwnerClientOptions): OwnerClient {
+export function createOwnerClient(
+  options: OwnerClientOptions,
+): OwnerClient & OwnerAdministrationClient {
   const { target, identity, unlock } = options;
   const now = options.now ?? Date.now;
 
@@ -168,6 +230,7 @@ export function createOwnerClient(options: OwnerClientOptions): OwnerClient {
     readonly path: string;
     readonly body: string;
     readonly proof?: string;
+    readonly session?: string;
   }): Promise<Answer | undefined> => {
     const transport = options.transport({
       origin: target.origin,
@@ -192,6 +255,7 @@ export function createOwnerClient(options: OwnerClientOptions): OwnerClient {
           [OWNER_IDENTITY_KEY_HEADER]: identity.publicKey,
           ...(input.method === "POST" ? { "content-type": "application/json" } : {}),
           ...(input.proof === undefined ? {} : { [OWNER_UNLOCK_HEADER]: input.proof }),
+          ...(input.session === undefined ? {} : { [OWNER_SESSION_HEADER]: input.session }),
         },
         ...(input.method === "POST" ? { body: input.body } : {}),
       });
@@ -227,8 +291,10 @@ export function createOwnerClient(options: OwnerClientOptions): OwnerClient {
         sign: async (text) => {
           try {
             return { status: "signed", value: { signature: await session.sign(text) } };
-          } catch {
-            return { status: "unavailable" };
+          } catch (error) {
+            return error instanceof OwnerUnlockDeclined
+              ? { status: "cancelled" }
+              : { status: "unavailable" };
           }
         },
         close: session.close,
@@ -301,6 +367,35 @@ export function createOwnerClient(options: OwnerClientOptions): OwnerClient {
     return { status: "done", body: answered.json };
   };
 
+  // The administration session lives in memory only, for this client's host.
+  let session: { readonly sessionId: string; readonly expiresAt: number } | undefined;
+  const sessionLive = (): boolean => session !== undefined && now() < session.expiresAt;
+
+  /** Sends an administration action under the open session; undefined when there is none to use. */
+  const underSession = async (
+    path: string,
+    body: string,
+  ): Promise<OwnerActionResult | undefined> => {
+    if (session === undefined || !sessionLive()) return undefined;
+    const answered = await send({ method: "POST", path, body, session: session.sessionId });
+    if (answered === undefined) return { status: "unreachable" };
+    if (!answered.ok || stringField(answered.json, "status") === "refused") {
+      const refused = refusal(answered);
+      // The host ended the session (expiry, a changed owner list, a removed device):
+      // forget it here too and let the caller ask for a fresh unlock.
+      if (SESSION_ENDED.has(refused.kind)) {
+        session = undefined;
+        return undefined;
+      }
+      return refused;
+    }
+    return { status: "done", body: answered.json };
+  };
+
+  /** An administration action: free under an open session, else one fresh unlock for this action. */
+  const administration = async (path: string, body: string): Promise<OwnerActionResult> =>
+    (await underSession(path, body)) ?? unlocked((signer) => act(path, body, signer));
+
   return {
     async alerts() {
       const answer = await send({ method: "GET", path: OWNER_ROUTES.alerts, body: "" });
@@ -318,13 +413,48 @@ export function createOwnerClient(options: OwnerClientOptions): OwnerClient {
       };
     },
     dismissAlert: (alertId) =>
-      unlocked((signer) => act(OWNER_ROUTES.alertDismiss, JSON.stringify({ alertId }), signer)),
+      administration(OWNER_ROUTES.alertDismiss, JSON.stringify({ alertId })),
     removeFromAlert: (alertId) =>
-      unlocked((signer) => act(OWNER_ROUTES.alertRemove, JSON.stringify({ alertId }), signer)),
+      administration(OWNER_ROUTES.alertRemove, JSON.stringify({ alertId })),
     setConfirmNewMembers: (enabled) =>
-      unlocked((signer) =>
-        act(OWNER_ROUTES.confirmNewMembers, JSON.stringify({ enabled }), signer),
+      administration(OWNER_ROUTES.confirmNewMembers, JSON.stringify({ enabled })),
+    openSession: () =>
+      unlocked(async (signer) => {
+        const opened = await act(OWNER_ROUTES.session, "", signer);
+        if (opened.status !== "done") return opened;
+        try {
+          session = decodeOwnerAdministrationSession(
+            (opened.body as { session?: unknown } | undefined)?.session,
+          );
+        } catch {
+          return { status: "refused", kind: "invalid-answer" };
+        }
+        // The secret stays in this client; the caller learns only when it ends.
+        return { status: "done", body: { expiresAt: session.expiresAt } };
+      }),
+    endSession: () => {
+      session = undefined;
+    },
+    hasSession: sessionLive,
+    readPosture: (subject) => administration(OWNER_ROUTES.postureRead, JSON.stringify({ subject })),
+    changePosture: (request) => {
+      const body = JSON.stringify(request);
+      // Full access is the one posture a session never covers.
+      return request.posture === "full-access"
+        ? unlocked((signer) => act(OWNER_ROUTES.postureChange, body, signer))
+        : administration(OWNER_ROUTES.postureChange, body);
+    },
+    receiveCredential: (input) =>
+      unlocked((signer) => act(OWNER_ROUTES.credentialReceive, JSON.stringify(input), signer)),
+    sendCredential: (input) =>
+      unlocked((signer) => act(OWNER_ROUTES.credentialCopy, JSON.stringify(input), signer)),
+    applyProposal: (offerId, projectId) =>
+      administration(
+        OWNER_ROUTES.provisionApply,
+        JSON.stringify({ offerId, ...(projectId === undefined ? {} : { projectId }) }),
       ),
+    dismissProposal: (offerId) =>
+      administration(OWNER_ROUTES.provisionDismiss, JSON.stringify({ offerId })),
     confirmNewMember: (member) =>
       unlocked(async (signer) => {
         // The confirmation is its own signature by the unlock key, over the
@@ -356,6 +486,44 @@ export function createOwnerClient(options: OwnerClientOptions): OwnerClient {
         );
       }),
   };
+}
+
+/** Refusals that mean the host no longer holds the session this device presented. */
+const SESSION_ENDED: ReadonlySet<string> = new Set([
+  "no-such-session",
+  "session-expired",
+  "session-owner-changed",
+  "session-wrong-owner",
+]);
+
+/**
+ * Copies an API-key sign-in from one of the person's computers to another. The
+ * person unlocks on each: first the computer that will receive the key, which
+ * makes a one-time ticket, then the computer that holds it, which sends the key
+ * straight to the first. The key never passes through this device. Provider
+ * rows have a different id on each computer, so the person names the row on
+ * each side.
+ */
+export async function copyApiKeySignIn(input: {
+  readonly source: Pick<OwnerAdministrationClient, "sendCredential">;
+  readonly target: Pick<OwnerAdministrationClient, "receiveCredential">;
+  readonly sourceMemberId: string;
+  readonly targetMemberId: string;
+  readonly sourceCredentialName: string;
+  readonly targetCredentialName: string;
+}): Promise<OwnerActionResult> {
+  const ticket = await input.target.receiveCredential({
+    sourceMemberId: input.sourceMemberId,
+    targetCredentialName: input.targetCredentialName,
+  });
+  if (ticket.status !== "done") return ticket;
+  const ticketId = stringField(ticket.body, "ticketId");
+  if (ticketId === undefined) return { status: "refused", kind: "invalid-answer" };
+  return input.source.sendCredential({
+    targetMemberId: input.targetMemberId,
+    sourceCredentialName: input.sourceCredentialName,
+    ticketId,
+  });
 }
 
 /** SHA-256 of an unlock public key's SubjectPublicKeyInfo, lowercase hex: what a host lists beside the owner's name. */
@@ -398,6 +566,21 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
   "unlock-user-verification-missing":
     "The passkey did not confirm that you were present. Try again.",
   "unlock-required": "This needs a fresh unlock.",
+  "own-unlock-required":
+    "This needs its own unlock. An open session covers only administration screens.",
+  "no-such-session": "That unlock session is over. Unlock again.",
+  "session-expired": "The five-minute unlock session is over. Unlock again.",
+  "session-owner-changed": "The list of owners changed, so the unlock session ended.",
+  "subscription-sign-in":
+    "Subscription sign-ins stay on the computer that holds them. Only API keys copy.",
+  "no-such-credential": "That computer holds no key under that name.",
+  "no-such-provider": "The other computer has no provider by that name to keep the key for.",
+  "already-stored": "That computer already holds a key under that name. It is not replaced.",
+  "several-keys":
+    "That provider holds several keys. Copy them one at a time after removing the rest.",
+  "ticket-expired": "The copy was not finished in time. Start it again.",
+  "no-such-ticket": "The other computer did not expect that copy. Start it again.",
+  "target-unreachable": "The other computer could not be reached.",
   "not-an-owner": "This computer does not list this device as an owner.",
   "owners-not-honored": "This computer does not let owner devices act. Its person can change that.",
   "hub-principal": "The hub cannot act as an owner.",

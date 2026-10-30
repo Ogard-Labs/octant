@@ -36,6 +36,7 @@ import {
   NativeHarnessSlotId,
 } from "./nativeHarnessRouting";
 import { HarnessRetryNotice } from "./harnessRetry";
+import { HubMemberId } from "./hubAndSpokes";
 import { ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId, type ProviderToolDefinition } from "./providers";
 import { ThreadPlanStepId } from "./threadPlan";
@@ -301,6 +302,17 @@ export const NativeHarnessDelegateArguments = Schema.Union(
     modelId: Schema.optional(ProviderModelId),
     reasoning: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
     includeParentContext: Schema.optional(Schema.Boolean),
+    /**
+     * A roster member of the person's hub that runs the child instead of this
+     * host. Work threads only; the member's own grant decides what it may do.
+     */
+    targetMemberId: Schema.optional(HubMemberId),
+    /**
+     * The Project to run in on that member. Projects have their own ids on each
+     * host, so this is the member's id for it, never this host's; the member
+     * checks it against the grant it holds for this host.
+     */
+    targetProjectId: Schema.optional(ProjectId),
     /**
      * Runs this child waits for. It starts only once all of them completed,
      * receives their replies, and never runs if one failed or was cancelled.

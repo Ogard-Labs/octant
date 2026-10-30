@@ -32,12 +32,6 @@ export interface PushNotificationDraftInput {
   readonly threadTitle?: string;
   /** Whether the person enabled thread names for this phone. */
   readonly threadTitles: boolean;
-  /**
-   * The host's own mark on an approval only a person at a window on that
-   * computer may answer. Taken from the journaled request, never inferred from
-   * its wording.
-   */
-  readonly localPersonOnly?: true;
 }
 
 export interface AutomationPushNotificationDraftInput {
@@ -122,23 +116,6 @@ const AUTOMATION_KIND_TITLE: Record<AutomationNotificationKind, string> = {
 export function buildRedactedPushNotification(
   input: PushNotificationDraftInput,
 ): RemotePushNotificationPayloadV1 {
-  if (input.kind === "approval-needed" && input.localPersonOnly === true) {
-    // The host refuses a paired device's answer to this approval, so the
-    // phone is told of a wait at the computer, not an ask: a phone may act on
-    // `approval-needed`, and an answer from it would settle nothing.
-    return {
-      kind: "waiting",
-      hostId: input.hostId as RemotePushNotificationPayloadV1["hostId"],
-      threadId: input.threadId,
-      mode: input.mode,
-      title: titled(
-        `Waiting for you at ${computerName(input.computerLabel)}`,
-        input.threadTitle,
-        input.threadTitles,
-      ),
-      body: "Only an Octant window on that computer can answer",
-    };
-  }
   return {
     kind: input.kind,
     hostId: input.hostId as RemotePushNotificationPayloadV1["hostId"],

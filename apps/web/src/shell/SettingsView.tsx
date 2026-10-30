@@ -84,7 +84,6 @@ import {
 import { RememberedToolApprovalsPanel } from "../extensions/RememberedToolApprovalsPanel";
 import { BrowserHubSection } from "../host/BrowserHubSection";
 import { RemoteAccessSettingsSection } from "../host/RemoteAccessSettingsSection";
-import { SshTargetsSettingsPage } from "../host/SshTargetsSettingsSection";
 import { PublicLinkSettings } from "../settings/PublicLinkSettings";
 import { SyncSettingsSection } from "../settings/SyncSettingsSection";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
@@ -115,7 +114,6 @@ import { ComputerUseSettingsView } from "../settings/ComputerUseSettingsView";
 import { DesktopSpendCapSettings } from "../settings/DesktopSpendCapSettings";
 import type { DesktopPaneClient } from "@octant/client-runtime/desktop-pane-client";
 import { ManagedToolsSettingsView } from "../settings/ManagedToolsSettingsView";
-import { AppStoreConnectKeySection } from "../settings/AppStoreConnectKeySection";
 import { UserProfileSettingsView } from "../profile/UserProfileSettingsView";
 import {
   ScopeIndicator,
@@ -161,8 +159,8 @@ import { ProviderUsageLimitsPanel } from "../usage/ProviderUsageLimitsPanel";
 import {
   pairedComputersOf,
   hubAdministrationOf,
+  ownerUnlockOf,
   remoteAccessAdministrationOf,
-  sshTargetAdministrationOf,
   type OctantHostBridge,
 } from "./hostBridge";
 import { openExternalUrl } from "./openExternalUrl";
@@ -1025,19 +1023,12 @@ function ActiveSectionContent({
           )}
         </>
       );
-    case "device-tools": {
-      const appStoreConnectKeyRequest = props.hostBridge?.appStoreConnectKeyRequest;
+    case "device-tools":
       return (
-        <>
-          <ManagedToolsSettingsView
-            {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
-          />
-          {appStoreConnectKeyRequest === undefined ? null : (
-            <AppStoreConnectKeySection bridge={{ appStoreConnectKeyRequest }} />
-          )}
-        </>
+        <ManagedToolsSettingsView
+          {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
+        />
       );
-    }
     case "providers":
       // The catalog of every provider Octant can set up sits under the ones
       // this host has, so finding and configuring a provider is one page. A
@@ -1180,6 +1171,7 @@ function ActiveSectionContent({
         <RemoteAccessSettingsSection
           bridge={administration}
           hub={hubAdministrationOf(props.hostBridge)}
+          ownerUnlock={ownerUnlockOf(props.hostBridge)}
           pairedComputers={pairedComputersOf(props.hostBridge)}
         />
       ) : (
@@ -1190,19 +1182,6 @@ function ActiveSectionContent({
             commands.
           </p>
           <BrowserHubSection hubAdministration={hubAdministrationOf(props.hostBridge)} />
-        </section>
-      );
-    }
-    case "ssh-targets": {
-      const administration = sshTargetAdministrationOf(props.hostBridge);
-      return administration !== undefined ? (
-        <SshTargetsSettingsPage bridge={administration} />
-      ) : (
-        <section aria-label="SSH targets" id="settings-ssh-targets">
-          <p>
-            SSH targets are added and their folders bound on the host machine, in the Octant desktop
-            app or with the <code>octant ssh-target</code> command.
-          </p>
         </section>
       );
     }

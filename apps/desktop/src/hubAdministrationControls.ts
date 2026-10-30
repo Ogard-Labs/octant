@@ -42,6 +42,8 @@ interface HubAdministrationRoute {
   readonly path: string;
   /** Absent when the operation takes no body. */
   readonly decodeBody?: BodyDecoder;
+  /** The body may be left out; when sent, it still decodes. */
+  readonly bodyOptional?: true;
 }
 
 const JoinCodeBody = Schema.Struct({ owner: Schema.Boolean }).annotations({
@@ -50,6 +52,10 @@ const JoinCodeBody = Schema.Struct({ owner: Schema.Boolean }).annotations({
 const JoinBody = Schema.Struct({ code: Schema.String.pipe(Schema.maxLength(4_096)) }).annotations({
   onExcessProperty: "error",
 });
+
+const JoinFinishBody = Schema.Struct({
+  unlockPublicKey: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_-]{1,512}$/)),
+}).annotations({ parseOptions: { onExcessProperty: "error" } });
 
 const CertificateBody = Schema.Struct({
   action: Schema.Literal("enable", "disable", "renew"),
@@ -75,7 +81,14 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     path: "/api/desktop/hub/join",
     decodeBody: Schema.decodeUnknownSync(JoinBody),
   },
-  "join-finish": { method: "POST", path: "/api/desktop/hub/join/finish" },
+  // An owner device presents the unlock key it made for this hub; the hub keeps
+  // it only if the join code was an owner code.
+  "join-finish": {
+    method: "POST",
+    path: "/api/desktop/hub/join/finish",
+    decodeBody: Schema.decodeUnknownSync(JoinFinishBody),
+    bodyOptional: true,
+  },
   grant: { method: "POST", path: "/api/desktop/hub/grant", decodeBody: decodeHubGrant },
   leave: { method: "POST", path: "/api/desktop/hub/leave" },
   "owners-add": {
@@ -240,7 +253,7 @@ export async function sendHubAdministrationOperation(
   }
   const route: HubAdministrationRoute = HUB_ADMINISTRATION_OPERATIONS[operation];
   let encoded: string | undefined;
-  if (route.decodeBody !== undefined) {
+  if (route.decodeBody !== undefined && !(route.bodyOptional === true && body === undefined)) {
     let decoded: unknown;
     try {
       decoded = route.decodeBody(body);

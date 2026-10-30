@@ -65,7 +65,7 @@ describe("composeHostDataMap", () => {
       location: { kind: "known", path: `${dataDirectory}/computer-use` },
     });
     expect(decoded.host.caches).toContainEqual({
-      name: "SSH target host-key pins",
+      name: "Leftover SSH target host-key pins (unused)",
       location: { kind: "known", path: `${dataDirectory}/ssh-targets` },
     });
     // Every directory the confirmed purge sweep reaches outside the journal
@@ -102,7 +102,6 @@ describe("composeHostDataMap", () => {
         { service: "app.octant.replica-store-credentials.v1" },
         { service: "app.octant.mcp-server-credentials.v1" },
         { service: "app.octant.desktop-provider-credentials.v1" },
-        { service: "app.octant.app-store-connect-keys.v1" },
         { service: "app.octant.push-platform-credentials.v1" },
       ],
     });
@@ -110,7 +109,6 @@ describe("composeHostDataMap", () => {
       "provider-calls",
       "update-checks",
       "marketplace-fetches",
-      "ssh-target-connections",
     ]);
     expect(JSON.stringify(decoded)).not.toMatch(/sk-|password|secret|token/i);
     expect(decoded.projects.kind).toBe("known");

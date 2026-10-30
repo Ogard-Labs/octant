@@ -420,11 +420,12 @@ are authorized as post-preview work (maintainer decision, 2026-10-26) and are
 not part of the technical preview: mobile maturity (Android internal builds,
 redacted push, capture and voice, public store distribution), a
 ciphertext-only hosted relay, a full LSP / extension host / debugger
-companion, Apple physical devices and then TestFlight and App Store
-distribution of a person's own apps, enterprise directory OAuth and cloud-IAM
-provider identity, disposable Linux desktops for headless hosts, remote SSH
-development environments, third-party provider-driver plugins, and the EU/GDPR
-compliance package (pending legal review). A hub-and-spoke topology on a
+companion, enterprise directory OAuth and cloud-IAM
+provider identity, disposable Linux desktops for headless hosts, third-party
+provider-driver plugins, and the EU/GDPR compliance package (pending legal
+review). Remote SSH development environments are out of scope (maintainer
+decision, 2026-10-29): an agent that needs another machine uses its own
+provider tools, and Octant on the person's other computers joins a hub. A hub-and-spoke topology on a
 person's own devices, where one Octant server (running without the desktop app
 and serving the web app over a private network such as Tailscale) enrolls the
 person's other computers and phones, introduces them to each other, fails over
@@ -435,10 +436,10 @@ once its owning specification documents its authority, privacy, and release
 boundaries. The authorization covers design and implementation; creating an
 account, spending money, submitting to a store, deploying a hosted service, or
 weakening any invariant each still needs a separate explicit maintainer
-action. App Store distribution of a person's own apps is admitted (maintainer
-decision, 2026-10-28) under the
-[Apple devices distribution rules](docs/design/apple-devices.md#distribution):
-each upload, submission, and release is a local person's confirmed act.
+action. Apple physical devices and App Store Connect upload, submission, and
+release are out of scope (maintainer decision, 2026-10-29): Octant drives the
+iOS Simulator only, and an agent that needs a device or the store uses its own
+provider tools.
 Connectors (MCP servers added by hand, imported
 from other tools on this Mac, signed in to, or chosen from the bundled catalog)
 are in scope under the architecture's

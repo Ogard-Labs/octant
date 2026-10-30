@@ -77,8 +77,6 @@ import type { HarnessStateWiring } from "./harnessState";
 import type { DevicesWiring } from "./devices";
 import type { BrowserWiring } from "./browser";
 import type { CanvasWiring } from "./canvas";
-import type { SshTargetsWiring } from "./sshTargets";
-import { bindRemoteCodeTurn, remoteCodeCheckoutRoot } from "../sshTarget/sshRemoteCodeThreads";
 
 function withCodeOperationRuntime(
   service: CodeRouteService,
@@ -250,7 +248,6 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   Pick<
     DevicesWiring,
     | "androidToolchainService"
-    | "appleDeviceService"
     | "appleToolchainService"
     | "bindDeviceApprovals"
     | "recordAppleEvidence"
@@ -288,8 +285,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   Pick<
     HarnessWiring,
     "nativeHarnessComposition" | "nativeHarnessHooks" | "onHarnessRecoveryLifted"
-  > &
-  Pick<SshTargetsWiring, "sshTargetConnections" | "sshTargetStore"> & {
+  > & {
     /** Wired by wireChat; read only after startup. */
     readonly codeThreadMentionDirectory: () => ReturnType<typeof createCodeThreadMentionDirectory>;
     /** Wired by wireWork; read only after startup. */
@@ -313,7 +309,6 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     agentsManagedToolsFor,
     androidInputGrants,
     androidToolchainService,
-    appleDeviceService,
     appleToolchainService,
     bindDeviceApprovals,
     browserAuthority,
@@ -375,8 +370,6 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     sideTasks,
     simulatorInputGrants,
     spendCeiling,
-    sshTargetConnections,
-    sshTargetStore,
     threadMentionService,
     threadOutsideContentMarks,
     workRequestRuntime,
@@ -396,25 +389,12 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     };
     const {
       androidToolchainRoutes,
-      appleDeviceRoutes,
       appleToolchainRoutes,
       resolveAndroidContext,
       resolveAppleContext,
-      prepareAppleUpload,
-      prepareAppleStoreVersion,
-      resolveAppleDeviceAgentScope,
-      resolveAppleDeviceThread,
     } = bindDeviceApprovals({
       validateAppleApproval: (windowId, request) =>
         codeOperationRuntime?.validateAppleApproval(windowId, request),
-      validateAppleDeviceLease: (windowId, request) =>
-        codeOperationRuntime?.validateAppleDeviceLease?.(windowId, request),
-      validateAppleDeviceAction: (windowId, request) =>
-        codeOperationRuntime?.validateAppleDeviceAction?.(windowId, request),
-      validateAppleDistributionUpload: (windowId, request) =>
-        codeOperationRuntime?.validateAppleDistributionUpload?.(windowId, request),
-      validateAppleDistributionVersion: (windowId, request) =>
-        codeOperationRuntime?.validateAppleDistributionVersion?.(windowId, request),
       validateAndroidApproval: (windowId, request) =>
         codeOperationRuntime?.validateAndroidApproval(windowId, request),
     });
@@ -523,7 +503,6 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       codeOperationRuntime = createCodeOperationRuntime({
         liveTurns,
         activeTurns: codeActiveTurns,
-        describeAppleDevice: (deviceId) => appleDeviceService.describe(deviceId),
         terminalBrowserGrants: grants,
         onPendingRequestWithdrawn: () => machineChangeFeed.publish(["code-navigation"]),
         gitMutationPort,
@@ -589,10 +568,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           retainProjectAccess: (windowId) => codeProjectAccess.retain(windowId),
         },
         resolveCheckoutRoot: async (windowId, thread, checkout) => {
-          // A remote root is named, never resolved here: the path is the
-          // target's, and only the turn's executor tools act on it.
-          if (checkout.kind === "remote-root")
-            return remoteCodeCheckoutRoot(sshTargetStore, thread);
+          // A remote root names a folder on another machine, never one here.
+          if (checkout.kind === "remote-root") return undefined;
           const root = await roots.resolve(windowId, thread, checkout, rootProbePath);
           if (root === undefined) return undefined;
           const workingDirectory = await resolveThreadWorkingDirectory(
@@ -640,16 +617,6 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             projectId: input.thread.projectId,
           }),
         nativeHarnessTools: (input) => nativeHarnessComposition.forCode(input),
-        remoteCodeTurn: (input) =>
-          bindRemoteCodeTurn(
-            {
-              store: sshTargetStore,
-              connections: sshTargetConnections,
-              composition: nativeHarnessComposition,
-              uuid: randomUUID,
-            },
-            input,
-          ),
         nativeHarness: nativeHarnessHooks,
         onProviderTurnRequested: (threadId) => {
           if (codeService instanceof CodeService) codeService.noteProviderTurnRequested(threadId);
@@ -806,39 +773,6 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               threadId: String(threadId),
               simulatorId: String(simulatorId),
             }),
-          // The person's paired devices, through the same device service and
-          // policy the workbench's device routes use. The agent's requests
-          // name the agent, so a lease or an effect it asks for counts only
-          // with the receipt a person at the Mac minted by answering it.
-          devices: {
-            request: async (windowId, request, signal) => {
-              const context = await resolveAppleDeviceAgentScope(windowId, request);
-              return context === undefined
-                ? undefined
-                : await appleDeviceService.request(request, context, signal);
-            },
-            check: async (windowId, request, signal) => {
-              const context = await resolveAppleDeviceAgentScope(windowId, request);
-              return context === undefined
-                ? undefined
-                : await appleDeviceService.check(request, context, signal);
-            },
-            readScreenshot: async (windowId, scope, reference) => {
-              const thread = await resolveAppleDeviceThread(windowId, scope);
-              if (thread === undefined) return undefined;
-              const read = await appleDeviceService.readScreenshot(reference, thread);
-              return read.kind === "found" ? read.bytes : undefined;
-            },
-            readConsole: async (windowId, scope, reference) => {
-              const thread = await resolveAppleDeviceThread(windowId, scope);
-              if (thread === undefined) return undefined;
-              const read = await appleDeviceService.readConsole(reference, thread);
-              return read.kind === "found" ? read.bytes : undefined;
-            },
-            prepareUpload: (windowId, input, signal) => prepareAppleUpload(windowId, input, signal),
-            prepareStoreVersion: (windowId, input, signal) =>
-              prepareAppleStoreVersion(windowId, input, signal),
-          },
         },
         androidToolchain: {
           resolveAuthority: (_windowId, thread) => ({
@@ -1340,7 +1274,6 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     };
     return {
       androidToolchainRoutes,
-      appleDeviceRoutes,
       appleToolchainRoutes,
       baseRouteCodeService,
       codeCompletedThreadSource,

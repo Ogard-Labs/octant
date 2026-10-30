@@ -346,7 +346,7 @@ function overlayCheckoutWorktree(
         : checkout.kind === "plain-folder"
           ? "Folder"
           : checkout.kind === "remote-root"
-            ? "On an SSH target"
+            ? "Remote folder"
             : "Current checkout",
     head: checkout.head,
     ...(checkout.kind === "managed-worktree" ? { receiptId: checkout.ownershipReceiptId } : {}),

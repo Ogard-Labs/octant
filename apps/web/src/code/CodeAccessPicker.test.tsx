@@ -1,7 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { remoteCodeThreadPostureRefusal } from "@octant/domain/ssh-target-recovery";
 import { CodeAccessPicker } from "./CodeAccessPicker";
 
 describe("CodeAccessPicker", () => {
@@ -197,33 +196,6 @@ describe("CodeAccessPicker", () => {
     // on the item, not only in a tooltip a touch screen never shows.
     expect(full).toHaveAccessibleDescription("Confirm in the desktop app");
     expect(full).toHaveTextContent("Confirm in the desktop app");
-  });
-
-  it("names the host's own reason on each raise a thread on an SSH target cannot take", async () => {
-    const user = userEvent.setup();
-    const onRaiseThread = vi.fn();
-    render(
-      <CodeAccessPicker
-        ceiling="approval-gated"
-        nativeConfirmationAvailable
-        onLowerThread={vi.fn()}
-        onRaiseThread={onRaiseThread}
-        onSelect={vi.fn()}
-        raiseRefusal={remoteCodeThreadPostureRefusal}
-        value="approval-gated"
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Next turn access" }));
-    for (const [name, posture] of [
-      ["Raise thread · Auto-accept edits", "auto-accept-edits"],
-      ["Raise thread · Full access", "full-access"],
-    ] as const) {
-      const row = await screen.findByRole("menuitemradio", { name });
-      expect(row).toHaveAttribute("aria-disabled", "true");
-      expect(row).toHaveAttribute("title", remoteCodeThreadPostureRefusal(posture));
-    }
-    expect(onRaiseThread).not.toHaveBeenCalled();
   });
 
   it("gives no reason line to options that are available", async () => {

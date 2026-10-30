@@ -4,7 +4,6 @@ import { mkdir, open, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   decodeAppleActionKind,
-  decodeAppleDeviceId,
   decodeAppleSimulatorId,
   decodeCodeCheckoutId,
   decodeCodeThreadId,
@@ -13,9 +12,8 @@ import {
   decodeToolActionId,
 } from "@octant/contracts";
 import { Schema } from "effect";
-import { CorrelationId, UtcTimestamp, type AppleDeviceId } from "@octant/contracts";
+import { CorrelationId, UtcTimestamp } from "@octant/contracts";
 import type { AppleRuntimeReceipt } from "./appleToolchainService";
-import { CORE_DEVICE_IDENTIFIER } from "./devicectl";
 
 const MAX_RECEIPTS = 64;
 const MAX_RECEIPT_BYTES = 1024 * 1024;
@@ -23,29 +21,18 @@ const MAX_RECEIPT_BYTES = 1024 * 1024;
 export const MAX_APPLE_ARTIFACT_BYTES = 16 * 1024 * 1024;
 const MAX_ARTIFACT_BYTES = MAX_APPLE_ARTIFACT_BYTES;
 const SAFE_REFERENCE = /^apple-[a-z0-9-]{1,500}$/;
-/** The most paired devices the host remembers an id for. */
-export const MAX_DEVICE_IDENTITIES = 256;
-const MAX_DEVICE_IDENTITY_BYTES = 64 * 1024;
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
-
-/** The host-minted id of one paired device and the CoreDevice identifier it maps to. */
-export interface AppleDeviceIdentity {
-  readonly deviceId: AppleDeviceId;
-  readonly coreDeviceIdentifier: string;
-}
 
 export class AppleRuntimeStore {
   readonly #root: string;
   readonly #artifactRoot: string;
   readonly #receiptPath: string;
-  readonly #deviceIdentityPath: string;
 
   constructor(root: string) {
     this.#root = root;
     this.#artifactRoot = join(root, "artifacts");
     this.#receiptPath = join(root, "active-actions.json");
-    this.#deviceIdentityPath = join(root, "device-identities.json");
   }
 
   get artifactRoot(): string {
@@ -85,37 +72,6 @@ export class AppleRuntimeStore {
     await rename(temporary, this.#receiptPath);
   }
 
-  /**
-   * Keeps each paired device's Octant id beside the CoreDevice identifier the
-   * host addresses it by, so the id a thread saw survives a restart. Nothing
-   * else about the device is written: its UDID, serial number, and ECID never
-   * reach this file.
-   */
-  async persistDeviceIdentities(identities: ReadonlyArray<AppleDeviceIdentity>): Promise<void> {
-    if (identities.length > MAX_DEVICE_IDENTITIES) throw new Error("Too many Apple devices.");
-    const validated = identities.map(validateDeviceIdentity);
-    await mkdir(this.#root, { recursive: true, mode: 0o700 });
-    const temporary = `${this.#deviceIdentityPath}.${randomUUID()}.tmp`;
-    await writeFile(temporary, `${JSON.stringify(validated)}\n`, {
-      encoding: "utf8",
-      mode: 0o600,
-    });
-    await rename(temporary, this.#deviceIdentityPath);
-  }
-
-  /** The stored identities, or none when the file is missing or not what this host wrote. */
-  async loadDeviceIdentities(): Promise<ReadonlyArray<AppleDeviceIdentity>> {
-    try {
-      const payload = await readStoredFile(this.#deviceIdentityPath, MAX_DEVICE_IDENTITY_BYTES);
-      if (payload === undefined) return [];
-      const parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(payload));
-      if (!Array.isArray(parsed) || parsed.length > MAX_DEVICE_IDENTITIES) return [];
-      return parsed.map(validateDeviceIdentity);
-    } catch {
-      return [];
-    }
-  }
-
   async loadReceipts(): Promise<ReadonlyArray<AppleRuntimeReceipt>> {
     try {
       const payload = await readStoredFile(this.#receiptPath, MAX_RECEIPT_BYTES);
@@ -127,24 +83,6 @@ export class AppleRuntimeStore {
       return [];
     }
   }
-}
-
-function validateDeviceIdentity(value: unknown): AppleDeviceIdentity {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error("Apple device identity is invalid.");
-  }
-  const input = value as Record<string, unknown>;
-  if (
-    Object.keys(input).length !== 2 ||
-    typeof input.coreDeviceIdentifier !== "string" ||
-    !CORE_DEVICE_IDENTIFIER.test(input.coreDeviceIdentifier)
-  ) {
-    throw new Error("Apple device identity is invalid.");
-  }
-  return {
-    deviceId: decodeAppleDeviceId(input.deviceId),
-    coreDeviceIdentifier: input.coreDeviceIdentifier,
-  };
 }
 
 function validateReceipt(value: unknown): AppleRuntimeReceipt {

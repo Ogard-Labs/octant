@@ -155,10 +155,6 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "Image-seam conformance harness that image driver tests run; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the image seam is retired.",
   ],
   [
-    "packages/provider-sdk/src/processPlacementConformance.ts",
-    "Remote placement conformance harness that driver tests run against a stand-in target; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the placement seam is retired.",
-  ],
-  [
     "packages/plugin-api/src/desktopProviderConformance.ts",
     "Desktop-provider seam conformance harness that desktop driver tests run; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the desktop-provider seam is retired.",
   ],
@@ -719,6 +715,10 @@ export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
     endpoint,
     "A delegating spoke signs and sends this over the private listener from apps/server (delegatingSpokeService.ts), which builds the path itself; no window or device calls it. Remove when the checker counts apps/server as a caller of its own listener's routes.",
   ]),
+  [
+    "/api/hub/peer/credentials",
+    "The host that holds an API key signs and sends it here over the private listener from apps/server (ownerCredentialCopy.ts), which builds the path itself, against a ticket an owner device made on the receiving host; no window or device calls it. Remove when the checker counts apps/server as a caller of its own listener's routes.",
+  ],
   ...[
     "/api/desktop/hub/delegations",
     "/api/desktop/hub/delegations/read",

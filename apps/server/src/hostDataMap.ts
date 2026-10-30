@@ -21,7 +21,6 @@ const REPLICA_DEVICE_KEY_CREDENTIAL_SERVICE = "app.octant.replica-device-keys.v1
 const REPLICA_STORE_CREDENTIAL_SERVICE = "app.octant.replica-store-credentials.v1";
 const MCP_SERVER_CREDENTIAL_SERVICE = "app.octant.mcp-server-credentials.v1";
 const DESKTOP_PROVIDER_CREDENTIAL_SERVICE = "app.octant.desktop-provider-credentials.v1";
-const APP_STORE_CONNECT_KEY_SERVICE = "app.octant.app-store-connect-keys.v1";
 const PUSH_PLATFORM_CREDENTIAL_SERVICE = "app.octant.push-platform-credentials.v1";
 
 const ARTIFACT_DIRECTORIES: ReadonlyArray<{ readonly name: string; readonly relative: string }> = [
@@ -50,10 +49,10 @@ const CACHE_DIRECTORIES: ReadonlyArray<{ readonly name: string; readonly relativ
   // The desktop app installs the computer-use driver here, and the host keeps
   // its runtime receipts under it, so a person inspecting the store sees it.
   { name: "Computer use driver", relative: "computer-use" },
-  // Each SSH target's pinned host key, in the owner-only known-hosts file the
-  // SSH client reads. The registration is in the journal; this is the copy
-  // the client needs, written from the journal before each connection.
-  { name: "SSH target host-key pins", relative: "ssh-targets" },
+  // A leftover of the removed SSH targets: the owner-only known-hosts files
+  // they pinned. Nothing reads or writes them now, and Octant leaves them in
+  // place; the person may delete the folder.
+  { name: "Leftover SSH target host-key pins (unused)", relative: "ssh-targets" },
 ];
 
 // Octant assigns each extra provider account a folder under the person's
@@ -150,7 +149,6 @@ export function desktopCredentialStore(): HostDataMapCredentialStoreInput {
       { service: REPLICA_STORE_CREDENTIAL_SERVICE },
       { service: MCP_SERVER_CREDENTIAL_SERVICE },
       { service: DESKTOP_PROVIDER_CREDENTIAL_SERVICE },
-      { service: APP_STORE_CONNECT_KEY_SERVICE },
       { service: PUSH_PLATFORM_CREDENTIAL_SERVICE },
     ],
   };
@@ -229,13 +227,7 @@ function composeOutbound(kind: HostDataMapHostKind): ReadonlyArray<HostDataMapOu
           leavesMachine: false,
           purpose: "This headless host does not check for desktop app updates.",
         };
-  const sshTargets: HostDataMapOutboundCategory = {
-    kind: "known",
-    category: "ssh-target-connections",
-    leavesMachine: true,
-    purpose: "Octant connects to the SSH targets you register, through your own SSH client.",
-  };
-  return [provider, updates, marketplace, sshTargets];
+  return [provider, updates, marketplace];
 }
 
 function namedLocations(

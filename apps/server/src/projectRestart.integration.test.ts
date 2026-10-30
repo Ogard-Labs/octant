@@ -19,6 +19,7 @@ import {
 } from "./persistence/persistenceService";
 import { openSqlite } from "./persistence/sqlitePort";
 import { ProjectService } from "./projectService";
+import { RETIRED_EVENT_NAMES } from "./persistence/retiredEvents";
 
 const now = "2026-07-14T16:00:00.000Z";
 const windowId = decodeWindowId("30000000-0000-4000-8000-000000000001");
@@ -336,6 +337,54 @@ describe("Project restart recovery", () => {
     ).toThrow();
   });
 
+  it("replays a journal holding every retired event name without quarantining a projection", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "octant.sqlite3");
+    const seeded = openSqlite(databasePath);
+    applyMigrations(seeded, MIGRATIONS, () => now);
+    const insert = seeded.prepare(`
+      INSERT INTO event_journal (
+        event_id, aggregate_type, aggregate_id, aggregate_version,
+        event_name, event_version, correlation_id, causation_id,
+        actor_kind, actor_id, occurred_at, payload_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    RETIRED_EVENT_NAMES.forEach((eventName, index) => {
+      const suffix = String(index).padStart(12, "0");
+      insert.run(
+        `30000000-0000-4000-8000-${suffix}`,
+        eventName.split(".")[0] ?? "retired",
+        `31000000-0000-4000-8000-${suffix}`,
+        1,
+        eventName,
+        1,
+        `32000000-0000-4000-8000-${suffix}`,
+        null,
+        "system",
+        "30000000-0000-4000-8000-000000000092",
+        now,
+        JSON.stringify({ retiredShape: "kept-for-replay" }),
+      );
+    });
+    seeded.close();
+
+    const result = await Effect.runPromise(
+      Effect.either(
+        Effect.scoped(
+          Effect.provide(
+            Persistence,
+            makePersistenceLive({ dataDirectory: directory, clock: () => now }),
+          ),
+        ),
+      ),
+    );
+
+    expect(Either.isRight(result)).toBe(true);
+    const inspected = openSqlite(databasePath);
+    expect(inspected.prepare("SELECT projection_name FROM event_quarantine").all()).toEqual([]);
+    inspected.close();
+  });
+
   it("quarantines an unknown event instead of starting with partial Project state", async () => {
     const directory = temporaryDirectory();
     const databasePath = join(directory, "octant.sqlite3");
@@ -414,7 +463,6 @@ describe("Project restart recovery", () => {
       { projection_name: "replica-membership", reason: "unknown-event-name" },
       { projection_name: "shell", reason: "unknown-event-name" },
       { projection_name: "spend-ceilings", reason: "unknown-event-name" },
-      { projection_name: "ssh-targets", reason: "unknown-event-name" },
       { projection_name: "theme", reason: "unknown-event-name" },
       { projection_name: "thread-checkpoint", reason: "unknown-event-name" },
       { projection_name: "thread-external-content-taint", reason: "unknown-event-name" },

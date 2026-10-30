@@ -42,13 +42,6 @@ export function useExtensionDraftSelections(options: {
    * selected for a send the host would refuse.
    */
   readonly providerCarriesTools?: boolean;
-  /**
-   * Why no tool selection (Browser, Computer, a connector or plugin) may ride
-   * a send here, when none may: a thread on an SSH target runs only the
-   * harness's tools there, and the host refuses the others. Each such
-   * reference is shown blocked with this reason; skills stay selectable.
-   */
-  readonly toolsRefusedReason?: string;
   /** Receipts restored with a persisted new-task draft after Settings unmounts. */
   readonly initialReceipts?: ReadonlyArray<ComposerExtensionSelection>;
 }) {
@@ -80,25 +73,17 @@ export function useExtensionDraftSelections(options: {
   // Browser or Computer staged before the thread moved to a runtime without
   // Octant's tools would still ride the next send, which the host refuses, so
   // it is shown blocked and carries no selection while that runtime is chosen.
-  const toolsRefusedReason = options.toolsRefusedReason;
   const receipts = useMemo(
     () =>
-      toolsRefusedReason !== undefined
-        ? stagedReceipts.map((receipt) =>
-            receipt.selection?.kind === "plugin"
-              ? blockedReceipt(receipt.reference, toolsRefusedReason)
+      providerCarriesTools
+        ? stagedReceipts
+        : stagedReceipts.map((receipt) =>
+            receipt.selection !== undefined &&
+            (isComputerUseSelection(receipt.selection) || isBrowserUseSelection(receipt.selection))
+              ? blockedReceipt(receipt.reference, NO_OCTANT_TOOLS)
               : receipt,
-          )
-        : providerCarriesTools
-          ? stagedReceipts
-          : stagedReceipts.map((receipt) =>
-              receipt.selection !== undefined &&
-              (isComputerUseSelection(receipt.selection) ||
-                isBrowserUseSelection(receipt.selection))
-                ? blockedReceipt(receipt.reference, NO_OCTANT_TOOLS)
-                : receipt,
-            ),
-    [providerCarriesTools, stagedReceipts, toolsRefusedReason],
+          ),
+    [providerCarriesTools, stagedReceipts],
   );
 
   // A refused send may restore after the user has opened another Project.

@@ -20,12 +20,7 @@ import { createProvisionHostPorts } from "../hub/provisionHostPorts";
 import { ProvisionService } from "../hub/provisionService";
 import { SpokeProvisionService } from "../hub/spokeProvisionService";
 import { createProviderCredentialRouteHandler } from "../providers/providerCredentialRoutes";
-import {
-  makeAppStoreConnectKeyBrokerClient,
-  makePushPlatformCredentialBrokerClient,
-} from "../providers/credentialBrokerClient";
-import { createAppStoreConnectKeyRouteHandler } from "../apple/appStoreConnectKeyRoutes";
-import { APPLE_DISTRIBUTION_ADMITTED } from "../apple/appleDeviceService";
+import { makePushPlatformCredentialBrokerClient } from "../providers/credentialBrokerClient";
 import { ProviderServiceError } from "../providers/providerService";
 import { providerKeyJournal, reconcileProviderKeyChanges } from "../providers/providerKeyJournal";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -53,6 +48,7 @@ import { createHostControlRouteHandler } from "../hostControlRoutes";
 import { desktopCredentialStore } from "../hostDataMap";
 import { ThreadRetentionService } from "../threadRetentionService";
 import { createLiveHostExportService } from "../hostExportService";
+import { createAgentRemoteDelegation } from "../hub/agentRemoteDelegation";
 import { createDelegationAdministrationRouteHandler } from "../hub/delegationAdministrationRoutes";
 import { createDelegationJournal } from "../hub/delegationJournal";
 import { createDelegationStateStore } from "../hub/delegationStateStore";
@@ -63,6 +59,10 @@ import { createWorkDelegationHost } from "../hub/workDelegationHost";
 import { createHubAdministrationRouteHandler } from "../hub/hubAdministrationRoutes";
 import { createHubLinkRouteHandler } from "../hub/hubLinkRoutes";
 import { createHubOwnerRouteHandler } from "../hub/hubOwnerRoutes";
+import { OwnerCredentialCopyService } from "../hub/ownerCredentialCopy";
+import { createProviderCredentialCopyBroker } from "../hub/ownerCredentialBroker";
+import { createReadingPostureHost } from "../hub/ownerPostureHost";
+import { createPeerCredentialRouteHandler } from "../hub/peerCredentialRoutes";
 import { OwnerUnlockService } from "../hub/ownerUnlock";
 import { createHubMembershipJournal } from "../hub/hubMembershipJournal";
 import { FailoverService } from "../hub/failoverService";
@@ -94,12 +94,11 @@ import {
 import { createPrivateListenerAdministrationRouteHandler } from "../remote/privateListenerAdministrationRoutes";
 import { createPrivateListenerSetting } from "../remote/privateListenerSetting";
 import { createSelfMadeListenerCertificateStore } from "../remote/selfMadeListenerCertificate";
-import { createSshTargetAdministrationRouteHandler } from "../sshTarget/sshTargetAdministrationRoutes";
-import { targetHoldsRunningTurn } from "../sshTarget/sshRemoteCodeThreads";
-import { SshRemoteProjectService } from "../sshTarget/sshRemoteProjectService";
-import { SshRemoteTerminalService } from "../sshTarget/sshRemoteTerminalService";
-import type { SshTargetsWiring } from "./sshTargets";
-import { boundHostRuntimeDiagnostics, type HostRuntimeDiagnostics } from "@octant/host-runtime";
+import {
+  boundHostRuntimeDiagnostics,
+  createReleaseFeedVerifier,
+  type HostRuntimeDiagnostics,
+} from "@octant/host-runtime";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
@@ -133,7 +132,10 @@ export type RemoteDependencies = Pick<
   "options" | "persistence" | "serve" | "startedAt" | "version"
 > &
   Pick<AuthorityWiring, "browserCaptureStore" | "windowAuthorityStore"> &
-  Pick<AgentRunsWiring, "agentRunAdmission" | "externalContentIngestionStore"> &
+  Pick<
+    AgentRunsWiring,
+    "agentRunAdmission" | "externalContentIngestionStore" | "remoteDelegationHolder"
+  > &
   Pick<HarnessStateWiring, "nativeHarnessSessions"> &
   Pick<IntegrationsWiring, "agentMessageService" | "toolEgressRules"> &
   Pick<ComputerUseWiring, "webAssets"> &
@@ -167,6 +169,7 @@ export type RemoteDependencies = Pick<
   Pick<CanvasWiring, "canvasRoutes" | "canvasPublicShareService"> &
   Pick<
     AutomationWiring,
+    | "automationCommandService"
     | "automationScheduler"
     | "hubPushHandoffSlot"
     | "pushGatewaySetting"
@@ -175,7 +178,6 @@ export type RemoteDependencies = Pick<
   Pick<RoutesWiring, "authenticatedProductDispatch"> &
   Pick<FoundationsWiring, "workThreadProjection"> &
   Pick<FoundationsWiring, "providerRuntimeRegistry"> &
-  Pick<SshTargetsWiring, "sshTargetConnections" | "sshTargetStore"> &
   Pick<CodeRuntimeWiring, "codeOperationRuntime">;
 
 const decodeAgentRunParentThreadId = Schema.decodeUnknownSync(AgentRunParentThreadId);
@@ -195,10 +197,12 @@ export function wireRemote(deps: RemoteDependencies) {
     agentMessageService,
     agentRunAdmission,
     authenticatedProductDispatch,
+    automationCommandService,
     automationScheduler,
     browserCaptureStore,
     hubPushHandoffSlot,
     nativeHarnessSessions,
+    remoteDelegationHolder,
     canvasPublicShareService,
     canvasRoutes,
     chatAttachmentStore,
@@ -376,6 +380,7 @@ export function wireRemote(deps: RemoteDependencies) {
           (async (request, facts) =>
             (await hubLinkRoutes(request)) ??
             (await peerDelegationRoutes(request)) ??
+            (await peerCredentialRoutes(request)) ??
             (await directPushRoutes(request, facts)) ??
             hubOwnerRoutes(request)),
         remoteServerGrants: services.remoteServerGrants ?? remoteServerGrantGatewayPort,
@@ -566,8 +571,13 @@ export function wireRemote(deps: RemoteDependencies) {
   });
   // Provisioning is off until the person turns it on in the hub's window, and a spoke
   // holds an offer only if its hub grant ticks Provision. Each kind applies through the
-  // service the person would use themselves; the host has no routine builder, so a
-  // routine offer is refused as a kind this host cannot apply.
+  // service the person would use themselves; a routine is built here from the Project
+  // the person names, through the Automation command service, and left paused.
+  const agentProfileService = new AgentProfileService({
+    persistence,
+    uuid: randomUUID,
+    clock: () => new Date().toISOString(),
+  });
   const provisionService = new ProvisionService({
     state: hubStateStore,
     identity: resolveHubIdentity,
@@ -586,14 +596,43 @@ export function wireRemote(deps: RemoteDependencies) {
         setReleaseRing: (ring) => shellService.setReleaseRing(ring),
       },
       extensions: { execute: (command) => extensionApiService.execute(command) },
-      profiles: new AgentProfileService({
-        persistence,
-        uuid: randomUUID,
-        clock: () => new Date().toISOString(),
-      }),
+      profiles: agentProfileService,
       providers: providerService,
       userScopeRef: OCTANT_LOCAL_ACTOR_ID,
       uuid: randomUUID,
+      verifyUpdateSignature: createReleaseFeedVerifier().verify,
+      routine: {
+        hostId: String(LOCAL_HOST_ID),
+        actorId: OCTANT_LOCAL_ACTOR_ID,
+        authorScopeId: ROUTINE_HOST_SCOPE_ID,
+        workProject: (projectId) => {
+          const project = persistence
+            .readProjects()
+            .find((candidate) => String(candidate.id) === projectId);
+          if (project?.type !== "work" || project.lifecycle !== "active") return undefined;
+          const bindingRevisionId = project.bindingHistory.at(-1)?.revisionId;
+          if (bindingRevisionId === undefined) return undefined;
+          return {
+            projectId: String(project.id),
+            name: project.name,
+            projectVersion: project.version,
+            bindingRevisionId: String(bindingRevisionId),
+          };
+        },
+        profiles: () => agentProfileService.list(),
+        workModel: () => {
+          const settings = workThreadProjection.settings();
+          return settings?.defaultProviderInstanceId === undefined ||
+            settings.defaultModelId === undefined
+            ? undefined
+            : {
+                instanceId: String(settings.defaultProviderInstanceId),
+                modelId: String(settings.defaultModelId),
+              };
+        },
+        automations: automationCommandService,
+        clock: () => new Date().toISOString(),
+      },
     }),
     record: recordHubMembership,
     now: Date.now,
@@ -722,6 +761,15 @@ export function wireRemote(deps: RemoteDependencies) {
     record: recordDelegation,
     now: Date.now,
   });
+  // An agent's helper request that names a member starts the same delegation.
+  remoteDelegationHolder.port = createAgentRemoteDelegation({
+    delegation: delegatingSpoke,
+    readProject: (projectId) => persistence.readProject(decodeProjectId(projectId)),
+    isWorkEnabled: () =>
+      enabledModes(persistence.readShellSettings()?.settings ?? defaultShellSettings()).includes(
+        "work",
+      ),
+  });
   // A result arrives without anyone asking for it: the host reads each open
   // delegation now and then. With none sent, a pass reads nothing.
   setInterval(() => void delegatingSpoke.trackOpen().catch(() => undefined), 5_000).unref();
@@ -743,10 +791,50 @@ export function wireRemote(deps: RemoteDependencies) {
         windowId,
       }),
   });
+  // A host with no credential broker has no sign-in to copy from or to.
+  const ownerCredentialCopy = new OwnerCredentialCopyService({
+    broker:
+      credentialBroker === undefined || credentialResolver === undefined
+        ? {
+            read: async () => ({ status: "refused", kind: "unavailable" }),
+            store: async () => ({ status: "refused", kind: "unavailable" }),
+          }
+        : createProviderCredentialCopyBroker({
+            readProviderInstances: () => persistence.readProviderInstances(),
+            credentials: {
+              has: (id) => credentialResolver.has(id),
+              set: (id, credential) => credentialResolver.set(id, credential),
+              delete: (id) => credentialResolver.delete(id),
+              readStored: (id) => credentialBroker.resolve(id),
+            },
+          }),
+    identity: resolveHubIdentity,
+    target: (memberId) => spokeLinkService.memberTarget(memberId),
+    transport: hubTransport,
+    authenticate: (request) => spokeLinkService.authenticatePeer(request),
+    ownerIsCurrent: (ownerMemberId) => {
+      const context = spokeLinkService.ownerContext();
+      return (
+        context !== undefined &&
+        context.owners.some((owner) => String(owner.memberId) === ownerMemberId) &&
+        !context.inactiveDeviceMemberIds.includes(ownerMemberId)
+      );
+    },
+    record: recordHubMembership,
+    now: Date.now,
+  });
+  const peerCredentialRoutes = createPeerCredentialRouteHandler({ copy: ownerCredentialCopy });
   const hubOwnerRoutes = createHubOwnerRouteHandler({
     hub: hubService,
     spoke: spokeLinkService,
     unlock: new OwnerUnlockService({ now: Date.now, hostMemberId: () => hubService.hubMemberId() }),
+    postures: createReadingPostureHost({
+      readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+      readProject: (projectId) => persistence.readProject(projectId),
+    }),
+    credentials: ownerCredentialCopy,
+    provision: spokeProvisionService,
+    record: recordHubMembership,
   });
   const localDeviceAdministrationRoutes = createLocalDeviceAdministrationRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
@@ -797,19 +885,6 @@ export function wireRemote(deps: RemoteDependencies) {
       }
     },
   });
-  const appStoreConnectKeyRoutes = createAppStoreConnectKeyRouteHandler({
-    desktopBridgeSecret: options.desktopBridgeSecret,
-    windowAuthorityStore,
-    macos: process.platform === "darwin",
-    distributionEnabled: APPLE_DISTRIBUTION_ADMITTED,
-    keys:
-      options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
-        ? undefined
-        : makeAppStoreConnectKeyBrokerClient({
-            url: options.credentialBrokerUrl,
-            token: options.credentialBrokerToken,
-          }),
-  });
   const privateListenerSetting = createPrivateListenerSetting(providerDataDirectory);
   const privateListenerAdministrationRoutes = createPrivateListenerAdministrationRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
@@ -817,40 +892,6 @@ export function wireRemote(deps: RemoteDependencies) {
     hostIdentityFingerprint: () => readHostIdentity(persistence.connection)?.key_fingerprint,
     control: () => privateListenerController,
     setting: privateListenerSetting,
-    maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
-  });
-  // SSH targets are administered from this machine alone, like the listener:
-  // the routes sit on the loopback chain beside it, never in product dispatch.
-  const { sshTargetStore, sshTargetConnections } = deps;
-  const sshRemoteProjects = new SshRemoteProjectService({
-    store: sshTargetStore,
-    connections: sshTargetConnections,
-    uuid: randomUUID,
-    clock: () => new Date().toISOString(),
-  });
-  const sshRemoteTerminals = new SshRemoteTerminalService({
-    projects: sshRemoteProjects,
-    connections: sshTargetConnections,
-    store: sshTargetStore,
-  });
-  // A restart ended every session, and every remote shell with it.
-  sshRemoteTerminals.reconcile();
-  const sshTargetAdministrationRoutes = createSshTargetAdministrationRouteHandler({
-    desktopBridgeSecret: options.desktopBridgeSecret,
-    windowAuthorityStore,
-    connections: sshTargetConnections,
-    projects: sshRemoteProjects,
-    terminals: sshRemoteTerminals,
-    threadRunsOnTarget: (targetId) =>
-      targetHoldsRunningTurn(
-        {
-          projects: () => sshTargetStore.listProjects(),
-          threads: () => persistence.readCodeThreads(),
-          turnInProgress: (threadId) =>
-            deps.codeOperationRuntime?.turnInProgress?.(threadId) === true,
-        },
-        String(targetId),
-      ),
     maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
   });
   // One diagnostics composer is shared by the owner control socket (through
@@ -1036,16 +1077,7 @@ export function wireRemote(deps: RemoteDependencies) {
           lifecycle: project.lifecycle,
           ...(project.type === "chat" ? {} : { canonicalRoot: project.binding.canonicalRoot }),
         })),
-        // A remote-bound Code Project is exported as any Project is: its
-        // identity, never its folder.
-        ...sshTargetStore.listProjects().map((project) => ({
-          projectId: project.id,
-          name: project.name,
-          type: "code" as const,
-          lifecycle: "active" as const,
-        })),
       ],
-      listSshTargets: () => sshTargetStore.exportTargets(),
       listProjectIds: () => persistence.readProjects().map((project) => String(project.id)),
       readProjectMemory: (projectId) => persistence.readProjectMemory(decodeProjectId(projectId)),
       listCanvases: () =>
@@ -1070,7 +1102,6 @@ export function wireRemote(deps: RemoteDependencies) {
     }),
   });
   return {
-    appStoreConnectKeyRoutes,
     composeHostDiagnostics,
     delegationAdministrationRoutes,
     externalContentRoutes,
@@ -1082,8 +1113,6 @@ export function wireRemote(deps: RemoteDependencies) {
     privateListenerSetting,
     providerCredentialRoutes,
     remoteHost,
-    sshRemoteTerminals,
-    sshTargetAdministrationRoutes,
   };
 }
 

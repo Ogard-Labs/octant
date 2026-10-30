@@ -629,14 +629,10 @@ export const ContextCompactionRefusalReason = Schema.Literal(
   "spend-ceiling-reached",
   "mode-disabled",
   "remote-client",
-  // The thread's root is on an SSH target. Its session is opened there only
-  // through a turn's placement, and a compaction has none, so it is refused
-  // rather than started on this host against the target's path.
-  "runs-on-ssh-target",
-  // A turn on the thread would be refused for the same reason, so a summary
-  // nobody could send next is not paid for: the thread or its Project is
-  // archived or gone, the saved model options are no longer offered, or the
-  // harness session is paused.
+  // A turn on the thread would be refused, so a summary nobody could send
+  // next is not paid for: the thread or its Project is archived or gone, the
+  // saved model options are no longer offered, or the harness session is
+  // paused.
   "project-unavailable",
   "model-options-unsupported",
   "thread-paused",

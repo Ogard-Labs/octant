@@ -214,7 +214,6 @@ describe("database CLI runtime composition", () => {
         { name: "extensions", lastSequence: 1, lag: 0 },
         { name: "extension-tool-grants", lastSequence: 1, lag: 0 },
         { name: "extension-project-pins", lastSequence: 1, lag: 0 },
-        { name: "ssh-targets", lastSequence: 1, lag: 0 },
         { name: "remote-access", lastSequence: 1, lag: 0 },
         { name: "thread-checkpoint", lastSequence: 1, lag: 0 },
         { name: "product-feedback", lastSequence: 1, lag: 0 },

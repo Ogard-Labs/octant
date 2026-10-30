@@ -41,6 +41,9 @@ import { createDelegationStateStore, type DelegationStatePort } from "./delegati
 import { FailoverService } from "./failoverService";
 import { createHubLinkRouteHandler } from "./hubLinkRoutes";
 import { createHubOwnerRouteHandler } from "./hubOwnerRoutes";
+import { TestCredentialBroker, TestPostureHost } from "./hubOwner.test-support";
+import { OwnerCredentialCopyService } from "./ownerCredentialCopy";
+import { createPeerCredentialRouteHandler } from "./peerCredentialRoutes";
 import { OwnerUnlockService } from "./ownerUnlock";
 import { createHubStateStore, type HubStatePort } from "./hubStateStore";
 import { HubService, type HubHostIdentity, type HubPairingPort } from "./hubService";
@@ -188,6 +191,10 @@ export interface HubTestHost {
   readonly delegationRecords: HubDelegationRecordedPayload[];
   /** The delegating side of this host: what its agents' remote child runs go through. */
   readonly delegating: DelegatingSpokeService;
+  /** This host's credential broker: the sign-ins it holds and the provider rows that take one. */
+  readonly credentials: TestCredentialBroker;
+  /** This host's Code postures, as the owner posture routes read and change them. */
+  readonly postures: TestPostureHost;
   readonly listener: PrivateListenerHostStatus;
   /** Every request this host's listener answered, as `METHOD path`. */
   readonly requests: string[];
@@ -590,12 +597,36 @@ export async function startHubTestHost(input: {
     spokeProvision,
     ...(input.wakeClock === undefined ? {} : { now: input.wakeClock }),
   });
+  const credentials = new TestCredentialBroker();
+  const postures = new TestPostureHost();
+  const credentialCopy = new OwnerCredentialCopyService({
+    broker: credentials,
+    identity: () => identity,
+    target: (memberId) => spoke.memberTarget(memberId),
+    transport,
+    authenticate: (request) => spoke.authenticatePeer(request),
+    ownerIsCurrent: (ownerMemberId) => {
+      const context = spoke.ownerContext();
+      return (
+        context !== undefined &&
+        context.owners.some((owner) => String(owner.memberId) === ownerMemberId) &&
+        !context.inactiveDeviceMemberIds.includes(ownerMemberId)
+      );
+    },
+    record: (change) => records.push(change),
+    now: Date.now,
+  });
   const hubOwnerRoutes = createHubOwnerRouteHandler({
     hub,
     spoke,
     unlock: new OwnerUnlockService({ now: ownerNow, hostMemberId: () => hub.hubMemberId() }),
+    postures,
+    credentials: credentialCopy,
+    provision: spokeProvision,
+    record: (change) => records.push(change),
     now: ownerNow,
   });
+  const peerCredentialRoutes = createPeerCredentialRouteHandler({ copy: credentialCopy });
   const delegationState = createDelegationStateStore(directory);
   const delegationRecords: HubDelegationRecordedPayload[] = [];
   const peerDelegationRoutes = createPeerDelegationRouteHandler({
@@ -620,6 +651,7 @@ export async function startHubTestHost(input: {
   const hubLink = async (request: Request) =>
     (await hubLinkRoutes(request)) ??
     (await peerDelegationRoutes(request)) ??
+    (await peerCredentialRoutes(request)) ??
     hubOwnerRoutes(request);
 
   let gatewayFetch:
@@ -722,6 +754,8 @@ export async function startHubTestHost(input: {
     delegationState,
     delegationRecords,
     delegating,
+    credentials,
+    postures,
     listener,
     requests,
     hubLink,

@@ -1,7 +1,7 @@
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { GithubCloneClient } from "@octant/client-runtime/github-clone-client";
 import type { ProjectId } from "@octant/contracts/projects";
-import { ArrowLeft, Check, FolderGit2, FolderOpen, FolderPlus, Network } from "lucide-react";
+import { ArrowLeft, Check, FolderGit2, FolderOpen, FolderPlus } from "lucide-react";
 import {
   lazy,
   Suspense,
@@ -39,21 +39,6 @@ export type ComposerProjectEntry =
     }
   | { readonly kind: "unfiled" }
   | { readonly kind: "add-folder" }
-  /**
-   * A Code Project whose folder is on an SSH target, listed with where it is.
-   * A window that cannot start a thread there (one with no SSH target
-   * administration) lists it with the reason it cannot be chosen.
-   */
-  | {
-      readonly kind: "remote-project";
-      readonly projectId: ProjectId;
-      readonly displayName: string;
-      /** `destination:folder`, as the target names it. */
-      readonly location: string;
-      readonly disabledReason?: string;
-    }
-  /** Binds a folder on an SSH target, in Settings › SSH targets. */
-  | { readonly kind: "add-remote" }
   | {
       readonly kind: "default-folder";
       readonly rootPath: string;
@@ -86,8 +71,6 @@ export interface ComposerProjectSelectorProps {
   readonly selection?: ComposerProjectSelection;
   readonly onSelect: (entry: ComposerProjectEntry) => void;
   readonly onAddFolder: () => void;
-  /** Opens Settings › SSH targets; required for an `add-remote` entry to act. */
-  readonly onAddRemote?: () => void;
   readonly github?: ComposerProjectGithubSource;
   readonly disabled?: boolean;
 }
@@ -96,7 +79,6 @@ type MenuEntry = ComposerProjectEntry | { readonly kind: "add-github" };
 
 export const NEW_PROJECT_FROM_FOLDER_LABEL = "New Project from folder…";
 export const NEW_PROJECT_FROM_GITHUB_LABEL = "New Project from GitHub repository…";
-export const NEW_PROJECT_ON_SSH_TARGET_LABEL = "New Project on an SSH target…";
 export const START_IN_DEFAULT_FOLDER_LABEL = "No project";
 export const UNFILED_THREAD_LABEL = "No Project";
 
@@ -135,30 +117,17 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
           entry.rootPath.toLowerCase().includes(trimmed)),
     );
   }, [props.entries, query]);
-  const remoteEntries = useMemo(() => {
-    const trimmed = query.trim().toLowerCase();
-    return props.entries.filter(
-      (entry): entry is Extract<ComposerProjectEntry, { kind: "remote-project" }> =>
-        entry.kind === "remote-project" &&
-        (trimmed === "" ||
-          entry.displayName.toLowerCase().includes(trimmed) ||
-          entry.location.toLowerCase().includes(trimmed)),
-    );
-  }, [props.entries, query]);
   const actionEntries = useMemo((): ReadonlyArray<MenuEntry> => {
     const actions: MenuEntry[] = props.entries.filter(
       (entry) =>
         entry.kind === "unfiled" || entry.kind === "default-folder" || entry.kind === "add-folder",
     );
     if (github !== undefined) actions.push({ kind: "add-github" });
-    if (props.entries.some((entry) => entry.kind === "add-remote")) {
-      actions.push({ kind: "add-remote" });
-    }
     return actions;
   }, [github, props.entries]);
   const flatEntries = useMemo(
-    (): ReadonlyArray<MenuEntry> => [...savedEntries, ...remoteEntries, ...actionEntries],
-    [actionEntries, remoteEntries, savedEntries],
+    (): ReadonlyArray<MenuEntry> => [...savedEntries, ...actionEntries],
+    [actionEntries, savedEntries],
   );
 
   const selectionLabel =
@@ -182,9 +151,7 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
         return;
       }
       if (entry.kind === "default-folder" && entry.disabled === true) return;
-      if (entry.kind === "remote-project" && entry.disabledReason !== undefined) return;
       if (entry.kind === "add-folder") props.onAddFolder();
-      else if (entry.kind === "add-remote") props.onAddRemote?.();
       else props.onSelect(entry);
       close();
     },
@@ -385,70 +352,22 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
                     </OctantButton>
                   );
                 })}
-                {remoteEntries.length === 0 ? null : (
-                  <p aria-hidden="true" className="composer-folder-selector__group">
-                    On SSH targets
-                  </p>
-                )}
-                {remoteEntries.map((entry, offset) => {
-                  const index = savedEntries.length + offset;
-                  const isSelected = String(entry.projectId) === String(props.selection?.projectId);
-                  return (
-                    <OctantButton
-                      {...(entry.disabledReason === undefined ? {} : { "aria-disabled": true })}
-                      aria-selected={isSelected}
-                      className={optionClass(index, isSelected)}
-                      id={`${listboxId}-option-${index}`}
-                      key={String(entry.projectId)}
-                      onClick={() => activate(entry)}
-                      role="option"
-                      title={entry.disabledReason ?? entry.location}
-                      type="button"
-                      variant="ghost"
-                    >
-                      <Network aria-hidden="true" size={14} strokeWidth={1.8} />
-                      <span className="composer-folder-selector__option-copy">
-                        <span className="composer-folder-selector__option-name">
-                          {entry.displayName}
-                        </span>
-                        <span className="composer-folder-selector__option-path">
-                          {entry.location}
-                        </span>
-                        {entry.disabledReason === undefined ? null : (
-                          <span className="composer-folder-selector__option-reason">
-                            {entry.disabledReason}
-                          </span>
-                        )}
-                      </span>
-                      {isSelected ? (
-                        <Check
-                          aria-hidden="true"
-                          className="composer-folder-selector__check"
-                          size={14}
-                          strokeWidth={2}
-                        />
-                      ) : null}
-                    </OctantButton>
-                  );
-                })}
                 {actionEntries.length === 0 ? null : (
                   <p aria-hidden="true" className="composer-folder-selector__group">
                     New Project
                   </p>
                 )}
                 {actionEntries.map((entry, offset) => {
-                  const index = savedEntries.length + remoteEntries.length + offset;
+                  const index = savedEntries.length + offset;
                   const isSelected = entry.kind === "unfiled" && props.selection === undefined;
                   const label =
                     entry.kind === "add-github"
                       ? NEW_PROJECT_FROM_GITHUB_LABEL
-                      : entry.kind === "add-remote"
-                        ? NEW_PROJECT_ON_SSH_TARGET_LABEL
-                        : entry.kind === "unfiled"
-                          ? UNFILED_THREAD_LABEL
-                          : entry.kind === "default-folder"
-                            ? START_IN_DEFAULT_FOLDER_LABEL
-                            : NEW_PROJECT_FROM_FOLDER_LABEL;
+                      : entry.kind === "unfiled"
+                        ? UNFILED_THREAD_LABEL
+                        : entry.kind === "default-folder"
+                          ? START_IN_DEFAULT_FOLDER_LABEL
+                          : NEW_PROJECT_FROM_FOLDER_LABEL;
                   const refused = entry.kind === "default-folder" && entry.disabled === true;
                   return (
                     <OctantButton
@@ -467,8 +386,6 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
                     >
                       {entry.kind === "add-github" ? (
                         <FolderGit2 aria-hidden="true" size={14} strokeWidth={1.8} />
-                      ) : entry.kind === "add-remote" ? (
-                        <Network aria-hidden="true" size={14} strokeWidth={1.8} />
                       ) : entry.kind === "default-folder" || entry.kind === "unfiled" ? (
                         <FolderOpen aria-hidden="true" size={14} strokeWidth={1.8} />
                       ) : (

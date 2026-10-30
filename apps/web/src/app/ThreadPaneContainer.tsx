@@ -395,7 +395,6 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
   } = actions;
   const {
     agentRunClient,
-    appleDeviceClient,
     appleToolchainClient,
     browserAutomationClient,
     canvasClient,
@@ -515,7 +514,6 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
               }}
               onNewThreadInProject={(projectId) => void openDraftInProject(projectId)}
               appleToolchainClient={appleToolchainClient}
-              appleDeviceClient={appleDeviceClient}
               agentRunClient={agentRunClient}
               nativeHarnessClient={nativeHarnessClient}
               onOpenSubagent={openSubagent}
@@ -854,12 +852,6 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 void openSettings({
                   section: "code",
                   setting: "code-require-git",
-                })
-              }
-              onOpenSshTargetSettings={() =>
-                void openSettings({
-                  section: "ssh-targets",
-                  setting: "ssh-remote-project-bind",
                 })
               }
               onOpenProviderSettings={() => void openSettings({ section: "providers" })}

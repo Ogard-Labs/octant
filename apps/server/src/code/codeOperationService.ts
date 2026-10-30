@@ -7,11 +7,6 @@ import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { randomUUID } from "node:crypto";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import {
-  REMOTE_CODE_THREAD_CONNECTORS_UNAVAILABLE,
-  REMOTE_CODE_THREAD_OPERATION_UNAVAILABLE,
-  remoteCodeThreadPostureRefusal,
-} from "@octant/domain/ssh-target-recovery";
-import {
   decodeCodeOperationCommand,
   decodeCodeOperationResult,
   decodeCodeRepositoryTestStatus,
@@ -86,13 +81,12 @@ import { ReviewFindingServiceError } from "./reviewFindingService";
 
 type Awaitable<T> = T | Promise<T>;
 
-/** The operations a thread whose checkout is a remote root may run: its turns. */
-const REMOTE_THREAD_OPERATIONS: ReadonlySet<CodeOperationCommand["kind"]> = new Set([
-  "start-provider-turn",
-  "answer-provider-input",
-  "answer-provider-approval",
-  "cancel-provider-turn",
-]);
+/**
+ * Why a thread whose checkout is a folder on another machine runs nothing: a
+ * build that could run threads there left it, and this host cannot.
+ */
+const REMOTE_FOLDER_UNAVAILABLE =
+  "This thread's checkout is a folder on a remote machine, which Octant no longer supports.";
 
 export interface CodeOperationAuthorityPort {
   readonly readThread: (threadId: CodeOperationCommand["threadId"]) => CodeThread | undefined;
@@ -754,12 +748,6 @@ export interface CodeOperationTurnPort {
     readonly checkoutRoot: string;
     readonly approvalId: string;
     readonly decision: "approved" | "denied";
-    /**
-     * Who answered: a person at a window on this Mac, or anyone else (a
-     * paired device, or a caller no window vouched for). Some requests only
-     * the first may settle.
-     */
-    readonly answeredBy?: "local-window" | "remote-device";
   }) => Promise<CodeOperationTurnResult>;
   readonly cancel: (input: {
     readonly thread: CodeThread;
@@ -1077,57 +1065,11 @@ export class CodeOperationService {
     }
     const scope = await this.#scope(windowId, command);
     if ("failure" in scope) return this.#failed(command.operationId, scope.failure, scope.message);
-    // A remote-bound thread's checkout lives on its SSH target. Its turns
-    // reach it through the executor; every other operation here (terminals,
-    // tests, Git, files, pull requests) would act on a folder of this host,
-    // so each is refused before any root is resolved.
-    if (scope.checkout.kind === "remote-root" && !REMOTE_THREAD_OPERATIONS.has(command.kind)) {
-      return this.#failed(
-        command.operationId,
-        "unavailable",
-        REMOTE_CODE_THREAD_OPERATION_UNAVAILABLE,
-      );
-    }
-    // A remote turn takes no checkpoint, so an edit made on the target without
-    // review has no way back. Creating or raising a thread there to Auto-accept
-    // edits or Full access is refused, yet a thread created before that rule
-    // can still hold one, and a window's session grant decides the posture a
-    // turn runs in. So a turn, or an answer that continues one, is refused in
-    // either posture before anything binds to the target or is journaled; a
-    // turn that asks for a narrower posture runs in it. A retried start runs
-    // in the posture its durable start recorded, whatever the retry asks for,
-    // so that is the posture it is judged by.
+    // Every operation here (turns, terminals, tests, Git, files, pull
+    // requests) would act on a folder of this host, so each is refused
+    // before any root is resolved.
     if (scope.checkout.kind === "remote-root") {
-      const remotePostureRefusal = remoteCodeThreadPostureRefusalForTurn(
-        scope.thread,
-        command,
-        command.kind === "start-provider-turn"
-          ? recordedTurnAccessPosture(
-              this.#replay(command.threadId, command.operationId, 0, 256).frames,
-            )
-          : undefined,
-      );
-      if (remotePostureRefusal !== undefined) {
-        return this.#failed(command.operationId, "unauthorized", remotePostureRefusal, "refused");
-      }
-    }
-    // A connector or plugin runs its tools on this host, and a remote turn's
-    // tools are only the harness's on the target. Selecting one is refused
-    // before any extension is resolved or started, as Browser and Computer
-    // are, rather than started here and dropped from the turn.
-    if (
-      scope.checkout.kind === "remote-root" &&
-      command.kind === "start-provider-turn" &&
-      command.extensionSelections?.some(
-        (selection) => selection.kind === "plugin" && !isBrowserUseSelection(selection),
-      ) === true
-    ) {
-      return this.#failed(
-        command.operationId,
-        "unavailable",
-        REMOTE_CODE_THREAD_CONNECTORS_UNAVAILABLE,
-        "refused",
-      );
+      return this.#failed(command.operationId, "unavailable", REMOTE_FOLDER_UNAVAILABLE);
     }
     if (command.kind === "start-provider-turn" && command.delivery !== undefined) {
       const delivery = this.#agentResultDelivery(command);
@@ -1369,12 +1311,11 @@ export class CodeOperationService {
                 recordedStart === undefined &&
                 turnRefusal === undefined
               ) {
-                // A remote root is no folder of this host: Git here never
-                // captures a path that only names it on the target.
-                const checkpoint =
-                  scope.checkout.kind === "remote-root"
-                    ? undefined
-                    : await this.#checkpoint(turnThread, scope.checkout.id, root.checkoutRoot);
+                const checkpoint = await this.#checkpoint(
+                  turnThread,
+                  scope.checkout.id,
+                  root.checkoutRoot,
+                );
                 // Check again after the asynchronous checkpoint so a changed generation or
                 // an intervening parent admission cannot acquire a stale delivery mark.
                 const afterCheckpoint = this.#agentResultDelivery(command);
@@ -1986,8 +1927,7 @@ export class CodeOperationService {
    * Code operation, `start-provider-turn` included, passes first (thread and
    * checkout identity, the window's Code Project, an available checkout, an
    * active thread). A decision is offered only where its answer could land:
-   * the answer starts a turn in the thread's own posture, which a thread on
-   * an SSH target refuses in Auto-accept edits or Full access.
+   * the answer starts a turn in the thread's own posture.
    */
   async admitsTurn(
     windowId: WindowId,
@@ -1998,10 +1938,7 @@ export class CodeOperationService {
       checkoutId: thread.checkoutId,
     });
     if ("failure" in scope) return false;
-    return (
-      scope.checkout.kind !== "remote-root" ||
-      remoteCodeThreadPostureRefusal(scope.thread.executionPolicy) === undefined
-    );
+    return scope.checkout.kind !== "remote-root";
   }
 
   async listPendingForWindow(windowId: WindowId): Promise<ReadonlyArray<PendingRequest>> {
@@ -2907,8 +2844,6 @@ export class CodeOperationService {
             checkoutRoot: root.checkoutRoot,
             approvalId: command.approvalId,
             decision: command.decision,
-            // Only the local window's own route speaks as `user`.
-            answeredBy: initiator === "user" ? "local-window" : "remote-device",
           }),
         );
       case "cancel-provider-turn": {
@@ -3637,13 +3572,7 @@ export class CodeOperationService {
       );
     const selections =
       command.extensionSelections?.filter((selection) => !isBrowserUseSelection(selection)) ?? [];
-    // A remote thread's turn has only the harness's tools on the target, so
-    // no pinned extension is started for it.
-    const remoteThread =
-      this.#options.authority.readCheckout(thread.checkoutId)?.kind === "remote-root";
-    const pinnedExtensionIds = remoteThread
-      ? []
-      : (this.#options.pinnedExtensionIds?.(String(thread.projectId)) ?? []);
+    const pinnedExtensionIds = this.#options.pinnedExtensionIds?.(String(thread.projectId)) ?? [];
     let skillContext: ReadonlyArray<ProviderContextBlock> = [];
     let extensionTools: AppManagedToolSet | undefined;
     if (selections.length > 0 || pinnedExtensionIds.length > 0) {
@@ -4190,29 +4119,6 @@ function turnAccessPosture(
     thread: thread.executionPolicy,
     ...(requested === undefined ? {} : { requested }),
   });
-}
-
-/**
- * Why a turn on a thread on an SSH target, or an answer that continues one,
- * is refused in the posture it would run in, or undefined. `thread` is the
- * thread as the asking window holds it: with its session grant, and clamped
- * to the running turn's posture. `recorded` is the posture a retried start's
- * durable start holds, which it runs in instead of the one it asks for.
- */
-function remoteCodeThreadPostureRefusalForTurn(
-  thread: CodeThread,
-  command: CodeOperationCommand,
-  recorded: CodeThread["executionPolicy"] | undefined,
-): string | undefined {
-  switch (command.kind) {
-    case "start-provider-turn":
-      return remoteCodeThreadPostureRefusal(turnAccessPosture(thread, command, recorded));
-    case "answer-provider-input":
-    case "answer-provider-approval":
-      return remoteCodeThreadPostureRefusal(thread.executionPolicy);
-    default:
-      return undefined;
-  }
 }
 
 function threadForTurn(

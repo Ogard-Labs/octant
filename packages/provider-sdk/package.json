@@ -24,9 +24,7 @@
     "./cloud-iam": "./src/cloudIam.ts",
     "./cloud-iam-conformance": "./src/cloudIamConformance.ts",
     "./image-generation": "./src/imageGeneration.ts",
-    "./image-generation-conformance": "./src/imageGenerationConformance.ts",
-    "./process-placement": "./src/processPlacement.ts",
-    "./process-placement-conformance": "./src/processPlacementConformance.ts"
+    "./image-generation-conformance": "./src/imageGenerationConformance.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

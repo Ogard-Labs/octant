@@ -225,4 +225,103 @@ describe("validation evidence restart replay", () => {
     }
     first.close();
   });
+
+  it.each([
+    "apple-device-build",
+    "apple-device-screenshot",
+    "apple-distribution-upload",
+    "apple-distribution-submit-for-review",
+  ])("replays a journal from before physical devices were removed, with a %s step", (stepId) => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-validation-retired-apple-"));
+    directories.push(directory);
+    const path = join(directory, "octant.sqlite3");
+
+    const first = openConnection(path);
+    const firstRegistries = makeRegistries();
+    const firstStore = new ValidationEventStore({
+      journal: new Journal({
+        connection: first,
+        registry: firstRegistries.events,
+        projections: firstRegistries.projections,
+        clock: () => now,
+      }),
+      uuid: makeUuid(),
+      actor,
+    });
+    const plan = Schema.decodeUnknownSync(ValidationPlanCreated)({
+      plan: {
+        planId: ids.plan,
+        authority,
+        steps: [
+          {
+            stepId,
+            description: "Run bounded Apple device build.",
+            sources: [{ kind: "apple-build", reference: `apple-action-${ids.plan}` }],
+            expectedOutcome: "passed",
+          },
+        ],
+        createdAt: now,
+      },
+    }).plan;
+    const evidence = Schema.decodeUnknownSync(ValidationEvidenceRecorded)({
+      evidence: {
+        evidenceId: ids.evidence,
+        planId: ids.plan,
+        stepId,
+        source: { kind: "apple-build", reference: `apple-action-${ids.plan}` },
+        outcome: "passed",
+        authority,
+        observedAt: now,
+        detail: "note: finished",
+        redacted: false,
+      },
+    }).evidence;
+    const report = Schema.decodeUnknownSync(ValidationReportCompleted)({
+      report: {
+        planId: ids.plan,
+        authority,
+        evidence: [evidence],
+        overallOutcome: "passed",
+        completedAt: now,
+        stepResults: [{ stepId, outcome: "passed", evidenceCount: 1 }],
+      },
+    }).report;
+    firstStore.appendPlan({ plan, expectedVersion: 0 });
+    firstStore.appendEvidence({ evidence, expectedVersion: 1 });
+    firstStore.appendReport({ report, expectedVersion: 2 });
+    first.close();
+
+    const reopened = openConnection(path);
+    const restartedRegistries = makeRegistries();
+    const restartedJournal = new Journal({
+      connection: reopened,
+      registry: restartedRegistries.events,
+      projections: restartedRegistries.projections,
+      clock: () => now,
+    });
+    for (const projection of restartedRegistries.projections.all()) {
+      catchUpProjection({
+        connection: reopened,
+        journal: restartedJournal,
+        projection,
+        clock: () => now,
+      });
+    }
+
+    expect(reopened.prepare("SELECT count(*) AS count FROM event_quarantine").get()).toEqual({
+      count: 0,
+    });
+    const snapshot = createValidationEvidenceLoader({
+      connection: reopened,
+      clock: () => now,
+    })({ authority });
+    expect(snapshot.kind).toBe("snapshot");
+    if (snapshot.kind === "snapshot") {
+      expect(snapshot.snapshot.overallOutcome).toBe("passed");
+      expect(snapshot.snapshot.report?.stepResults).toEqual([
+        { stepId, outcome: "passed", evidenceCount: 1 },
+      ]);
+    }
+    reopened.close();
+  });
 });

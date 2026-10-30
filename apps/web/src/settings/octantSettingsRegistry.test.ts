@@ -31,7 +31,6 @@ describe("octantSettingsRegistry", () => {
       "sync",
       "remote-access",
       "host",
-      "ssh-targets",
       "usage",
     ]);
   });
@@ -240,25 +239,6 @@ describe("octantSettingsRegistry", () => {
     expect(results[0]?.sectionId).toBe("voice");
   });
 
-  it("finds the App Store Connect key on Device tools only in a desktop window", () => {
-    const desktop = searchSettings(
-      listAvailableSections(octantSettingsRegistry, capabilities),
-      capabilities,
-      "app store connect",
-    );
-    expect(desktop[0]).toMatchObject({
-      sectionId: "device-tools",
-      settingId: "app-store-connect-key-state",
-    });
-    const browserCapabilities = { ...capabilities, nativeBoundsAvailable: false };
-    const browser = searchSettings(
-      listAvailableSections(octantSettingsRegistry, browserCapabilities),
-      browserCapabilities,
-      "app store connect",
-    );
-    expect(browser.filter((result) => result.kind === "setting")).toEqual([]);
-  });
-
   it("lands a link to the model endpoints on the add-endpoint row of Octant Harness", () => {
     const resolved = resolveDeepLink(octantSettingsRegistry, capabilities, {
       section: "harness",
@@ -350,9 +330,6 @@ const COMPUTED_SETTING_ROWS: Readonly<Record<string, string>> = {
   "managed-tool-*": "managed-tools-automatic-updates",
   "paired-computer-*": "paired-computers-code",
   "hub-auto-apply-*": "hub-auto-apply",
-  "ssh-target-*": "ssh-targets-list",
-  "ssh-remote-project-*": "ssh-remote-projects",
-  "ssh-remote-worktree-*": "ssh-remote-projects",
   "sync-approver-*": "sync-members",
   "sync-join-request-*": "sync-members",
   "sync-member-*": "sync-members",

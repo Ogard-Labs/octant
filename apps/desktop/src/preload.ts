@@ -1,8 +1,11 @@
 import type { NativeMenuRequest, NativeMenuOutcome } from "@octant/contracts/shell";
 import { decodeMenuBarOpenThread, type MenuBarOpenThread } from "./menuBar";
 import { isHubAdministrationOperation } from "./hubAdministrationControls";
-import { isSshTargetOperation } from "./sshTargetControls";
-import { isAppStoreConnectKeyOperation } from "./appStoreConnectKeyControls";
+import type {
+  OwnerUnlockChallenge,
+  OwnerUnlockKeyOutcome,
+  OwnerUnlockRefusal,
+} from "./ownerUnlockKeychain";
 import { contextBridge, ipcRenderer } from "electron";
 import type { CodeApprovalId, CodeOperationApprovalRequest } from "@octant/contracts";
 import type { CodeOperationApprovalPalette } from "./codeOperationApprovalView";
@@ -101,6 +104,39 @@ export interface RemoteHostIdentityRotationResult {
 }
 type MaterialListener = (event: unknown, material: unknown) => void;
 type DeepLinkListener = (event: unknown, target: unknown) => void;
+
+const OWNER_UNLOCK_REFUSALS: ReadonlySet<string> = new Set([
+  "unavailable",
+  "no-key",
+  "cancelled",
+  "not-an-owner-unlock",
+  "failed",
+]);
+
+/** Passes on only the public key, a signature, or a named refusal; nothing else crosses. */
+function decodeOwnerUnlockOutcome(value: unknown): OwnerUnlockKeyOutcome<{
+  readonly publicKey?: string;
+  readonly signature?: string;
+}> {
+  if (typeof value === "object" && value !== null) {
+    const record = value as Readonly<Record<string, unknown>>;
+    if (record.status === "done") {
+      return {
+        status: "done",
+        ...(typeof record.publicKey === "string" ? { publicKey: record.publicKey } : {}),
+        ...(typeof record.signature === "string" ? { signature: record.signature } : {}),
+      };
+    }
+    if (
+      record.status === "refused" &&
+      typeof record.kind === "string" &&
+      OWNER_UNLOCK_REFUSALS.has(record.kind)
+    ) {
+      return { status: "refused", kind: record.kind as OwnerUnlockRefusal };
+    }
+  }
+  return { status: "refused", kind: "failed" };
+}
 
 export type RemoteServerPageBridgeOutcome =
   | { readonly kind: "opened"; readonly notice?: string }
@@ -900,33 +936,6 @@ export function createHostBridge(
       ipc.on(IPC_CHANNELS.remoteServerPageSign, receive);
       return () => ipc.removeListener(IPC_CHANNELS.remoteServerPageSign, receive);
     },
-    appStoreConnectKeyRequest: async (operation: string, body?: unknown) => {
-      if (!isAppStoreConnectKeyOperation(operation)) {
-        throw new TypeError("Invalid App Store Connect key request.");
-      }
-      const answer = (await ipc.invoke(
-        IPC_CHANNELS.appStoreConnectKeyRequest,
-        operation,
-        body,
-      )) as { readonly status?: unknown; readonly body?: unknown } | null;
-      if (typeof answer?.status !== "number") {
-        throw new Error("Octant could not reach the host.");
-      }
-      return { status: answer.status, body: answer.body };
-    },
-    sshTargetRequest: async (operation: string, body?: unknown) => {
-      if (!isSshTargetOperation(operation)) {
-        throw new TypeError("Invalid SSH target request.");
-      }
-      const answer = (await ipc.invoke(IPC_CHANNELS.sshTargetRequest, operation, body)) as {
-        readonly status?: unknown;
-        readonly body?: unknown;
-      } | null;
-      if (typeof answer?.status !== "number") {
-        throw new Error("Octant SSH target controls are unavailable.");
-      }
-      return { status: answer.status, body: answer.body };
-    },
     hubAdministrationRequest: async (operation: string, body?: unknown) => {
       if (!isHubAdministrationOperation(operation)) {
         throw new TypeError("Invalid hub request.");
@@ -940,6 +949,26 @@ export function createHostBridge(
       }
       return { status: answer.status, body: answer.body };
     },
+    // A Mac owner device's unlock key. The bridge can make the key (its public
+    // half comes back), sign one owner unlock challenge, and forget the key.
+    // It cannot return the private key or sign any other text.
+    ownerUnlockMakeKey: async () =>
+      decodeOwnerUnlockOutcome(await ipc.invoke(IPC_CHANNELS.ownerUnlockMake)),
+    ownerUnlockSign: async (challenge: OwnerUnlockChallenge) =>
+      decodeOwnerUnlockOutcome(
+        await ipc.invoke(IPC_CHANNELS.ownerUnlockSign, {
+          challengeId: challenge.challengeId,
+          nonce: challenge.nonce,
+          hostMemberId: challenge.hostMemberId,
+          ownerMemberId: challenge.ownerMemberId,
+          method: challenge.method,
+          path: challenge.path,
+          bodyHash: challenge.bodyHash,
+          expiresAt: challenge.expiresAt,
+        }),
+      ),
+    ownerUnlockForgetKey: async () =>
+      decodeOwnerUnlockOutcome(await ipc.invoke(IPC_CHANNELS.ownerUnlockForget)),
     getPrivateListenerStatus: async () =>
       decodePrivateListenerStatus(await ipc.invoke(IPC_CHANNELS.privateListenerStatus)),
     enablePrivateListener: async (request: PrivateListenerEnableRequest) => {

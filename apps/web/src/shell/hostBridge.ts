@@ -1,5 +1,6 @@
 import type { CodeOperationApprovalRequest } from "@octant/contracts/code-operations";
 import type { AppReleaseRing, AppUpdateState } from "@octant/contracts/app-updates";
+import type { DesktopOwnerUnlockPort } from "@octant/client-runtime";
 import type { NativeMenuRequest, NativeMenuOutcome } from "@octant/contracts/shell";
 
 export type { AppUpdateState };
@@ -49,7 +50,6 @@ import type {
   RemotePairingTicketSourceClass,
   ResolvedSidebarMaterial,
   SettlePairedComputerOutcome,
-  SshTargetOperation,
 } from "@octant/contracts/desktop-bridge";
 
 export type {
@@ -92,7 +92,6 @@ export type {
   RemotePairingTicketSourceClass,
   ResolvedSidebarMaterial,
   SettlePairedComputerOutcome,
-  SshTargetOperation,
 } from "@octant/contracts/desktop-bridge";
 
 /**
@@ -226,21 +225,6 @@ export function remoteAccessAdministrationOf(
   };
 }
 
-export interface SshTargetAdministrationBridge {
-  readonly sshTargetRequest: (
-    operation: SshTargetOperation,
-    body?: unknown,
-  ) => Promise<{ readonly status: number; readonly body: unknown }>;
-}
-
-/** The SSH target administration when this window is a desktop window, else nothing. */
-export function sshTargetAdministrationOf(
-  bridge: OctantHostBridge | undefined,
-): SshTargetAdministrationBridge | undefined {
-  const request = bridge?.sshTargetRequest;
-  return request === undefined ? undefined : { sshTargetRequest: request };
-}
-
 /** What a window asks of this host's hub role and hub membership. */
 export type HubAdministrationOperation =
   | "status"
@@ -295,26 +279,35 @@ export function hubAdministrationOf(
   return request === undefined ? undefined : { hubAdministrationRequest: request };
 }
 
-export type AppStoreConnectKeyOperation = "status" | "set" | "remove";
-
 /**
- * App Store Connect key entry in a desktop window. The desktop forwards each
- * request to the host's local key route; the key is never read back.
+ * A Mac owner device's unlock key (Touch ID or the account password). The
+ * desktop makes the key and returns only its public half, signs one owner
+ * unlock challenge, and forgets the key. Absent outside the desktop app.
  */
-export interface AppStoreConnectKeyBridge {
-  readonly appStoreConnectKeyRequest: (
-    operation: AppStoreConnectKeyOperation,
-    body?: unknown,
-  ) => Promise<{ readonly status: number; readonly body: unknown }>;
+export type OwnerUnlockBridge = DesktopOwnerUnlockPort;
+
+/** The Mac's unlock key when this window is a desktop window, else nothing. */
+export function ownerUnlockOf(bridge: OctantHostBridge | undefined): OwnerUnlockBridge | undefined {
+  if (
+    bridge?.ownerUnlockMakeKey === undefined ||
+    bridge.ownerUnlockSign === undefined ||
+    bridge.ownerUnlockForgetKey === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    ownerUnlockMakeKey: bridge.ownerUnlockMakeKey,
+    ownerUnlockSign: bridge.ownerUnlockSign,
+    ownerUnlockForgetKey: bridge.ownerUnlockForgetKey,
+  };
 }
 
 export interface OctantHostBridge
   extends
     Partial<RemoteAccessAdministrationBridge>,
     Partial<PairedComputersBridge>,
-    Partial<SshTargetAdministrationBridge>,
     Partial<HubAdministrationBridge>,
-    Partial<AppStoreConnectKeyBridge> {
+    Partial<OwnerUnlockBridge> {
   /**
    * Shows a server another paired computer granted this device, served by
    * the desktop's loopback forwarder, in Octant's browser or the default one.

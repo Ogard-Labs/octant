@@ -26,7 +26,7 @@ describe("CodeWorkspace", () => {
     expect(screen.getByText("Loading exact checkout status and diff evidence.")).toBeVisible();
   });
 
-  it("says a remote thread's Git and terminal tabs are not available here, and asks the host nothing", () => {
+  it("says a thread on a remote folder's Git and terminal tabs are not available here, and asks the host nothing", () => {
     const client = codeClient();
     const base = controller("approval-gated") as {
       readonly activeView: { readonly checkout: object };
@@ -53,7 +53,7 @@ describe("CodeWorkspace", () => {
       expect(screen.getByRole("heading", { name: `${title} is not available here` })).toBeVisible();
       expect(
         screen.getByText(
-          "This thread's checkout is on an SSH target, where this operation is not available.",
+          "This thread's checkout is a folder on a remote machine, which Octant no longer supports.",
         ),
       ).toBeVisible();
       unmount();
@@ -710,102 +710,6 @@ describe("CodeWorkspace", () => {
       2,
       expect.objectContaining({ kind: "key-press", key: "home" }),
     );
-  });
-  it("lets a person give a paired iPhone to the thread from the Apple workbench, through the desktop confirmation", async () => {
-    const deviceId = "90000000-0000-4000-8000-000000000016";
-    const appleToolchainClient = {
-      discover: vi.fn(async () => ({
-        workspace: {
-          projectPath: "Fixture.xcodeproj",
-          projectKind: "xcode-project",
-          schemes: ["Fixture"],
-          configurations: ["Debug"],
-          targets: ["Fixture"],
-          sourceRevision: "a".repeat(40),
-        },
-        toolchain: { available: true, xcodeVersion: "16.4", sdks: [] },
-        simulators: [],
-      })),
-      snapshot: vi.fn(async () => ({
-        sequence: 1,
-        active: [],
-        recentEvidence: [],
-        simulators: [],
-      })),
-      execute: vi.fn(),
-      cancel: vi.fn(),
-      watchScreen: vi.fn(() => new Promise<never>(() => undefined)),
-    };
-    const deviceRequests: Array<{ readonly kind: string; readonly approval: unknown }> = [];
-    const appleDeviceClient = {
-      request: vi.fn(async (request: { readonly kind: string; readonly approval: unknown }) => {
-        deviceRequests.push(request);
-        return request.kind === "use-device"
-          ? { kind: "apple-device-leased", deviceId, grantedAt: "2026-10-27T12:00:01.000Z" }
-          : {
-              kind: "apple-device-discovery",
-              discovery: {
-                devices: [
-                  {
-                    deviceId,
-                    name: "Henrik's iPhone",
-                    model: "iPhone 16 Pro",
-                    platform: "ios",
-                    osVersion: "26.1",
-                    connection: "wired",
-                    state: "connected",
-                  },
-                ],
-                tooling: ["list-devices", "screenshot"],
-                leases: [],
-                discoveredAt: "2026-10-27T12:00:00.000Z",
-              },
-            };
-      }),
-      readScreenshot: vi.fn(),
-    };
-    const appleDeviceLease = vi.fn(async () => ids.approval as string | undefined);
-    const workbench = (pane?: "device") => (
-      <CodeWorkspace
-        appleDeviceClient={appleDeviceClient as never}
-        appleToolchainClient={appleToolchainClient as never}
-        approvals={{ appleDeviceLease }}
-        client={codeClient()}
-        controller={controller("full-access")}
-        createUuid={uuidFactory()}
-        tab={
-          {
-            id: TAB_ID,
-            kind: "apple-workbench",
-            mode: "code",
-            threadId: ids.thread,
-            title: "Apple workbench",
-            ...(pane === undefined ? {} : { pane }),
-            projectPath: "Fixture.xcodeproj",
-          } as never
-        }
-      />
-    );
-    const view = render(workbench());
-    // Full access does not give the thread a phone: the person still confirms it.
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Let this thread use Henrik's iPhone…" }),
-    );
-    await waitFor(() => expect(appleDeviceLease).toHaveBeenCalledTimes(1));
-    expect(appleDeviceLease).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "use-device", deviceId, threadId: ids.thread }),
-    );
-    await waitFor(() =>
-      expect(deviceRequests.find((request) => request.kind === "use-device")?.approval).toEqual({
-        kind: "approved",
-        approvalId: ids.approval,
-      }),
-    );
-    view.unmount();
-    // The dock's Simulator pane is a live view; a physical device has none.
-    render(workbench("device"));
-    await waitFor(() => expect(appleToolchainClient.discover).toHaveBeenCalledTimes(2));
-    expect(screen.queryByRole("heading", { name: "Physical devices" })).toBeNull();
   });
   it("keeps reading the host's snapshot while a Simulator view opened directly is up", async () => {
     const simulatorId = "90000000-0000-4000-8000-000000000006";

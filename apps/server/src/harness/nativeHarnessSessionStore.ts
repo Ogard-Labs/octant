@@ -61,12 +61,12 @@ export interface NativeHarnessSessionStoreOptions {
   readonly actor: typeof EventActor.Type;
   readonly clock: () => string;
   /**
-   * Whether a Code thread's turns run on an SSH target. A restart ends the
-   * target's session, and restart reconciliation marks the thread's turn
+   * Whether a Code thread's checkout is a folder on another machine, from a
+   * build that could run threads there. Restart reconciliation marks its turn
    * interrupted, so nothing is left to answer its parked approvals or
    * questions: they are settled at start-up rather than left for a resume.
    */
-  readonly runsOnSshTarget?: (threadId: string) => boolean;
+  readonly runsInRemoteFolder?: (threadId: string) => boolean;
 }
 
 interface SessionRecord {
@@ -93,7 +93,7 @@ export class NativeHarnessSessionStore {
   readonly #uuid: () => string;
   readonly #actor: typeof EventActor.Type;
   readonly #clock: () => string;
-  readonly #runsOnSshTarget: ((threadId: string) => boolean) | undefined;
+  readonly #runsInRemoteFolder: ((threadId: string) => boolean) | undefined;
   readonly #records = new Map<string, SessionRecord>();
   /** Calls of the turn running now, per thread; journaled with the turn when it ends. */
   readonly #activeTools = new Map<string, NativeHarnessToolCall[]>();
@@ -120,7 +120,7 @@ export class NativeHarnessSessionStore {
     this.#uuid = options.uuid;
     this.#actor = decodeActor(options.actor);
     this.#clock = options.clock;
-    this.#runsOnSshTarget = options.runsOnSshTarget;
+    this.#runsInRemoteFolder = options.runsInRemoteFolder;
     this.#hydrate();
     this.#requireRecoveryAfterRestart();
   }
@@ -657,18 +657,20 @@ export class NativeHarnessSessionStore {
     for (const [threadId, record] of this.#records) {
       // Child sessions cannot keep a pending transport request across a host
       // restart. A late answer must never be delivered to their next session.
-      // Nor can a lead on an SSH target: its turn died with the target's
-      // session and reads interrupted, so a card left pending could only be
+      // Nor can a lead in a remote folder: its turn died with the
+      // restart and reads interrupted, so a card left pending could only be
       // answered against a turn that no longer exists.
-      const endedWithTarget =
-        record.session.mode === "code" && this.#runsOnSshTarget?.(threadId) === true;
+      const endedWithRemoteFolder =
+        record.session.mode === "code" && this.#runsInRemoteFolder?.(threadId) === true;
       for (const approval of record.approvals.filter(
-        (entry) => (endedWithTarget || entry.source !== undefined) && entry.status === "pending",
+        (entry) =>
+          (endedWithRemoteFolder || entry.source !== undefined) && entry.status === "pending",
       )) {
         this.settleApproval(threadId, approval.id, { status: "expired" });
       }
       for (const question of record.questions.filter(
-        (entry) => (endedWithTarget || entry.source !== undefined) && entry.status === "pending",
+        (entry) =>
+          (endedWithRemoteFolder || entry.source !== undefined) && entry.status === "pending",
       )) {
         this.settleQuestion(threadId, question.id, { status: "expired" });
       }

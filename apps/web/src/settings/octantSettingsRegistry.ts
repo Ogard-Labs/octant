@@ -882,7 +882,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Device tools",
       scope: "host",
       keywords:
-        "device tools simulator emulator serve-sim serve-avd ios android stream updates upgrade bundled app store connect distribution",
+        "device tools simulator emulator serve-sim serve-avd ios android stream updates upgrade bundled",
       settings: [
         {
           id: settingId("managed-tools-automatic-updates"),
@@ -895,51 +895,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Update check",
           scope: "host",
           keywords: "check updates device tools",
-        },
-        // The App Store Connect key is entered only from a desktop window, so
-        // search offers these rows only where the section can appear.
-        {
-          id: settingId("app-store-connect-key-state"),
-          label: "App Store Connect API key",
-          scope: "host",
-          keywords:
-            "app store connect api key apple distribution upload testflight remove replace keychain",
-          nativeRequired: "nativeBoundsAvailable",
-        },
-        {
-          id: settingId("app-store-connect-issuer"),
-          label: "App Store Connect issuer ID",
-          scope: "host",
-          keywords: "app store connect issuer id api key apple distribution",
-          nativeRequired: "nativeBoundsAvailable",
-        },
-        {
-          id: settingId("app-store-connect-key-id"),
-          label: "App Store Connect key ID",
-          scope: "host",
-          keywords: "app store connect key id api key apple distribution",
-          nativeRequired: "nativeBoundsAvailable",
-        },
-        {
-          id: settingId("app-store-connect-private-key"),
-          label: "App Store Connect private key",
-          scope: "host",
-          keywords: "app store connect private key p8 authkey api key apple distribution",
-          nativeRequired: "nativeBoundsAvailable",
-        },
-        {
-          id: settingId("app-store-connect-key-source"),
-          label: "App Store Connect private key from",
-          scope: "host",
-          keywords: "app store connect private key source keychain 1password op reference",
-          nativeRequired: "nativeBoundsAvailable",
-        },
-        {
-          id: settingId("app-store-connect-1password-reference"),
-          label: "App Store Connect 1Password reference",
-          scope: "host",
-          keywords: "app store connect 1password op reference secret vault item field private key",
-          nativeRequired: "nativeBoundsAvailable",
         },
       ],
     },
@@ -1285,40 +1240,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Host process",
           scope: "host",
           keywords: "host process stop restart",
-        },
-      ],
-    },
-    {
-      id: "ssh-targets",
-      label: "SSH targets",
-      scope: "host",
-      // Shown only in a desktop window: a paired browser cannot administer targets.
-      keywords:
-        "ssh target remote machine server devbox host key fingerprint pin executor attest confinement bubblewrap connect remote folder project worktree terminal shell",
-      settings: [
-        {
-          id: settingId("ssh-target-add"),
-          label: "Add an SSH target",
-          scope: "host",
-          keywords: "add register ssh target destination host key fingerprint pin executor",
-        },
-        {
-          id: settingId("ssh-targets-list"),
-          label: "SSH targets",
-          scope: "host",
-          keywords: "connect reconnect re-pin repin remove attestation admitted refused recovery",
-        },
-        {
-          id: settingId("ssh-remote-project-bind"),
-          label: "Bind a remote folder",
-          scope: "host",
-          keywords: "bind remote folder project code root on target",
-        },
-        {
-          id: settingId("ssh-remote-projects"),
-          label: "Remote Projects",
-          scope: "host",
-          keywords: "remote project terminal shell worktree branch open remove",
         },
       ],
     },

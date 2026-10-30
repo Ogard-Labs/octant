@@ -23,9 +23,6 @@ import {
   decodeProviderSessionId,
   type CodeCheckoutIdentity,
   type AppleActionRequest,
-  type AppleDeviceId,
-  type AppleDeviceRecord,
-  type AppleDeviceRequest,
   type AndroidEmulatorRequest,
   type CodeOperationCommand,
   type CodeOperationFailure,
@@ -68,7 +65,6 @@ import type {
   ProviderDriver,
   ProviderSessionResume,
 } from "@octant/provider-sdk/driver";
-import { acquireProviderConnection } from "@octant/provider-sdk/process-placement";
 import type { Journal } from "../persistence/journal";
 import { GhPullRequestPort, createGhCommandPort, type GhDeliveryTarget } from "./ghPullRequestPort";
 import { GitMutationPort } from "./gitMutationPort";
@@ -194,7 +190,6 @@ import {
 } from "./codeAppManagedTools";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { heldTurnContext } from "../providers/heldTurnContext";
-import type { RemoteCodeTurnBinding, RemoteCodeTurnInput } from "../sshTarget/sshRemoteCodeThreads";
 import {
   PROVIDER_CONTEXT_RESTATED,
   type ProviderTurnContextDelta,
@@ -300,9 +295,6 @@ export interface CodeOperationRuntimeOptions {
    * The paired device a lease confirmation names, as the host last saw it.
    * Absent on a host with no device layer, where no lease is ever confirmed.
    */
-  readonly describeAppleDevice?: (
-    deviceId: AppleDeviceId,
-  ) => Pick<AppleDeviceRecord, "name" | "model" | "osVersion" | "connection"> | undefined;
   readonly windowAccess: {
     readonly canAccessProject: CodeOperationAuthorityPort["canAccessProject"];
     /**
@@ -524,13 +516,6 @@ export interface CodeOperationRuntimeOptions {
     /** The turn's resolved credential values, which a journal read redacts. */
     readonly secrets: ReadonlyArray<string>;
   }) => AppManagedToolSet | undefined;
-  /**
-   * A turn of a thread whose checkout is a remote root: the native harness's
-   * tools on its SSH target, or a placed ACP agent's client tools and its
-   * placement there, bound to the target's session now, or why the thread
-   * cannot run there. Absent means this host runs no such turn.
-   */
-  readonly remoteCodeTurn?: (input: RemoteCodeTurnInput) => RemoteCodeTurnBinding;
   readonly spendCeiling?: {
     readonly admit: SpendCeilingService["admit"];
     readonly settle: SpendCeilingService["settle"];
@@ -719,18 +704,6 @@ export interface CodeOperationRuntime {
   validateAppleApproval(windowId: WindowId, request: AppleActionRequest): Promise<boolean>;
   validateAndroidApproval(windowId: WindowId, request: AndroidEmulatorRequest): Promise<boolean>;
   /** Whether a person at this window confirmed exactly this device lease. */
-  validateAppleDeviceLease?(windowId: WindowId, request: AppleDeviceRequest): Promise<boolean>;
-  validateAppleDistributionUpload?(
-    windowId: WindowId,
-    request: AppleDeviceRequest,
-  ): Promise<boolean>;
-  /** Whether a person at this window confirmed exactly this submission or release. */
-  validateAppleDistributionVersion?(
-    windowId: WindowId,
-    request: AppleDeviceRequest,
-  ): Promise<boolean>;
-  /** Whether this window holds the one-use approval of exactly this device effect. */
-  validateAppleDeviceAction?(windowId: WindowId, request: AppleDeviceRequest): Promise<boolean>;
   revokeApprovals(windowId: WindowId): void;
   /**
    * Shows a native-harness question on the thread's running turn so it is
@@ -1169,34 +1142,6 @@ export function createCodeOperationRuntime(
         );
         thread = resolved?.thread;
         checkout = resolved?.checkout;
-      } else if (request.effect.kind === "apple-device-lease") {
-        const lease = await resolveAppleDeviceLeaseScope(options, windowId, request.effect.request);
-        if (lease === undefined) return undefined;
-        directContext = await approvalContext(options, undefined, lease.thread, lease.checkout);
-        directThreadTitle = lease.thread.title;
-        directPrompt = appleDeviceLeasePrompt(lease);
-      } else if (request.effect.kind === "apple-device-action") {
-        const action = await resolveAppleDeviceActionScope(
-          options,
-          windowId,
-          request.effect.request,
-        );
-        if (action === undefined) return undefined;
-        directContext = await approvalContext(options, undefined, action.thread, action.checkout);
-        directThreadTitle = action.thread.title;
-        directPrompt = appleDeviceActionPrompt(action, request.effect.request);
-      } else if (request.effect.kind === "apple-distribution-upload") {
-        const upload = await resolveAppleUploadScope(options, windowId, request.effect.request);
-        if (upload === undefined) return undefined;
-        directContext = await approvalContext(options, undefined, upload.thread, upload.checkout);
-        directThreadTitle = upload.thread.title;
-        directPrompt = appleUploadPrompt(upload, request.effect.request);
-      } else if (request.effect.kind === "apple-distribution-version") {
-        const step = await resolveAppleUploadScope(options, windowId, request.effect.request);
-        if (step === undefined) return undefined;
-        directContext = await approvalContext(options, undefined, step.thread, step.checkout);
-        directThreadTitle = step.thread.title;
-        directPrompt = appleStoreVersionPrompt(step, request.effect.request);
       } else if (request.effect.kind === "create-thread-full-access") {
         thread = request.effect.thread;
         checkout = options.persistence.readCodeCheckout(thread.checkoutId);
@@ -1337,58 +1282,6 @@ export function createCodeOperationRuntime(
       return await approvalValidator.validate({
         windowId,
         effect: { kind: "apple-action", request },
-        contextDigest: approvalContextDigest(context),
-        approvalId: request.approval.approvalId,
-      });
-    },
-    validateAppleDeviceLease: async (windowId, request) => {
-      if (approvalValidator === undefined || request.approval.kind !== "approved") return false;
-      const lease = await resolveAppleDeviceLeaseScope(options, windowId, request);
-      if (lease === undefined) return false;
-      const context = await approvalContext(options, undefined, lease.thread, lease.checkout);
-      if (context === undefined) return false;
-      return await approvalValidator.validate({
-        windowId,
-        effect: { kind: "apple-device-lease", request },
-        contextDigest: approvalContextDigest(context),
-        approvalId: request.approval.approvalId,
-      });
-    },
-    validateAppleDistributionUpload: async (windowId, request) => {
-      if (approvalValidator === undefined || request.approval.kind !== "approved") return false;
-      const upload = await resolveAppleUploadScope(options, windowId, request);
-      if (upload === undefined) return false;
-      const context = await approvalContext(options, undefined, upload.thread, upload.checkout);
-      if (context === undefined) return false;
-      return await approvalValidator.validate({
-        windowId,
-        effect: { kind: "apple-distribution-upload", request },
-        contextDigest: approvalContextDigest(context),
-        approvalId: request.approval.approvalId,
-      });
-    },
-    validateAppleDistributionVersion: async (windowId, request) => {
-      if (approvalValidator === undefined || request.approval.kind !== "approved") return false;
-      const step = await resolveAppleUploadScope(options, windowId, request);
-      if (step === undefined) return false;
-      const context = await approvalContext(options, undefined, step.thread, step.checkout);
-      if (context === undefined) return false;
-      return await approvalValidator.validate({
-        windowId,
-        effect: { kind: "apple-distribution-version", request },
-        contextDigest: approvalContextDigest(context),
-        approvalId: request.approval.approvalId,
-      });
-    },
-    validateAppleDeviceAction: async (windowId, request) => {
-      if (approvalValidator === undefined || request.approval.kind !== "approved") return false;
-      const resolved = await resolveDeviceApprovalScope(options, windowId, request);
-      if (resolved === undefined) return false;
-      const context = await approvalContext(options, undefined, resolved.thread, resolved.checkout);
-      if (context === undefined) return false;
-      return await approvalValidator.validate({
-        windowId,
-        effect: { kind: "apple-device-action", request },
         contextDigest: approvalContextDigest(context),
         approvalId: request.approval.approvalId,
       });
@@ -1622,9 +1515,8 @@ export function createCodeOperationRuntime(
         if (!(await options.windowAccess.canAccessProject(windowId, stored.projectId)))
           return undefined;
         const checkout = options.persistence.readCodeCheckout(stored.checkoutId);
-        // A remote root names the target's folder. A runtime starts there only
-        // through the placement a turn binds on the target's session, and this
-        // acquisition carries none, so it would start here against that path.
+        // A remote root names a folder on another machine, so a runtime
+        // started here would run against that path on this host.
         if (checkout === undefined || checkout.kind === "remote-root") return undefined;
         const root = await options.resolveCheckoutRoot(windowId, stored, checkout);
         if (root === undefined || root === null) return undefined;
@@ -1708,8 +1600,8 @@ export function createCodeOperationRuntime(
         return { status: "refused", reason: "unavailable" };
       }
       // A fork starts from files this host's Git captured. A remote root's
-      // path names a folder on the target, and on this host either nothing or
-      // an unrelated folder of the same name, so no capture runs there.
+      // path names a folder on another machine, and on this host either
+      // nothing or an unrelated folder of the same name, so no capture runs.
       if (options.persistence.readCodeCheckout(source.checkoutId)?.kind === "remote-root") {
         return { status: "refused", reason: "unavailable" };
       }
@@ -1869,246 +1761,6 @@ async function resolveAndroidApprovalScope(
   return resolveDeviceApprovalScope(options, windowId, request);
 }
 
-interface AppleDeviceLeaseScope {
-  readonly thread: CodeThread;
-  readonly checkout: CodeCheckoutIdentity;
-  readonly device: NonNullable<
-    ReturnType<NonNullable<CodeOperationRuntimeOptions["describeAppleDevice"]>>
-  >;
-  /** The thread a move takes the device from, which the person must be shown. */
-  readonly from?: CodeThread;
-}
-
-/**
- * The thread, checkout, and device a lease confirmation names. Unlike an
- * effect's approval it does not depend on the thread's posture: a lease asks
- * a person under every posture, Full access and Plan included.
- */
-async function resolveAppleDeviceLeaseScope(
-  options: CodeOperationRuntimeOptions,
-  windowId: WindowId,
-  request: AppleDeviceRequest,
-): Promise<AppleDeviceLeaseScope | undefined> {
-  const thread = options.persistence.readCodeThread(request.threadId);
-  const checkout = options.persistence.readCodeCheckout(request.checkoutId);
-  const device =
-    request.deviceId === undefined ? undefined : options.describeAppleDevice?.(request.deviceId);
-  const from =
-    request.fromThreadId === undefined
-      ? undefined
-      : options.persistence.readCodeThread(request.fromThreadId);
-  if (
-    request.kind !== "use-device" ||
-    device === undefined ||
-    thread === undefined ||
-    checkout === undefined ||
-    thread.checkoutId !== checkout.id ||
-    thread.repositoryId !== checkout.repositoryId ||
-    thread.projectId !== request.authority.projectId ||
-    thread.providerInstanceId !== request.authority.providerInstanceId ||
-    thread.lifecycle !== "active" ||
-    checkout.availability !== "available" ||
-    request.authority.mode !== "code" ||
-    request.authority.extension.kind !== "core" ||
-    (request.fromThreadId !== undefined && from === undefined) ||
-    !(await options.windowAccess.canAccessProject(windowId, thread.projectId))
-  ) {
-    return undefined;
-  }
-  return { thread, checkout, device, ...(from === undefined ? {} : { from }) };
-}
-
-/** Names the device and the thread, and for a move the thread that loses it. */
-function appleDeviceLeasePrompt(lease: AppleDeviceLeaseScope): {
-  readonly message: string;
-  readonly detail: string;
-} {
-  const { device, from, thread } = lease;
-  return {
-    message: `Let this thread use ${device.name}?`,
-    detail: boundApprovalDetail(
-      [
-        `Device: ${device.name} · ${device.model} · iOS ${device.osVersion} · ${device.connection === "wired" ? "connected by cable" : "on the network"}`,
-        `Thread: ${thread.title}`,
-        ...(from === undefined ? [] : [`Moves the device from: ${from.title}`]),
-        "Until the lease ends, this thread can install and run its own app on the device, take screenshots, and read that app's console output.",
-      ].join("\n"),
-    ),
-  };
-}
-
-/**
- * The thread, checkout, and device a device effect's approval names. Like a
- * Simulator effect's, it is asked only while the thread's posture decides
- * effects by approval: Plan refuses them and Full access runs them unasked.
- */
-async function resolveAppleDeviceActionScope(
-  options: CodeOperationRuntimeOptions,
-  windowId: WindowId,
-  request: AppleDeviceRequest,
-  /** The posture that decides; a live turn may run narrower than the stored thread. */
-  effectiveThread?: (thread: CodeThread) => CodeThread,
-): Promise<Omit<AppleDeviceLeaseScope, "from"> | undefined> {
-  const resolved = await resolveDeviceApprovalScope(options, windowId, request, effectiveThread);
-  const device =
-    request.deviceId === undefined ? undefined : options.describeAppleDevice?.(request.deviceId);
-  if (resolved === undefined || device === undefined) return undefined;
-  return { ...resolved, device };
-}
-
-/** Names the device, the thread, and exactly what this one approval runs. */
-function appleDeviceActionPrompt(
-  scope: Omit<AppleDeviceLeaseScope, "from">,
-  request: AppleDeviceRequest,
-): { readonly message: string; readonly detail: string } {
-  const { device, thread } = scope;
-  const app = request.bundleIdentifier ?? "this thread's app";
-  const message =
-    request.kind === "build"
-      ? `Build this thread's app for ${device.name}?`
-      : request.kind === "run"
-        ? `Build and run this thread's app on ${device.name}?`
-        : request.kind === "install"
-          ? `Install this thread's app on ${device.name}?`
-          : request.kind === "launch"
-            ? `Launch ${app} on ${device.name}?`
-            : `Stop ${app} on ${device.name}?`;
-  return {
-    message,
-    detail: boundApprovalDetail(
-      [
-        `Action: ${request.kind}`,
-        `Device: ${device.name} · ${device.model} · iOS ${device.osVersion} · ${device.connection === "wired" ? "connected by cable" : "on the network"}`,
-        `Thread: ${thread.title}`,
-        ...(request.projectPath === undefined ? [] : [`Project: ${request.projectPath}`]),
-        ...(request.scheme === undefined ? [] : [`Scheme: ${request.scheme}`]),
-        ...(request.teamId === undefined
-          ? []
-          : [
-              `Team: ${request.teamId}`,
-              "Signs for development with your own identity for this team from the login keychain. Octant changes no certificate or provisioning profile.",
-            ]),
-        ...(request.artifact === undefined ? [] : [`Signed app: ${request.artifact}`]),
-        ...(request.bundleIdentifier === undefined ? [] : [`App: ${request.bundleIdentifier}`]),
-      ].join("\n"),
-    ),
-  };
-}
-
-/**
- * The thread and checkout a distribution step's confirmation names: an
- * upload, a submission for App Review, or a release. Like a lease, it does
- * not depend on the thread's posture: each asks a person under every posture,
- * Full access included, and the device policy refuses it in Plan.
- */
-async function resolveAppleUploadScope(
-  options: CodeOperationRuntimeOptions,
-  windowId: WindowId,
-  request: AppleDeviceRequest,
-): Promise<{ readonly thread: CodeThread; readonly checkout: CodeCheckoutIdentity } | undefined> {
-  const thread = options.persistence.readCodeThread(request.threadId);
-  const checkout = options.persistence.readCodeCheckout(request.checkoutId);
-  const complete =
-    (request.kind === "upload" && request.upload !== undefined) ||
-    ((request.kind === "submit-for-review" || request.kind === "release-version") &&
-      request.storeVersion !== undefined);
-  if (
-    !complete ||
-    thread === undefined ||
-    checkout === undefined ||
-    thread.checkoutId !== checkout.id ||
-    thread.repositoryId !== checkout.repositoryId ||
-    thread.projectId !== request.authority.projectId ||
-    thread.providerInstanceId !== request.authority.providerInstanceId ||
-    thread.lifecycle !== "active" ||
-    checkout.availability !== "available" ||
-    request.authority.mode !== "code" ||
-    request.authority.extension.kind !== "core" ||
-    !(await options.windowAccess.canAccessProject(windowId, thread.projectId))
-  ) {
-    return undefined;
-  }
-  return { thread, checkout };
-}
-
-/**
- * Names exactly what one upload sends: the app, its version and build, the
- * team and the signing identity, the project, and the checkout revision the
- * approval is bound to.
- */
-function appleUploadPrompt(
-  scope: { readonly thread: CodeThread; readonly checkout: CodeCheckoutIdentity },
-  request: AppleDeviceRequest,
-): { readonly message: string; readonly detail: string } {
-  const upload = request.upload;
-  const head = scope.checkout.head;
-  const revision =
-    head.kind === "branch"
-      ? `${head.name} at ${head.oid.slice(0, 12)}`
-      : head.kind === "detached"
-        ? head.oid.slice(0, 12)
-        : "no commit yet";
-  return {
-    message:
-      upload === undefined
-        ? "Upload this thread's app to App Store Connect?"
-        : `Upload ${upload.bundleIdentifier} ${upload.version} (${upload.buildNumber}) to App Store Connect?`,
-    detail: boundApprovalDetail(
-      [
-        ...(upload === undefined
-          ? []
-          : [
-              `App: ${upload.bundleIdentifier}`,
-              `Version: ${upload.version} (build ${upload.buildNumber})`,
-              `Team: ${upload.signing.teamId}`,
-              `Signing identity: ${upload.signing.identity}`,
-              `Provisioning profile: ${upload.profileId}`,
-            ]),
-        ...(request.projectPath === undefined ? [] : [`Project: ${request.projectPath}`]),
-        ...(request.scheme === undefined ? [] : [`Scheme: ${request.scheme}`]),
-        `Revision: ${revision}`,
-        `Thread: ${scope.thread.title}`,
-        "Octant archives this revision, signs it for the App Store with this identity and profile, and uploads that one build with your App Store Connect key. It does not submit the version for review or release it.",
-      ].join("\n"),
-    ),
-  };
-}
-
-/**
- * Names exactly the version one submission or release acts on: the app, the
- * version and its build, and the platform. A release says that it publishes
- * the version to the App Store.
- */
-function appleStoreVersionPrompt(
-  scope: { readonly thread: CodeThread },
-  request: AppleDeviceRequest,
-): { readonly message: string; readonly detail: string } {
-  const version = request.storeVersion;
-  const release = request.kind === "release-version";
-  const named =
-    version === undefined
-      ? "this thread's app"
-      : `${version.bundleIdentifier} ${version.version} (${version.buildNumber})`;
-  return {
-    message: release ? `Release ${named} on the App Store?` : `Submit ${named} for App Review?`,
-    detail: boundApprovalDetail(
-      [
-        ...(version === undefined
-          ? []
-          : [
-              `App: ${version.bundleIdentifier}`,
-              `Version: ${version.version} (build ${version.buildNumber})`,
-              "Platform: iOS",
-            ]),
-        `Thread: ${scope.thread.title}`,
-        release
-          ? "Octant releases this one approved version now, publishing it to the App Store with your App Store Connect key. It changes nothing else."
-          : "Octant submits this one version for App Review with what App Store Connect already holds for it, using your App Store Connect key. It does not change metadata, screenshots, pricing, availability, or export-compliance answers, and it does not release the version.",
-      ].join("\n"),
-    ),
-  };
-}
-
 async function resolveDeviceApprovalScope(
   options: CodeOperationRuntimeOptions,
   windowId: WindowId,
@@ -2202,15 +1854,6 @@ function approvalPrompt(
         ? [`Scheme: ${effect.request.scheme}`]
         : []),
     ].join("\n");
-  } else if (
-    effect.kind === "apple-device-lease" ||
-    effect.kind === "apple-device-action" ||
-    effect.kind === "apple-distribution-upload" ||
-    effect.kind === "apple-distribution-version"
-  ) {
-    // prepareApproval words a device request from the device it names, which
-    // this function is not given; reaching here is a wiring fault.
-    throw new TypeError("A device request is prompted with the device it names.");
   } else if (effect.kind === "android-action") {
     const input =
       isAndroidEmulatorInputKind(effect.request.kind) ||
@@ -2383,13 +2026,6 @@ interface ActiveTurn {
   readonly computerUseDestination?: ComputerUseDestinationSelection;
   /** The selected MCP servers' tools, resolved when the turn was accepted. */
   readonly extensionTools?: AppManagedToolSet;
-  /**
-   * A remote-bound Project's turn: its tools on the target, and a placed
-   * runtime's placement, bound to the session it held when the turn was
-   * taken on. They are the turn's whole tool set; nothing of this host's
-   * checkout tools joins them.
-   */
-  readonly remote?: Extract<RemoteCodeTurnBinding, { readonly status: "bound" }>;
   readonly extensionSelections?: ReadonlyArray<
     import("@octant/contracts/extensions").ExtensionSelection
   >;
@@ -2416,10 +2052,6 @@ interface ActiveTurn {
     string,
     {
       readonly origin?: string;
-      /** Settled only by a person at a window on this Mac, never by a paired device. */
-      readonly localPersonOnly?: true;
-      /** Still answerable in a Plan turn: it allows nothing Plan refuses. */
-      readonly answerableInPlan?: true;
       readonly finish: (outcome: "approved" | "denied" | "cancelled" | "expired") => void;
     }
   >;
@@ -2444,13 +2076,9 @@ interface ActiveTurn {
   readonly onContextDelivered?: () => void;
 }
 
-/**
- * Why a remote-bound thread's turn stopped when its target's session ended.
- * The command running there died with the executor and nothing was queued
- * for a later session, so the person sends again once the target is back.
- */
-const TARGET_DISCONNECTED =
-  "The SSH target's session ended (target-disconnected). Nothing was queued; Octant reconnects to the target on its own, so send the message again once it is connected.";
+/** Why a turn on a thread whose checkout is a folder on another machine did not start. */
+const REMOTE_FOLDER_UNSUPPORTED =
+  "This thread's checkout is a folder on a remote machine, which Octant no longer supports. Start a new thread in a local Project.";
 
 /** Why a turn carrying conversation merged back from a fork did not start. */
 const FORK_MERGE_UNREADABLE =
@@ -2739,22 +2367,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         "The task's previous turn stopped before the provider started. Retry that message, or start a new task.",
       );
     const driver = resolvedDriver;
-    // A thread on an SSH target has only the harness's hands there: Browser,
-    // Computer, and a fork's session seeding all act on this host.
-    const remoteThread = this.#isRemoteThread(input.thread);
-    if (remoteThread) {
-      if (this.#options.remoteCodeTurn === undefined)
-        return failStart("This host cannot run a thread on an SSH target.");
-      if (
-        command.computerUseSelection !== undefined ||
-        command.extensionSelections?.some(isBrowserUseSelection) === true
-      )
-        return failStart(
-          "Browser and Computer are not offered to a thread on an SSH target. Send the message without them.",
-        );
-      if (input.thread.forkedFrom !== undefined)
-        return failStart("A thread on an SSH target cannot start from a fork.");
-    }
+    // A thread from a build that could run on a remote machine keeps its
+    // remote folder, which this host cannot run a turn in.
+    if (this.#isRemoteThread(input.thread)) return failStart(REMOTE_FOLDER_UNSUPPORTED);
     const browserSelections = command.extensionSelections?.filter(isBrowserUseSelection) ?? [];
     if (
       browserSelections.length > 1 ||
@@ -2903,43 +2518,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       await input.extensionTools?.close?.().catch(() => undefined);
       return failStart(FORK_MERGE_UNREADABLE);
     }
-    // A remote-bound thread's provider is checked and its tools are bound to
-    // the target's session last, before anything launches, so no refusal
-    // after this point leaves a binding behind. A session that ends before
-    // the turn is taken on still stops it.
-    let remote: Extract<RemoteCodeTurnBinding, { readonly status: "bound" }> | undefined;
-    let targetLostBeforeStart = false;
-    if (remoteThread) {
-      const bound = this.#options.remoteCodeTurn?.({
-        thread: input.thread,
-        windowId: input.windowId,
-        driver,
-        secrets,
-        onTargetDisconnected: () => {
-          const running = this.#active.get(key);
-          if (running !== undefined && remote !== undefined && running.remote === remote) {
-            void this.#interruptForLostTarget(running);
-          } else targetLostBeforeStart = true;
-        },
-      });
-      if (bound === undefined || bound.status === "refused") {
-        await input.extensionTools?.close?.().catch(() => undefined);
-        return failStart(bound?.message ?? "This host cannot run a thread on an SSH target.");
-      }
-      remote = bound;
-      // Extensions' tools act on this host; the remote tool set is the whole turn's.
-      await input.extensionTools?.close?.().catch(() => undefined);
-    }
     // Driver, credentials, and fork preparation may outlive the host's admission.
     if (input.admissionCurrent?.() === false) {
-      remote?.release();
       return refuseRevokedAdmission();
-    }
-    // Nothing below yields before the turn is held, so a session that ends
-    // from here on finds the running turn and stops it.
-    if (targetLostBeforeStart) {
-      remote?.release();
-      return failStart(TARGET_DISCONNECTED);
     }
     // Feedback stays pending through every preparation refusal. Consuming it
     // here does not yield between the final admission check and owning the turn.
@@ -2972,10 +2553,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       ...(command.computerUseDestination === undefined
         ? {}
         : { computerUseDestination: command.computerUseDestination }),
-      ...(input.extensionTools === undefined || remote !== undefined
-        ? {}
-        : { extensionTools: input.extensionTools }),
-      ...(remote === undefined ? {} : { remote }),
+      ...(input.extensionTools === undefined ? {} : { extensionTools: input.extensionTools }),
       ...(command.extensionSelections === undefined || command.extensionSelections.length === 0
         ? {}
         : { extensionSelections: command.extensionSelections }),
@@ -3521,20 +3099,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const { context, prompt } = asked;
     const summary = boundProviderSummary(`${prompt.message}\n${prompt.detail}`);
     if (summary === undefined) return { status: "unavailable" };
-    // A physical device's lease and effects are a person's at the Mac to
-    // allow: a paired device observes only (decision 4 of
-    // docs/design/apple-devices.md), so its answer settles nothing here.
-    const localPersonOnly =
-      effect.kind === "apple-device-lease" ||
-      effect.kind === "apple-device-action" ||
-      effect.kind === "apple-distribution-upload" ||
-      effect.kind === "apple-distribution-version";
-    const outcome = await this.#askToolApproval(active, summary, undefined, signal, {
-      localPersonOnly,
-      // A lease is asked under every posture: it opens the device to the
-      // thread but changes nothing on it, so Plan still lets it be answered.
-      answerableInPlan: effect.kind === "apple-device-lease",
-    });
+    const outcome = await this.#askToolApproval(active, summary, undefined, signal);
     if (outcome !== "approved") return { status: outcome };
     try {
       const receipt = store.issue({
@@ -3571,55 +3136,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     // The turn's posture, not the stored one: a Full-access thread running an
     // approval-gated turn asks here too, and its stored policy alone refused it.
     const turnPosture = (thread: CodeThread) => this.threadWithActiveTurnPosture(thread);
-    if (effect.kind === "apple-device-lease") {
-      const lease = await resolveAppleDeviceLeaseScope(
-        this.#options,
-        active.windowId,
-        effect.request,
-      );
-      if (lease === undefined) return undefined;
-      const context = await approvalContext(this.#options, undefined, lease.thread, lease.checkout);
-      return context === undefined ? undefined : { context, prompt: appleDeviceLeasePrompt(lease) };
-    }
-    if (effect.kind === "apple-distribution-upload") {
-      const upload = await resolveAppleUploadScope(this.#options, active.windowId, effect.request);
-      if (upload === undefined) return undefined;
-      const context = await approvalContext(
-        this.#options,
-        undefined,
-        upload.thread,
-        upload.checkout,
-      );
-      return context === undefined
-        ? undefined
-        : { context, prompt: appleUploadPrompt(upload, effect.request) };
-    }
-    if (effect.kind === "apple-distribution-version") {
-      const step = await resolveAppleUploadScope(this.#options, active.windowId, effect.request);
-      if (step === undefined) return undefined;
-      const context = await approvalContext(this.#options, undefined, step.thread, step.checkout);
-      return context === undefined
-        ? undefined
-        : { context, prompt: appleStoreVersionPrompt(step, effect.request) };
-    }
-    if (effect.kind === "apple-device-action") {
-      const action = await resolveAppleDeviceActionScope(
-        this.#options,
-        active.windowId,
-        effect.request,
-        turnPosture,
-      );
-      if (action === undefined) return undefined;
-      const context = await approvalContext(
-        this.#options,
-        undefined,
-        action.thread,
-        action.checkout,
-      );
-      return context === undefined
-        ? undefined
-        : { context, prompt: appleDeviceActionPrompt(action, effect.request) };
-    }
     const scope = await resolveDeviceApprovalScope(
       this.#options,
       active.windowId,
@@ -3638,7 +3154,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     summary: string,
     origin: string | undefined,
     signal?: AbortSignal,
-    answer: { readonly localPersonOnly?: boolean; readonly answerableInPlan?: boolean } = {},
   ): Promise<"approved" | "denied" | "cancelled" | "expired"> {
     if (signal?.aborted || active.abort.signal.aborted || active.toolApprovals.size >= 4)
       return Promise.resolve("cancelled");
@@ -3660,8 +3175,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       const timer = setTimeout(() => finish("expired"), 10 * 60_000);
       active.toolApprovals.set(String(approvalId), {
         ...(origin === undefined ? {} : { origin }),
-        ...(answer.localPersonOnly === true ? { localPersonOnly: true } : {}),
-        ...(answer.answerableInPlan === true ? { answerableInPlan: true } : {}),
         finish,
       });
       signal?.addEventListener("abort", abort, { once: true });
@@ -3676,9 +3189,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             approvalId,
             action: "provider-tool",
             summary,
-            // Journaled with the ask so every client reads the same rule the
-            // answer is refused under, and a paired one offers no answer.
-            ...(answer.localPersonOnly === true ? { localPersonOnly: true as const } : {}),
           },
         });
         active.cursor = frame.cursor;
@@ -3701,18 +3211,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const toolApproval = active?.toolApprovals.get(input.approvalId);
     if (active !== undefined && toolApproval !== undefined) {
       if (
-        (turnPosture === "plan" && toolApproval.answerableInPlan !== true) ||
+        turnPosture === "plan" ||
         active.thread.permissionPersistence !== input.thread.permissionPersistence
       )
         return turnState("failed");
-      // The card stays up for the person at the Mac; a paired device's
-      // answer, or one whose window nobody vouched for, settles nothing.
-      if (toolApproval.localPersonOnly === true && input.answeredBy !== "local-window") {
-        return turnState(active.state, {
-          category: "failed",
-          message: "Only a person at the Mac this thread runs on can answer this request.",
-        });
-      }
       toolApproval.finish(input.decision === "approved" ? "approved" : "denied");
       if (input.decision === "approved") return answeredTurnState(active.state);
       return this.#countDeniedApproval(active);
@@ -3915,7 +3417,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     await Promise.all(
       activeTurns.map(async (active) => {
         active.state = "interrupted";
-        active.remote?.release();
         this.#persistRuntimeWork(active, "interrupted");
         active.abort.abort();
         if (active.connection === undefined) return;
@@ -3938,41 +3439,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     return this.#options.persistence.readCodeCheckout(thread.checkoutId)?.kind === "remote-root";
   }
 
-  /**
-   * The target's session ended under a remote-bound turn. The turn stops as
-   * interrupted, which aborts its calls and so withdraws an approval or a
-   * question still waiting; nothing is retried or queued.
-   */
-  async #interruptForLostTarget(active: ActiveTurn): Promise<void> {
-    if (active.state !== "running" && active.state !== "waiting") return;
-    active.interruptMessage = TARGET_DISCONNECTED;
-    active.state = "interrupted";
-    this.#persistRuntimeWork(active, "interrupted");
-    active.abort.abort();
-    if (active.connection !== undefined) {
-      await Effect.runPromise(
-        active.connection
-          .interrupt(active.sessionId as never)
-          .pipe(Effect.catchAll(() => Effect.void)),
-      );
-    }
-  }
-
   #appManagedTools(active: ActiveTurn): AppManagedToolSet | undefined {
-    if (active.remote !== undefined) {
-      // The turn's whole tool set: every other set reads or acts on a folder
-      // or a device of this host. The runner closes it when the turn ends.
-      const { tools, release } = active.remote;
-      const standing = this.#options.windowAccess.standingAuthority;
-      return {
-        ...tools,
-        execute: (input) => standing(() => tools.execute(input)),
-        close: async () => {
-          release();
-          await tools.close?.();
-        },
-      };
-    }
     const supportsAppManagedTools = this.#options.supportsAppManagedTools?.(active.thread) === true;
     const supportsAcpClientCapabilities =
       this.#options.supportsAcpClientCapabilities?.(active.thread) === true;
@@ -4136,7 +3603,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     });
     if (replay.status !== "ok") {
       active.state = "waiting";
-      active.remote?.release();
       // Nothing downstream reports an outcome for a turn that never reached the
       // provider, so the record it opened has to be closed here or the board
       // would read the thread as executing until the next restart.
@@ -4341,13 +3807,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                   category: "unauthorized",
                   message: "Provider authority mismatch.",
                 });
-              // A runtime placed on the thread's target starts only through
-              // the placement its turn was bound with, on that session.
-              const placement = active.remote?.placement;
-              return acquireProviderConnection(
-                active.driver,
-                placement === undefined ? acquireInput : { ...acquireInput, placement },
-              ).pipe(
+              return active.driver.acquire(acquireInput).pipe(
                 Effect.tap((connection) =>
                   Effect.sync(() => {
                     active.connection = connection;
@@ -4369,14 +3829,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             }),
           reconcileObservation: ({ claim }) =>
             Effect.promise(async () => {
-              // A remote root is no folder of this host, so no local Git
-              // process may observe a path that only names it.
-              if (active.remote !== undefined) {
-                return {
-                  status: "not-confirmed" as const,
-                  summary: "The checkout is on an SSH target; this host does not observe it.",
-                };
-              }
               if (claim.kind === "file-change" || claim.kind === "diff") {
                 const observation = await this.#git.observe(active.checkoutRoot);
                 return observation.status === "ready"

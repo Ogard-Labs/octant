@@ -2381,6 +2381,22 @@ CREATE INDEX validation_evidence_authority_idx
       aggregate_type, aggregate_id, global_sequence
     );`,
   },
+  {
+    version: 90,
+    name: "drop_ssh_target_projections",
+    // Remote SSH environments are gone and no projection fills these tables.
+    // Their events stay in the journal as retired names, so a rebuild needs
+    // nothing from them. Migrations 86 to 88 stay as they were written.
+    sql: `
+      DROP INDEX ssh_remote_project_target_idx;
+      DROP INDEX ssh_remote_worktree_project_idx;
+      DROP TABLE ssh_target_runtime_binary_projection;
+      DROP TABLE ssh_remote_terminal_projection;
+      DROP TABLE ssh_remote_worktree_projection;
+      DROP TABLE ssh_remote_project_projection;
+      DROP TABLE ssh_target_projection;
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {

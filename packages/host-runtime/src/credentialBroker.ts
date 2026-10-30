@@ -1,12 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingHttpHeaders, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
-import { handleAppStoreConnectKeyFileRoute } from "./appStoreConnectKeyFiles";
-import {
-  handleAppStoreConnectTokenRoute,
-  readOnePasswordWithCli,
-  type OnePasswordRead,
-} from "./appStoreConnectKeySource";
 import {
   CredentialPurgeFailure,
   CredentialStoreFailure,
@@ -59,18 +53,6 @@ const ROUTES = new Set([
   "/v1/desktop-provider-credentials/resolve",
   "/v1/desktop-provider-credentials/set",
   "/v1/desktop-provider-credentials/delete",
-  // No resolve: nothing on the host reads an App Store Connect key back yet,
-  // so a stolen broker token cannot either.
-  "/v1/app-store-connect-keys/has",
-  "/v1/app-store-connect-keys/set",
-  "/v1/app-store-connect-keys/delete",
-  // The key reaches an upload only as a 0600 file the broker writes into that
-  // upload's private folder and removes after; the answer never carries it.
-  "/v1/app-store-connect-keys/write-key-file",
-  "/v1/app-store-connect-keys/remove-key-file",
-  // An App Store Connect API request is authorized by a token the broker
-  // signs here; the answer is that one short-lived token, never the key.
-  "/v1/app-store-connect-keys/sign-token",
   "/v1/push-platform-credentials/has",
   "/v1/push-platform-credentials/resolve",
   "/v1/push-platform-credentials/set",
@@ -90,7 +72,6 @@ const REPLICA_STORE_CREDENTIAL_PREFIX = "/v1/replica-store-credentials/";
 const CANVAS_PUBLIC_SHARE_SECRET_PREFIX = "/v1/canvas-public-share-secrets/";
 const MCP_SERVER_CREDENTIAL_PREFIX = "/v1/mcp-server-credentials/";
 const DESKTOP_PROVIDER_CREDENTIAL_PREFIX = "/v1/desktop-provider-credentials/";
-const APP_STORE_CONNECT_KEY_PREFIX = "/v1/app-store-connect-keys/";
 const PUSH_PLATFORM_CREDENTIAL_PREFIX = "/v1/push-platform-credentials/";
 type NamespacedIdField = "instanceId" | "credentialRef" | "secretId";
 const MAX_CREDENTIAL_BYTES = 12 * 1_024;
@@ -155,25 +136,6 @@ export async function startCredentialBroker(
    */
   desktopProviderCredentials?: CredentialStore,
   /**
-   * The App Store Connect API key a person enters for distributing their own
-   * app, in a credential namespace of its own. It is served only on
-   * `/v1/app-store-connect-keys/*`, which can store, test for, and delete the
-   * key but never read it back.
-   */
-  appStoreConnectKeys?: CredentialStore,
-  /**
-   * The host-private directory whose `upload-<uuid>` folders the broker may
-   * write an App Store Connect key file into for one upload. Without it the
-   * key-file routes answer not found.
-   */
-  appStoreConnectKeyFileRoot?: string,
-  /**
-   * Reads a key the person keeps in 1Password, at the moment a token is
-   * signed or an upload's key file written. Defaults to the person's own `op`
-   * CLI; tests pass a fake.
-   */
-  readOnePassword: OnePasswordRead = readOnePasswordWithCli,
-  /**
    * The Apple and Google push credentials and the sealing key a hub that sends
    * notifications directly holds, in a credential namespace of their own. They
    * are served only on `/v1/push-platform-credentials/*`, so no provider,
@@ -212,11 +174,7 @@ export async function startCredentialBroker(
       canvasPublicShareSecrets,
       mcpServerCredentials,
       desktopProviderCredentials,
-      appStoreConnectKeys,
-      appStoreConnectKeyFileRoot,
-      readOnePassword,
       pushPlatformCredentials,
-      oauth?.now ?? Date.now,
     ).then(
       ({ destroyIncoming, response }) => {
         const headers: Record<string, string> = {};
@@ -291,11 +249,7 @@ export async function startCredentialBroker(
         canvasPublicShareSecrets,
         mcpServerCredentials,
         desktopProviderCredentials,
-        appStoreConnectKeys,
-        appStoreConnectKeyFileRoot,
-        readOnePassword,
         pushPlatformCredentials,
-        oauth?.now ?? Date.now,
       ),
   });
 }
@@ -313,11 +267,7 @@ async function handleIncoming(
   canvasPublicShareSecrets: CredentialStore | undefined,
   mcpServerCredentials: CredentialStore | undefined,
   desktopProviderCredentials: CredentialStore | undefined,
-  appStoreConnectKeys: CredentialStore | undefined,
-  appStoreConnectKeyFileRoot: string | undefined,
-  readOnePassword: OnePasswordRead,
   pushPlatformCredentials: CredentialStore | undefined,
-  now: () => number,
 ): Promise<{ destroyIncoming: boolean; response: ResponseData }> {
   if (brokerUrl === undefined) throw new Error("unavailable");
   const headers = requestHeaders(incoming.headers);
@@ -353,11 +303,7 @@ async function handleIncoming(
         canvasPublicShareSecrets,
         mcpServerCredentials,
         desktopProviderCredentials,
-        appStoreConnectKeys,
-        appStoreConnectKeyFileRoot,
-        readOnePassword,
         pushPlatformCredentials,
-        now,
       ),
     ),
   };
@@ -376,11 +322,7 @@ async function handleBrokerRequest(
   canvasPublicShareSecrets: CredentialStore | undefined,
   mcpServerCredentials: CredentialStore | undefined,
   desktopProviderCredentials: CredentialStore | undefined,
-  appStoreConnectKeys: CredentialStore | undefined,
-  appStoreConnectKeyFileRoot: string | undefined,
-  readOnePassword: OnePasswordRead,
   pushPlatformCredentials: CredentialStore | undefined,
-  now: () => number,
 ): Promise<Response> {
   const url = new URL(request.url);
   if (!isAuthorized(peerAddress, request.headers, token)) {
@@ -461,29 +403,6 @@ async function handleBrokerRequest(
       "credentialRef",
       request,
       pushPlatformCredentials,
-    );
-  }
-
-  if (url.pathname.startsWith(APP_STORE_CONNECT_KEY_PREFIX)) {
-    if (appStoreConnectKeys === undefined) return failure("not-found", 404);
-    const operation = url.pathname.slice(APP_STORE_CONNECT_KEY_PREFIX.length);
-    if (operation === "write-key-file" || operation === "remove-key-file") {
-      return handleAppStoreConnectKeyFileRoute(
-        operation,
-        request,
-        appStoreConnectKeys,
-        appStoreConnectKeyFileRoot,
-        readOnePassword,
-      );
-    }
-    if (operation === "sign-token") {
-      return handleAppStoreConnectTokenRoute(request, appStoreConnectKeys, readOnePassword, now);
-    }
-    return handleNamespacedRoute(
-      url.pathname.slice(APP_STORE_CONNECT_KEY_PREFIX.length),
-      "credentialRef",
-      request,
-      appStoreConnectKeys,
     );
   }
 

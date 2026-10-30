@@ -234,27 +234,6 @@ import { ThemeProjection } from "./themeProjection";
 import { ExtensionProjection, EXTENSION_LIFECYCLE_EVENT } from "./extensionProjection";
 import { ExtensionToolGrantProjection } from "./extensionToolGrantProjection";
 import { ExtensionProjectPinProjection } from "./extensionProjectPinProjection";
-import { SshTargetProjection } from "./sshTargetProjection";
-import {
-  PROVIDER_RUNTIME_EGRESS_EVENT_NAMES,
-  ProviderRuntimeEgressDecisionsRecorded,
-  ProviderRuntimeEgressLaunchStarted,
-  ProviderRuntimeEgressLaunchSummarized,
-  SSH_REMOTE_PROJECT_EVENT_NAMES,
-  SSH_REMOTE_TERMINAL_EVENT_NAMES,
-  SSH_REMOTE_WORKTREE_EVENT_NAMES,
-  SSH_TARGET_EVENT_NAMES,
-  SshRemoteProjectBound,
-  SshRemoteTerminalEnded,
-  SshRemoteTerminalStarted,
-  SshRemoteWorktreeCreated,
-  SshRemoteWorktreeRemoved,
-  SshTargetAttested,
-  SshTargetRegistered,
-  SshTargetRemoved,
-  SshTargetRepinned,
-  SshTargetRuntimeBinarySet,
-} from "@octant/contracts/ssh-target-events";
 import { RemoteAccessProjection } from "./remoteAccessProjection";
 import {
   PRODUCT_FEEDBACK_CAPTURED,
@@ -525,31 +504,6 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(EXTENSION_TOOL_GRANT_EVENT_NAMES.recorded, 1, ExtensionToolGrantRecorded)
     .register(EXTENSION_TOOL_GRANT_EVENT_NAMES.revoked, 1, ExtensionToolGrantRevoked)
     .register(EXTENSION_PROJECT_PIN_EVENT_NAMES.changed, 1, ExtensionProjectPinChanged)
-    .register(SSH_TARGET_EVENT_NAMES.registered, 1, SshTargetRegistered)
-    .register(SSH_TARGET_EVENT_NAMES.repinned, 1, SshTargetRepinned)
-    .register(SSH_TARGET_EVENT_NAMES.attested, 1, SshTargetAttested)
-    .register(SSH_TARGET_EVENT_NAMES.removed, 1, SshTargetRemoved)
-    .register(SSH_TARGET_EVENT_NAMES.runtimeBinarySet, 1, SshTargetRuntimeBinarySet)
-    .register(SSH_REMOTE_PROJECT_EVENT_NAMES.bound, 1, SshRemoteProjectBound)
-    .register(SSH_REMOTE_WORKTREE_EVENT_NAMES.created, 1, SshRemoteWorktreeCreated)
-    .register(SSH_REMOTE_WORKTREE_EVENT_NAMES.removed, 1, SshRemoteWorktreeRemoved)
-    .register(SSH_REMOTE_TERMINAL_EVENT_NAMES.started, 1, SshRemoteTerminalStarted)
-    .register(SSH_REMOTE_TERMINAL_EVENT_NAMES.ended, 1, SshRemoteTerminalEnded)
-    .register(
-      PROVIDER_RUNTIME_EGRESS_EVENT_NAMES.launchStarted,
-      1,
-      ProviderRuntimeEgressLaunchStarted,
-    )
-    .register(
-      PROVIDER_RUNTIME_EGRESS_EVENT_NAMES.decisionsRecorded,
-      1,
-      ProviderRuntimeEgressDecisionsRecorded,
-    )
-    .register(
-      PROVIDER_RUNTIME_EGRESS_EVENT_NAMES.launchSummarized,
-      1,
-      ProviderRuntimeEgressLaunchSummarized,
-    )
     .register(REMOTE_ACCESS_EVENT_NAMES.hostIdentityInitialized, 1, HostIdentityInitializedV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.deviceRegistered, 1, DeviceRegisteredV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.deviceKeyRotated, 1, DeviceKeyRotatedV1)
@@ -659,7 +613,6 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(new ExtensionProjection())
       .register(new ExtensionToolGrantProjection())
       .register(new ExtensionProjectPinProjection())
-      .register(new SshTargetProjection())
       .register(new RemoteAccessProjection())
       .register(new ThreadCheckpointProjection())
       .register(new ProductFeedbackProjection())

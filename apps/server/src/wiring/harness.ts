@@ -63,9 +63,6 @@ import type { IntegrationsWiring } from "./integrations";
 import type { WorkspaceWiring } from "./workspace";
 import type { HarnessStateWiring } from "./harnessState";
 import type { WorkRequestStateWiring } from "./workRequestState";
-import { bindSshRemoteHarness } from "../sshTarget/sshRemoteHarness";
-import { remoteCodeProjectOf } from "../sshTarget/sshRemoteCodeThreads";
-import type { SshTargetsWiring } from "./sshTargets";
 
 export type HarnessDependencies = Pick<ServerStart, "persistence"> &
   Pick<
@@ -85,6 +82,7 @@ export type HarnessDependencies = Pick<ServerStart, "persistence"> &
     | "agentRunOrchestration"
     | "contributeChildTools"
     | "externalContentIngestionStore"
+    | "remoteDelegation"
     | "sideTasks"
     | "threadFollowUpSuggestions"
     | "turnMetrics"
@@ -107,8 +105,7 @@ export type HarnessDependencies = Pick<ServerStart, "persistence"> &
   > &
   Pick<WorkRequestStateWiring, "runningWorkTurnAccess"> &
   Pick<FoundationsWiring, "codeBoardEventStore" | "workThreadProjection" | "workTurnProjection"> &
-  Pick<WorkspaceWiring, "projectService"> &
-  Pick<SshTargetsWiring, "sshTargetConnections" | "sshTargetStore">;
+  Pick<WorkspaceWiring, "projectService">;
 
 export function wireHarness(deps: HarnessDependencies) {
   const {
@@ -129,6 +126,7 @@ export function wireHarness(deps: HarnessDependencies) {
     nativeHarnessLeadFallback,
     nativeHarnessQuestions,
     nativeHarnessRouter,
+    remoteDelegation,
     nativeHarnessRoutingStore,
     nativeHarnessSessions,
     nativeHarnessTranscripts,
@@ -136,8 +134,6 @@ export function wireHarness(deps: HarnessDependencies) {
     providerDataDirectory,
     runningWorkTurnAccess,
     sideTasks,
-    sshTargetConnections,
-    sshTargetStore,
     threadFollowUpSuggestions,
     toolEgressRules,
     turnMetrics,
@@ -521,6 +517,7 @@ export function wireHarness(deps: HarnessDependencies) {
           isTainted: () =>
             readThreadExternalContentTaint(persistence.connection, scope.parentThreadId)
               .externalContentIngested,
+          remote: remoteDelegation,
           router: nativeHarnessRouter,
           sessions: nativeHarnessSessions,
           uuid: randomUUID,
@@ -534,7 +531,6 @@ export function wireHarness(deps: HarnessDependencies) {
       runningWorkTurnAccess,
       readThreadTaint: (threadId) =>
         readThreadExternalContentTaint(persistence.connection, threadId),
-      holdsRemoteCodeBinding: (thread) => remoteCodeProjectOf(sshTargetStore, thread) !== undefined,
     }),
     isHarnessProvider: (providerInstanceId) => {
       const instance = persistence.readProviderInstance(providerInstanceId);
@@ -555,26 +551,6 @@ export function wireHarness(deps: HarnessDependencies) {
           proxiedShell: harnessProxiedShell,
           commandHosts: (threadId: string) => toolEgressRules.commandConfirmationHosts(threadId),
         }),
-    // A remote-bound Project's commands decide their egress on this host, at
-    // a proxy of the same rules a local command's uses; the target only
-    // carries the connections.
-    remoteHarness: (input) =>
-      bindSshRemoteHarness(
-        {
-          connections: sshTargetConnections,
-          ...(harnessEgressEndpoint === undefined
-            ? {}
-            : {
-                egress: {
-                  startLaunch: (launch) => toolEgressRules.startLaunch(launch),
-                  endpoint: harnessEgressEndpoint,
-                  launchId: () => decodeEgressLaunchId(randomUUID()),
-                },
-              }),
-          uuid: randomUUID,
-        },
-        input,
-      ),
     // The posture a command's network follows is the one its turn may use:
     // the window's session grant, clamped to the running turn's posture, so
     // a thread widened mid-turn keeps that turn's commands on `proxied`.

@@ -331,7 +331,7 @@ describe("reconcileCodeRestart", () => {
     ["waiting", "waiting"],
     ["completed", "completed"],
   ] as const)(
-    "interrupts a remote-bound thread's %s turn as target-disconnected, since the restart ended its target's session",
+    "interrupts a %s turn left in a remote folder, since no session can return to it",
     (operationState, workState) => {
       const { connection, journal } = openStore();
       try {
@@ -403,7 +403,7 @@ describe("reconcileCodeRestart", () => {
               state: "interrupted",
               failure: {
                 category: "failed",
-                message: expect.stringContaining("target-disconnected"),
+                message: expect.stringContaining("no longer supported"),
               },
             },
           ]);

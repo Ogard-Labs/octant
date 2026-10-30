@@ -10,10 +10,9 @@ stay as the record of what each track must satisfy.
 The maintainer unlocked the previously parked tracks on 2026-10-26: mobile
 maturity (Android internal builds, redacted push, capture and voice, public
 store distribution), a ciphertext-only hosted relay, a full LSP / extension
-host / debugger companion, Apple physical devices and then TestFlight and App
-Store distribution of a person's own apps, enterprise directory OAuth and
+host / debugger companion, enterprise directory OAuth and
 cloud-IAM provider identity, disposable Linux desktops for headless hosts,
-remote SSH development environments, third-party provider-driver plugins, and
+third-party provider-driver plugins, and
 the EU/GDPR compliance package (pending legal review).
 
 They are authorized post-preview work, not part of the technical preview, and

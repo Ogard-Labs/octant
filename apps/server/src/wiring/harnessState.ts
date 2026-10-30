@@ -51,7 +51,7 @@ export function wireHarnessState(deps: HarnessStateDependencies) {
     clock: () => new Date().toISOString(),
     // Read once, while the store replays at start-up: restart reconciliation
     // has already marked the thread's remote turn interrupted.
-    runsOnSshTarget: (threadId) => {
+    runsInRemoteFolder: (threadId) => {
       const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
       return (
         thread !== undefined &&

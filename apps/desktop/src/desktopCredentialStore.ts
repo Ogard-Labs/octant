@@ -25,8 +25,6 @@ export type DesktopCredentialBackend =
       readonly mcpServerCredentials: CredentialStore;
       /** Cloud desktop providers' API keys, in their own Keychain service. */
       readonly desktopProviderCredentials: CredentialStore;
-      /** The App Store Connect API key, in its own Keychain service; distribution is macOS-only. */
-      readonly appStoreConnectKeys: CredentialStore;
       /** Push credentials of a hub that sends notifications directly, in their own Keychain service. */
       readonly pushPlatformCredentials: CredentialStore;
     }
@@ -44,7 +42,6 @@ export type DesktopCredentialBackend =
       readonly mcpServerCredentials: CredentialStore;
       /** Cloud desktop providers' API keys, under their own attribute. */
       readonly desktopProviderCredentials: CredentialStore;
-      readonly appStoreConnectKeys?: undefined;
       /** Push credentials of a hub that sends notifications directly, under their own attribute. */
       readonly pushPlatformCredentials: CredentialStore;
     }
@@ -57,7 +54,6 @@ export type DesktopCredentialBackend =
       readonly canvasPublicShareSecrets?: undefined;
       readonly mcpServerCredentials?: undefined;
       readonly desktopProviderCredentials?: undefined;
-      readonly appStoreConnectKeys?: undefined;
       readonly pushPlatformCredentials?: undefined;
     }
   | {
@@ -69,7 +65,6 @@ export type DesktopCredentialBackend =
       readonly canvasPublicShareSecrets?: undefined;
       readonly mcpServerCredentials?: undefined;
       readonly desktopProviderCredentials?: undefined;
-      readonly appStoreConnectKeys?: undefined;
       readonly pushPlatformCredentials?: undefined;
     };
 
@@ -114,10 +109,6 @@ export async function resolveDesktopCredentialBackend(options: {
       desktopProviderCredentials: makeKeychainCredentialStore(options.keychainHelperPath, {
         storeScope: options.storeScope,
         namespace: "desktop-provider-credential",
-      }),
-      appStoreConnectKeys: makeKeychainCredentialStore(options.keychainHelperPath, {
-        storeScope: options.storeScope,
-        namespace: "app-store-connect-key",
       }),
       pushPlatformCredentials: makeKeychainCredentialStore(options.keychainHelperPath, {
         storeScope: options.storeScope,
