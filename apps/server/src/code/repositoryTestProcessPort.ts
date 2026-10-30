@@ -210,8 +210,7 @@ export interface RepositoryTestProcessInput {
   readonly isolatedRoots?: ReadonlyArray<string>;
   /**
    * Each chunk of stdout and stderr as it arrives, on top of the result's
-   * bounded capture. A physical device's console session is the caller: it
-   * runs as long as the app does, and its output is read while it runs.
+   * bounded capture, for a caller that reads output while the command runs.
    */
   readonly onOutput?: (chunk: Uint8Array) => void;
 }

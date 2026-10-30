@@ -226,14 +226,6 @@ const facts = {
       cursor: 4,
       event: { kind: "approval-requested", approvalId },
     } satisfies Shape<CodeOperationEventFrame>),
-  // A device lease or action only a person at a window on the host answers.
-  codeLocalOnlyApproval: (approvalId: string, summary: string) =>
-    committed("code.operation-event-recorded@1", {
-      threadId: codeThread,
-      operationId: "e1000000-0000-4000-8000-000000000001",
-      cursor: 6,
-      event: { kind: "approval-requested", approvalId, summary, localPersonOnly: true },
-    } satisfies Shape<CodeOperationEventFrame>),
   codeQuestion: (requestId: string) =>
     committed("code.operation-event-recorded@1", {
       threadId: codeThread,
@@ -375,84 +367,6 @@ describe("ordinary-thread notifications", () => {
       "waiting",
     ]);
     expect(transport?.sent).toHaveLength(4);
-  });
-
-  it("tells the phone an approval only the computer can answer is waiting there, and still asks for one it can answer", async () => {
-    const { register, service, transport, open, receipts } = host();
-    register(phone);
-    register(tablet, { ...allKinds, threadTitles: true });
-    service.onCommittedAppend(facts.codeApproval());
-    service.onCommittedAppend(
-      facts.codeLocalOnlyApproval(
-        "e2000000-0000-4000-8000-000000000003",
-        "Let this thread use Henrik's iPhone?",
-      ),
-    );
-    await vi.waitFor(() => expect(receipts()).toHaveLength(4));
-
-    const shown = (transport?.sent ?? []).map((send) => {
-      const deviceId = send.destination.deviceId === phone ? phone : tablet;
-      const { kind, title, body } = open(send.envelope, deviceId);
-      return { deviceId, urgency: send.envelope.urgency, kind, title, body };
-    });
-    expect(shown).toEqual([
-      {
-        deviceId: phone,
-        urgency: "high",
-        kind: "approval-needed",
-        title: "Approval needed",
-        body: "On Studio Mac",
-      },
-      {
-        deviceId: tablet,
-        urgency: "high",
-        kind: "approval-needed",
-        title: "Approval needed: Fix the release build",
-        body: "On Studio Mac",
-      },
-      // Sealed as a wait, not an ask, so the phone offers nothing to answer.
-      {
-        deviceId: phone,
-        urgency: "high",
-        kind: "waiting",
-        title: "Waiting for you at Studio Mac",
-        body: "Only an Octant window on that computer can answer",
-      },
-      {
-        deviceId: tablet,
-        urgency: "high",
-        kind: "waiting",
-        title: "Waiting for you at Studio Mac: Fix the release build",
-        body: "Only an Octant window on that computer can answer",
-      },
-    ]);
-    // The rule comes from the host's mark, never the approval's wording.
-    for (const send of transport?.sent ?? []) {
-      const content = JSON.stringify(
-        open(send.envelope, send.destination.deviceId === phone ? phone : tablet),
-      );
-      expect(content).not.toContain("iPhone");
-    }
-    // The person asked to hear about approvals, and this is one: the phone's
-    // approval preference governs it, and its receipt keeps the kind observed.
-    expect(receipts().map((receipt) => receipt.kind)).toEqual([
-      "approval-needed",
-      "approval-needed",
-      "approval-needed",
-      "approval-needed",
-    ]);
-  });
-
-  it("holds a local-only approval back from a phone that turned approvals off, even with waiting on", async () => {
-    const { register, service, transport, receipts } = host();
-    register(phone, { ...allKinds, approvalNeeded: false });
-    register(tablet, { ...allKinds, waiting: false });
-    service.onCommittedAppend(
-      facts.codeLocalOnlyApproval("e2000000-0000-4000-8000-000000000004", "Launch the app?"),
-    );
-    await vi.waitFor(() => expect(receipts()).toHaveLength(1));
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(transport?.sent.map((send) => send.destination.deviceId)).toEqual([tablet]);
   });
 
   it("holds back a device's notifications past the rate limit and journals each one it held", async () => {

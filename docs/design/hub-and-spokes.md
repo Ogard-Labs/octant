@@ -40,15 +40,20 @@ records; the owner panel reads each spoke's alerts from that spoke's origin, and
 acting on one still happens on that spoke's own page, where its passkey is. The
 browser flow is tested with a faked authenticator and has not been run against a
 real hub or a real Tailscale certificate. Nothing here has been run on a real phone, a real
-passkey, or Android. Sign-in copy, posture routes, and a Mac Touch ID unlock key
-are not built. The wake service is built (the hub's own
+passkey, or Android. An owner device's one unlock covers five minutes of
+administration (the host keeps the session in memory), copies an API-key
+sign-in between two spokes, reads a Code posture, and applies or dismisses a
+provisioning proposal, read narrowly as slice 5 and slice 10 record; a host
+changes no posture for an owner device yet, and a Mac Touch ID unlock key is not
+built. The wake service is built (the hub's own
 switch, spokes reporting opaque routine times, the Wake-on-LAN packet and signed
 nudge, standbys holding the times), read narrowly as the last item of slice 8
 records; it has run only between hosts on loopback with a fake socket, and a real
 Wake-on-LAN wake of a sleeping Mac has not been tried. Delegation is
 built for Work Projects, read narrowly as the last item of the delivery plan's
 slice 6 records. Failover is built (a named standby, member switching, stand-in,
-step-down with merge-back, and promotion), read narrowly as the last item of
+step-down with merge-back, and promotion, which spokes that ticked Standby
+follow without a person), read narrowly as the last item of
 slice 7 records; it has run only between hosts on loopback, with the hub
 stopped by blocking its address, never on a real network or after a real
 reboot. Push through the hub is built (the hub's own switch, a spoke handing it
@@ -60,8 +65,8 @@ phone, and it never sends to Apple or Google itself. Provisioning is built (the
 hub's own switch, offers as data, proposals the spoke's person applies or
 dismisses, and applying on arrival for three kinds), read narrowly as the last
 item of slice 10 records; it has run only between hosts on loopback with fake
-services behind each kind, and a routine proposal cannot be applied on a real
-host yet. After this slice every delivery-plan slice is built. What remains is
+services behind each kind, though a real host now builds a routine offer and
+checks a mirrored feed against the shared release keys. After this slice every delivery-plan slice is built. What remains is
 the maintainer's: the live checks the slices name (a real Wake-on-LAN wake, a
 delivery to a real phone, a phone, passkey, and Touch ID run, a failover on a
 real network, a browser against a real hub), Windows, and the post-preview
@@ -474,11 +479,20 @@ from their phone or laptop what they could do sitting at any of them. An
 - **One unlock, one action, 60 seconds.** The host's challenge names the
   owner, the method, the path, and the hash of the request body, ends 60
   seconds after the host issued it, and is forgotten once any request answers
-  it, whether or not that request succeeds. This build asks for a new unlock
-  for every change; the five-minute reuse for administration screens in
-  [decision H17](#decisions) is not built. Rationale: a signature that names
+  it, whether or not that request succeeds. Rationale: a signature that names
   its action cannot be replayed for another, and a client that never keeps an
   unlock open has nothing to leak.
+- **An administration session, five minutes.** An owner device may spend one
+  such unlock on a session for the administration scope
+  ([decision H17](#decisions)). The host answers with a secret id, keeps it in
+  memory only (a restart ends it), and binds it to that owner device and to the
+  owner list as it stood; the device presents it beside its signed requests for
+  actions of the administration class. It ends five minutes after it opened,
+  when anything is added to or removed from the host's owner list, and when the
+  device is revoked or no longer listed. Full access, merge, a sign-in copy, an
+  owner change, leaving the hub, and opening a session each need their own
+  challenge and are refused with `own-unlock-required` when a session is all
+  that is presented.
 - **Alerts live on spokes.** Each spoke compares a newer roster with the one it
   held and keeps an alert for every member added, whatever Confirm new members
   says. An owner device reads them from the spoke it concerns; the hub holds no
@@ -756,7 +770,9 @@ are and how to reach them.
 - **Replacing the hub for good.** Promoting a standby to hub permanently, for
   example after the Mac mini dies, is a local action on the standby that the
   person confirms, followed by each spoke accepting the new hub
-  ([decision H11](#decisions)).
+  ([decision H11](#decisions)): a spoke that ticked Standby takes it after the old
+  hub has been silent for the failover time, and any other spoke accepts it in
+  its own window.
 
 Rationale: the hub holds little authority (a roster, wake times, and a send
 path), so a short-lived second hub costs little, and failover needs no
@@ -981,6 +997,48 @@ maintainer's hardware, or names the maintainer gate.
    every owner device is recovered from a spoke's window or the hub's shell.
    Verification: server permission negatives and a two-host smoke with a
    software authenticator; phone and Touch ID runs are maintainer gates.
+
+   The five-minute session, the posture routes, and the API-key copy are built,
+   with these narrower readings:
+   - **Administration is a short list.** A session covers dismissing or removing
+     from an alert, changing the hub grant, Confirm new members, a join code
+     without the owner mark, the hub role, Remove, reading a posture, any
+     posture change but Full access, and applying or dismissing an offer. Opening a
+     session, adding or removing an owner, confirming a member, leaving the hub,
+     an owner join code, Full access, and a sign-in copy are the own-unlock
+     class, stricter than the decision's list names (confirming and leaving are
+     placed there because each is a one-way membership act).
+   - **A session is checked against the owner list, not a clock alone.** The host
+     compares a counter of owner-list changes (kept in memory, raised on every
+     add and remove) with the one the session opened against, so a window that
+     removes a device and lists it again ends the session too.
+   - **Postures are a Code Project's and a Code thread's.** A Project's posture is
+     whether it remembers Full access for its threads; Work asks first and has
+     none. Reading one asks for an unlock or an open session, which is stricter
+     than reading an alert. The route accepts a change, holds Full access to its
+     own unlock, and journals it with the owner device, but the host as it runs
+     today answers every change `unsupported`: the Code service's Full access
+     confirmation is bound to a local window, and a window-free path for an owner
+     device is not built. The routes are proved against a fake host.
+   - **A sign-in copy is two unlocks on two hosts.** Each host keeps its own owner
+     list, so the owner device unlocks on the receiving host first, which makes
+     a one-time ticket (two minutes) naming the sending host and the receiving
+     host's own provider row, then on the sending host, which reads the key from
+     its own provider row and hands it over the pinned link against that ticket.
+     Provider rows get a fresh id on every host, so the owner names the row on
+     each side and the ticket, not the sender, decides where the key lands. It
+     runs between spokes only: the hub is neither source nor target. Only an API
+     key or bearer token on a provider row is copied; the receiving host never
+     replaces a key already stored (two copies redeemed together store once, and
+     the second is answered `already-stored`), a pool of several keys is refused,
+     and a subscription sign-in is refused as `subscription-sign-in`.
+     Both hosts journal the names and the owner device, never the value, and the
+     key is never returned to the owner device. The hub's view of copies and
+     Remove everywhere are not built.
+   - **No window for these yet.** The server routes and the client-runtime calls
+     (`openSession`, `readPosture`, `changePosture`, `copyApiKeySignIn`) are built;
+     the Settings rows and the phone screens that call them are not.
+
 6. **Delegation.** Remote child runs from A to B with the peer grant, `peer:A`
    principal, approvals on B, results as data, and cancel. Acceptance: B
    refuses a request outside the grant or above approval-gated Code; an
@@ -1052,12 +1110,24 @@ maintainer's hardware, or names the maintainer gate.
      (`handback-invalid`, journaled as `stand-in-refused`) if it removes the hub, a
      standby, or the sender, or adds anything but a spoke: the hub signs the merge,
      so it must not carry a change members refuse from a standby.
-   - **Promotion changes no spoke by itself.** A named standby, on the person's
-     confirmation in its own window or `octant hub promote --confirm`, becomes the
-     hub, clears the standby order, drops the old hub from the roster, and signs
-     with its own roster key. Every spoke, including those that ticked Standby,
-     accepts it in its own window (`octant hub accept-hub`): H11's automatic
-     following for spokes that ticked Standby is not built. The new hub trusts
+   - **Promotion is followed by spokes that ticked Standby, and awaited by the
+     rest.** A named standby, on the person's confirmation in its own window or
+     `octant hub promote --confirm`, becomes the hub, clears the standby order,
+     drops the old hub from the roster, and signs with its own roster key. A
+     spoke whose hub grant ticks Standby takes it without a person
+     (`decideHubFollow`) only if it also ticks Roster, and only on its own failover look: the old hub must have
+     been silent for the whole failover time (so a promotion while the old hub is
+     reachable waits for the person, as a standby-signed roster does), the signer
+     must be a standby the last hub-signed roster named, with the key that roster
+     fingerprints, answering as hub with a signature that verifies against its
+     roster key, and the roster must list the spoke and move the sequence
+     forward. The spoke's grant, peer grants, and owners carry over untouched, and
+     the journal records `new-hub-accepted` under the new hub with the reason
+     `standby-granted-hub-silent`. A refusal changes nothing. Every other spoke
+     accepts the new hub in its own window (`octant hub accept-hub`); none shows a
+     pending notice, and a spoke that is off or asleep during the look follows or
+     waits on a later one. A standby that is itself standing in when another is
+     promoted does not follow. The new hub trusts
      the key a member presents when its fingerprint matches the roster. Guests the
      standby admitted as a spoke are revoked, and guests join the new hub again.
    - **Where the person reaches it.** The hub's Settings section sets the
@@ -1225,9 +1295,12 @@ maintainer's hardware, or names the maintainer gate.
     - **The spoke refuses what it cannot apply.** A kind with no service behind it
       on that host is refused on arrival (`kind-unsupported`). Proposals lapse after
       a week and a spoke holds at most 32; unticking Provision drops them.
-    - **Applying is the window's.** Apply and Dismiss are loopback administration
-      routes, so a remote device, the hub, a peer, and an owner device never apply;
-      an owner device applying is not built. Each kind goes through the service a
+    - **Applying is the window's, or an owner device's after an unlock.** Apply and
+      Dismiss are loopback administration routes, so a remote device, the hub, and
+      a peer never apply. An owner device on this spoke's owner list does, with a
+      fresh unlock or an open administration session, through the same apply path
+      and journaled with `owner-unlock` as the principal; it has no Settings row
+      or phone screen yet. Each kind goes through the service a
       person would use: the plugin service's inspect then install (nothing trusts
       or enables it), the profile service, the provider service (the row is made
       switched off, with authentication that wants a key the person adds), and the
@@ -1236,22 +1309,31 @@ maintainer's hardware, or names the maintainer gate.
     - **Narrower than the grant text.** A profile that asks for Full access or a
       remembered permission is refused, because only a person on the spoke chooses
       those. The candidate channel is followed on an offer only by a spoke already
-      on it. The update-feed mirror's signature is checked with the release keys the
-      host holds; a host with none refuses a mirrored offer. The server wiring holds
-      no release keys yet (they are compiled into the desktop app), so a real host
-      refuses mirrored offers until the desktop hands them over. The verified feed
-      is kept as the document the hub served; the desktop updater does not read it.
+      on it. The update-feed mirror's signature is checked with the release public
+      keys; a host with none refuses a mirrored offer. The server reads them from
+      `@octant/host-runtime`, the same check the desktop updater runs, so a headless
+      hub verifies a mirrored feed too, and a feed whose signature fails is refused.
+      The desktop keeps its own copy of the key literals because the release
+      tooling rewrites them there; a desktop test requires the two lists to agree.
+      The verified feed is kept as the document the hub served; the desktop updater
+      does not read it.
     - **Endpoint rows ask (the H5 reading).** H5 lists three kinds that may apply
       on arrival: an update channel, an untrusted plugin install, and a profile
       without secrets. An endpoint row is not among them, so it always asks, as a
       routine does; the request that sets applying on arrival names only the three.
-    - **A routine needs a Project and a builder.** A routine offer names no
-      Project, host, profile, or authority. The person binds it to a Project when
-      applying it (`octant hub apply <id> --project <id>`; Settings points to that).
-      Building the definition needs the editor's receipts, which only a window
-      builds today, so the host's service for the kind refuses it
-      (`kind-unsupported`) until that builder moves to the server. The apply path is
-      proven with a fake service that records the principal.
+    - **A routine needs a Project.** A routine offer names no Project, host,
+      profile, or authority. The person binds it to a Project when applying it
+      (`octant hub apply <id> --project <id>`; Settings points to that). The server
+      builds the definition itself and creates it through the Automation command
+      service a window uses. It reads narrowly: only an active Work Project binds
+      (a Code routine needs a checkout only a window prepares, so it is refused as
+      `kind-unsupported`); the profile is the first approval-gated one compatible
+      with Work, and the model is Work's own default, so a host with neither refuses
+      (`apply-failed`) rather than widen anything; authority is Work's, with no
+      shell or Git; and the routine is journaled paused from its first event (one create
+      command with a paused initial state, never a create then a pause), so it runs
+      only after the person resumes it in Automation Center. It is recorded under the host's own
+      scope, never the hub's. The receipt derivations repeat the editor's.
     - **Journal.** Offers made and withdrawn, proposals received, applied (the
       principal and whether a person or the standing choice did it), dismissed, and
       refused, each with a reason word and never an offer's text. Applying on arrival

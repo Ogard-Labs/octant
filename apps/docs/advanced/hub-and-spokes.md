@@ -409,8 +409,10 @@ computer decides for itself.
 **If the hub is lost for good.** On the standby's own window, choose **Make this
 computer the hub…** under **Join a hub**, and confirm. Or run
 `octant hub promote --confirm` on it. The old hub leaves the list and the
-standby order is cleared. Nothing follows by itself: on each other computer,
-run `octant hub accept-hub <name of the new hub>` in its own window. A computer
+standby order is cleared. A computer where you ticked **Standby** follows the new
+hub by itself once the old hub has been out of reach for the failover time, and
+keeps exactly the permissions it gave the old hub. On each other computer, run
+`octant hub accept-hub <name of the new hub>` in its own window. A computer
 asks the new hub over the connection it already trusted for that standby, and
 accepts it only if it answers as that standby with a list that includes the
 computer. Phones that joined as guests join the new hub again with a new code.
@@ -570,7 +572,10 @@ holds at most 32.
   from the endpoint's own page.
 - **Routine.** It waits for you, always. You choose its Project, and it is made by
   this computer under its own limits, as a routine you wrote would be. Apply it
-  with `octant hub apply <offer-id> --project <project-id>`.
+  with `octant hub apply <offer-id> --project <project-id>`. It must be a Work
+  Project. The routine is made paused, with approval-gated Work authority and
+  Work's default model, so it does nothing until you resume it in Automation
+  Center. A Code routine is not accepted yet.
 
 **Apply on arrival (a spoke).** Each of these is off until you turn it on:
 update channel, plugin install (untrusted and off), and agent profile. Turn them

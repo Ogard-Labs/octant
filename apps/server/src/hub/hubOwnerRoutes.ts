@@ -5,37 +5,57 @@
 // private listener: the owner's host identity key signs the request, and a
 // fresh unlock from the owner's unlock key signs a host challenge bound to this
 // exact method, path, and body. The host checks its own owner list, the hub
-// grant's Owners item, and the unlock before any side effect. The hub, a
+// grant's Owners item, and the unlock before any side effect. An unlock is a
+// fresh challenge for one action, or an open administration session (five
+// minutes, decision H17) for the actions that class allows; Full access, a
+// credential copy, an owner change, and opening a session each need their own
+// challenge. The hub, a
 // standby, a peer, and anything that is not on the owner list are refused; an
 // agent or a routine holds no member key and reaches only the product routes.
 
+import { createHash } from "node:crypto";
 import {
   OWNER_IDENTITY_KEY_HEADER,
+  OWNER_SESSION_HEADER,
   OWNER_UNLOCK_HEADER,
   decodeConfirmNewMembersRequest,
   decodeHubGrant,
+  decodeHubProposalDecisionRequest,
   decodeHubRoleRequest,
   decodeNewMemberConfirmation,
   decodeOwnerAdditionRequest,
   decodeOwnerAlertRequest,
   decodeOwnerChallengeRequest,
+  decodeOwnerCredentialCopyRequest,
+  decodeOwnerCredentialReceiveRequest,
   decodeOwnerJoinCodeRequest,
   decodeOwnerMemberRequest,
+  decodeOwnerPostureChangeRequest,
+  decodeOwnerPostureReadRequest,
   decodeOwnerRemovalRequest,
   decodeOwnerUnlockProof,
   type AuditActingPrincipal,
   type HubGrant,
   type HubMemberId,
+  type HubMembershipChangedPayload,
   type OwnerUnlockProof,
 } from "@octant/contracts";
-import { authorizeOwnerRequest, type OwnerRequestAuthorization } from "@octant/domain";
+import {
+  authorizeOwnerRequest,
+  ownerPostureUnlockClass,
+  type OwnerRequestAuthorization,
+  type OwnerUnlockClass,
+} from "@octant/domain";
 import { publicKeyFingerprint } from "./hubCrypto";
 import { HUB_LINK_HEADER, HubLinkVerifier } from "./hubLink";
 import type { HubService } from "./hubService";
 import type { HostOwnerRecord } from "./hubStateStore";
+import type { OwnerCredentialCopyService } from "./ownerCredentialCopy";
+import type { OwnerPostureHost } from "./ownerPostureHost";
 import { ownerEntries } from "./ownerRecords";
-import type { OwnerUnlockService } from "./ownerUnlock";
+import type { OwnerSessionCheck, OwnerUnlockService, OwnerUnlockVerification } from "./ownerUnlock";
 import type { SpokeLinkService } from "./spokeLinkService";
+import type { SpokeProvisionService } from "./spokeProvisionService";
 
 export const HUB_OWNER_ROUTE_PREFIX = "/api/hub/owner";
 
@@ -54,6 +74,13 @@ export const HUB_OWNER_ROUTES = {
   hubRole: `${HUB_OWNER_ROUTE_PREFIX}/hub-role`,
   joinCode: `${HUB_OWNER_ROUTE_PREFIX}/join-codes`,
   removeMember: `${HUB_OWNER_ROUTE_PREFIX}/members/remove`,
+  session: `${HUB_OWNER_ROUTE_PREFIX}/session`,
+  postureRead: `${HUB_OWNER_ROUTE_PREFIX}/posture/read`,
+  postureChange: `${HUB_OWNER_ROUTE_PREFIX}/posture/change`,
+  credentialReceive: `${HUB_OWNER_ROUTE_PREFIX}/credentials/receive`,
+  credentialCopy: `${HUB_OWNER_ROUTE_PREFIX}/credentials/copy`,
+  provisionApply: `${HUB_OWNER_ROUTE_PREFIX}/provision/apply`,
+  provisionDismiss: `${HUB_OWNER_ROUTE_PREFIX}/provision/dismiss`,
 } as const;
 
 type OwnerRoute = (typeof HUB_OWNER_ROUTES)[keyof typeof HUB_OWNER_ROUTES];
@@ -80,9 +107,52 @@ const HUB_ONLY: ReadonlySet<string> = new Set([
 ]);
 const EITHER: ReadonlySet<string> = new Set([
   HUB_OWNER_ROUTES.challenge,
+  HUB_OWNER_ROUTES.session,
   HUB_OWNER_ROUTES.ownersAdd,
   HUB_OWNER_ROUTES.ownersRemove,
 ]);
+
+/**
+ * The actions that always need their own fresh challenge, whatever session is
+ * open (decision H17): opening a session, owner changes, copying a sign-in, and
+ * the actions that change who may be an owner or leave the hub. Full access is
+ * decided by the posture asked for; an owner join code by its body.
+ */
+const OWN_UNLOCK_ROUTES: ReadonlySet<string> = new Set([
+  HUB_OWNER_ROUTES.session,
+  HUB_OWNER_ROUTES.ownersAdd,
+  HUB_OWNER_ROUTES.ownersRemove,
+  HUB_OWNER_ROUTES.confirmMember,
+  HUB_OWNER_ROUTES.leave,
+  HUB_OWNER_ROUTES.credentialReceive,
+  HUB_OWNER_ROUTES.credentialCopy,
+]);
+
+/** Which unlock this action asks for. A body that does not decode asks for the strictest. */
+function unlockClassFor(route: string, body: string): OwnerUnlockClass {
+  if (OWN_UNLOCK_ROUTES.has(route)) return "own";
+  try {
+    if (route === HUB_OWNER_ROUTES.joinCode) {
+      return decodeOwnerJoinCodeRequest(JSON.parse(body)).owner ? "own" : "administration";
+    }
+    if (route === HUB_OWNER_ROUTES.postureChange) {
+      return ownerPostureUnlockClass(decodeOwnerPostureChangeRequest(JSON.parse(body)).posture);
+    }
+  } catch {
+    return "own";
+  }
+  return "administration";
+}
+
+/** Identifies the owner list and each owner's unlock key, so a session ends when either changes. */
+function ownerListStamp(scope: OwnerScope): string {
+  const entries = scope.owners
+    .map((entry) => `${String(entry.memberId)}:${entry.unlockPublicKey}`)
+    .sort();
+  return createHash("sha256")
+    .update(`${scope.host}\n${scope.ownerListRevision}\n${entries.join("\n")}`, "utf8")
+    .digest("hex");
+}
 
 const MAX_BODY_BYTES = 16 * 1_024;
 const NO_STORE = { "cache-control": "no-store" } as const;
@@ -91,6 +161,10 @@ export interface HubOwnerRouteOptions {
   readonly hub: HubService;
   readonly spoke: SpokeLinkService;
   readonly unlock: OwnerUnlockService;
+  readonly postures: OwnerPostureHost;
+  readonly credentials: OwnerCredentialCopyService;
+  readonly provision: SpokeProvisionService;
+  readonly record: (change: HubMembershipChangedPayload) => void;
   readonly now?: () => number;
 }
 
@@ -100,6 +174,7 @@ interface OwnerScope {
   readonly owners: ReadonlyArray<HostOwnerRecord>;
   readonly grant: HubGrant | undefined;
   readonly inactiveDeviceMemberIds: ReadonlyArray<string>;
+  readonly ownerListRevision: number;
 }
 
 type Refusal = { readonly status: number; readonly kind: string };
@@ -135,6 +210,7 @@ export function createHubOwnerRouteHandler(
             owners: hub.owners,
             grant: undefined,
             inactiveDeviceMemberIds: hub.inactiveDeviceMemberIds,
+            ownerListRevision: hub.ownerListRevision,
           };
     const spokeScope: OwnerScope | undefined =
       spoke === undefined
@@ -145,6 +221,7 @@ export function createHubOwnerRouteHandler(
             owners: spoke.owners,
             grant: spoke.grant,
             inactiveDeviceMemberIds: spoke.inactiveDeviceMemberIds,
+            ownerListRevision: spoke.ownerListRevision,
           };
     if (HUB_ONLY.has(route)) {
       return hubScope ?? { status: 403, kind: "hub-role-off" };
@@ -198,21 +275,39 @@ export function createHubOwnerRouteHandler(
     if (senderMember === undefined || presentedKey === null) return refused(401, "unknown-sender");
     // Revoking a member's paired device on this host ends its owner powers here,
     // even while its owner entry and roster entry remain.
-    if (scope.inactiveDeviceMemberIds.includes(senderId)) return refused(403, "device-revoked");
+    if (scope.inactiveDeviceMemberIds.includes(senderId)) {
+      options.unlock.revokeOwner(senderId);
+      return refused(403, "device-revoked");
+    }
+    // A device that is no longer on the owner list holds no session either.
+    if (owner === undefined) options.unlock.revokeOwner(senderId);
 
     // The unlock is checked here, before anything else is decided, because it
-    // consumes the challenge whatever happens next.
+    // consumes the challenge whatever happens next. A request that carries a
+    // challenge answer is judged by it alone; one that carries only a session
+    // id is covered only if its action is an administration one.
     const needsUnlock = UNLOCKED_ROUTES.has(route);
+    const unlockClass = needsUnlock ? unlockClassFor(route, body) : "own";
     const proof = readUnlockProof(request);
-    const unlockResult =
-      !needsUnlock || owner === undefined || proof === undefined
-        ? undefined
-        : options.unlock.verify({
-            ownerMemberId: senderId,
-            unlockPublicKey: owner.unlockPublicKey,
-            proof,
-            request: { method: request.method, path: route, body },
-          });
+    const sessionId = request.headers.get(OWNER_SESSION_HEADER);
+    let unlockResult: OwnerUnlockVerification | undefined;
+    let sessionResult: OwnerSessionCheck | undefined;
+    if (needsUnlock && owner !== undefined) {
+      if (proof !== undefined) {
+        unlockResult = options.unlock.verify({
+          ownerMemberId: senderId,
+          unlockPublicKey: owner.unlockPublicKey,
+          proof,
+          request: { method: request.method, path: route, body },
+        });
+      } else if (sessionId !== null) {
+        sessionResult = options.unlock.checkSession({
+          sessionId,
+          ownerMemberId: senderId,
+          ownerListStamp: ownerListStamp(scope),
+        });
+      }
+    }
 
     const decision: OwnerRequestAuthorization = authorizeOwnerRequest({
       host: scope.host,
@@ -221,16 +316,22 @@ export function createHubOwnerRouteHandler(
       roster: scope.roster,
       memberId: senderMember.memberId,
       identityKeyFingerprint: publicKeyFingerprint(presentedKey),
-      unlock: !needsUnlock ? "not-needed" : unlockResult?.status === "fresh" ? "fresh" : "absent",
+      unlock: !needsUnlock
+        ? "not-needed"
+        : unlockResult?.status === "fresh"
+          ? "fresh"
+          : sessionResult?.status === "open"
+            ? "session"
+            : "absent",
+      unlockClass,
     });
     if (decision.status === "refused") {
       // An unlock that failed is more useful to report than the missing one it left behind.
-      if (
-        decision.kind === "unlock-required" &&
-        unlockResult !== undefined &&
-        unlockResult.status === "refused"
-      ) {
+      if (decision.kind === "unlock-required" && unlockResult?.status === "refused") {
         return refused(403, `unlock-${unlockResult.kind}`);
+      }
+      if (decision.kind === "unlock-required" && sessionResult?.status === "refused") {
+        return refused(403, sessionResult.kind);
       }
       return refused(403, decision.kind);
     }
@@ -340,6 +441,66 @@ export function createHubOwnerRouteHandler(
             { memberId: String(decodeOwnerMemberRequest(json()).memberId) },
             principal,
           ),
+        );
+      case HUB_OWNER_ROUTES.session: {
+        empty();
+        const session = options.unlock.openSession({
+          ownerMemberId: String(input.senderMemberId),
+          ownerListStamp: ownerListStamp(scope),
+        });
+        if (session === undefined) return refused(429, "too-many-sessions");
+        options.record({
+          change: "owner-session-opened",
+          actingPrincipal: principal,
+          memberId: input.senderMemberId,
+        });
+        return Response.json({ status: "opened", session }, { headers: NO_STORE });
+      }
+      case HUB_OWNER_ROUTES.postureRead:
+        return outcome(await options.postures.read(decodeOwnerPostureReadRequest(json()).subject));
+      case HUB_OWNER_ROUTES.postureChange: {
+        const change = decodeOwnerPostureChangeRequest(json());
+        const result = await options.postures.change(change);
+        if (result.status === "changed") {
+          options.record({
+            change: "owner-posture-changed",
+            actingPrincipal: principal,
+            memberId: input.senderMemberId,
+            posture: change.posture,
+          });
+        }
+        return outcome(result);
+      }
+      case HUB_OWNER_ROUTES.credentialReceive: {
+        const asked = decodeOwnerCredentialReceiveRequest(json());
+        return outcome(
+          options.credentials.issueTicket({
+            ownerMemberId: String(input.senderMemberId),
+            sourceMemberId: String(asked.sourceMemberId),
+            targetCredentialName: asked.targetCredentialName,
+            principal,
+          }),
+        );
+      }
+      case HUB_OWNER_ROUTES.credentialCopy: {
+        const asked = decodeOwnerCredentialCopyRequest(json());
+        const result = await options.credentials.send({
+          targetMemberId: String(asked.targetMemberId),
+          sourceCredentialName: asked.sourceCredentialName,
+          ticketId: asked.ticketId,
+          principal,
+        });
+        return outcome(result.status === "ok" ? { status: "copied" } : result);
+      }
+      case HUB_OWNER_ROUTES.provisionApply: {
+        const decided = decodeHubProposalDecisionRequest(json());
+        return outcome(
+          await options.provision.apply(decided.offerId, principal, decided.projectId),
+        );
+      }
+      case HUB_OWNER_ROUTES.provisionDismiss:
+        return outcome(
+          options.provision.dismiss(decodeHubProposalDecisionRequest(json()).offerId, principal),
         );
     }
   }

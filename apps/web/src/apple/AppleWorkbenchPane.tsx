@@ -8,7 +8,6 @@ import type {
   AppleSimulatorRecord,
 } from "@octant/contracts/apple-toolchain";
 import type { AppleSimulatorLiveFrame } from "@octant/domain";
-import type { ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { AppleSimulatorLiveFrameView } from "./AppleSimulatorLiveFrame";
 import type { AppleSimulatorLiveScreen } from "./useAppleSimulatorLiveScreen";
@@ -121,11 +120,6 @@ export interface AppleWorkbenchPaneProps {
   /** The person turned the live view off in the device pane. */
   readonly liveViewStopped?: boolean;
   readonly onLiveView?: (next: "stop" | "reconnect") => void;
-  /**
-   * The paired iPhones and iPads, after the Simulators. They have their own
-   * discovery, so they show even when the Simulator side could not load.
-   */
-  readonly physicalDevices?: ReactNode;
 }
 
 export function AppleWorkbenchPane(props: AppleWorkbenchPaneProps) {
@@ -135,7 +129,6 @@ export function AppleWorkbenchPane(props: AppleWorkbenchPaneProps) {
     return (
       <AppleWorkbenchState
         status="waiting"
-        physicalDevices={props.physicalDevices}
         {...(props.liveFrame === undefined ? {} : { liveFrame: props.liveFrame })}
         {...(props.screenUrl === undefined ? {} : { screenUrl: props.screenUrl })}
         {...(props.liveScreen === undefined ? {} : { liveScreen: props.liveScreen })}
@@ -179,7 +172,6 @@ export function AppleWorkbenchPane(props: AppleWorkbenchPaneProps) {
         simulators={props.discovery.simulators}
         {...(props.needsAllowInput === true ? { needsAllowInput: true } : {})}
       />
-      {props.physicalDevices}
       <ProgressList
         busy={props.busy === true}
         {...(props.onCancel === undefined ? {} : { onCancel: props.onCancel })}
@@ -255,13 +247,7 @@ function LiveFrame(
 function AppleWorkbenchState(
   props: Pick<
     AppleWorkbenchPaneProps,
-    | "status"
-    | "errorMessage"
-    | "onRetry"
-    | "liveFrame"
-    | "screenUrl"
-    | "liveScreen"
-    | "physicalDevices"
+    "status" | "errorMessage" | "onRetry" | "liveFrame" | "screenUrl" | "liveScreen"
   >,
 ) {
   const presentation = {
@@ -300,7 +286,6 @@ function AppleWorkbenchState(
           Retry
         </OctantButton>
       )}
-      {props.physicalDevices}
     </section>
   );
 }

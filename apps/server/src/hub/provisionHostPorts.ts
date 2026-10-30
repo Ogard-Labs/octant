@@ -20,6 +20,7 @@ import {
 import { Schema } from "effect";
 import type { AgentProfileServiceApi } from "../agentProfileService";
 import type { ProviderServiceApi } from "../providers/providerService";
+import { createRoutineOfferAuthor, type RoutineOfferDependencies } from "./routineOfferBuilder";
 import type { ApplyOutcome, ProvisionHostPorts } from "./spokeProvisionService";
 
 const decodeWindowId = Schema.decodeUnknownSync(WindowId);
@@ -43,6 +44,7 @@ export interface ProvisionHostDependencies {
   readonly userScopeRef: string;
   readonly uuid: () => string;
   readonly verifyUpdateSignature?: ProvisionHostPorts["verifyUpdateSignature"];
+  readonly routine?: Omit<RoutineOfferDependencies, "uuid">;
 }
 
 const failed: ApplyOutcome = { status: "failed", kind: "apply-failed" };
@@ -69,9 +71,11 @@ export function createProvisionHostPorts(deps: ProvisionHostDependencies): Provi
     modelEndpoint: {
       add: async (offer) => addEndpoint(deps, offer),
     },
-    // A routine is authored from a draft built against this host's own profile and
-    // binding receipts, which only a window builds today, so a host with no such
-    // builder refuses the kind and a routine proposal cannot be applied here yet.
+    // A routine is built here against this host's own Project, profile, and
+    // binding receipts, so a host without them refuses the kind.
+    ...(deps.routine === undefined
+      ? {}
+      : { routine: { author: createRoutineOfferAuthor({ ...deps.routine, uuid: deps.uuid }) } }),
     ...(deps.verifyUpdateSignature === undefined
       ? {}
       : { verifyUpdateSignature: deps.verifyUpdateSignature }),

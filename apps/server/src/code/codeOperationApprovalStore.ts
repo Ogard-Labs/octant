@@ -242,14 +242,7 @@ export function approvalContextDigest(context: unknown): string {
 }
 
 function normalizeEffect(effect: CodeApprovalEffect): unknown {
-  if (
-    effect.kind === "apple-action" ||
-    effect.kind === "android-action" ||
-    effect.kind === "apple-device-lease" ||
-    effect.kind === "apple-device-action" ||
-    effect.kind === "apple-distribution-upload" ||
-    effect.kind === "apple-distribution-version"
-  ) {
+  if (effect.kind === "apple-action" || effect.kind === "android-action") {
     const { approval: _approval, ...request } = effect.request;
     return { ...effect, request };
   }
