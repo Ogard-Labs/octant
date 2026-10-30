@@ -10,9 +10,9 @@ const settings = {
 
 function client(overrides: { settings?: unknown; execute?: () => Promise<unknown> } = {}) {
   return {
-    bootstrap: vi.fn(async () => ({
-      ...("settings" in overrides ? { settings: overrides.settings } : { settings }),
-    })),
+    bootstrap: vi.fn(async () =>
+      "settings" in overrides ? { settings: overrides.settings } : { settings },
+    ),
     execute: vi.fn(
       overrides.execute ??
         (async () => ({ kind: "settings-updated", settings: { ...settings, version: 4 } })),

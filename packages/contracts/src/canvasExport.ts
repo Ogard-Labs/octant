@@ -118,6 +118,7 @@ export const CANVAS_EXPORT_PICTURE_FILES_MAX = 96;
  */
 export const CanvasExportFileName = Schema.NonEmptyTrimmedString.pipe(
   Schema.maxLength(160),
+  // oxlint-disable-next-line no-control-regex
   Schema.pattern(/^[^./\\\0][^/\\\0]*$/),
   Schema.filter((value) => isExportCredentialFreeText(value), {
     message: () => "An export file name must not contain a secret.",

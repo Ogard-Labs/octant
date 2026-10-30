@@ -1,4 +1,3 @@
-import type { ExtensionSelection } from "@octant/contracts/extensions";
 import { recordProviderChildObservation } from "@octant/provider-sdk/child-observations";
 import {
   coveredAgentResultDeliveryMembers,

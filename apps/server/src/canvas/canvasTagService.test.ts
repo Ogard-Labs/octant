@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Schema } from "effect";
 import {
   CANVAS_SCHEMA_VERSION,
-  decodeCanvasActor,
   decodeCanvasId,
   decodeCanvasVersion,
   decodeUtcTimestamp,

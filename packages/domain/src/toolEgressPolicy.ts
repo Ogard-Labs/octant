@@ -81,6 +81,7 @@ export type ToolEgressHostName =
 
 // Characters that are never part of a host name: whitespace, controls, and
 // URL delimiters a caller could use to make the parser read a different host.
+// oxlint-disable-next-line no-control-regex
 const NON_HOST_CHARACTER = /[\s\u0000-\u001f\u007f/\\@?#%]/;
 const DOTTED_IPV4 = /^\d+\.\d+\.\d+\.\d+$/;
 

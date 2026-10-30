@@ -1662,7 +1662,7 @@ describe("delegation administration on the delegating spoke", () => {
   it("refuses a window that does not hold the parent thread from reading or cancelling its child", async () => {
     const { handle, b, child } = await setup();
     const started = await handle(post(DELEGATION_ADMINISTRATION_ROUTES.start, startCommand(b)));
-    const { requestId } = (await started?.json()) as { requestId: string };
+    const { requestId } = (await started!.json()) as { requestId: string };
     const asOtherWindow = { "x-octant-window-capability": otherCapability };
 
     for (const path of [

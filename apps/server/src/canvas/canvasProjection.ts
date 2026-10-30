@@ -144,12 +144,12 @@ export class CanvasProjection implements Projection {
    */
   evict(canvasIds: ReadonlyArray<string>): void {
     const evicted = new Set(canvasIds);
-    for (const id of [...this.#byId.keys()]) {
+    for (const id of Array.from(this.#byId.keys())) {
       if (evicted.has(String(id))) this.#byId.delete(id);
     }
     for (const index of [this.#byProject, this.#byThread]) {
       for (const [key, ids] of index) {
-        for (const id of [...ids]) {
+        for (const id of Array.from(ids)) {
           if (evicted.has(String(id))) ids.delete(id);
         }
         if (ids.size === 0) index.delete(key);

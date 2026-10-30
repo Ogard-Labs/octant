@@ -576,7 +576,7 @@ describe("usage route Project scope", () => {
     expect(body.records).toHaveLength(1);
     const first = body.records[0];
     expect(first?.subject).toHaveProperty("aggregateId");
-    expect((first?.subject as { readonly aggregateId: string }).aggregateId).toBe(ids.threadA);
+    expect((first!.subject as { readonly aggregateId: string }).aggregateId).toBe(ids.threadA);
     expect(body.totals.totalRequests).toBe(1);
     // Neither the other Project's thread nor an unfiled thread is this
     // Project's row, in the records or in any aggregate.
@@ -707,7 +707,7 @@ describe("usage route scope for a window bound to no Project", () => {
       const record = body.records[0];
       expect(record?.subject).toMatchObject({ aggregateType: "chat-thread" });
       expect(record?.subject).toHaveProperty("aggregateId");
-      expect((record?.subject as { readonly aggregateId: string }).aggregateId).toBe(
+      expect((record!.subject as { readonly aggregateId: string }).aggregateId).toBe(
         ids.unfiledThread,
       );
       expect(text).not.toContain(ids.projectA);

@@ -83,7 +83,7 @@ describe("forks and checkpoints from the terminal", () => {
     });
     expect(result).toMatchObject({ kind: "created", mode: "code" });
     if (result.kind === "created")
-      expect(result.threadId).toBe((seen[0]?.body as { threadId: string }).threadId);
+      expect(result.threadId).toBe((seen[0]!.body as { threadId: string }).threadId);
   });
 
   it("says why the host refused a fork, and refuses one with nothing finished to fork from", async () => {

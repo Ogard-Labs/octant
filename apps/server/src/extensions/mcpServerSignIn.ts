@@ -282,7 +282,7 @@ export class McpServerSignIn {
   /** Forgets a package's sign-ins once it is uninstalled; the grants are revoked where possible. */
   async forgetPackage(extensionId: string): Promise<void> {
     await this.#load();
-    for (const [key, record] of [...this.#signIns]) {
+    for (const [key, record] of Array.from(this.#signIns)) {
       if (!key.startsWith(`${extensionId}:`)) continue;
       await this.#options.oauth
         .signOut({
