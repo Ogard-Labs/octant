@@ -26,6 +26,7 @@ describe("octantSettingsRegistry", () => {
       "device-tools",
       "github",
       "linear",
+      "servers",
       "permissions",
       "secret-stores",
       "data",
@@ -277,10 +278,11 @@ describe("octantSettingsRegistry", () => {
     expect(first("delete my data")).toBe("data/thread-retention");
     expect(first("telemetry")).toBe("data/data-map");
     // "connector" also reaches Browser extensions through the word "extension",
-    // so the Skills page is among the first answers rather than always the first.
+    // and Servers through "server", so the Skills page is among the first
+    // answers rather than always the first.
     expect(
       searchSettings(available, capabilities, "connector")
-        .slice(0, 2)
+        .slice(0, 4)
         .map((result) => result.sectionId),
     ).toContain("skills");
     expect(first("sign out github")).toBe("github/github-logout");

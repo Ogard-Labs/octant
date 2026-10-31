@@ -5,6 +5,14 @@ import type {
   ShieldWatcherLabel,
   ToolApprovalClass,
 } from "@octant/contracts";
+import {
+  classifyRemoteCommand,
+  parseSshInvocation,
+  profileAllows,
+  registeredServerFor,
+  type ShieldServerRule,
+  type SshInvocation,
+} from "./shieldServerPolicy";
 
 /**
  * Octant Shield's Judge, the deterministic part: the rules that decide a
@@ -20,8 +28,13 @@ import type {
  * 2. Taint limits. On a thread marked by outside content Shield cannot allow
  *    irreversible, publish, or new-egress calls.
  * 3. Fast allow rules, with no model call: reads and edits inside the bound
- *    root, the Project's own test or build command, and read-only Git.
+ *    root, the Project's own test or build command, read-only Git, and SSH to
+ *    a registered server within its profile.
  * 4. The model, for everything else.
+ *
+ * An `ssh` command is judged by the server rules alone (`judgeSshCall`):
+ * they apply the same hard lines to the remote command, then the server's
+ * profile.
  */
 
 /** What the call does, as far as the Judge needs to know. */
@@ -63,6 +76,8 @@ export interface ShieldRuleInput {
   readonly tainted: boolean;
   /** The Project's own test and build commands, exactly as the Project runs them. */
   readonly projectCommands: ReadonlyArray<string>;
+  /** The servers the person registered; SSH to any other host goes to the person. */
+  readonly servers?: ReadonlyArray<ShieldServerRule> | undefined;
 }
 
 /**
@@ -248,6 +263,10 @@ export function judgeShieldCallByRules(input: ShieldRuleInput): ShieldRuleOutcom
   const root = normalizePosixPath(input.boundRoot);
   const command = call.command?.trim();
 
+  const ssh: SshInvocation =
+    command === undefined || command.length === 0 ? { kind: "not-ssh" } : parseSshInvocation(command);
+  if (ssh.kind === "ssh") return judgeSshCall(ssh, input);
+
   // 1. Hard lines and deny rules.
   if (command !== undefined && command.length > 0) {
     if (SECRET_PATH_TEXT.test(command) && EGRESS_TOOL.test(command)) {
@@ -311,6 +330,14 @@ export function judgeShieldCallByRules(input: ShieldRuleInput): ShieldRuleOutcom
       "This kind of call is outside what Shield may allow, so the person decides.",
     );
   }
+  if (ssh.kind === "unreadable") {
+    return decided(
+      "ask",
+      "hard-line",
+      "ssh-unreadable",
+      "The command does more than one plain ssh call, so Shield cannot tell which server it reaches and the person decides.",
+    );
+  }
 
   // 2. Taint limits.
   if (input.tainted) {
@@ -369,6 +396,102 @@ export function judgeShieldCallByRules(input: ShieldRuleInput): ShieldRuleOutcom
     }
   }
   return { kind: "needs-model" };
+}
+
+/**
+ * An `ssh` command, read as the person's server registry allows it. Only a
+ * plain call to a registered server, as its registered user, with options
+ * that only tune the connection, can pass; the remote command then meets the
+ * malicious-call rules (all but raising privilege, since `sudo` on the
+ * person's own server is what a profile grants), the lock-out actions, and
+ * the secret paths, before the profile decides.
+ */
+function judgeSshCall(
+  ssh: Extract<SshInvocation, { kind: "ssh" }>,
+  input: ShieldRuleInput,
+): ShieldRuleOutcome {
+  if (ssh.keyPath) {
+    return decided("deny", "deny-rule", "ssh-key-path", "Shield refuses to reach SSH keys.");
+  }
+  const server = registeredServerFor(input.servers ?? [], ssh.host);
+  if (server === undefined) {
+    return decided(
+      "ask",
+      "hard-line",
+      "unregistered-server",
+      `${ssh.host} is not a server the person registered, so the person decides.`,
+    );
+  }
+  if (ssh.user !== undefined && ssh.user !== server.user) {
+    return decided(
+      "ask",
+      "hard-line",
+      "server-user-mismatch",
+      `The call signs in as ${ssh.user}, not the registered user ${server.user}, so the person decides.`,
+    );
+  }
+  if (!ssh.optionsPlain) {
+    return decided(
+      "ask",
+      "hard-line",
+      "ssh-option",
+      "The call uses an ssh option that can open a tunnel or run a program here, so the person decides.",
+    );
+  }
+  const remote = ssh.remote;
+  if (remote === undefined) {
+    return decided(
+      "ask",
+      "hard-line",
+      "interactive-ssh",
+      "The call opens a login session with no command, so the person decides.",
+    );
+  }
+  for (const entry of COMMAND_RULES) {
+    if (entry.rule !== "raises-privilege" && entry.pattern.test(remote)) {
+      return decided(entry.verdict, entry.stage, entry.rule, entry.reason);
+    }
+  }
+  const { tier } = classifyRemoteCommand(remote, server.deployCommands);
+  if (tier === "lockout") {
+    return decided(
+      "ask",
+      "hard-line",
+      "server-lockout",
+      `The command can lock the person out of ${server.alias} or destroy data on it, so the person decides.`,
+    );
+  }
+  if (SSH_KEY_PATH_TEXT.test(remote) || SECRET_PATH_TEXT.test(remote)) {
+    return decided(
+      "ask",
+      "deny-rule",
+      "secret-path",
+      "The command reads a file on the server that holds secrets, so the person decides.",
+    );
+  }
+  if (input.tainted && tier !== "read") {
+    return decided(
+      "ask",
+      "taint-limit",
+      "tainted-thread",
+      "This thread has read outside content, so the person decides on server commands that change anything.",
+    );
+  }
+  if (tier === "unknown") return { kind: "needs-model" };
+  if (profileAllows(server.profile, tier)) {
+    return decided(
+      "allow",
+      "fast-allow",
+      "registered-server",
+      `A ${tier === "read" ? "read" : tier === "operate" ? "routine operation" : "configuration change"} on ${server.alias}, within its profile.`,
+    );
+  }
+  return decided(
+    "ask",
+    "hard-line",
+    "beyond-server-profile",
+    `The command goes beyond what ${server.alias}'s profile allows, so the person decides.`,
+  );
 }
 
 function isProjectCommand(command: string, projectCommands: ReadonlyArray<string>): boolean {

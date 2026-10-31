@@ -49,6 +49,10 @@ import {
 } from "@octant/client-runtime/extension-client";
 import { createFolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import {
+  createShieldServersClient,
+  type ShieldServersClient,
+} from "@octant/client-runtime/shield-servers-client";
+import {
   createSecretStoresClient,
   type SecretStoresClient,
 } from "@octant/client-runtime/secret-stores-client";
@@ -184,6 +188,8 @@ export interface LaunchedShellClients {
   readonly replicaStoreSettingsClient: ReplicaStoreSettingsClient | undefined;
   /** Absent off a local host: linking a secret store is host authority. */
   readonly secretStoresClient: SecretStoresClient | undefined;
+  /** Absent when the base URL is one the client refuses; the registry is local-window only. */
+  readonly shieldServersClient: ShieldServersClient | undefined;
   /** Absent off a local host: creating, joining, and revoking are host authority. */
   readonly replicaMembershipClient: ReplicaMembershipClient | undefined;
   /** Read-only sync status, for a client that is not on the host. */
@@ -263,6 +269,15 @@ export function createLaunchedShellClients(
     replicaStoreSettingsClient = undefined;
   }
 
+  let shieldServersClient: ShieldServersClient | undefined;
+  try {
+    shieldServersClient = createShieldServersClient(port);
+  } catch {
+    // The registry is host authority; a client the base URL refuses leaves
+    // Settings › Servers saying so.
+    shieldServersClient = undefined;
+  }
+
   let secretStoresClient: SecretStoresClient | undefined;
   try {
     secretStoresClient = createSecretStoresClient(port);
@@ -327,6 +342,7 @@ export function createLaunchedShellClients(
     providerUsageLimitsClient,
     replicaStoreSettingsClient,
     secretStoresClient,
+    shieldServersClient,
     replicaMembershipClient,
     replicaSyncStatusClient: createReplicaSyncStatusClient(port),
     shipClient: options.shipClient ?? createShipClient(port),

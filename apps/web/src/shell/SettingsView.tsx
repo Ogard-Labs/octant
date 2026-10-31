@@ -98,6 +98,8 @@ import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-cl
 import type { ReplicaMembershipClient } from "@octant/client-runtime/replica-membership-client";
 import type { ReplicaStoreSettingsClient } from "@octant/client-runtime/replica-store-settings-client";
 import type { SecretStoresClient } from "@octant/client-runtime/secret-stores-client";
+import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
+import { ShieldServersSettings } from "../settings/ShieldServersSettings";
 import type { ReplicaSyncStatusClient } from "@octant/client-runtime/replica-sync-status-client";
 import { AutomationNotificationSettings } from "../host/AutomationNotificationSettings";
 import { PhoneNotificationSettings } from "../host/PhoneNotificationSettings";
@@ -223,6 +225,8 @@ export interface SettingsViewProps {
   readonly replicaStoreSettingsClient?: ReplicaStoreSettingsClient;
   /** Absent off the host: linking a secret store and pointing a key at it are host authority. */
   readonly secretStoresClient?: SecretStoresClient;
+  /** Settings › Servers; absent off this computer. */
+  readonly shieldServersClient?: ShieldServersClient;
   /** Creating, joining, and revoking on this host; absent off it. */
   readonly replicaMembershipClient?: ReplicaMembershipClient;
   /** Read-only sync status, used when this client is not on the host. */
@@ -286,6 +290,8 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   skills:
     "Skills extend what agents can do. Review the source, then trust and enable only what you want.",
   github: "Connection and repository access on the selected host.",
+  servers:
+    "Your own servers that agents may reach over SSH, and what Shield lets them do there.",
   host: "The host process: its status, startup, notifications, and maintenance.",
   permissions: "What you have already allowed: websites, extension tools, and public links.",
   data: "What this host stores, how long it keeps threads, and how to back it up.",
@@ -1236,6 +1242,13 @@ function ActiveSectionContent({
         </section>
       );
     }
+    case "servers":
+      return (
+        <ShieldServersSettings
+          client={props.shieldServersClient}
+          focusedSetting={focusedSetting}
+        />
+      );
     case "secret-stores":
       return (
         <SecretStoresSettingsSection

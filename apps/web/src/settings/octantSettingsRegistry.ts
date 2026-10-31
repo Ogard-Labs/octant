@@ -955,6 +955,28 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
+      id: "servers",
+      label: "Servers",
+      scope: "host",
+      keywords:
+        "servers ssh host alias login user profile read-only operate admin runbook notes deploy commands ssh agent shield",
+      settings: [
+        {
+          id: settingId("shield-servers-list"),
+          label: "Your servers",
+          scope: "host",
+          keywords: "servers list ssh host alias profile read-only operate admin change remove",
+        },
+        {
+          id: settingId("shield-servers-add"),
+          label: "Add a server",
+          scope: "host",
+          keywords:
+            "add register server ssh host alias user profile read-only operate admin deploy runbook notes ssh agent",
+        },
+      ],
+    },
+    {
       id: "permissions",
       label: "Permissions",
       scope: "host",

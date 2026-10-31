@@ -213,6 +213,13 @@ import {
   ThreadEgressLaunchSummarizedPayload,
 } from "@octant/contracts";
 import {
+  SHIELD_REMOTE_COMMAND_EVENT_NAMES,
+  SHIELD_SERVERS_EVENT_NAMES,
+  ShieldRemoteCommandRanPayload,
+  ShieldServerRemovedPayload,
+  ShieldServerSetPayload,
+} from "@octant/contracts/shield-servers";
+import {
   CODE_LANGUAGE_SERVER_EVENT_NAMES,
   CodeLanguageServerApprovalGranted,
 } from "@octant/contracts/code-language";
@@ -501,6 +508,9 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       ThreadEgressDecisionsRecordedPayload,
     )
     .register(CODE_DEBUG_EVENT_NAMES.egressLaunchSummarized, 1, ThreadEgressLaunchSummarizedPayload)
+    .register(SHIELD_SERVERS_EVENT_NAMES.serverSet, 1, ShieldServerSetPayload)
+    .register(SHIELD_SERVERS_EVENT_NAMES.serverRemoved, 1, ShieldServerRemovedPayload)
+    .register(SHIELD_REMOTE_COMMAND_EVENT_NAMES.ran, 1, ShieldRemoteCommandRanPayload)
     .register(AGENT_RUN_REQUESTED, 1, AgentRunRequested)
     .register(AGENT_RUN_STATUS_CHANGED, 1, AgentRunStatusChanged)
     .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged)
