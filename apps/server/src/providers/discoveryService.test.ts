@@ -887,7 +887,7 @@ describe("discoveryService", () => {
     expect(snapshot.candidates.map((candidate) => candidate.driverKind)).toEqual(["codex"]);
   });
 
-  it("does not offer fx, or run its binary, even when an fx binary is installed", async () => {
+  it("offers an installed fx binary", async () => {
     const fs = makeFakeFs(
       new Map([
         ["/usr/local/bin/codex", { file: true }],
@@ -914,8 +914,8 @@ describe("discoveryService", () => {
     });
 
     const snapshot = await service.scan();
-    expect(snapshot.candidates.map((candidate) => candidate.driverKind)).toEqual(["codex"]);
-    expect(started).not.toContain("/usr/local/bin/fx");
+    expect(snapshot.candidates.map((candidate) => candidate.driverKind)).toEqual(["codex", "fx"]);
+    expect(started).toContain("/usr/local/bin/fx");
   });
 
   it("keeps a Claude auth probe off an isolated account overlay", async () => {
