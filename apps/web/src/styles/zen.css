@@ -958,6 +958,16 @@ img.zen-appearance__thumb {
   border-bottom: 1px solid var(--oct-border-soft);
 }
 
+/* The dock is narrow, so the profile control shows its icon alone here; the
+   icon changes with the profile and the control's label names it. */
+.zen-research__chrome .browser-profile-control {
+  padding: 0 var(--oct-space-2);
+}
+
+.zen-research__chrome .browser-profile-control span {
+  display: none;
+}
+
 .zen-research__address {
   flex: 1;
   overflow: hidden;

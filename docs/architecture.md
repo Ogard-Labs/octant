@@ -340,18 +340,40 @@ lasts): the kernel's pressure level on macOS, and the available share of
 `/proc/meminfo` on Linux, where under 10% reads as low and under 5% as very
 low. A reading the platform cannot give is "unknown", which counts as no
 signal, never as normal pressure. The host process counts as pressure on its
-own once it holds 2 GiB (4 GiB for very low), or a quarter (a half) of a
-machine smaller than 8 GiB. On the first low reading, when pressure rises, and
+own once it holds its **memory limits**: low at the first, very low at the
+second. The setting is Automatic by default, which is 2 GiB (4 GiB for very
+low), or a quarter (a half) of a machine smaller than 8 GiB. Custom replaces
+the pair with two sizes in GB of 1024³ bytes, the same unit as the default
+(0.5 to 64, very low above low) that apply as
+given on any machine, without the small-machine scaling: the person chose them
+knowing what else the machine runs. The limits are a host setting in Settings >
+Host, changed only by a local window: `POST /api/host-control/memory-limits`
+sits on the loopback host-control surface, behind the `host.service.memory-limits`
+action that a paired device is denied, so a paired device can neither read nor
+change it. Each change is one journaled event
+(`host-memory-limits.changed@1`) naming who made it, when, and the values
+before and after; the `host_memory_limits_projection` row is rebuilt from those
+events, and saving the values already in force records nothing. A pair that is
+out of bounds or not ordered comes back as a refused outcome with a plain
+message, never as a stored value. The guard reads the saved limits at every
+sample, and a change takes a reading at once, so a new limit applies without a
+restart; a limits read that fails falls back to Automatic and is logged, since
+the built-in pair is the safe reading. The limits only move when the host eases
+itself; they never touch a running turn or the system's own signal. On the
+first low reading, when pressure rises, and
 then at most once a minute while it lasts, the host eases itself in a fixed
 order: it logs the reading, stops provider runtimes whose last lease ended and
 sessions parked for reuse (the next turn starts them again), then trims caches
 it rebuilds on demand (SQLite's page cache and, under Bun, the heap). A running
 turn is never stopped; the report only counts how many were left running. The
 host-control status carries a `memory` report (level, the host's size in
-megabytes, the last relief as counts, and any unclean stop) and nothing named:
+megabytes, the limits in force as set and as resolved for this machine, the last
+relief as counts, and any unclean stop) and nothing named:
 no provider, thread, or path. The renderer shows it as one dismissible, quiet
 notice and as rows in Settings > Host, only when the host stopped something, when
-memory was very low, or after an unclean stop. Dismissal is local to the
+memory was very low, or after an unclean stop. The Memory limits control (an
+Automatic or Custom choice with two fields) sits in its own Memory section on
+the same page whenever the host reports memory. Dismissal is local to the
 renderer. Nothing leaves the machine.
 
 The host keeps `host-memory.json` in its data directory (owner-only: the last
@@ -1719,6 +1741,13 @@ hold for every action in it:
   the head SHA, as Octant's own record beside the forge's history.
 - **Credential.** Octant stores no forge token, as under the merge rules
   below.
+- **Approval shows the whole text.** Below Full access, a title or body change
+  asks the person in the thread with the exact repository, base, head, draft
+  state, title, and body; the answer becomes a one-use approval bound to that
+  command and the delivery target. The prompt shows the whole title and body or
+  none of it: text too long for the approval prompt (the 2 KB summary bound) is
+  refused rather than shown cut, because an approval never covers text the
+  person could not read.
 - **Merging on the person's say.** A Code thread may merge, turn on
   auto-merge, or merge a whole stack only when the person allowed it: in the
   request itself, through the Project's "agents may merge" setting, or
@@ -1731,13 +1760,13 @@ hold for every action in it:
 | Action                                     | Who                                                                                          | Approval                                                                                                                          | Still refused                                               | Built                                                                                                                     |
 | ------------------------------------------ | -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | Fast-forward push to its own branch        | Agent or person                                                                              | Approval-gated asks for each act; remembered Full access does not ask                                                             | A branch the thread does not own; any force option          | Yes (`push-git`)                                                                                                          |
-| Open a pull request                        | Agent or person                                                                              | As for push                                                                                                                       | A repository outside the binding; a base outside it         | Yes, as ready for review (`create-pull-request`)                                                                          |
-| Open a draft pull request                  | Agent or person                                                                              | As for push                                                                                                                       | As for opening                                              | Allowed; not built yet                                                                                                    |
-| Mark ready for review                      | Agent or person                                                                              | As for push                                                                                                                       | A pull request the thread does not own                      | Allowed; not built yet                                                                                                    |
-| Stacked pull request on its parent         | Agent or person                                                                              | As for push                                                                                                                       | A parent branch no thread or linked thread of this one owns | Allowed; not built yet                                                                                                    |
+| Open a pull request                        | Agent or person                                                                              | As for push                                                                                                                       | A repository outside the binding; a base outside it         | Yes, ready or draft (`create-pull-request`)                                                                               |
+| Open a draft pull request                  | Agent or person                                                                              | As for push                                                                                                                       | As for opening                                              | Yes (`create-pull-request` with `draft`)                                                                                  |
+| Mark ready for review                      | Agent or person                                                                              | As for push                                                                                                                       | A pull request the thread does not own                      | Yes (`update-pull-request`, `draft: false`)                                                                               |
+| Stacked pull request on its parent         | Agent or person                                                                              | As for push                                                                                                                       | A parent branch no thread or linked thread of this one owns | Yes (`create-pull-request` with `base`; the parent branch needs an open pull request)                                     |
 | Amend and push with force-with-lease       | Agent or person, own branch only                                                             | As for push                                                                                                                       | A protected or a shared branch                              | Allowed; not built yet                                                                                                    |
 | Plain force-push, or to the default branch | Agent or person, when the person asks in that turn                                           | The person's request in that turn                                                                                                 | Without that request; another thread's branch               | Allowed; not built yet                                                                                                    |
-| Edit title or body                         | Agent or person                                                                              | As for push                                                                                                                       | A pull request the thread did not open and is not linked to | Allowed; not built yet                                                                                                    |
+| Edit title or body                         | Agent or person                                                                              | As for push                                                                                                                       | A pull request the thread did not open and is not linked to | Yes (`update-pull-request`)                                                                                               |
 | Add or remove labels                       | Agent or person                                                                              | As for push                                                                                                                       | Creating repository-wide labels                             | Allowed; not built yet                                                                                                    |
 | Review replies and comments                | Agent drafts; person sends                                                                   | The person approves each post below Full access, because it posts under their name; at Full access it posts when the person asked | Approving or requesting changes                             | Allowed; not built yet                                                                                                    |
 | Approve or request changes                 | Person                                                                                       | —                                                                                                                                 | The pull request's own author, by the forge's rule          | Allowed for a person; not built yet                                                                                       |
@@ -8835,12 +8864,15 @@ access` agree); a thread's own change is journaled as
   per browsing context) unless the person at a local window puts it in their
   Project's persistent profile or the host's Personal profile; a profile page
   opens only in the desktop app's native Browser, never headless. Octant never
-  opens or imports another browser's profile. An agent reads or acts on an
+  opens another browser's profile in place. An agent reads or acts on an
   origin in a profile page only after a site approval naming the profile;
   paired devices, routines, subagents, and terminal Browser grants are refused
-  on profile pages. Browser extensions install only from an unpacked folder at
-  a local window, start disabled, are enabled per profile, and never load into a
-  Private page. Detail is in [Browser profiles and extensions](design/browser-profiles.md).
+  on profile pages; a paired device sees only that a signed-in page exists. The
+  person signs out of a profile (closing its pages and removing its storage) at a
+  local window, and the host journals that it happened without naming a site or
+  a cookie. Browser extensions (approved design, not yet built) install only
+  from an unpacked folder at a local window, start disabled, are enabled per
+  profile, and never load into a Private page. Detail is in [Browser profiles and extensions](design/browser-profiles.md).
 - **Side Chat reads.** A Side Chat may read its source thread's transcript,
   state, and files; it never inherits the source's Work or Code execution
   authority. The file tools (`octant_side_chat_list_files`,
@@ -10236,7 +10268,8 @@ approval, and merge, auto-merge, or a stack merge the person allowed), a
 person's merge from any of their windows, phone, or web client, and
 host-local routines (Automation Center), Chat routines included, are in scope
 under the rules in [Modes](#modes-chat-work-and-code). Of the pull-request
-actions, only a fast-forward push, opening a ready pull request, a person's
+actions, only a fast-forward push, opening a draft, ready, or stacked pull
+request and editing its title, body, or draft state, a person's
 merge of one pull request from a local window, and the Merge when ready and
 Auto-fix switches the person turns on there are built; the rest, Chat routines,
 and the key providers' skill folders and extra skill folders added in Settings,

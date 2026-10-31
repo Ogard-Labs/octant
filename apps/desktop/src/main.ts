@@ -115,6 +115,7 @@ import {
   type ReturnTypeOfBrowserSurfaceHost,
 } from "./browserSurfaceHost";
 import { startBrowserRuntimeBroker, type BrowserRuntimeBroker } from "./browserRuntimeBroker";
+import { createBrowserProfileStore } from "./browserProfileStore";
 import { openCodeExternalEditorFromServer } from "./codeExternalEditor";
 import {
   detectOpenInApplications,
@@ -1745,6 +1746,11 @@ async function attachExistingLocalHost(): Promise<LocalHostDescriptor | undefine
   };
 }
 
+/** Where Electron keeps the persistent stores of the Project and Personal Browser profiles. */
+function browserProfilesDirectory(): string {
+  return join(app.getPath("userData"), "Partitions");
+}
+
 async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
   if (server !== undefined && activeServerUrl !== undefined && serverInstanceId !== undefined) {
     return {
@@ -1783,7 +1789,15 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
           webPreferences: { partition, ...webPreferences },
         }) as unknown as BrowserSurfaceViewPort,
     });
-    const nextBrowserRuntimeBroker = await startBrowserRuntimeBroker(browserSurfaceHost);
+    const surfaceHost = browserSurfaceHost;
+    const nextBrowserRuntimeBroker = await startBrowserRuntimeBroker(
+      surfaceHost,
+      createBrowserProfileStore({
+        partitionsDirectory: browserProfilesDirectory(),
+        sessionFor: (partition) => session.fromPartition(partition),
+        closeProfilePages: (profile) => surfaceHost.closeProfileContexts(profile),
+      }),
+    );
     startingBrowserBroker = nextBrowserRuntimeBroker;
     const nextComputerService = createComputerUseDesktopService({
       bundledPath: resolveDesktopNativeHelperPath(
@@ -1849,6 +1863,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
         const spec = serverSpawnSpec({
           browserBrokerToken: nextBrowserRuntimeBroker.token,
           browserBrokerUrl: nextBrowserRuntimeBroker.url,
+          browserProfilesDirectory: browserProfilesDirectory(),
           computerUseBrokerUrl: nextComputerBroker.url,
           computerUseBrokerToken: nextComputerBroker.token,
           ...(nextDeviceBroker === undefined

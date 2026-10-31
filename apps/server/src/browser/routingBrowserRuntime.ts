@@ -1,5 +1,5 @@
 import type { BrowserContextId } from "@octant/contracts/browser-automation";
-import type { BrowserRuntimePort } from "./browserRuntimePort";
+import { BrowserProfileUnavailableError, type BrowserRuntimePort } from "./browserRuntimePort";
 import { DesktopBrowserOwnerUnavailable } from "./desktopBrowserRuntime";
 
 export class RoutingBrowserRuntime implements BrowserRuntimePort {
@@ -19,10 +19,34 @@ export class RoutingBrowserRuntime implements BrowserRuntimePort {
     return (await this.#native.available()) || (await this.#headless.available());
   }
 
+  async nativeAvailable(): Promise<boolean> {
+    return this.#native.available();
+  }
+
+  get profiles(): BrowserRuntimePort["profiles"] {
+    return this.#native.profiles;
+  }
+
   async createContext(
     ...args: Parameters<BrowserRuntimePort["createContext"]>
   ): ReturnType<BrowserRuntimePort["createContext"]> {
-    const [contextId] = args;
+    const [contextId, policy] = args;
+    // A stored profile has one store, and the desktop app keeps it. Falling back
+    // to a headless page would open a copy with different cookies, so a profile
+    // page opens natively or not at all.
+    if (policy.profile !== undefined && policy.profile.kind !== "private") {
+      if (!(await this.#native.available())) throw new BrowserProfileUnavailableError();
+      try {
+        const presentation = await this.#native.createContext(...args);
+        this.#backend.set(contextId, this.#native);
+        return presentation;
+      } catch (error) {
+        if (error instanceof DesktopBrowserOwnerUnavailable) {
+          throw new BrowserProfileUnavailableError();
+        }
+        throw error;
+      }
+    }
     if (!(await this.#native.available())) {
       const presentation = await this.#headless.createContext(...args);
       this.#backend.set(contextId, this.#headless);

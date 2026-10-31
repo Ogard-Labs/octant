@@ -93,8 +93,6 @@ describe("GhPullRequestPort", () => {
         "list",
         "--repo",
         target.baseRepository,
-        "--base",
-        target.baseBranch,
         "--head",
         "feature/phase-7",
         "--state",
@@ -123,6 +121,126 @@ describe("GhPullRequestPort", () => {
     expect(environment).not.toHaveProperty("OCTANT_SIMULATOR_DEVICE_BROKER_TOKEN");
     expect(environment).not.toHaveProperty("OCTANT_CREDENTIAL_BROKER_TOKEN");
     expect(environment).not.toHaveProperty("OCTANT_DESKTOP_BRIDGE_SECRET");
+  });
+
+  it("opens a draft stacked on another branch that has an open pull request", async () => {
+    const stacked = { ...pullRequest, baseRefName: "feature/phase-6" };
+    const { command, port } = fixture([
+      listResult([]),
+      listResult([{ number: 174, headRefName: "feature/phase-6" }]),
+      { exitCode: 0, stdout: `${pullRequest.url}\n` },
+      listResult([stacked]),
+    ]);
+
+    await expect(
+      port.ensure(
+        { ...request, draft: true, baseBranch: "feature/phase-6" },
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({
+      status: "created",
+      draft: true,
+      pullRequest: { number: 175, baseBranch: "feature/phase-6", headBranch: "feature/phase-7" },
+    });
+    expect(vi.mocked(command.run).mock.calls[2]![0]).toEqual([
+      "pr",
+      "create",
+      "--repo",
+      target.baseRepository,
+      "--base",
+      "feature/phase-6",
+      "--head",
+      target.head,
+      "--title",
+      request.title,
+      "--body-file",
+      "-",
+      "--draft",
+    ]);
+  });
+
+  it("refuses to stack on a branch with no open pull request and creates nothing", async () => {
+    const { command, port } = fixture([listResult([]), listResult([])]);
+
+    await expect(
+      port.ensure({ ...request, baseBranch: "feature/abandoned" }, new AbortController().signal),
+    ).resolves.toEqual({ status: "unavailable", code: "invalid-base" });
+    expect(command.run).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(command.run).mock.calls.map(([arguments_]) => arguments_[1])).toEqual([
+      "list",
+      "list",
+    ]);
+  });
+
+  it("refuses to stack the thread's branch on itself", async () => {
+    const { command, port } = fixture([listResult([])]);
+
+    await expect(
+      port.ensure({ ...request, baseBranch: "feature/phase-7" }, new AbortController().signal),
+    ).resolves.toEqual({ status: "unavailable", code: "invalid-base" });
+    expect(command.run).toHaveBeenCalledOnce();
+  });
+
+  it("edits and marks ready the open pull request found by the thread's own head", async () => {
+    const { command, port } = fixture([
+      listResult([pullRequest]),
+      { exitCode: 0, stdout: "" },
+      { exitCode: 0, stdout: "" },
+    ]);
+
+    await expect(
+      port.update(
+        { threadId: request.threadId, title: "Ready now", body: "Final notes.", draft: false },
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({ status: "updated", draft: false, pullRequest: { number: 175 } });
+    const calls = vi.mocked(command.run).mock.calls;
+    expect(calls[1]![0]).toEqual([
+      "pr",
+      "edit",
+      "175",
+      "--repo",
+      target.baseRepository,
+      "--title",
+      "Ready now",
+      "--body-file",
+      "-",
+    ]);
+    expect(calls[1]![1].stdin).toBe("Final notes.");
+    expect(calls[2]![0]).toEqual(["pr", "ready", "175", "--repo", target.baseRepository]);
+  });
+
+  it("turns the open pull request back into a draft", async () => {
+    const { command, port } = fixture([listResult([pullRequest]), { exitCode: 0, stdout: "" }]);
+
+    await expect(
+      port.update({ threadId: request.threadId, draft: true }, new AbortController().signal),
+    ).resolves.toMatchObject({ status: "updated", draft: true });
+    expect(vi.mocked(command.run).mock.calls[1]![0]).toEqual([
+      "pr",
+      "ready",
+      "175",
+      "--repo",
+      target.baseRepository,
+      "--undo",
+    ]);
+  });
+
+  it("changes nothing when the thread's branch has no open pull request", async () => {
+    const { command, port } = fixture([listResult([])]);
+
+    await expect(
+      port.update({ threadId: request.threadId, draft: false }, new AbortController().signal),
+    ).resolves.toEqual({ status: "none" });
+    expect(command.run).toHaveBeenCalledOnce();
+  });
+
+  it("reports an edit GitHub refused as unavailable", async () => {
+    const { port } = fixture([listResult([pullRequest]), { exitCode: 1, stdout: "" }]);
+
+    await expect(
+      port.update({ threadId: request.threadId, title: "New" }, new AbortController().signal),
+    ).resolves.toEqual({ status: "unavailable", code: "pr-update-unavailable" });
   });
 
   it("creates once and then re-observes the exact PR for retry-safe identity", async () => {

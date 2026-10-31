@@ -76,6 +76,31 @@ describe("GitObservationPort", () => {
     expect(gitOutput(repository, "status", "--porcelain=v1")).toContain("tracked.txt");
   });
 
+  it("leaves whitespace-only edits out of the diff when asked, without changing the state token", async () => {
+    const repository = join(temporaryDirectory(), "repository");
+    mkdirSync(repository);
+    git(repository, "init", "--initial-branch=main");
+    git(repository, "config", "user.name", "Octant Test");
+    git(repository, "config", "user.email", "test@octant.local");
+    writeFileSync(join(repository, "tracked.txt"), "alpha\nbeta\n");
+    writeFileSync(join(repository, "spaced.txt"), "one\ntwo\n");
+    git(repository, "add", "--", "tracked.txt", "spaced.txt");
+    git(repository, "commit", "-m", "initial");
+    writeFileSync(join(repository, "tracked.txt"), "alpha\n    beta\ngamma\n");
+    writeFileSync(join(repository, "spaced.txt"), "one\n  two\n");
+    const port = new GitObservationPort(confinedOptions());
+
+    const shown = await port.observe(repository);
+    const ignored = await port.observe(repository, undefined, { ignoreWhitespace: true });
+
+    if (shown.status !== "ready" || ignored.status !== "ready") throw new Error("not ready");
+    expect(shown.diff.text).toContain("spaced.txt");
+    expect(ignored.diff.text).not.toContain("spaced.txt");
+    expect(ignored.diff.text).toContain("+gamma");
+    expect(ignored.changedPaths).toEqual(shown.changedPaths);
+    expect(ignored.stateToken).toBe(shown.stateToken);
+  });
+
   it("names an untracked directory without the slash git prints after it", async () => {
     const root = temporaryDirectory();
     const repository = join(root, "repository");

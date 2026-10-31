@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   evaluateBrowserAction,
-  evaluateProfileMode,
   canRecordBrowserObservation,
   isContextExpired,
   shouldProtectCredentialField,
@@ -166,22 +165,6 @@ describe("evaluateBrowserAction", () => {
         authority,
       ).kind,
     ).toBe("denied");
-  });
-});
-
-describe("evaluateProfileMode", () => {
-  it("allows isolated mode always", () => {
-    expect(evaluateProfileMode("isolated", activeContext.policy).kind).toBe("allowed");
-  });
-
-  it("denies existing-profile when policy is isolated", () => {
-    const result = evaluateProfileMode("existing-profile", activeContext.policy);
-    expect(result.kind).toBe("denied");
-  });
-
-  it("allows existing-profile when policy opts in", () => {
-    const policy = { ...activeContext.policy, profileMode: "existing-profile" as const };
-    expect(evaluateProfileMode("existing-profile", policy).kind).toBe("allowed");
   });
 });
 

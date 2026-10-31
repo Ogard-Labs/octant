@@ -27,6 +27,8 @@ export async function assertAutomaticHostStartupEnabled(
 interface ServerSpawnSpecOptions {
   readonly browserBrokerToken: string;
   readonly browserBrokerUrl: string;
+  /** Where the app keeps Browser profile stores; a location, not a secret. */
+  readonly browserProfilesDirectory?: string;
   readonly computerUseBrokerToken?: string;
   readonly computerUseBrokerUrl?: string;
   readonly simulatorDeviceBrokerToken?: string;
@@ -94,6 +96,7 @@ function packagedArtifactVersion(version: string | undefined): {
 export function serverSpawnSpec(options: ServerSpawnSpecOptions) {
   const inherited = { ...options.env };
   delete inherited.OCTANT_ARTIFACT_VERSION;
+  delete inherited.OCTANT_BROWSER_PROFILES_DIRECTORY;
   delete inherited.OCTANT_COMPUTER_USE_BROKER_URL;
   delete inherited.OCTANT_COMPUTER_USE_BROKER_TOKEN;
   delete inherited.OCTANT_SIMULATOR_DEVICE_BROKER_URL;
@@ -105,6 +108,9 @@ export function serverSpawnSpec(options: ServerSpawnSpecOptions) {
     ...inherited,
     OCTANT_BROWSER_BROKER_TOKEN: options.browserBrokerToken,
     OCTANT_BROWSER_BROKER_URL: options.browserBrokerUrl,
+    ...(options.browserProfilesDirectory === undefined
+      ? {}
+      : { OCTANT_BROWSER_PROFILES_DIRECTORY: options.browserProfilesDirectory }),
     ...(options.computerUseBrokerUrl === undefined || options.computerUseBrokerToken === undefined
       ? {}
       : {

@@ -95,6 +95,7 @@ const settings = {
   computerUse: { enabled: true, automaticUpdates: true },
   standaloneSkillActivations: {},
   rememberedBrowserOrigins: [],
+  rememberedBrowserProfileSites: [],
   userProfile: { accent: "indigo", avatar: { kind: "initials" } },
 } as const;
 

@@ -219,6 +219,7 @@ describe("shell settings policy", () => {
       standaloneSkillActivations: {},
       // Nothing has been answered "always allow" yet.
       rememberedBrowserOrigins: [],
+      rememberedBrowserProfileSites: [],
     });
     expect(replaceShellSettings(current, replacement)).toEqual({
       ...replacement,
@@ -227,6 +228,7 @@ describe("shell settings policy", () => {
       environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
       standaloneSkillActivations: {},
       rememberedBrowserOrigins: [],
+      rememberedBrowserProfileSites: [],
     });
     expect(current.chatEnabled).toBe(true);
     expect(replaceShellSettings(current, { ...replacement, sidebarWidth: 1 }).sidebarWidth).toBe(
