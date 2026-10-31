@@ -1,4 +1,5 @@
 import { useDraftModelOptions } from "../providers/useDraftModelOptions";
+import type { AutoReview } from "../code/autoReview";
 import {
   NewTaskDraftsContext,
   NewTaskDraftScopeContext,
@@ -203,6 +204,8 @@ export interface DraftThreadWorkspaceProps {
   readonly onPermissionModeChange?: (mode: PermissionMode) => void;
   /** Whether the selected provider has a reviewer of its own, so Auto applies. */
   readonly autoSupported?: boolean;
+  /** Who would answer the new thread's prompts at Auto, or why nobody can. */
+  readonly autoReview?: AutoReview;
   readonly onAttachFolder?: () => void;
   readonly onOpenCodeSettings?: () => void;
   /** Opens Providers & Models from the start composer while none is ready. */
@@ -814,6 +817,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           ? {}
           : { onPermissionModeChange: props.onPermissionModeChange })}
         {...(props.autoSupported === true ? { autoSupported: true } : {})}
+        {...(props.autoReview === undefined ? {} : { autoReview: props.autoReview })}
         projectSetup={
           selectedProjectId === undefined && compatibleProjects.length === 0 ? (
             <div aria-label="Set up a Code project" className="code-home__project-setup">

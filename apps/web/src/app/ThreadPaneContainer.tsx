@@ -129,6 +129,7 @@ export interface ThreadPaneContainerProps {
     | "setProjectProviderPolicy"
     | "setProjectNativeProviders"
     | "setProjectPermissionMode"
+    | "setProjectAutoReviewer"
     | "setProjectBrandKit"
     | "setProjectDesktopRecipe"
     | "setProjectActions"
@@ -393,6 +394,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     setProjectProviderPolicy,
     setProjectNativeProviders,
     setProjectPermissionMode,
+    setProjectAutoReviewer,
     setProjectBrandKit,
     setProjectDesktopRecipe,
     setProjectActions,
@@ -690,6 +692,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
               onProviderPolicyChange={setProjectProviderPolicy}
               onNativeProvidersChange={setProjectNativeProviders}
               onProjectPermissionModeChange={setProjectPermissionMode}
+              onProjectAutoReviewerChange={setProjectAutoReviewer}
               onBrandKitChange={setProjectBrandKit}
               onDesktopRecipeChange={setProjectDesktopRecipe}
               onActionsChange={setProjectActions}

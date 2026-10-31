@@ -1,4 +1,5 @@
 import type { CodeClient } from "@octant/client-runtime/code-client";
+import type { AutoReview } from "./autoReview";
 import type { WorkspaceTab } from "@octant/contracts/shell";
 import type {
   CodeOperationResult,
@@ -148,6 +149,8 @@ export interface CodeWorkspaceProps {
   ) => void;
   readonly providerGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
   readonly harnessAutoReviewSupported?: boolean;
+  /** Who answers the thread's prompts at Auto, or why nobody can. */
+  readonly autoReview?: AutoReview;
   readonly tab: CodeTab;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
@@ -219,6 +222,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         {...(props.harnessAutoReviewSupported === undefined
           ? {}
           : { harnessAutoReviewSupported: props.harnessAutoReviewSupported })}
+        {...(props.autoReview === undefined ? {} : { autoReview: props.autoReview })}
         {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
         {...(props.imageGenerationClient === undefined
           ? {}

@@ -6,6 +6,8 @@ import {
   decodeBrowserProfile,
 } from "./browserAutomation";
 import {
+  decodeBrowserCookiesImported,
+  decodeImportedCookie,
   decodeBrowserProfileCleared,
   decodeBrowserProfilesCommand,
   decodeBrowserProfilesResult,
@@ -116,5 +118,76 @@ describe("Browser profiles contract", () => {
     const decode = Schema.decodeUnknownSync(RememberedBrowserProfileSite);
     expect(decode({ origin: "https://github.com", profile: { kind: "personal" } })).toBeDefined();
     expect(() => decode({ origin: "https://github.com", profile: { kind: "private" } })).toThrow();
+  });
+
+  it("imports by naming a browser and one of its profiles, never by carrying a cookie or a path", () => {
+    const command = {
+      kind: "import-cookies",
+      profile: { kind: "personal" },
+      browser: "chrome",
+      sourceProfile: "Default",
+    };
+    expect(decodeBrowserProfilesCommand(command)).toEqual(command);
+    expect(decodeBrowserProfilesCommand({ kind: "import-sources" })).toEqual({
+      kind: "import-sources",
+    });
+    expect(() => decodeBrowserProfilesCommand({ ...command, browser: "safari" })).toThrow();
+    expect(() =>
+      decodeBrowserProfilesCommand({ ...command, profile: { kind: "private" } }),
+    ).toThrow();
+    expect(() => decodeBrowserProfilesCommand({ ...command, cookies: [] })).toThrow();
+    expect(() => decodeBrowserProfilesCommand({ ...command, path: "/etc" })).toThrow();
+  });
+
+  it("decodes the import answers and refusals", () => {
+    expect(
+      decodeBrowserProfilesResult({
+        kind: "browser-cookies-imported",
+        profile: { kind: "personal" },
+        browser: "firefox",
+        sourceProfile: "Profiles/a.default",
+        imported: 3,
+        skipped: 1,
+      }).kind,
+    ).toBe("browser-cookies-imported");
+    expect(
+      decodeBrowserProfilesResult({
+        kind: "browser-profiles-refused",
+        reason: "keychain-refused",
+        message: "No.",
+      }).kind,
+    ).toBe("browser-profiles-refused");
+  });
+
+  it("journals an import as a source, a profile and counts, with room for no cookie", () => {
+    const payload = {
+      kind: "browser-cookies-imported",
+      profile: { kind: "personal" },
+      browser: "chrome",
+      sourceProfile: "Default",
+      imported: 3,
+      skipped: 0,
+    };
+    expect(decodeBrowserCookiesImported(payload)).toEqual(payload);
+    expect(() =>
+      decodeBrowserCookiesImported({ ...payload, cookies: [{ name: "sid", value: "secret" }] }),
+    ).toThrow();
+  });
+
+  it("bounds a cookie in transit and refuses unknown fields", () => {
+    const cookie = {
+      domain: ".example.com",
+      hostOnly: false,
+      name: "sid",
+      value: "v",
+      path: "/",
+      secure: true,
+      httpOnly: true,
+      sameSite: "lax",
+    };
+    expect(decodeImportedCookie(cookie)).toEqual(cookie);
+    expect(() => decodeImportedCookie({ ...cookie, value: "v".repeat(4_097) })).toThrow();
+    expect(() => decodeImportedCookie({ ...cookie, sameSite: "other" })).toThrow();
+    expect(() => decodeImportedCookie({ ...cookie, extra: 1 })).toThrow();
   });
 });

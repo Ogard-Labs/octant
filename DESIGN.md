@@ -1311,9 +1311,10 @@ button is the only tab stop; an unsupported model keeps the button reachable
 and explains the refusal in the surface's status line. It never opens the file
 chooser or uploads while refused. Model, access, and destination controls keep
 one type scale. The mode picker reads the same in new and existing threads:
-Auto (with "Recommended" where the provider has a reviewer, otherwise
-listed disabled with the reason), Ask first, Accept edits, Plan, and Full
-access, each with a one-line description. Choosing a mode is one click and
+Auto (with "Recommended" wherever a reviewer can run, the provider's own or
+Octant Shield, its description naming which; otherwise listed disabled with
+the reason), Ask first, Accept edits, Plan, and Full access, each with a
+one-line description. Choosing a mode is one click and
 changes the thread; the first Full access pick on this machine or in a
 Project shows the one-time warning first.
 The Code start screen's agent home (suggested prompts, Up next, Start something
@@ -2141,8 +2142,13 @@ as an account default a Project
 may override: **Auto reviewer** (Provider's own / Octant Shield), **Safe
 networks** (trusted hosts, domains, address ranges, and private-network tags),
 and **Servers** (registered SSH hosts, each with a Read-only, Operate, or Admin
-profile and an optional notes file). The rules behind them are in
-[Octant Shield](docs/architecture.md#octant-shield); allowed, not built yet.
+profile and an optional notes file), and as an account setting **Shield
+model** (each thread's provider with its smallest model, or a configured
+endpoint). The rules behind them are in
+[Octant Shield](docs/architecture.md#octant-shield). Built for Code: Auto
+reviewer and Shield model in Settings › Code › Access, and the reviewer
+override as a select on a Code Project's overview; safe networks and servers
+are allowed, not built yet.
 A Work Project's **Developer tools** switch is presentation, not a
 permission, so it lives on that Project's overview, not here
 ([Workspace](docs/design/workspace.md); allowed, not built yet). A Browser request from a

@@ -1,5 +1,6 @@
 import type {
   BrowserProfileClearScope,
+  ImportedCookie,
   StoredBrowserProfile,
 } from "@octant/contracts/browser-profiles";
 import type {
@@ -98,6 +99,14 @@ export interface BrowserProfileStorePort {
     ReadonlyArray<{ readonly profile: StoredBrowserProfile; readonly sizeBytes: number }>
   >;
   readonly clear: (profile: StoredBrowserProfile, scope: BrowserProfileClearScope) => Promise<void>;
+  /**
+   * Puts cookies into a profile's store, one bounded batch at a time, and says
+   * how many it kept. The cookies pass through and are retained nowhere.
+   */
+  readonly importCookies: (
+    profile: StoredBrowserProfile,
+    cookies: ReadonlyArray<ImportedCookie>,
+  ) => Promise<{ readonly imported: number; readonly skipped: number }>;
 }
 
 /**
