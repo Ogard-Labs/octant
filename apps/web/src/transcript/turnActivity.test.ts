@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { alwaysVisibleActivityRows, settledTurnActivitySummary } from "./turnActivity";
+import {
+  alwaysVisibleActivityRows,
+  settledTurnActivitySummary,
+  toolStepsActivity,
+} from "./turnActivity";
 
 describe("turn activity", () => {
   it("summarizes a settled turn's toolchain for the quiet fold line", () => {
@@ -50,5 +54,25 @@ describe("turn activity", () => {
     expect(alwaysVisibleActivityRows(activity)).toEqual([
       { kind: "task", id: "t1", state: "waiting", summary: "Apply the edit" },
     ]);
+  });
+
+  it("carries the Watcher's tag from a Chat or Work turn's recorded tool step to its row", () => {
+    const activity = toolStepsActivity(
+      [
+        {
+          toolCallId: "fetch-1",
+          toolName: "webfetch",
+          state: "completed",
+          outsideContent: { labels: ["agent-instructions"] },
+        },
+        { toolCallId: "read-1", toolName: "Read", state: "completed" },
+      ],
+      false,
+    );
+    expect(activity?.rows).toMatchObject([
+      { id: "fetch-1", outsideContent: { labels: ["agent-instructions"] } },
+      { id: "read-1" },
+    ]);
+    expect(activity?.rows[1]).not.toHaveProperty("outsideContent");
   });
 });

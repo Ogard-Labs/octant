@@ -79,6 +79,7 @@ export function toolStepsActivity(
       state: step.state,
       ...(step.summary === undefined ? {} : { summary: step.summary }),
       ...(step.published === undefined ? {} : { published: step.published }),
+      ...(step.outsideContent === undefined ? {} : { outsideContent: step.outsideContent }),
     })),
     reasoning: "",
     ...(truncated === true ? { truncated: true } : {}),

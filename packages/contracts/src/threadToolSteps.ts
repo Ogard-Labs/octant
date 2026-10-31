@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { ToolOutsideContentMark } from "./shieldWatcherMark";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
@@ -74,6 +75,8 @@ export const ThreadToolStep = Schema.Struct({
   state: ThreadToolStepState,
   summary: Schema.optional(boundedNonEmptyText(MAX_THREAD_TOOL_STEP_SUMMARY_BYTES)),
   published: Schema.optional(ThreadPublishedPage),
+  /** The call's result brought outside content into the thread, and what the Watcher found in it. */
+  outsideContent: Schema.optional(ToolOutsideContentMark),
 }).annotations(strict);
 export type ThreadToolStep = typeof ThreadToolStep.Type;
 

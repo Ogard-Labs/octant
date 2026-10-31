@@ -1,6 +1,10 @@
 import type { ProviderRuntimeEvent } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
-import { recordThreadToolStep, type ThreadToolSteps } from "./threadToolSteps";
+import {
+  markThreadToolStepOutsideContent,
+  recordThreadToolStep,
+  type ThreadToolSteps,
+} from "./threadToolSteps";
 
 const base = {
   instanceId: "20000000-0000-4000-8000-000000000001",
@@ -93,5 +97,68 @@ describe("a turn's tool steps", () => {
 
   it("ignores events that are not tool calls", () => {
     expect(fold([event({ kind: "text-delta", text: "hi" })])).toBeUndefined();
+  });
+});
+
+describe("the Watcher's tag on a tool step", () => {
+  it("keeps the tag through the call's later progress and result", () => {
+    const started = fold([event({ kind: "tool-start", toolCallId: "w", toolName: "Fetch" })]);
+    const marked = markThreadToolStepOutsideContent(started, {
+      toolCallId: "w",
+      toolName: "Fetch",
+      mark: { labels: ["agent-instructions"] },
+    });
+    const done = recordThreadToolStep(
+      recordThreadToolStep(
+        marked,
+        event({ kind: "tool-progress", toolCallId: "w", message: "Fetching" }),
+      ),
+      event({ kind: "tool-success", toolCallId: "w", summary: "Fetched" }),
+    );
+    expect(done?.steps).toEqual([
+      {
+        toolCallId: "w",
+        toolName: "Fetch",
+        state: "completed",
+        summary: "Fetched",
+        outsideContent: { labels: ["agent-instructions"] },
+      },
+    ]);
+  });
+
+  it("keeps labels already found when a later mark adds none, and adds new ones", () => {
+    const first = markThreadToolStepOutsideContent(undefined, {
+      toolCallId: "w",
+      toolName: "Fetch",
+      mark: { labels: ["hidden-text"] },
+    });
+    const same = markThreadToolStepOutsideContent(first, {
+      toolCallId: "w",
+      toolName: "Fetch",
+      mark: { labels: [] },
+    });
+    expect(same).toBe(first);
+    const more = markThreadToolStepOutsideContent(first, {
+      toolCallId: "w",
+      toolName: "Fetch",
+      mark: { labels: ["encoded-text"] },
+    });
+    expect(more?.steps[0]?.outsideContent?.labels).toEqual(["hidden-text", "encoded-text"]);
+  });
+
+  it("gives a call that announced no start a completed row to carry the tag", () => {
+    const steps = markThreadToolStepOutsideContent(undefined, {
+      toolCallId: "t1",
+      toolName: "web-fetch",
+      mark: { labels: [] },
+    });
+    expect(steps?.steps).toEqual([
+      {
+        toolCallId: "t1",
+        toolName: "web-fetch",
+        state: "completed",
+        outsideContent: { labels: [] },
+      },
+    ]);
   });
 });
