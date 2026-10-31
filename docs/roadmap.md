@@ -179,10 +179,10 @@ Intentionally out of scope; changing this requires an approved design change.
   designated Code thread per Code Project that reads the Project's board and
   proposes work the user must explicitly confirm. It launches and redirects
   nothing.
-- **Agent-initiated merge and review approval** — any merge an agent,
-  routine, or hub or peer host starts, an agent's approval or request for
-  changes, and plain force-push. A Code thread's own pull-request work and a
-  person's confirmed merge are allowed under
+- **Merges and force-pushes an agent starts on its own initiative** — and any
+  merge a hub or peer host starts. A Code thread's own pull-request work, a
+  merge or plain force-push the person asked for or allowed, and a person's
+  merge from any of their clients are allowed under
   [Git and pull requests](architecture.md#modes-chat-work-and-code).
 - **Octant-operated cloud accounts or telemetry** — the product stays
   local-first and privacy-preserving by default.

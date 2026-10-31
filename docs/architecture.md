@@ -21,9 +21,12 @@ are the exception once sync is on: they are copied into a store the user owns,
 not into a store Octant operates. The journal does not leave. See
 [Persistence](#persistence).
 
-Five principles are the yardstick for every product rule in the
-specifications (maintainer decision, 2026-10-31). A rule that protects none of
-them is a default a person can change, not a law.
+Six principles are the yardstick for every product rule in the
+specifications (maintainer decisions, 2026-10-31). A rule that protects none of
+them is a default a person can change, not a law. Octant's purpose is a useful
+place to run many agents: every provider in one place, plus tools the native
+apps lack. It is not a locked-down workspace; one stricter than the native
+apps gives nobody a reason to use it.
 
 1. **The person's ecosystem, the person's call.** Octant runs on their
    machine, with their accounts, folders, and tools. Their explicit choice
@@ -42,6 +45,15 @@ them is a default a person can change, not a law.
    ([Key providers run as themselves](#providers)).
 5. **Honesty never softens.** Octant always says what a provider or tool can
    and cannot do, and records what happened.
+6. **Never stricter than the native app.** Anything a person can allow in a
+   key provider's own app, they can allow in Octant, with the same or fewer
+   steps. Rationale (compared 2026-10-31): Claude Code offers a bypass mode,
+   an automatic mode whose classifier reviews each call, its sandbox off by
+   default, and merge-when-ready in its desktop app; Codex offers no
+   approvals with full access, an automatic approval reviewer, and its own
+   subagents on by default; other agent workspace apps start threads in full
+   access and merge, auto-merge, and merge whole stacks. Those apps also send
+   telemetry by default, which Octant never does (principle 2).
 
 **Hard lines.** No setting, guardrail level, or provider review turns these
 off:
@@ -51,13 +63,12 @@ off:
 - Octant stores no forge token and never journals a secret value.
 - Updates are signed and verified; anything unverifiable is refused.
 - Authority is checked on the host before any side effect; a phone or web
-  client never exceeds the host.
+  client never exceeds what the person allowed on the host.
 - Providers report capabilities honestly and fail closed.
-- The journal records what agents did, including when guardrails were
-  lowered.
-- Only a person merges, approves a pull request, or marks a thread Done.
-- No plain force-push; never to the default branch or another thread's
-  branch.
+- The journal records every lowered guardrail, every merge, and every
+  force-push, with who allowed it.
+- An agent never merges or force-pushes on its own initiative: only when the
+  person asked for it, or under a standing setting the person turned on.
 - Plan mode is read-only. That is the definition of Plan, not a guardrail.
 
 Every other product rule that limits what a person or an agent may do is a
@@ -150,9 +161,10 @@ The design rests on a small set of invariants that every package obeys:
   Skills are discovered only from valid `.agents/skills/` and
   `.claude/skills/` packages in the permitted repository ancestry (the closed
   `PROJECT_SKILL_ROOTS` allow-list), from the user-global `~/.agents/skills/`
-  directory, and from extra skill folders a person adds in Settings (allowed;
-  not built yet), all under the same activation ladder, never from the home
-  folder's own `.claude` ([Extensions and skills](#extensions-and-skills)).
+  directory, and also from the key providers' own skill folders and any
+  folder a person adds in Settings (allowed; not built yet), all under the
+  same activation ladder. Today discovery never reads the home folder's own
+  `.claude` ([Extensions and skills](#extensions-and-skills)).
 - **Modes are server-enforced.** Chat, Work, and Code are server-enforced
   domain modes, not renderer flags. Code is always available; disabling Chat or
   Work never deletes their data. The shell presents Chat and Work as one
@@ -912,11 +924,11 @@ reaches its own kind's commands, and nothing in the renderer can turn a Chat
 into Work or a Work thread into Chat. Settings' Chat and Work switches still
 gate their domains: with one off, the composer offers only the other kind.
 
-| Mode     | Binds to                                                                                                                            | Authority                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Chat** | A virtual, memory-scoped Project, or no Project at all                                                                              | No filesystem or shell authority. Optional safe research tools; scratch space is isolated per thread.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| **Work** | Exactly one OS-confined project root                                                                                                | Confined reads and bounded writes inside that root, approval-gated unless the thread's access is auto-accept-edits; no shell and no Git by default (a person may enable both for a Work Project: allowed; not built yet); document adapters (docx, pptx, pdf, image); research with citations; server-authoritative board.                                                                                                                                                                                                                                                                   |
-| **Code** | Exactly one directory, ideally a repository root; Code threads select a checkout (current checkout or a managed worktree) inside it | Starts approval-gated (Guarded); Full access when remembered for that Project, or when the person made a lower [guardrail level](#security-and-authority) the default (allowed; not built yet). Plan mode is always read-only. Git, terminals, tests, PR observation, and managed subagents run inside the bound root. Creating a Code Project may explicitly initialize Git in that folder (`docs/decisions/0079`) so a Code thread can prepare a checkout immediately; if that initialization fails, creation is refused and no Project is journaled. Binding without Git remains allowed. |
+| Mode     | Binds to                                                                                                                            | Authority                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Chat** | A virtual, memory-scoped Project, or no Project at all                                                                              | No filesystem or shell authority. Optional safe research tools; scratch space is isolated per thread.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| **Work** | Exactly one OS-confined project root                                                                                                | Confined reads and bounded writes inside that root, approval-gated unless the thread's access is auto-accept-edits; no shell and no Git by default (a person may enable both for a Work Project: allowed; not built yet); document adapters (docx, pptx, pdf, image); research with citations; server-authoritative board.                                                                                                                                                                                                                                                                                                                                               |
+| **Code** | Exactly one directory, ideally a repository root; Code threads select a checkout (current checkout or a managed worktree) inside it | Starts at the [guardrail level](#security-and-authority) the person picked at first run (Guarded recommended) or later set for the Project or globally (allowed; not built yet). Today it starts approval-gated (Guarded), or Full access when remembered for that Project. Plan mode is always read-only. Git, terminals, tests, PR observation, and managed subagents run inside the bound root. Creating a Code Project may explicitly initialize Git in that folder (`docs/decisions/0079`) so a Code thread can prepare a checkout immediately; if that initialization fails, creation is refused and no Project is journaled. Binding without Git remains allowed. |
 
 Work's missing shell and Git are withheld, not approval-gated: a person is
 never asked to approve a command in Work, because approving one would give the
@@ -1565,44 +1577,55 @@ lock them; changes from the thread happen in turns, which it refuses. A turn
 already running when the mark lands finishes normally.
 
 **Git and pull requests.** A Code thread may push its own branch and open,
-update, and stack pull requests from it; a person merges. The line sits at
-merging, approving, and other people's branches, because those are where an
-agent could land unreviewed work or destroy someone else's. Every forge change
-goes through one journaled Octant pull-request tool, and these rules hold for
-every action in it:
+update, and stack pull requests from it, and merge them when the person asked
+for it (maintainer decision, 2026-10-31: pull requests are larger now, and the
+native apps already merge on request). The line sits at an agent acting on its
+own initiative and at other people's branches, because those are where an
+agent could land work nobody asked for or destroy someone else's. Every forge
+change goes through one journaled Octant pull-request tool, and these rules
+hold for every action in it:
 
 - **Where.** Only the repository the thread's Project binds, and only a base
   inside that repository.
 - **Whose branch.** A thread owns the branch its checkout works on, the head
-  of its delivery target. It never acts on the default branch, a protected
-  branch, or another thread's branch; a stacked pull request may only target
+  of its delivery target. It never acts on another thread's branch, and acts
+  on the default or a protected branch only through a merge or force-push the
+  person asked for (the forge's own protection still applies); a stacked pull
+  request may only target
   the branch of the thread or linked thread it stacks on.
 - **Refusals.** Plan mode refuses every action, and so does revoked forge
-  access. A plain force-push is never offered; rewriting the thread's own
-  branch uses force-with-lease.
+  access.
+- **Force-push.** Rewriting the thread's own branch uses force-with-lease by
+  default. A plain force-push, or a force-push to the default branch, happens
+  only when the person asks for it in that turn, and is journaled.
 - **Record.** Each action journals the actor, the repository, the number, and
   the head SHA, as Octant's own record beside the forge's history.
 - **Credential.** Octant stores no forge token, as under the merge rules
   below.
-- **People approve and merge.** Agents and routines never merge, approve, or
-  request changes. A thread a routine started is approval-gated unless the
-  person opted that routine lower ([Routines](#modes-chat-work-and-code)), so
-  by default its prompts wait for a person, and it never merges at any level.
+- **Merging on the person's say.** A Code thread may merge, turn on
+  auto-merge, or merge a whole stack only when the person allowed it: in the
+  request itself, through the Project's "agents may merge" setting, or
+  through a routine the person created with merging allowed
+  ([Routines](#modes-chat-work-and-code)). The merge must match the reviewed
+  head SHA and the repository's required checks, and is journaled with who
+  allowed it. Agents do not approve or request changes on a pull request; the
+  forge does not let a pull request's author approve their own.
 
-| Action                               | Who                                        | Approval                                                                               | Still refused                                                  | Built                                                  |
-| ------------------------------------ | ------------------------------------------ | -------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------ |
-| Fast-forward push to its own branch  | Agent or person                            | Approval-gated asks for each act; remembered Full access does not ask                  | A branch the thread does not own; any force option             | Yes (`push-git`)                                       |
-| Open a pull request                  | Agent or person                            | As for push                                                                            | A repository outside the binding; a base outside it            | Yes, as ready for review (`create-pull-request`)       |
-| Open a draft pull request            | Agent or person                            | As for push                                                                            | As for opening                                                 | Allowed; not built yet                                 |
-| Mark ready for review                | Agent or person                            | As for push                                                                            | A pull request the thread does not own                         | Allowed; not built yet                                 |
-| Stacked pull request on its parent   | Agent or person                            | As for push                                                                            | A parent branch no thread or linked thread of this one owns    | Allowed; not built yet                                 |
-| Amend and push with force-with-lease | Agent or person, own branch only           | Asks every time unless Full access is remembered; the lease is mandatory               | Plain force-push; the default, a protected, or a shared branch | Allowed; not built yet                                 |
-| Edit title or body                   | Agent or person                            | As for push                                                                            | A pull request the thread did not open and is not linked to    | Allowed; not built yet                                 |
-| Add or remove labels                 | Agent or person                            | As for push                                                                            | Creating repository-wide labels                                | Allowed; not built yet                                 |
-| Review replies and comments          | Agent drafts; person sends                 | The person approves each post, Full access included, because it posts under their name | Approving or requesting changes                                | Allowed; not built yet                                 |
-| Approve or request changes           | Person only                                | —                                                                                      | Agents and routines                                            | Allowed for a person; not built yet                    |
-| Close or reopen                      | Person, or agent with approval             | Asks every time                                                                        | Deleting the branch                                            | Allowed; not built yet                                 |
-| Merge                                | Person only, local window or paired device | Inline confirmation of the reviewed head SHA                                           | Agents, routines, hub or peer hosts, any Code posture          | Local window yes; paired device allowed, not built yet |
+| Action                                     | Who                                                                                          | Approval                                                                                               | Still refused                                               | Built                                                                                    |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Fast-forward push to its own branch        | Agent or person                                                                              | Approval-gated asks for each act; remembered Full access does not ask                                  | A branch the thread does not own; any force option          | Yes (`push-git`)                                                                         |
+| Open a pull request                        | Agent or person                                                                              | As for push                                                                                            | A repository outside the binding; a base outside it         | Yes, as ready for review (`create-pull-request`)                                         |
+| Open a draft pull request                  | Agent or person                                                                              | As for push                                                                                            | As for opening                                              | Allowed; not built yet                                                                   |
+| Mark ready for review                      | Agent or person                                                                              | As for push                                                                                            | A pull request the thread does not own                      | Allowed; not built yet                                                                   |
+| Stacked pull request on its parent         | Agent or person                                                                              | As for push                                                                                            | A parent branch no thread or linked thread of this one owns | Allowed; not built yet                                                                   |
+| Amend and push with force-with-lease       | Agent or person, own branch only                                                             | As for push                                                                                            | A protected or a shared branch                              | Allowed; not built yet                                                                   |
+| Plain force-push, or to the default branch | Agent or person, when the person asks in that turn                                           | The person's request in that turn                                                                      | Without that request; another thread's branch               | Allowed; not built yet                                                                   |
+| Edit title or body                         | Agent or person                                                                              | As for push                                                                                            | A pull request the thread did not open and is not linked to | Allowed; not built yet                                                                   |
+| Add or remove labels                       | Agent or person                                                                              | As for push                                                                                            | Creating repository-wide labels                             | Allowed; not built yet                                                                   |
+| Review replies and comments                | Agent drafts; person sends                                                                   | The person approves each post, Full access included, because it posts under their name                 | Approving or requesting changes                             | Allowed; not built yet                                                                   |
+| Approve or request changes                 | Person                                                                                       | —                                                                                                      | The pull request's own author, by the forge's rule          | Allowed for a person; not built yet                                                      |
+| Close or reopen                            | Person, or agent with approval                                                               | Asks every time                                                                                        | Deleting the branch                                         | Allowed; not built yet                                                                   |
+| Merge, auto-merge, or merge a stack        | Person on any of their windows, phone, or web client; Code thread when the person allowed it | The person's confirmation, request, Project setting, or routine; reviewed head SHA and required checks | An agent on its own initiative; hub or peer hosts           | Person merging one pull request from a local window yes; the rest allowed, not built yet |
 
 Which path reaches the forge depends on the thread's
 [guardrail level](#security-and-authority):
@@ -1614,10 +1637,10 @@ Which path reaches the forge depends on the thread's
   are the person's choice, as they would be outside Octant. Octant journals
   each push or pull-request change it observes (a shell command whose
   activity the provider reports), with the actor and the command, and the
-  hard lines still hold: Octant refuses a plain force-push, a push to the
-  default or another thread's branch, and any merge or approval it can see
-  before it runs, and records what it could not see. Allowed; not built yet:
-  today such a change is journaled only as a shell command.
+  hard lines still hold: Octant refuses a merge or a plain force-push the
+  person did not ask for and a push to another thread's branch when it can
+  see them before they run, and records what it could not see. Allowed; not
+  built yet: today such a change is journaled only as a shell command.
 
 At Guarded and Provider review a known gap remains: a Code agent's shell can
 reach forge credentials today. (At Trusted no runtime is confined by Octant,
@@ -1635,15 +1658,20 @@ Guarded and Provider review is a known follow-up.
 **Pull-request merge.** A person merges one open pull request from its review
 (`POST /api/code/project-pull-requests/merge`). The rules:
 
-- **Who.** A person only. Today that is a `local-window` principal: the route
-  answers 403 to a paired remote device before decoding the command. A person
-  on a paired device may merge under the same confirmation and head checks
-  (allowed; not built yet); a host that honors owner devices asks that device
-  for a fresh unlock first
-  ([Hub and spokes: owner devices](design/hub-and-spokes.md#owner-devices)).
-  The server service refuses any initiator other than `user` as
-  `not-authorized`. No provider, agent tool, plugin, routine, hub or peer
-  host, or Code posture (Full access included) can reach it.
+- **Who.** A person, from any of their windows, phone, or web client, one
+  pull request or a whole stack in one step; or a Code thread when the person
+  allowed it, as above. Built today: a `local-window` principal merging one
+  pull request; the route answers 403 to a paired remote device before
+  decoding the command, and the server service refuses any initiator other
+  than `user` as `not-authorized`, so no provider, agent tool, plugin,
+  routine, hub or peer host, or Code posture (Full access included) reaches
+  it yet. Allowed; not built yet: merging from a paired device or web client
+  under the same confirmation and head checks (a host that honors owner
+  devices asks that device for a fresh unlock first,
+  [Hub and spokes: owner devices](design/hub-and-spokes.md#owner-devices)),
+  merging a stack in one step, auto-merge, and an agent's merge on the
+  person's request, Project setting, or routine. Hub and peer hosts never
+  merge on a person's behalf.
 - **Confirmation.** The review enables Merge only for a fresh, unambiguous,
   open, mergeable observation. Merge opens an inline confirmation that names the reviewed head
   and focuses Cancel; nothing merges until the person chooses Confirm merge.
@@ -1734,11 +1762,14 @@ the thread it came from.
   and fits under the profile. Work routines get no shell or Git authority. By
   default Full access is not eligible, whether or not it was remembered
   elsewhere: the contract refuses it on the snapshot and dispatch blocks it as
-  `full-access-ineligible`, and Code runs are created approval-gated. A
-  person may opt one routine into Full access (Trusted) or provider review
-  when creating it, never an agent proposing one, and the choice is captured
-  in the authority snapshot and journaled (allowed; not built yet). A routine
-  never runs at a level lower than the one its creator chose. Work
+  `full-access-ineligible`, and Code runs are created approval-gated. The
+  rule is that a routine runs at the [guardrail level](#security-and-authority)
+  the person picks when creating it, Trusted included, and a Code routine may
+  merge the pull requests it opens when the person allowed that at creation;
+  an agent proposing a routine never picks either for the person. Both
+  choices are captured in the authority snapshot and journaled (allowed; not
+  built yet). A routine never runs at a level lower than the one its creator
+  chose. Work
   runs bind the Project's confined root like an interactive Work thread, and
   their unattended first turn runs ask-first even when the host's Work default
   is auto-accept-edits, unless the routine's captured effective authority is
@@ -2348,11 +2379,13 @@ flowchart LR
   append it too, as the next item describes. The thread-lifetime taint
   projection rebuilds from the journal; session, turn, and restart boundaries
   never clear it. Irreversible or authority-bearing actions on a tainted thread
-  still require fresh confirmation after replay. That gate is a default: at
-  Trusted it warns and does not block, at Off it is off, and a person may
-  switch it off for one thread or Project at any level (allowed; not built
-  yet). The mark itself is recorded at every level, because the journal
-  records what came in. One gate enforces it today:
+  still require fresh confirmation after replay. That gate follows the
+  thread's [guardrail level](#security-and-authority): on at Guarded and
+  Provider review, a warning that does not block at Trusted, and off at Off;
+  a person turns it down for one thread or Project by setting that scope's
+  level (allowed; not built yet: today it is on at every posture). The mark
+  itself is recorded at every level, because the journal records what came
+  in. One gate enforces it today:
   `resolveThreadElevation` in `packages/domain/src/toolCallPolicy.ts` asks
   afresh, under every posture that allows the tool at all, Full access
   included, for each closed-catalog entry marked `irreversibleUnderTaint`
@@ -6314,10 +6347,12 @@ same. This holds in Chat, Work, and Code.
 - Skills are discovered only from valid `.agents/skills/` and `.claude/skills/`
   packages between the working directory and the Project or repository root
   (the closed `PROJECT_SKILL_ROOTS` allow-list), plus the user-global
-  `~/.agents/skills/`, plus extra skill folders a person adds in Settings
-  (allowed; not built yet: a folder the person names is its own root, wherever
-  it is, and Octant never discovers one). Octant's own discovery never reads
-  the home folder's own `.claude`, even when
+  `~/.agents/skills/`, plus the key providers' own skill folders (such as
+  `~/.claude/skills/`) and any folder a person adds in Settings (allowed; not
+  built yet: a folder the person names or a provider folder they turn on is
+  its own root, wherever it is, and Octant never discovers one on its own).
+  Today Octant's own discovery never reads the home folder's own `.claude`,
+  even when
   the host's Project-less fallback root is the home folder. A discovered
   skills folder that is a symlink, or resolves outside the bound root, is
   ignored. Every root
@@ -7100,34 +7135,35 @@ mechanisms are:
   Other work a request defers still loses that request's admission when
   dispatch completes.
 - **Guardrail levels.** One setting says how much a thread's tool calls are
-  guarded. It can be set globally, per Project, and per thread; the narrowest
-  scope that sets one wins (a thread over its Project, a Project over the
-  global default), unless the person overrides it on the spot for one action.
-  Narrowest scope, not most protective, because Off exists only per Project
-  and per thread (below) and would otherwise never take effect.
+  guarded. Any level, Off included, can be set globally, per Project, and per
+  thread; the narrowest scope that sets one wins (a thread over its Project, a
+  Project over the global default), unless the person overrides it on the spot
+  for one action, because a narrower setting is the person's exception to the
+  wider one. Off shows a one-time warning wherever it is first set.
 
-  | Level           | Who approves tool calls                                                      | Prompt-injection gate                                | Sandbox                                     | Default for                             |
-  | --------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------- | --------------------------------------- |
-  | Guarded         | The person, for anything with effects                                        | On: fresh confirmation after reading outside content | Octant's OS confinement plus the provider's | New Code and Work threads               |
-  | Provider review | The provider's own review model or harness; the person for what it escalates | On                                                   | Octant's plus the provider's                | Opt-in, per provider that supports it   |
-  | Trusted         | Nobody inside the folder; the person for anything outside it                 | Warns, does not block                                | The provider's own sandbox                  | Opt-in (today's remembered Full access) |
-  | Off             | Nobody                                                                       | Off                                                  | None beyond the operating system            | Opt-in, with one clear warning          |
+  | Level           | Who approves tool calls                                                      | Prompt-injection gate                                | Sandbox                                     | Git and pull requests                                                                  | Default for                                           |
+  | --------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------- | -------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+  | Guarded         | The person, for anything with effects                                        | On: fresh confirmation after reading outside content | Octant's OS confinement plus the provider's | Opens and updates pull requests after asking; merges only when the person asked        | Recommended at first run                              |
+  | Provider review | The provider's own review model or harness; the person for what it escalates | On                                                   | Octant's plus the provider's                | As Guarded, with the provider's review standing in for the person's click              | Opt-in, per provider that supports it                 |
+  | Trusted         | Nobody inside the folder; the person for anything outside it                 | Warns, does not block                                | The provider's own sandbox                  | Opens, updates, and merges the pull requests the person asked for without asking again | Offered at first run (today's remembered Full access) |
+  | Off             | Nobody                                                                       | Off                                                  | None beyond the operating system            | As Trusted, plus a plain force-push when the person asks for it                        | Opt-in, with a one-time warning                       |
   - **Every level keeps the hard lines** in
     [Overview and principles](#overview-and-principles): Plan stays read-only,
-    only a person merges, approves, or marks Done, no plain force-push, no
-    telemetry, no stored forge token, and the journal records what happened.
-    A level changes who answers and what Octant confines, never those.
+    an agent never merges or force-pushes on its own initiative, no
+    telemetry, no stored forge token, and the journal records every lowered
+    level, merge, and force-push. A level changes who answers and what Octant
+    confines, never those.
+  - **First run asks.** The first run asks which level new threads start at,
+    with Guarded recommended and Trusted offered; the person can change it per
+    Project or globally at any time (allowed; not built yet: today new Code
+    threads start approval-gated unless Full access is remembered).
   - **Lowering is journaled and shown.** Each change records who lowered it,
     when, from which level, and at which scope. The thread header shows the
     level in force and the scope it came from.
-  - **Routines and subagents start at their creator's level** and go lower
-    only when the person says so: a child run never exceeds its parent, and a
-    routine runs at the level captured when it was created
-    ([Routines](#modes-chat-work-and-code)).
-  - **Off is per Project and per thread only, not global** (maintainer
-    decision, 2026-10-31, taking the narrower answer to the open question).
-    A person turns it off where they mean to, one confirmed warning at a time;
-    the maintainer may widen it to a global setting later.
+  - **Subagents start at their parent's level** and go lower only when the
+    person says so; a child run never exceeds its parent. A routine runs at
+    the level the person picked when creating it, Trusted included, and
+    captured then ([Routines](#modes-chat-work-and-code)).
 
   Today's postures map onto the levels. Approval-gated is Guarded, and
   auto-accept-edits is Guarded with project file writes waived. Plan is not a
@@ -7138,7 +7174,8 @@ mechanisms are:
   the Octant Harness exception below. Built today: Guarded, Provider review
   for Claude Code and Codex in Code, and Trusted as Full access, set per
   thread and remembered per Project. Allowed; not built yet: the single
-  level setting with its global and Project defaults, the header indicator,
+  level setting with its global and Project defaults, the first-run
+  question, the header indicator,
   Provider review in Work and on Mistral Vibe and OpenCode, Trusted's
   warn-only injection gate (Full access still asks under taint today), and
   Off.
@@ -7158,9 +7195,9 @@ mechanisms are:
     verdict, and Codex's reviewer answers inside the runtime without sending
     each request to the host.
   - **Hard lines apply after the provider says yes.** A provider's approval
-    never merges, approves a pull request, force-pushes, reaches another
-    thread's branch, or writes in Plan; the host refuses those whatever the
-    review answered.
+    never stands in for the person's request to merge or force-push, never
+    reaches another thread's branch, and never writes in Plan; the host
+    refuses those whatever the review answered.
   - **What it escalates goes to the person,** through the ordinary approval
     path, and so does every call on a thread marked by outside content: the
     injection gate stays on at this level, so delegation is off on a marked
@@ -7173,10 +7210,10 @@ mechanisms are:
   actions, credential access, access outside the bound root, privilege or
   sandbox changes. Grants are scoped and journaled; a remembered approval of
   one MCP tool in one Project follows the rules in
-  [Extensions and skills](#extensions-and-skills). Code starts approval-gated
-  (Guarded) by default; a person may make Full access (Trusted) or provider
-  review the default for a Project or for everything (allowed; not built yet:
-  today only a per-Project remembered Full access exists);
+  [Extensions and skills](#extensions-and-skills). Code starts at the level
+  the person picked at first run (Guarded recommended, Trusted offered),
+  changeable per Project or globally (allowed; not built yet: today Code
+  starts approval-gated and only a per-Project remembered Full access exists);
   Plan mode is read-only; auto-accept-edits waives only project file writes;
   a Work thread takes its access from Settings › Work when it is created —
   ask-first (the default) or auto-accept-edits — and keeps it; the host sets
@@ -7564,8 +7601,7 @@ mechanisms are:
   changes who answers, not the sandbox. Trusted is Full access, where Octant
   wraps no provider runtime and each runs in its own sandbox. Off would launch
   the runtime with its own sandbox off and no Octant wrapping, leaving only
-  the operating system's own protections (allowed per Project and thread; not
-  built yet). Plan's read-only enforcement is the same at every level.
+  the operating system's own protections (allowed; not built yet). Plan's read-only enforcement is the same at every level.
 
   Codex is unwrapped because its app-server is leased once per provider
   instance: `providerRuntimeRegistry` keys runtimes by `instanceId`, so one
@@ -9498,19 +9534,21 @@ signed in to, or chosen from the bundled catalog) are in scope under the
 [connector rules](#extensions-and-skills): user-added packages through the
 published seams and the credential broker, never a hosted service. A Code
 thread's own Git and pull-request work (push, draft, ready, stacked, and
-force-with-lease on its own branch, title, body, labels, drafted replies a
-person sends, and close or reopen with approval), a person's confirmed merge
-from a local window or a paired device, and host-local routines (Automation
-Center), Chat routines included, are in scope under the rules in
-[Modes](#modes-chat-work-and-code). Of the pull-request actions, only a
-fast-forward push, opening a ready pull request, and merging from a local
-window are built; the rest, Chat routines, extra skill folders added in
-Settings, and linked external secret stores are allowed and not built yet.
+force-with-lease on its own branch, a plain force-push the person asks for,
+title, body, labels, drafted replies a person sends, close or reopen with
+approval, and merge, auto-merge, or a stack merge the person allowed), a
+person's merge from any of their windows, phone, or web client, and
+host-local routines (Automation Center), Chat routines included, are in scope
+under the rules in [Modes](#modes-chat-work-and-code). Of the pull-request
+actions, only a fast-forward push, opening a ready pull request, and a
+person's merge of one pull request from a local window are built; the rest,
+Chat routines, the key providers' skill folders and extra skill folders added
+in Settings, and linked external secret stores are allowed and not built yet.
 The [guardrail levels](#security-and-authority) and the
 [key providers' native features](#providers) are in scope; of them only
 Guarded, Provider review for Claude Code and Codex in Code, and Trusted as
-Full access are built. Agent-initiated merge, review approval by an agent, plain force-push, and
-cloud scheduling are not in scope. A self-hosted wake service
+Full access are built. A merge or force-push an agent starts on its own
+initiative, and cloud scheduling, are not in scope. A self-hosted wake service
 that runs in the Octant server on a person's hub and wakes their own spokes is
 in scope under [Hub and spokes](design/hub-and-spokes.md#wake-service); an
 Octant-operated hosted service, deploying anything, creating an account, or

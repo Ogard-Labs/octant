@@ -633,7 +633,10 @@ tabs or action tiles: adding a folder lives in the composer's Project picker. Th
 behavior is in [Workspace](docs/design/workspace.md#start-screen-cards).
 
 First-run setup asks only what a first task needs — a usable provider, a
-Project folder, and a model — and ends in one primary action, Start a task,
+Project folder, a model, and the
+[guardrail level](docs/architecture.md#security-and-authority) new threads
+start at (Guarded recommended, Trusted offered; this question is allowed, not
+built yet) — and ends in one primary action, Start a task,
 that opens the new-task composer in that Project. Every step is optional from
 the first one. Opening setup focuses the current step's heading so a long
 provider list does not scroll past its introduction; Tab then reaches the
@@ -2122,8 +2125,8 @@ Cancel; Tab can leave the warning to continue reviewing. Escape within the warni
 or Cancel returns focus to Merge (or the review heading if Merge is unavailable).
 An attempted merge keeps its existing freshness and reviewed-head checks, and
 focus moves to its result when the attempt completes. It is not a trusted task
-approval surface. Only a person can merge; who may merge and
-what the host checks are owned by
+approval surface. Who may merge (a person, or a Code thread the person
+allowed) and what the host checks are owned by
 [architecture](docs/architecture.md#modes-chat-work-and-code).
 
 A dialog with a visible heading uses that heading as its accessible name through
