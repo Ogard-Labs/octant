@@ -286,6 +286,37 @@ describe("Pi process boundary", () => {
     expect(refused).toMatchObject({ _tag: "Left", left: { category: "stale-resume" } });
   });
 
+  it("grants a Project's extra folder the root's writes, and none to a Chat launch", async () => {
+    const f = fixture();
+    const notes = `${f.root}-notes`;
+    mkdirSync(notes, { recursive: true });
+    const confinement = makePiConfinementLive({
+      platform: "darwin",
+      sandboxPath: f.sandbox,
+      credentialPath: f.auth,
+      modelsPath: f.models,
+      temporaryDirectory: f.base,
+    });
+    const profileFor = async (mode: "code" | "chat") =>
+      (
+        await Effect.runPromise(
+          confinement.prepare({
+            binaryPath: f.binary,
+            root: mode === "chat" ? f.home : f.root,
+            extraFolders: [notes],
+            piHome: f.home,
+            sessionDirectory: join(f.home, "sessions"),
+            sessionId: `${mode}-1`,
+            mode,
+            executionPolicy: "approval-gated",
+            environment: {},
+          }),
+        )
+      ).args[1];
+    expect(await profileFor("code")).toContain(`(allow file-write* (subpath "${notes}"))`);
+    expect(await profileFor("chat")).not.toContain(notes);
+  });
+
   it("writes isolated configuration, links provider-owned auth, and loads only the Octant bridge", async () => {
     const f = fixture();
     const confinement = makePiConfinementLive({
@@ -414,8 +445,14 @@ describe("Pi process boundary", () => {
     expect(piArguments("/bridge.ts", "/sessions", "full-1", "code", "full-access")).toEqual(
       expect.arrayContaining(["--tools", "bash,edit,write,read,grep,find,ls"]),
     );
+    // Work and Code share one capability set at the thread's level.
+    for (const policy of ["approval-gated", "auto-accept-edits", "full-access"] as const) {
+      expect(piArguments("/bridge.ts", "/sessions", "work-1", "work", policy)).toEqual(
+        piArguments("/bridge.ts", "/sessions", "work-1", "code", policy),
+      );
+    }
     expect(piArguments("/bridge.ts", "/sessions", "work-1", "work", "approval-gated")).toEqual(
-      expect.arrayContaining(["--tools", "edit,write,read,grep,find,ls"]),
+      expect.arrayContaining(["--tools", "bash,edit,write,read,grep,find,ls"]),
     );
 
     const f = fixture();
@@ -487,27 +524,34 @@ describe("Pi process boundary", () => {
     expect(chatLaunch.args[1]).not.toContain("(allow process-exec)");
     expect(chatLaunch.args[1]).not.toContain(`(allow file-write* (subpath "${chat.root}"))`);
 
-    const work = fixture();
-    const workLaunch = await Effect.runPromise(
-      makePiConfinementLive({
-        platform: "darwin",
-        sandboxPath: work.sandbox,
-        temporaryDirectory: work.base,
-      }).prepare({
-        binaryPath: work.binary,
-        root: work.root,
-        piHome: work.home,
-        sessionDirectory: join(work.home, "sessions"),
-        sessionId: "work-1",
-        mode: "work",
-        executionPolicy: "approval-gated",
-        environment: sanitizePiEnvironment({ PATH: "/usr/bin" }, work.home),
-      }),
-    );
-    // Work declares shell "denied", but a provider's in-process shell emits
-    // no protocol request to refuse — only the jail's exec deny holds it.
-    expect(workLaunch.args[1]).not.toContain("(allow process-fork)");
-    expect(workLaunch.args[1]).not.toContain("(allow process-exec)");
+    // Work shares Code's shell at the thread's level, so a Work launch gets
+    // the jail a Code launch at the same level gets, exec and fork included.
+    for (const executionPolicy of ["approval-gated", "auto-accept-edits", "full-access"] as const) {
+      const work = fixture();
+      const launchFor = (mode: "work" | "code") =>
+        Effect.runPromise(
+          makePiConfinementLive({
+            platform: "darwin",
+            sandboxPath: work.sandbox,
+            temporaryDirectory: work.base,
+          }).prepare({
+            binaryPath: work.binary,
+            root: work.root,
+            piHome: work.home,
+            sessionDirectory: join(work.home, "sessions"),
+            sessionId: "work-1",
+            mode,
+            executionPolicy,
+            environment: sanitizePiEnvironment({ PATH: "/usr/bin" }, work.home),
+          }),
+        );
+      const workLaunch = await launchFor("work");
+      expect(workLaunch.args).toEqual((await launchFor("code")).args);
+      if (executionPolicy !== "full-access") {
+        expect(workLaunch.args[1]).toContain("(allow process-fork)");
+        expect(workLaunch.args[1]).toContain("(allow process-exec)");
+      }
+    }
   });
 
   it("fails closed for non-macOS bounded modes and pre-existing provider-owned targets", async () => {

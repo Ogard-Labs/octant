@@ -541,22 +541,24 @@ describe("Claude execution policy", () => {
       allowDangerouslySkipPermissions: false,
       tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "AskUserQuestion", "TodoWrite"],
     });
-    expect(claudeExecutionOptions("approval-gated", false, "work").tools).toEqual([
-      "Read",
-      "Grep",
-      "Glob",
-      "Edit",
-      "Write",
-      "AskUserQuestion",
-      "TodoWrite",
-    ]);
+    // Work and Code share one capability set at the thread's level.
+    for (const [policy, autoApprove] of [
+      ["approval-gated", false],
+      ["approval-gated", true],
+      ["auto-accept-edits", false],
+      ["full-access", false],
+    ] as const) {
+      expect(claudeExecutionOptions(policy, autoApprove, "work")).toEqual(
+        claudeExecutionOptions(policy, autoApprove, "code"),
+      );
+    }
     expect(claudeExecutionOptions("plan")).toEqual({
       permissionMode: "plan",
       allowDangerouslySkipPermissions: false,
       tools: ["Read", "Glob", "Grep", "TodoWrite"],
     });
     // A Code Plan turn runs read-only commands only where its Seatbelt profile
-    // can name the programs; Chat and Work have no shell in any posture.
+    // can name the programs; Chat has no shell, and Work never runs in Plan.
     expect(claudeExecutionOptions("plan", false, "code", "darwin").tools).toEqual([
       "Read",
       "Glob",
@@ -647,6 +649,47 @@ describe("Claude execution policy", () => {
       );
 
       await acquired.close();
+    }
+  });
+
+  it("grants a Project's extra folder what the root gets, in its sandbox and its tool gate", async () => {
+    const extraFolder = "/tmp/octant-claude-notes";
+    const f = harness();
+    const scope = await Effect.runPromise(Scope.make());
+    const connection = await Effect.runPromise(
+      f.driver
+        .acquire({ instanceId, projectRoot, extraFolders: [extraFolder], mode: "code" })
+        .pipe(Effect.provideService(Scope.Scope, scope)),
+    );
+    try {
+      await Effect.runPromise(
+        connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      const open = f.opens[0]!;
+      expect(open.additionalDirectories).toEqual([extraFolder]);
+      expect(open.sandbox?.filesystem).toEqual({
+        denyRead: ["/"],
+        allowRead: [projectRoot, extraFolder],
+        allowWrite: [projectRoot, extraFolder],
+      });
+      const signal = new AbortController().signal;
+      const read = (file_path: string, toolUseId: string) =>
+        open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Read",
+          input: { file_path },
+          toolUseId,
+          signal,
+        });
+      await expect(read(`${extraFolder}/today.md`, "extra")).resolves.toEqual({
+        behavior: "allow",
+      });
+      await expect(read("/tmp/octant-claude-elsewhere/a.md", "sibling")).resolves.toMatchObject({
+        behavior: "deny",
+      });
+    } finally {
+      await Effect.runPromise(Scope.close(scope, Exit.void));
     }
   });
 
@@ -1155,10 +1198,19 @@ describe("Claude execution policy", () => {
       callback.then((decision) => ({ kind: "decision" as const, decision })),
     ]);
     expect(first.kind).toBe("approval");
+    // The pending call reaches an automatic reviewer through the connection,
+    // never on the event, and is gone once the request is answered.
+    expect(JSON.stringify(first)).not.toContain('"call"');
+    expect(acquired.connection.approvalCall?.({ sessionId, requestId: "request-1" })).toMatchObject(
+      { tool: "Edit", input: expect.stringContaining('"file_path"') },
+    );
     await Effect.runPromise(
       acquired.connection.answerApproval({ sessionId, requestId: "request-1", approved: true }),
     );
     await expect(callback).resolves.toEqual({ behavior: "allow" });
+    expect(
+      acquired.connection.approvalCall?.({ sessionId, requestId: "request-1" }),
+    ).toBeUndefined();
     await acquired.close();
   });
 
@@ -1203,37 +1255,43 @@ describe("Claude execution policy", () => {
     await acquired.close();
   });
 
-  it("never offers a Work session a shell, and refuses one it asks for without raising an approval", async () => {
-    const f = harness();
-    const acquired = await acquire(f.driver, "work");
-    await Effect.runPromise(
-      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
-    );
-    const open = f.opens[0]!;
-    expect(open.tools).not.toContain("Bash");
-    expect(open.tools).toEqual(expect.arrayContaining(["Read", "Edit", "Write"]));
-    const approvals: ProviderRuntimeEvent[] = [];
-    const subscription = Effect.runFork(
-      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
-        Effect.sync(() => {
-          if (event.kind === "approval-request") approvals.push(event);
-        }),
-      ),
-    );
-    await expect(
-      open.preToolUse({
-        sessionId: "sdk-session-1",
-        projectRoot,
-        toolName: "Bash",
-        input: { command: "git status", description: "Show working tree status" },
-        toolUseId: "work-bash",
-        signal: new AbortController().signal,
-      }),
-    ).resolves.toMatchObject({ behavior: "deny" });
-    expect(approvals).toEqual([]);
-    await Effect.runPromise(Fiber.interrupt(subscription));
-    await acquired.close();
-  });
+  it.each([
+    ["approval-gated", false],
+    ["approval-gated", true],
+    ["auto-accept-edits", false],
+    ["full-access", false],
+  ] as const)(
+    "starts a Work session at %s (auto %s) with the shell, posture, sandbox and Bash gate of the same Code session",
+    async (executionPolicy, autoApprove) => {
+      const sessionFor = async (mode: "work" | "code") => {
+        const f = harness();
+        const acquired = await acquire(f.driver, mode);
+        await Effect.runPromise(
+          acquired.connection.start({ sessionId, modelId, executionPolicy, autoApprove }),
+        );
+        const open = f.opens[0]!;
+        const bash = await open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Bash",
+          input: { command: "git status", description: "Show working tree status" },
+          toolUseId: `${mode}-bash`,
+          signal: new AbortController().signal,
+        });
+        await acquired.close();
+        return {
+          tools: open.tools,
+          executionPolicy: open.executionPolicy,
+          autoApprove: open.autoApprove,
+          sandbox: open.sandbox,
+          bash,
+        };
+      };
+      const work = await sessionFor("work");
+      expect(work.tools).toContain("Bash");
+      expect(work).toEqual(await sessionFor("code"));
+    },
+  );
 
   it("allows reads from the hook alone, so a read-heavy turn never trips the grant cap", async () => {
     const f = harness();
@@ -1313,6 +1371,60 @@ describe("Claude execution policy", () => {
       acquired.connection.answerApproval({ sessionId, requestId: "request-1", approved: false }),
     );
     await expect(callback).resolves.toMatchObject({ behavior: "deny" });
+    await acquired.close();
+  });
+
+  it("asks again for the same call after a one-call answer, even when the person reuses approvals for the session", async () => {
+    const f = harness("subscription", "current-session");
+    const acquired = await acquire(f.driver);
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const open = f.opens[0]!;
+    const signal = new AbortController().signal;
+    const input = { file_path: `${projectRoot}/src/app.ts`, old_string: "a", new_string: "b" };
+    const nextApproval = () =>
+      Effect.runPromise(
+        Stream.runHead(
+          Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+            Stream.filter(
+              (event) => event.sessionId === sessionId && event.kind === "approval-request",
+            ),
+          ),
+        ),
+      );
+    const ask = async (toolUseId: string) => {
+      const approval = nextApproval();
+      await Promise.resolve();
+      await open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Edit",
+        input,
+        toolUseId,
+        signal,
+      });
+      const callback = open.canUseTool({ toolName: "Edit", input, toolUseId, signal });
+      const first = await Promise.race([
+        approval.then((result) => ({ kind: "event" as const, result })),
+        callback.then((decision) => ({ kind: "decision" as const, decision })),
+      ]);
+      return { first, callback };
+    };
+    const firstCall = await ask("edit-once");
+    expect(firstCall.first.kind).toBe("event");
+    await Effect.runPromise(
+      acquired.connection.answerApproval({
+        sessionId,
+        requestId: "request-1",
+        approved: true,
+        scope: "once",
+      }),
+    );
+    await expect(firstCall.callback).resolves.toEqual({ behavior: "allow" });
+    // The same call again is asked again: a one-call answer is never reused.
+    const secondCall = await ask("edit-again");
+    expect(secondCall.first.kind).toBe("event");
     await acquired.close();
   });
 

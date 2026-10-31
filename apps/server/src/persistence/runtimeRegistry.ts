@@ -27,6 +27,7 @@ import {
   CodeProjectAccessChanged,
   CodeProjectNewThreadWorkspaceChanged,
   CodeProjectPermissionModeChanged,
+  CodeProjectAutoReviewerChanged,
   CodeProjectPullRequestBackgroundRefreshChanged,
   CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED,
   CodeProjectPullRequestMergeRecorded,
@@ -37,6 +38,8 @@ import {
   WorkProjectStatusFileChanged,
   ProjectBrandKitChanged,
   CodeProjectActionsChanged,
+  ProjectExtraFolderAdded,
+  ProjectExtraFolderRemoved,
   CodeProjectDesktopRecipeChanged,
   CodeCheckoutObserved,
   CodeCheckoutRemoved,
@@ -157,7 +160,14 @@ import {
   RemotePushRegistrationRecordedV1,
   RemoteServerGrantClosedPayload,
   RemoteServerGrantOpenedPayload,
+  BROWSER_EXTENSION_EVENT_NAMES,
   BROWSER_PROFILE_EVENT_NAMES,
+  BrowserExtensionDisabled,
+  BrowserExtensionEnabled,
+  BrowserExtensionInstalled,
+  BrowserExtensionRemoved,
+  BrowserExtensionUpdated,
+  BrowserCookiesImported,
   BrowserProfileCleared,
   TERMINAL_BROWSER_GRANT_EVENT_NAMES,
   TerminalBrowserGrantIssued,
@@ -359,6 +369,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("project.binding-relinked@1", 1, ProjectBindingRelinked)
     .register("project.code-access-changed@1", 1, CodeProjectAccessChanged)
     .register("project.code-permission-mode-changed@1", 1, CodeProjectPermissionModeChanged)
+    .register("project.code-auto-reviewer-changed@1", 1, CodeProjectAutoReviewerChanged)
     .register(
       "project.code-new-thread-workspace-changed@1",
       1,
@@ -380,6 +391,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("project.work-status-file-changed@1", 1, WorkProjectStatusFileChanged)
     .register("project.brand-kit-changed@1", 1, ProjectBrandKitChanged)
     .register("project.code-actions-changed@1", 1, CodeProjectActionsChanged)
+    .register("project.extra-folder-added@1", 1, ProjectExtraFolderAdded)
+    .register("project.extra-folder-removed@1", 1, ProjectExtraFolderRemoved)
     .register("project.code-desktop-recipe-changed@1", 1, CodeProjectDesktopRecipeChanged)
     .register("memory.entry-created@1", 1, MemoryEntryCreated)
     .register("memory.entry-superseded@1", 1, MemoryEntrySuperseded)
@@ -548,6 +561,12 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(PROJECT_TERMINAL_EVENT_NAMES.started, 1, ProjectTerminalStarted)
     .register(PROJECT_TERMINAL_EVENT_NAMES.ended, 1, ProjectTerminalEnded)
     .register(BROWSER_PROFILE_EVENT_NAMES.cleared, 1, BrowserProfileCleared)
+    .register(BROWSER_EXTENSION_EVENT_NAMES.installed, 1, BrowserExtensionInstalled)
+    .register(BROWSER_EXTENSION_EVENT_NAMES.updated, 1, BrowserExtensionUpdated)
+    .register(BROWSER_EXTENSION_EVENT_NAMES.removed, 1, BrowserExtensionRemoved)
+    .register(BROWSER_EXTENSION_EVENT_NAMES.enabled, 1, BrowserExtensionEnabled)
+    .register(BROWSER_EXTENSION_EVENT_NAMES.disabled, 1, BrowserExtensionDisabled)
+    .register(BROWSER_PROFILE_EVENT_NAMES.cookiesImported, 1, BrowserCookiesImported)
     .register(TERMINAL_BROWSER_GRANT_EVENT_NAMES.issued, 1, TerminalBrowserGrantIssued)
     .register(TERMINAL_BROWSER_GRANT_EVENT_NAMES.revoked, 1, TerminalBrowserGrantRevoked)
     .register(HUB_MEMBERSHIP_CHANGED, 1, HubMembershipChangedPayload)

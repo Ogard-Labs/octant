@@ -210,8 +210,10 @@ that hosts the thread, not from a paired phone or browser.
 - Browser automation uses per-thread incognito contexts with an origin
   allowlist and credential-field protection. A page is Private unless you put it
   in a Project or Personal profile, which keeps its sign-in on this Mac until you
-  sign out. The agent asks you before it uses a signed-in site; a routine, a
-  subagent, a terminal CLI, and a paired device cannot open one.
+  sign out; you can import cookies from another browser on this Mac into one of
+  them, by picking it yourself, through macOS's own Keychain prompt. The agent
+  asks you before it uses a signed-in site; a routine, a subagent, a terminal
+  CLI, and a paired device cannot open one.
 
 ### Protected files
 

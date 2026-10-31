@@ -580,6 +580,9 @@ export class BrowserAutomationService {
         url: observed.url,
         title: observed.title,
         takenBy,
+        ...(storedBrowserProfile(owned.record.policy.profile) === undefined
+          ? {}
+          : { profile: storedBrowserProfile(owned.record.policy.profile) }),
         providerInstanceId: owned.record.authority.providerInstanceId,
         correlationId: owned.action.correlationId,
       });

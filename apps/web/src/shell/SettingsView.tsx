@@ -59,6 +59,7 @@ import { useSettingsSaved, type SettingsWriteResult } from "./useSettingsSaved";
 import { SidebarDestinationSettings } from "./SidebarDestinationSettings";
 import { PluginSettingsSection } from "./PluginSettingsSection";
 import { BrowserProfilesSection } from "../browser/BrowserProfilesSection";
+import { BrowserExtensionsSection } from "../browser/BrowserExtensionsSection";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { RememberedBrowserProfileSite } from "@octant/contracts/shell";
 import { browserProfileKey } from "@octant/domain";
@@ -212,7 +213,10 @@ export interface SettingsViewProps {
   readonly diagnosticsExportClient?: DiagnosticsExportClient;
   readonly hostControlClient?: HostControlClient;
   /** Settings › Data & privacy › Browser profiles; absent where the host keeps none. */
-  readonly browserAutomationClient?: Pick<BrowserAutomationClient, "manageProfiles">;
+  readonly browserAutomationClient?: Pick<
+    BrowserAutomationClient,
+    "manageExtensions" | "manageProfiles"
+  >;
   /** Settings › Permissions › Protected files; absent where the host publishes no list. */
   readonly protectedFilesClient?: ProtectedFilesClient;
   /** Settings › Data & privacy › Public links; absent where the host has no such surface. */
@@ -966,6 +970,7 @@ function ActiveSectionContent({
             <CodeSettingsView
               focusedSetting={focusedSetting}
               onUpdate={props.codeController.updateSettings}
+              providerSnapshot={props.providerController?.snapshot}
               settings={props.codeController.bootstrap.settings}
             />
           )}
@@ -1330,6 +1335,15 @@ function ActiveSectionContent({
                 Backup, recovery, and retention controls are available on the host machine only.
               </p>
             </section>
+          )}
+          {props.browserAutomationClient === undefined ? null : (
+            <BrowserExtensionsSection
+              client={props.browserAutomationClient}
+              {...(props.pickLocalPluginFolder === undefined
+                ? {}
+                : { pickExtensionFolder: props.pickLocalPluginFolder })}
+              {...(focusedSetting === undefined ? {} : { focusedSetting })}
+            />
           )}
           {props.browserAutomationClient === undefined ? null : (
             <BrowserProfilesSection

@@ -67,6 +67,8 @@ export interface OpenCodeServerConnection {
 export interface OpenCodeProcessStartInput {
   readonly binaryPath: string;
   readonly cwd: string;
+  /** The Project's extra folders, granted what `cwd` is granted. */
+  readonly extraFolders?: ReadonlyArray<string>;
   /** Product mode used to derive the OS process policy before launch. */
   readonly mode?: "chat" | "work" | "code";
   /** Effective thread policy used to derive filesystem/process/network limits. */
@@ -991,11 +993,12 @@ function prepareOpenCodeLaunch(
           environment: profile.environment,
         };
       }
-      // Work declares shell "denied"; an in-process provider shell emits
-      // no permission request, so the jail itself must refuse to spawn it.
-      const jailDeniesProcess = executionPolicy === "plan" || mode !== "code";
+      // Chat and Plan have no shell; an in-process provider shell emits no
+      // permission request, so the jail itself must refuse to spawn it. Work
+      // launches exactly as Code does at the same level.
+      const jailDeniesProcess = executionPolicy === "plan" || mode === "chat";
       // OpenCode 2 runs `git rev-parse` at startup to resolve its project.
-      // Under the Chat/Plan/Work jail that spawn fails with EPERM and the
+      // Under the Chat/Plan jail that spawn fails with EPERM and the
       // server answers 500 for every route in a work tree. On macOS the
       // stand-in puts an always-failing `git` first on PATH so the spawn
       // succeeds and git exits non-zero, which OpenCode reads as "not a git
@@ -1003,7 +1006,7 @@ function prepareOpenCodeLaunch(
       // and nothing else. Linux confinement cannot express that one exec
       // without also allowing fork, which is the hole the Plan jail exists
       // to close, so Linux keeps fork denied and the probe fails closed.
-      // OpenCode 1.x and Code mode are unchanged.
+      // OpenCode 1.x and Work and Code modes are unchanged.
       const betaGitStandin = runtime === "beta" && jailDeniesProcess && platform === "darwin";
       if (betaGitStandin) {
         const standinBin = prepareGitStandinDirectory(profile);
@@ -1020,6 +1023,9 @@ function prepareOpenCodeLaunch(
         executable: input.binaryPath,
         args,
         boundRoot: root,
+        ...(mode === "chat" || input.extraFolders === undefined
+          ? {}
+          : { extraBoundRoots: input.extraFolders }),
         temporaryDirectory,
         additionalWriteRoots: writeRoots,
         readRoots,

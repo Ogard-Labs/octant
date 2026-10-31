@@ -498,6 +498,39 @@ describe("Linux Bubblewrap confinement", () => {
     expect((unusable as ProcessConfinementError).userFixable).toBeUndefined();
   });
 
+  it("binds a Project's extra folder as it binds the root, writable or read-only alike", () => {
+    const { root, boundRoot, temporaryDirectory, bwrapPath } = fixture();
+    const extra = join(root, "extra");
+    const sibling = join(root, "sibling");
+    mkdirSync(extra);
+    mkdirSync(sibling);
+    const launch = (writeBoundRoot: boolean) =>
+      buildBubblewrapLaunch(
+        {
+          executable: "/bin/true",
+          args: [],
+          boundRoot,
+          extraBoundRoots: [extra],
+          temporaryDirectory,
+          networkEgress: "none",
+          writeBoundRoot,
+        },
+        { bwrapPath },
+      );
+
+    const writable = launch(true);
+    expect(boundPairs(writable.args, "--bind")).toContainEqual([boundRoot, boundRoot]);
+    expect(boundPairs(writable.args, "--bind")).toContainEqual([extra, extra]);
+    expect(writable.args.some((arg) => arg.startsWith(sibling))).toBe(false);
+    // Commands still start in the main folder.
+    expect(hasFlagValue(writable.args, "--chdir", boundRoot)).toBe(true);
+
+    const readOnly = launch(false);
+    expect(boundPairs(readOnly.args, "--ro-bind")).toContainEqual([extra, extra]);
+    expect(boundPairs(readOnly.args, "--bind")).not.toContainEqual([extra, extra]);
+    expect(boundPairs(readOnly.args, "--bind")).not.toContainEqual([boundRoot, boundRoot]);
+  });
+
   it("uses a private tmpfs for /tmp instead of binding the host directory", () => {
     const { boundRoot, bwrapPath } = fixture();
     const launch = buildBubblewrapLaunch(

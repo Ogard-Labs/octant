@@ -27,7 +27,7 @@ import {
   MAX_WORK_TRANSCRIPT_TURNS,
   ProviderSessionId,
   UtcTimestamp,
-  WORK_TURN_CAPABILITIES,
+  DEFAULT_WORK_ACCESS,
   decodeCancelWorkTurnCommand,
   decodeContextSubjectRef,
   decodeWorkThreadTranscript,
@@ -92,6 +92,11 @@ import {
   FILE_MENTION_UNREADABLE_CONTEXT,
   THREAD_MENTION_UNREADABLE_CONTEXT,
   workProjectKeepsStatusFile,
+  clampWorkAccess,
+  workThreadAccessOf,
+  workTurnCapabilityFacts,
+  projectExtraFolderRoots,
+  projectExtraFoldersInstructions,
   type ThreadToolSteps,
 } from "@octant/domain";
 import {
@@ -188,10 +193,11 @@ interface WorkUsageFacts {
 
 export interface WorkTurnStartOptions {
   /**
-   * Run this turn ask-first whatever the thread's access, for a caller
-   * whose own authority is narrower than the thread's (a goal loop round).
+   * The most this turn may run at, for a caller whose own authority may be
+   * narrower than the thread's (a goal-loop round, a routine, a delegation):
+   * the turn runs at the thread's level clamped to it (`clampWorkAccess`).
    */
-  readonly holdAskFirst?: boolean;
+  readonly accessCeiling?: WorkAccess;
   /**
    * Set by the host's own usage-limit recovery when it dispatches the
    * authorized continuation: the send is not the person re-engaging, so it
@@ -302,6 +308,8 @@ export interface WorkTurnServiceDependencies {
   readonly resolveAppManagedTools?: (input: {
     readonly thread: WorkThread;
     readonly projectRoot: string;
+    /** The Project's extra folders, which file tools treat as the root. */
+    readonly extraFolders?: ReadonlyArray<string>;
     readonly windowId: WindowId;
   }) => AppManagedToolSet | undefined;
   /** The harness around a turn: stable instructions in front, the reply observed after. */
@@ -697,6 +705,13 @@ export class WorkTurnService {
       throw this.#failure("unauthorized", "Work turn admission is no longer current.");
     }
     const thread = await this.#threads.read(authenticatedWindowId, command.threadId);
+    // The level this turn runs at, fixed at admission: the thread's own,
+    // clamped to the caller's ceiling. It is journaled with the turn and is
+    // what the provider session starts with.
+    const turnAccess =
+      options?.accessCeiling === undefined
+        ? (thread?.access ?? DEFAULT_WORK_ACCESS)
+        : clampWorkAccess(thread?.access ?? DEFAULT_WORK_ACCESS, options.accessCeiling);
     const projectBootstrap = await this.#projects.bootstrap(authenticatedWindowId);
     const accessible = projectBootstrap.active.some(
       (project) =>
@@ -986,6 +1001,7 @@ export class WorkTurnService {
             block,
           }),
         ),
+        ...extraFolderContributions(project),
         ...(await this.#projectBriefContributions(project, command.threadId)),
         ...priorTranscript,
         ...(handoff === undefined
@@ -1111,7 +1127,7 @@ export class WorkTurnService {
           ...(command.extensionSelections === undefined || command.extensionSelections.length === 0
             ? {}
             : { extensionSelections: command.extensionSelections }),
-          capabilities: WORK_TURN_CAPABILITIES,
+          capabilities: workTurnCapabilityFacts(turnAccess),
           ...(command.delivery === undefined ? {} : { delivery: command.delivery }),
           acceptedAt,
         },
@@ -1145,14 +1161,13 @@ export class WorkTurnService {
     const launch = this.#runTurn({
       command,
       ...(thread === undefined ? {} : { thread }),
-      ...(thread === undefined
-        ? {}
-        : { access: options?.holdAskFirst === true ? ("ask-first" as const) : thread.access }),
+      ...(thread === undefined ? {} : { access: turnAccess }),
       windowId: authenticatedWindowId,
       providerSessionId,
       ...(resumeCursor === undefined ? {} : { resumeCursor }),
       projectRoot,
       projectCanonicalRoot: project.binding.canonicalRoot,
+      extraFolders: projectExtraFolderRoots(project),
       driver,
       attachments: attachmentInputs,
       contextPlan: planned,
@@ -1407,6 +1422,8 @@ export class WorkTurnService {
     readonly projectRoot: string;
     /** The Project's bound root, where `STATUS.md` lives; the turn may run in a subfolder. */
     readonly projectCanonicalRoot: string;
+    /** The Project's extra folders, granted what the bound root is granted. */
+    readonly extraFolders: ReadonlyArray<string>;
     readonly driver: ProviderDriver;
     readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
     readonly contextPlan: Extract<WorkTurnContextPlan, { readonly kind: "ok" }>;
@@ -1439,6 +1456,7 @@ export class WorkTurnService {
         : this.#resolveAppManagedTools?.({
             thread: input.thread,
             projectRoot: input.projectRoot,
+            ...(input.extraFolders.length === 0 ? {} : { extraFolders: input.extraFolders }),
             windowId: input.windowId,
           });
     const appManagedTools =
@@ -1447,14 +1465,14 @@ export class WorkTurnService {
         : combineAppManagedToolSets(hostTools, input.extensionTools);
     // Only a thread whose person chose the runtime's artifact tool is offered
     // it; every other thread of the account keeps Canvas and its launch keeps
-    // every guard. A Work turn never runs in Plan: it runs ask-first or
-    // auto-accepting edits.
+    // every guard. A Work turn never runs in Plan: it runs at its thread's
+    // level.
     const artifactToolName =
       input.thread?.documentDelivery === "native-artifacts"
         ? input.driver.nativeArtifactTool?.({
             mode: "work",
-            executionPolicy:
-              input.access === "auto-accept-edits" ? "auto-accept-edits" : "approval-gated",
+            executionPolicy: workThreadAccessOf(input.access ?? DEFAULT_WORK_ACCESS)
+              .executionPolicy,
           })
         : undefined;
     const finalPlan = includeWorkToolDefinitions({
@@ -1576,6 +1594,7 @@ export class WorkTurnService {
               },
             }),
         projectRoot: input.projectRoot,
+        ...(input.extraFolders.length === 0 ? {} : { extraFolders: input.extraFolders }),
         driver: input.driver,
         signal: input.signal,
         ...(input.thread?.modelOptionValues === undefined
@@ -2496,6 +2515,24 @@ function workTurnThreadFacts(
  * window, and held in the feed's frames, once per later tool event of the
  * turn (sixty later events held about 15 MB for one snapshot).
  */
+/** Tells the agent about the Project's extra folders, which its runtime cannot see. */
+function extraFolderContributions(
+  project: Parameters<typeof projectExtraFolderRoots>[0],
+): ReadonlyArray<WorkTurnContextContribution> {
+  const text = projectExtraFoldersInstructions(projectExtraFolderRoots(project));
+  if (text === undefined) return [];
+  return [
+    {
+      text,
+      sourceKind: "instruction",
+      referenceId: "octant-project-extra-folders",
+      category: "octant-policy",
+      posture: "required",
+      block: { kind: "instructions", text },
+    },
+  ];
+}
+
 function withoutPublishedSnapshots(toolSteps: ThreadToolSteps): ThreadToolSteps {
   if (!toolSteps.steps.some((step) => step.published?.snapshot !== undefined)) return toolSteps;
   return {

@@ -4,6 +4,7 @@ import type {
   AgentRunId,
   NativeHarnessApproval,
   NativeHarnessCommandHost,
+  ProviderApprovalCall,
   ProviderRuntimeEvent,
   ProviderInstanceId,
   NativeHarnessSlotCandidate,
@@ -206,6 +207,8 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
     approve: async (input: {
       readonly run: AgentRun;
       readonly event: Extract<ProviderRuntimeEvent, { readonly kind: "approval-request" }>;
+      /** The pending call, from the child's connection, for Shield. */
+      readonly call?: ProviderApprovalCall | undefined;
       readonly signal: AbortSignal;
     }): Promise<boolean> =>
       (await approve({
@@ -215,7 +218,9 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
         approvalClass: "child-provider-action",
         shieldCall: (boundRoot) =>
           shieldCallFromProviderRequest({
-            tool: input.event.action,
+            tool: input.call?.tool ?? input.event.action,
+            input: input.call?.input,
+            workingDirectory: input.call?.workingDirectory,
             description: input.event.description,
             boundRoot,
           }),

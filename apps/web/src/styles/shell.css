@@ -3180,6 +3180,11 @@ form > .work-composer-adapter__attachments {
   opacity: 0.5;
 }
 
+.browser-extensions-button {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
 .browser-workspace__omnibox {
   display: flex;
   flex: 1 1 auto;

@@ -57,6 +57,8 @@ export type SpawnClaudeCodeProcess = NonNullable<ClaudeAgentSdkOptions["spawnCla
  */
 export interface ClaudeRuntimeConfinement {
   readonly projectRoot: string;
+  /** The Project's extra folders, which Plan reads as it reads the root. */
+  readonly extraFolders?: ReadonlyArray<string>;
   readonly executionPolicy: ProviderExecutionPolicy;
   /**
    * Whether this launch offers the Bash tool. A Plan launch gets the shell and
@@ -1105,14 +1107,29 @@ function confineClaudeLaunch(
       searchPath = searchPath === undefined ? gitFolder : `${gitFolder}:${searchPath}`;
     }
     const extraRules = [...keychainRules, ...configurationRules, ...commandRules];
+    // A folder removed from disk since it was added is left out, as the
+    // runtime could not read it anyway.
+    const extraFolders = (confinement.extraFolders ?? []).flatMap((folder) => {
+      try {
+        return [realpathSync(folder)];
+      } catch {
+        return [];
+      }
+    });
     const launch = options.confinement.prepare({
       executable: spawnOptions.command,
       args: spawnOptions.args,
       boundRoot,
+      extraBoundRoots: extraFolders,
       temporaryDirectory,
       additionalWriteRoots: stateRoots.writeRoots,
       readRoots: [boundRoot, temporaryDirectory, ...stateRoots.readRoots],
-      privateHomeAllowPaths: [boundRoot, temporaryDirectory, ...stateRoots.readRoots],
+      privateHomeAllowPaths: [
+        boundRoot,
+        ...extraFolders,
+        temporaryDirectory,
+        ...stateRoots.readRoots,
+      ],
       // The runtime calls its own control plane, so it resolves the runtime
       // egress policy rather than the thread default. This driver
       // carries Code threads, and the policy no longer reads the mode.

@@ -1,4 +1,5 @@
 import type { ManagedToolAnswer } from "./managedMcpTools";
+import { providerApprovalCall } from "./providerApprovalCall";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
@@ -21,6 +22,7 @@ import {
   type ProviderSessionId,
   type ThreadPublishedSnapshot,
   type UtcTimestamp,
+  type ProviderApprovalCall,
 } from "@octant/contracts";
 import type {
   ProviderAcquireInput,
@@ -147,13 +149,9 @@ export function claudeExecutionOptions(
   mode?: ProviderAcquireInput["mode"],
   platform: NodeJS.Platform = process.platform,
 ): ClaudeExecutionOptions {
+  // Work and Code share one capability set at the thread's level, so a Work
+  // session starts with Bash exactly as a Code session at that level does.
   const options = claudePolicyOptions(policy, autoApprove);
-  // Work has no shell or Git authority, so Claude is never offered Bash there
-  // rather than offered it and asked about each call: a person approving a
-  // command would hand a Work thread authority its mode does not have.
-  if (mode === "work") {
-    return { ...options, tools: options.tools.filter((tool) => tool !== "Bash") };
-  }
   // A Code Plan turn may run read-only commands where its sandbox can hold the
   // shell to them (see `claudePlanRunsCommands`). Plan has no approvals, so
   // the sandbox, not a person, is what keeps those commands read-only.
@@ -276,9 +274,10 @@ function claudePolicyOptions(
   }
 }
 
-function claudeSandboxSettings(
+export function claudeSandboxSettings(
   policy: ProviderExecutionPolicy,
   projectRoot: string,
+  extraFolders: ReadonlyArray<string> = [],
 ): ClaudeSandboxSettings | undefined {
   if (policy !== "approval-gated" && policy !== "auto-accept-edits") return undefined;
   return {
@@ -288,8 +287,9 @@ function claudeSandboxSettings(
     allowUnsandboxedCommands: false,
     filesystem: {
       denyRead: ["/"],
-      allowRead: [projectRoot],
-      allowWrite: [projectRoot],
+      // An extra folder is granted exactly what the root is.
+      allowRead: [projectRoot, ...extraFolders],
+      allowWrite: [projectRoot, ...extraFolders],
     },
   };
 }
@@ -378,6 +378,27 @@ function globFixedPrefix(pattern: string): string {
   }
   const prefix = segments.join("/");
   return prefix === "" ? "/" : prefix;
+}
+
+/**
+ * The driver options a connection answers "inside the Project?" with: a path
+ * in one of the Project's extra folders counts as inside the root, for every
+ * check that asks about the root, and nothing else changes.
+ */
+function withProjectFolders(
+  options: ClaudeDriverOptions,
+  projectRoot: string,
+  extraFolders: ReadonlyArray<string>,
+): ClaudeDriverOptions {
+  if (extraFolders.length === 0) return options;
+  const inside = options.isProjectConfinedPath;
+  return {
+    ...options,
+    isProjectConfinedPath: (root, absolutePath) =>
+      inside(root, absolutePath) ||
+      (root === projectRoot &&
+        extraFolders.some((folder) => absolutePath === folder || inside(folder, absolutePath))),
+  };
 }
 
 /** Whether a file tool's target resolves to the login keychain folder or a file in it. */
@@ -530,6 +551,8 @@ interface ClaudePreToolGrant {
 interface ClaudePendingApprovalState extends ClaudePendingApproval {
   readonly decision: DeferredValue<ClaudeToolDecision>;
   readonly reuseKey: string;
+  /** The pending call for an automatic reviewer; never published. */
+  readonly call?: ProviderApprovalCall | undefined;
 }
 
 interface ClaudePendingQuestionState extends ClaudePendingQuestion {
@@ -1223,13 +1246,15 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
         : undefined,
     probe: makeProbe(options, environmentFactory, factories.clock),
     contextFacts: makeClaudeContextFacts(options, environmentFactory, factories.clock),
-    acquire: ({ instanceId, projectRoot, mode }) => {
+    acquire: ({ instanceId, projectRoot, mode, extraFolders = [] }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
           failure("invalid-configuration", "Provider instance does not match driver."),
         );
       }
-      if (!isAbsolute(projectRoot) || resolve(projectRoot) !== projectRoot) {
+      if (
+        [projectRoot, ...extraFolders].some((root) => !isAbsolute(root) || resolve(root) !== root)
+      ) {
         return Effect.fail(
           failure(
             "invalid-configuration",
@@ -1237,7 +1262,14 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
           ),
         );
       }
-      return makeConnection(options, environmentFactory, projectRoot, mode, factories);
+      return makeConnection(
+        withProjectFolders(options, projectRoot, extraFolders),
+        environmentFactory,
+        projectRoot,
+        extraFolders,
+        mode,
+        factories,
+      );
     },
   };
 }
@@ -1246,6 +1278,7 @@ function makeConnection(
   options: ClaudeDriverOptions,
   environmentFactory: ClaudeEnvironmentFactory,
   projectRoot: string,
+  extraFolders: ReadonlyArray<string>,
   mode: ProviderAcquireInput["mode"],
   factories: ConnectionFactories,
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
@@ -1765,7 +1798,7 @@ function makeConnection(
             projectRoot,
             isProjectConfinedPath: options.isProjectConfinedPath,
           });
-        const sandbox = claudeSandboxSettings(input.executionPolicy, projectRoot);
+        const sandbox = claudeSandboxSettings(input.executionPolicy, projectRoot, extraFolders);
         let callbackState: SessionState | undefined;
         const canUseTool: ClaudeOpenQueryInput["canUseTool"] = async (request) => {
           const activeState = callbackState;
@@ -1914,6 +1947,10 @@ function makeConnection(
             ...mapped.request,
             decision: deferred<ClaudeToolDecision>(),
             reuseKey,
+            call: providerApprovalCall({
+              tool: mapped.request.toolName,
+              arguments: request.input,
+            }),
           };
           activeState.pendingApprovals.set(pending.requestId, pending);
           publish(pending.event);
@@ -2111,6 +2148,7 @@ function makeConnection(
             .openQuery({
               binaryPath: options.binaryPath,
               projectRoot,
+              ...(extraFolders.length === 0 ? {} : { additionalDirectories: extraFolders }),
               authEnvironment: offersArtifacts
                 ? claudeArtifactLaunchEnvironment(environment.environment)
                 : environment.environment,
@@ -2596,6 +2634,8 @@ function makeConnection(
           }
           await release(state);
         }),
+      approvalCall: ({ sessionId, requestId }) =>
+        sessions.get(sessionId)?.pendingApprovals.get(requestId)?.call,
       answerApproval: (answer) =>
         Effect.suspend(() => {
           const state = sessions.get(answer.sessionId);
@@ -2621,7 +2661,11 @@ function makeConnection(
               }
               // A publish is never reused: the same input republishes the
               // file as it is now, which the person has not seen.
-              if (persistence === "current-session" && pending.toolName !== CLAUDE_ARTIFACT_TOOL) {
+              if (
+                answer.scope !== "once" &&
+                persistence === "current-session" &&
+                pending.toolName !== CLAUDE_ARTIFACT_TOOL
+              ) {
                 state.approvalReuse.add(pending.reuseKey);
               }
               pending.decision.resolve({ behavior: "allow" });
