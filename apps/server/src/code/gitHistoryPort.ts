@@ -38,6 +38,8 @@ export class GitHistoryPort {
     root: string,
     input: GitHistoryQuery,
     signal?: AbortSignal,
+    /** Local-commits fallback when the branch has no upstream, most specific first. */
+    baseRefs: ReadonlyArray<string> = [],
   ): Promise<GitHistoryResult> {
     try {
       const query = decodeGitHistoryQuery(input);
@@ -50,6 +52,8 @@ export class GitHistoryPort {
         return unavailable;
       if (query.kind === "commit")
         return decodeGitHistoryResult(await this.#commit(canonicalRoot, query, signal));
+      if (query.kind === "local-commits")
+        return decodeGitHistoryResult(await this.#local(canonicalRoot, query, baseRefs, signal));
       return decodeGitHistoryResult(await this.#history(canonicalRoot, query, signal));
     } catch {
       return unavailable;
@@ -161,6 +165,79 @@ export class GitHistoryPort {
     };
   }
 
+  async #local(
+    root: string,
+    query: Extract<GitHistoryQuery, { kind: "local-commits" }>,
+    baseRefs: ReadonlyArray<string>,
+    signal?: AbortSignal,
+  ): Promise<GitHistoryResult> {
+    const run = (args: ReadonlyArray<string>) => this.#run(root, args, signal);
+    const [headResult, branchResult, shallowResult] = await Promise.all([
+      run(["rev-parse", "--verify", "HEAD"]),
+      run(["symbolic-ref", "--quiet", "--short", "HEAD"]),
+      run(["rev-parse", "--is-shallow-repository"]),
+    ]);
+    if (!shallowResult.ok) return unavailable;
+    const head = headResult.ok && OID.test(headResult.text.trim()) ? headResult.text.trim() : null;
+    const base = {
+      status: "history" as const,
+      threadId: query.threadId,
+      checkoutId: query.checkoutId,
+      head,
+      branch: branchResult.ok ? branchResult.text.trim() : null,
+      shallow: shallowResult.text.trim() === "true",
+      refsTruncated: false,
+      refs: [],
+      nextCursor: null,
+    };
+    if (head === null) return { ...base, commits: [] };
+    // The upstream is what the person has pushed; the base branch is the next
+    // best answer for a branch that was never pushed. A ref that does not
+    // resolve is skipped, so a missing remote-tracking ref falls to the local one.
+    const candidates: Array<{ readonly label: string; readonly spec: string }> = [
+      { label: "upstream", spec: "@{upstream}" },
+      ...baseRefs.map((ref) => ({ label: ref, spec: ref })),
+    ];
+    for (const candidate of candidates) {
+      const resolved = await run([
+        "rev-parse",
+        "--verify",
+        "--end-of-options",
+        `${candidate.spec}^{commit}`,
+      ]);
+      const tip = resolved.text.trim();
+      if (!resolved.ok || !OID.test(tip)) continue;
+      const name =
+        candidate.label === "upstream"
+          ? await run(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"])
+          : undefined;
+      const log = await run([
+        "log",
+        "--topo-order",
+        "--no-decorate",
+        "-z",
+        `--format=${LOG_FORMAT}`,
+        // One past the page, so a list that fits exactly is not mistaken for a cut one.
+        `--max-count=${MAX_GIT_HISTORY_PAGE + 1}`,
+        head,
+        `^${tip}`,
+        "--",
+      ]);
+      if (!log.ok) return unavailable;
+      const found = parseCommits(log.text);
+      return {
+        ...base,
+        comparedWith: (name?.ok === true ? name.text.trim() : candidate.label).replace(
+          /^refs\/(heads|remotes)\//,
+          "",
+        ),
+        commits: found.slice(0, MAX_GIT_HISTORY_PAGE),
+        ...(found.length > MAX_GIT_HISTORY_PAGE ? { commitsTruncated: true } : {}),
+      };
+    }
+    return { ...base, commits: [] };
+  }
+
   async #commit(
     root: string,
     query: Extract<GitHistoryQuery, { kind: "commit" }>,
@@ -180,7 +257,13 @@ export class GitHistoryPort {
       parent === null
         ? ["diff-tree", "--root", "--no-commit-id", "-r", query.oid]
         : ["diff", parent, query.oid];
-    const flags = ["--no-ext-diff", "--no-textconv", "--no-color", "--find-renames"];
+    const flags = [
+      "--no-ext-diff",
+      "--no-textconv",
+      "--no-color",
+      "--find-renames",
+      ...(query.ignoreWhitespace === true ? ["-w"] : []),
+    ];
     const [patch, stats] = await Promise.all([
       this.#run(root, [...base, ...flags, "-p", "--"], signal, true),
       run([...base, ...flags, "--numstat", "-z", "--"]),
