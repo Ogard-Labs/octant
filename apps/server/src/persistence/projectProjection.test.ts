@@ -204,6 +204,24 @@ describe("ProjectProjection", () => {
     connection.close();
   });
 
+  it("replays a person trusting key providers in a Work Project", () => {
+    const connection = openConnection();
+    const projection = new ProjectProjection();
+    const trusted = decodeProject({ ...work, nativeProviders: ["claude", "codex"], version: 2 });
+    projection.apply(
+      connection,
+      envelope({
+        eventName: "project.native-providers-changed@1",
+        aggregateType: "project",
+        aggregateId: trusted.id,
+        aggregateVersion: trusted.version,
+        payload: { project: trusted },
+      }),
+    );
+    expect(readProject(connection, trusted.id)).toEqual(trusted);
+    connection.close();
+  });
+
   it("replays a Project's default mode, and a Project that only remembered Full access still reads as Full access", () => {
     const connection = openConnection();
     const projection = new ProjectProjection();

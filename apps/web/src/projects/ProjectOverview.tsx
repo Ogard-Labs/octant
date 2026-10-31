@@ -1,4 +1,4 @@
-import type { PermissionMode } from "@octant/contracts/providers";
+import type { KeyProviderDriverKinds, PermissionMode } from "@octant/contracts/providers";
 import { createDesktopPaneClient } from "@octant/client-runtime/desktop-pane-client";
 import { createProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
@@ -28,6 +28,7 @@ import { ProjectActionsSection } from "./ProjectActionsSection";
 import { ProjectDesktopRecipeSection } from "./ProjectDesktopRecipeSection";
 import { ProjectPermissionModeSection } from "./ProjectPermissionModeSection";
 import { ProjectProviderPolicySection } from "./ProjectProviderPolicySection";
+import { ProjectNativeProvidersSection } from "./ProjectNativeProvidersSection";
 import {
   PROJECT_COLOR_MENU_ITEMS,
   ProjectTile,
@@ -60,6 +61,11 @@ export interface ProjectOverviewProps {
   readonly onProviderPolicyChange?: (
     projectId: ProjectId,
     policy: ProjectProviderPolicy,
+  ) => Promise<boolean>;
+  /** Sets which key providers run as themselves in this Work or Code Project. */
+  readonly onNativeProvidersChange?: (
+    projectId: ProjectId,
+    providers: KeyProviderDriverKinds,
   ) => Promise<boolean>;
   /** Sets the mode this Code Project's new threads start in; absent follows Settings. */
   readonly onPermissionModeChange?: (
@@ -441,6 +447,21 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                   }
                   project={props.project}
                   providerInstances={props.providerInstances ?? []}
+                />
+              </ProjectOverviewInspector>
+            ) : null}
+            {props.project.type !== "chat" && props.onNativeProvidersChange !== undefined ? (
+              <ProjectOverviewInspector
+                key={`${String(props.project.id)}-native-providers`}
+                label="Trusted providers"
+                summary="Let a provider load this Project's own hooks, MCP servers, and plugins"
+              >
+                <ProjectNativeProvidersSection
+                  disabled={archived || connectionStale}
+                  onChange={async (providers) =>
+                    (await props.onNativeProvidersChange?.(props.project.id, providers)) ?? false
+                  }
+                  project={props.project}
                 />
               </ProjectOverviewInspector>
             ) : null}

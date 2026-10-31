@@ -11,6 +11,7 @@ import {
   decodeCodeProjectPermissionModeChanged,
   decodeCodeProjectPullRequestBackgroundRefreshChanged,
   decodeProjectProviderPolicyChanged,
+  decodeProjectNativeProvidersChanged,
   decodeProjectCreated,
   decodeProjectId,
   decodeProjectLifecycleChanged,
@@ -178,6 +179,8 @@ const projectDecoders = {
     decodeCodeProjectPullRequestBackgroundRefreshChanged(payload).project,
   "project.provider-policy-changed@1": (payload: unknown) =>
     decodeProjectProviderPolicyChanged(payload).project,
+  "project.native-providers-changed@1": (payload: unknown) =>
+    decodeProjectNativeProvidersChanged(payload).project,
   "project.work-status-file-changed@1": (payload: unknown) =>
     decodeWorkProjectStatusFileChanged(payload).project,
   "project.brand-kit-changed@1": (payload: unknown) =>

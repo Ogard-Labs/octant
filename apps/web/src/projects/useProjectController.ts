@@ -1,4 +1,4 @@
-import type { PermissionMode } from "@octant/contracts/providers";
+import type { KeyProviderDriverKinds, PermissionMode } from "@octant/contracts/providers";
 import {
   decodeBindingReceiptId,
   decodeMemoryEntryId,
@@ -406,6 +406,28 @@ export function useProjectController(options: ProjectControllerOptions) {
     );
   }
 
+  /** Sets which key providers run as themselves in this Work or Code Project. */
+  async function setNativeProviders(
+    projectId: ProjectId,
+    providers: KeyProviderDriverKinds,
+  ): Promise<boolean> {
+    const project = projectById.get(projectId);
+    if (project === undefined || project.type === "chat") return false;
+    const current = project.nativeProviders ?? [];
+    if (current.length === providers.length && current.every((kind) => providers.includes(kind))) {
+      return true;
+    }
+    return execute(
+      {
+        kind: "change-project-native-providers",
+        projectId,
+        expectedVersion: project.version,
+        providers,
+      },
+      "Project trust updated.",
+    );
+  }
+
   async function create(
     type: ProjectType,
     name: string,
@@ -747,6 +769,7 @@ export function useProjectController(options: ProjectControllerOptions) {
     setCodePermissionMode,
     setCodePullRequestBackgroundRefresh,
     setProviderPolicy,
+    setNativeProviders,
     setBrandKit,
     setDesktopRecipe,
     setActions,

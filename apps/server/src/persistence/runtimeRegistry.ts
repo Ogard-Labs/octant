@@ -84,6 +84,7 @@ import {
   ProjectLifecycleChanged,
   ProjectOrderChanged,
   ProjectProviderPolicyChanged,
+  ProjectNativeProvidersChanged,
   ProjectColorChanged,
   ProjectRenamed,
   ProviderDefaultsUpdated,
@@ -94,6 +95,7 @@ import {
   ProviderInstanceDriverRebound,
   ProviderInstanceCreated,
   ProviderInstanceDataTagsChanged,
+  ProviderInstanceNativeSetupChanged,
   ProviderInstanceEnabledChanged,
   ProviderInstanceRemoved,
   ProviderInstanceRenamed,
@@ -375,6 +377,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     )
     .register(CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED, 1, CodeProjectPullRequestAutoFixRecorded)
     .register("project.provider-policy-changed@1", 1, ProjectProviderPolicyChanged)
+    .register("project.native-providers-changed@1", 1, ProjectNativeProvidersChanged)
     .register("project.work-status-file-changed@1", 1, WorkProjectStatusFileChanged)
     .register("project.brand-kit-changed@1", 1, ProjectBrandKitChanged)
     .register("project.code-actions-changed@1", 1, CodeProjectActionsChanged)
@@ -391,6 +394,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("provider.instance-driver-quarantined@1", 1, ProviderInstanceDriverQuarantined)
     .register("provider.instance-data-tags-changed@1", 1, ProviderInstanceDataTagsChanged)
     .register("provider.instance-enabled-changed@1", 1, ProviderInstanceEnabledChanged)
+    .register("provider.instance-native-setup-changed@1", 1, ProviderInstanceNativeSetupChanged)
     .register("provider.instance-removed@1", 1, ProviderInstanceRemoved)
     .register("provider.defaults-updated@1", 1, ProviderDefaultsUpdated)
     .register("provider.catalog-updated@1", 1, ProviderCatalogUpdated)

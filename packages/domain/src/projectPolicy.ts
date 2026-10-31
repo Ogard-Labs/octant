@@ -1,7 +1,7 @@
 import type { CanvasDesignBrand } from "@octant/contracts/canvas";
 import type { DesktopRecipe, LeasableDesktopProvider } from "@octant/contracts/desktop-lease";
 import type { AggregateVersion, UtcTimestamp } from "@octant/contracts/events";
-import type { PermissionMode } from "@octant/contracts/providers";
+import type { KeyProviderDriverKinds, PermissionMode } from "@octant/contracts/providers";
 import { designBrandTokenRefusal } from "./canvasDesignFrameKit";
 import { desktopNetworkAllowed } from "./desktopLeasePolicy";
 import {
@@ -321,6 +321,33 @@ export function changeProjectProviderPolicy(
   return {
     ...project,
     providerPolicy,
+    version: nextVersion(project),
+    updatedAt,
+  };
+}
+
+/**
+ * Sets which key providers a Work or Code Project trusts to run as
+ * themselves there, with the Project's own settings, hooks, MCP servers, and
+ * plugins. A Chat Project has no folder, so it holds no such trust. The list
+ * is kept in the order the person gave it; an empty list removes the field.
+ */
+export function changeProjectNativeProviders(
+  project: Project,
+  providers: KeyProviderDriverKinds,
+  updatedAt: UtcTimestamp,
+): BoundProject {
+  if (project.type === "chat") {
+    reject("binding-not-allowed", "Only Work and Code Projects trust a provider's own setup");
+  }
+  const current = project.nativeProviders ?? [];
+  if (current.length === providers.length && current.every((kind) => providers.includes(kind))) {
+    reject("invalid-lifecycle", "Project already trusts exactly these providers");
+  }
+  const { nativeProviders: _previous, ...rest } = project;
+  return {
+    ...rest,
+    ...(providers.length === 0 ? {} : { nativeProviders: providers }),
     version: nextVersion(project),
     updatedAt,
   };

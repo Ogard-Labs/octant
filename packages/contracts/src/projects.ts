@@ -3,7 +3,7 @@ import { CanvasDesignBrand } from "./canvasBrand";
 import { DesktopRecipe, DesktopRecipeKeyChange } from "./desktopLease";
 import { ActorId, AggregateVersion, EventActor, UtcTimestamp } from "./events";
 import { HostId } from "./host";
-import { PermissionMode, ProviderInstanceId } from "./providers";
+import { KeyProviderDriverKinds, PermissionMode, ProviderInstanceId } from "./providers";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -171,6 +171,13 @@ const BoundProjectFields = {
   origin: Schema.optional(ProjectOrigin),
   /** Absent on older Projects and interpreted as allow-all. */
   providerPolicy: Schema.optional(ProjectProviderPolicy),
+  /**
+   * The key providers the person trusted in this Project: each runs here as
+   * itself, with its own setup and the Project's own settings, hooks, MCP
+   * servers, plugins, and tools. Absent trusts none. A person sets it from a
+   * window on this host; an agent cannot.
+   */
+  nativeProviders: Schema.optional(KeyProviderDriverKinds),
 } as const;
 
 export const ChatProject = Schema.Struct({
@@ -303,6 +310,7 @@ const WorkProjectSummary = Schema.Struct({
   bindingRevisionId: BindingRevisionId,
   origin: Schema.optional(ProjectOrigin),
   providerPolicy: Schema.optional(ProjectProviderPolicy),
+  nativeProviders: Schema.optional(KeyProviderDriverKinds),
   statusFile: Schema.optional(WorkProjectStatusFile),
 }).annotations(strict);
 
@@ -320,6 +328,7 @@ const CodeProjectSummary = Schema.Struct({
   actions: Schema.optional(ProjectActions),
   connectedRepository: Schema.optional(ConnectedGitHubRepository),
   providerPolicy: Schema.optional(ProjectProviderPolicy),
+  nativeProviders: Schema.optional(KeyProviderDriverKinds),
 }).annotations(strict);
 
 export const ProjectSummary = Schema.Union(ChatProject, WorkProjectSummary, CodeProjectSummary);
@@ -535,6 +544,12 @@ export const ProjectCommand = Schema.Union(
     ...ProjectCommandFields,
     policy: ProjectProviderPolicy,
   }).annotations(strict),
+  /** The whole list of key providers this Work or Code Project trusts; empty trusts none. */
+  Schema.Struct({
+    kind: Schema.Literal("change-project-native-providers"),
+    ...ProjectCommandFields,
+    providers: KeyProviderDriverKinds,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-work-project-status-file"),
     ...ProjectCommandFields,
@@ -607,6 +622,10 @@ export const ProjectCommandResult = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("project-provider-policy-changed"),
+    project: BoundProject,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("project-native-providers-changed"),
     project: BoundProject,
   }).annotations(strict),
   Schema.Struct({
@@ -752,6 +771,11 @@ export const ProjectProviderPolicyChanged = Schema.Struct({
   project: BoundProject,
 }).annotations(strict);
 export type ProjectProviderPolicyChanged = typeof ProjectProviderPolicyChanged.Type;
+/** A person changed which key providers this Project trusts, from a window on this host. */
+export const ProjectNativeProvidersChanged = Schema.Struct({
+  project: BoundProject,
+}).annotations(strict);
+export type ProjectNativeProvidersChanged = typeof ProjectNativeProvidersChanged.Type;
 export const WorkProjectStatusFileChanged = Schema.Struct({
   project: WorkProject,
 }).annotations(strict);
@@ -792,6 +816,7 @@ export const PROJECT_EVENT_NAMES = [
   "project.code-new-thread-workspace-changed@1",
   "project.code-pull-request-background-refresh-changed@1",
   "project.provider-policy-changed@1",
+  "project.native-providers-changed@1",
   "project.work-status-file-changed@1",
   "project.brand-kit-changed@1",
   "project.code-desktop-recipe-changed@1",
@@ -841,6 +866,9 @@ export const decodeCodeProjectPullRequestBackgroundRefreshChanged = Schema.decod
 export const decodeCodeProjectActionsChanged = Schema.decodeUnknownSync(CodeProjectActionsChanged);
 export const decodeProjectProviderPolicyChanged = Schema.decodeUnknownSync(
   ProjectProviderPolicyChanged,
+);
+export const decodeProjectNativeProvidersChanged = Schema.decodeUnknownSync(
+  ProjectNativeProvidersChanged,
 );
 export const decodeWorkProjectStatusFileChanged = Schema.decodeUnknownSync(
   WorkProjectStatusFileChanged,

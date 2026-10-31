@@ -69,6 +69,58 @@ export const ProviderDriverKind = Schema.Literal(
 );
 export type ProviderDriverKind = typeof ProviderDriverKind.Type;
 
+/**
+ * The key providers: the runtimes that run inside Octant as they run on their
+ * own, with their own subagents, web tools, skills, configuration, and a
+ * trusted Project's code, once the person allows it.
+ */
+export const KEY_PROVIDER_DRIVER_KINDS = ["claude", "codex", "opencode", "mistral-vibe"] as const;
+export const KeyProviderDriverKind = Schema.Literal(...KEY_PROVIDER_DRIVER_KINDS);
+export type KeyProviderDriverKind = typeof KeyProviderDriverKind.Type;
+export const KeyProviderDriverKinds = Schema.Array(KeyProviderDriverKind).pipe(
+  Schema.filter(
+    (kinds) =>
+      kinds.length <= KEY_PROVIDER_DRIVER_KINDS.length && new Set(kinds).size === kinds.length,
+  ),
+);
+export type KeyProviderDriverKinds = typeof KeyProviderDriverKinds.Type;
+
+/**
+ * What a key provider's session may load of its own, as the host resolved it
+ * for one session from the thread's level and mode, the account's switch, and
+ * the Project's trust. Each field turns one thing on; a driver applies the
+ * fields it can and reports the rest in its `nativeSetup` capability. Absent
+ * on a session means every field is off, which is how every other provider
+ * and every single-use request starts.
+ */
+export const ProviderNativeSetup = Schema.Struct({
+  /** The runtime's own subagents. */
+  subagents: Schema.Boolean,
+  /** The runtime's own web search and page fetch. */
+  webTools: Schema.Boolean,
+  /** Skills the runtime finds in the account's home and in the Project. */
+  skills: Schema.Boolean,
+  /** MCP servers and plugins the person set up in the account's home configuration. */
+  toolServers: Schema.Boolean,
+  /** The account's home settings with their hooks; never in Chat or Plan. */
+  hooks: Schema.Boolean,
+  /**
+   * The Project's own settings, hooks, MCP servers, plugins, and tools, in a
+   * Project the person trusted for this provider; never in Chat or Plan.
+   */
+  projectCode: Schema.Boolean,
+}).annotations(strict);
+export type ProviderNativeSetup = typeof ProviderNativeSetup.Type;
+export const PROVIDER_NATIVE_SETUP_FEATURES = [
+  "subagents",
+  "webTools",
+  "skills",
+  "toolServers",
+  "hooks",
+  "projectCode",
+] as const satisfies ReadonlyArray<keyof ProviderNativeSetup>;
+export type ProviderNativeSetupFeature = (typeof PROVIDER_NATIVE_SETUP_FEATURES)[number];
+
 /** User-maintained data handling labels used by Project provider policy. */
 export const ProviderDataTag = Schema.Literal("eu", "zdr");
 export type ProviderDataTag = typeof ProviderDataTag.Type;
@@ -914,34 +966,52 @@ const ProviderInstanceFields = {
   dataTags: Schema.optional(ProviderDataTags),
 } as const;
 
-export const OpenCodeProviderInstance = Schema.Struct({
+/**
+ * A key provider account the person let run as itself: its own subagents,
+ * web tools, skills, and home configuration load in its threads at Guarded
+ * and Reviewed, as they do at Full access. Absent is off. Only
+ * `set-provider-native-setup`, sent from a window on this host, changes it; a
+ * configuration change or a new account never carries it.
+ */
+const KeyProviderInstanceFields = {
   ...ProviderInstanceFields,
+  nativeSetup: Schema.optional(Schema.Literal(true)),
+} as const;
+
+export const OpenCodeProviderInstance = Schema.Struct({
+  ...KeyProviderInstanceFields,
   driverKind: Schema.Literal("opencode"),
   configuration: OpenCodeProviderConfiguration,
 }).annotations(strict);
 export type OpenCodeProviderInstance = typeof OpenCodeProviderInstance.Type;
 export const CodexProviderInstance = Schema.Struct({
-  ...ProviderInstanceFields,
+  ...KeyProviderInstanceFields,
   driverKind: Schema.Literal("codex"),
   configuration: CodexProviderConfiguration,
 }).annotations(strict);
 export type CodexProviderInstance = typeof CodexProviderInstance.Type;
 export const ClaudeProviderInstance = Schema.Struct({
-  ...ProviderInstanceFields,
+  ...KeyProviderInstanceFields,
   driverKind: Schema.Literal("claude"),
   configuration: ClaudeProviderConfiguration,
 }).annotations(strict);
 export type ClaudeProviderInstance = typeof ClaudeProviderInstance.Type;
-/** An instance of any ACP agent; its configuration kind must match its driver kind. */
+/**
+ * An instance of any ACP agent; its configuration kind must match its driver
+ * kind. Of the ACP agents only Mistral Vibe is a key provider, so only its
+ * instance may carry `nativeSetup`.
+ */
 export const AcpAgentProviderInstance = Schema.Struct({
-  ...ProviderInstanceFields,
+  ...KeyProviderInstanceFields,
   driverKind: Schema.Literal(...ACP_AGENT_KINDS),
   configuration: AcpAgentConfiguration,
 })
   .annotations(strict)
   .pipe(
     Schema.filter(
-      (instance) => instance.configuration.kind === acpAgentConfigurationKind(instance.driverKind),
+      (instance) =>
+        instance.configuration.kind === acpAgentConfigurationKind(instance.driverKind) &&
+        (instance.nativeSetup === undefined || instance.driverKind === "mistral-vibe"),
     ),
   );
 export type AcpAgentProviderInstance = typeof AcpAgentProviderInstance.Type;
@@ -1190,6 +1260,18 @@ export const ProviderInstanceEnabledChanged = Schema.Struct({
   instance: ProviderInstance,
 }).annotations(strict);
 export type ProviderInstanceEnabledChanged = typeof ProviderInstanceEnabledChanged.Type;
+/** A person turned a key provider account's own setup on or off from a local window. */
+export const ProviderInstanceNativeSetupChanged = Schema.Struct({
+  instance: Schema.Union(
+    OpenCodeProviderInstance,
+    CodexProviderInstance,
+    ClaudeProviderInstance,
+    AcpAgentProviderInstance.pipe(
+      Schema.filter((instance) => instance.driverKind === "mistral-vibe"),
+    ),
+  ),
+}).annotations(strict);
+export type ProviderInstanceNativeSetupChanged = typeof ProviderInstanceNativeSetupChanged.Type;
 export const ProviderInstanceRemoved = Schema.Struct({
   instanceId: ProviderInstanceId,
   version: AggregateVersion,
@@ -1209,6 +1291,7 @@ export const PROVIDER_EVENT_NAMES = [
   "provider.instance-driver-quarantined@1",
   "provider.instance-data-tags-changed@1",
   "provider.instance-enabled-changed@1",
+  "provider.instance-native-setup-changed@1",
   "provider.instance-removed@1",
   "provider.defaults-updated@1",
   "provider.catalog-updated@1",
@@ -1474,6 +1557,24 @@ export const ProviderCapabilities = Schema.Struct({
       work: ProviderCapabilitySupport,
       code: ProviderCapabilitySupport,
       unsupportedReason: Schema.optional(ProviderNativeArtifactsUnsupportedReason),
+    }).annotations(strict),
+  ),
+  /**
+   * Which of its own features a key provider's driver can turn on when a
+   * session's `nativeSetup` asks for them. Absent reads as unsupported for
+   * every feature, which is every provider that is not a key provider.
+   * Supported says the driver loads the feature and Octant still sees what it
+   * does (a native child run, a native web read); it does not say the person
+   * turned it on.
+   */
+  nativeSetup: Schema.optional(
+    Schema.Struct({
+      subagents: ProviderCapabilitySupport,
+      webTools: ProviderCapabilitySupport,
+      skills: ProviderCapabilitySupport,
+      toolServers: ProviderCapabilitySupport,
+      hooks: ProviderCapabilitySupport,
+      projectCode: ProviderCapabilitySupport,
     }).annotations(strict),
   ),
 }).annotations(strict);
@@ -2131,6 +2232,15 @@ export const ProviderRegistryCommand = Schema.Union(
    */
   Schema.Struct({
     kind: Schema.Literal("set-claude-artifact-delivery"),
+    ...ProviderInstanceCommandFields,
+    enabled: Schema.Boolean,
+  }).annotations(strict),
+  /**
+   * Lets one key provider account run as itself, or turns that off. Only a
+   * person at the Octant window on this host sends it.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("set-provider-native-setup"),
     ...ProviderInstanceCommandFields,
     enabled: Schema.Boolean,
   }).annotations(strict),
@@ -2851,6 +2961,10 @@ export const decodeProviderInstanceDriverQuarantined = Schema.decodeUnknownSync(
 export const decodeProviderInstanceEnabledChanged = Schema.decodeUnknownSync(
   ProviderInstanceEnabledChanged,
 );
+export const decodeProviderInstanceNativeSetupChanged = Schema.decodeUnknownSync(
+  ProviderInstanceNativeSetupChanged,
+);
+export const decodeProviderNativeSetup = Schema.decodeUnknownSync(ProviderNativeSetup);
 export const decodeProviderInstanceDataTagsChanged = Schema.decodeUnknownSync(
   ProviderInstanceDataTagsChanged,
 );

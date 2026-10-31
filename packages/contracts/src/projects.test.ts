@@ -522,6 +522,7 @@ describe("Project and memory event payload contracts", () => {
       "project.code-new-thread-workspace-changed@1",
       "project.code-pull-request-background-refresh-changed@1",
       "project.provider-policy-changed@1",
+      "project.native-providers-changed@1",
       "project.work-status-file-changed@1",
       "project.brand-kit-changed@1",
       "project.code-desktop-recipe-changed@1",

@@ -77,6 +77,7 @@ import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { isComputerUseSelection } from "@octant/plugin-host/computer-use";
 import type { ProviderDriver, ProviderSessionHandle } from "@octant/provider-sdk/driver";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
+import { nativeSetupOption, sessionNativeSetup } from "../providers/providerNativeSetup";
 import type {
   NativeHarnessTurnAdmission,
   NativeHarnessTurnScope,
@@ -1553,6 +1554,15 @@ export class WorkTurnService {
           : { outsideContentMarks: this.#outsideContentMarks }),
         ...(input.access === undefined ? {} : { access: input.access }),
         ...(artifactToolName === undefined ? {} : { nativeArtifacts: true }),
+        ...nativeSetupOption(
+          sessionNativeSetup(this.#persistence, {
+            providerInstanceId: input.command.authority.providerInstanceId,
+            projectId: input.command.authority.projectId,
+            mode: "work",
+            executionPolicy:
+              input.access === "auto-accept-edits" ? "auto-accept-edits" : "approval-gated",
+          }),
+        ),
         ...(input.resumeCursor === undefined ? {} : { resumeCursor: input.resumeCursor }),
         ...(input.driver.conversationOwnership !== "provider" &&
         input.driver.conversationOwnership !== "host-resumable"
