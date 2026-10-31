@@ -877,6 +877,45 @@ describe("CodeService commands", () => {
     });
   });
 
+  it("keeps the Auto reviewer and Shield model across later changes, and returns Shield to the thread's provider on null", async () => {
+    const fixture = serviceFixture();
+    const shieldModel = {
+      providerInstanceId: "00000000-0000-4000-8000-0000000000a1",
+      modelId: "local-small",
+    };
+    const chosen = await fixture.service.execute(ids.window, {
+      kind: "update-code-settings",
+      expectedVersion: 0,
+      defaultExecutionPolicy: "approval-gated",
+      defaultPermissionPersistence: "current-session",
+      autoReviewer: "octant-shield",
+      shieldModel: shieldModel as never,
+    });
+    expect(chosen).toMatchObject({ settings: { autoReviewer: "octant-shield", shieldModel } });
+    if (chosen.kind !== "settings-updated") throw new Error("settings were not updated");
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: chosen.settings } as never);
+
+    const later = await fixture.service.execute(ids.window, {
+      kind: "update-code-settings",
+      expectedVersion: 1,
+      defaultExecutionPolicy: "plan",
+      defaultPermissionPersistence: "current-session",
+    });
+    expect(later).toMatchObject({ settings: { autoReviewer: "octant-shield", shieldModel } });
+    if (later.kind !== "settings-updated") throw new Error("settings were not updated");
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: later.settings } as never);
+
+    const cleared = await fixture.service.execute(ids.window, {
+      kind: "update-code-settings",
+      expectedVersion: 2,
+      defaultExecutionPolicy: "plan",
+      defaultPermissionPersistence: "current-session",
+      shieldModel: null,
+    });
+    expect(cleared).toMatchObject({ settings: { autoReviewer: "octant-shield" } });
+    expect(cleared).not.toHaveProperty("settings.shieldModel");
+  });
+
   it("keeps the Git requirement a window asks for when it still sends the old default-folder switch", async () => {
     const fixture = serviceFixture();
 

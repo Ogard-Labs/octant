@@ -294,7 +294,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
       >
         <div className="setgroup">
           <SettingRow
-            description="Auto lets the provider's own reviewer approve each action; where a provider has none, threads ask first."
+            description="Auto lets a reviewer approve each action: the provider's own or Octant Shield. Where none can run, threads ask first."
             label="Default mode"
             scope="mode"
             settingId="code-default-access"

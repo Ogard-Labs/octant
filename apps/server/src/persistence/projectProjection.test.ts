@@ -10,8 +10,7 @@ import {
   type Project,
 } from "@octant/contracts";
 import { afterEach, describe, expect, it } from "vitest";
-import { chosenAutoReviewer,
-  defaultPermissionModeFor } from "@octant/domain/guardrail-policy";
+import { chosenAutoReviewer, defaultPermissionModeFor } from "@octant/domain/guardrail-policy";
 import { Journal } from "./journal";
 import { applyMigrations, MIGRATIONS } from "./migrations";
 import {

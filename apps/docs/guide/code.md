@@ -81,11 +81,20 @@ its draft.
 Each Code thread runs in one of five server-enforced modes. The mode picker
 in the composer changes it in one click, for new and existing threads alike:
 
-- **Auto**: the provider's own reviewer approves each action (Claude's auto
-  mode, Codex's approval reviewer), inside the same sandbox as Ask first.
-  What the reviewer escalates, and everything after the thread reads outside
-  content, comes back to you. Providers without a reviewer show Auto
-  unavailable with the reason, and a thread set to Auto asks first there.
+- **Auto**: a reviewer approves each action inside the same sandbox as Ask
+  first: the provider's own (Claude's auto mode, Codex's approval reviewer),
+  or Octant Shield, Octant's own reviewer, on every other runtime and wherever
+  you choose it. Choose in Settings › Code › Access › Auto reviewer, or per
+  Project on its overview; Settings › Code › Access › Shield model picks the
+  model Shield asks (by default each thread's own provider with its smallest
+  model, or any configured endpoint, a local one included). Shield allows
+  reads and edits in the folder, your Project's test and build commands, and
+  Git commands that only read without asking a model; it refuses or hands you
+  harmful-looking calls; its model sees only your messages and the pending
+  action. What a reviewer escalates comes back to you, and each Shield
+  decision shows as an Octant Shield line beside the tool rows. Where no
+  reviewer can run, Auto is listed unavailable with the reason and a thread
+  set to Auto asks first.
 - **Ask first**: confines work to the bound Project root. Octant's sandbox
   does this for most runtimes; Codex, and Claude outside Plan, rely on their
   own sandbox instead. Each mutation or command surfaces an approval request.

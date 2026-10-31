@@ -133,7 +133,15 @@ describe("the mode a new thread starts in", () => {
 
 describe("which runtimes Octant Shield can review", () => {
   it("reviews every runtime that sends its prompts to Octant, and none that decides alone", () => {
-    for (const kind of ["openai-compatible", "ollama", "claude", "codex", "opencode", "pi", "kilo"]) {
+    for (const kind of [
+      "openai-compatible",
+      "ollama",
+      "claude",
+      "codex",
+      "opencode",
+      "pi",
+      "kilo",
+    ]) {
       expect(shieldRoutesApprovals(kind as never), kind).toBe(true);
     }
     for (const kind of ["oh-my-pi", "openai-image"]) {

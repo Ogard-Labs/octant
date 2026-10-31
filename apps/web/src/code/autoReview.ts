@@ -1,4 +1,8 @@
-import type { ProviderInstance, ProviderInstanceId, ProviderObservedState } from "@octant/contracts";
+import type {
+  ProviderInstance,
+  ProviderInstanceId,
+  ProviderObservedState,
+} from "@octant/contracts";
 import type { AutoReviewer } from "@octant/contracts/shield";
 import {
   resolveAutoReviewer,
@@ -30,7 +34,8 @@ export function autoReviewFor(input: {
   const providerReview =
     input.observedByInstance.get(input.providerInstanceId)?.capabilities.harnessAutoReview ===
     "supported";
-  const routes = instance !== undefined && instance.enabled && shieldRoutesApprovals(instance.driverKind);
+  const routes =
+    instance !== undefined && instance.enabled && shieldRoutesApprovals(instance.driverKind);
   return resolveAutoReviewer({
     chosen: input.chosen,
     providerReview,

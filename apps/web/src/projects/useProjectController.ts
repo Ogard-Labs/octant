@@ -1,4 +1,5 @@
 import type { PermissionMode } from "@octant/contracts/providers";
+import type { AutoReviewer } from "@octant/contracts/shield";
 import {
   decodeBindingReceiptId,
   decodeMemoryEntryId,
@@ -248,6 +249,25 @@ export function useProjectController(options: ProjectControllerOptions) {
         ...(permissionMode === undefined ? {} : { permissionMode }),
       },
       "Code Project default mode updated.",
+    );
+  }
+
+  /** Record who answers a Code Project's prompts at Auto; absent follows Settings. */
+  async function setCodeAutoReviewer(
+    projectId: ProjectId,
+    autoReviewer: AutoReviewer | undefined,
+  ): Promise<boolean> {
+    const project = projectById.get(projectId);
+    if (project?.type !== "code") return false;
+    if (project.autoReviewer === autoReviewer) return true;
+    return execute(
+      {
+        kind: "change-code-project-auto-reviewer",
+        projectId,
+        expectedVersion: project.version,
+        ...(autoReviewer === undefined ? {} : { autoReviewer }),
+      },
+      "Code Project Auto reviewer updated.",
     );
   }
 
@@ -745,6 +765,7 @@ export function useProjectController(options: ProjectControllerOptions) {
     setColor,
     setCodeNewThreadWorkspace,
     setCodePermissionMode,
+    setCodeAutoReviewer,
     setCodePullRequestBackgroundRefresh,
     setProviderPolicy,
     setBrandKit,

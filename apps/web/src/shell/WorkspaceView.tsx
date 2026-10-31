@@ -428,6 +428,10 @@ export interface WorkspaceViewProps {
     projectId: ProjectId,
     permissionMode: import("@octant/contracts/providers").PermissionMode | undefined,
   ) => Promise<boolean>;
+  readonly onProjectAutoReviewerChange?: (
+    projectId: ProjectId,
+    autoReviewer: import("@octant/contracts/shield").AutoReviewer | undefined,
+  ) => Promise<boolean>;
   readonly onBrandKitChange?: (
     projectId: ProjectId,
     brandKit: CanvasDesignBrand,
@@ -2234,6 +2238,9 @@ function renderNonCodeTab(
         {...(props.onProjectPermissionModeChange === undefined
           ? {}
           : { onPermissionModeChange: props.onProjectPermissionModeChange })}
+        {...(props.onProjectAutoReviewerChange === undefined
+          ? {}
+          : { onAutoReviewerChange: props.onProjectAutoReviewerChange })}
         {...(props.onBrandKitChange === undefined
           ? {}
           : { onBrandKitChange: props.onBrandKitChange })}
@@ -2838,7 +2845,5 @@ function draftAutoReview(props: WorkspaceViewProps): {
     chosen: props.codeController.bootstrap?.settings.autoReviewer,
   });
   if (autoReview === undefined) return {};
-  return autoReview.status === "reviewer"
-    ? { autoSupported: true, autoReview }
-    : { autoReview };
+  return autoReview.status === "reviewer" ? { autoSupported: true, autoReview } : { autoReview };
 }

@@ -169,7 +169,11 @@ describe("Octant Shield as the host wires it", () => {
     ).toMatchObject({ reviewer: "octant-shield", verdict: "allow" });
     const providerOwn = hostShieldWith(thread(), { ...own, chosenReviewer: () => "provider" });
     expect(
-      await providerOwn.review({ threadId, call: command("git status"), boundRoot: "/Users/dev/app" }),
+      await providerOwn.review({
+        threadId,
+        call: command("git status"),
+        boundRoot: "/Users/dev/app",
+      }),
     ).toBeUndefined();
   });
 
