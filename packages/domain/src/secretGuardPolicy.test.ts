@@ -173,6 +173,23 @@ describe("secret redaction", () => {
     expect(redactSecrets("short abc", ["abc"]).redacted).toBe(false);
   });
 
+  it("redacts a PuTTY key and stays linear on repeated headers that never close", () => {
+    const key = `PuTTY-User-Key-File-3: ssh-ed25519\nPrivate-Lines: 1\n${"h".repeat(40)}\nPrivate-MAC: ${"0a".repeat(16)}\nafter`;
+    expect(redactSecrets(`before ${key}`).text).toBe(`before ${SECRET_REDACTION}\nafter`);
+    const hostile = "PuTTY-User-Key-File-0:".repeat(50_000);
+    const started = performance.now();
+    const result = redactSecrets(hostile);
+    expect(performance.now() - started).toBeLessThan(500);
+    expect(result.text).toBe(SECRET_REDACTION);
+  });
+
+  it("expands a path with many repeated slashes in linear time", () => {
+    const hostile = `/a${"/".repeat(100_000)}b${"/".repeat(100_000)}`;
+    const started = performance.now();
+    expect(expandProtectedPath(hostile, HOME)).toBe("/a/b");
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
   it("leaves ordinary text alone and keeps unchanged values identical", () => {
     const value = { a: "ordinary output", list: ["git push origin main"] };
     expect(redactSecretsInValue(value)).toBe(value);

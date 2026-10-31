@@ -178,6 +178,7 @@ export function ProtectedFilesSettings(props: ProtectedFilesSettingsProps) {
           >
             <form
               className="protected-files__add"
+              noValidate
               onSubmit={(event) => {
                 event.preventDefault();
                 const path = draft.trim();

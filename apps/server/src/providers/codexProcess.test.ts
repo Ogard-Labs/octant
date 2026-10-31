@@ -128,6 +128,7 @@ async function failureOf<A>(effect: Effect.Effect<A, ProviderFailure, never>) {
 function makePort(overrides: CodexProcessOptions = {}) {
   return makeCodexProcessLive({
     versionProbeConfinement: passthroughConfinement,
+    confinement: passthroughConfinement,
     octantVersion: "0.1.0-test",
     startupTimeoutMs: 500,
     shutdownTimeoutMs: 100,

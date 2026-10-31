@@ -348,7 +348,7 @@ function baseDirectory(
 
 /** `~/x` against the home folder; an absolute path as it is; anything else refused. */
 export function expandProtectedPath(path: string, homeDirectory: string): string | undefined {
-  const trimmed = path.trim().replace(/\/+$/u, "");
+  const trimmed = withoutTrailingSlashes(path.trim());
   if (trimmed.startsWith("~/")) return normalizePosix(joinPosix(homeDirectory, trimmed.slice(2)));
   if (trimmed.startsWith("/") && trimmed.length > 1) return normalizePosix(trimmed);
   return undefined;
@@ -453,7 +453,6 @@ export function protectedFileRefusal(entry: ResolvedProtectedEntry, homeDirector
  */
 const SECRET_SHAPES: ReadonlyArray<RegExp> = [
   /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)/gu,
-  /PuTTY-User-Key-File-[0-9]+:[\s\S]*?Private-MAC: [0-9a-f]+/gu,
   /\bsk-ant-[A-Za-z0-9_-]{16,}/gu,
   /\bsk-(?:proj-|svcacct-)?[A-Za-z0-9][A-Za-z0-9_-]{14,}[A-Za-z0-9]\b/gu,
   /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/gu,
@@ -496,8 +495,39 @@ export function redactSecrets(
     if (value.length < MINIMUM_ISSUED_VALUE_LENGTH) continue;
     output = output.split(value).join(SECRET_REDACTION);
   }
+  output = redactPuttyKeys(output);
   for (const shape of SECRET_SHAPES) output = output.replace(shape, SECRET_REDACTION);
   return { text: output, redacted: output !== text };
+}
+
+const PUTTY_HEADER = "PuTTY-User-Key-File-";
+const PUTTY_MAC = "Private-MAC: ";
+
+/**
+ * A PuTTY private key, from its header to the end of its `Private-MAC` line,
+ * or to the end of the text when the MAC is missing. Found with `indexOf` in
+ * one forward pass: a lazy regular expression spanning the key restarted at
+ * every repeated header and took quadratic time on text that never closed it.
+ */
+function redactPuttyKeys(text: string): string {
+  let output = "";
+  let cursor = 0;
+  for (;;) {
+    const start = text.indexOf(PUTTY_HEADER, cursor);
+    if (start === -1) return output + text.slice(cursor);
+    output += text.slice(cursor, start) + SECRET_REDACTION;
+    const mac = text.indexOf(PUTTY_MAC, start + PUTTY_HEADER.length);
+    if (mac === -1) return output;
+    const lineEnd = text.indexOf("\n", mac);
+    cursor = lineEnd === -1 ? text.length : lineEnd;
+  }
+}
+
+/** A path without its trailing slashes, trimmed in one backward pass. */
+function withoutTrailingSlashes(path: string): string {
+  let end = path.length;
+  while (end > 0 && path.charCodeAt(end - 1) === 47) end -= 1;
+  return path.slice(0, end);
 }
 
 /** Redacts every string inside a JSON-shaped value, keys left as they are. */
