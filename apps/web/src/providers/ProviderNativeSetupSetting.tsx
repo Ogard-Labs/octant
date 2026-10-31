@@ -67,7 +67,7 @@ export function ProviderNativeSetupSetting(props: ProviderNativeSetupSettingProp
       }
       label={`Run ${name} as itself`}
       scope="host"
-      settingId={settingId}
+      settingId={`provider-${props.instance.id}-native-setup`}
     >
       <OctantSwitch
         checked={props.instance.nativeSetup === true}
