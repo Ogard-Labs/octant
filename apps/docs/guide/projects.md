@@ -46,7 +46,7 @@ Projects support the following operations:
   or Escape to close it. **Settings ›
   Sidebar › Thread filter** can keep the field always shown.
 - **Relink**: when a bound root becomes unavailable (moved or removed), the Project shows `Relink required`. Use audited relink to point to the new location. Root availability is observed at bootstrap and is not journaled, so relinking does not rewrite durable history.
-- **Remember Full access** (Code Projects): `octant project access <name> full-access` on the host lets new Code threads that choose Remember for this Project start with Full access without a per-thread confirmation, or raise an existing thread to it — a Code thread `octant agent` starts in that Project follows the same choice; `octant project access <name> approval-gated` returns to the default.
+- **Default mode** (Code Projects): under **Access and limits** in the Project overview, choose the mode this Project's new threads start in, or **Same as Settings**. `octant project access <name> full-access` on the host still sets Full access for the Project (and `approval-gated` returns it to Settings); a Code thread `octant agent` starts in that Project follows the same choice.
 
 ## Brand kit
 

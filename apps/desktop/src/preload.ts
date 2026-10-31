@@ -30,6 +30,9 @@ import type {
   CanvasPrototypeOpenRequest,
   CanvasPrototypeOpenResult,
   CanvasPrototypeSurfacePreparation,
+  CaptureWindowList,
+  CaptureWindowPermissionOutcome,
+  CaptureWindowResult,
   CodeCheckoutOpenRequest,
   CodeExternalEditorRequest,
   CodeOperationApprovalAnchor,
@@ -278,6 +281,14 @@ export interface OctantHostBridge {
   readonly selectLocalPluginFolder: () => Promise<PickerReceiptResult>;
   /** Native file picker for a runtime's executable; returns an opaque receipt, never the path. */
   readonly selectRuntimeBinary: () => Promise<PickerReceiptResult>;
+  /**
+   * Window capture for the composer. Present only on macOS, where the host can
+   * capture a window: listing reads titles only, the permission is requested
+   * only on the person's say-so, and a capture reads the one window picked.
+   */
+  readonly listCaptureWindows?: () => Promise<CaptureWindowList>;
+  readonly requestCaptureWindowPermission?: () => Promise<CaptureWindowPermissionOutcome>;
+  readonly captureWindow?: (windowId: string) => Promise<CaptureWindowResult>;
   readonly setProviderCredential: (providerInstanceId: string, credential: string) => Promise<void>;
   /** Labels only. A secret is never returned to the renderer. */
   readonly listProviderApiKeys: (
@@ -765,6 +776,21 @@ export function createHostBridge(
       ),
     selectRuntimeBinary: async () =>
       decodePickerReceiptResult(await ipc.invoke(IPC_CHANNELS.selectRuntimeBinary), "binary"),
+    ...(platform === "darwin"
+      ? {
+          listCaptureWindows: async () =>
+            decodeCaptureWindowList(await ipc.invoke(IPC_CHANNELS.windowCaptureList)),
+          requestCaptureWindowPermission: async () =>
+            decodeCaptureWindowPermission(await ipc.invoke(IPC_CHANNELS.windowCapturePermission)),
+          captureWindow: async (windowId: string) => {
+            if (typeof windowId !== "string" || windowId.length === 0 || windowId.length > 256)
+              throw new TypeError("Invalid window to capture.");
+            return decodeCaptureWindowResult(
+              await ipc.invoke(IPC_CHANNELS.windowCaptureTake, windowId),
+            );
+          },
+        }
+      : {}),
     setProviderCredential: async (providerInstanceId: string, credential: string) => {
       validateProviderInstanceId(providerInstanceId);
       if (
@@ -1676,6 +1702,69 @@ function decodeProjectRootPickerResult(value: unknown): ProjectRootPickerResult 
     });
   }
   throw new TypeError("Invalid Project root picker result.");
+}
+
+function decodeCaptureWindowList(value: unknown): CaptureWindowList {
+  if (isRecord(value) && value.kind === "permission-needed") {
+    if (
+      value.access === "not-determined" ||
+      value.access === "denied" ||
+      value.access === "restricted"
+    )
+      return Object.freeze({ kind: "permission-needed", access: value.access });
+  }
+  if (isRecord(value) && value.kind === "windows" && Array.isArray(value.windows)) {
+    const windows = value.windows.filter(
+      (entry): entry is { id: string; name: string } =>
+        isRecord(entry) &&
+        typeof entry.id === "string" &&
+        entry.id.length > 0 &&
+        entry.id.length <= 256 &&
+        typeof entry.name === "string" &&
+        entry.name.length > 0,
+    );
+    if (windows.length === value.windows.length)
+      return Object.freeze({
+        kind: "windows",
+        windows: Object.freeze(
+          windows.map((entry) => Object.freeze({ id: entry.id, name: entry.name })),
+        ),
+      });
+  }
+  throw new TypeError("Invalid window capture list.");
+}
+
+function decodeCaptureWindowPermission(value: unknown): CaptureWindowPermissionOutcome {
+  if (isRecord(value) && (value.kind === "granted" || value.kind === "needs-settings"))
+    return Object.freeze({ kind: value.kind });
+  throw new TypeError("Invalid window capture permission answer.");
+}
+
+// Under the attachment limit the server enforces; a larger reply is not an image to attach.
+const MAX_CAPTURED_WINDOW_BYTES = 24 * 1024 * 1024;
+
+function decodeCaptureWindowResult(value: unknown): CaptureWindowResult {
+  if (isRecord(value)) {
+    if (value.kind === "gone" || value.kind === "permission-needed")
+      return Object.freeze({ kind: value.kind });
+    if (value.kind === "failed" && typeof value.message === "string")
+      return Object.freeze({ kind: "failed", message: value.message.slice(0, 300) });
+    if (
+      value.kind === "captured" &&
+      value.mimeType === "image/png" &&
+      typeof value.name === "string" &&
+      value.bytes instanceof Uint8Array &&
+      value.bytes.byteLength > 0 &&
+      value.bytes.byteLength <= MAX_CAPTURED_WINDOW_BYTES
+    )
+      return Object.freeze({
+        kind: "captured",
+        name: value.name,
+        mimeType: "image/png",
+        bytes: value.bytes,
+      });
+  }
+  throw new TypeError("Invalid window capture result.");
 }
 
 function decodePickerReceiptResult(

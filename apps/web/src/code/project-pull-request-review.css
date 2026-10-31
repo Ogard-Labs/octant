@@ -208,3 +208,21 @@
   font-size: var(--oct-text-xs);
   cursor: pointer;
 }
+
+.code-pr-review__switch {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  padding: var(--oct-space-2) 0;
+}
+
+.code-pr-review__switch-text {
+  min-width: 0;
+}
+
+.code-pr-review__switch-text p {
+  margin: 2px 0 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}

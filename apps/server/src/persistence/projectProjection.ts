@@ -8,6 +8,7 @@ import {
   decodeProjectBindingRelinked,
   decodeCodeProjectAccessChanged,
   decodeCodeProjectNewThreadWorkspaceChanged,
+  decodeCodeProjectPermissionModeChanged,
   decodeCodeProjectPullRequestBackgroundRefreshChanged,
   decodeProjectProviderPolicyChanged,
   decodeProjectCreated,
@@ -168,6 +169,8 @@ const projectDecoders = {
   "project.binding-relinked@1": (payload: unknown) => decodeProjectBindingRelinked(payload).project,
   "project.code-access-changed@1": (payload: unknown) =>
     decodeCodeProjectAccessChanged(payload).project,
+  "project.code-permission-mode-changed@1": (payload: unknown) =>
+    decodeCodeProjectPermissionModeChanged(payload).project,
   "project.code-new-thread-workspace-changed@1": (payload: unknown) =>
     decodeCodeProjectNewThreadWorkspaceChanged(payload).project,
   "project.code-pull-request-background-refresh-changed@1": (payload: unknown) =>
