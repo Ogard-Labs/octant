@@ -90,6 +90,7 @@ import {
   decodeCodeTestRunId,
   decodeCodeThreadId,
   type CodeDeliveryOutcomeKind,
+  type CodeTerminalId,
 } from "@octant/contracts/code";
 import { decodeCodeOperationId } from "@octant/contracts/code-operations";
 import type { CodeComposerSubmitInput } from "./code/composer/CodeComposerAdapter";
@@ -140,7 +141,12 @@ import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { ProviderClient } from "@octant/client-runtime/provider-client";
 import { decodeAppleProjectPath } from "@octant/contracts/apple-toolchain";
 import { LOCAL_TOOL_HOST_ID } from "@octant/contracts/tool-actions";
-import { decodeProjectId, type ProjectId, type ProjectSummary } from "@octant/contracts/projects";
+import {
+  decodeProjectId,
+  type ProjectAction,
+  type ProjectId,
+  type ProjectSummary,
+} from "@octant/contracts/projects";
 import { enabledModes } from "@octant/domain/mode-policy";
 import { resolveModelContextWindow } from "@octant/domain/model-context-window";
 import {
@@ -308,6 +314,8 @@ import {
 import { projectPullRequestKey } from "./code/CodeProjectPullRequests";
 import { OctantToast } from "./ui/base/OctantToast";
 import { useProjectController } from "./projects/useProjectController";
+import { ProjectActionButtons } from "./projects/ProjectActionButtons";
+import { runProjectAction as runSavedProjectAction } from "./projects/runProjectAction";
 import { ProjectThreadsProvider } from "./projects/ProjectThreadsSection";
 import { useProviderController } from "./providers/useProviderController";
 import { ModelToolVerificationContext } from "./providers/ModelToolVerificationContext";
@@ -507,6 +515,7 @@ export interface AppProps {
   readonly zenClient?: ZenClient;
 }
 
+const NO_PROJECT_ACTIONS: ReadonlyArray<ProjectAction> = [];
 const NO_PROVIDER_INSTANCES: ReadonlyArray<ProviderInstance> = [];
 const NO_VOICE_SETTINGS: VoiceSettings = {};
 const NO_IMAGE_PROFILES: ReadonlyArray<never> = [];
@@ -4688,6 +4697,7 @@ function LaunchedShell(
       setProjectPermissionMode: projectController.setCodePermissionMode,
       setProjectBrandKit: projectController.setBrandKit,
       setProjectDesktopRecipe: projectController.setDesktopRecipe,
+      setProjectActions: projectController.setActions,
       setProjectWorkStatusFile: projectController.setWorkStatusFile,
       setProjectsListOpen,
       setRailPlaceholder,
@@ -6434,7 +6444,7 @@ function LaunchedShell(
    * holds, with no thread, and pins it. The host decides the root and whether
    * this window may open it; a refusal leaves the space as it was.
    */
-  async function addZenProjectTerminal(projectId: ProjectId): Promise<void> {
+  async function addZenProjectTerminal(projectId: ProjectId): Promise<CodeTerminalId | undefined> {
     const terminalId = decodeCodeTerminalId(crypto.randomUUID());
     // No card means no way back to a shell: a Project terminal has no thread
     // or listing to reopen it from, so one without a card stops rather than
@@ -6457,15 +6467,45 @@ function LaunchedShell(
       // The reply was lost, not necessarily the start.
       setThreadExportNotice("The Project terminal could not be started.");
       await stop();
-      return;
+      return undefined;
     }
     if (started.kind === "project-terminal-refused") {
       setThreadExportNotice(started.message);
-      return;
+      return undefined;
     }
-    if (started.kind !== "project-terminal" || started.terminal.state !== "running") return;
-    if (await zen.pinProjectTerminal({ projectId, terminalId })) return;
+    if (started.kind !== "project-terminal" || started.terminal.state !== "running") {
+      return undefined;
+    }
+    if (await zen.pinProjectTerminal({ projectId, terminalId })) return terminalId;
     await stop();
+    return undefined;
+  }
+
+  /**
+   * Types a saved action into the Project's terminal and shows it in Zen. A
+   * terminal this window already pinned for the Project is reused while its
+   * shell runs; otherwise a new one is opened and pinned. The host reads the
+   * line from the Project record and applies the terminal's own confinement
+   * and approval posture, so this only names the action.
+   */
+  async function runProjectAction(projectId: ProjectId, action: ProjectAction): Promise<void> {
+    // Zen holds the card, so its space has to be loaded before a shell starts:
+    // a shell with no card to show it would only be stopped again.
+    if (!zen.active) await zen.enterZen();
+    await runSavedProjectAction(
+      {
+        execute: (command) => projectTerminalClient.execute(command),
+        pinnedTerminals: (zen.space?.elements ?? []).flatMap((element) =>
+          element.kind === "project-terminal" && String(element.projectId) === String(projectId)
+            ? [element.terminalId]
+            : [],
+        ),
+        openTerminal: () => addZenProjectTerminal(projectId),
+        notify: setThreadExportNotice,
+      },
+      projectId,
+      action,
+    );
   }
 
   function addZenBrowser(sourceContext: import("@octant/contracts/zen").ZenSourceContext): void {
@@ -6487,6 +6527,14 @@ function LaunchedShell(
    * control already uses, so a command is a second route to an action, never a
    * second authority for it.
    */
+  const actionsProject = projectController.projects.find(
+    (project) =>
+      project.type === "code" && project.lifecycle === "active" && project.id === activeProjectId,
+  );
+  const activeProjectActions =
+    actionsProject?.type === "code"
+      ? (actionsProject.actions ?? NO_PROJECT_ACTIONS)
+      : NO_PROJECT_ACTIONS;
   const octantCommands = buildOctantCommands({
     activeMode,
     modes: enabledModes(controller.settings),
@@ -6520,6 +6568,22 @@ function LaunchedShell(
     skills: commandExtensions.skills,
     pluginServers: commandExtensions.pluginServers,
     appleProjects,
+    ...(actionsProject === undefined || activeProjectActions.length === 0
+      ? {}
+      : {
+          projectActions: activeProjectActions.map((action) => ({
+            actionId: String(action.id),
+            name: action.name,
+            command: action.command,
+            projectName: actionsProject.name,
+          })),
+          onRunProjectAction: (commandAction: { readonly actionId: string }) => {
+            const action = activeProjectActions.find(
+              (candidate) => String(candidate.id) === commandAction.actionId,
+            );
+            if (action !== undefined) void runProjectAction(actionsProject.id, action);
+          },
+        }),
     onOpenAppleProject: (project) => {
       // The thread's own controller, not the window's reader: the window's
       // reader binds to no thread and so knows no checkout to open against.
@@ -7206,6 +7270,12 @@ function LaunchedShell(
           settings={controller.settings?.voice ?? NO_VOICE_SETTINGS}
         >
           <OctantCommandProvider commands={octantCommands}>
+            {actionsProject === undefined ? null : (
+              <ProjectActionButtons
+                actions={activeProjectActions}
+                onRun={(action) => void runProjectAction(actionsProject.id, action)}
+              />
+            )}
             <NeedsYouProvider source={needsYouSource}>
               {/* Held here rather than with any Code pane: a thread's controller has to
         outlive the surfaces reading it, so closing a diff tab never tears down

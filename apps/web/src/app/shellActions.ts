@@ -1,6 +1,7 @@
 import type { EnvironmentSelection } from "@octant/client-runtime/environment-selection";
 import type {
   CodeProjectPullRequestDetailObserved,
+  CodeTerminalId,
   CodeProjectPullRequestDetailQuery,
   CodeProjectPullRequestMergeMethod,
   CodeProjectPullRequestMergeOutcome,
@@ -65,7 +66,7 @@ export type ShellActions = {
   readonly activatePane: ShellController["activatePane"];
   readonly addDockTab: (surface: RightUtilityDockSurfaceId) => void;
   readonly addZenBrowser: (sourceContext: ZenSourceContext) => void;
-  readonly addZenProjectTerminal: (projectId: ProjectId) => Promise<void>;
+  readonly addZenProjectTerminal: (projectId: ProjectId) => Promise<CodeTerminalId | undefined>;
   readonly addZenTerminal: (sourceContext: ZenSourceContext) => Promise<void>;
   readonly archiveCodeThread: CodeController["archiveThread"];
   readonly clearFocus: ShellController["clearFocus"];
@@ -261,6 +262,7 @@ export type ShellActions = {
   readonly setProjectPermissionMode: ProjectController["setCodePermissionMode"];
   readonly setProjectBrandKit: ProjectController["setBrandKit"];
   readonly setProjectDesktopRecipe: ProjectController["setDesktopRecipe"];
+  readonly setProjectActions: ProjectController["setActions"];
   readonly setProjectWorkStatusFile: ProjectController["setWorkStatusFile"];
   readonly setProjectsListOpen: Dispatch<SetStateAction<boolean>>;
   readonly setRailPlaceholder: Dispatch<
