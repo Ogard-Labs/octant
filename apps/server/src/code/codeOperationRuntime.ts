@@ -45,6 +45,7 @@ import {
   type CodeRuntimeWorkId,
   type CodeOperationResult,
   type CodeThread,
+  type ShieldDecision,
   type ComputerUseDestinationSelection,
   type CodeThreadId,
   type EventActor,
@@ -730,6 +731,12 @@ export interface CodeOperationRuntime {
    * the request gone.
    */
   turnAwaitsPerson?(threadId: string): boolean;
+  /** Shows one Octant Shield decision on the thread's running turn. */
+  recordShieldReview?(input: {
+    readonly threadId: string;
+    readonly summary: string;
+    readonly decision: ShieldDecision;
+  }): void;
   /**
    * Settles as interrupted every provider turn of the thread that a host
    * restart left reading running or waiting, when nothing is running it now.
@@ -1490,6 +1497,7 @@ export function createCodeOperationRuntime(
     pendingRequests: (windowId) => service.listPendingForWindow(windowId),
     admitsTurn: (windowId, thread) => service.admitsTurn(windowId, thread),
     turnAwaitsPerson: (threadId) => turns.awaitsPerson(threadId),
+    recordShieldReview: (input) => turns.recordShieldReview(input),
     settleCutOffTurns: (threadId) => turns.settleCutOffTurns(threadId),
     threadWithActiveTurnPosture: (thread) => turns.threadWithActiveTurnPosture(thread),
     turnInProgress: (threadId) => startingTurns.has(threadId) || turns.holdsTurn(threadId),
@@ -2956,6 +2964,33 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     if (active === undefined || !active.harnessQuestions.has(input.questionId)) return;
     active.harnessQuestions.delete(input.questionId);
     active.questions.delete(input.questionId);
+  }
+
+  /**
+   * Journals one Octant Shield decision on the thread's running turn, where
+   * the transcript shows it beside the tool rows. A thread with no live turn
+   * has no transcript row to add it to; the approval journal that asked still
+   * holds the decision.
+   */
+  recordShieldReview(input: {
+    readonly threadId: string;
+    readonly summary: string;
+    readonly decision: ShieldDecision;
+  }): void {
+    const active = this.#active.get(input.threadId);
+    if (active === undefined || (active.state !== "running" && active.state !== "waiting")) return;
+    const summary = boundProviderSummary(input.summary) ?? "Tool call";
+    try {
+      const frame = this.#events.append({
+        threadId: active.thread.id,
+        operationId: active.operationId,
+        expectedCursor: active.cursor,
+        event: { kind: "approval-reviewed", summary, decision: input.decision },
+      });
+      active.cursor = frame.cursor;
+    } catch {
+      // A journal that refuses the row leaves the decision where it was made.
+    }
   }
 
   /** Whether this thread's running turn has an approval or a question still unanswered. */

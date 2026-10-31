@@ -119,6 +119,29 @@ describe("the agent's approval card in a thread", () => {
     );
   });
 
+  it("says why Octant Shield handed the call to the person", async () => {
+    const escalated = {
+      ...approval,
+      shield: {
+        reviewer: "octant-shield",
+        verdict: "ask",
+        stage: "deny-rule",
+        rule: "persistence",
+        reason: "The command makes something start again later on its own, so the person decides.",
+        latencyMs: 1,
+        decidedAt: "2026-10-16T12:06:00.000Z",
+      },
+    };
+    const client = clientFor(async () => view({ approvals: [escalated] }));
+    render(<ThreadHarnessCards client={client as never} threadId={threadId} />);
+    const card = await screen.findByRole("region", { name: "Approval requested" });
+    expect(
+      within(card).getByText(
+        "Octant Shield asks you: The command makes something start again later on its own, so the person decides.",
+      ),
+    ).toBeVisible();
+  });
+
   it("says nothing for a subagent's approval, which the Agents tab answers", async () => {
     const client = clientFor(async () => view({ approvals: [childApproval] }));
     render(<ThreadHarnessCards client={client as never} threadId={threadId} />);
