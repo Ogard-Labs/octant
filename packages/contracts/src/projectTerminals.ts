@@ -2,7 +2,7 @@ import { Schema } from "effect";
 import { CodeTerminalId } from "./code";
 import { MAX_CODE_OPERATION_TERMINAL_INPUT_BYTES } from "./codeOperations";
 import { UtcTimestamp } from "./events";
-import { BindingRevisionId, ProjectId } from "./projects";
+import { BindingRevisionId, ProjectActionId, ProjectActionDirectory, ProjectId } from "./projects";
 import { WindowId } from "./shell";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -72,6 +72,21 @@ export const ProjectTerminalCommand = Schema.Union(
   }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("stop"), ...Target }).annotations(strict),
   /**
+   * Type one of the Project's saved actions into a running terminal. The
+   * command names the action, never its text: the host reads the line from the
+   * Project record, so a caller cannot send a command the person did not save.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("run-action"),
+    ...Target,
+    actionId: ProjectActionId,
+  }).annotations(strict),
+  /** Ask which commands the Project's own files suggest saving as actions. */
+  Schema.Struct({
+    kind: Schema.Literal("suggest-actions"),
+    projectId: ProjectId,
+  }).annotations(strict),
+  /**
    * What the shell printed after an absolute character offset. The reader
    * holds the offset, so catching up costs what was printed since it last
    * looked.
@@ -117,11 +132,28 @@ export const ProjectTerminalRefusalReason = Schema.Literal(
 );
 export type ProjectTerminalRefusalReason = typeof ProjectTerminalRefusalReason.Type;
 
+/** Where a suggested action was found, shown beside it so the person can judge it. */
+export const ProjectActionSuggestionSource = Schema.Literal("package.json", "Makefile");
+export type ProjectActionSuggestionSource = typeof ProjectActionSuggestionSource.Type;
+
+export const ProjectActionSuggestion = Schema.Struct({
+  name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(40)),
+  command: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_000)),
+  directory: ProjectActionDirectory,
+  source: ProjectActionSuggestionSource,
+}).annotations(strict);
+export type ProjectActionSuggestion = typeof ProjectActionSuggestion.Type;
+
 export const ProjectTerminalResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("project-terminal"),
     terminal: ProjectTerminalView,
     output: Schema.optional(ProjectTerminalOutput),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("project-action-suggestions"),
+    projectId: ProjectId,
+    suggestions: Schema.Array(ProjectActionSuggestion).pipe(Schema.maxItems(24)),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("project-terminal-refused"),

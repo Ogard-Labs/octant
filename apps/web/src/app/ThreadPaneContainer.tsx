@@ -128,6 +128,7 @@ export interface ThreadPaneContainerProps {
     | "setProjectPermissionMode"
     | "setProjectBrandKit"
     | "setProjectDesktopRecipe"
+    | "setProjectActions"
     | "setProjectWorkStatusFile"
     | "setThreadStatsVisible"
     | "setUsageOpen"
@@ -388,6 +389,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     setProjectPermissionMode,
     setProjectBrandKit,
     setProjectDesktopRecipe,
+    setProjectActions,
     setProjectWorkStatusFile,
     setThreadStatsVisible,
     setUsageOpen,
@@ -681,6 +683,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
               onProjectPermissionModeChange={setProjectPermissionMode}
               onBrandKitChange={setProjectBrandKit}
               onDesktopRecipeChange={setProjectDesktopRecipe}
+              onActionsChange={setProjectActions}
               onWorkStatusFileChange={(projectId, enabled) =>
                 setProjectWorkStatusFile(projectId, enabled ? "enabled" : "disabled")
               }

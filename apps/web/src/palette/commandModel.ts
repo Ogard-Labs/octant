@@ -18,6 +18,7 @@ export type OctantCommandGroup =
   | "Modes"
   | "Threads"
   | "Projects"
+  | "Actions"
   | "Workspace"
   | "Settings";
 
