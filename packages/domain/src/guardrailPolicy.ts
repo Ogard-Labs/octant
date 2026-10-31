@@ -1,6 +1,8 @@
+import { isAcpAgentKind } from "@octant/contracts/acp-agent-profiles";
 import type {
   AutoReviewer,
   GuardrailLevel,
+  ProviderDriverKind,
   PermissionMode,
   ProviderExecutionPolicy,
   ToolActionAuthority,
@@ -8,6 +10,7 @@ import type {
   WorkAccess,
   WorkTurnCapabilityFacts,
 } from "@octant/contracts";
+import { isNativeHarnessDriverKind } from "./providerPolicy";
 
 /**
  * What a thread stores about its authority. The level is derived from these,
@@ -308,6 +311,32 @@ export function resolveGuardrail(input: {
         outsideContent: "recorded",
       };
   }
+}
+
+/** The Auto reviewer a thread's person chose: its Project's, else Settings'. */
+export function chosenAutoReviewer(input: {
+  readonly project?: { readonly autoReviewer?: AutoReviewer | undefined } | undefined;
+  readonly settings?: { readonly autoReviewer?: AutoReviewer | undefined } | undefined;
+}): AutoReviewer | undefined {
+  return input.project?.autoReviewer ?? input.settings?.autoReviewer;
+}
+
+/**
+ * Runtimes whose approval prompts reach Octant before the call runs, so
+ * Octant Shield can answer them: the Octant Harness, whose tool calls pass
+ * Octant's approval path, the Anthropic and OpenAI coding runtimes
+ * (`canUseTool`, app-server approval requests), OpenCode (`permission.asked`),
+ * every ACP agent (`session/request_permission`), and Pi (its extension's
+ * confirmation).
+ */
+export function shieldRoutesApprovals(driverKind: ProviderDriverKind): boolean {
+  if (isNativeHarnessDriverKind(driverKind) || isAcpAgentKind(driverKind)) return true;
+  return (
+    driverKind === "claude" ||
+    driverKind === "codex" ||
+    driverKind === "opencode" ||
+    driverKind === "pi"
+  );
 }
 
 /**

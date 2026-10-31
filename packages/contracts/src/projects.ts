@@ -4,6 +4,7 @@ import { DesktopRecipe, DesktopRecipeKeyChange } from "./desktopLease";
 import { ActorId, AggregateVersion, EventActor, UtcTimestamp } from "./events";
 import { HostId } from "./host";
 import { PermissionMode, ProviderInstanceId } from "./providers";
+import { AutoReviewer } from "./shield";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -342,6 +343,11 @@ export const CodeProject = Schema.Struct({
    */
   defaultPermissionMode: Schema.optional(PermissionMode),
   /**
+   * Who answers this Project's prompts at Auto, overriding Settings. Absent
+   * follows Settings.
+   */
+  autoReviewer: Schema.optional(AutoReviewer),
+  /**
    * The disposable desktop this Project's threads lease from. Absent means no
    * recipe, so every lease command refuses `no-provider-configured`. A person
    * sets it from a local window; an agent cannot.
@@ -379,6 +385,7 @@ const CodeProjectSummary = Schema.Struct({
   newThreadWorkspace: Schema.optional(CodeNewThreadWorkspace),
   pullRequestBackgroundRefresh: Schema.optional(CodeProjectPullRequestBackgroundRefresh),
   defaultPermissionMode: Schema.optional(PermissionMode),
+  autoReviewer: Schema.optional(AutoReviewer),
   desktopRecipe: Schema.optional(DesktopRecipe),
   actions: Schema.optional(ProjectActions),
   connectedRepository: Schema.optional(ConnectedGitHubRepository),
@@ -592,6 +599,12 @@ export const ProjectCommand = Schema.Union(
     ...ProjectCommandFields,
     /** Absent returns the Project to the Settings default. */
     permissionMode: Schema.optional(PermissionMode),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-code-project-auto-reviewer"),
+    ...ProjectCommandFields,
+    /** Absent returns the Project to the Settings default. */
+    autoReviewer: Schema.optional(AutoReviewer),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-code-project-new-thread-workspace"),
@@ -829,6 +842,11 @@ export const CodeProjectPermissionModeChanged = Schema.Struct({
   project: CodeProject,
 }).annotations(strict);
 export type CodeProjectPermissionModeChanged = typeof CodeProjectPermissionModeChanged.Type;
+/** The Project's Auto reviewer changed; the payload is the whole Project. */
+export const CodeProjectAutoReviewerChanged = Schema.Struct({
+  project: CodeProject,
+}).annotations(strict);
+export type CodeProjectAutoReviewerChanged = typeof CodeProjectAutoReviewerChanged.Type;
 /** Journaled so every window sees the same Project habit after a change. */
 export const CodeProjectNewThreadWorkspaceChanged = Schema.Struct({
   project: CodeProject,
@@ -890,6 +908,7 @@ export const PROJECT_EVENT_NAMES = [
   "project.binding-relinked@1",
   "project.code-access-changed@1",
   "project.code-permission-mode-changed@1",
+  "project.code-auto-reviewer-changed@1",
   "project.code-new-thread-workspace-changed@1",
   "project.code-pull-request-background-refresh-changed@1",
   "project.provider-policy-changed@1",
@@ -938,6 +957,9 @@ export const decodeProjectExtraFolderRemoved = Schema.decodeUnknownSync(ProjectE
 export const decodeCodeProjectAccessChanged = Schema.decodeUnknownSync(CodeProjectAccessChanged);
 export const decodeCodeProjectPermissionModeChanged = Schema.decodeUnknownSync(
   CodeProjectPermissionModeChanged,
+);
+export const decodeCodeProjectAutoReviewerChanged = Schema.decodeUnknownSync(
+  CodeProjectAutoReviewerChanged,
 );
 export const decodeCodeProjectNewThreadWorkspaceChanged = Schema.decodeUnknownSync(
   CodeProjectNewThreadWorkspaceChanged,

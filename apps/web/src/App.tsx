@@ -1,4 +1,5 @@
 import { SidebarThreadTabsContext, type SidebarThreadTabs } from "./shell/sidebarThreadTabs";
+import { autoReviewFor } from "./code/autoReview";
 import {
   createTabActivationRegistry,
   TabActivationProvider,
@@ -4697,6 +4698,7 @@ function LaunchedShell(
       setProjectColor: projectController.setColor,
       setProjectProviderPolicy: projectController.setProviderPolicy,
       setProjectPermissionMode: projectController.setCodePermissionMode,
+      setProjectAutoReviewer: projectController.setCodeAutoReviewer,
       setProjectBrandKit: projectController.setBrandKit,
       setProjectDesktopRecipe: projectController.setDesktopRecipe,
       setProjectActions: projectController.setActions,
@@ -7174,8 +7176,13 @@ function LaunchedShell(
             controller: firstRunController,
             onSelectModel: selectFirstRunModel,
             autoSupportedFor: (providerInstanceId) =>
-              providerController.observedByInstance.get(providerInstanceId)?.capabilities
-                .harnessAutoReview === "supported",
+              autoReviewFor({
+                providerInstanceId,
+                instances: providerController.instances,
+                observedByInstance: providerController.observedByInstance,
+                chosen: codeController.bootstrap?.settings.autoReviewer,
+                shieldModel: codeController.bootstrap?.settings.shieldModel,
+              })?.status === "reviewer",
             onSetDefaultMode: async (mode) => {
               const settings = codeController.bootstrap?.settings;
               if (settings === undefined) return false;
