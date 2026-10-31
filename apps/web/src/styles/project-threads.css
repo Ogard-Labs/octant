@@ -788,6 +788,42 @@
   justify-content: flex-start;
 }
 
+/* The Projects a Work or Code thread may move into. Each choice is a plain
+   button so a name and its folder can stack; a Project the host would refuse is
+   greyed and the reason sits beside it. */
+.move-thread__list {
+  display: grid;
+  gap: var(--oct-space-2);
+  margin: var(--oct-space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.move-thread__choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 2px;
+  width: 100%;
+  height: auto;
+  padding: var(--oct-space-2) var(--oct-space-3);
+  white-space: normal;
+  text-align: left;
+}
+
+.move-thread__folder,
+.move-thread__reason {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  overflow-wrap: anywhere;
+}
+
+.move-thread__reason {
+  display: block;
+  margin-top: 2px;
+}
+
 .project-button {
   min-height: 31px;
   padding: 0 var(--oct-space-3);

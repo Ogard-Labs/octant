@@ -699,6 +699,18 @@ export const InterruptChatTurnCommand = Schema.Struct({
 }).annotations(strict);
 
 /**
+ * Kills the runtime process one running attempt is stuck in, after a normal
+ * Stop did not end it. Only the attempt's own process is touched; the thread
+ * stays usable and its session can be resumed.
+ */
+export const ForceStopChatTurnCommand = Schema.Struct({
+  kind: Schema.Literal("force-stop-chat-turn"),
+  ...ChatThreadCommandFields,
+  turnId: ChatTurnId,
+  attemptId: ChatAttemptId,
+}).annotations(strict);
+
+/**
  * Opts this thread into resuming one usage-limited attempt when the provider's
  * declared reset arrives. The server reads the limit and reset from the
  * journaled attempt rather than trusting the command, and journals the opt-in
@@ -894,6 +906,7 @@ export const ChatCommand = Schema.Union(
   RetryChatTurnCommand,
   ResumeChatTurnCommand,
   InterruptChatTurnCommand,
+  ForceStopChatTurnCommand,
   ScheduleChatUsageResumeCommand,
   CancelChatUsageResumeCommand,
   AnswerChatTurnQuestionCommand,

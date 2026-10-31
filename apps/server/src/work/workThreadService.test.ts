@@ -1,6 +1,7 @@
 import {
   type AggregateVersion,
   type UtcTimestamp,
+  decodeThreadWorkingDirectory,
   decodeWorkThread,
   decodeProviderModel,
   decodeWorkThreadBootstrap,
@@ -1392,6 +1393,154 @@ function thread(overrides: Partial<ReturnType<typeof decodeWorkThread>> = {}) {
     ...overrides,
   });
 }
+
+describe("moving a Work thread to another Project", () => {
+  const otherProject = decodeProjectId("72000000-0000-4000-8000-000000000011");
+  const otherBinding = "72000000-0000-4000-8000-000000000012";
+
+  function destination(folder: string, overrides: Partial<Project> = {}): Project {
+    const base = workProject();
+    if (base.type !== "work") throw new Error("fixture must be a Work Project");
+    return {
+      ...base,
+      id: otherProject,
+      name: "Elsewhere",
+      binding: { canonicalRoot: folder },
+      bindingHistory: [
+        {
+          ...base.bindingHistory[0]!,
+          revisionId: otherBinding as never,
+          currentBinding: { canonicalRoot: folder },
+        },
+      ],
+      ...overrides,
+    } as Project;
+  }
+
+  function moveFixture(
+    folder: string,
+    options: Parameters<typeof serviceFixture>[0] = {},
+    destinationOverrides: Partial<Project> = {},
+  ) {
+    const target = destination(folder, destinationOverrides);
+    const fixture = serviceFixture({
+      threads: [thread({ workingDirectory: decodeThreadWorkingDirectory("drafts") })],
+      accessibleProjects: [
+        { id: ids.project, type: "work", name: "Knowledge", lifecycle: "active" },
+        { id: otherProject, type: "work", name: "Elsewhere", lifecycle: "active" },
+      ],
+      ...options,
+    });
+    fixture.persistence.readProject.mockImplementation(((id: string) =>
+      String(id) === String(otherProject) ? target : workProject()) as never);
+    return fixture;
+  }
+
+  const move = (expectedVersion = 1) =>
+    ({
+      kind: "move-work-thread",
+      threadId: ids.thread,
+      expectedVersion,
+      projectId: otherProject,
+    }) as const;
+
+  it("files the thread into a Project bound to the same folder and journals who moved it", async () => {
+    const fixture = moveFixture("/private/tmp/knowledge");
+    const result = await fixture.service.execute(ids.window, move());
+
+    expect(result).toMatchObject({
+      kind: "thread-updated",
+      thread: {
+        projectId: otherProject,
+        bindingRevisionId: otherBinding,
+        workingDirectory: "drafts",
+        access: "ask-first",
+        title: "Draft brief",
+        version: 2,
+      },
+    });
+    expect(fixture.projection.read(ids.thread)?.projectId).toBe(otherProject);
+    const append = fixture.persistence.journal.append.mock.calls[0]?.[0];
+    expect(append?.events[0]).toMatchObject({
+      eventName: "work.thread-updated@1",
+      actor: { kind: "local-user" },
+      occurredAt: now,
+    });
+  });
+
+  it("keeps the thread in the same place when the Project's folder contains it", async () => {
+    const fixture = moveFixture("/private");
+    const result = await fixture.service.execute(ids.window, move());
+
+    expect(result).toMatchObject({
+      kind: "thread-updated",
+      thread: { projectId: otherProject, workingDirectory: "tmp/knowledge/drafts" },
+    });
+    expect(fixture.workingDirectories.resolve).toHaveBeenCalledWith(
+      "/private",
+      "tmp/knowledge/drafts",
+    );
+  });
+
+  it("refuses a Project bound to a different folder and changes nothing", async () => {
+    for (const folder of ["/private/tmp/other", "/private/tmp/knowledge/drafts"]) {
+      const fixture = moveFixture(folder);
+      await expect(fixture.service.execute(ids.window, move())).rejects.toMatchObject({
+        failure: { category: "invalid", message: /different folder/ },
+      });
+      expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+      expect(fixture.projection.read(ids.thread)?.projectId).toBe(ids.project);
+    }
+  });
+
+  it("refuses a Chat Project, a Project the window cannot see, and a thread that is running", async () => {
+    const chat = moveFixture("/private/tmp/knowledge", {}, { type: "chat" } as never);
+    await expect(chat.service.execute(ids.window, move())).rejects.toMatchObject({
+      failure: { message: /own kind/ },
+    });
+
+    const hidden = moveFixture("/private/tmp/knowledge", {
+      accessibleProjects: [
+        { id: ids.project, type: "work", name: "Knowledge", lifecycle: "active" },
+      ],
+    });
+    await expect(hidden.service.execute(ids.window, move())).rejects.toMatchObject({
+      failure: { message: /not available/ },
+    });
+
+    const running = moveFixture("/private/tmp/knowledge", {
+      observeRuntime: () => ({ executing: true, awaitingInput: false }),
+    });
+    await expect(running.service.execute(ids.window, move())).rejects.toMatchObject({
+      failure: { message: /running turn/ },
+    });
+    for (const fixture of [chat, hidden, running]) {
+      expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    }
+  });
+
+  it("refuses a move a routine makes as the host, and a stale version", async () => {
+    const routine = moveFixture("/private/tmp/knowledge");
+    await expect(routine.service.execute(ROUTINE_HOST_SCOPE_ID, move())).rejects.toMatchObject({
+      failure: { category: "unauthorized" },
+    });
+
+    const stale = moveFixture("/private/tmp/knowledge");
+    await expect(stale.service.execute(ids.window, move(7))).rejects.toMatchObject({
+      failure: { category: "stale" },
+    });
+  });
+
+  it("refuses a Project whose provider policy excludes the thread's provider", async () => {
+    const fixture = moveFixture("/private/tmp/knowledge", {}, {
+      providerPolicy: { mode: "whitelist", providerInstanceIds: [] },
+    } as never);
+    await expect(fixture.service.execute(ids.window, move())).rejects.toMatchObject({
+      failure: { category: "unauthorized" },
+    });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+});
 
 describe("completing and snoozing a Work thread", () => {
   const later = new Date(Date.parse(now) + 24 * 60 * 60 * 1_000).toISOString();

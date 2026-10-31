@@ -355,6 +355,17 @@ window, or turn it off, under **Settings › General › Archive put-away
 threads**. Archiving keeps every thread and its history; only a confirmed purge
 in **Settings › Data & storage** deletes anything.
 
+## Move to a Project
+
+Choose **Move to Project…** from a Code thread's row menu to file it into
+another Code Project. The thread stays a Code thread and keeps its history,
+its guardrail level, and its checkout or managed worktree. It can move only to
+a Code Project bound to the same repository folder, so the checkout stays
+valid; a Project bound to any other folder is greyed out with the reason, and
+the host refuses it too. A Full access grant you made for the current session
+does not carry over: the thread returns to its saved level. Octant refuses the
+move while a turn is running or the agent is waiting on you.
+
 ## Agents that see the other threads of a Project
 
 When several Code threads work in the same Project, each thread's agent can

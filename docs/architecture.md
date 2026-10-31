@@ -1001,6 +1001,47 @@ gate their domains: with one off, the composer offers only the other kind.
 | **Work** | Exactly one OS-confined project root                                                                                                | The shared capability set at the thread's [guardrail level](#security-and-authority): file reads and writes, shell, Git, local command-line tools, SSH to the person's own machines, provider-native tools, and subagents, as in Code. Focus: documents and artifacts with document adapters (docx, pptx, pdf, image), research with citations, local tasks, and the server-authoritative board; Done by a person. Developer surfaces stay hidden until the person turns them on for the Project (below). Today's build is narrower: confined reads and approval-gated writes (or auto-accept-edits), no shell or Git, never Full access; the shared level is allowed; not built yet.                                                               |
 | **Code** | Exactly one directory, ideally a repository root; Code threads select a checkout (current checkout or a managed worktree) inside it | The same shared capability set at the thread's guardrail level, which starts in the mode the person picked at first run (Auto pre-selected; Ask first where the provider has no Auto) or later set for the Project or in Settings › Code › Access; any thread switches mode from its composer. Plan mode is always read-only. Focus: Git, terminals, tests, pull requests, review, and managed subagents inside the bound root, with checkouts, managed worktrees, and the objective delivery target. Creating a Code Project may explicitly initialize Git in that folder so a Code thread can prepare a checkout immediately; if that initialization fails, creation is refused and no Project is journaled. Binding without Git remains allowed. |
 
+A No-project Chat thread can be filed into a Chat Project from its thread menu
+(**Move to Project…**), picking one or creating it there. The move is the
+server's `move-chat-thread` command: it keeps the thread's kind, history, and
+settings, accepts only an active Chat Project, and adds no filesystem, shell, or
+network authority; the Project's memory applies from the thread's next message.
+A Chat already in a Project offers no move. A tool-extension selection resolved
+while the thread had no Project no longer matches its new scope and is refused
+until it is selected again.
+
+A Work or Code thread can be filed into another Project of its own mode from its
+row menu (**Move to Project…**). The server's `move-work-thread` and
+`move-code-thread` commands keep the thread's kind, history, and guardrail
+level, and add no filesystem reach: the pure `decideThreadMove` policy admits
+only an active Project of the same mode whose bound folder is the thread's
+folder or contains it, and refuses an archived thread, a running turn, a thread
+waiting on the person, the thread's own Project, and any other folder, each with
+a plain reason. A person makes the move; a routine acting as the host is
+refused. A Work thread takes the destination's binding revision and its working
+directory is rewritten to name the same place under the new root, so a
+containing folder changes the confinement root but not where the thread works.
+A Code thread also needs its checkout to stay valid: the destination's checkout
+must be the same repository at the same folder, so a Project that merely
+contains the thread's folder is refused. A checkout of the Project's folder is
+re-derived under the destination and journaled before the thread; a managed
+worktree keeps its own identity. A session grant of Full access is discarded on
+the move. The destination's provider policy still applies to the thread's
+provider and model. Each move is one journaled thread update by the local
+person with its time, and replays like any other thread update.
+
+Stop asks the runtime to end a turn. When the runtime does not end it, a
+provider whose sessions each own a process (reported as the `forceStop`
+capability, Claude today) lets the person **Force stop** the turn ten seconds
+after pressing Stop in Chat. The server's `force-stop-chat-turn` command kills
+that attempt's own runtime process tree and nothing else, journals the attempt
+`cancelled`, and leaves the thread usable and its session resumable. A runtime
+that serves several threads from one process (Codex, OpenCode) reports
+`forceStop` unsupported: the command is refused, the UI never offers it, and
+Stop settles the attempt at once as before. For a provider that supports it, a
+Stop keeps the attempt running until the runtime really ends it, so a Stop that
+did not take stays visible. Work and Code do not offer Force stop yet.
+
 **One authority model, two focuses** (maintainer decision, 2026-10-31: "Work
 and Code should essentially be able to do the same, but Work is more for
 non-technical users that do not need issue-tracker/Git tools etc. But for
@@ -8505,6 +8546,7 @@ access` agree); a thread's own change is journaled as
   | `appManagedTools`        | `supported`                                                                       | `supported`                                                                    | `unsupported`; `supported` on macOS in a verified isolated config        | `unsupported`; `supported` once the probe attests the tool bridge on Pi 0.85.1 or 1.1.0 and later | `varies`: `supported` on macOS when the agent serves HTTP MCP                 | `unsupported`; `supported` for each model a person verified      | `unsupported`; `supported` for each model a person verified                       | `unsupported`; `supported` for each model the host verified      | `unsupported`                         |
   | `acpClientCapabilities`  | `absent`                                                                          | `absent`                                                                       | `absent`                                                                 | `absent`                                                                                          | `supported`                                                                   | `absent`                                                         | `absent`                                                                          | `absent`                                                         | `absent`                              |
   | `modelSwitch`            | `supported`                                                                       | `supported`                                                                    | `supported`; the resume names the thread's current model on every prompt | `absent`; same                                                                                    | `absent`; same                                                                | `absent`; Octant replays history, so the model may change        | `absent`; Octant replays history, so the model may change                         | `absent`; Octant replays history, so the model may change        | `absent`                              |
+  | `forceStop`              | `supported`                                                                       | `unsupported`; one process serves every thread                                 | `unsupported`; one process serves every thread                           | `absent`                                                                                          | `absent`                                                                      | `absent`                                                         | `absent`                                                                          | `absent`                                                         | `absent`                              |
   | `sessionCompaction.chat` | `supported`; `unavailable` when the install lacks `/compact`                      | `supported`; `unavailable` before Codex 0.162.1                                | `absent`                                                                 | `absent`                                                                                          | `absent`                                                                      | `unsupported`; Octant summarizes                                 | `unsupported`; Octant summarizes                                                  | `unsupported`; Octant summarizes                                 | `absent`                              |
   | `sessionCompaction.work` | as Chat                                                                           | as Chat                                                                        | `absent`                                                                 | `absent`                                                                                          | `absent`                                                                      | `unsupported`; Octant summarizes                                 | `unsupported`; Octant summarizes                                                  | `unsupported`; Octant summarizes                                 | `absent`                              |
   | `sessionCompaction.code` | as Chat                                                                           | as Chat                                                                        | `absent`                                                                 | `absent`                                                                                          | `absent`                                                                      | `supported`; Octant Harness compacts its own transcript          | `supported`; Octant Harness compacts its own transcript                           | `supported`; Octant Harness compacts its own transcript          | `absent`                              |
