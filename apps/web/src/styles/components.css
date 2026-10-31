@@ -1401,6 +1401,35 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
   color: var(--oct-meta);
 }
 
+/* A tool row whose result brought outside content in. Quiet when nothing was
+   found, and at Full access, where outside content is recorded only; a
+   Watcher finding elsewhere takes the warning role. */
+.turn-activity__outside {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 50%;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
+}
+
+.turn-activity__outside[data-found="true"][data-quiet="false"] {
+  color: var(--oct-warn-fg);
+}
+
+.turn-activity__outside > svg {
+  flex: none;
+}
+
+.turn-activity__outside-text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .turn-activity__disclosure[data-state="failed"] .turn-activity__outcome,
 .turn-activity__disclosure[data-state="failed"] .turn-activity__status-icon {
   color: var(--oct-danger-fg);

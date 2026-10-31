@@ -294,3 +294,21 @@ export function defaultPermissionModeFor(input: {
     autoApprove: input.settings.defaultAutoApprove,
   });
 }
+
+/**
+ * Whether outside content is recorded only: Code at Full access, where the
+ * mark tags the tool row and the thread card and never asks or blocks. Work
+ * is not on the shared levels, so its mark gates as before.
+ */
+export function outsideContentRecordedOnly(input: {
+  readonly mode: ToolActionAuthority["mode"];
+  readonly executionPolicy: ThreadAccess["executionPolicy"];
+}): boolean {
+  if (input.mode !== "code") return false;
+  const guardrail = resolveGuardrail({
+    access: { executionPolicy: input.executionPolicy },
+    capabilities: { providerReview: true, providerSandbox: false },
+    mode: "code",
+  });
+  return guardrail.status === "supported" && guardrail.outsideContent === "recorded";
+}

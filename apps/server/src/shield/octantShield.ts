@@ -1,11 +1,13 @@
 import {
   decodeShieldDecision,
   MAX_SHIELD_REASON_LENGTH,
+  SHIELD_WATCHER_LABELS,
   type GuardrailLevel,
   type ShieldDecision,
   type ShieldModelChoice,
   type ShieldStage,
   type ShieldVerdict,
+  type ShieldWatcherLabel,
   type TurnUsage,
 } from "@octant/contracts";
 import {
@@ -79,6 +81,8 @@ export interface ShieldThreadFacts {
       }
     | undefined;
   readonly tainted: (threadId: string) => boolean;
+  /** What the Watcher found in what the thread read: kinds only, never text. */
+  readonly watcherLabels: (threadId: string) => ReadonlyArray<ShieldWatcherLabel>;
   /** The person's own messages in the thread, oldest first. Nothing the agent read. */
   readonly personMessages: (threadId: string) => ReadonlyArray<string>;
   readonly projectCommands: (boundRoot: string) => ReadonlyArray<string>;
@@ -99,6 +103,8 @@ export interface ShieldReviewRequest {
   readonly boundRoot: string;
   /** A subagent's own taint, which counts beside its parent's. */
   readonly alsoTainted?: boolean | undefined;
+  /** What the Watcher found in what a subagent read, beside its parent's. */
+  readonly alsoWatcherLabels?: ReadonlyArray<ShieldWatcherLabel> | undefined;
   readonly signal?: AbortSignal | undefined;
 }
 
@@ -177,7 +183,14 @@ export class OctantShield {
     const brake = shieldBrakeEngaged(this.#brakes.get(request.threadId) ?? SHIELD_BRAKE_RELEASED);
     if (brake.engaged) return decide("ask", "brake", brake.reason, { rule: "denial-brake" });
 
-    const tainted = facts.tainted(request.threadId) || request.alsoTainted === true;
+    const ownLabels = facts.watcherLabels(request.threadId);
+    const watcherLabels = SHIELD_WATCHER_LABELS.filter(
+      (label) => ownLabels.includes(label) || request.alsoWatcherLabels?.includes(label) === true,
+    );
+    // A label is only ever raised on content the thread read, so a labelled
+    // thread is marked even if its mark could not be read.
+    const tainted =
+      facts.tainted(request.threadId) || request.alsoTainted === true || watcherLabels.length > 0;
     const input: ShieldJudgeInput = {
       call: request.call,
       boundRoot: request.boundRoot,
@@ -185,6 +198,7 @@ export class OctantShield {
       projectCommands: facts.projectCommands(request.boundRoot),
       level: reviewing.level,
       personMessages: facts.personMessages(request.threadId),
+      watcherLabels,
     };
     const ruled = judgeShieldCallByRules(input);
     if (ruled.kind === "decided") {

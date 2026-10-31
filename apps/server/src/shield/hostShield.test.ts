@@ -40,6 +40,7 @@ function hostShieldWith(stored: CodeThread, overrides: Partial<HostShieldDepende
     ],
     resolveDriver: () => ({}) as ProviderDriver,
     tainted: () => false,
+    watcherLabels: () => [],
     personMessages: () => ["Show me the status."],
     scratchRoot: "/tmp/octant-shield-scratch",
     clock: () => "2026-10-31T00:00:00.000Z",

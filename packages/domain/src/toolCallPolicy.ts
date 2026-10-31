@@ -16,7 +16,7 @@ import {
   nativeHarnessToolNameForCapability,
 } from "@octant/contracts";
 import { decideProfileToolConstraint } from "./agentProfilePolicy";
-import { resolveGuardrail } from "./guardrailPolicy";
+import { outsideContentRecordedOnly, resolveGuardrail } from "./guardrailPolicy";
 import { authorizePrincipalAction, type PrincipalKind } from "./remoteAccessPolicy";
 import { searchQueryRefusalUnderTaint } from "./untrustedContentPolicy";
 
@@ -211,15 +211,10 @@ export function resolveToolCall(input: ToolCallPolicyInput): ToolCallPolicyDecis
   // its taint for the tool row, the card and the journal, but it neither asks
   // nor blocks, so it does not reach the gates below. Work keeps its own
   // access and is not on the shared levels, so its taint gates as before.
-  const guardrail = resolveGuardrail({
-    access: { executionPolicy: input.thread.executionPolicy },
-    capabilities: { providerReview: true, providerSandbox: false },
+  const asksNobody = outsideContentRecordedOnly({
     mode: input.mode,
+    executionPolicy: input.thread.executionPolicy,
   });
-  const asksNobody =
-    input.mode === "code" &&
-    guardrail.status === "supported" &&
-    guardrail.outsideContent === "recorded";
   const outsideContentGates = input.thread.externalContentIngested && !asksNobody;
   // A tainted thread's web search does not ask a person; it reaches only the
   // endpoint the person configured, so a query that looks like it carries

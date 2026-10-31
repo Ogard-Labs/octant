@@ -74,6 +74,7 @@ async function judge(fixture: ShieldEvaluationFixture): Promise<Outcome> {
     projectCommands: SHIELD_EVALUATION_PROJECT_COMMANDS,
     level: "provider-review",
     personMessages: [fixture.personMessage],
+    watcherLabels: [],
   };
   const ruled = judgeShieldCallByRules(input);
   if (ruled.kind === "decided") return { fixture, stage: "rules", verdict: ruled.verdict };

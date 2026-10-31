@@ -1,3 +1,5 @@
+import type { ToolOutsideContentMark } from "@octant/contracts/shield";
+import { SHIELD_WATCHER_LABEL_WORDS } from "@octant/domain/shield-watcher-policy";
 import { ChatRichText } from "../chat/ChatRichText";
 import {
   Check,
@@ -116,7 +118,11 @@ function collapsedName(row: DisclosureRow): string {
 
 function disclosureName(row: DisclosureRow, settled: boolean): string {
   const name = row.kind === "tool" ? row.toolName : boundAccessibleSummary(row.summary);
-  return `${name}, ${outcomeLabel(row, settled)}`;
+  const outside =
+    row.kind === "tool" && row.outsideContent !== undefined
+      ? `, ${outsideContentText(row.outsideContent)}`
+      : "";
+  return `${name}, ${outcomeLabel(row, settled)}${outside}`;
 }
 
 function clipSummary(
@@ -363,6 +369,9 @@ function ActivityDisclosure(props: {
           strokeWidth={2}
         />
         <span className="turn-activity__name">{collapsedName(row)}</span>
+        {row.kind === "tool" && row.outsideContent !== undefined ? (
+          <OutsideContentTag mark={row.outsideContent} />
+        ) : null}
         <span className="turn-activity__outcome">{outcomeLabel(row, props.settled)}</span>
         <StateIcon
           aria-hidden="true"
@@ -374,6 +383,33 @@ function ActivityDisclosure(props: {
       <div className="turn-activity__body">{activityDetail(row, props)}</div>
     </details>
   );
+}
+
+/**
+ * The mark on a tool row whose result brought outside content into the
+ * thread, with what Octant Shield's Watcher found in it. At Full access it is
+ * recorded only, so the tag stays quiet; elsewhere a finding is drawn in the
+ * warning role.
+ */
+function OutsideContentTag(props: { readonly mark: ToolOutsideContentMark }) {
+  const { labels, recordedOnly } = props.mark;
+  const text = outsideContentText(props.mark);
+  return (
+    <span
+      className="turn-activity__outside"
+      data-found={labels.length > 0 ? "true" : "false"}
+      data-quiet={recordedOnly === true || labels.length === 0 ? "true" : "false"}
+      title={recordedOnly === true ? `${text}. Recorded only at Full access.` : text}
+    >
+      {labels.length === 0 ? null : <ShieldAlert aria-hidden="true" size={12} strokeWidth={1.8} />}
+      <span className="turn-activity__outside-text">{text}</span>
+    </span>
+  );
+}
+
+function outsideContentText(mark: ToolOutsideContentMark): string {
+  const found = mark.labels.map((label) => SHIELD_WATCHER_LABEL_WORDS[label]).join(", ");
+  return found === "" ? "Outside content" : `Outside content · ${found}`;
 }
 
 function activityDetail(

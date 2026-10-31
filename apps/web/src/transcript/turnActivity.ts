@@ -1,4 +1,4 @@
-import type { ShieldDecision } from "@octant/contracts/shield";
+import type { ShieldDecision, ToolOutsideContentMark } from "@octant/contracts/shield";
 import type { HarnessRetryNotice, ThreadPublishedPage, ThreadToolStep } from "@octant/contracts";
 
 /**
@@ -22,6 +22,8 @@ export type TurnActivityRow =
       readonly summary?: string;
       /** A page the call published outside this host, such as a Claude artifact. */
       readonly published?: ThreadPublishedPage;
+      /** The call's result brought outside content into the thread. */
+      readonly outsideContent?: ToolOutsideContentMark;
     }
   | {
       readonly kind: "task";

@@ -10,10 +10,12 @@ import {
   type ProviderResumeCursor,
   type ProviderUsageLimit,
   type ThreadPublishedPage,
+  type ToolOutsideContentMark,
   type TurnStopReason,
   type UsageCost,
 } from "@octant/contracts";
 import { ledgerUsageCost, observeTurnMetrics, startTurnMetrics } from "@octant/domain";
+import { outsideContentRecordedOnly } from "@octant/domain/guardrail-policy";
 import { Effect, Fiber, Scope, Stream } from "effect";
 import type {
   ProviderAcquireInput,
@@ -132,6 +134,8 @@ export interface CodeTurnEvent {
   readonly toolName?: string;
   /** A page a finished tool call published outside this host. */
   readonly published?: ThreadPublishedPage;
+  /** The finished call's result brought outside content into the thread. */
+  readonly outsideContent?: ToolOutsideContentMark;
   readonly status?: string;
   readonly path?: string;
   readonly change?: string;
@@ -604,6 +608,20 @@ export class CodeTurnRunner {
                       text: answer.isError
                         ? appManagedActionFailureText(execution.result)
                         : "App-managed action completed.",
+                      ...(answer.isError || execution.outsideContent === undefined
+                        ? {}
+                        : {
+                            outsideContent: {
+                              labels: execution.outsideContent.labels,
+                              // At Full access the mark is recorded only: a quiet tag.
+                              ...(outsideContentRecordedOnly({
+                                mode: "code",
+                                executionPolicy: input.thread.executionPolicy,
+                              })
+                                ? { recordedOnly: true as const }
+                                : {}),
+                            },
+                          }),
                     });
                     return;
                   }

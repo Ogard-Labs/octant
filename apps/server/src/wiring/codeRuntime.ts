@@ -62,7 +62,10 @@ import { fileMentionContextBlocks, FileMentionService } from "../fileMentionServ
 import { createAgentMessageTools } from "../agentMessage/agentMessageTools";
 import { codeSiblingThreadSource } from "../siblingThreads/codeSiblingThreadSource";
 import { createSiblingThreadTools } from "../siblingThreads/siblingThreadTools";
-import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
+import {
+  readShieldWatcherLabels,
+  readThreadExternalContentTaint,
+} from "../context/externalContentTaintProjection";
 import { CodeTurnDecisions } from "../turnDecisions/codeTurnDecisions";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
 import { isReplayedAndroidEvidence } from "../android/androidToolchainService";
@@ -1223,6 +1226,19 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             snapshot: () => projectPullRequestService.boardSnapshot(windowId),
           },
           planProgress: codeBoardPlanProgressSource,
+          outsideContent: {
+            read: (threadId) => {
+              if (
+                !readThreadExternalContentTaint(persistence.connection, String(threadId))
+                  .externalContentIngested
+              ) {
+                return undefined;
+              }
+              return readShieldWatcherLabels(persistence.connection, String(threadId)).length > 0
+                ? "flagged"
+                : "read";
+            },
+          },
           clock: () => new Date().toISOString(),
         });
         return board.query(query);

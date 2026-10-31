@@ -22,7 +22,10 @@ import { codeTurnExecutionPolicyReader } from "../code/codeTurnExecutionPolicy";
 import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
 import { nativeHarnessRecoveryBlockers } from "../harness/nativeHarnessRecovery";
 import { newestChatAttemptSession } from "../harness/nativeHarnessJournalLookup";
-import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
+import {
+  readShieldWatcherLabels,
+  readThreadExternalContentTaint,
+} from "../context/externalContentTaintProjection";
 import { createNativeHarnessAuthority } from "../harness/nativeHarnessAuthority";
 import {
   createNativeHarnessComposition,
@@ -532,6 +535,7 @@ export function wireHarness(deps: HarnessDependencies) {
     resolveDriver: resolveConfiguredDriver,
     tainted: (threadId) =>
       readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
+    watcherLabels: (threadId) => readShieldWatcherLabels(persistence.connection, threadId),
     personMessages: (threadId, limit) =>
       codeBoardEventStore.personPromptsForThread(threadId, limit).flatMap((prompt) => {
         const text = codeEvidence.read(prompt);

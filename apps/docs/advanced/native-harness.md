@@ -370,7 +370,12 @@ model about the rest. That model sees only your own messages in the thread
 and the pending call, never what the agent read. When Shield is unsure, its
 model does not answer, or the thread has read outside content and the call
 would reach out or could not be undone, the approval comes to you with
-Shield's reason. After three denials in a row, or twenty in one thread, the
+Shield's reason. Octant Shield also reads each tool result before the model
+does and labels text that looks like an injection: instructions aimed at the
+agent, hidden or encoded text, a request to send secrets out, or a false claim
+of authority. A labelled result marks the thread, its tool row says "Outside
+content" and what was found, and Shield's model is told the kinds it found,
+never the text. After three denials in a row, or twenty in one thread, the
 next call comes to you. Each decision shows in the transcript as an Octant
 Shield line beside the tool rows. A class you allowed for the session goes
 through on your word without asking Shield, and a subagent's calls are
