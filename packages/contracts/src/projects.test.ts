@@ -26,6 +26,8 @@ import {
   decodeProjectRank,
   decodeProjectRenamed,
   decodeProjectSummary,
+  decodeProjectAction,
+  decodeProjectActions,
 } from "./projects";
 
 const ids = {
@@ -523,6 +525,7 @@ describe("Project and memory event payload contracts", () => {
       "project.work-status-file-changed@1",
       "project.brand-kit-changed@1",
       "project.code-desktop-recipe-changed@1",
+      "project.code-actions-changed@1",
       "memory.entry-created@1",
       "memory.entry-superseded@1",
       "memory.entry-retracted@1",
@@ -579,5 +582,35 @@ describe("Project and memory event payload contracts", () => {
       entry: transferredMemory,
     });
     expect(() => decodeMemoryEntryTransferred({ entry: userMemory })).toThrow();
+  });
+});
+
+describe("Project actions", () => {
+  const action = (overrides: Record<string, unknown> = {}) => ({
+    id: "81000000-0000-4000-8000-000000000001",
+    name: "Dev",
+    command: "bun run dev",
+    directory: "apps/web",
+    ...overrides,
+  });
+
+  it("keeps a folder inside the Project root and a command on one line", () => {
+    expect(decodeProjectAction(action())).toMatchObject({ directory: "apps/web" });
+    for (const directory of ["../outside", "/etc", "a/../b", "a\\b", "a/"]) {
+      expect(() => decodeProjectAction(action({ directory }))).toThrow();
+    }
+    expect(() => decodeProjectAction(action({ command: "echo a\nrm -rf b" }))).toThrow();
+  });
+
+  it("refuses duplicate names, however they are cased, and lists past the limit", () => {
+    const second = action({ id: "81000000-0000-4000-8000-000000000002", name: "dev" });
+    expect(() => decodeProjectActions([action(), second])).toThrow();
+    const many = Array.from({ length: 13 }, (_, index) =>
+      action({
+        id: `81000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+        name: `Action ${index}`,
+      }),
+    );
+    expect(() => decodeProjectActions(many)).toThrow();
   });
 });

@@ -410,6 +410,20 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     );
   }
 
+  // Optional client methods are bound here so the review keeps them as props
+  // only where the host offers the switches.
+  const projectPullRequestSwitchActions = {
+    ...(codeClient.queryProjectPullRequestSwitches === undefined
+      ? {}
+      : { loadSwitches: codeClient.queryProjectPullRequestSwitches.bind(codeClient) }),
+    ...(codeClient.setProjectPullRequestMergeWhenReady === undefined
+      ? {}
+      : { setMergeWhenReady: codeClient.setProjectPullRequestMergeWhenReady.bind(codeClient) }),
+    ...(codeClient.setProjectPullRequestAutoFix === undefined
+      ? {}
+      : { setAutoFix: codeClient.setProjectPullRequestAutoFix.bind(codeClient) }),
+  };
+
   function bottomToolContent(surface: RightUtilityDockSurfaceId) {
     if (surface === "review" && projectPullRequestReviewOpen && selectedProjectPullRequest) {
       return (
@@ -417,6 +431,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
           key={`${String(selectedProjectPullRequest.projectId)}:${selectedProjectPullRequest.repositoryOwner}/${selectedProjectPullRequest.repositoryName}#${selectedProjectPullRequest.number}`}
           load={(query) => codeClient.queryProjectPullRequestDetail(query)}
           onMerge={actions.mergeProjectPullRequest}
+          {...projectPullRequestSwitchActions}
           onOpenChat={actions.openProjectPullRequestChat}
           onOpenLinkedThread={(thread) =>
             actions.openLinkedProjectPullRequestThread(thread, selectedProjectPullRequest.projectId)
@@ -536,6 +551,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
               key={`${String(selectedProjectPullRequest.projectId)}:${selectedProjectPullRequest.repositoryOwner}/${selectedProjectPullRequest.repositoryName}#${selectedProjectPullRequest.number}`}
               load={(query) => codeClient.queryProjectPullRequestDetail(query)}
               onMerge={actions.mergeProjectPullRequest}
+              {...projectPullRequestSwitchActions}
               onOpenChat={actions.openProjectPullRequestChat}
               onOpenLinkedThread={(thread) =>
                 actions.openLinkedProjectPullRequestThread(
@@ -606,6 +622,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
                 key={`${String(selectedProjectPullRequest.projectId)}:${selectedProjectPullRequest.repositoryOwner}/${selectedProjectPullRequest.repositoryName}#${selectedProjectPullRequest.number}`}
                 load={(query) => codeClient.queryProjectPullRequestDetail(query)}
                 onMerge={actions.mergeProjectPullRequest}
+                {...projectPullRequestSwitchActions}
                 onOpenChat={actions.openProjectPullRequestChat}
                 onOpenLinkedThread={(thread) =>
                   actions.openLinkedProjectPullRequestThread(

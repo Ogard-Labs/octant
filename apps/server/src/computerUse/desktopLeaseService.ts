@@ -43,6 +43,7 @@ import {
   type DesktopPaneStart,
   type DesktopPlacementId,
   type DesktopProviderId,
+  type DesktopProviderSetupReason,
   type DesktopProviderLocality,
   type DesktopRecipe,
   type DesktopLeaseSpend,
@@ -116,6 +117,12 @@ export interface RegisteredDesktopProvider {
   readonly provider: DesktopProvider;
   /** Installed, trusted, enabled, and effective for leasing now. */
   readonly effective: boolean;
+  /**
+   * Set while the host knows the person has not set up what this driver
+   * needs. The driver stays listed so the person can see why, and every start
+   * on it refuses `needs-setup` before any call to the provider.
+   */
+  readonly needsSetup?: DesktopProviderSetupReason;
 }
 
 export interface DesktopLeaseThread {
@@ -843,6 +850,16 @@ export function createDesktopLeaseService(
     return options.providers().find((entry) => String(entry.provider.id) === providerId);
   }
 
+  /** What a person is told of a provider: its terms, and that it needs setup while it does. */
+  function listing(
+    provider: DesktopProvider,
+    terms?: Pick<DesktopLeaseTerms, "locality" | "billed">,
+  ): LeasableDesktopProvider {
+    const base = leasableOf(provider, terms);
+    const needsSetup = registered(String(provider.id))?.needsSetup;
+    return needsSetup === undefined ? base : { ...base, needsSetup };
+  }
+
   /** A provider is blocked while any desktop it made may still be running unverified. */
   function blocked(providerId: string): boolean {
     return (
@@ -1053,6 +1070,15 @@ export function createDesktopLeaseService(
     const listings = new Map<string, Array<DesktopHandle>>();
     for (const entry of options.providers()) {
       const providerId = String(entry.provider.id);
+      // A provider run by the person's own daemon is asked nothing until a
+      // lease of it was journaled: a listing makes that daemon wait on its
+      // provider, and a host that never leased from it has nothing there.
+      if (
+        entry.provider.daemon !== undefined &&
+        !projection.list().some((record) => String(record.lease.providerId) === providerId)
+      ) {
+        continue;
+      }
       const teardown = teardownPortOf(entry.provider);
       // A provider that needs a credential lists one account at a time: each
       // one a lease of this provider recorded, since those are the only keys
@@ -1277,6 +1303,9 @@ export function createDesktopLeaseService(
     if (recipe === undefined) return refused("no-provider-configured");
     const loaded = registered(String(recipe.providerId));
     if (loaded === undefined) return refused("no-provider-configured");
+    // Fails closed before any other judgment of the recipe: a provider whose
+    // setup the host knows is missing starts nothing, and says so.
+    if (loaded.needsSetup !== undefined) return refused("needs-setup");
     const terms = recipeTerms(loaded.provider, recipe);
     if (terms === undefined) return refused("no-provider-configured");
     // A cloud desktop runs on the person's own account, so a recipe that
@@ -1355,7 +1384,7 @@ export function createDesktopLeaseService(
           : await options
               .confirm({
                 owner: first.owner,
-                provider: leasableOf(first.provider, first.terms),
+                provider: listing(first.provider, first.terms),
                 ...(first.terms.placementId === undefined
                   ? {}
                   : { placementId: first.terms.placementId }),
@@ -1673,7 +1702,7 @@ export function createDesktopLeaseService(
         confirm({
           owner,
           leaseId: caller.leaseId,
-          provider: leasableOf(first.provider, first.record.lease),
+          provider: listing(first.provider, first.record.lease),
           asks: gate.asks,
           artifact,
         }),
@@ -1788,7 +1817,7 @@ export function createDesktopLeaseService(
     return {
       status: "overview",
       leases: [...holding, ...lastEnded],
-      providers: options.providers().map((entry) => leasableOf(entry.provider)),
+      providers: options.providers().map((entry) => listing(entry.provider)),
       start: startFor(caller),
     };
   };
@@ -1810,7 +1839,7 @@ export function createDesktopLeaseService(
     if (gate.kind === "refused") return refused(gate.reason);
     return {
       status: "available",
-      provider: leasableOf(admission.provider, admission.terms),
+      provider: listing(admission.provider, admission.terms),
       ...(admission.terms.placementId === undefined
         ? {}
         : { placementId: admission.terms.placementId }),
@@ -2105,7 +2134,7 @@ export function createDesktopLeaseService(
       leasable: options
         .providers()
         .filter((entry) => entry.effective)
-        .map((entry) => leasableOf(entry.provider)),
+        .map((entry) => listing(entry.provider)),
     });
 
   const holdsCredential = (credentialRef: DesktopCredentialRef): boolean =>

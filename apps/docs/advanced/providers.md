@@ -639,6 +639,17 @@ active key runs out.
   switch keys within a turn. A command-line runtime, such as Claude Code or
   Codex, uses the first key for now and does not switch.
 
+#### A key from a secret store
+
+Instead of storing a key, a provider can point at an item in a password manager
+you linked in **Settings → Secret stores** (the 1Password command line tool
+today). Open the provider and use **Key from a secret store**: enter the item's
+address and choose **Use this item**. Octant keeps the address, fetches the key
+from the manager each time it is used, and never stores, logs, or shows it. A
+locked store or a missing item fails the request like a missing key, with a
+message naming the cause. See [Use API keys from a secret
+store](../guide/secret-stores.md).
+
 ### Claude artifacts
 
 By default Claude delivers a document, report, deck, or page as a Canvas, and

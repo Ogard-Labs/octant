@@ -1157,6 +1157,7 @@ export function startOctantServer(
       composeHostDiagnostics,
       externalContentRoutes,
       hostControlRoutes,
+      supportBundleRoutes,
       delegationAdministrationRoutes,
       hubAdministrationRoutes,
       localDeviceAdministrationRoutes,
@@ -1164,6 +1165,7 @@ export function startOctantServer(
       privateListenerController,
       privateListenerSetting,
       providerCredentialRoutes,
+      secretStoresRoutes,
       remoteHost,
     } = wireRemote({
       canvasPublicShareService,
@@ -1286,8 +1288,10 @@ export function startOctantServer(
                 (await hubAdministrationRoutes(request)) ??
                 (await delegationAdministrationRoutes(request)) ??
                 (await providerCredentialRoutes(request)) ??
+                (await secretStoresRoutes(request)) ??
                 (await localDeviceAdministrationRoutes(request)) ??
                 (await hostControlRoutes(request)) ??
+                (await supportBundleRoutes(request)) ??
                 (await externalContentRoutes(request)) ??
                 (await replicaStoreSettingsRoutes(request)) ??
                 (await replicaMembershipRoutes(request)) ??

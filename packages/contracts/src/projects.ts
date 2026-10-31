@@ -205,6 +205,60 @@ export const CodeProjectPullRequestBackgroundRefresh = Schema.Literal("enabled",
 export type CodeProjectPullRequestBackgroundRefresh =
   typeof CodeProjectPullRequestBackgroundRefresh.Type;
 
+export const ProjectActionId = brandedUuid("ProjectActionId");
+export type ProjectActionId = typeof ProjectActionId.Type;
+
+export const MAX_PROJECT_ACTIONS = 12;
+
+/**
+ * A folder inside the Project's bound root, relative to it. `.` is the root
+ * itself. A path that could leave the root (absolute, `..`, backslashes) is not
+ * a working directory, so the shell is never pointed outside the Project.
+ */
+export const ProjectActionDirectory = Schema.String.pipe(
+  Schema.maxLength(512),
+  Schema.filter(
+    (value) =>
+      value === "." ||
+      (value.length > 0 &&
+        !value.includes("\0") &&
+        !value.includes("\\") &&
+        !value.startsWith("/") &&
+        !value.endsWith("/") &&
+        value === value.normalize("NFC") &&
+        value.split("/").every((segment) => segment !== "" && segment !== "." && segment !== "..")),
+  ),
+);
+
+/**
+ * A named command the person runs in the Project's terminal: one line they
+ * wrote or confirmed, and the folder under the root it runs in. It is typed
+ * into the person's own shell, so it runs under the same confinement and
+ * approval posture as anything else typed there.
+ */
+export const ProjectAction = Schema.Struct({
+  id: ProjectActionId,
+  name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(40)),
+  command: Schema.NonEmptyTrimmedString.pipe(
+    Schema.maxLength(1_000),
+    Schema.filter(
+      (value) => !value.includes("\0") && !value.includes("\r") && !value.includes("\n"),
+    ),
+  ),
+  directory: ProjectActionDirectory,
+}).annotations(strict);
+export type ProjectAction = typeof ProjectAction.Type;
+
+export const ProjectActions = Schema.Array(ProjectAction).pipe(
+  Schema.filter(
+    (actions) =>
+      actions.length <= MAX_PROJECT_ACTIONS &&
+      new Set(actions.map((action) => String(action.id))).size === actions.length &&
+      new Set(actions.map((action) => action.name.toLowerCase())).size === actions.length,
+  ),
+);
+export type ProjectActions = typeof ProjectActions.Type;
+
 export const CodeProject = Schema.Struct({
   ...ProjectFields,
   type: Schema.Literal("code"),
@@ -231,6 +285,8 @@ export const CodeProject = Schema.Struct({
    * sets it from a local window; an agent cannot.
    */
   desktopRecipe: Schema.optional(DesktopRecipe),
+  /** Named commands for the Project terminal. Absent means none were defined. */
+  actions: Schema.optional(ProjectActions),
 }).annotations(strict);
 export type CodeProject = typeof CodeProject.Type;
 
@@ -261,6 +317,7 @@ const CodeProjectSummary = Schema.Struct({
   pullRequestBackgroundRefresh: Schema.optional(CodeProjectPullRequestBackgroundRefresh),
   defaultPermissionMode: Schema.optional(PermissionMode),
   desktopRecipe: Schema.optional(DesktopRecipe),
+  actions: Schema.optional(ProjectActions),
   connectedRepository: Schema.optional(ConnectedGitHubRepository),
   providerPolicy: Schema.optional(ProjectProviderPolicy),
 }).annotations(strict);
@@ -468,6 +525,12 @@ export const ProjectCommand = Schema.Union(
     pullRequestBackgroundRefresh: CodeProjectPullRequestBackgroundRefresh,
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("change-code-project-actions"),
+    ...ProjectCommandFields,
+    /** The whole list; an empty list removes every action. */
+    actions: ProjectActions,
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("change-project-provider-policy"),
     ...ProjectCommandFields,
     policy: ProjectProviderPolicy,
@@ -536,6 +599,10 @@ export const ProjectCommandResult = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("code-project-pull-request-background-refresh-changed"),
+    project: CodeProject,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("code-project-actions-changed"),
     project: CodeProject,
   }).annotations(strict),
   Schema.Struct({
@@ -676,6 +743,11 @@ export const CodeProjectPullRequestBackgroundRefreshChanged = Schema.Struct({
 }).annotations(strict);
 export type CodeProjectPullRequestBackgroundRefreshChanged =
   typeof CodeProjectPullRequestBackgroundRefreshChanged.Type;
+/** Journaled once per save so every window and a restarted host see the same list. */
+export const CodeProjectActionsChanged = Schema.Struct({ project: CodeProject }).annotations(
+  strict,
+);
+export type CodeProjectActionsChanged = typeof CodeProjectActionsChanged.Type;
 export const ProjectProviderPolicyChanged = Schema.Struct({
   project: BoundProject,
 }).annotations(strict);
@@ -723,6 +795,7 @@ export const PROJECT_EVENT_NAMES = [
   "project.work-status-file-changed@1",
   "project.brand-kit-changed@1",
   "project.code-desktop-recipe-changed@1",
+  "project.code-actions-changed@1",
   "memory.entry-created@1",
   "memory.entry-superseded@1",
   "memory.entry-retracted@1",
@@ -730,6 +803,9 @@ export const PROJECT_EVENT_NAMES = [
 ] as const;
 
 export const decodeProjectId = Schema.decodeUnknownSync(ProjectId);
+export const decodeProjectAction = Schema.decodeUnknownSync(ProjectAction);
+export const decodeProjectActions = Schema.decodeUnknownSync(ProjectActions);
+export const decodeProjectActionId = Schema.decodeUnknownSync(ProjectActionId);
 export const decodeMemoryEntryId = Schema.decodeUnknownSync(MemoryEntryId);
 export const decodeBindingRevisionId = Schema.decodeUnknownSync(BindingRevisionId);
 export const decodeBindingReceiptId = Schema.decodeUnknownSync(BindingReceiptId);
@@ -762,6 +838,7 @@ export const decodeCodeProjectNewThreadWorkspaceChanged = Schema.decodeUnknownSy
 export const decodeCodeProjectPullRequestBackgroundRefreshChanged = Schema.decodeUnknownSync(
   CodeProjectPullRequestBackgroundRefreshChanged,
 );
+export const decodeCodeProjectActionsChanged = Schema.decodeUnknownSync(CodeProjectActionsChanged);
 export const decodeProjectProviderPolicyChanged = Schema.decodeUnknownSync(
   ProjectProviderPolicyChanged,
 );

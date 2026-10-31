@@ -61,7 +61,13 @@ export function createShieldModelPort(input: {
         prompt,
         timeoutMs,
       });
-      if (outcome.status === "completed") return { status: "answered", text: outcome.text };
+      if (outcome.status === "completed") {
+        return {
+          status: "answered",
+          text: outcome.text,
+          ...(outcome.usage === undefined ? {} : { usage: outcome.usage }),
+        };
+      }
       if (outcome.status === "timed-out") return { status: "timed-out" };
       if (outcome.status === "failed") return { status: "failed" };
       return { status: "unreached" };

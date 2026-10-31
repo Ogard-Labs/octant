@@ -1,10 +1,13 @@
-import { decodeDesktopLease } from "@octant/contracts";
+import { decodeDesktopLease, decodeLeasableDesktopProvider } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
 import {
   desktopKeyIntent,
   desktopPaneState,
   endedMessage,
+  providerCapability,
   screenPoint,
+  setupMessage,
+  startRefusalMessage,
   type DesktopOverview,
 } from "./desktopPaneModel";
 
@@ -72,5 +75,36 @@ describe("desktop pane model", () => {
       y: 400,
     });
     expect(screenPoint({ x: 5, y: 210 }, shown, { width: 1280, height: 800 })).toBeUndefined();
+  });
+});
+
+describe("provider capability and setup wording", () => {
+  const provider = (overrides: object) =>
+    decodeLeasableDesktopProvider({
+      providerId: "p",
+      displayName: "E2B",
+      locality: "cloud",
+      billed: true,
+      ...overrides,
+    });
+
+  it("says where a desktop runs, whose account it uses, and whether it bills", () => {
+    expect(providerCapability(provider({ locality: "host-local", billed: false }))).toBe(
+      "Runs on this host. No account and no cost.",
+    );
+    expect(providerCapability(provider({}))).toMatch(
+      /your own E2B account.*bills you.*asks before every start/,
+    );
+    expect(providerCapability(provider({ daemon: true, billed: false }))).toMatch(
+      /E2B app signed in on this computer/,
+    );
+  });
+
+  it("names what each missing setup needs and the refusal a start meets", () => {
+    expect(setupMessage("no-credential-store", "E2B")).toMatch(/credential store/);
+    expect(setupMessage("daemon-not-connected", "Cua Spaces")).toMatch(
+      /Cua Spaces needs its app running/,
+    );
+    expect(startRefusalMessage("needs-setup")).toMatch(/needs setting up/);
   });
 });

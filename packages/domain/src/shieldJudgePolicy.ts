@@ -214,8 +214,16 @@ const COMMAND_RULES: ReadonlyArray<CommandRule> = [
 const TAINT_LIMITED_COMMAND =
   /(?:^|[\s;&|(`$])(?:curl|wget|nc|ncat|netcat|scp|sftp|ftp|rsync|ssh|socat|telnet)\b|\bgit\s+(?:push|send-email|fetch|pull|clone|remote\s+add)\b|\b(?:npm|pnpm|yarn|bun)\s+(?:publish|add|install|i)\b|\bpip\d?\s+install\b|\bgh\s+\w|\bdocker\s+(?:push|login)\b|\bcargo\s+publish\b|(?:^|[\s;&|])rm\s|\bgit\s+(?:reset\s+--hard|clean|checkout\s+--|restore)\b/i;
 
-/** Characters that make a command more than one plain program with plain arguments. */
-const SHELL_COMPOSITION = /[;&|<>`$(){}\n\r\\*?]/;
+/**
+ * Anything a shell reads as more than one plain program with plain words:
+ * separators and newlines, pipes, substitution, redirection, backgrounding,
+ * quoting and escapes (which hide a flag from a word check:
+ * `"--output=x"` reaches Git as `--output=x`), globs, brace, tilde and
+ * history expansion, comments, and any whitespace but a space or a tab. A
+ * fast allow reads the command exactly as written, before anything is
+ * normalized, and only ever passes words the shell hands on unchanged.
+ */
+const NOT_PLAIN_WORDS = /[;&|<>`$(){}\\'"*?[\]!#]|[^\S \t]|(?:^|[ \t])~/;
 
 const PERSISTENCE_PATH =
   /(?:^|\/)(?:Library\/Launch(?:Agents|Daemons)|\.(?:zshrc|zprofile|zshenv|zlogin|bashrc|bash_profile|bash_login|profile)$|\.config\/fish\/config\.fish$|\.git\/hooks(?:\/|$))/;
@@ -348,15 +356,15 @@ export function judgeShieldCallByRules(input: ShieldRuleInput): ShieldRuleOutcom
 }
 
 function isProjectCommand(command: string, projectCommands: ReadonlyArray<string>): boolean {
+  // Plain words only (a test file, a filter flag): anything that chains
+  // another program onto the Project's command is a different command, and
+  // it is refused on the text as written, before whitespace is folded.
+  if (NOT_PLAIN_WORDS.test(command)) return false;
   const normalized = collapseWhitespace(command);
   return projectCommands.some((candidate) => {
     const own = collapseWhitespace(candidate);
     if (own.length === 0) return false;
-    if (normalized === own) return true;
-    if (!normalized.startsWith(`${own} `)) return false;
-    // Plain arguments only (a test file, a filter flag): anything that chains
-    // another program onto the Project's command is a different command.
-    return !SHELL_COMPOSITION.test(normalized.slice(own.length));
+    return normalized === own || normalized.startsWith(`${own} `);
   });
 }
 
@@ -380,18 +388,59 @@ const READ_ONLY_GIT_SUBCOMMANDS: ReadonlySet<string> = new Set([
   "ls-tree",
 ]);
 
+/**
+ * Long options that make a reading Git command write a file, run a program,
+ * read outside the repository, or switch repositories. Git accepts any
+ * unambiguous prefix of a long option (`--outp` is `--output`), so an option
+ * that is a prefix of one of these is refused too.
+ */
+const GIT_OPTIONS_THAT_REACH_OUT: ReadonlyArray<string> = [
+  "output",
+  "ext-diff",
+  "textconv",
+  "no-index",
+  "exec",
+  "exec-path",
+  "git-dir",
+  "work-tree",
+  "namespace",
+  "config-env",
+  "open-files-in-pager",
+  "filters",
+  "contents",
+  "paginate",
+];
+
+/** Short options with the same reach: a pager command (`-O`), and `-o`, `-c` kept out to be safe. */
+const GIT_SHORT_OPTIONS_THAT_REACH_OUT = /^-[a-zA-Z]*[Ooc]/;
+
+function gitOptionReachesOut(arg: string): boolean {
+  if (arg.startsWith("--")) {
+    const name = arg.slice(2).split("=")[0] ?? "";
+    if (name.length === 0) return false;
+    return GIT_OPTIONS_THAT_REACH_OUT.some((option) => option.startsWith(name));
+  }
+  return GIT_SHORT_OPTIONS_THAT_REACH_OUT.test(arg);
+}
+
 const WRITING_BRANCH_FLAGS =
   /^(?:-d|-D|-m|-M|-c|-C|-f|-u|--delete|--move|--copy|--force|--set-upstream-to.*|--unset-upstream|--edit-description|--track.*)$/;
 
-/** `git <subcommand>` that reads the repository and writes nothing, not even a file. */
+/**
+ * `git <subcommand>` that reads the repository and writes nothing, not even a
+ * file. Git never lets an alias stand in for a built-in subcommand, so the
+ * subcommand named is the one that runs; options are checked as the shell
+ * passes them on, which is why a command with any quoting or expansion is
+ * refused before its words are read.
+ */
 export function isReadOnlyGit(command: string): boolean {
-  if (SHELL_COMPOSITION.test(command)) return false;
+  if (NOT_PLAIN_WORDS.test(command)) return false;
   const tokens = collapseWhitespace(command).split(" ");
   if (tokens[0] !== "git") return false;
   const subcommand = tokens[1];
   if (subcommand === undefined || !READ_ONLY_GIT_SUBCOMMANDS.has(subcommand)) return false;
   const args = tokens.slice(2);
-  if (args.some((arg) => /^--output(?:=|$)|^--ext-diff$|^--exec/.test(arg))) return false;
+  if (args.some((arg) => arg.startsWith("-") && gitOptionReachesOut(arg))) return false;
   switch (subcommand) {
     case "branch":
       return args.every((arg) => arg.startsWith("-") && !WRITING_BRANCH_FLAGS.test(arg));
@@ -727,6 +776,20 @@ export function shieldJudgePrompt(input: ShieldJudgeInput): string {
   );
 }
 
+/**
+ * A reply wrapped in one Markdown code fence (```json … ```), unwrapped by
+ * scanning rather than by a pattern, so a long hostile reply costs linear
+ * time. Anything else is returned as it came.
+ */
+function withoutCodeFence(body: string): string {
+  if (body.length < 7 || !body.startsWith("```") || !body.endsWith("```")) return body;
+  const firstLineEnd = body.indexOf("\n");
+  if (firstLineEnd === -1 || firstLineEnd > body.length - 4) return body;
+  const language = body.slice(3, firstLineEnd).trim();
+  if (language !== "" && language !== "json") return body;
+  return body.slice(firstLineEnd + 1, body.length - 3).trim();
+}
+
 export type ShieldModelAnswer = { readonly verdict: ShieldVerdict; readonly reason: string };
 
 /**
@@ -735,9 +798,7 @@ export type ShieldModelAnswer = { readonly verdict: ShieldVerdict; readonly reas
  * answer is never read as an allow: the caller hands the call to the person.
  */
 export function parseShieldModelAnswer(text: string): ShieldModelAnswer | undefined {
-  let body = text.trim();
-  const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(body);
-  if (fenced?.[1] !== undefined) body = fenced[1].trim();
+  const body = withoutCodeFence(text.trim());
   if (!body.startsWith("{") || !body.endsWith("}")) return undefined;
   let parsed: unknown;
   try {
