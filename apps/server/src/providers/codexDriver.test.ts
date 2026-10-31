@@ -2599,6 +2599,36 @@ describe("Codex execution authority and approvals", () => {
     },
   );
 
+  it.each([
+    ["command", commandApproval],
+    ["file change", fileApproval],
+  ] as const)(
+    "accepts a one-call %s answer for that call only, even under current-session persistence",
+    async (_name, makeRequest) => {
+      const f = fixture();
+      const acquired = await acquireConnection(
+        makeCodexDriver(f.options({ permissionPersistence: () => "current-session" })),
+      );
+      await startSession(acquired.connection);
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "approval", attachments: [], tools: [] }),
+      );
+      const event = takeEvents(acquired.connection, 1);
+      f.emit(makeRequest());
+      await event;
+      await Effect.runPromise(
+        acquired.connection.answerApproval({
+          sessionId,
+          requestId: "request-1",
+          approved: true,
+          scope: "once",
+        }),
+      );
+      expect(f.calls.at(-1)?.input).toMatchObject({ result: { decision: "accept" } });
+      await acquired.close();
+    },
+  );
+
   it("defaults approval persistence to the current session", async () => {
     const f = fixture();
     const acquired = await acquireConnection(makeCodexDriver(f.options()));
@@ -2696,9 +2726,18 @@ describe("Codex execution authority and approvals", () => {
       expect(JSON.stringify(approvalEvents)).not.toMatch(
         /octant-codex-project|curl|private\.example/,
       );
+      // The command reaches an automatic reviewer through the connection
+      // alone, with its working directory and without the runtime's reason.
+      const call = acquired.connection.approvalCall?.({ sessionId, requestId: "request-1" });
+      expect(call).toMatchObject({ tool: "command", workingDirectory: cwd });
+      expect(call?.input).toContain("curl private.example/secret");
+      expect(call?.input).not.toContain("must-not-cross");
       await Effect.runPromise(
         acquired.connection.answerApproval({ sessionId, requestId: "request-1", approved: false }),
       );
+      expect(
+        acquired.connection.approvalCall?.({ sessionId, requestId: "request-1" }),
+      ).toBeUndefined();
       expect(f.calls.at(-1)?.input).toMatchObject({ result: { decision: "decline" } });
       await acquired.close();
     },

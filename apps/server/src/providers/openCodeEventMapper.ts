@@ -10,6 +10,7 @@ import type {
 import type { Event } from "@opencode-ai/sdk/v2/types";
 import { outputStopReason } from "./outputStopReason";
 import { outsideContentTarget } from "./outsideContentRead";
+import { providerApprovalCall } from "./providerApprovalCall";
 
 export interface OpenCodeEventContext {
   readonly instanceId: ProviderInstanceId;
@@ -556,4 +557,46 @@ export function mapOpenCodeEvent(
     default:
       return assertNever(event);
   }
+}
+
+/**
+ * The pending call an OpenCode permission names, for an automatic reviewer:
+ * its patterns and the metadata it carries (a command, a path).
+ */
+export function openCodeApprovalCall(
+  action: string,
+  properties: object,
+): ReturnType<typeof providerApprovalCall> {
+  const record = properties as Record<string, unknown>;
+  const metadata =
+    typeof record.metadata === "object" && record.metadata !== null ? record.metadata : {};
+  const call = providerApprovalCall({
+    tool: action,
+    arguments: {
+      ...metadata,
+      ...(record.patterns === undefined ? {} : { patterns: record.patterns }),
+      ...openCodeV2Targets(action, record.resources),
+    },
+  });
+  return call;
+}
+
+/**
+ * A v2 permission names what it targets in `resources`: the files an edit or
+ * read reaches, the command a shell call runs, or the address a fetch opens.
+ * Several commands are not one command a rule could read, so they stay
+ * patterns for the model.
+ */
+function openCodeV2Targets(action: string, resources: unknown): Record<string, unknown> {
+  if (!Array.isArray(resources)) return {};
+  const targets = resources.filter((entry): entry is string => typeof entry === "string");
+  if (targets.length === 0) return {};
+  const kind = action.toLowerCase();
+  if (kind === "bash" || kind === "shell") {
+    return targets.length === 1 ? { command: targets[0] } : { patterns: targets };
+  }
+  if (kind.includes("fetch") || kind.includes("web")) {
+    return targets.length === 1 ? { url: targets[0] } : { patterns: targets };
+  }
+  return { paths: targets };
 }

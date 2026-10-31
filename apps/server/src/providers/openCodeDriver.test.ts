@@ -923,6 +923,33 @@ describe("OpenCode driver", () => {
     expect(fixture.calls.some((call) => call.startsWith("permission.reply"))).toBe(false);
   });
 
+  it("answers a one-call approval once, even when the person remembers approvals for the Project", async () => {
+    const fixture = driverFixture({
+      permissionPersistence: "project-default",
+      events: [permissionEvent("provider-session", "one")],
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project" }).pipe(
+          Effect.flatMap((connection) =>
+            connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }).pipe(
+              Effect.tap(() =>
+                connection.answerApproval({
+                  sessionId,
+                  requestId: "one",
+                  approved: true,
+                  scope: "once",
+                }),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(fixture.calls).toContain("permission.reply:once");
+    expect(fixture.calls).not.toContain("permission.reply:always");
+  });
+
   it("maps remembered approval to always and denial to reject", async () => {
     const fixture = driverFixture({
       permissionPersistence: "project-default",

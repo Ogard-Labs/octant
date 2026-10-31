@@ -7592,8 +7592,9 @@ mechanisms are:
   Allowed; not built yet: the single
   level setting with its global and Project defaults, the first-run
   question, the header indicator, the one-time warning,
-  Reviewed in Work and on Mistral Vibe, Octant Shield outside the Octant
-  Harness, and Full access without a sandbox or prompts for every runtime.
+  Reviewed in Work and Mistral Vibe's own auto-approve mode, Octant Shield's
+  picker and Settings, and Full access without a sandbox or prompts for every
+  runtime.
 
 - **Reviewed.** A reviewer answers the prompts that would otherwise go to
   the person: the provider's own, where it has one, or
@@ -7747,8 +7748,7 @@ access` agree); a thread's own change is journaled as
   repository, so such an action runs without an Octant prompt. Octant's
   denies still win, and Octant never writes such a grant; the
   [OpenCode runtime specification](design/provider-runtimes.md#opencode) states the details.
-  [Octant Shield](#octant-shield) answers these prompts at Reviewed; it does
-  not yet run.
+  [Octant Shield](#octant-shield) answers these prompts at Reviewed.
   Three provider tool requests denied in one Code turn end it as
   interrupted, with the reason journaled, so a provider cannot loop a
   person's refusals.
@@ -10085,10 +10085,10 @@ in this document describe the build as it ships.
 ### Octant Shield
 
 Octant Shield is Octant's own automatic approval reviewer (maintainer
-decision, 2026-10-31). Its Judge is built for the Octant Harness, its
-subagents included (build order step 1, below); the other runtimes, the picker
-and Settings, the Watcher, safe networks, and the server registry are designed,
-not built. It answers the approval prompts
+decision, 2026-10-31). Its Judge is built for every runtime below, subagents
+included (build order steps 1 and 2); the picker and Settings, the Watcher,
+safe networks, and the server registry are designed, not built. It answers the
+approval prompts
 that would otherwise go to the person, for every runtime that routes
 approvals through Octant: Octant Harness, Claude Code (`canUseTool`), Codex
 (app-server approval requests), OpenCode (`permission.asked`), ACP agents
@@ -10239,7 +10239,26 @@ settled harness approval carrying the decision, an ask is journaled as the
 pending approval with Shield's reason, and the Code transcript shows each
 decision as an `approval-reviewed` row beside the tool rows. A subagent asks
 under its parent's reviewer, judged against its own worktree, with its own
-taint counted beside the parent's.
+taint counted beside the parent's. A provider runtime's prompt reaches
+Shield with the pending call the runtime described: each driver keeps it
+beside the pending request and hands it over through the provider seam's
+`approvalCall`, never on the approval event, so nothing journaled, exported,
+or shown carries it. Only the fields a reviewer judges cross (the command, its
+working directory, the paths and URLs the call names, a sandbox request's
+permissions), with credential-shaped text redacted and cut to 8 KB; a write's
+contents, a tool's output, and the runtime's own reason stay out. Codex's
+request to widen its own sandbox is a privilege change, which Shield hands to
+the person. An allow or deny goes straight back to the runtime for that one
+call and does not count toward the three refusals that end a turn; an ask is
+the ordinary approval. Every automatic answer, and every answer on a child
+run's behalf, carries the seam's one-call scope (`ProviderApprovalAnswer.scope:
+"once"`): no driver remembers it for the session or the Project or asks the
+runtime to, whatever the person's persistence setting, so one allow never
+authorizes a later call nobody reviewed. An OpenCode v2 permission's
+`resources` are read as the paths, command, or address it targets. Claude Code and Codex keep their own reviewer at Auto
+by default, so Shield answers their prompts only once the person chooses it;
+Mistral Vibe's own auto-approve mode is not built, so Shield reviews it, as it
+reviews OpenCode, every other ACP agent, and Pi.
 
 **Build order.** (1) Octant Harness; (2) every runtime through the approval
 path; (3) the picker and Settings; (4) the Watcher; (5) safe networks; (6)
@@ -10337,7 +10356,7 @@ The [guardrail levels](#security-and-authority) and the
 [key providers' native features](#providers) are in scope; of them only
 Guarded, Accept edits, Reviewed for Claude Code and Codex in Code, and
 Full access in Code are built; [Octant Shield](#octant-shield) is in scope,
-and its Judge is built for the Octant Harness only. A merge or force-push an agent starts on its own
+and its Judge is built for every runtime that routes approvals through Octant. A merge or force-push an agent starts on its own
 initiative, and cloud scheduling, are not in scope. A self-hosted wake service
 that runs in the Octant server on a person's hub and wakes their own spokes is
 in scope under [Hub and spokes](design/hub-and-spokes.md#wake-service); an

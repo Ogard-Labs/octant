@@ -150,7 +150,7 @@ One setting says how much a thread's tool calls are guarded, with four levels: A
 - Older recorded "Trusted" or "Off" levels replay as Full access.
 - Built in Code: Ask first, Accept edits, Auto with the key CLI providers' own reviewers, Plan, and Full access with no sandbox and no prompts for every runtime, with a first-run default, a Settings › Code › Access default, a Project override, and the one-time warning.
 - Built in Work: Auto, Ask first, Accept edits and Full access, set from Settings › Work and the composer, with the one-time warning; Work has no Plan.
-- Not built yet: Octant Shield outside the Octant Harness, an ACP agent's own reviewer, a Work Project override, and the thread header indicator. The guardrail-level list in the architecture still names some of the Code pieces as not built; its later Code access rules describe them as built.
+- Not built yet: Octant Shield's picker and Settings, an ACP agent's own reviewer, a Work Project override, and the thread header indicator. The guardrail-level list in the architecture still names some of the Code pieces as not built; its later Code access rules describe them as built.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Security and authority, Guardrail levels](../architecture.md#security-and-authority).
 
@@ -203,8 +203,8 @@ Octant Shield is Octant's own automatic approval reviewer for every runtime that
 - Shield uses the thread's own provider account and its smallest model by default, or another configured endpoint, sends no telemetry, counts against spend ceilings, and journals every decision.
 - A release with Shield requires measuring its false-allow rate on a fixture set of known-safe and known-unsafe calls.
 - Build order: the native harness, every runtime's approval path, the picker and Settings, the Watcher, safe networks, then the server registry and SSH.
-- Built: the Judge (rules, fast allow rules that read a command exactly as written, the model stage, fail-closed, brakes, per-call grants, taint limits, spend reservations with the review's usage recorded under the thread), answering the Octant Harness's approvals on a Code thread in Auto and its subagents', each decision journaled and shown on the transcript; the fixture set with a test of the rule stages and a false-allow measurement script.
-- Not built yet: the other runtimes' approval paths, the picker and Settings, the Watcher (so the Judge has no labels yet), safe networks, and the server registry; the false-allow rate of a real model is unmeasured.
+- Built: the Judge (rules, fast allow rules that read a command exactly as written, the model stage, fail-closed, brakes, per-call grants, taint limits, spend reservations with the review's usage recorded under the thread), answering the approvals of the Octant Harness, Claude Code, Codex, OpenCode, ACP agents and Pi on a Code thread in Auto where Shield is the reviewer, and their subagents', each decision journaled and shown on the transcript; the fixture set with a test of the rule stages and a false-allow measurement script.
+- Not built yet: the picker and Settings (so Claude Code and Codex keep their own reviewer), the Watcher (so the Judge has no labels yet), safe networks, and the server registry; the false-allow rate of a real model is unmeasured.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Octant Shield](../architecture.md#octant-shield).
 
