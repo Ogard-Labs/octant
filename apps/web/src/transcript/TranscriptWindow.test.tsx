@@ -283,6 +283,58 @@ describe("TranscriptWindow", () => {
     expect(screen.queryByRole("textbox", { name: "Find in thread" })).not.toBeInTheDocument();
   });
 
+  it("opens the find bar from a composer that sits outside the transcript's column", async () => {
+    render(
+      <section aria-label="Thread workspace">
+        <div>
+          <TranscriptWindow
+            itemKey={(item: Row) => item.id}
+            items={rows(10)}
+            listLabel="Transcript"
+            renderItem={(item: Row) => <button type="button">{item.label}</button>}
+            restoreKey="thread-a"
+          />
+        </div>
+        <textarea aria-label="Message" />
+      </section>,
+    );
+
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Message" }), {
+      key: "f",
+      metaKey: true,
+    });
+
+    expect(await screen.findByRole("textbox", { name: "Find in thread" })).toBeInTheDocument();
+  });
+
+  it("finds a phrase that spans inline formatting but not a block boundary", async () => {
+    const items: ReadonlyArray<Row> = [{ id: "a", label: "x" }];
+    render(
+      <TranscriptWindow
+        itemKey={(item: Row) => item.id}
+        items={items}
+        listLabel="Transcript"
+        renderItem={() => (
+          <div>
+            <p>
+              The <strong>plan</strong> is ready
+            </p>
+            <p>Second</p>
+          </div>
+        )}
+        restoreKey="thread-a"
+      />,
+    );
+    fireEvent.keyDown(window, { key: "f", metaKey: true });
+    const input = await screen.findByRole("textbox", { name: "Find in thread" });
+
+    fireEvent.change(input, { target: { value: "the plan is" } });
+    expect(await screen.findByText("1 of 1")).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: "readysecond" } });
+    expect(await screen.findByText("No matches")).toBeInTheDocument();
+  });
+
   it("leaves Cmd-F to the code editor and terminal", () => {
     renderWindow(rows(10));
     const editor = document.createElement("div");

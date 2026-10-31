@@ -446,8 +446,10 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
       if (target instanceof Element) {
         // The code editor and terminal have their own find.
         if (target.closest(".monaco-editor, .xterm") !== null) return;
-        // Only the thread the person is in: its transcript and composer share a parent.
-        const owner = root.parentElement;
+        // Only the thread the person is in: its transcript and composer sit in
+        // the same workspace section (the transcript's parent can be a column
+        // that leaves the composer outside).
+        const owner = root.closest("section") ?? root.parentElement;
         if (target !== document.body && owner !== null && !owner.contains(target)) return;
       }
       event.preventDefault();

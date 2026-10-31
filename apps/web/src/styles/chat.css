@@ -1236,7 +1236,7 @@ html[data-octant-increased-contrast="true"] .thread-work-shelf form button {
 
 .transcript-find__status {
   min-width: 4.5rem;
-  font-size: 0.8461rem;
+  font-size: var(--oct-text-xs);
   color: var(--oct-muted);
   font-variant-numeric: tabular-nums;
 }
