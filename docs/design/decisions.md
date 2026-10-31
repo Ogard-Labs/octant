@@ -669,7 +669,7 @@ A person merges one open pull request from its review in a local window. A Code 
 
 - Built: the review enables Merge only for a fresh, mergeable observation, opens an inline confirmation naming the reviewed head, and the server re-reads state and refuses a stale head.
 - Octant uses the host's forge command-line login and strips ambient tokens; every attempt journals the actor, repository, number, method, approved head SHA and result.
-- A paired phone or web client may merge one pull request or a whole stack, but only with `confirmed: true` for the head it reviewed; the server then requires the repository's required checks to pass and refuses when they fail, are pending or cannot be read. A stack merges bottom first and is refused whole unless it is one chain.
+- A paired phone or web client may merge one pull request or a whole stack, but only with `confirmed: true` for the head it reviewed; the server then requires the repository's required checks to pass and refuses when they fail, are pending or cannot be read. A stack merges bottom first, each child retargeted to the branch the stack lands on before it merges, and is refused whole unless it is one chain. A review reply is posted only after the thread is read back and found on the named pull request.
 - An agent merges on the person's request only after the person approves that one merge in the thread, at every guardrail level; no routine, plugin or hub or peer host reaches it.
 - Auto-merge from a paired device, an agent's merge on a Project setting or routine, and a fresh owner-device unlock are allowed (not built yet).
 
