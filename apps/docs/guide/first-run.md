@@ -153,8 +153,7 @@ without asking, with no sandbox. Protected files, such as SSH and cloud keys,
 are guarded by Octant's own tools and redaction only, and a shell command can
 read them. The first time this computer or a Project picks
 it, Octant shows that warning once. At Full access, outside content an agent
-read is only marked on the tool row and the thread card; nothing asks. Not
-built yet.
+read is only marked on the tool row and the thread card; nothing asks.
 
 Destinations that this host cannot back — Navigator without a model, a Work
 board that is not wired, GitHub pull requests without a working GitHub

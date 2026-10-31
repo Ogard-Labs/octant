@@ -1,3 +1,7 @@
+import {
+  decideRemotePullRequestMerge,
+  type RequiredChecksState,
+} from "@octant/domain/code-pull-request-action-policy";
 import type {
   CodeProjectPullRequestBackgroundRefreshState,
   CodeProjectPullRequestConnection,
@@ -225,6 +229,12 @@ export class CodeProjectPullRequestService {
   readonly #detail: CodeProjectPullRequestDetailPort;
   readonly #merge: CodeProjectPullRequestMergePort;
   readonly #recordMerge: ((record: CodeProjectPullRequestMergeRecorded) => void) | undefined;
+  readonly #requiredChecks:
+    | ((
+        request: { readonly owner: string; readonly name: string; readonly number: number },
+        signal: AbortSignal,
+      ) => Promise<RequiredChecksState>)
+    | undefined;
   readonly #threads: CodeProjectLinkedThreadSource;
   readonly #clock: () => string;
   readonly #cacheStats: CacheStatsRecorder | undefined;
@@ -271,6 +281,14 @@ export class CodeProjectPullRequestService {
     readonly detail: CodeProjectPullRequestDetailPort;
     readonly merge?: CodeProjectPullRequestMergePort;
     /**
+     * Reads the required checks of a pull request. A merge the person confirmed
+     * (from a paired client, or as part of a stack) is refused unless they pass.
+     */
+    readonly requiredChecks?: (
+      request: { readonly owner: string; readonly name: string; readonly number: number },
+      signal: AbortSignal,
+    ) => Promise<RequiredChecksState>;
+    /**
      * Journals each merge attempt's outcome. The merge is a user-confirmed
      * mutation of the person's repository, so Octant keeps its own record of
      * which head was approved and how the attempt ended, beside GitHub's.
@@ -297,6 +315,7 @@ export class CodeProjectPullRequestService {
       ({
         mergeByIdentity: async () => ({ status: "unavailable", reason: "unavailable" }),
       } satisfies CodeProjectPullRequestMergePort);
+    this.#requiredChecks = options.requiredChecks;
     this.#recordMerge = options.recordMerge;
     this.#threads = options.threads;
     this.#clock = options.clock ?? (() => new Date().toISOString());
@@ -527,6 +546,7 @@ export class CodeProjectPullRequestService {
     windowId: WindowId,
     command: CodeProjectPullRequestMergeCommand,
     signal: AbortSignal,
+    caller: "local-window" | "remote-device" = "local-window",
   ): Promise<CodeProjectPullRequestMergeOutcome> {
     const projects = await this.#resolveProjects(windowId);
     const authorized = this.#authorizedConnection(projects, command);
@@ -538,13 +558,32 @@ export class CodeProjectPullRequestService {
         number: command.number,
         method: command.method,
         headSha: command.headSha,
+        // Absent means the local window, as every record was before paired
+        // clients could merge.
+        ...(caller === "remote-device" ? { caller } : {}),
         result,
       });
-    let result: GhPullRequestMergeResult | { status: "refused"; reason: "not-authorized" };
+    // A paired client, or a merge that says the person confirmed it, is held
+    // to the repository's required checks. The local window's own review
+    // already shows them and its Confirm step is the person's choice.
+    const confirmedRefusal =
+      authorized !== undefined &&
+      !this.#githubRevoked &&
+      (caller === "remote-device" || command.confirmed === true)
+        ? await this.#confirmedMergeRefusal(caller, command, signal)
+        : undefined;
+    let result:
+      | GhPullRequestMergeResult
+      | {
+          status: "refused";
+          reason: "not-authorized" | "not-confirmed" | "checks-not-passing" | "checks-unknown";
+        };
     if (authorized === undefined) {
       result = { status: "refused", reason: "not-authorized" };
     } else if (this.#githubRevoked) {
       result = { status: "unavailable", reason: "disconnected" };
+    } else if (confirmedRefusal !== undefined) {
+      result = confirmedRefusal;
     } else {
       try {
         result = await this.#merge.mergeByIdentity(
@@ -588,6 +627,40 @@ export class CodeProjectPullRequestService {
       };
     }
     return result;
+  }
+
+  async #confirmedMergeRefusal(
+    caller: "local-window" | "remote-device",
+    command: CodeProjectPullRequestMergeCommand,
+    signal: AbortSignal,
+  ): Promise<
+    | {
+        status: "refused";
+        reason: "not-confirmed" | "checks-not-passing" | "checks-unknown";
+      }
+    | undefined
+  > {
+    const decision = decideRemotePullRequestMerge({
+      caller,
+      confirmed: command.confirmed === true,
+      requiredChecks:
+        command.confirmed === true && this.#requiredChecks !== undefined
+          ? await this.#requiredChecks(
+              {
+                owner: command.repositoryOwner,
+                name: command.repositoryName,
+                number: command.number,
+              },
+              signal,
+            )
+          : "unknown",
+    });
+    return decision.decision === "allow"
+      ? undefined
+      : {
+          status: "refused",
+          reason: decision.reason === "not-authorized" ? "not-confirmed" : decision.reason,
+        };
   }
 
   async refresh(

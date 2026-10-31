@@ -29,7 +29,9 @@ import {
   CodeProjectPermissionModeChanged,
   CodeProjectAutoReviewerChanged,
   CodeProjectPullRequestBackgroundRefreshChanged,
+  CODE_PROJECT_PULL_REQUEST_ACTION_RECORDED,
   CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED,
+  CodeProjectPullRequestActionRecorded,
   CodeProjectPullRequestMergeRecorded,
   CODE_PROJECT_PULL_REQUEST_MERGE_WHEN_READY_RECORDED,
   CodeProjectPullRequestMergeWhenReadyRecorded,
@@ -383,6 +385,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       CodeProjectPullRequestBackgroundRefreshChanged,
     )
     .register(CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED, 1, CodeProjectPullRequestMergeRecorded)
+    .register(CODE_PROJECT_PULL_REQUEST_ACTION_RECORDED, 1, CodeProjectPullRequestActionRecorded)
     .register(
       CODE_PROJECT_PULL_REQUEST_MERGE_WHEN_READY_RECORDED,
       1,

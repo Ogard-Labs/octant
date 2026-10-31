@@ -3,6 +3,7 @@ import {
   decodeCodeProjectPullRequestSwitchesView,
   decodeCodeThreadId,
   decodeUtcTimestamp,
+  type CodeProjectPullRequestMergeOutcome,
   type CodeProjectPullRequestSwitchOutcome,
   type CodeProjectPullRequestDetailQuery,
   type CodeProjectPullRequestDetailRefreshCommand,
@@ -156,6 +157,30 @@ describe("DockProjectPullRequestReviewTool", () => {
       await screen.findByText("Merged pull request #12. Refreshing its review state."),
     ).toBeVisible();
   });
+  it("says plainly why the host refused a merge whose required checks have not passed", async () => {
+    const user = userEvent.setup();
+    const onMerge = vi.fn(
+      async (): Promise<CodeProjectPullRequestMergeOutcome> => ({
+        status: "refused",
+        reason: "checks-not-passing",
+      }),
+    );
+    render(
+      <DockProjectPullRequestReviewTool
+        load={async () => detailView("Ready to merge.", "mergeable")}
+        onMerge={onMerge}
+        query={query}
+        refresh={async () => detailView("Ready to merge.", "mergeable")}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Merge" }));
+    await user.click(screen.getByRole("button", { name: "Confirm merge" }));
+
+    expect(
+      await screen.findByText("Merge refused: the required checks have not all passed."),
+    ).toBeVisible();
+  });
+
   it("restores Merge after cancelling a failed inline attempt", async () => {
     const user = userEvent.setup();
     const onMerge = vi.fn(async () => {

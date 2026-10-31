@@ -339,9 +339,13 @@ When you ask, the agent can open the pull request for the thread's own
 branch, as a draft or ready for review, and stack it on another branch that
 already has an open pull request. It can also change that pull request's
 title and description, or mark a draft ready (or turn it back into a draft).
-It never chooses another branch, and it cannot merge or close anything. A
-thread that asks before acting shows you the exact change first; Full access
-goes ahead; Plan refuses. The thread's pull request shows in Review and on
+It can also add or remove labels the repository already has, close the pull
+request or reopen it, post a comment or a reply in a review thread, and merge
+it. Comments, replies, and merges always ask you first, at every access level;
+the comment shows its whole text. It never chooses another branch, and it never
+approves a pull request or deletes a branch. A thread that asks before acting
+shows you the exact change first; Full access goes ahead for the rest; Plan
+refuses. The thread's pull request shows in Review and on
 its card, stacked ones included.
 The sidebar follows the pane that last received pointer or keyboard input.
 Each thread remembers its open tools and selected tool.

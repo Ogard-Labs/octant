@@ -8,8 +8,10 @@ import {
   decodeContentIngestedPayload,
   decodeThreadExternalContentState,
   decodeThreadExternalContentTaint,
+  SHIELD_WATCHER_LABELS,
   type ApprovalOutsideContent,
   type EventEnvelope,
+  type ShieldWatcherLabel,
   type ThreadExternalContentState,
   type ThreadExternalContentTaint,
 } from "@octant/contracts";
@@ -19,6 +21,10 @@ import {
   projectThreadContentTaint,
   type ThreadContentTaintEvent,
 } from "@octant/domain/untrusted-content-policy";
+import {
+  SHIELD_WATCHER_SOURCE_PREFIX,
+  shieldWatcherLabelOfSource,
+} from "@octant/domain/shield-watcher-policy";
 import { readAggregateVersion } from "../persistence/chatProjection";
 import type { Projection } from "../persistence/projection";
 import type { SqliteConnection } from "../persistence/sqlitePort";
@@ -298,6 +304,31 @@ export function readThreadExternalContentTaint(
     externalContentIngested: row.external_content_ingested === 1,
     ingestedSources: JSON.parse(row.ingested_sources_json),
   });
+}
+
+/**
+ * What Octant Shield's Watcher found in what the thread read since its mark
+ * was last cleared: label kinds only, in the contract's order.
+ */
+export function readShieldWatcherLabels(
+  connection: SqliteConnection,
+  threadId: string,
+): ReadonlyArray<ShieldWatcherLabel> {
+  const rows = connection
+    .prepare(
+      `
+      SELECT DISTINCT source_label
+      FROM thread_external_content_ingestion_projection
+      WHERE thread_id = ? AND substr(source_label, 1, ?) = ?
+    `,
+    )
+    .all(
+      String(threadId),
+      SHIELD_WATCHER_SOURCE_PREFIX.length,
+      SHIELD_WATCHER_SOURCE_PREFIX,
+    ) as ReadonlyArray<{ readonly source_label: string }>;
+  const found = new Set(rows.map((row) => shieldWatcherLabelOfSource(row.source_label)));
+  return SHIELD_WATCHER_LABELS.filter((label) => found.has(label));
 }
 
 export function hasThreadExternalContentReference(

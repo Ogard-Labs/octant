@@ -45,6 +45,7 @@ function card(overrides: {
   readonly linkedPullRequest?: CodeBoardCard["linkedPullRequest"];
   readonly reviewState?: CodeBoardCard["reviewState"];
   readonly lastMeaningfulActivityAt?: CodeBoardCard["lastMeaningfulActivityAt"];
+  readonly outsideContent?: CodeBoardCard["outsideContent"];
 }): CodeBoardCard {
   return {
     threadId: `00000000-0000-4000-8000-0000000051${overrides.id}`,
@@ -94,6 +95,7 @@ function card(overrides: {
     ...(overrides.blockingReason === undefined ? {} : { blockingReason: overrides.blockingReason }),
     followUp: overrides.followUp ?? false,
     lastMeaningfulActivityAt: overrides.lastMeaningfulActivityAt ?? null,
+    ...(overrides.outsideContent === undefined ? {} : { outsideContent: overrides.outsideContent }),
   } as unknown as CodeBoardCard;
 }
 
@@ -404,6 +406,31 @@ describe("CodeThreadBoard", () => {
     expect(cardFor("Waiting thread").querySelector(".board-card-eyebrow")).toHaveTextContent(
       "Project A",
     );
+  });
+
+  it("puts a small mark on the card of a thread that read outside content", async () => {
+    const loadBoard = vi.fn(async () =>
+      view([
+        card({ id: "01", status: "ready", title: "Flagged thread", outsideContent: "flagged" }),
+        card({ id: "02", status: "ready", title: "Reading thread", outsideContent: "read" }),
+        card({ id: "03", status: "ready", title: "Local thread" }),
+      ]),
+    );
+    render(<CodeThreadBoard loadBoard={loadBoard} projects={projects} storage={memoryStorage()} />);
+
+    await screen.findByText("Flagged thread");
+    const flagged = within(cardFor("Flagged thread")).getByRole("img", {
+      name: "Octant Shield flagged outside content this thread read",
+    });
+    expect(flagged).toHaveAttribute("data-found", "true");
+    expect(
+      within(cardFor("Reading thread")).getByRole("img", {
+        name: "This thread read outside content",
+      }),
+    ).toHaveAttribute("data-found", "false");
+    expect(cardFor("Local thread").querySelector(".board-card-outside")).toBeNull();
+    // A mark, never a prompt: the card offers nothing to answer.
+    expect(within(cardFor("Flagged thread")).queryAllByRole("button")).toHaveLength(1);
   });
 
   it("keeps failing checks and active agents visible in the board scan path", async () => {

@@ -110,6 +110,7 @@ describe("a child under a parent Octant Shield reviews", () => {
       questions: { ask: vi.fn() },
       shield: () => ({ review, recordOnTranscript: shown }),
       childTainted: () => tainted,
+      childWatcherLabels: () => (tainted ? ["hidden-text" as const] : []),
     });
     return { interactions, ask, recordReviewed, review, shown };
   };
@@ -131,6 +132,7 @@ describe("a child under a parent Octant Shield reviews", () => {
       boundRoot: "/child",
       call: expect.objectContaining({ command: "bun run test", workingDirectory: "/child" }),
       alsoTainted: true,
+      alsoWatcherLabels: ["hidden-text"],
       signal,
     });
     expect(ask).not.toHaveBeenCalled();

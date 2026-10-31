@@ -86,35 +86,49 @@ receives an explicit normalized path set.
   attributing your work to an address invented from the OS account. Merges and
   reverts create commits too, so they resolve their author the same way.
 - **Push** requires an approved action or Full access, a confirmed remote and
-  refspec, a non-detached branch, and no force option.
+  refspec, and a non-detached branch. A thread pushes only its own branch.
+  After you amend a commit, the agent can push it with **force-with-lease**:
+  Git replaces the remote branch only if it is still the commit Octant saw, so
+  a branch someone else moved is left alone. A plain force-push, or any push to
+  the default branch, happens only when you approve that one push; Full access
+  does not cover it.
 - **Pull requests** are created through the installed authenticated `gh`
   CLI. Octant first checks for an existing PR for the same head and base,
   so a retry returns the same PR and never duplicates it. **Octant stores
   no GitHub token** and strips ambient token variables from ordinary Git
   commands. It never creates a fork automatically; you select an already
   configured writable head remote and the intended base repo and branch.
-- **Today, agents never merge or change a pull request.** Comments, approvals,
-  request-changes, editing, closing, reopening, and **merge are denied to the
-  agent under every posture**. Planned: an agent may merge, turn on
-  auto-merge, or merge a stack when you ask it to or allow it for the
-  Project, and you may merge from a paired device. You can merge an open pull request yourself
-  from its review on the desktop: choose a method, then **Confirm merge**.
-  Octant merges only the head you reviewed, refuses if it moved, and uses your
-  signed-in `gh`. A paired device cannot merge. You can also turn on
+- **Agents and pull requests.** When you ask, the agent can edit its own pull
+  request, add or remove labels the repository already has (it never creates
+  one), close it or reopen it (a merged one stays merged, and the branch is
+  never deleted), and post a comment or a reply in a review thread. Every
+  comment and reply asks you first, at every access level, and shows the whole
+  text, because it posts under your name. The agent never approves or requests
+  changes on a pull request. It can merge its own pull request when you ask,
+  after you approve that one merge; Octant merges only the head you saw, and
+  only when the repository's required checks have passed.
+- **You merge yourself.** Open a pull request's review and choose a method,
+  then **Confirm merge**. Octant merges only the head you reviewed, refuses
+  if it moved or if a required check has not passed, and uses your signed-in
+  `gh`. A paired phone or web client can merge a pull request, or a whole
+  stack from the bottom, the same way; a stack that is not one chain is
+  refused before anything merges. Labels, comments, replies, close, and
+  reopen from the desktop window have a route but no controls yet. You can also turn on
   **Merge when ready** and **Auto-fix** there; see
   [Automatic actions](#automatic-actions-on-a-pull-request). Durable local review findings stay thread-owned; publishing
   them to GitHub is a later phase.
 
 ## Authority matrix
 
-| Operation                       | Plan                                                        | Approval-gated                                           | Full access |
-| ------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------- | ----------- |
-| Read, search, status, diff      | Allow                                                       | Allow                                                    | Allow       |
-| Edit, save, rename, delete file | Deny                                                        | Prompt                                                   | Allow       |
-| Start/stop terminal or test     | Deny                                                        | Prompt (agent); your own terminal opens without a prompt | Allow       |
-| Stage, commit, push, create PR  | Deny                                                        | Prompt                                                   | Allow       |
-| Merge or other PR mutation      | Deny everywhere                                             | Deny everywhere                                          | Deny        |
-| Create sibling managed root     | Separate local-user confirmation (denied to remote clients) |                                                          |             |
+| Operation                        | Plan                                                        | Approval-gated                                           | Full access         |
+| -------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------- | ------------------- |
+| Read, search, status, diff       | Allow                                                       | Allow                                                    | Allow               |
+| Edit, save, rename, delete file  | Deny                                                        | Prompt                                                   | Allow               |
+| Start/stop terminal or test      | Deny                                                        | Prompt (agent); your own terminal opens without a prompt | Allow               |
+| Stage, commit, push, create PR   | Deny                                                        | Prompt                                                   | Allow               |
+| Merge, comment, or reply on a PR | Deny                                                        | Prompt for each act                                      | Prompt for each act |
+| Labels, close, reopen a PR       | Deny                                                        | Prompt                                                   | Allow               |
+| Create sibling managed root      | Separate local-user confirmation (denied to remote clients) |                                                          |                     |
 
 ## Pull requests workspace
 

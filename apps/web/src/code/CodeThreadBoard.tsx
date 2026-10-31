@@ -9,7 +9,15 @@ import type {
 import type { CodeThreadId } from "@octant/contracts/code";
 import type { ProjectId } from "@octant/contracts/projects";
 import { THREAD_BOARD_STATUS_COLUMN_ORDER } from "@octant/domain/thread-board-policy";
-import { ChevronDown, Filter, GitBranch, GitPullRequest, RefreshCw, Search } from "lucide-react";
+import {
+  ChevronDown,
+  Filter,
+  GitBranch,
+  GitPullRequest,
+  RefreshCw,
+  Search,
+  ShieldAlert,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ThreadBoardCardLive,
@@ -501,6 +509,28 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
   );
 }
 
+/**
+ * The small mark on the card of a thread that read outside content. It is
+ * information only, never a prompt; a thread where Octant Shield's Watcher
+ * found injection-shaped content takes the warning role.
+ */
+function OutsideContentCardMark(props: { readonly found: boolean }) {
+  const label = props.found
+    ? "Octant Shield flagged outside content this thread read"
+    : "This thread read outside content";
+  return (
+    <span
+      aria-label={label}
+      className="board-card-outside"
+      data-found={props.found ? "true" : "false"}
+      role="img"
+      title={label}
+    >
+      <ShieldAlert aria-hidden="true" size={12} strokeWidth={1.8} />
+    </span>
+  );
+}
+
 function CodeBoardCardView(props: {
   readonly card: CodeBoardCard;
   readonly layout: "card" | "list";
@@ -550,6 +580,9 @@ function CodeBoardCardView(props: {
             {card.title}
           </span>
         </OctantButton>
+        {card.outsideContent === undefined ? null : (
+          <OutsideContentCardMark found={card.outsideContent === "flagged"} />
+        )}
         {/*
          * The status is always text: a compact chip where the column does not
          * state it, and screen-reader-only where the Status column header
