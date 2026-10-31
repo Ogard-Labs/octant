@@ -147,9 +147,17 @@ describe("Shield server registry", () => {
         status: "timed-out",
       }),
     ).toBe("recorded");
-    expect(store.recordRemoteCommand({ threadId, command: "git status", status: "ran" })).toBe(
-      "not-remote",
-    );
+    expect(
+      store.recordRemoteCommand({
+        threadId,
+        command: 'ssh "$HOST" uptime',
+        status: "ran",
+        exitCode: 0,
+      }),
+    ).toBe("recorded");
+    for (const command of ["git status", 'git commit -m "fix ssh bug"']) {
+      expect(store.recordRemoteCommand({ threadId, command, status: "ran" })).toBe("not-remote");
+    }
 
     const recorded = journal
       .replayAggregateType({
@@ -173,6 +181,13 @@ describe("Shield server registry", () => {
         host: "db9",
         command: "cd /tmp && ssh db9 uptime",
         status: "timed-out",
+        ranAt: "2026-10-31T12:00:00.000Z",
+      },
+      {
+        threadId,
+        command: 'ssh "$HOST" uptime',
+        status: "ran",
+        exitCode: 0,
         ranAt: "2026-10-31T12:00:00.000Z",
       },
     ]);

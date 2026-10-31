@@ -10528,8 +10528,9 @@ applies them to every command that starts with `ssh`:
 
 - Only a call that reads as one plain `ssh [options] [user@]host [command]`
   can pass; a command that also runs, redirects, or expands anything locally,
-  or names `ssh` anywhere but first, goes to the person, since a word check
-  cannot tell which server it reaches.
+  or runs `ssh` anywhere but first (after a separator, in a substitution),
+  goes to the person, since a word check cannot tell which server it
+  reaches. The word `ssh` inside a message or a search pattern is not a call.
 - An option that names a key file (`-i`, `IdentityFile`) is refused; one that
   can open a tunnel or run a local program (`-L`, `-R`, `-D`, `-A`, `-J`,
   `-F`, `ProxyCommand`, and any `-o` key outside a short list of connection
@@ -10541,11 +10542,19 @@ applies them to every command that starts with `ssh`:
   placed: a lock-out or destructive part makes the whole command go to the
   person at every profile, then a read of a secret path goes to the person,
   then a tainted thread may only read, then anything no profile names, or
-  text the remote shell would expand or redirect, goes to the model, and
-  last the server's profile allows its tiers and sends the rest to the person.
+  text the remote shell would expand, glob, or redirect, goes to the model,
+  and last the server's profile allows its tiers and sends the rest to the
+  person. A program named by a path outside the system's `bin` folders is
+  unknown whatever its name; `sed` counts only as an in-place edit (Admin);
+  `ip` reads only with `show` or `list`; a package option that sets
+  configuration, `pm2 start`, and a `certbot` hook make a command unknown;
+  any state change to SSH or network units, a power target, a recursive
+  change on a system folder, removing an SSH or boot package, and `kill -1`
+  are lock-out actions.
 
 Every `ssh` command an Octant Harness shell runs, at every level, is journaled
-under its thread as `shield-remote-commands.ran@1` with the host, the
+under its thread as `shield-remote-commands.ran@1` with the host (left out
+when the command names it only at run time, as `ssh "$HOST"`), the
 registered server when it is one, the command (credential-shaped text
 redacted, cut to 2 KB), and how it ended with its exit code; output is not kept
 there. A command whose record cannot be journaled returns no output. Its

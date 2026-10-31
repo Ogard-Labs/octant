@@ -104,7 +104,13 @@ const PLAIN_CONFIG_KEYS = new Set([
   "connectionattempts",
 ]);
 
-const SSH_WORD = /(?:^|[\s;&|(`$])ssh(?=\s|$)/;
+/**
+ * `ssh` where the shell runs it: first, or after a separator, a subshell or
+ * substitution opening, or `sudo`/`exec`/`command`, quoted or not. A word
+ * `ssh` inside a message or a search pattern is not a call.
+ */
+const SSH_IN_COMMAND_POSITION =
+  /(?:^|[;&|(`\n]|\$\()\s*(?:(?:sudo|exec|command|env|nohup|time)\s+)*['"]?ssh['"]?(?=\s|$)/;
 const KEY_FILE = /(?:^|\/)(?:id_[a-z0-9_-]+|[^/]+\.pem|[^/]+\.key)$|\.ssh\//i;
 
 /**
@@ -115,7 +121,7 @@ const KEY_FILE = /(?:^|\/)(?:id_[a-z0-9_-]+|[^/]+\.pem|[^/]+\.key)$|\.ssh\//i;
  */
 export function parseSshInvocation(command: string): SshInvocation {
   const trimmed = command.trim();
-  if (!SSH_WORD.test(trimmed)) return { kind: "not-ssh" };
+  if (!SSH_IN_COMMAND_POSITION.test(trimmed)) return { kind: "not-ssh" };
   const words = localWords(trimmed);
   if (words === undefined || words[0] !== "ssh") {
     return { kind: "unreadable", host: guessHost(trimmed) };
@@ -224,7 +230,9 @@ function localWords(text: string): ReadonlyArray<string> | undefined {
 /** The first word after `ssh` that is not an option: the host the record names. */
 function guessHost(text: string): string | undefined {
   const match =
-    /(?:^|[\s;&|(`$])ssh\s+((?:-[A-Za-z0-9]+(?:\s+[^\s-][^\s]*)?\s+)*)([^\s;&|)'"`]+)/.exec(text);
+    /(?:^|[\s;&|(`$'"])ssh['"]?\s+((?:-[A-Za-z0-9]+(?:\s+[^\s-][^\s]*)?\s+)*)([^\s;&|)'"`]+)/.exec(
+      text,
+    );
   const target = match?.[2];
   if (target === undefined) return undefined;
   const host = target.slice(target.lastIndexOf("@") + 1);
@@ -310,7 +318,9 @@ function remoteSegments(text: string): {
         continue;
       }
     }
-    if (char === "<" || char === ">" || char === "\\") expands = true;
+    // Redirection, escapes, and unquoted globs or braces: what runs or what
+    // is read is decided on the server, not by the words written here.
+    if (/[<>\\*?[\]{}~]/.test(char)) expands = true;
     current += char;
     raw += char;
     inWord = true;
@@ -402,11 +412,9 @@ const READ_COMMANDS = new Set([
   "zgrep",
   "zcat",
   "wc",
-  "uniq",
   "cut",
   "ls",
   "stat",
-  "file",
   "lsblk",
   "blkid",
   "findmnt",
@@ -439,7 +447,14 @@ const FILE_CHANGE_COMMANDS = new Set([
 
 /** Paths where an edit can lock the person out: SSH, sign-in, and account files. */
 const LOCKOUT_PATHS =
-  /(?:\/etc\/ssh\/|sshd_config|authorized_keys|\/etc\/sudoers|\/etc\/passwd\b|\/etc\/shadow\b|\/etc\/group\b|\/etc\/pam\.d|\/etc\/fstab\b|\/etc\/network\/interfaces|\/etc\/netplan\/)/;
+  /(?:\/etc\/ssh\b|\.ssh\b|\/etc\/sudoers|\/boot\b|sshd_config|authorized_keys|\/etc\/sudoers|\/etc\/passwd\b|\/etc\/shadow\b|\/etc\/group\b|\/etc\/pam\.d|\/etc\/fstab\b|\/etc\/network\/interfaces|\/etc\/netplan\/)/;
+
+/** Units whose state decides whether the server stays reachable or running. */
+const POWER_TARGETS =
+  /^(?:reboot|poweroff|halt|kexec|rescue|emergency|shutdown|sleep|suspend|hibernate|hybrid-sleep)\.target$/;
+/** Packages whose removal can end SSH access or the server's own start. */
+const ACCESS_PACKAGES =
+  /^(?:openssh|ssh|sudo|systemd|netplan|ifupdown|network-manager|iptables|nftables|ufw|firewalld|linux-image|grub)/;
 
 const SSH_UNITS =
   /^(?:ssh|sshd|ssh\.service|sshd\.service|ssh\.socket|sshd\.socket|network|networking|NetworkManager|systemd-networkd)(?:\.service)?$/;
@@ -459,8 +474,10 @@ function systemctlTier(args: ReadonlyArray<string>): ShieldRemoteCommandTier {
     /^(?:reboot|poweroff|halt|kexec|rescue|emergency|isolate|suspend|hibernate|default)$/.test(verb)
   )
     return "lockout";
-  const touchesAccess = units.some((unit) => SSH_UNITS.test(unit));
-  if (/^(?:stop|disable|mask|kill)$/.test(verb) && touchesAccess) return "lockout";
+  if (units.some((unit) => POWER_TARGETS.test(unit))) return "lockout";
+  // Any change of state to SSH or the network can cut the person off,
+  // a restart included: a bad configuration only bites when it is loaded.
+  if (units.some((unit) => SSH_UNITS.test(unit))) return "lockout";
   if (
     /^(?:restart|reload|start|stop|try-restart|reload-or-restart|try-reload-or-restart|reset-failed)$/.test(
       verb,
@@ -478,6 +495,15 @@ function systemctlTier(args: ReadonlyArray<string>): ShieldRemoteCommandTier {
 
 function packageTier(command: string, args: ReadonlyArray<string>): ShieldRemoteCommandTier {
   const verb = args.find((arg) => !arg.startsWith("-"));
+  // Options that set configuration can hook a program into any verb.
+  if (args.some((arg) => /^(?:-o|-c|--option|--config-file|--setopt|--config)\b/.test(arg)))
+    return "unknown";
+  const packages = args.filter((arg) => !arg.startsWith("-")).slice(1);
+  if (
+    /^(?:remove|purge|autoremove|erase|del)$/.test(verb ?? "") &&
+    packages.some((name) => ACCESS_PACKAGES.test(name))
+  )
+    return "lockout";
   if (command === "apt" || command === "apt-get") {
     if (verb === "list" || verb === "show" || verb === "search" || verb === "policy") return "read";
     if (verb === "update" || verb === "upgrade") return "operate";
@@ -596,12 +622,26 @@ function firewallTier(command: string, args: ReadonlyArray<string>): ShieldRemot
   return "read";
 }
 
+/**
+ * `ip` takes any unambiguous prefix of an object or a command (`ip l s eth0
+ * down` is `ip link set eth0 down`), so only an object followed by nothing
+ * or by `show`/`list` and its filters reads; anything else changes the
+ * network, or runs a program in a namespace, and goes to the person.
+ */
 function ipTier(args: ReadonlyArray<string>): ShieldRemoteCommandTier {
   const words = args.filter((arg) => !arg.startsWith("-"));
-  if (words.some((word) => /^(?:del|delete|flush|replace|change)$/.test(word))) return "lockout";
-  if (words.includes("set") && words.includes("down")) return "lockout";
-  if (words.some((word) => /^(?:add|set|append|prepend)$/.test(word))) return "admin";
-  return "read";
+  const [object, action] = words;
+  if (object === undefined) return "read";
+  if (
+    /^n(?:e(?:t(?:n(?:s)?)?)?)?$/.test(object) &&
+    object.length >= 2 &&
+    "netns".startsWith(object)
+  )
+    return "lockout";
+  if (action === undefined) return "read";
+  if (/^(?:show|list|ls|sh|s)$/.test(action) && !(action === "s" && object.startsWith("l")))
+    return "read";
+  return "lockout";
 }
 
 function segmentTier(
@@ -611,6 +651,10 @@ function segmentTier(
   const stripped = withoutSudo(segment.words);
   if (stripped === undefined) return "unknown";
   const [program = "", ...args] = stripped;
+  // A program named by a path is that file, whatever its name: only the
+  // system's own folders hold the commands the tiers name.
+  const folder = program.slice(0, Math.max(program.lastIndexOf("/"), 0));
+  if (program.includes("/") && !/^\/(?:usr\/)?(?:local\/)?s?bin$/.test(folder)) return "unknown";
   const command = program.slice(program.lastIndexOf("/") + 1);
   const text = stripped.join(" ");
   const tier = baseTier(command, args, text, deployCommands);
@@ -644,7 +688,9 @@ function baseTier(
   if (command === "gpasswd") return args.includes("-d") ? "lockout" : "admin";
   if (command === "useradd" || command === "adduser" || command === "groupadd") return "admin";
   if (command === "kill" || command === "pkill" || command === "killall") {
-    return args.some((arg) => /^(?:1|sshd?|systemd)$/.test(arg)) ? "lockout" : "admin";
+    return args.some((arg) => /^(?:-?1|sshd?|systemd|init|-u|--user)$/.test(arg))
+      ? "lockout"
+      : "admin";
   }
   if (command === "nmcli") {
     return args.some((arg) => /^(?:down|delete|off|disconnect)$/.test(arg)) ? "lockout" : "unknown";
@@ -687,35 +733,58 @@ function baseTier(
   }
   if (/^(?:apt|apt-get|apt-cache|dpkg|rpm|dnf|yum|apk)$/.test(command))
     return packageTier(command, args);
-  if (command === "unattended-upgrade") return "operate";
+  if (command === "unattended-upgrade") return args.length === 0 ? "operate" : "unknown";
   if (command === "docker") return dockerTier(args);
   if (command === "kubectl") return kubectlTier(args);
   if (command === "pm2" || command === "supervisorctl") {
     const verb = args[0] ?? "";
     if (/^(?:list|ls|status|logs|show|describe|jlist)$/.test(verb)) return "read";
-    if (/^(?:restart|reload|start|stop)$/.test(verb)) return "operate";
+    // `start` names a program to run, so only the verbs that act on what
+    // already runs are routine.
+    if (/^(?:restart|reload|stop)$/.test(verb)) return "operate";
     return "unknown";
   }
   if (command === "nginx") {
     if (args.every((arg) => /^-(?:t|T|v|V|q)$/.test(arg)) && args.length > 0) return "read";
-    if (args[0] === "-s") return "operate";
+    if (
+      args.length === 2 &&
+      args[0] === "-s" &&
+      /^(?:reload|reopen|stop|quit)$/.test(args[1] ?? "")
+    )
+      return "operate";
     return "unknown";
   }
-  if (command === "certbot") return args[0] === "renew" ? "operate" : "unknown";
+  if (command === "certbot") {
+    return args[0] === "renew" &&
+      args.slice(1).every((arg) => /^(?:-q|--quiet|-n|--non-interactive|--dry-run)$/.test(arg))
+      ? "operate"
+      : "unknown";
+  }
   if (command === "top") return args.some((arg) => /^-[a-zA-Z]*b/.test(arg)) ? "read" : "unknown";
   if (command === "dmesg") {
     return args.some((arg) => /^(?:-c|-C|--clear|--read-clear)$/.test(arg)) ? "admin" : "read";
   }
   if (command === "hostname") return args.every((arg) => arg.startsWith("-")) ? "read" : "admin";
   if (command === "date") return args.some((arg) => /^(?:-s|--set)/.test(arg)) ? "admin" : "read";
-  if (command === "sort")
-    return args.some((arg) => /^(?:-o|--output)/.test(arg)) ? "unknown" : "read";
-  if (command === "sed")
-    return args.some((arg) => /^(?:-i|--in-place)/.test(arg)) ? "admin" : "read";
+  // `sed` can run a program or write a file from its script, so only an
+  // in-place edit is placed (as a configuration edit), and never as a read.
+  if (command === "sed") {
+    const inPlace = args.some((arg) => /^-[a-zA-Z]*i/.test(arg) || arg.startsWith("--in-place"));
+    return inPlace ? "admin" : "unknown";
+  }
   if (command === "timedatectl" || command === "hostnamectl") {
     return args.some((arg) => arg.startsWith("set-")) ? "admin" : "read";
   }
-  if (FILE_CHANGE_COMMANDS.has(command)) return "admin";
+  if (FILE_CHANGE_COMMANDS.has(command)) {
+    // A permission or owner change on the root or a system folder can lock
+    // every account out at once.
+    if (
+      /^(?:chmod|chown|chgrp)$/.test(command) &&
+      args.some((arg) => /^\/(?:(?:etc|home|root|usr|var|bin|sbin|lib|lib64|boot)\/?)?$/.test(arg))
+    )
+      return "lockout";
+    return "admin";
+  }
   if (READ_COMMANDS.has(command)) return "read";
   return "unknown";
 }
@@ -733,21 +802,26 @@ function collapse(text: string): string {
 export function classifyRemoteCommand(
   remote: string,
   deployCommands: ReadonlyArray<string>,
-): { readonly tier: ShieldRemoteCommandTier } {
+): {
+  readonly tier: ShieldRemoteCommandTier;
+  /** Every word the remote command runs with, quotes removed: what a path check reads. */
+  readonly words: string;
+} {
   const { segments, expands } = remoteSegments(remote);
-  if (segments.length === 0) return { tier: "unknown" };
+  const words = segments.map((segment) => segment.words.join(" ")).join(" ; ");
+  if (segments.length === 0) return { tier: "unknown", words };
   const tiers = segments.map((segment) => segmentTier(segment, deployCommands));
-  if (tiers.includes("lockout")) return { tier: "lockout" };
+  if (tiers.includes("lockout")) return { tier: "lockout", words };
   const described = deployCommands.some((deploy) => collapse(deploy) === collapse(remote));
-  if (described) return { tier: "operate" };
-  if (expands || tiers.includes("unknown")) return { tier: "unknown" };
+  if (described) return { tier: "operate", words };
+  if (expands || tiers.includes("unknown")) return { tier: "unknown", words };
   let highest: "read" | "operate" | "admin" = "read";
   for (const tier of tiers) {
     if (tier === "read" || tier === "operate" || tier === "admin") {
       if (TIER_RANK[tier] > TIER_RANK[highest]) highest = tier;
     }
   }
-  return { tier: highest };
+  return { tier: highest, words };
 }
 
 /** The registered server an ssh host names; ssh matches `Host` aliases without regard to case. */

@@ -116,6 +116,17 @@ describe("reading an ssh command", () => {
     });
   });
 
+  it("takes only ssh in command position as an ssh call", () => {
+    expect(parseSshInvocation('git commit -m "fix ssh bug"').kind).toBe("not-ssh");
+    expect(parseSshInvocation("grep ssh /var/log/auth.log").kind).toBe("not-ssh");
+    expect(parseSshInvocation("'ssh' web1 uptime")).toMatchObject({ kind: "ssh", host: "web1" });
+    expect(parseSshInvocation('ssh "$H" uptime')).toMatchObject({ kind: "unreadable" });
+    expect(parseSshInvocation("echo hi | ssh web1 uptime")).toMatchObject({
+      kind: "unreadable",
+      host: "web1",
+    });
+  });
+
   it("does not take a command that runs more locally as a plain ssh call", () => {
     expect(parseSshInvocation("ssh web1 uptime && rm -rf ~").kind).toBe("unreadable");
     expect(parseSshInvocation("cd /tmp && ssh web1 uptime")).toMatchObject({
@@ -233,6 +244,14 @@ describe("Shield on ssh calls", () => {
       verdict: "ask",
       rule: "secret-path",
     });
+    for (const command of [
+      "sudo cat /etc/shadow",
+      "cat /etc/'sh'adow",
+      "cat /etc/ssh/ssh_host_ed25519_key",
+      "cat /root/.ssh/authorized_keys",
+    ]) {
+      expect(judge(`ssh web1 "${command}"`, [web]), command).toMatchObject({ verdict: "ask" });
+    }
   });
 
   it("lets a tainted thread only read, and asks for anything that changes the server", () => {

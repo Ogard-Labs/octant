@@ -56,6 +56,8 @@ const decodeEventName = Schema.decodeUnknownSync(EventName);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 
 const REPLAY_BATCH = 500;
+/** What the record can name as a host; an address with a port or brackets is left out. */
+const ALIAS = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,252}$/;
 
 /**
  * Folders that hold keys and credentials. A runbook there would hand their
@@ -164,9 +166,10 @@ export class ShieldServerStore {
 
   /**
    * Journals one `ssh` command a thread ran, with the host it named, the
-   * registered server when it is one, and how it ended. A command that names
-   * no host is not a remote command and records nothing. The command is
-   * redacted and cut; its output is not kept here.
+   * registered server when it is one, and how it ended. A command with `ssh`
+   * in command position is recorded even when its host cannot be read; one
+   * without is not a remote command. The command is redacted and cut; its
+   * output is not kept here.
    */
   recordRemoteCommand(input: {
     readonly threadId: string;
@@ -175,9 +178,9 @@ export class ShieldServerStore {
     readonly exitCode?: number | undefined;
   }): "recorded" | "not-remote" | "unavailable" {
     const ssh = parseSshInvocation(input.command);
-    const host = ssh.kind === "not-ssh" ? undefined : ssh.host;
-    if (host === undefined) return "not-remote";
-    const server = registeredServerFor(this.servers(), host);
+    if (ssh.kind === "not-ssh") return "not-remote";
+    const host = ssh.host !== undefined && ALIAS.test(ssh.host) ? ssh.host : undefined;
+    const server = host === undefined ? undefined : registeredServerFor(this.servers(), host);
     const redacted = redactSecretShaped(input.command.trim());
     let threadId: AggregateId;
     try {
@@ -187,7 +190,7 @@ export class ShieldServerStore {
     }
     const payload = {
       threadId,
-      host,
+      ...(host === undefined ? {} : { host }),
       ...(server === undefined ? {} : { serverId: server.serverId }),
       command:
         redacted.length > MAX_SHIELD_REMOTE_COMMAND_LENGTH

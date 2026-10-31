@@ -118,7 +118,8 @@ export type ShieldRemoteCommandStatus = typeof ShieldRemoteCommandStatus.Type;
  */
 export const ShieldRemoteCommandRanPayload = Schema.Struct({
   threadId: AggregateId,
-  host: ShieldServerAlias,
+  /** The host the command names, absent when it names one only at run time (`ssh "$HOST"`) or not as an alias. */
+  host: Schema.optional(ShieldServerAlias),
   /** The registered server the host named, when it is one. */
   serverId: Schema.optional(AggregateId),
   command: Schema.String.pipe(Schema.maxLength(MAX_SHIELD_REMOTE_COMMAND_LENGTH)),

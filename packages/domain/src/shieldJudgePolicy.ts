@@ -147,6 +147,10 @@ const EGRESS_TOOL =
 const SECRET_PATH_TEXT =
   /(?:^|[\s"'=:/])(?:~\/|\$HOME\/|\/Users\/[^/\s]+\/)?(?:\.ssh\b|\.aws\/(?:credentials|config)\b|\.netrc\b|\.git-credentials\b|\.gnupg\b|Library\/Keychains\b|\.docker\/config\.json\b|\.kube\/config\b|\.config\/gh\/hosts\.yml\b|\.npmrc\b|\.pypirc\b|\.env(?:\.(?!example\b|sample\b|template\b)[\w-]+)?(?=$|[\s"';|&)])|[\w.-]+\.(?:pem|p12|pfx)\b|id_(?:rsa|dsa|ecdsa|ed25519)\b)/i;
 
+/** Files on a server that hold its own secrets: password hashes, host keys, private TLS keys. */
+const SERVER_SECRET_PATH =
+  /\/etc\/(?:shadow|gshadow|sudoers)\b|ssh_host_\w*key\b|\/etc\/ssl\/private\b|\.ssh\/|\/root\/\./;
+
 const SSH_KEY_PATH_TEXT =
   /(?:^|[\s"'=:/])(?:\.ssh\/(?!known_hosts\b|config\b)\S+|id_(?:rsa|dsa|ecdsa|ed25519)\b)/i;
 
@@ -454,7 +458,7 @@ function judgeSshCall(
       return decided(entry.verdict, entry.stage, entry.rule, entry.reason);
     }
   }
-  const { tier } = classifyRemoteCommand(remote, server.deployCommands);
+  const { tier, words } = classifyRemoteCommand(remote, server.deployCommands);
   if (tier === "lockout") {
     return decided(
       "ask",
@@ -463,7 +467,16 @@ function judgeSshCall(
       `The command can lock the person out of ${server.alias} or destroy data on it, so the person decides.`,
     );
   }
-  if (SSH_KEY_PATH_TEXT.test(remote) || SECRET_PATH_TEXT.test(remote)) {
+  // Read on the words as the server receives them too, so quoting inside a
+  // path (`/etc/'sh'adow`) does not hide it.
+  if (
+    [remote, words].some(
+      (text) =>
+        SSH_KEY_PATH_TEXT.test(text) ||
+        SECRET_PATH_TEXT.test(text) ||
+        SERVER_SECRET_PATH.test(text),
+    )
+  ) {
     return decided(
       "ask",
       "deny-rule",
