@@ -562,6 +562,37 @@ describe("Linux Bubblewrap confinement", () => {
     expect(hasFlagValue(launch.args, "--remount-ro", "/tmp")).toBe(false);
   });
 
+  it("keeps write-denied entries of a writable folder readable with their contents", () => {
+    const { boundRoot, temporaryDirectory, bwrapPath, root } = fixture();
+    const accountHome = join(root, "account");
+    const config = join(accountHome, "config.toml");
+    const skills = join(accountHome, "skills");
+    const secret = join(accountHome, "secret");
+    mkdirSync(skills, { recursive: true });
+    writeFileSync(config, 'model_provider = "local"\n');
+    writeFileSync(secret, "hidden");
+    const launch = buildBubblewrapLaunch(
+      {
+        executable: "/bin/true",
+        args: [],
+        boundRoot,
+        temporaryDirectory,
+        networkEgress: "none",
+        additionalWriteRoots: [accountHome],
+        additionalDenyWritePaths: [config, skills, secret],
+        additionalDenyReadPaths: [secret],
+      },
+      { bwrapPath },
+    );
+
+    const readOnly = boundPairs(launch.args, "--ro-bind");
+    expect(readOnly).toContainEqual([config, config]);
+    expect(readOnly).toContainEqual([skills, skills]);
+    expect(tmpfsTargets(launch.args)).not.toContain(skills);
+    // A read denial still hides what a write denial bound read-only.
+    expect(readOnly.find(([, target]) => target === secret)?.[0]).not.toBe(secret);
+  });
+
   it("applies a read denial that only overlaps a read-only mount", () => {
     const { boundRoot, temporaryDirectory, bwrapPath, root } = fixture();
     const readRoot = join(root, "readable");
