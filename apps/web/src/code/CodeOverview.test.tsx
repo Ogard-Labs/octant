@@ -543,7 +543,11 @@ function controller(): CodeController {
     turnErrorInTranscript: false,
     providerRequests: [],
     providerAnswerRefusal: undefined,
-    bootstrap: { checkouts: [checkout], settings: { defaultExecutionPolicy: "approval-gated" } as never, threads: [thread] } as never,
+    bootstrap: {
+      checkouts: [checkout],
+      settings: { defaultExecutionPolicy: "approval-gated" } as never,
+      threads: [thread],
+    } as never,
     client: { queryBoard: vi.fn(async () => boardView([])) } as never,
     editorDrafts: {
       clear: vi.fn(),

@@ -581,12 +581,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "access mode auto ask first accept edits plan full access approval approvals reviewer new thread guardrail",
         },
         {
-          id: settingId("code-full-access-sandbox-off"),
-          label: "Turn off the sandbox in Full access",
-          scope: "app",
-          keywords: "off sandbox no sandbox full access bypass unconfined guardrail",
-        },
-        {
           id: settingId("code-editor-executable"),
           label: "External editor",
           scope: "app",

@@ -54,28 +54,51 @@ describe("CodeSettingsView", () => {
     });
   });
 
-  it("turns the sandbox off in Full access only after a warning, and back on without one", async () => {
-    const update = vi.fn(async () => true);
-    const user = userEvent.setup();
-    render(<CodeSettingsView onUpdate={update} settings={settings as never} />);
-
-    const off = screen.getByRole("switch", { name: "Turn off the sandbox in Full access" });
-    await user.click(off);
-    expect(update).not.toHaveBeenCalled();
-    const warning = await screen.findByRole("dialog", {
-      name: "Run Full access with no sandbox?",
+  it("warns once before this machine's first Full access default, and has no Off switch", async () => {
+    const stored = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: (key: string, value: string) => void stored.set(key, value),
     });
-    expect(warning).toHaveTextContent(/SSH and cloud keys/);
-    await user.click(screen.getByRole("button", { name: "Turn off the sandbox" }));
-    expect(update).toHaveBeenLastCalledWith(
-      expect.objectContaining({ fullAccessSandboxOff: true }),
-    );
-    expect(off).toBeChecked();
+    try {
+      const update = vi.fn(async () => true);
+      const user = userEvent.setup();
+      const { unmount } = render(
+        <CodeSettingsView onUpdate={update} settings={settings as never} />,
+      );
+      expect(screen.queryByRole("switch", { name: /sandbox/i })).toBeNull();
 
-    await user.click(off);
-    expect(update).toHaveBeenLastCalledWith(
-      expect.objectContaining({ fullAccessSandboxOff: false }),
-    );
+      await chooseSelectFieldOption(
+        user,
+        screen.getByRole("combobox", { name: "Default mode" }),
+        "Full access",
+      );
+      expect(update).not.toHaveBeenCalled();
+      const warning = await screen.findByRole("dialog", { name: "Use Full access?" });
+      expect(warning).toHaveTextContent(
+        "Agents can change any file and run any command without asking, with no sandbox, so they can read your whole home folder, including SSH and cloud keys.",
+      );
+      await user.click(screen.getByRole("button", { name: "Use Full access" }));
+      expect(update).toHaveBeenLastCalledWith(
+        expect.objectContaining({ defaultExecutionPolicy: "full-access" }),
+      );
+      unmount();
+
+      // The second pick on this machine goes straight through.
+      const again = vi.fn(async () => true);
+      render(<CodeSettingsView onUpdate={again} settings={settings as never} />);
+      await chooseSelectFieldOption(
+        user,
+        screen.getByRole("combobox", { name: "Default mode" }),
+        "Full access",
+      );
+      expect(screen.queryByRole("dialog", { name: "Use Full access?" })).toBeNull();
+      expect(again).toHaveBeenCalledWith(
+        expect.objectContaining({ defaultExecutionPolicy: "full-access" }),
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("lets one Git requirement switch decide plain folders and threads without a Project", async () => {

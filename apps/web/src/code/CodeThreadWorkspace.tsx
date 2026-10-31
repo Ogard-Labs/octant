@@ -2029,7 +2029,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 disabled={accessChanging}
                 onChange={(next) => void changeMode(next)}
                 {...(profileName === undefined ? {} : { profileName })}
-                sandboxOff={thread.sandboxOff === true}
+                warningScope={{ projectId: String(thread.projectId) }}
                 value={permissionModeOf(thread)}
               />
             </>

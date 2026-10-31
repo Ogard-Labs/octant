@@ -325,17 +325,8 @@ describe("Claude Agent SDK port", () => {
   test.each([
     ["a missing approval-gated sandbox", { ...openInput, sandbox: undefined }],
     [
-      "a sandbox that still asks about commands on Full access",
+      "a sandbox on Full access",
       { ...openInput, executionPolicy: "full-access", sandbox: openInput.sandbox },
-    ],
-    [
-      "a sandbox on Off",
-      {
-        ...openInput,
-        executionPolicy: "full-access",
-        sandboxOff: true,
-        sandbox: { ...openInput.sandbox, autoAllowBashIfSandboxed: true },
-      },
     ],
     ["a sandbox on Plan", { ...openInput, executionPolicy: "plan", sandbox: openInput.sandbox }],
     [
@@ -385,7 +376,6 @@ describe("Claude Agent SDK port", () => {
           const query = yield* fullAccess.port.openQuery({
             ...newSessionInput,
             executionPolicy: "full-access",
-            sandboxOff: true,
           });
           expect(fullAccess.invocation?.options).toMatchObject({
             permissionMode: "bypassPermissions",
@@ -397,26 +387,6 @@ describe("Claude Agent SDK port", () => {
       ),
     );
     expect(fullAccess.query.setPermissionMode).toHaveBeenCalledWith("plan");
-
-    // Full access below Off keeps Claude's sandbox and asks nobody inside it.
-    const trusted = makeHarness([{ ...safeRuntimeInitialization, permissionMode: "acceptEdits" }]);
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const { resumeSessionId: _resumeSessionId, ...newSessionInput } = openInput;
-          yield* trusted.port.openQuery({
-            ...newSessionInput,
-            executionPolicy: "full-access",
-            sandbox: { ...openInput.sandbox, autoAllowBashIfSandboxed: true },
-          });
-          expect(trusted.invocation?.options).toMatchObject({
-            permissionMode: "acceptEdits",
-            sandbox: { autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false },
-          });
-          expect(trusted.invocation?.options.allowDangerouslySkipPermissions).toBeUndefined();
-        }),
-      ),
-    );
 
     const plan = makeHarness([{ ...safeRuntimeInitialization, permissionMode: "plan" }]);
     await Effect.runPromise(
@@ -2037,16 +2007,10 @@ describe("Claude Agent SDK port", () => {
     "rejects a %s session status that drifts from %s to %s",
     async (executionPolicy, initializedMode, statusMode) => {
       const { sandbox: _sandbox, ...withoutSandbox } = openInput;
-      // These Full access rows are Off: the one level that bypasses
-      // permissions and runs with no sandbox.
       const input =
         executionPolicy === "approval-gated"
           ? openInput
-          : ({
-              ...withoutSandbox,
-              executionPolicy,
-              ...(executionPolicy === "full-access" ? { sandboxOff: true } : {}),
-            } as const);
+          : ({ ...withoutSandbox, executionPolicy } as const);
       const failed = await failureOf(
         Effect.scoped(
           Effect.gen(function* () {
@@ -2083,16 +2047,10 @@ describe("Claude Agent SDK port", () => {
     "accepts a %s session status that preserves %s with reported mode %s",
     async (executionPolicy, initializedMode, statusMode) => {
       const { sandbox: _sandbox, ...withoutSandbox } = openInput;
-      // These Full access rows are Off: the one level that bypasses
-      // permissions and runs with no sandbox.
       const input =
         executionPolicy === "approval-gated"
           ? openInput
-          : ({
-              ...withoutSandbox,
-              executionPolicy,
-              ...(executionPolicy === "full-access" ? { sandboxOff: true } : {}),
-            } as const);
+          : ({ ...withoutSandbox, executionPolicy } as const);
       const messages = await Effect.runPromise(
         Effect.scoped(
           Effect.gen(function* () {

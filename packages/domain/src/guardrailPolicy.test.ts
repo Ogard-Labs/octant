@@ -24,8 +24,7 @@ describe("guardrail levels", () => {
       ],
       [{ executionPolicy: "plan" }, "guarded", "plan"],
       [{ executionPolicy: "plan", autoApprove: true }, "guarded", "plan"],
-      [{ executionPolicy: "full-access" }, "trusted", "full-access"],
-      [{ executionPolicy: "full-access", sandboxOff: true }, "off", "full-access"],
+      [{ executionPolicy: "full-access" }, "full-access", "full-access"],
     ] as const;
     for (const [access, level, mode] of table) {
       expect([access, guardrailLevelOf(access)]).toEqual([access, level]);
@@ -39,37 +38,31 @@ describe("guardrail levels", () => {
     }
   });
 
-  it("decides sandbox, approver, egress and injection gate per level for a provider with its own reviewer and sandbox", () => {
+  it("decides sandbox, approver, egress and outside-content handling per level for a provider with its own reviewer and sandbox", () => {
     const row = (access: Parameters<typeof guardrailLevelOf>[0]) => {
       const resolved = resolveGuardrail({ access, capabilities: claudeOrCodex });
       if (resolved.status !== "supported") throw new Error("expected supported");
-      return [resolved.sandbox, resolved.approver, resolved.egress, resolved.injectionGate];
+      return [resolved.sandbox, resolved.approver, resolved.egress, resolved.outsideContent];
     };
     expect(row({ executionPolicy: "approval-gated" })).toEqual([
       "both",
       "person",
       "provider-endpoints-only",
-      "on",
+      "gates",
     ]);
     expect(row({ executionPolicy: "approval-gated", autoApprove: true })).toEqual([
       "both",
       "provider-review",
       "provider-endpoints-only",
-      "on",
+      "gates",
     ]);
     expect(row({ executionPolicy: "full-access" })).toEqual([
-      "provider",
-      "none",
-      "unrestricted",
-      "on",
-    ]);
-    expect(row({ executionPolicy: "full-access", sandboxOff: true })).toEqual([
       "none",
       "none",
       "unrestricted",
-      "off",
+      "recorded",
     ]);
-    expect(row({ executionPolicy: "plan" })).toEqual(["both", "person", "none", "on"]);
+    expect(row({ executionPolicy: "plan" })).toEqual(["both", "person", "none", "gates"]);
   });
 
   it("reports Auto unsupported for a provider without a reviewer and runs it as Ask first", () => {
@@ -85,13 +78,17 @@ describe("guardrail levels", () => {
     });
   });
 
-  it("keeps Octant's confinement as the Trusted sandbox where the provider has none", () => {
-    expect(
-      resolveGuardrail({
-        access: { executionPolicy: "full-access" },
-        capabilities: wrappedRuntime,
-      }),
-    ).toMatchObject({ status: "supported", level: "trusted", sandbox: "octant" });
+  it("runs Full access with no sandbox for every runtime, wrapped or not", () => {
+    for (const capabilities of [claudeOrCodex, wrappedRuntime]) {
+      expect(
+        resolveGuardrail({ access: { executionPolicy: "full-access" }, capabilities }),
+      ).toMatchObject({
+        status: "supported",
+        level: "full-access",
+        sandbox: "none",
+        approver: "none",
+      });
+    }
   });
 
   it("gives Work no network at any level", () => {

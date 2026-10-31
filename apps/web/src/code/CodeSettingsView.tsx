@@ -3,20 +3,19 @@ import type { PermissionMode, SettingsSettingId } from "@octant/contracts";
 import { permissionModeOf, threadAccessOf } from "@octant/domain/guardrail-policy";
 import { useRef, useState } from "react";
 import { SettingRow, SettingsSection } from "../settings/primitives";
-import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantFieldError } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
+import { useFullAccessWarning } from "./FullAccessWarning";
 import { PERMISSION_MODE_OPTIONS } from "./PermissionModePicker";
 
 export interface CodeSettingsUpdate {
   readonly defaultExecutionPolicy: CodeSettings["defaultExecutionPolicy"];
   readonly defaultPermissionPersistence: CodeSettings["defaultPermissionPersistence"];
   readonly defaultAutoApprove?: boolean;
-  readonly fullAccessSandboxOff?: boolean;
   readonly externalEditor?: NonNullable<CodeSettings["externalEditor"]>;
   readonly requireGitRepository?: boolean;
   readonly defaultDiffLayout?: CodeDiffLayout;
@@ -25,7 +24,6 @@ export interface CodeSettingsUpdate {
 
 interface CodeSettingsDraft {
   readonly permissionMode: PermissionMode;
-  readonly sandboxOff: boolean;
   readonly requireGitRepository: boolean;
   readonly defaultDiffLayout: CodeDiffLayout;
   readonly executable: string;
@@ -59,9 +57,6 @@ const MODE_OPTIONS = PERMISSION_MODE_OPTIONS.map((option) => ({
   label: option.id === "auto" ? "Auto · Recommended" : option.label,
 }));
 
-const SANDBOX_OFF_WARNING =
-  "Off removes the sandbox from Full access. Agents can then change any file and run any command without asking, and can read your whole home folder, including SSH and cloud keys. Octant still records every action and never sends telemetry.";
-
 function permissionModeOfSettings(settings: CodeSettings): PermissionMode {
   return permissionModeOf({
     executionPolicy: settings.defaultExecutionPolicy,
@@ -71,8 +66,7 @@ function permissionModeOfSettings(settings: CodeSettings): PermissionMode {
 
 export function CodeSettingsView(props: CodeSettingsViewProps) {
   const [permissionMode, setPermissionMode] = useState(permissionModeOfSettings(props.settings));
-  const [sandboxOff, setSandboxOff] = useState(props.settings.fullAccessSandboxOff === true);
-  const [confirmSandboxOff, setConfirmSandboxOff] = useState(false);
+  const fullAccessWarning = useFullAccessWarning("machine");
   const [requireGitRepository, setRequireGitRepository] = useState(
     props.settings.requireGitRepository,
   );
@@ -92,11 +86,6 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     setPermissionMode((current) =>
       current === permissionModeOfSettings(previousSettings)
         ? permissionModeOfSettings(props.settings)
-        : current,
-    );
-    setSandboxOff((current) =>
-      current === (previousSettings.fullAccessSandboxOff === true)
-        ? props.settings.fullAccessSandboxOff === true
         : current,
     );
     setRequireGitRepository((current) =>
@@ -145,9 +134,6 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     if (change.permissionMode !== undefined) {
       setPermissionMode(permissionModeOfSettings(host));
     }
-    if (change.sandboxOff !== undefined) {
-      setSandboxOff(host.fullAccessSandboxOff === true);
-    }
     if (change.requireGitRepository !== undefined) {
       setRequireGitRepository(host.requireGitRepository);
     }
@@ -171,7 +157,6 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
   ) {
     const draft: CodeSettingsDraft = {
       permissionMode,
-      sandboxOff,
       requireGitRepository,
       defaultDiffLayout,
       executable,
@@ -208,7 +193,6 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
         // The host keeps what it stored when a change leaves these out, so
         // only an Access change carries them.
         ...(change.permissionMode === undefined ? {} : { defaultAutoApprove: access.autoApprove }),
-        ...(change.sandboxOff === undefined ? {} : { fullAccessSandboxOff: change.sandboxOff }),
         requireGitRepository: draft.requireGitRepository,
         defaultDiffLayout: draft.defaultDiffLayout,
         // The host keeps the stored switch when a change leaves it out, so
@@ -252,50 +236,19 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
               onValueChange={(value) => {
                 const option = MODE_OPTIONS.find((candidate) => candidate.id === value);
                 if (option === undefined) return;
-                setPermissionMode(option.id);
-                void commit("access", { permissionMode: option.id });
+                fullAccessWarning.guard(option.id, () => {
+                  setPermissionMode(option.id);
+                  void commit("access", { permissionMode: option.id });
+                });
               }}
               options={MODE_OPTIONS}
               value={permissionMode}
             />
           </SettingRow>
-          <SettingRow
-            description="Off: Full access also removes the sandbox. Threads raised to Full access from then on run with no sandbox and no prompts."
-            label="Turn off the sandbox in Full access"
-            scope="mode"
-            settingId="code-full-access-sandbox-off"
-          >
-            <OctantSwitch
-              checked={sandboxOff}
-              label="Turn off the sandbox in Full access"
-              onCheckedChange={(checked) => {
-                if (checked) {
-                  setConfirmSandboxOff(true);
-                  return;
-                }
-                setSandboxOff(false);
-                void commit("access", { sandboxOff: false });
-              }}
-            />
-          </SettingRow>
         </div>
         <CodeSettingsFeedbackSlot feedback={feedback} section="access" />
       </SettingsSection>
-      {confirmSandboxOff ? (
-        <OctantConfirmDialog
-          confirmLabel="Turn off the sandbox"
-          destructive
-          onCancel={() => setConfirmSandboxOff(false)}
-          onConfirm={() => {
-            setConfirmSandboxOff(false);
-            setSandboxOff(true);
-            void commit("access", { sandboxOff: true });
-          }}
-          title="Run Full access with no sandbox?"
-        >
-          {SANDBOX_OFF_WARNING}
-        </OctantConfirmDialog>
-      ) : null}
+      {fullAccessWarning.dialog}
       <SettingsSection
         description="The diff layout default is used until a thread has its own choice."
         title="Thread defaults"

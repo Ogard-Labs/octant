@@ -1071,6 +1071,7 @@ describe("DraftThreadWorkspace", () => {
     await user.type(prompt, "Keep this exact prompt");
     await user.click(screen.getByRole("button", { name: "Mode" }));
     await user.click(await screen.findByRole("menuitemradio", { name: /Full access/ }));
+    await user.click(await screen.findByRole("button", { name: "Use Full access" }));
 
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     await user.click(screen.getByRole("option", { name: "New Project from folder…" }));

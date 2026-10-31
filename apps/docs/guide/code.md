@@ -85,18 +85,14 @@ in the composer changes it in one click, for new and existing threads alike:
   `rg`, `ls`, and `cat` without asking: the sandbox lets it start only a
   short list of reading tools, refuses every write they try outside a
   scratch folder of its own, and gives them no network.
-- **Full access**: no prompts inside the folder, and the provider's own
-  sandbox still applies: Claude runs in its accept-edits mode with sandboxed
-  commands allowed, and Codex in its workspace-write sandbox. Edits or
-  commands that would leave the folder are refused. Publishing still asks
-  every time.
-
-**Off** is not a mode. It is the **Turn off the sandbox in Full access**
-switch in **Settings → Code → Access**, which shows a warning when you turn
-it on. With it on, threads you raise to Full access run with no sandbox and
-no prompts, and can read your whole home folder; the picker then reads
-**Full access · no sandbox**. Turning it off applies the next time a thread
-is set to Full access.
+- **Full access**: no sandbox and no prompts, as in the providers' own apps.
+  Agents can change any file and run any command without asking, so they can
+  read your whole home folder, including SSH and cloud keys. Nothing asks,
+  pushing, merging and publishing included; the agent does those because you
+  asked in the thread, and every action is recorded. Outside content the
+  agent read is tagged on the tool row and the thread card, never blocked.
+  The first time this computer or a Project picks Full access, Octant shows
+  that warning once.
 
 New threads start in the default mode from first run or **Settings → Code →
 Access**; a Project can choose its own under **Access and limits** in its

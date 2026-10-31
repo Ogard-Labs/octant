@@ -185,6 +185,15 @@ export function wireHarness(deps: HarnessDependencies) {
     networkEgress: "none",
     harnessShellScriptDirectory: harnessScriptDirectory,
   });
+  // Full access runs a command the way the providers' own apps do: outside
+  // Octant's OS sandbox, network open. The owned process group, receipts and
+  // output capture stay, so the command is still journaled and stoppable.
+  const harnessFullAccessProcessPort = new RepositoryTestProcessPort({
+    receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
+    temporaryDirectory: harnessWorkDirectory,
+    harnessShellScriptDirectory: harnessScriptDirectory,
+    confinement: { prepare: ({ executable, args }) => ({ command: executable, args }) },
+  });
   // Approval-gated and auto-accept-edits Code commands run on `proxied`
   // network: each command gets its own egress proxy listener, on loopback
   // on macOS and as a Unix socket in a private directory on Linux, and
@@ -543,6 +552,10 @@ export function wireHarness(deps: HarnessDependencies) {
     }),
     offlineShell: createNativeHarnessShell({
       process: harnessOfflineProcessPort,
+      scriptDirectory: harnessScriptDirectory,
+    }),
+    fullAccessShell: createNativeHarnessShell({
+      process: harnessFullAccessProcessPort,
       scriptDirectory: harnessScriptDirectory,
     }),
     ...(harnessProxiedShell === undefined

@@ -1592,18 +1592,6 @@ describe("CodeService commands", () => {
   });
 
   describe("guardrail levels", () => {
-    const settingsWith = (fullAccessSandboxOff: boolean) =>
-      ({
-        settings: {
-          defaultExecutionPolicy: "approval-gated",
-          defaultPermissionPersistence: "current-session",
-          requireGitRepository: true,
-          defaultDiffLayout: "unified",
-          ...(fullAccessSandboxOff ? { fullAccessSandboxOff: true } : {}),
-          version: 1,
-          updatedAt: now,
-        },
-      }) as never;
     const raise = (permissionPersistence: "current-session" | "project-default") => ({
       kind: "change-code-thread-access" as const,
       threadId: ids.thread,
@@ -1637,31 +1625,17 @@ describe("CodeService commands", () => {
       );
     });
 
-    it("runs Full access at Off only when the person turned the sandbox off in Settings", async () => {
-      const sandboxed = serviceFixture({
-        threads: [thread({ executionPolicy: "approval-gated" })],
-      });
-      const raised = await sandboxed.service.execute(ids.window, raise("project-default"));
-      expect(raised).toMatchObject({ thread: { executionPolicy: "full-access" } });
-      expect(raised).not.toHaveProperty("thread.sandboxOff");
-
-      const off = serviceFixture({ threads: [thread({ executionPolicy: "approval-gated" })] });
-      off.persistence.readCodeSettings.mockImplementation(() => settingsWith(true));
-      await expect(
-        off.service.execute(ids.window, raise("project-default")),
-      ).resolves.toMatchObject({ thread: { executionPolicy: "full-access", sandboxOff: true } });
-    });
-
-    it("ignores a client that sends the sandbox off itself, and clears it when the thread leaves Full access", async () => {
+    it("drops the retired sandbox-off stamp a client or an old journal carries, so both old forms are Full access", async () => {
       const fixture = serviceFixture({ threads: [] });
       const created = await fixture.service.execute(ids.window, {
         kind: "create-code-thread",
-        thread: { ...thread({ executionPolicy: "full-access" }), sandboxOff: true },
+        thread: { ...thread({ executionPolicy: "full-access" }), sandboxOff: true } as never,
       });
+      expect(created).toMatchObject({ thread: { executionPolicy: "full-access" } });
       expect(created).not.toHaveProperty("thread.sandboxOff");
 
       const lowered = serviceFixture({
-        threads: [{ ...thread({ executionPolicy: "full-access" }), sandboxOff: true }],
+        threads: [{ ...thread({ executionPolicy: "full-access" }), sandboxOff: true } as never],
       });
       const result = await lowered.service.execute(ids.window, {
         kind: "change-code-thread-access",

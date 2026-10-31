@@ -871,6 +871,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                       props.onPermissionModeChange?.(next);
                     }}
                     value={permissionMode}
+                    warningScope={
+                      props.projectId === undefined
+                        ? "machine"
+                        : { projectId: String(props.projectId) }
+                    }
                     {...(props.creating === true ? { disabled: true } : {})}
                   />
                 </>

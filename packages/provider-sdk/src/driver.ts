@@ -59,13 +59,6 @@ export interface ProviderSessionStart {
    */
   readonly autoApprove?: boolean;
   /**
-   * Full access with the sandbox off (the Off level). Meaningful only with
-   * `executionPolicy: "full-access"`; absent is Trusted, where a driver keeps
-   * the provider's own sandbox. A driver whose provider has no sandbox of its
-   * own runs both the same.
-   */
-  readonly sandboxOff?: boolean;
-  /**
    * User-chosen values for options the model declares (`ProviderModel.options`),
    * keyed by option id. Drivers apply the ids they understand and ignore the
    * rest; absent means provider defaults.
@@ -102,8 +95,6 @@ export interface ProviderSessionResume {
   readonly resumeCursor: ProviderResumeCursor;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly autoApprove?: boolean;
-  /** See {@link ProviderSessionStart.sandboxOff}. */
-  readonly sandboxOff?: boolean;
   /**
    * The thread's current model. A driver that reports `modelSwitch` as
    * supported runs the resumed session on it; any other driver keeps the model

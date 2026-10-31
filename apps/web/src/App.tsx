@@ -380,7 +380,7 @@ import {
   navigatorConfigurationKey,
   useNavigatorAssistant,
 } from "./navigator/useNavigatorAssistant";
-import { PERMISSION_MODE_LABEL, SANDBOX_OFF_LABEL } from "./code/PermissionModePicker";
+import { PERMISSION_MODE_LABEL } from "./code/PermissionModePicker";
 import { useThreadTurnMetrics } from "./threadStats/useThreadTurnMetrics";
 import { useContextController } from "./context/useContextController";
 import { useSessionCompaction } from "./context/useSessionCompaction";
@@ -4456,10 +4456,7 @@ function LaunchedShell(
         );
   const overviewAccess =
     overviewCodeThread !== undefined
-      ? overviewCodeThread.executionPolicy === "full-access" &&
-        overviewCodeThread.sandboxOff === true
-        ? SANDBOX_OFF_LABEL
-        : PERMISSION_MODE_LABEL[permissionModeOf(overviewCodeThread)]
+      ? PERMISSION_MODE_LABEL[permissionModeOf(overviewCodeThread)]
       : overviewWorkThread === undefined
         ? undefined
         : overviewWorkThread.access === "auto-accept-edits"

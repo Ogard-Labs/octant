@@ -2056,8 +2056,14 @@ describe("CodeThreadWorkspace", () => {
       autoApprove: true,
     });
 
+    // The first Full access pick in a Project waits for the warning.
     await user.click(screen.getByRole("button", { name: "Mode" }));
     await user.click(await screen.findByRole("menuitemradio", { name: "Full access" }));
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole("dialog", { name: "Use Full access?" })).toHaveTextContent(
+      /SSH and cloud keys/,
+    );
+    await user.click(screen.getByRole("button", { name: "Use Full access" }));
     expect(execute).toHaveBeenLastCalledWith(
       expect.objectContaining({ executionPolicy: "full-access", autoApprove: false }),
     );
@@ -2075,22 +2081,21 @@ describe("CodeThreadWorkspace", () => {
     );
   });
 
-  it("names Full access with the sandbox off for a thread at Off", () => {
+  it("says a Full access thread runs with no sandbox and no prompts", () => {
     const base = controller();
     const view = base.activeView!;
     render(
       <CodeThreadWorkspace
         controller={controller({
-          activeView: {
-            ...view,
-            thread: { ...view.thread, executionPolicy: "full-access", sandboxOff: true },
-          },
+          activeView: { ...view, thread: { ...view.thread, executionPolicy: "full-access" } },
         })}
         threadId={threadId}
       />,
     );
-    expect(screen.getByRole("button", { name: "Mode" })).toHaveTextContent(
-      "Full access · no sandbox",
+    const mode = screen.getByRole("button", { name: "Mode" });
+    expect(mode).toHaveTextContent("Full access");
+    expect(mode).toHaveAccessibleDescription(
+      "No sandbox and no prompts. Every action is still recorded.",
     );
   });
 

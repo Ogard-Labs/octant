@@ -261,6 +261,18 @@ export const CodeThreadForkOrigin = Schema.Struct({
 }).annotations(strict);
 export type CodeThreadForkOrigin = typeof CodeThreadForkOrigin.Type;
 
+/**
+ * Retired: Full access once had a sandboxed form (Trusted) and an unsandboxed
+ * one (Off), told apart by a thread `sandboxOff` stamp and a Settings switch.
+ * They are one level now, Full access with no sandbox and no prompts, so a
+ * journal or store that carries either value still decodes and the value is
+ * dropped: both old forms replay as Full access.
+ */
+const RetiredSandboxOffSwitch = Schema.optionalToOptional(Schema.Boolean, Schema.Never, {
+  decode: () => Option.none(),
+  encode: () => Option.none(),
+});
+
 export const CodeThread = Schema.Struct({
   id: CodeThreadId,
   projectId: ProjectId,
@@ -353,13 +365,7 @@ export const CodeThread = Schema.Struct({
    * and `full-access` (no prompts exist). Clamped by taint and capability.
    */
   autoApprove: Schema.optional(Schema.Boolean),
-  /**
-   * Full access with the sandbox off: the Off level. The host stamps it from
-   * the person's Settings switch when the thread reaches Full access and
-   * clears it at every other posture, so a client cannot send it. Optional so
-   * a journal written before the level existed replays as Trusted.
-   */
-  sandboxOff: Schema.optional(Schema.Boolean),
+  sandboxOff: RetiredSandboxOffSwitch,
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
@@ -438,11 +444,7 @@ export const CodeSettings = Schema.Struct({
    * which is what a store persisted before the question existed did.
    */
   defaultAutoApprove: Schema.optional(Schema.Boolean),
-  /**
-   * The Off switch under Full access: a thread raised to Full access while it
-   * is on runs with no sandbox. Absent reads as off.
-   */
-  fullAccessSandboxOff: Schema.optional(Schema.Boolean),
+  fullAccessSandboxOff: RetiredSandboxOffSwitch,
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
 }).annotations(strict);
@@ -654,7 +656,6 @@ export const CodeCommand = Schema.Union(
     defaultDiffLayout: Schema.optional(CodeDiffLayout),
     bundledLanguageServer: Schema.optional(Schema.Boolean),
     defaultAutoApprove: Schema.optional(Schema.Boolean),
-    fullAccessSandboxOff: Schema.optional(Schema.Boolean),
   }).annotations(strict),
   CreateCodeThreadCommand,
   Schema.Struct({

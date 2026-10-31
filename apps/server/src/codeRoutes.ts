@@ -611,8 +611,8 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           }
           // Full access no longer asks for a native confirmation, so the
           // confirmation no longer keeps a paired device from reaching it.
-          // A device may lower a thread; raising one to Full access, or
-          // turning the sandbox off, is chosen at a window on this host.
+          // A device may lower a thread; raising one to Full access is chosen
+          // at a window on this host.
           if (
             command !== undefined &&
             callerKind === "remote-device" &&
@@ -2591,9 +2591,7 @@ function raisesToFullAccess(command: CodeCommand): boolean {
     case "create-code-thread":
       return command.thread.executionPolicy === "full-access";
     case "update-code-settings":
-      return (
-        command.defaultExecutionPolicy === "full-access" || command.fullAccessSandboxOff === true
-      );
+      return command.defaultExecutionPolicy === "full-access";
     default:
       return false;
   }

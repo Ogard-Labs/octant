@@ -252,20 +252,19 @@ export type ProviderExecutionPolicy = typeof ProviderExecutionPolicy.Type;
 
 /**
  * How much a thread's tool calls are guarded, from most to least. Guarded asks
- * the person; Provider review lets the provider's own reviewer answer; Trusted
- * asks nobody inside the folder and keeps a sandbox; Off removes the sandbox
- * too. A thread's level is derived from its stored posture (see
- * `guardrailPolicy` in the domain), so journals written before levels existed
- * replay onto them unchanged.
+ * the person; Provider review lets the provider's own reviewer answer; Full
+ * access runs with no sandbox and asks nobody, as it does in the providers'
+ * own apps. A thread's level is derived from its stored posture (see
+ * `guardrailPolicy` in the domain), so journals written before levels existed,
+ * and the retired Trusted and Off forms of Full access, replay onto it.
  */
-export const GuardrailLevel = Schema.Literal("guarded", "provider-review", "trusted", "off");
+export const GuardrailLevel = Schema.Literal("guarded", "provider-review", "full-access");
 export type GuardrailLevel = typeof GuardrailLevel.Type;
 
 /**
  * The words a person picks a thread's mode by, in picker order. Auto is
  * Provider review, Ask first and Accept edits are Guarded, Plan is the
- * read-only overlay, and Full access is Trusted (Off when the person turned
- * the sandbox off in Settings). Off is never a picker choice.
+ * read-only overlay, and Full access is Full access.
  */
 export const PermissionMode = Schema.Literal(
   "auto",

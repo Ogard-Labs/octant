@@ -1533,9 +1533,6 @@ export class CodeService {
           ...((command.defaultAutoApprove ?? current.defaultAutoApprove) === true
             ? { defaultAutoApprove: true }
             : {}),
-          ...((command.fullAccessSandboxOff ?? current.fullAccessSandboxOff) === true
-            ? { fullAccessSandboxOff: true }
-            : {}),
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
@@ -3197,22 +3194,15 @@ export class CodeService {
    */
   /**
    * The host's half of a thread's level. Full access is always journaled on
-   * the thread (session-only Full access is gone), and whether it runs with
-   * the sandbox off is the person's Settings switch at the moment the thread
-   * reaches it, never the client's say. Every other posture clears the switch,
-   * and Full access drops the reviewer, which has nothing left to answer.
+   * the thread (session-only Full access is gone) and drops the reviewer,
+   * which has nothing left to answer.
    */
   #withGuardrailStamp(thread: CodeThread): CodeThread {
-    const { sandboxOff: _clientSandboxOff, autoApprove, ...rest } = thread;
+    const { autoApprove, ...rest } = thread;
     if (rest.executionPolicy !== "full-access") {
       return decodeCodeThread({ ...rest, ...(autoApprove === true ? { autoApprove } : {}) });
     }
-    const settings = this.#persistence.readCodeSettings()?.settings ?? this.#defaultSettings();
-    return decodeCodeThread({
-      ...rest,
-      permissionPersistence: "project-default",
-      ...(settings.fullAccessSandboxOff === true ? { sandboxOff: true } : {}),
-    });
+    return decodeCodeThread({ ...rest, permissionPersistence: "project-default" });
   }
 
   /**

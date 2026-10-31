@@ -1,6 +1,7 @@
 import type { PermissionMode } from "@octant/contracts/providers";
 import { AUTO_UNSUPPORTED_REASON } from "@octant/domain/guardrail-policy";
 import { useId } from "react";
+import { useFullAccessWarning } from "../code/FullAccessWarning";
 import { PERMISSION_MODE_OPTIONS } from "../code/PermissionModePicker";
 import { OctantButton } from "../ui/base/OctantButton";
 import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
@@ -16,11 +17,12 @@ export interface FirstRunModeStepProps {
  * The one question first run asks about guardrails: which mode new threads
  * start in. Auto is pre-selected and marked Recommended where the provider
  * has a reviewer; elsewhere Ask first is, and Auto says why it is not
- * offered. Full access is a choice, never the default. Off is not here: it
- * is a Settings switch under Full access.
+ * offered. Full access is a choice, never the default, and the first pick
+ * of it warns.
  */
 export function FirstRunModeStep(props: FirstRunModeStepProps) {
   const name = useId();
+  const warning = useFullAccessWarning("machine");
   return (
     <div className="first-run__step">
       <p className="first-run__intro">
@@ -45,7 +47,7 @@ export function FirstRunModeStep(props: FirstRunModeStepProps) {
               className="first-run__mode"
               disabled={unsupported}
               key={option.id}
-              onClick={() => props.onSelect(option.id)}
+              onClick={() => warning.guard(option.id, () => props.onSelect(option.id))}
               role="radio"
               tabIndex={checked ? 0 : -1}
               type="button"
@@ -66,6 +68,7 @@ export function FirstRunModeStep(props: FirstRunModeStepProps) {
           );
         })}
       </div>
+      {warning.dialog}
     </div>
   );
 }

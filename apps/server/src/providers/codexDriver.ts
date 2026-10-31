@@ -393,7 +393,6 @@ interface SessionState {
   readonly modelId: string;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly autoApprove: boolean | undefined;
-  readonly sandboxOff: boolean | undefined;
   readonly threadId: string;
   readonly correlationId: CorrelationId;
   readonly turnOverrides?: Pick<CodexTurnStartInput, "model" | "effort">;
@@ -543,16 +542,9 @@ function request<A>(operation: () => Promise<A>): Effect.Effect<A, ProviderFailu
 export function codexExecutionSettings(
   policy: ProviderExecutionPolicy,
   autoApprove?: boolean,
-  sandboxOff?: boolean,
 ): Pick<CodexThreadStartInput, "approvalPolicy" | "sandbox" | "approvalsReviewer"> {
   if (policy === "full-access") {
-    // Off is the old Full access: no sandbox and nobody asked. Full access
-    // keeps Codex's own workspace sandbox, inside which an in-root write or
-    // command just runs (measured against codex-cli 0.154.0); what would
-    // leave it escalates, and the approval handler answers that.
-    return sandboxOff === true
-      ? { approvalPolicy: "never", sandbox: "danger-full-access", approvalsReviewer: "user" }
-      : { approvalPolicy: "on-request", sandbox: "workspace-write", approvalsReviewer: "user" };
+    return { approvalPolicy: "never", sandbox: "danger-full-access", approvalsReviewer: "user" };
   }
   if (policy === "approval-gated" || policy === "auto-accept-edits") {
     // `on-request` lets the model decide when to escalate, so the sandbox — not
@@ -600,9 +592,8 @@ export function codexExecutionSettings(
 export function codexTurnExecutionSettings(
   policy: ProviderExecutionPolicy,
   autoApprove?: boolean,
-  sandboxOff?: boolean,
 ): Pick<CodexTurnStartInput, "approvalPolicy" | "sandboxPolicy" | "approvalsReviewer"> {
-  const { sandbox, ...rest } = codexExecutionSettings(policy, autoApprove, sandboxOff);
+  const { sandbox, ...rest } = codexExecutionSettings(policy, autoApprove);
   const sandboxPolicy =
     sandbox === "danger-full-access"
       ? ({ type: "dangerFullAccess" } as const)
@@ -1272,7 +1263,7 @@ function makeConnection(
         }
         if (item.kind === "approval") {
           state.outputAccepted = true;
-          if (state.executionPolicy === "full-access" && state.sandboxOff === true) {
+          if (state.executionPolicy === "full-access") {
             terminalEvent(state, {
               kind: "failed",
               failure: failure(
@@ -1312,14 +1303,11 @@ function makeConnection(
             continue;
           }
           if (
-            (state.executionPolicy === "auto-accept-edits" &&
-              item.approval.kind === "file-change") ||
-            state.executionPolicy === "full-access"
+            state.executionPolicy === "auto-accept-edits" &&
+            item.approval.kind === "file-change"
           ) {
             // Auto-accept edits waives exactly the project-confined file writes
-            // proven above; commands and permission grants still ask. Full
-            // access asks nobody inside the folder, so every escalation proven
-            // project-confined above is accepted, and the rest was declined.
+            // proven above; commands and permission grants still ask.
             Effect.runFork(
               request(() =>
                 client.respondApproval({
@@ -1444,7 +1432,6 @@ function makeConnection(
         readonly sessionId: ProviderSessionId;
         readonly executionPolicy: ProviderExecutionPolicy;
         readonly autoApprove?: boolean;
-        readonly sandboxOff?: boolean;
       },
       thread: CodexThreadResult,
       modelId: string,
@@ -1464,7 +1451,6 @@ function makeConnection(
         modelId,
         executionPolicy: input.executionPolicy,
         autoApprove: input.autoApprove,
-        sandboxOff: input.sandboxOff,
         threadId: thread.thread.id,
         ...(turnOverrides === undefined ? {} : { turnOverrides }),
         correlationId: factories.makeCorrelation() as CorrelationId,
@@ -1490,11 +1476,7 @@ function makeConnection(
         withPendingLifecycle(() =>
           Effect.gen(function* () {
             ensureSubscribed();
-            const settings = codexExecutionSettings(
-              input.executionPolicy,
-              input.autoApprove,
-              input.sandboxOff,
-            );
+            const settings = codexExecutionSettings(input.executionPolicy, input.autoApprove);
             const requestedOptions = input.modelOptionValues;
             let optionSettings: Pick<CodexThreadStartInput, "serviceTier" | "config"> = {};
             if (requestedOptions !== undefined && Object.keys(requestedOptions).length > 0) {
@@ -1687,11 +1669,7 @@ function makeConnection(
                     const turn = await client.turnStart({
                       threadId: state.threadId,
                       input: codexTurnInput(input),
-                      ...codexTurnExecutionSettings(
-                        state.executionPolicy,
-                        state.autoApprove,
-                        state.sandboxOff,
-                      ),
+                      ...codexTurnExecutionSettings(state.executionPolicy, state.autoApprove),
                       ...state.turnOverrides,
                       ...(mode === "chat" ? { environments: [] as const } : {}),
                     });

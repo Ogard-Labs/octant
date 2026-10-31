@@ -2210,11 +2210,12 @@ flowchart LR
   never clear it. Irreversible or authority-bearing actions on a tainted thread
   still require fresh confirmation after replay. One gate enforces that:
   `resolveThreadElevation` in `packages/domain/src/toolCallPolicy.ts` asks
-  afresh, under every posture that allows the tool at all, Full access
-  included, for each closed-catalog entry marked `irreversibleUnderTaint`
+  afresh, under every posture below Full access that allows the tool at all,
+  for each closed-catalog entry marked `irreversibleUnderTaint`
   (MCP tools, computer-use, the harness's `web-fetch`, `bash`, `edit`,
   `write`, and `goal-check`); Plan refuses all of these but `web-fetch`
-  before that check. A contract test refuses a catalog entry in a
+  before that check. At Full access in Code the taint is recorded only (see
+  [modes](#modes-chat-work-and-code)). A contract test refuses a catalog entry in a
   destructive, credential, outside-Project, or privilege-expansion class
   without that flag. A Code Git action a person takes from a window is that
   person's own per-action act, and no agent tool issues one.
@@ -5039,7 +5040,7 @@ the model at another size.
   a launch taints when it received bytes from an outside host, as the
   [egress rules](#harness-tool-egress-rules) describe. Once tainted, `bash`, `edit`,
   `write`, `goal-check`, and `web-fetch` need a person's confirmation for every
-  call even under Full access, and refuse when no approval surface exists;
+  call below Full access, and refuse when no approval surface exists;
   `web-fetch` is included because a GET can carry data out in its URL. That
   confirmation is single-use: a remembered "always" approval stops covering
   its class the moment the thread is tainted, and an "always" answered then
@@ -6926,20 +6927,20 @@ mechanisms are:
   Code threads run in one of five modes, picked in one click from the
   composer of any thread and in the same words as the native apps: Auto,
   Ask first, Accept edits, Plan, and Full access. Each mode is a thread
-  posture the host stores (`executionPolicy`, `autoApprove`, and the host's
-  `sandboxOff` stamp), and the guardrail level is derived from that posture
-  by `resolveGuardrail` in `packages/domain/src/guardrailPolicy.ts`, never
-  stored beside it, so journals from before the levels replay onto them
-  unchanged:
+  posture the host stores (`executionPolicy` and `autoApprove`), and the
+  guardrail level is derived from that posture by `resolveGuardrail` in
+  `packages/domain/src/guardrailPolicy.ts`, never stored beside it, so
+  journals from before the levels replay onto them unchanged. The levels,
+  top to bottom, are Guarded (Ask first, Accept edits), Provider review
+  (Auto), and Full access; Plan is a read-only overlay:
 
-  | Mode         | Stored posture                   | Level              | Claude Code                                                      | Codex                                                          |
-  | ------------ | -------------------------------- | ------------------ | ---------------------------------------------------------------- | -------------------------------------------------------------- |
-  | Auto         | `approval-gated` + `autoApprove` | Provider review    | `permissionMode: "auto"`, its sandbox                            | `read-only` + `on-request`, `approvalsReviewer: "auto_review"` |
-  | Ask first    | `approval-gated`                 | Guarded            | `default`, its sandbox; Octant's gate decides each call          | `read-only` + `on-request`, reviewer `user`                    |
-  | Accept edits | `auto-accept-edits`              | Guarded            | `default`, its sandbox; in-root edits waived                     | `read-only` + `on-request`, in-root patch edits accepted       |
-  | Plan         | `plan`                           | Guarded, read-only | `plan`                                                           | `read-only` + `never`                                          |
-  | Full access  | `full-access`                    | Trusted            | `acceptEdits`, its sandbox with `autoAllowBashIfSandboxed: true` | `workspace-write` + `on-request`                               |
-  | (Off)        | `full-access` + `sandboxOff`     | Off                | `bypassPermissions`, no sandbox                                  | `danger-full-access` + `never`                                 |
+  | Mode         | Stored posture                   | Level              | Claude Code                                             | Codex                                                          |
+  | ------------ | -------------------------------- | ------------------ | ------------------------------------------------------- | -------------------------------------------------------------- |
+  | Auto         | `approval-gated` + `autoApprove` | Provider review    | `permissionMode: "auto"`, its sandbox                   | `read-only` + `on-request`, `approvalsReviewer: "auto_review"` |
+  | Ask first    | `approval-gated`                 | Guarded            | `default`, its sandbox; Octant's gate decides each call | `read-only` + `on-request`, reviewer `user`                    |
+  | Accept edits | `auto-accept-edits`              | Guarded            | `default`, its sandbox; in-root edits waived            | `read-only` + `on-request`, in-root patch edits accepted       |
+  | Plan         | `plan`                           | Guarded, read-only | `plan`                                                  | `read-only` + `never`                                          |
+  | Full access  | `full-access`                    | Full access        | `bypassPermissions`, no sandbox                         | `danger-full-access` + `never`                                 |
 
   Option names were read from the installed Agent SDK (0.3.211
   `PermissionMode`) and the Codex app-server schema (codex-cli 0.164.0
@@ -6952,17 +6953,34 @@ mechanisms are:
   Codex): Codex's reviewer is thread-wide, so on auto-accept-edits it also
   answers, and may deny, an in-root patch edit the posture would waive.
   Delegation is clamped off by taint and by capability (`harnessAutoReviewEffective`).
-  At Full access nobody is asked inside the folder: Claude's edits outside
-  the Project are refused by the pre-tool gate rather than asked, its
-  commands stay in its own sandbox, and a Codex escalation that is proven
-  project-confined is accepted by the host while any other is declined. Off
-  is not a mode: it is the Settings › Code › Access switch "Turn off the
-  sandbox in Full access", shown with a one-time warning when turned on.
-  The host stamps `sandboxOff` from that switch when a thread reaches Full
-  access and clears it at every other posture; a client cannot send it. At
-  Off, outside content is still recorded on the thread but no longer makes
-  an irreversible call ask again (`resolveToolCall`); publishing still asks
-  every time at every level.
+  Full access means what it means in the providers' own apps: no sandbox and
+  no prompts (maintainer decision, 2026-10-31, which folded the earlier
+  sandboxed Trusted level and the separate Off switch into it). OpenCode, Pi
+  and the Octant harness launch outside Octant's OS sandbox with the network
+  open, and Octant answers every approval allow; an ACP agent also launches
+  unconfined, keeping only the static denials of host credential files and
+  unapproved MCP, skill and hook folders, because credentials reach providers
+  only through the credential broker and discovery never enables an
+  extension. No call asks at Full access in Code, irreversible actions and
+  publish-to-target included (`resolveToolCall`): the agent pushes, merges or
+  publishes because the person asked in the thread, and the journal records
+  the call. Outside content is recorded only: the thread keeps its taint for
+  the tool row tag, the thread card mark, the journal and export, and it
+  never prompts or blocks, the tainted web-search refusal included. Work is
+  not on the shared levels, so its taint gates as before. A journal that
+  carries the retired `sandboxOff` thread stamp or `fullAccessSandboxOff`
+  Settings switch decodes and drops it, so both old forms of Full access
+  replay as Full access. The first time this machine (its Settings default
+  or first run) or a Project (its default or one of its threads) picks Full
+  access, the window shows one warning: agents can change any file and run
+  any command without asking, with no sandbox, so they can read the whole
+  home folder, including SSH and cloud keys. It is kept in the window's
+  storage, since only a window on this host can choose Full access. What
+  still holds at Full access is privacy and the record, not prompts: no
+  telemetry and the provider telemetry guards, the journal of every tool
+  call and level change, secret redaction in logs, journal and exports,
+  spend ceilings, remote clients never exceeding the host, no agent marking
+  a thread Done, and credentials only through the broker.
 
   The default mode for new threads is first run's question (Auto
   pre-selected and marked Recommended where the chosen provider has a
@@ -6978,8 +6996,8 @@ access` agree); a thread's own change is journaled as
   access needs no native confirmation and is always journaled on the thread:
   session-only Full access is gone, and a session grant left from before is
   revoked on the thread's next mode change. A paired device may lower a
-  thread but cannot raise one to Full access, start one at Full access, or
-  turn the sandbox off; the host refuses those at the route with "Full
+  thread but cannot raise one to Full access or start one at Full access;
+  the host refuses those at the route with "Full
   access is chosen in the Octant window on this host." `octant agent` keeps
   sending Full access exactly when the Project remembers it. Work keeps its
   own Settings › Work access (ask-first or auto-accept-edits) for now; the

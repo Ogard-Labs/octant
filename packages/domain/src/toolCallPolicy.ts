@@ -97,11 +97,6 @@ export type ToolCallPolicyInput = {
      */
     readonly externalContentIngested: boolean;
     /**
-     * The Off level: Full access with the sandbox off, where outside content
-     * is recorded but no longer gates a call. Absent is Trusted.
-     */
-    readonly sandboxOff?: boolean;
-    /**
      * Snapshotted profile tool allowlist. Empty or absent means no constraint.
      * Reloading the live profile here would let an edit change a running thread.
      */
@@ -212,11 +207,25 @@ export function resolveToolCall(input: ToolCallPolicyInput): ToolCallPolicyDecis
   }
 
   // 8. Thread elevation / approval / taint (untrusted-content taint hook)
+  // At Full access in Code outside content is recorded only: the thread keeps
+  // its taint for the tool row, the card and the journal, but it neither asks
+  // nor blocks, so it does not reach the gates below. Work keeps its own
+  // access and is not on the shared levels, so its taint gates as before.
+  const guardrail = resolveGuardrail({
+    access: { executionPolicy: input.thread.executionPolicy },
+    capabilities: { providerReview: true, providerSandbox: false },
+    mode: input.mode,
+  });
+  const asksNobody =
+    input.mode === "code" &&
+    guardrail.status === "supported" &&
+    guardrail.outsideContent === "recorded";
+  const outsideContentGates = input.thread.externalContentIngested && !asksNobody;
   // A tainted thread's web search does not ask a person; it reaches only the
   // endpoint the person configured, so a query that looks like it carries
-  // data is refused outright, under every posture.
+  // data is refused outright, below Full access.
   if (
-    input.thread.externalContentIngested &&
+    outsideContentGates &&
     String(catalogEntry.capabilityId) === nativeHarnessToolCapabilityId("web-search")
   ) {
     const query = searchQueryOf(input.arguments);
@@ -225,23 +234,12 @@ export function resolveToolCall(input: ToolCallPolicyInput): ToolCallPolicyDecis
       return deny("thread-elevation", `${refusal.reason}: ${refusal.detail}`);
     }
   }
-  const guardrail = resolveGuardrail({
-    access: {
-      executionPolicy: input.thread.executionPolicy,
-      sandboxOff: input.thread.sandboxOff,
-    },
-    capabilities: { providerReview: true, providerSandbox: false },
-    mode: input.mode,
-  });
   const elevation = resolveThreadElevation({
     entry: catalogEntry,
     executionPolicy: input.thread.executionPolicy,
+    asksNobody,
     approvalSatisfied: input.thread.approvalSatisfied,
-    // At Off the person removed the gate: outside content is still recorded
-    // on the thread, it just no longer makes an irreversible call ask.
-    externalContentIngested:
-      input.thread.externalContentIngested &&
-      (guardrail.status === "supported" ? guardrail.injectionGate : "on") === "on",
+    externalContentIngested: outsideContentGates,
   });
   if (elevation.kind === "deny") {
     return deny("thread-elevation", elevation.reason);
@@ -360,9 +358,15 @@ export function planRefusesApprovalClass(approvalClass: ToolApprovalClass): bool
   );
 }
 
-function resolveThreadElevation(input: {
-  readonly entry: ClosedToolCatalogEntry;
+/**
+ * Step 8 on its own: whether a call the earlier steps admitted runs, asks, or
+ * is refused by the thread's posture, approvals and taint.
+ */
+export function resolveThreadElevation(input: {
+  readonly entry: Pick<ClosedToolCatalogEntry, "approvalClass" | "irreversibleUnderTaint">;
   readonly executionPolicy: ProviderExecutionPolicy;
+  /** Code at Full access: see `resolveGuardrail`. */
+  readonly asksNobody: boolean;
   readonly approvalSatisfied: boolean;
   readonly externalContentIngested: boolean;
 }):
@@ -371,6 +375,14 @@ function resolveThreadElevation(input: {
   | { readonly kind: "deny"; readonly reason: string } {
   if (input.executionPolicy === "plan" && planRefusesApprovalClass(input.entry.approvalClass)) {
     return { kind: "deny", reason: "plan-mode-denied" };
+  }
+
+  // Full access asks nobody, for any class: irreversible actions and
+  // publication included. The agent pushes, merges or publishes because the
+  // person asked in the thread, and the journal records the call; it is not a
+  // prompt. Plan's read-only refusal above still holds as an overlay.
+  if (input.asksNobody) {
+    return { kind: "allow" };
   }
 
   // Taint hook: thread-lifetime taint forces fresh confirmation for irreversible classes.
@@ -391,7 +403,8 @@ function resolveThreadElevation(input: {
   // Publication is approved one act at a time, against the exact target and
   // bytes about to leave the machine. A satisfied standing approval is exactly
   // what must not carry it, so this sits above the postures rather than inside
-  // them: no execution policy, including full access, turns it into an allow.
+  // them: no prompting posture turns it into an allow. Full access, which
+  // asks nobody, returned above.
   if (input.entry.approvalClass === "publish-to-target") {
     return { kind: "prompt", reason: "approval-required" };
   }

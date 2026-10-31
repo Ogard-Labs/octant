@@ -121,8 +121,8 @@ The Mode step asks once which mode new threads start in:
 - **Ask first**: agents ask before commands and file changes.
 - **Accept edits**: file edits inside the folder go through; commands ask.
 - **Plan**: read-only.
-- **Full access**: no prompts inside the folder. The provider's own sandbox
-  still applies. Never pre-selected.
+- **Full access**: no sandbox and no prompts. Picking it shows a one-time
+  warning. Never pre-selected.
 
 Continue records the selected mode, pre-selected or not. You can change it
 later in **Settings → Code → Access**, set a different one for a Project, or

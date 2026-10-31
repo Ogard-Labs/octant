@@ -14,7 +14,6 @@ import type {
 export interface ThreadAccess {
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly autoApprove?: boolean | undefined;
-  readonly sandboxOff?: boolean | undefined;
 }
 
 /** What the thread's provider can do for itself, as its driver reports it. */
@@ -40,8 +39,12 @@ export type GuardrailResolution =
       readonly sandbox: GuardrailSandbox;
       readonly approver: GuardrailApprover;
       readonly egress: ToolNetworkEgressPolicy;
-      /** On: outside content makes irreversible calls ask afresh. Off only at Off. */
-      readonly injectionGate: "on" | "off";
+      /**
+       * On: outside content makes irreversible calls ask afresh. At Full
+       * access it is recorded only (tagged on the tool row and thread, kept in
+       * the journal and export), never a prompt or a block.
+       */
+      readonly outsideContent: "gates" | "recorded";
     }
   | {
       /**
@@ -71,11 +74,7 @@ export function permissionModeOf(access: ThreadAccess): PermissionMode {
   }
 }
 
-/**
- * The posture a picker choice stores. Off is not a choice: the host decides
- * `sandboxOff` from the person's Settings switch when a thread reaches Full
- * access.
- */
+/** The posture a picker choice stores. */
 export function threadAccessOf(mode: PermissionMode): {
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly autoApprove: boolean;
@@ -97,14 +96,12 @@ export function threadAccessOf(mode: PermissionMode): {
 /**
  * The level a stored posture is at. Today's postures map onto it:
  * approval-gated and auto-accept-edits are Guarded, either one with the
- * provider's reviewer delegated is Provider review, remembered Full access is
- * Trusted, and Full access with the sandbox off is Off. Plan is read-only at
- * Guarded.
+ * provider's reviewer delegated is Provider review, and `full-access` is Full
+ * access, whichever retired form (Trusted, or Off with its `sandboxOff`
+ * stamp) a journal wrote it in. Plan is read-only at Guarded.
  */
 export function guardrailLevelOf(access: ThreadAccess): GuardrailLevel {
-  if (access.executionPolicy === "full-access") {
-    return access.sandboxOff === true ? "off" : "trusted";
-  }
+  if (access.executionPolicy === "full-access") return "full-access";
   if (access.executionPolicy === "plan") return "guarded";
   return access.autoApprove === true ? "provider-review" : "guarded";
 }
@@ -140,7 +137,7 @@ export function resolveGuardrail(input: {
         sandbox: ownSandbox ? "both" : "octant",
         approver: "person",
         egress,
-        injectionGate: "on",
+        outsideContent: "gates",
       },
     };
   }
@@ -156,24 +153,11 @@ export function resolveGuardrail(input: {
         sandbox: ownSandbox ? "both" : "octant",
         approver: level === "provider-review" ? "provider-review" : "person",
         egress,
-        injectionGate: "on",
+        outsideContent: "gates",
       };
-    case "trusted":
-      // The provider's own sandbox where it has one. Where it has none, the
-      // confinement Octant gives that runtime at Full access stays the only
-      // one, so it is reported as Octant's rather than as no sandbox.
-      return {
-        status: "supported",
-        level,
-        mode,
-        readOnly: false,
-        folderEditsWaived: true,
-        sandbox: ownSandbox ? "provider" : "octant",
-        approver: "none",
-        egress,
-        injectionGate: "on",
-      };
-    case "off":
+    case "full-access":
+      // What Full access means in the providers' own apps: no sandbox, Octant's
+      // or the provider's, and nobody asked. Network is open.
       return {
         status: "supported",
         level,
@@ -183,7 +167,7 @@ export function resolveGuardrail(input: {
         sandbox: "none",
         approver: "none",
         egress,
-        injectionGate: "off",
+        outsideContent: "recorded",
       };
   }
 }
