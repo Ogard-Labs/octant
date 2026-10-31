@@ -282,6 +282,7 @@ function ZenCodeCardSurface(props: {
           instances: providerController.instances,
           observedByInstance: providerController.observedByInstance,
           chosen: controller?.bootstrap?.settings.autoReviewer,
+          shieldModel: controller?.bootstrap?.settings.shieldModel,
         });
   const harnessAutoReviewSupported = autoReview?.status === "reviewer" ? true : undefined;
   if (controller === undefined) {

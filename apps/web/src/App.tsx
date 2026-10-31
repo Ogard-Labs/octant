@@ -7175,6 +7175,7 @@ function LaunchedShell(
                 instances: providerController.instances,
                 observedByInstance: providerController.observedByInstance,
                 chosen: codeController.bootstrap?.settings.autoReviewer,
+                shieldModel: codeController.bootstrap?.settings.shieldModel,
               })?.status === "reviewer",
             onSetDefaultMode: async (mode) => {
               const settings = codeController.bootstrap?.settings;

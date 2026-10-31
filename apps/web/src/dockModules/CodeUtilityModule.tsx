@@ -52,6 +52,7 @@ export function CodeUtilityModule(
           instances: props.providerController.instances,
           observedByInstance: props.providerController.observedByInstance,
           chosen: controller.bootstrap?.settings.autoReviewer,
+          shieldModel: controller.bootstrap?.settings.shieldModel,
         });
   const harnessAutoReviewSupported = autoReview?.status === "reviewer" ? true : undefined;
   return (

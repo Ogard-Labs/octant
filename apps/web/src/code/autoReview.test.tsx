@@ -50,6 +50,31 @@ describe("who answers a thread's prompts at Auto, as the picker shows it", () =>
     expect(review("omp")).toMatchObject({ status: "none" });
   });
 
+  it("falls back to asking first when the chosen Shield model's provider is disabled or gone", () => {
+    const withModel = (providerInstanceId: string) =>
+      autoReviewFor({
+        providerInstanceId: id("opencode"),
+        instances,
+        observedByInstance,
+        shieldModel: { providerInstanceId: id(providerInstanceId), modelId: "small" as never },
+      });
+    expect(withModel("claude")).toEqual({ status: "reviewer", reviewer: "octant-shield" });
+    expect(withModel("off")).toMatchObject({
+      status: "none",
+      reason: expect.stringContaining("Shield model"),
+    });
+    expect(withModel("removed")).toMatchObject({ status: "none" });
+    // A key provider keeps its own reviewer whatever Shield's model is.
+    expect(
+      autoReviewFor({
+        providerInstanceId: id("claude"),
+        instances,
+        observedByInstance,
+        shieldModel: { providerInstanceId: id("removed"), modelId: "small" as never },
+      }),
+    ).toEqual({ status: "reviewer", reviewer: "provider" });
+  });
+
   it("offers Auto on a runtime with no reviewer of its own, in Octant Shield's name", async () => {
     const user = userEvent.setup();
     render(
@@ -109,6 +134,43 @@ describe("Settings › Access reviewer and Shield model", () => {
     expect(field).toHaveTextContent("Provider's own");
     await chooseSelectFieldOption(userEvent.setup(), field, "Octant Shield");
     expect(update).toHaveBeenCalledWith(expect.objectContaining({ autoReviewer: "octant-shield" }));
+  });
+
+  it("shows the stored reviewer and Shield model again when saving them fails, so a retry is possible", async () => {
+    const update = vi.fn(async () => false);
+    const chosen = {
+      providerInstanceId: id("00000000-0000-4000-8000-0000000000a1"),
+      modelId: "local-small" as never,
+    };
+    render(
+      <CodeSettingsView
+        onUpdate={update}
+        providerSnapshot={
+          {
+            instances: [{ id: chosen.providerInstanceId, displayName: "Local", enabled: true }],
+            catalogs: [
+              {
+                instanceId: chosen.providerInstanceId,
+                models: [{ id: chosen.modelId, displayName: "Local small" }],
+              },
+            ],
+          } as never
+        }
+        settings={settings as never}
+      />,
+    );
+    const user = userEvent.setup();
+    const reviewer = screen.getByRole("combobox", { name: "Auto reviewer" });
+    await chooseSelectFieldOption(user, reviewer, "Octant Shield");
+    await vi.waitFor(() => expect(reviewer).toHaveTextContent("Provider's own"));
+    await chooseSelectFieldOption(user, reviewer, "Octant Shield");
+    expect(update).toHaveBeenCalledTimes(2);
+
+    const model = screen.getByRole("combobox", { name: "Shield model" });
+    await chooseSelectFieldOption(user, model, "Local · Local small");
+    await vi.waitFor(() =>
+      expect(model).toHaveTextContent("Each thread's provider, smallest model"),
+    );
   });
 
   it("offers each enabled provider's models for Shield and returns to the thread's own", async () => {

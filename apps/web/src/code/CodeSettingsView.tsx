@@ -191,9 +191,19 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
    * can correct it.
    */
   function restoreUnsavedPicks(
-    change: Partial<CodeSettingsDraft> & { readonly bundledLanguageServer?: boolean },
+    change: Partial<CodeSettingsDraft> & {
+      readonly bundledLanguageServer?: boolean;
+      readonly autoReviewer?: AutoReviewer;
+      readonly shieldModel?: ShieldModelChoice | null;
+    },
   ) {
     const host = hostSettings.current;
+    if (change.autoReviewer !== undefined) {
+      setAutoReviewer(host.autoReviewer ?? "provider");
+    }
+    if (change.shieldModel !== undefined) {
+      setShieldModel(modelValue(host.shieldModel));
+    }
     if (change.permissionMode !== undefined) {
       setPermissionMode(permissionModeOfSettings(host));
     }

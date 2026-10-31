@@ -1169,6 +1169,7 @@ function renderCodeTab(
       project: project?.type === "code" ? project : undefined,
       settings: codeController.bootstrap?.settings,
     }),
+    shieldModel: codeController.bootstrap?.settings.shieldModel,
   });
   const harnessAutoReviewSupported = autoReview?.status === "reviewer" ? true : undefined;
   const content = (
@@ -2843,6 +2844,7 @@ function draftAutoReview(props: WorkspaceViewProps): {
     instances: props.providerController.instances,
     observedByInstance: props.providerController.observedByInstance,
     chosen: props.codeController.bootstrap?.settings.autoReviewer,
+    shieldModel: props.codeController.bootstrap?.settings.shieldModel,
   });
   if (autoReview === undefined) return {};
   return autoReview.status === "reviewer" ? { autoSupported: true, autoReview } : { autoReview };
