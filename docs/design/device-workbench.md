@@ -26,7 +26,13 @@ thread is open appears without reloading. `xcodebuild` has no option for a bare
 Swift package, so an `octant_apple` request naming `Package.swift` fails at the
 `project` step saying an Xcode project or workspace is needed. A Simulator
 created after discovery is found by reading the device list again when a request
-names it. An agent's
+names it, and an open pane picks it up too: a host snapshot read re-reads the
+device list in the background at most every 15 seconds, and the pane reads the
+snapshot every 15 seconds while visible (every 3 seconds while a tool runs), so
+a Simulator made elsewhere appears without closing the pane. `octant_apple`'s
+`projectPath` is relative to the checkout root; an absolute path is accepted when
+it lies inside the checkout (it is converted to the relative form) and refused,
+saying it is outside the checkout, when it does not. An agent's
 `octant_apple` `boot`, `run`, or `open` raises that pane once per request
 instead of launching Simulator.app. That request lives only in server memory,
 keyed by thread and served only to the same thread and checkout; it is never
@@ -472,25 +478,25 @@ the arrow keys are hardware keys, and Space types a space. Command and Control
 shortcuts, and Tab, stay with the app. Home, Lock, and (where the host reports
 them) Volume up and down are buttons.
 
-**Typed text takes one of two routes on the Simulator.** Text made only of ASCII
-letters A to Z, digits 0 to 9, spaces, and new lines is typed as key positions
-by the native helper. That route needs a QWERTY software keyboard with an
-Automatic hardware layout in the languages listed under
+**Typed text has one route on the Simulator.** Text made only of ASCII letters A
+to Z, digits 0 to 9, spaces, and new lines is typed as key positions by the
+native helper. That route needs a QWERTY software keyboard with an Automatic
+hardware layout in the languages listed under
 [Native device helper and typed text](#native-device-helper-and-typed-text), and
 a keyboard it cannot read or does not accept is refused
 (`keyboard-layout-unknown`, `keyboard-layout-unsupported`) rather than typed
-wrong. Any other text, including punctuation, letters such as æ, ø, å, or é,
-and other scripts, is copied to the Simulator's pasteboard with
-`xcrun simctl pbcopy` and pasted with Command-V. The action reports success when
-the keystroke is sent, not when the field takes the text (a field that is not
-focused, or that refuses a paste, ignores it), so the evidence note says the
-text was sent as a paste and the agent checks the screen. The paste route does not check
-the keyboard layout. If the copy fails, the action is refused as unavailable
-and no key is pressed. Whether the paste lands in every field, and how the paste
-key behaves on a non-QWERTY layout, are not verified on a device; the desktop
-tests mock the copy and the keystroke. Characters typed on the focused screen
-go to the device as typed text, so an Option-modified key arrives as the
-character it produces; only Command and Control shortcuts are kept by the app.
+wrong. Any other text, including punctuation, letters such as æ, ø, å, or é, and
+other scripts, is refused whole (`unsupported-character`) and nothing is typed;
+the evidence note says so, and the agent may type the text some other way
+(for example by opening a URL or a deep link). A paste through
+`xcrun simctl pbcopy` and Command-V was tried and removed: on Xcode 27 the copy
+exits 0 and sets nothing, and neither the copy nor the keystroke can tell whether
+the field took the text, so it reported success for text that never arrived
+(observed: `a, b! æøå 日本` returned success and the field stayed empty). An action
+reports success only for text the helper keyed. Characters typed on the focused
+screen go to the device as typed text, so an Option-modified key arrives as the
+character it produces; only Command and Control shortcuts are kept by the app,
+and a key outside the typable set is refused with the same reason.
 
 **Pinch and multi-touch are non-goals.** The helper's touch operation takes one
 point per call, and there is no second-finger operation, so the channel cannot

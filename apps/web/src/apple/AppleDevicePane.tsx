@@ -380,7 +380,7 @@ function appleSetup(props: AppleWorkbenchPaneProps): DeviceView {
   };
 }
 
-function appleDiagnostics(props: AppleWorkbenchPaneProps): DeviceDiagnostics {
+export function appleDiagnostics(props: AppleWorkbenchPaneProps): DeviceDiagnostics {
   const stream = props.liveScreen?.status;
   const facts = [
     {

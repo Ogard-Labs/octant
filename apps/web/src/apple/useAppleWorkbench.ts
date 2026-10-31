@@ -20,6 +20,8 @@ import { scheduleVisibleInterval } from "../polling/documentVisibility";
 
 /** State and offer reads are not frames, so a few seconds of lag is invisible. */
 const POLL_INTERVAL_MS = 3_000;
+/** How often an open, visible pane asks whether a Simulator was added or removed. */
+const DESTINATIONS_POLL_INTERVAL_MS = 15_000;
 
 export interface UseAppleWorkbenchOptions {
   readonly client: AppleToolchainClient;
@@ -111,7 +113,6 @@ export function useAppleWorkbench(options: UseAppleWorkbenchOptions): AppleWorkb
   useEffect(() => {
     if (!enabled || status !== "ready") return;
     const watching = (runtime?.active.length ?? 0) > 0 || runtime?.paneOpenRequest !== undefined;
-    if (!watching) return;
     const controller = new AbortController();
     const pull = async () => {
       try {
@@ -122,7 +123,12 @@ export function useAppleWorkbench(options: UseAppleWorkbenchOptions): AppleWorkb
             ? previous
             : {
                 ...previous,
-                simulators: withNewerStates(previous.simulators, next.simulators, undefined),
+                // The host re-reads the device list on its own cadence, so an
+                // open pane also learns of a Simulator made elsewhere.
+                simulators: withNewSimulators(
+                  withNewerStates(previous.simulators, next.simulators, undefined),
+                  next.simulators,
+                ),
               },
         );
       } catch {
@@ -130,9 +136,13 @@ export function useAppleWorkbench(options: UseAppleWorkbenchOptions): AppleWorkb
       }
     };
     // Visible-only: a hidden window does not poll, and showing it again pulls once.
-    const stop = scheduleVisibleInterval(() => void pull(), POLL_INTERVAL_MS, {
-      runImmediately: true,
-    });
+    // While a tool runs the state is followed closely; otherwise only the
+    // destination list is checked, slowly.
+    const stop = scheduleVisibleInterval(
+      () => void pull(),
+      watching ? POLL_INTERVAL_MS : DESTINATIONS_POLL_INTERVAL_MS,
+      { runImmediately: watching },
+    );
     return () => {
       controller.abort();
       stop();
@@ -215,6 +225,13 @@ export function useAppleWorkbench(options: UseAppleWorkbenchOptions): AppleWorkb
 }
 
 type SimulatorRecords = AppleDiscoverySnapshot["simulators"];
+
+/** Simulators the host now lists that the pane's list lacks, after the ones it has. */
+function withNewSimulators(listed: SimulatorRecords, reported: SimulatorRecords): SimulatorRecords {
+  const known = new Set(listed.map((record) => String(record.simulatorId)));
+  const added = reported.filter((record) => !known.has(String(record.simulatorId)));
+  return added.length === 0 ? listed : [...listed, ...added];
+}
 
 /**
  * The listed destinations with the states the host now reports. States are

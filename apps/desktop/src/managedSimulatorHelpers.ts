@@ -21,8 +21,6 @@ const FIRST_FRAME_MS = 5_000;
 const CONFIG_POLL_MS = 200;
 /** What the device helper types as key positions; it checks the guest layout first. */
 const KEY_TYPED_TEXT = /^[A-Za-z0-9 \n]+$/;
-/** HID usage of V, and of the left Command modifier. */
-const PASTE_KEY = { usage: 25, modifiers: [227] } as const;
 /**
  * How long asking the guest whether its input is connected may take. A busy
  * CoreSimulator was observed taking minutes to answer `simctl spawn`; input
@@ -117,8 +115,6 @@ export interface ManagedSimulatorHelpersOptions {
   readonly fetch?: typeof fetch;
   readonly readyMs?: number;
   readonly firstFrameMs?: number;
-  /** Puts text on the Simulator's pasteboard; resolves whether it did. */
-  readonly copyToPasteboard?: (udid: string, text: string, signal: AbortSignal) => Promise<boolean>;
   /** Asks the guest whether Device Hub has taken its touch and buttons. */
   /** The host-private directory a screen capture may land in; without it Rotate cannot read the orientation. */
   readonly captureDirectory?: string;
@@ -183,7 +179,6 @@ export function createManagedSimulatorHelpers(
   const fetchImpl = options.fetch ?? fetch;
   const readyMs = options.readyMs ?? READY_MS;
   const firstFrameMs = options.firstFrameMs ?? FIRST_FRAME_MS;
-  const copyToPasteboard = options.copyToPasteboard ?? simctlPasteboardCopy;
   const inputConnection = options.inputConnection ?? simctlInputConnection;
   const sitsWideOf = options.sitsWide ?? simctlSitsWideIn(options.captureDirectory);
   const openTouchChannel = options.openTouchChannel ?? openServeSimTouchChannel;
@@ -415,8 +410,10 @@ export function createManagedSimulatorHelpers(
 
   /**
    * serve-sim types US key positions without reading the guest layout, so text
-   * never goes to it. Text the device helper can key goes there; punctuation
-   * and non-Latin text is pasted through the Simulator pasteboard.
+   * never goes to it. Only text the device helper can key is sent; anything
+   * else is refused whole. A paste through `simctl pbcopy` was tried and
+   * dropped: on Xcode 27 the copy exits 0 and sets nothing, and nothing can
+   * tell whether the field took a paste, so it reported text it had not typed.
    */
   async function typeText(
     udid: string,
@@ -427,23 +424,12 @@ export function createManagedSimulatorHelpers(
     if (KEY_TYPED_TEXT.test(text)) {
       return native.send(udid, { op: "text", text }, timeoutMs, cancelled);
     }
-    const startedAt = Date.now();
-    const signal =
-      cancelled === undefined
-        ? AbortSignal.timeout(timeoutMs)
-        : AbortSignal.any([cancelled, AbortSignal.timeout(timeoutMs)]);
-    const copied = await copyToPasteboard(udid, text, signal);
-    if (actionWasCancelled(cancelled)) {
-      return { status: "unavailable", message: "The action was cancelled." };
-    }
-    if (!copied) {
-      return { status: "unavailable", message: "The Simulator pasteboard could not be set." };
-    }
-    const remainingMs = timeoutMs - (Date.now() - startedAt);
-    if (remainingMs <= 0) {
-      return { status: "unavailable", message: "Setting the Simulator pasteboard used the time." };
-    }
-    return native.send(udid, { op: "key", ...PASTE_KEY }, remainingMs, cancelled);
+    return {
+      status: "refused",
+      code: "unsupported-character",
+      message:
+        "The Simulator can type only letters A to Z, digits, spaces, and new lines. Nothing was typed.",
+    };
   }
 
   /**
@@ -949,28 +935,6 @@ function simctlSitsWideIn(
       await rm(file, { force: true });
     }
   };
-}
-
-/** `xcrun simctl pbcopy` reads the text from stdin, so it never reaches argv. */
-function simctlPasteboardCopy(udid: string, text: string, signal: AbortSignal): Promise<boolean> {
-  return new Promise((resolve) => {
-    let child: ChildProcess;
-    try {
-      child = spawnProcess("xcrun", ["simctl", "pbcopy", udid], {
-        // pbcopy decodes stdin with the locale; a GUI app's environment often has none.
-        env: { ...process.env, LANG: "en_US.UTF-8", LC_ALL: "en_US.UTF-8" },
-        stdio: ["pipe", "ignore", "ignore"],
-        signal,
-      });
-    } catch {
-      resolve(false);
-      return;
-    }
-    child.once("error", () => resolve(false));
-    child.once("exit", (code) => resolve(code === 0));
-    child.stdin?.once("error", () => undefined);
-    child.stdin?.end(text);
-  });
 }
 
 /**

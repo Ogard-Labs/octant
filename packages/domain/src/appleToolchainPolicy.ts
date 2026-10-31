@@ -281,15 +281,7 @@ export function redactedAppleInputDiagnostic(
   }
   if (request.kind === "type-text") {
     const length = request.text?.length ?? 0;
-    // The desktop pastes anything beyond letters, digits, spaces and new lines,
-    // and a paste is sent without learning whether the focused field took it.
-    const pasted = !/^[A-Za-z0-9 \n]*$/.test(request.text ?? "");
-    return {
-      severity: "note",
-      message: pasted
-        ? `type-text completed (length=${length}; redacted); sent as a paste, so check the screen for the text`
-        : `type-text completed (length=${length}; redacted)`,
-    };
+    return { severity: "note", message: `type-text completed (length=${length}; redacted)` };
   }
   if (request.kind === "key-press") {
     return {
