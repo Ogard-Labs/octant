@@ -88,6 +88,81 @@ const parentLead = () => ({
   modelId: run.routingReceipt.selectedModelId,
 });
 
+describe("a child under a parent Octant Shield reviews", () => {
+  const shieldDecision = (verdict: "allow" | "ask" | "deny") => ({
+    reviewer: "octant-shield" as const,
+    verdict,
+    stage: "model" as const,
+    reason: `Shield said ${verdict}.`,
+    latencyMs: 1,
+    decidedAt: "2026-10-31T00:00:00.000Z" as never,
+  });
+  const interactionsWith = (verdict: "allow" | "ask" | "deny" | undefined, tainted = false) => {
+    const ask = vi.fn<NativeHarnessApprovalStore["ask"]>(async () => "approved");
+    const recordReviewed = vi.fn();
+    const review = vi.fn(async () => (verdict === undefined ? undefined : shieldDecision(verdict)));
+    const shown = vi.fn();
+    const interactions = createAgentRunInteractions({
+      parentLead,
+      parentAuthority: () => run.authority,
+      getById: () => run,
+      approvals: { ask, recordReviewed },
+      questions: { ask: vi.fn() },
+      shield: () => ({ review, recordOnTranscript: shown }),
+      childTainted: () => tainted,
+    });
+    return { interactions, ask, recordReviewed, review, shown };
+  };
+  const toolCall = {
+    toolName: "bash" as const,
+    summary: "bash: bun run test",
+    approvalClass: "shell-commands",
+    freshConfirmation: false,
+    callId: "call-1",
+    arguments: { command: "bun run test" },
+  };
+
+  it("inherits the parent's reviewer for its own tools, judged in its own worktree", async () => {
+    const { interactions, ask, recordReviewed, review, shown } = interactionsWith("allow", true);
+    const signal = new AbortController().signal;
+    expect(await interactions.toolsFor(run).approvals?.({ ...toolCall, signal })).toBe("approved");
+    expect(review).toHaveBeenCalledWith({
+      threadId: String(run.parentThreadId),
+      boundRoot: "/child",
+      call: expect.objectContaining({ command: "bun run test", workingDirectory: "/child" }),
+      alsoTainted: true,
+      signal,
+    });
+    expect(ask).not.toHaveBeenCalled();
+    expect(recordReviewed).toHaveBeenCalledWith(
+      expect.objectContaining({ source: expect.objectContaining({ runId: run.id }) }),
+      expect.objectContaining({ verdict: "allow" }),
+    );
+    expect(shown).toHaveBeenCalledOnce();
+  });
+
+  it("refuses a child's provider prompt Shield denies, without asking the person", async () => {
+    const { interactions, ask } = interactionsWith("deny");
+    expect(await interactions.approve({ run, event, signal: new AbortController().signal })).toBe(
+      false,
+    );
+    expect(ask).not.toHaveBeenCalled();
+  });
+
+  it("hands what Shield escalates to the person on the parent thread", async () => {
+    const { interactions, ask } = interactionsWith("ask");
+    await interactions
+      .toolsFor(run)
+      .approvals?.({ ...toolCall, signal: new AbortController().signal });
+    expect(ask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: run.parentThreadId,
+        shield: expect.objectContaining({ verdict: "ask" }),
+      }),
+    );
+  });
+});
+
 describe("managed child interactions", () => {
   it.each(["provider", "octant"])(
     "refuses a pending %s approval after the parent changes to Plan",

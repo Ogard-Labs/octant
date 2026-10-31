@@ -7660,8 +7660,8 @@ mechanisms are:
   Allowed; not built yet: the single
   level setting with its global and Project defaults, the first-run
   question, the header indicator, the one-time warning,
-  Reviewed in Work and on Mistral Vibe, Octant Shield, and Full access
-  without a sandbox or prompts for every runtime.
+  Reviewed in Work and on Mistral Vibe, Octant Shield outside the Octant
+  Harness, and Full access without a sandbox or prompts for every runtime.
 
 - **Reviewed.** A reviewer answers the prompts that would otherwise go to
   the person: the provider's own, where it has one, or
@@ -10152,7 +10152,10 @@ in this document describe the build as it ships.
 ### Octant Shield
 
 Octant Shield is Octant's own automatic approval reviewer (maintainer
-decision, 2026-10-31; designed, not built). It answers the approval prompts
+decision, 2026-10-31). Its Judge is built for the Octant Harness, its
+subagents included (build order step 1, below); the other runtimes, the picker
+and Settings, the Watcher, safe networks, and the server registry are designed,
+not built. It answers the approval prompts
 that would otherwise go to the person, for every runtime that routes
 approvals through Octant: Octant Harness, Claude Code (`canUseTool`), Codex
 (app-server approval requests), OpenCode (`permission.asked`), ACP agents
@@ -10261,7 +10264,49 @@ wall. A model reviewer is not a guarantee.
 
 **Evaluation.** The repository keeps a fixture set of known-safe and
 known-unsafe calls, and a release with Shield requires measuring its
-false-allow rate on that set.
+false-allow rate on that set. The set lives in
+`packages/domain/src/shieldEvaluationFixtures.ts`; every test run checks that
+the rule stages answer each fixture as recorded and never allow a
+known-unsafe one, and `bun run shield:eval` measures the whole pipeline,
+running the model stage only against an endpoint named in its environment.
+
+**As built.** The rule stages, the prompt the model sees, the answer it must
+give, and the brakes are pure policy in `packages/domain/src/shieldJudgePolicy.ts`;
+the host runs them in `apps/server/src/shield/`. The Judge's input type has no
+field for a tool result, a file's contents, or a fetched page, and the
+person's messages are read from the thread's own turn prompts, never from what
+the agent read, so nothing outside can reach the model. The Project's own
+test and build commands are the `test`, `build`, `typecheck`, and `lint`
+scripts of its root `package.json` under the package manager its lockfile
+names, and the standard commands of a Cargo, Swift, or Go package at the
+root; a command passes by rule only with plain arguments after it. Read-only
+Git is `status`, `diff`, `log`, `show`, `blame`, and the other subcommands
+that only read, with no shell composition and no flag that writes a file.
+The model is a tool-less one-shot session started in a scratch folder
+outside every Project, on the thread's provider account with the catalogue's
+smallest tier by name (a nano, mini, or haiku model, for example), else the
+thread's own model; it has 20 seconds. Each model call reserves a small
+bound against the thread's and Project's spend ceilings first, so a ceiling
+that refuses hands the call to the person, and what the call used is
+journaled under the reviewed thread (request shape `shield-review`, on its
+own `shield-review-usage` aggregate) before the reservation is released, so
+the usage ledger and every ceiling over the thread count it; a call that
+reported nothing is recorded as unreported spend. A fast allow reads a
+command exactly as written: any quoting, escape, expansion, glob, separator,
+redirection, or whitespace other than a space or a tab sends it to the model,
+and read-only Git refuses any option, or unambiguous prefix of one, that
+writes a file, runs a program, reads outside the repository, or switches
+repositories (`--output`, `--ext-diff`, `--textconv`, `--no-index`,
+`--exec-path`, `--git-dir`, `--work-tree`, `-O`, and the like). The brakes are kept per thread in
+the host process: a restart gives a paused thread back to Shield, which
+widens nothing because every counted decision was a refusal. A class the
+person already allowed for the session goes through on their word without
+asking Shield. On the Octant Harness an allow or deny is journaled as a
+settled harness approval carrying the decision, an ask is journaled as the
+pending approval with Shield's reason, and the Code transcript shows each
+decision as an `approval-reviewed` row beside the tool rows. A subagent asks
+under its parent's reviewer, judged against its own worktree, with its own
+taint counted beside the parent's.
 
 **Build order.** (1) Octant Harness; (2) every runtime through the approval
 path; (3) the picker and Settings; (4) the Watcher; (5) safe networks; (6)
@@ -10358,8 +10403,8 @@ in the credential broker, the value fetched at use and never kept.
 The [guardrail levels](#security-and-authority) and the
 [key providers' native features](#providers) are in scope; of them only
 Guarded, Accept edits, Reviewed for Claude Code and Codex in Code, and
-Full access in Code are built; [Octant Shield](#octant-shield) is in scope and
-designed, not built. A merge or force-push an agent starts on its own
+Full access in Code are built; [Octant Shield](#octant-shield) is in scope,
+and its Judge is built for the Octant Harness only. A merge or force-push an agent starts on its own
 initiative, and cloud scheduling, are not in scope. A self-hosted wake service
 that runs in the Octant server on a person's hub and wakes their own spokes is
 in scope under [Hub and spokes](design/hub-and-spokes.md#wake-service); an

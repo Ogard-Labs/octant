@@ -206,6 +206,7 @@ export function startOctantServer(
     });
     const {
       agentRunInteractions,
+      shieldHolder,
       nativeHarnessApprovals,
       nativeHarnessQuestions,
       nativeHarnessSessions,
@@ -453,10 +454,15 @@ export function startOctantServer(
       researchRouter,
       sideTaskFirstMessage,
       sideTaskRoutes,
+      hostShield,
       threadWork,
     } = wireHarness({
       projectService,
       agentRunInteractions,
+      shieldHolder,
+      codeEvidence,
+      providerRuntimeRegistry,
+      spendCeiling,
       nativeHarnessApprovals,
       nativeHarnessQuestions,
       nativeHarnessSessions,
@@ -702,6 +708,9 @@ export function startOctantServer(
       threadMentionService: (): ThreadMentionService => threadMentionService,
       threadOutsideContentMarks,
     });
+    // Octant Shield's decisions show on the Code transcript beside the tool
+    // rows; the runtime that owns the transcript is built after Shield.
+    hostShield.showDecisionsWith((input) => codeOperationRuntime?.recordShieldReview?.(input));
     const {
       codeCheckoutOpenRoutes,
       codeExternalEditorRoutes,
