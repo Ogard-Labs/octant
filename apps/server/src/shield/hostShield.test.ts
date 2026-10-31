@@ -108,8 +108,10 @@ describe("Octant Shield as the host wires it", () => {
       reservations: [],
     }));
     const settle = vi.fn();
+    const recordUsage = vi.fn();
     const shield = hostShieldWith(thread(), {
       spendCeiling: { admit, settle, abandon: vi.fn() },
+      recordUsage,
       // A driver that cannot be acquired leaves the model unreached.
       resolveDriver: () =>
         ({
@@ -127,7 +129,17 @@ describe("Octant Shield as the host wires it", () => {
     expect(admit).toHaveBeenCalledWith(
       expect.objectContaining({ threadId, threadType: "code-thread", countsAsTurn: false }),
     );
-    expect(settle).toHaveBeenCalledOnce();
+    // A call that reported nothing is still recorded, as unreported spend,
+    // before its reservation is released.
+    expect(recordUsage).toHaveBeenCalledExactlyOnceWith({
+      threadId,
+      model: { providerInstanceId, modelId: "fast-mini" },
+      usage: undefined,
+    });
+    expect(settle).toHaveBeenCalledExactlyOnceWith({ reservationId: expect.any(String) });
+    expect(recordUsage.mock.invocationCallOrder[0]).toBeLessThan(
+      settle.mock.invocationCallOrder[0] ?? 0,
+    );
   });
 
   it("shows decisions on the transcript once the Code runtime is wired", () => {

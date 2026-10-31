@@ -6,6 +6,7 @@ import {
   type ShieldModelChoice,
   type ShieldStage,
   type ShieldVerdict,
+  type TurnUsage,
 } from "@octant/contracts";
 import {
   judgeShieldCallByRules,
@@ -24,7 +25,12 @@ import {
 export const SHIELD_MODEL_TIMEOUT_MS = 20_000;
 
 export type ShieldModelOutcome =
-  | { readonly status: "answered"; readonly text: string }
+  | {
+      readonly status: "answered";
+      readonly text: string;
+      /** What the provider reported the call used; absent when it reported nothing. */
+      readonly usage?: TurnUsage;
+    }
   | { readonly status: "unreached" | "timed-out" | "failed" };
 
 /** One configured model the Judge asks, by one prompt and one reply, with no tools. */
@@ -38,13 +44,19 @@ export interface ShieldModelPort {
   }) => Promise<ShieldModelOutcome>;
 }
 
-/** Shield's model calls count against the thread's and Project's spend ceilings. */
+/**
+ * Shield's model calls count against the thread's and Project's spend
+ * ceilings: a call reserves before it runs, and settling records what it used
+ * under the thread (unreported when the provider said nothing) before the
+ * reservation is released.
+ */
 export interface ShieldSpendPort {
   readonly admit: (scope: {
     readonly threadId: string;
     readonly projectId?: string | undefined;
+    readonly model: ShieldModelChoice;
   }) =>
-    | { readonly status: "admitted"; readonly settle: () => void }
+    | { readonly status: "admitted"; readonly settle: (usage: TurnUsage | undefined) => void }
     | {
         readonly status: "refused";
         readonly reason: string;
@@ -188,6 +200,7 @@ export class OctantShield {
     const admission = this.#options.spend?.admit({
       threadId: request.threadId,
       projectId: reviewing.projectId,
+      model: model.model,
     });
     if (admission?.status === "refused") {
       return decide("ask", "fail-closed", `${admission.reason} The person decides this call.`, {
@@ -209,9 +222,8 @@ export class OctantShield {
       );
     } catch {
       outcome = { status: "failed" };
-    } finally {
-      admission?.settle();
     }
+    admission?.settle(outcome.status === "answered" ? outcome.usage : undefined);
     if (outcome.status !== "answered") {
       return decide(
         "ask",

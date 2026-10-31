@@ -9924,7 +9924,17 @@ outside every Project, on the thread's provider account with the catalogue's
 smallest tier by name (a nano, mini, or haiku model, for example), else the
 thread's own model; it has 20 seconds. Each model call reserves a small
 bound against the thread's and Project's spend ceilings first, so a ceiling
-that refuses hands the call to the person. The brakes are kept per thread in
+that refuses hands the call to the person, and what the call used is
+journaled under the reviewed thread (request shape `shield-review`, on its
+own `shield-review-usage` aggregate) before the reservation is released, so
+the usage ledger and every ceiling over the thread count it; a call that
+reported nothing is recorded as unreported spend. A fast allow reads a
+command exactly as written: any quoting, escape, expansion, glob, separator,
+redirection, or whitespace other than a space or a tab sends it to the model,
+and read-only Git refuses any option, or unambiguous prefix of one, that
+writes a file, runs a program, reads outside the repository, or switches
+repositories (`--output`, `--ext-diff`, `--textconv`, `--no-index`,
+`--exec-path`, `--git-dir`, `--work-tree`, `-O`, and the like). The brakes are kept per thread in
 the host process: a restart gives a paused thread back to Shield, which
 widens nothing because every counted decision was a refusal. A class the
 person already allowed for the session goes through on their word without

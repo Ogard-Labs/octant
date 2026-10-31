@@ -144,6 +144,7 @@ describe("Octant Shield on the host", () => {
     const { port } = fakeModel({
       status: "answered",
       text: '{"verdict":"allow","reason":"Fine."}',
+      usage: { inputTokens: 310, outputTokens: 12 },
     });
     const settle = vi.fn();
     const admit = vi.fn(() => ({ status: "admitted" as const, settle }));
@@ -158,8 +159,9 @@ describe("Octant Shield on the host", () => {
       clock: () => "2026-10-31T12:00:00.000Z",
     });
     await shield.review({ threadId: "t", call: bash("ls"), boundRoot: root });
-    expect(admit).toHaveBeenCalledWith({ threadId: "t", projectId: "project-1" });
-    expect(settle).toHaveBeenCalledTimes(1);
+    expect(admit).toHaveBeenCalledWith({ threadId: "t", projectId: "project-1", model });
+    // What the call used is settled with it, so the ledger records it.
+    expect(settle).toHaveBeenCalledExactlyOnceWith({ inputTokens: 310, outputTokens: 12 });
 
     const refusing = new OctantShield({
       facts: {

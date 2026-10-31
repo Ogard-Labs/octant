@@ -4,6 +4,7 @@ import { realpath, stat as statFromDisk } from "node:fs/promises";
 import { join } from "node:path";
 import { queueSteeringWhereDelivered, withSteerable } from "../harness/nativeHarnessSteerability";
 import { createHostShield, shieldRoutesApprovals } from "../shield/hostShield";
+import { recordShieldReviewUsage } from "../shield/shieldUsageLedger";
 import {
   AggregateId,
   decodeCodeThreadId,
@@ -537,6 +538,21 @@ export function wireHarness(deps: HarnessDependencies) {
         return text === undefined ? [] : [text];
       }),
     spendCeiling,
+    recordUsage: ({ threadId, model, usage }) =>
+      recordShieldReviewUsage(
+        {
+          connection: persistence.connection,
+          journal: persistence.journal,
+          clock: () => new Date().toISOString(),
+          uuid: randomUUID,
+        },
+        {
+          threadId,
+          providerInstanceId: model.providerInstanceId,
+          modelId: model.modelId,
+          usage,
+        },
+      ),
     scratchRoot: harnessWorkDirectory,
   });
   shieldHolder.port = hostShield;
