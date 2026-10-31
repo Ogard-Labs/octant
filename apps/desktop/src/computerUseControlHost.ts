@@ -189,6 +189,7 @@ export function createComputerUseControlHost(options: {
             pid,
             window_id: windowId,
             include_screenshot: true,
+            tree_format: "elements",
             max_dimension: 1280,
             max_elements: 512,
           });
@@ -390,10 +391,12 @@ export function createComputerUseControlHost(options: {
         const address = {
           pid: old.pid,
           window_id: old.windowId,
-          snapshot_id: before.observation.snapshotId,
           session: session.id,
           delivery_mode: "background",
-          ...("elementIndex" in command ? { element_index: command.elementIndex } : {}),
+          // A token names one snapshot row; a newer snapshot of the window stales it.
+          ...("elementIndex" in command
+            ? { element_token: `${before.observation.snapshotId}:${command.elementIndex}` }
+            : {}),
         };
         await call("start_session", { session: session.id });
         if (command.operation === "click")
