@@ -147,6 +147,8 @@ describe("ACP Code client tools", () => {
       await rm(root, { recursive: true, force: true });
       await rm(extra, { recursive: true, force: true });
       await rm(beside, { recursive: true, force: true });
+    }
+  });
 
   it("refuses a protected file at Full access and names the rule and channel", async () => {
     const root = await realpath(await mkdtemp(join(tmpdir(), "octant-acp-home-")));
