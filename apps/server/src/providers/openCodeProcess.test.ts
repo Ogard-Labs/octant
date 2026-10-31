@@ -827,6 +827,35 @@ describe("OpenCodeProcessPort", () => {
     ).toBe(false);
   });
 
+  it("starts Full access with no wrapper around the runtime", async () => {
+    const fixture = probeWrapper("v2-ready");
+    const prepared: Array<ReadonlyArray<string>> = [];
+    const confinement: ProcessConfinementPort = {
+      // The version probe is confined as at every level; the runtime launch
+      // is not wrapped at all.
+      prepare: (input) => {
+        prepared.push(input.args);
+        return { command: input.executable, args: input.args };
+      },
+    };
+    await Effect.runPromise(
+      Effect.scoped(
+        makeOpenCodeProcessLive({
+          confinement,
+          platform: "darwin",
+          runtimeConfigResolver: async () => undefined,
+          startupTimeoutMs: 2_000,
+        }).start({
+          binaryPath: fixture.binaryPath,
+          cwd: fixture.root,
+          mode: "code",
+          executionPolicy: "full-access",
+        }),
+      ),
+    );
+    expect(prepared.some((args) => args.includes("serve"))).toBe(false);
+  });
+
   it("starts the server on its own egress proxy below Full access and keeps loopback off the proxy", async () => {
     const fixture = profileRecordingWrapper("isolation-supported");
     let captured: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;

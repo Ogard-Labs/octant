@@ -7788,34 +7788,46 @@ mechanisms are:
   exception to the wider one. Full access shows a one-time warning the first
   time a machine or a Project picks it.
 
-  | Level                                    | Who approves tool calls                                                                                                | Prompt-injection gate                                       | Sandbox                                         | Git and pull requests                                                                                      | Default for                                                               |
-  | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-  | Guarded (Ask first)                      | The person, for anything with effects                                                                                  | On: fresh confirmation after reading outside content        | Octant's OS confinement plus the provider's     | Opens and updates pull requests after asking; merges only when the person asked                            | Ask first in the first-run picker; the fallback where no reviewer can run |
-  | Guarded with edits waived (Accept edits) | The person, except file edits inside the folder                                                                        | On                                                          | Octant's plus the provider's                    | As Guarded                                                                                                 | Accept edits in the first-run picker                                      |
-  | Reviewed (Auto)                          | A reviewer the person chooses: the provider's own or [Octant Shield](#octant-shield); the person for what it escalates | On                                                          | Octant's plus the provider's                    | As Guarded, with the reviewer standing in for the person's click                                           | Auto in the first-run picker, pre-selected                                |
-  | Full access                              | Nobody: no prompts, every approval answered allow                                                                      | Off: outside content is recorded and marked, never a prompt | None: no Octant sandbox and no provider sandbox | Opens, updates, merges, and force-pushes the pull requests and branches the person asked for in the thread | Full access in the first-run picker, never pre-selected                   |
+  | Level                                    | Who approves tool calls                                                                                                | Prompt-injection gate                                       | Sandbox                                                                                                               | Git and pull requests                                                                                      | Default for                                                               |
+  | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+  | Guarded (Ask first)                      | The person, for anything with effects                                                                                  | On: fresh confirmation after reading outside content        | Octant's OS confinement plus the provider's                                                                           | Opens and updates pull requests after asking; merges only when the person asked                            | Ask first in the first-run picker; the fallback where no reviewer can run |
+  | Guarded with edits waived (Accept edits) | The person, except file edits inside the folder                                                                        | On                                                          | Octant's plus the provider's                                                                                          | As Guarded                                                                                                 | Accept edits in the first-run picker                                      |
+  | Reviewed (Auto)                          | A reviewer the person chooses: the provider's own or [Octant Shield](#octant-shield); the person for what it escalates | On                                                          | Octant's plus the provider's                                                                                          | As Guarded, with the reviewer standing in for the person's click                                           | Auto in the first-run picker, pre-selected                                |
+  | Full access                              | Nobody: no prompts, every approval answered allow                                                                      | Off: outside content is recorded and marked, never a prompt | None: no Octant sandbox and no provider sandbox; protected files are guarded by Octant's own tools and redaction only | Opens, updates, merges, and force-pushes the pull requests and branches the person asked for in the thread | Full access in the first-run picker, never pre-selected                   |
   - **Full access means no sandbox and no prompts,** as in the providers'
     own apps (maintainer decision, 2026-10-31). Per runtime: Claude Code
     runs `permissionMode: "bypassPermissions"`; Codex runs
-    `danger-full-access` with approval policy `never`, unwrapped; OpenCode,
-    ACP agents (Mistral Vibe included), Pi, and the Octant Harness run
-    without Octant's OS sandbox, and Octant answers each of their approval
-    requests allow. The network is open. No class still prompts at this
-    level, irreversible actions and publishing to an outside target
-    included. An agent acts on pull requests, pushes, and merges only because
-    the person asked in the thread; that is behavior, journaled, not a
-    prompt.
+    `danger-full-access` with approval policy `never`; OpenCode, ACP agents
+    (Mistral Vibe included), Pi, and the Octant Harness run without Octant's
+    OS sandbox, and Octant answers each of their approval requests allow.
+    The network is open. No class still prompts at this level, irreversible
+    actions and publishing to an outside target included. An agent acts on
+    pull requests, pushes, and merges only because the person asked in the
+    thread; that is behavior, journaled, not a prompt.
+  - **Full access is full access for secret files too** (maintainer
+    decision, 2026-10-31: "softer guard — full access is full access").
+    No runtime or command runs under an OS wall at this level, and a shell
+    command can read a protected file. The [secret guard](#secret-guard) is
+    soft there: Octant's own file tools (the Octant Harness's, the ACP
+    client's host-side file operations, and Claude Code's through Octant's
+    tool gate) still refuse a protected path with the same plain message,
+    [Octant Shield](#octant-shield)'s Judge and Watcher are to flag a read of a
+    protected path and a secret-then-network sequence as journaled tags and
+    never block (allowed; not built yet), and secret redaction stays on. Below Full access the list is
+    an OS rule on every confined launch.
   - **Outside content is recorded only** at Full access: a quiet tag on the
     tool row, a small mark on the thread card, and the taint in the journal
     and export. It never prompts and never blocks
     ([Octant Shield's Watcher](#octant-shield) does this tagging).
   - **The one-time warning** reads: agents can change any file and run any
-    command without asking, with no sandbox, so they can read your whole
-    home folder, including SSH and cloud keys.
+    command without asking, with no sandbox. Protected files, such as SSH and
+    cloud keys, are guarded by Octant's own tools and redaction only, and a
+    shell command can read them.
   - **Every level keeps the hard lines** in
     [Overview and principles](#overview-and-principles): no telemetry and the
     provider telemetry guards, the journal of every tool call and level
-    change, secret redaction in logs, the journal, and exports, spend
+    change, the secret guard's refusal in Octant's own file tools and its redaction in tool
+    output, transcripts, logs, the journal, and exports, spend
     ceilings, remote clients never exceeding the host, an agent never
     marking a thread Done, credentials reaching providers only through the
     credential broker, Plan read-only, and an agent never merging or
@@ -7864,7 +7876,8 @@ mechanisms are:
   Code, set per thread and remembered per Project. Today's Full access
   already runs Claude Code at `bypassPermissions` and Codex at
   `danger-full-access` with approval policy `never`, with no Octant
-  wrapping for any provider runtime. It still asks for some classes (the
+  wrapping for any provider runtime.
+  It still asks for some classes (the
   Octant Harness exception below, a tainted thread's confirmations, a
   review reply posted under the person's name, a publish to an outside
   service); those prompts are today's build, not the rule.
@@ -8289,23 +8302,12 @@ access` agree); a thread's own change is journaled as
   pins against this table, is the accepted one: Claude keeps its own sandbox
   outside Plan, and closing that gap is not an open goal. Octant says so rather than promising a boundary it
   does not draw; a runtime that can be wrapped without losing what it needs is
-  taken as its own change. Full access never gets the deny-default
-  profile. The one wrapper it can get is deny-only: an ACP profile with
-  extension or host-auth paths to deny (Kimi, for example) launches Full access
-  under an allow-default `sandbox-exec` profile or a Bubblewrap host-root bind
-  that denies only those paths (`makeAcpConfinementLive`). That wrapper
-  confines nothing else. On Linux it is refused when `bwrap` is setuid, as
-  above. On Linux a deny path that does not exist is skipped,
-  because Bubblewrap would create it in the person's own Project (see
-  [Extensions and skills](#extensions-and-skills)). A linked deny path is
-  covered at its target, as in the restricted capsule above: measured on
-  bwrap 0.9.0, an absolute or dangling link at a mount point refused the
-  whole Full-access launch. A link to a missing file exists, and the runtime
-  could write that file through it, so its target is covered too, and
-  Bubblewrap leaves an empty folder there, with any missing folders above it.
-  A missing target this host user could not create is skipped, because the
-  runtime cannot write it either, and a target inside another denied folder
-  is already hidden by that folder's cover.
+  taken as its own change. Full access gets no wrapper at all: every
+  runtime and every command it runs launches as the program itself, with no
+  profile, no Bubblewrap bind, and no credential-file or extension denials
+  (maintainer decision, 2026-10-31: "softer guard — full access is full
+  access"). Programs that apply a sandbox of their own, such as `swift package`
+  and headless Chromium, therefore run without extra flags.
 
   | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                  | Plan's read-only enforced by                                                                                                                                                                                                               |
   | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -8320,11 +8322,11 @@ access` agree); a thread's own change is journaled as
   The columns are today's postures. On the
   [guardrail levels](#security-and-authority): Guarded and Reviewed run
   the Plan and approval-gated columns unchanged, because a reviewer
-  changes who answers, not the sandbox. At Full access Octant wraps no
-  provider runtime and no runtime keeps its own sandbox: Claude Code runs
-  `bypassPermissions` and Codex `danger-full-access` (built), and OpenCode,
-  ACP agents, Pi, and the Octant Harness run without Octant's OS sandbox,
-  leaving only the operating system's own protections. Plan's read-only enforcement is the same at every level.
+  changes who answers, not the sandbox. At Full access no runtime keeps its
+  own sandbox: Claude Code runs `bypassPermissions` and Codex
+  `danger-full-access` (built), and OpenCode, ACP agents, Pi, and the Octant
+  Harness run without Octant's OS sandbox, unwrapped (built). Nothing nests,
+  so a program that applies a Seatbelt profile of its own works. Plan's read-only enforcement is the same at every level.
 
   A Work thread launches exactly as a Code thread at the same level would
   ([Modes](#modes-chat-work-and-code)); the launch builders read the mode only
@@ -8344,7 +8346,7 @@ access` agree); a thread's own change is journaled as
   - **Codex app-server:** wrapped at Guarded and Reviewed as in Code, with
     the lease keyed by root, mode, and posture (below); the shell runs inside
     Octant's profile, so `~/.ssh` is reachable only through the person's SSH
-    agent or a server registered with Octant Shield. Unwrapped at Full access.
+    agent or a server registered with Octant Shield. At Full access unwrapped.
   - **Octant Harness:** gives the Work thread the shell port a Code harness
     thread has, under the same harness authority, which still asks before
     every command whatever a window's session grant says.
@@ -8377,8 +8379,8 @@ access` agree); a thread's own change is journaled as
   Claude's unwrapped postures rest on the runtime's own sandbox because its
   sign-in and tools need reach that a deny-default profile would have to
   re-grant.
-  At Full access a Codex command reaches the whole disk, `~/.aws` and `~/.ssh`
-  included, and the launch environment is the same in every posture. Octant
+  At Full access a Codex command reaches the whole disk,
+  and the launch environment is the same in every posture. Octant
   therefore gives the Codex runtime no reusable cloud credential the person
   did not configure for that account. The environment
   Octant launches it with carries no AWS profile, shared-config location, or
@@ -10399,6 +10401,138 @@ remediation plan was measured on 12 Oct 2026, and the maintainer chose the Keych
 it found. The rule is still not in force: it needs Anthropic's Commercial
 Terms or an explicit Anthropic exception. Until that is recorded, the rules
 in this document describe the build as it ships.
+
+### Secret guard
+
+Below Full access, secret files stay out of every agent's reach by an OS rule;
+at Full access they are guarded softly (maintainer decision, 2026-10-31:
+"softer guard — full access is full access"). Full access stays "no sandbox,
+no prompts": a shell command there can read a protected file. Built, except
+the Watcher's tags.
+
+- **One list, every runtime.** The list is
+  `packages/domain/src/secretGuardPolicy.ts`; the host turns it into rules in
+  `apps/server/src/process/secretGuard.ts`. Below Full access (Ask first, Accept edits, Auto, Plan) it joins every
+  confined launch through the shared builder: the deny-default Seatbelt profile emits
+  it after every grant (Seatbelt applies the last matching rule), so a
+  protected file inside a granted root, such as a home folder opened as a
+  Project, stays denied; the Bubblewrap capsule covers each protected file
+  inside a bound root. At Full access no launch is wrapped (see
+  [Sandbox](#security-and-authority)), so the list is not an OS rule there.
+  The built-in groups, per platform:
+  - **SSH private keys:** files in `~/.ssh` (two levels) named `id_*`,
+    `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.ppk`, or `identity`, and any file
+    that has a `name.pub` companion, found from the folder listing alone.
+    `*.pub`, `config`, and `known_hosts` stay readable, and so does an agent
+    socket in the folder.
+  - **Cloud command-line credentials:** `~/.aws/credentials`,
+    `~/.aws/sso/cache`, `~/.aws/cli/cache`, the credential and token files
+    under `~/.config/gcloud`, and the token caches under `~/.azure`. Each
+    tool's configuration file stays readable.
+  - **Cluster configuration** (`~/.kube/config`), **container registry
+    sign-in** (`~/.docker/config.json`), **package registry tokens**
+    (`~/.npmrc`, `~/.pypirc`, `~/.gem/credentials`, `~/.cargo/credentials`),
+    **Git and network credential files** (`~/.git-credentials`,
+    `~/.config/git/credentials`, `~/.netrc`), and the **forge command-line
+    sign-in** (`~/.config/gh/hosts.yml`). The registry files are protected
+    whole: a token line cannot be told from the rest without reading it.
+  - **Keychains and password vaults:** on macOS every file under
+    `~/Library/Keychains` except the login keychain database and its SQLite
+    companions, and the local vault folders of password managers; on Linux
+    `~/.local/share/keyrings` and the vault folders. The login keychain stays
+    readable because the Security framework opens it in the calling process:
+    `git credential-osxkeychain`, `security`, and a runtime's own Keychain
+    sign-in fail without it, and its items stay encrypted and unlock only
+    through the keychain service. A confined launch gets that exception back
+    for reading only, and only when a granted root already reached the folder.
+  - **Browser cookies and saved logins:** profile cookie, login, and key
+    stores under `~/Library/Application Support` (five levels) and the
+    browser cookie folders on macOS; under `~/.config` and the browser
+    profile folders on Linux.
+  - **Octant's own secrets:** the bridge secret, the data directory's
+    `remote` and `integrations` folders, and the runtime directory's
+    `*.secret` files.
+  - **Provider sign-ins:** each provider's stored sign-in file in the home
+    folder, and Octant's managed account homes (`providers/` in the data
+    directory). A runtime may read its own sign-in and no other tool's: a
+    launch names its own account paths, and a sign-in entry at or beneath
+    one is left out, one containing it is denied with the own path
+    re-allowed. A confined launch also counts as its own the read and write
+    roots it was granted by name, except the bound root and the temporary
+    directory. No own path ever reopens a file in another group.
+- **The person can add paths and remove built-ins.** Settings › Permissions
+  › Protected files (`ProtectedFilesService`, `/api/protected-files`) shows
+  each group with the paths it covers on this host and the channel that
+  replaces it. A person adds an absolute or `~/` path and removes it again;
+  removing a built-in group needs an explicit confirm, and the command
+  carries `confirmed: true`, so an unconfirmed removal is not representable.
+  Every change is journaled under the `protected-files` aggregate with the
+  actor; only a window on this host may change the list, never a paired
+  device. The journal holds changes, not the list, so a group a later Octant
+  adds is protected on every host. Changes reach every launch prepared after
+  them.
+- **Work goes through the channel instead of the file.** SSH through the
+  agent socket in `SSH_AUTH_SOCK`, a password manager's SSH agent included;
+  Git over HTTPS through the system credential helper, which reaches the
+  keychain through the Security framework; provider, connector, and package
+  keys through the credential broker; cluster access through a `KUBECONFIG`
+  the person keeps outside the list. Cloud command-line tools getting
+  short-lived credentials from the broker when linked is allowed; not built
+  yet.
+- **A refused read names its rule and channel.** Octant's own file tools
+  (the Octant Harness's read, write, edit, and grep; the ACP client's file
+  read and write) and Claude Code's file tools, through Octant's tool gate,
+  answer a protected path at every level, Full access included, with the
+  group, the path, and the channel to use instead (`protectedFileRefusal`). The Octant Harness's
+  search across a folder skips protected files without opening them.
+  Claude Code's Grep, Glob, and LS take no exclusion and, at the postures
+  where the runtime runs outside Octant's profile (approval-gated,
+  auto-accept-edits, and Full access), run in its unwrapped process, so a search rooted at or
+  above an existing protected file, or inside a protected folder, is refused
+  whole (`secretGuardSearchRefusal`); its own sandbox cannot carry the list,
+  because its `allowRead` takes precedence over `denyRead`. Protected entries
+  are matched in their lexical and resolved forms, so a linked folder's target
+  is refused too. In the Seatbelt profiles each exception follows only its own
+  rule's denial, and the person's added paths are denied last, after a
+  launch's extra rules. A command's refusal is the
+  operating system's `Operation not permitted`; Octant does not rewrite
+  command output.
+- **Secret redaction everywhere.** Known key formats (private key blocks,
+  provider, forge, registry, cloud, and chat-service tokens, JSON web
+  tokens, a URL's password, an `_authToken` value) and every value the
+  credential broker handed out in this host process are redacted
+  (`redactSecrets`) from a runtime's normalized events at the shared driver
+  boundary (`redactProviderRuntimeSecrets`), so tool output, transcripts, the
+  journal, exports, and diagnostics built from them carry the mark instead.
+  Thread exports and the service log pass the same redaction. Tool and
+  approval requests are left as asked, so redaction never changes what an
+  agent does. A key split across two streamed chunks is not caught, and the
+  model still sees what a tool returned to it.
+- **Shield links in.** The Judge, built for the Octant Harness, sends a
+  command that reaches a secret file to the person (`secret-path`) and refuses
+  one that reads secrets and sends something off the computer
+  (`reads-secrets-then-egress`); see [Octant Shield](#octant-shield). Allowed;
+  not built yet: the Watcher flagging an attempt to read a protected path or
+  print a secret-holding environment variable, and the Judge reading the
+  person's protected list rather than its own secret-path patterns. At Full
+  access these are journaled tags and never block, because nothing else
+  stands between a shell command and the file there.
+- **Measured friction** (macOS 27, below Full access, fake files in a
+  throwaway home): a planted `~/.ssh/id_test` is refused while
+  `~/.ssh/config`, `known_hosts`, and public keys read; `ssh-add -l` lists a
+  key through an agent socket inside `~/.ssh`; `git` commits and runs `ssh`
+  for an SSH remote. Not measured: a push over SSH or HTTPS to a real server,
+  a real publish, and a container pull.
+- **Known gaps.** At Full access a shell command, or any program the agent
+  starts, can read a protected file: only Octant's own file tools and
+  redaction stand in the way, by decision. On Linux a protected file absent
+  when a confined runtime starts is not covered, because Bubblewrap would
+  have to create a placeholder in the person's home folder first; a file
+  created mid-session is covered from the next launch. Below Full access
+  Claude Code's commands run in Claude Code's own sandbox, which the guard
+  cannot join; the Project-root rule and the approvals hold them, and its
+  file tools are refused by Octant's gate. Linux launches are covered by
+  tests of the covers they build, not yet by a measured run.
 
 ### Octant Shield
 

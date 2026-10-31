@@ -120,8 +120,10 @@ in the composer changes it in one click, for new and existing threads alike:
   short list of reading tools, refuses every write they try outside a
   scratch folder of its own, and gives them no network.
 - **Full access**: no sandbox and no prompts, as in the providers' own apps.
-  Agents can change any file and run any command without asking, so they can
-  read your whole home folder, including SSH and cloud keys. Nothing asks,
+  Agents can change any file and run any command without asking.
+  [Protected files](../advanced/privacy-and-security.md#protected-files),
+  such as SSH private keys and cloud credentials, are guarded by Octant's own
+  tools and redaction only, and a shell command can read them. Nothing asks,
   pushing, merging and publishing included; the agent does those because you
   asked in the thread, and every action is recorded. Outside content the
   agent read is tagged on the tool row and the thread card, never blocked.

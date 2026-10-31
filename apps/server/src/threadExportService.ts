@@ -44,6 +44,7 @@ import {
   type ImageJob,
 } from "@octant/contracts";
 import { browserCaptureExportAttachments, generatedImageExportAttachments } from "@octant/domain";
+import { redactHostSecretsInValue } from "./process/secretRedaction";
 
 const IN_PROGRESS = new Set(["queued", "streaming", "waiting", "running", "accepted"]);
 const MAX_CODE_EXPORT_CONVERSATION_PAGES = 100;
@@ -161,7 +162,9 @@ export class ThreadExportService {
     if (source === undefined) {
       return decodeThreadExportOutcome({ kind: "refused", reason: "not-found" });
     }
-    const bundle = buildThreadExportBundle(source);
+    // A key pasted into a message or printed by a tool leaves the host as
+    // the redaction mark, never as the key.
+    const bundle = buildThreadExportBundle(redactHostSecretsInValue(source));
     if (threadExportContainsForbiddenKey(bundle)) {
       return decodeThreadExportOutcome({ kind: "refused", reason: "unauthorized" });
     }

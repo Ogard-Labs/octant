@@ -1,5 +1,6 @@
 import type { CredentialPurgeAttempt } from "@octant/domain";
 import { credentialStoreFailureCauseOf, type KeyRejection } from "@octant/host-runtime";
+import { noteIssuedSecret } from "../process/secretRedaction";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const PURGE_FAILURE_KINDS = new Set(["locked", "unavailable", "indeterminate", "failed"]);
@@ -165,6 +166,8 @@ function makeBrokerCredentialClient(
       if (!hasExactKeys(value, ["credential"]) || typeof value.credential !== "string") {
         throw brokerFailure();
       }
+      // A value the broker handed out is redacted wherever it later appears.
+      noteIssuedSecret(value.credential);
       return value.credential;
     },
     set: async (providerInstanceId: string, credential: string): Promise<void> => {
