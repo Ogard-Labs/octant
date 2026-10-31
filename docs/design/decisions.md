@@ -63,13 +63,13 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Browser](#browser)                                                                   | 4         | 3       | 0            | 1                   |
 | [Provider runtimes](#provider-runtimes)                                               | 6         | 6       | 0            | 0                   |
 | [Model endpoints and organization sign-in](#model-endpoints-and-organization-sign-in) | 6         | 5       | 1            | 0                   |
-| [Outside provider drivers](#outside-provider-drivers)                                 | 3         | 2       | 1            | 0                   |
+| [Outside provider drivers](#outside-provider-drivers)                                 | 3         | 3       | 0            | 0                   |
 | [Device workbench and mobile](#device-workbench-and-mobile)                           | 8         | 6       | 2            | 0                   |
 | [Hubs, relay and Nightly](#hubs-relay-and-nightly)                                    | 5         | 3       | 1            | 1                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
 | [Decided, pending a specification update](#decided-pending-a-specification-update)    | 5         | 0       | 0            | 5                   |
-| **All areas**                                                                         | **222**   | **172** | **36**       | **14**              |
+| **All areas**                                                                         | **222**   | **173** | **35**       | **14**              |
 
 ## Principles and hard lines
 
@@ -2339,9 +2339,11 @@ Updates are never automatic, and trust binds a content digest. Marketplace packa
 
 - A new digest arrives held and untrusted; the instances stop until the person trusts it, and trusting clears their Verify tools records.
 - A marketplace package carries a publisher signature, the key is pinned at first trust, and a version signed by another key is held until re-trusted.
-- Only a local folder yields a driver today; the package-registry source is not built yet.
+- A driver comes from a local folder or from a signed npm package. The host checks the download against the integrity the registry published, the signature names the npm package, and nothing from the package runs when it is fetched.
+- A package's identity is its registry and name, so a new version updates the same package. An update check asks the registry the package was installed from and installs nothing.
+- Publishing the author kit to npm needs an npm organization and stays a maintainer action.
 
-Status: Partly built. Since: 2026-10-26. Detail: [Outside provider drivers: provenance and updates](outside-provider-drivers.md#provenance-and-updates) and [signature rules](outside-provider-drivers.md#signature-rules).
+Status: Built. Since: 2026-10-26. Detail: [Outside provider drivers: provenance and updates](outside-provider-drivers.md#provenance-and-updates), [signature rules](outside-provider-drivers.md#signature-rules) and [npm source](outside-provider-drivers.md#npm-source).
 
 ## Device workbench and mobile
 
