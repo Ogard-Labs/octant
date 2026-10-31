@@ -577,7 +577,8 @@ describe("native harness hostile content", () => {
     expect(lead.asked).toHaveLength(2);
     expect(lead.asked[1]).toMatchObject({ approvalClass: "shell-commands", singleUse: true });
     // It names what marked the thread, so the person knows why it asks.
-    expect(lead.asked[1]?.outsideSources).toEqual(["web-fetch"]);
+    // Octant Shield's Watcher names what it found in the page beside it.
+    expect(lead.asked[1]?.outsideSources).toEqual(["shield-watcher-fake-authority", "web-fetch"]);
 
     // An "always" answered on the tainted thread covers only that one command.
     expect(await lead.call("bash", { command: "bun test" })).toMatchObject({ isError: false });
