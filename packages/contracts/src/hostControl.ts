@@ -72,6 +72,48 @@ export const HostLifecycleControlAvailability = Schema.Union(
 );
 export type HostLifecycleControlAvailability = typeof HostLifecycleControlAvailability.Type;
 
+export const HostMemoryPressureLevel = Schema.Literal("normal", "elevated", "critical");
+export type HostMemoryPressureLevel = typeof HostMemoryPressureLevel.Type;
+
+const BoundedMegabytes = Schema.Int.pipe(Schema.between(0, 16_777_216));
+
+/**
+ * What the host did the last time memory ran short. Counts and flags only:
+ * no provider, thread, or path is named, so the report is as safe to show as
+ * the rest of the host card. `activeTurnsKept` is how many running turns were
+ * left alone, because relief never stops one.
+ */
+export const HostMemoryRelief = Schema.Struct({
+  at: BoundedText,
+  pressure: Schema.Literal("elevated", "critical"),
+  source: Schema.Literal("system", "process", "both"),
+  idleProviderRuntimesStopped: BoundedCount,
+  idleSessionsReleased: BoundedCount,
+  cachesTrimmed: Schema.Boolean,
+  activeTurnsKept: BoundedCount,
+}).annotations(strict);
+export type HostMemoryRelief = typeof HostMemoryRelief.Type;
+
+/**
+ * The previous host process ended without a clean stop. The cause is not
+ * known; the last reading before it went silent is what the person can judge
+ * it by.
+ */
+export const HostPreviousStop = Schema.Struct({
+  lastSeenAt: BoundedText,
+  pressure: HostMemoryPressureLevel,
+  processMegabytes: BoundedMegabytes,
+}).annotations(strict);
+export type HostPreviousStop = typeof HostPreviousStop.Type;
+
+export const HostMemoryStatus = Schema.Struct({
+  pressure: HostMemoryPressureLevel,
+  processMegabytes: BoundedMegabytes,
+  lastRelief: Schema.optional(HostMemoryRelief),
+  previousStop: Schema.optional(HostPreviousStop),
+}).annotations(strict);
+export type HostMemoryStatus = typeof HostMemoryStatus.Type;
+
 export const HostControlStatus = Schema.Struct({
   identity: HostControlIdentity,
   versions: HostControlVersions,
@@ -82,6 +124,8 @@ export const HostControlStatus = Schema.Struct({
     active: BoundedCount,
     attentionRequired: Schema.Boolean,
   }).annotations(strict),
+  /** Absent while the host runs without a memory guard (a test seam). */
+  memory: Schema.optional(HostMemoryStatus),
   lifecycle: Schema.Struct({
     stop: HostLifecycleControlAvailability,
     restart: HostLifecycleControlAvailability,

@@ -37,3 +37,20 @@ export function createComputerUseDriverUpdates(options: {
 export function isNewerComputerDriver(candidate: string, current: string): boolean {
   return isNewerManagedVersion(candidate, current);
 }
+
+/**
+ * The driver contract this build's SDK speaks. The driver is pre-1.0, so a new
+ * minor can change the wire contract and only patch releases are accepted.
+ * A driver that reports another minor is refused at startup and before a
+ * staged update activates, however correctly it is signed.
+ */
+export const COMPUTER_DRIVER_CONTRACT = { major: 0, minor: 8 } as const;
+
+export function isCompatibleComputerDriverContract(contractVersion: string): boolean {
+  const match = /^(0|[1-9]\d{0,7})\.(0|[1-9]\d{0,7})\.(0|[1-9]\d{0,7})$/.exec(contractVersion);
+  return (
+    match !== null &&
+    Number(match[1]) === COMPUTER_DRIVER_CONTRACT.major &&
+    Number(match[2]) === COMPUTER_DRIVER_CONTRACT.minor
+  );
+}

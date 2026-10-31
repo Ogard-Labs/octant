@@ -168,6 +168,7 @@ export function startOctantServer(
       browserAuthority,
       codeBoardEventStore,
       codeEvidence,
+      hostMemoryGuard,
       isProjectPolicyTargetAllowed,
       providerRuntimeRegistry,
       selectCodeConversation,
@@ -520,7 +521,6 @@ export function startOctantServer(
       threadAwaitsHarnessApproval,
       bindingReceiptStore,
       cacheStats,
-      codeApprovalStore,
       codeSessionAuthority,
       externalContentIngestionStore,
       gitEnvironmentPort,
@@ -1177,6 +1177,7 @@ export function startOctantServer(
       generatedImageStore,
       debugConfigurationApprovals,
       debugService,
+      hostMemoryGuard,
       languageServerApprovals,
       nativeHarnessSessions,
       onWorkTurnCancelled,
@@ -1319,6 +1320,9 @@ export function startOctantServer(
           // so a host that fails to bind never archives anything on its own,
           // and the stop below is registered before the first pass runs.
           completedThreadArchiveSweep.start();
+          // The memory guard reads the last run's state before it overwrites
+          // it, so the next-start notice survives a crash.
+          await hostMemoryGuard.start();
           // Artifact sync pulls and drains its queue now and on an interval,
           // only once the host is serving; with sync off each pass returns
           // before any store call.
@@ -1399,6 +1403,11 @@ export function startOctantServer(
             shutdownFailure ??= error;
           }
           completedThreadArchiveSweep.stop();
+          try {
+            await hostMemoryGuard.stop();
+          } catch (error) {
+            shutdownFailure ??= error;
+          }
           stopArtifactSync();
           stopPublicShareSweep();
           providerUsageLimitsService.stop();

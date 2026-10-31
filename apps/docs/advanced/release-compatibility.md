@@ -68,7 +68,8 @@ and the signed feed verifies.
   the Linux image, and native mobile store distribution
 - Pull-request review mutation (approve, comment, request changes, close)
   and any merge an agent or paired device starts; you can merge a pull request
-  yourself from its review on the desktop after confirming
+  yourself from its review on the desktop after confirming, or turn on Merge
+  when ready and Auto-fix there
 - Cloud-run schedules that wake a sleeping computer; routines run only while
   the host is running
 - Connector/OAuth marketplace and data migration from current Octant

@@ -1,3 +1,4 @@
+import type { PermissionMode } from "@octant/contracts/providers";
 import { createDesktopPaneClient } from "@octant/client-runtime/desktop-pane-client";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
@@ -18,6 +19,7 @@ import { ProjectMemorySection } from "./ProjectMemorySection";
 import { ProjectThreadsSection } from "./ProjectThreadsSection";
 import { ProjectBrandKitSection } from "./ProjectBrandKitSection";
 import { ProjectDesktopRecipeSection } from "./ProjectDesktopRecipeSection";
+import { ProjectPermissionModeSection } from "./ProjectPermissionModeSection";
 import { ProjectProviderPolicySection } from "./ProjectProviderPolicySection";
 import {
   PROJECT_COLOR_MENU_ITEMS,
@@ -51,6 +53,11 @@ export interface ProjectOverviewProps {
   readonly onProviderPolicyChange?: (
     projectId: ProjectId,
     policy: ProjectProviderPolicy,
+  ) => Promise<boolean>;
+  /** Sets the mode this Code Project's new threads start in; absent follows Settings. */
+  readonly onPermissionModeChange?: (
+    projectId: ProjectId,
+    permissionMode: PermissionMode | undefined,
   ) => Promise<boolean>;
   /** Absent when the host cannot accept the change; the brand kit is then not shown. */
   readonly onBrandKitChange?: (
@@ -409,6 +416,21 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                   }
                   project={props.project}
                   providerInstances={props.providerInstances ?? []}
+                />
+              </ProjectOverviewInspector>
+            ) : null}
+            {props.project.type === "code" && props.onPermissionModeChange !== undefined ? (
+              <ProjectOverviewInspector
+                key={`${String(props.project.id)}-mode`}
+                label="Default mode"
+                summary="The mode this Project's new threads start in"
+              >
+                <ProjectPermissionModeSection
+                  disabled={archived || connectionStale}
+                  onChange={async (mode) =>
+                    (await props.onPermissionModeChange?.(props.project.id, mode)) ?? false
+                  }
+                  project={props.project}
                 />
               </ProjectOverviewInspector>
             ) : null}

@@ -1,5 +1,5 @@
 import type { CredentialPurgeAttempt } from "@octant/domain";
-import type { KeyRejection } from "@octant/host-runtime";
+import { credentialStoreFailureCauseOf, type KeyRejection } from "@octant/host-runtime";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const PURGE_FAILURE_KINDS = new Set(["locked", "unavailable", "indeterminate", "failed"]);
@@ -402,7 +402,7 @@ async function refusedCredential(response: Response): Promise<never> {
   }
   const cause =
     body !== null && typeof body === "object" ? (body as { cause?: unknown }).cause : undefined;
-  const knownCause = cause === "locked" || cause === "no-login-collection" ? cause : undefined;
+  const knownCause = credentialStoreFailureCauseOf(cause);
   if (
     !isRecord(body) ||
     typeof body.error !== "string" ||

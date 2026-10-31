@@ -44,7 +44,13 @@ function setup(
     readonly storeAvailable?: boolean;
     readonly failingStore?: boolean;
     readonly onReprobe?: (instance: ProviderInstance) => void;
-    readonly failingCause?: "locked" | "no-login-collection";
+    readonly failingCause?:
+      | "locked"
+      | "no-login-collection"
+      | "no-service"
+      | "no-tool"
+      | "denied"
+      | "timed-out";
     readonly onSet?: () => void;
     readonly journalFails?: boolean;
     readonly failDelete?: boolean;
@@ -243,16 +249,15 @@ describe("host-local provider key routes", () => {
   });
 
   it("passes on why the keyring refused, so the person can fix it", async () => {
-    const { handle } = setup({ failingStore: true, failingCause: "locked" });
-    const result = await json(
-      await handle(hostLocal(SET, { instance: GATEWAY_ID, credential: KEY, replace: false })),
-    );
+    for (const cause of ["locked", "no-service", "no-tool", "denied", "timed-out"] as const) {
+      const { handle } = setup({ failingStore: true, failingCause: cause });
+      const result = await json(
+        await handle(hostLocal(SET, { instance: GATEWAY_ID, credential: KEY, replace: false })),
+      );
 
-    expect(result.status).toBe(503);
-    expect(result.body).toMatchObject({
-      category: "credential-store-unavailable",
-      cause: "locked",
-    });
+      expect(result.status).toBe(503);
+      expect(result.body).toMatchObject({ category: "credential-store-unavailable", cause });
+    }
   });
 
   it("re-checks the provider once its key is stored or removed, so Needs key clears without a restart", async () => {

@@ -533,8 +533,15 @@ an Azure AI Foundry provider offers only its configured deployments.
 
 Each endpoint is one row that says whether it works: **Ready**, **Sign in to
 use**, **Sign in again**, **Signed out**, **Checking…**, **Can't connect**, **Needs key**,
-**Key refused**, **No access**, **Sign-in doesn't match**, **Not working**, **No
-models yet**, or **Off**. A row that needs you says why
+**Key refused**, **Request denied**, **Can't read key**, **No access**, **Sign-in doesn't match**, **Not working**, **No
+models yet**, or **Off**. **Key refused** means the service answered that it
+turned the key down. **Request denied** means it took the key but denied the
+request, as a key limited to some calls does. **Can't read key** means Octant
+could not read the saved key back from the credential store; a check that never
+reached the service never reads as a refused key. When the credential store
+will not keep a new key, the message names why (a locked keyring, no keyring
+running, `secret-tool` missing, access denied, no answer) and what to do next.
+A keyring started after Octant works on the next key with no restart. A row that needs you says why
 in one sentence and offers one fix, such as **Try again**, **Replace key**,
 **Edit address**, or **Add model IDs**. Opening a row shows the endpoint's own
 page: its sign-in or key, its models (search them, show or hide each one, and

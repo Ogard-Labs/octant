@@ -23,6 +23,28 @@ stop the affected projection without rewriting history. Ambiguous recovery
 state is always **Waiting** or **recovery-required**, never **Done** or
 healthy.
 
+## Low memory
+
+Octant watches how much memory its host process uses and what your system says
+about memory pressure. It reads both on your machine only and sends nothing
+anywhere.
+
+When memory runs low, the host first stops what is only waiting: provider
+processes with no turn using them and sessions kept warm for a quick reply. It
+then frees caches it can rebuild. A running turn is never stopped; the notice
+tells you how many kept going. Your next message starts a stopped provider
+again, so the cost is a slower first reply.
+
+You see a short notice only when something was stopped or memory was very low.
+Settings, then Host, shows the current memory level, the host's size, and the
+last relief.
+
+If the host ends without a clean stop, for example because the system ran out
+of memory, the per-user service starts it again. The next time Octant opens, it
+tells you the host stopped unexpectedly and shows the last memory reading it
+took. That reading is a hint, not a diagnosis: a normal reading means the cause
+is not known.
+
 ## Recovery tooling
 
 Operator commands cover the journal and projections:
