@@ -1249,6 +1249,11 @@ function makeConnection(
             input.modelId,
             input.modelOptionValues ?? {},
             input.executionPolicy,
+            // The agent's own reviewer is the session's mode and the person's
+            // setup is its launch's guards and filesystem denies; a retained
+            // process opened under either other value is never taken up.
+            profile.ownReviewer === true && input.autoApprove === true,
+            input.nativeSetup ?? null,
             options.authentication,
             input.tools,
           ]);

@@ -2061,6 +2061,58 @@ it("keeps a retained native session identity reserved while it is idle", async (
   );
 });
 
+it("never takes up a retained session opened under another reviewer or another of the person's setups", async () => {
+  const own = {
+    subagents: false,
+    webTools: true,
+    skills: true,
+    toolServers: true,
+    hooks: true,
+    projectCode: false,
+  } as const;
+  const cases = [
+    { first: { autoApprove: true }, second: { autoApprove: false }, mode: "ask" },
+    { first: { autoApprove: false }, second: { autoApprove: true }, mode: "auto-approve" },
+    { first: { nativeSetup: own }, second: {}, mode: "ask" },
+    { first: {}, second: { nativeSetup: own }, mode: "ask" },
+  ] as const;
+  for (const { first, second, mode } of cases) {
+    const { driver, client, starts } = fixture(vibe, { runtimeVersion: "2.25.0" });
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, mode: "code", projectRoot });
+          const started = yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+            ...first,
+          });
+          const events = yield* connection.subscribe;
+          const terminal = yield* Effect.fork(Effect.promise(() => collectTerminal(events)));
+          yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+          yield* Fiber.join(terminal);
+          yield* connection.stop(sessionId);
+          if (started.resumeCursor === undefined) throw new Error("Missing cursor");
+          const sessionStarts = () => starts.filter((start) => start.purpose !== "probe").length;
+          const before = sessionStarts();
+          yield* connection.resume({
+            sessionId,
+            resumeCursor: started.resumeCursor,
+            executionPolicy: "approval-gated",
+            ...second,
+          });
+          // A fresh launch under the new setting, resumed the configured way.
+          expect(sessionStarts()).toBe(before + 1);
+          expect(client.loadSession).toHaveBeenLastCalledWith("agent-session-1", projectRoot);
+          expect(client.setConfigOption).toHaveBeenLastCalledWith(expect.anything(), "mode", mode);
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+  }
+});
+
 it("adding Computer use on a resumed task can send the next message", async () => {
   const { driver, client } = fixture(vibe, {
     mcpHttp: true,
