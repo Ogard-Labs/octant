@@ -1602,7 +1602,7 @@ export function sortToolDefinitionsByName(
 
 /**
  * Shrinks the request until the endpoint accepts its size, without touching
- * the conversation itself (decision 0067): first older tool results are
+ * the conversation itself: first older tool results are
  * replaced by a marker, oldest first, then whole earlier exchanges are left
  * out behind a note. The latest message is never cut. Undefined means even
  * that does not fit.

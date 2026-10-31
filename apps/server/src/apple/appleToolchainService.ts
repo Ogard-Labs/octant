@@ -208,7 +208,7 @@ export interface AppleToolchainServiceOptions {
    * `-` into the working directory — the checkout — and reports nothing, so
    * the capture names a file here instead. The capture launch is granted this
    * directory as its only extra write root, so it may live outside the shared
-   * temporary root every confined command can read (0160); the service creates
+   * temporary root every confined command can read; the service creates
    * it as a private directory when it is missing. By default it is the process
    * port's own temporary directory.
    */
@@ -290,7 +290,7 @@ export class AppleToolchainService {
   #lastToolchain: AppleToolchainDiscovery;
   #lastSimulators: ReadonlyArray<AppleSimulatorRecord> = [];
   #simulatorListReadAt = 0;
-  #simulatorListRefreshing = false;
+  #simulatorListRefresh: Promise<void> | undefined;
   readonly #captureDirectory: string;
   readonly #capturePrefix: string;
   /**
@@ -656,7 +656,29 @@ export class AppleToolchainService {
   }
 
   snapshot(context: AppleExecutionContext): AppleRuntimeSnapshot {
-    this.#refreshListedSimulators(context);
+    void this.#refreshListedSimulators(context);
+    return this.#readSnapshot(context);
+  }
+
+  /**
+   * A snapshot that first waits, briefly, for the device list re-read this call
+   * started or joined. A pane polling on a slow cadence, or one that just came
+   * back to the front, then sees a Simulator made since the last poll in the
+   * same answer instead of one poll later.
+   */
+  async refreshedSnapshot(context: AppleExecutionContext): Promise<AppleRuntimeSnapshot> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      this.#refreshListedSimulators(context),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, SIMULATOR_LIST_WAIT_MS);
+      }),
+    ]);
+    clearTimeout(timer);
+    return this.#readSnapshot(context);
+  }
+
+  #readSnapshot(context: AppleExecutionContext): AppleRuntimeSnapshot {
     const paneOpenRequest = this.#paneOpenRequests.get(String(context.threadId));
     return decodeAppleRuntimeSnapshot({
       sequence: this.#sequence,
@@ -839,17 +861,19 @@ export class AppleToolchainService {
    * interval however many panes or tools ask, and a Simulator made since then
    * shows up on the next read.
    */
-  #refreshListedSimulators(context: AppleExecutionContext): void {
-    if (this.#discovery.size === 0 || this.#simulatorListRefreshing) return;
+  #refreshListedSimulators(context: AppleExecutionContext): Promise<void> {
+    if (this.#discovery.size === 0) return Promise.resolve();
+    if (this.#simulatorListRefresh !== undefined) return this.#simulatorListRefresh;
     const now = Date.now();
-    if (now - this.#simulatorListReadAt < SIMULATOR_LIST_REFRESH_MS) return;
+    if (now - this.#simulatorListReadAt < SIMULATOR_LIST_REFRESH_MS) return Promise.resolve();
     this.#simulatorListReadAt = now;
-    this.#simulatorListRefreshing = true;
-    void this.#addListedSimulators(context, new AbortController().signal)
+    const refresh = this.#addListedSimulators(context, new AbortController().signal)
       .catch(() => undefined)
       .finally(() => {
-        this.#simulatorListRefreshing = false;
+        this.#simulatorListRefresh = undefined;
       });
+    this.#simulatorListRefresh = refresh;
+    return refresh;
   }
 
   /** Adds Simulators the device list names that no cached list has; known ones keep their state. */
@@ -1006,7 +1030,7 @@ export class AppleToolchainService {
         );
         // The capture lands in a host-private directory, created 0700, that no
         // other confined launch can read; only this launch is granted it as a
-        // write root (0160).
+        // write root.
         let captureDirectoryReady = true;
         try {
           await mkdir(this.#captureDirectory, { recursive: true, mode: 0o700 });
@@ -1547,7 +1571,7 @@ export class AppleToolchainService {
         // Every launch denies the capture directory after its broad grants, so
         // a checkout bound to an ancestor cannot read another thread's raw
         // screen. The screenshot launch alone re-allows it by carrying the
-        // same directory as an additional write root (0160).
+        // same directory as an additional write root.
         isolatedRoots: [this.#captureDirectory, ...(this.#options.isolatedRoots ?? [])],
         ...(grants === undefined ? {} : grants),
       },
@@ -2385,7 +2409,11 @@ function unavailableFailure(message: string, step: AppleDiscoveryStep): AppleDis
 }
 
 /** How often an open pane's reads may re-read the device list. */
-const SIMULATOR_LIST_REFRESH_MS = 15_000;
+// Shorter than the pane's 15 s poll: a poll that lands a few milliseconds early
+// would otherwise be skipped and the list would wait for the poll after it.
+const SIMULATOR_LIST_REFRESH_MS = 10_000;
+/** How long a snapshot waits for the device list before answering with what it has. */
+const SIMULATOR_LIST_WAIT_MS = 5_000;
 const CAPTURE_FILE_PREFIX = "octant-apple-capture-";
 /** Every attempt has its own path, so one set serves all services in the process. */
 const capturesInProgress = new Set<string>();

@@ -1200,6 +1200,10 @@ function projectEvents(): ReadonlyArray<readonly [string, unknown]> {
     ["project.lifecycle-changed@1", { project }],
     ["project.binding-relinked@1", { project: boundProject(project) }],
     ["project.code-access-changed@1", { project: codeProject }],
+    [
+      "project.code-permission-mode-changed@1",
+      { project: { ...codeProject, defaultPermissionMode: "auto" } },
+    ],
     ["memory.entry-created@1", { entry }],
     [
       "memory.entry-superseded@1",

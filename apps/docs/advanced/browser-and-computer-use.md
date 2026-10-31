@@ -239,7 +239,9 @@ and Screen Recording permissions, and check the installed CuaDriver version.
 if access is still missing. macOS may not show another permission prompt. Enable
 Octant there; if it is absent, use **+** to add the installed Octant app. Relaunch
 Octant after changing permissions, then choose **Recheck**. Recheck reads the
-current state without requesting access. Each task asks before accessing an
+current state without requesting access. Settings shows **Allowed** only when
+the computer-use driver Octant starts holds the permission too; an unsigned
+Octant build can be allowed while its driver is refused. Each task asks before accessing an
 application; **Allow app for 5 minutes** grants that
 task temporary access. Plan mode, remote clients, unavailable permissions,
 and unsupported provider transports refuse control.
@@ -254,8 +256,8 @@ operate. Use **Stop computer use** or disable the plugin to revoke access.
 Octant bundles its own CuaDriver, including the native SDK, and does not require
 a separate installation. **Automatic updates** is off by default. When you turn
 it on, Octant checks upstream daily, verifies the publisher, checksum, architecture, and
-driver compatibility, then upgrades after computer-use tasks finish. If the
-replacement cannot start, Octant retains the previous verified driver. You
+that its protocol is compatible with this Octant, then upgrades after computer-use tasks finish. If the
+replacement is incompatible or cannot start, Octant keeps the previous verified driver. You
 can use **Check for updates** in Settings at any time.
 Checks send no task content or identifiers.
 
@@ -345,9 +347,17 @@ Project has one, the pane says so instead of offering **Start desktop**. To
 set one, open the Code Project, then **Disposable desktop** → **Manage** in its
 settings:
 
-- **Provider** lists only the desktop providers this host has ready. On Linux
-  that is this host itself, offered once Bubblewrap, Xvfb, xdotool, and
-  ImageMagick are installed and Octant has restarted.
+- **Provider** lists the desktop providers this host offers. On Linux that
+  includes this host itself, once Bubblewrap, Xvfb, xdotool, and ImageMagick
+  are installed and Octant has restarted, and Cua Spaces; E2B is listed on
+  every host. A line under the list says where the provider runs, whose
+  account it uses, and whether it bills you. A provider that isn't set up
+  here shows **(needs setup)** and can't be chosen, and what it needs is
+  listed under the selector: E2B needs this computer
+  to have a credential store for your API key, and Cua Spaces needs its app
+  running and signed in on this computer. Nothing starts on a provider until
+  you save a recipe that names it, and a desktop that bills you still asks
+  you first.
 - **Runs on** appears for a provider that names where its desktops run, and
   picks where this Project's desktops run.
 - **Computer** appears when they run on one of your other computers, and
@@ -380,8 +390,7 @@ network access. **Remove recipe** asks first: removing it, or changing its
 provider, where it runs, its computer, or its key, ends the Project's running desktops. Only a window on the host
 itself can set or remove a recipe or enter its key, so **Disposable desktop**
 appears only there: a paired phone or browser doesn't show a Project's
-settings, and the host refuses a recipe change from either. This
-version offers no cloud provider yet, so the key field doesn't appear.
+settings, and the host refuses a recipe change from either.
 
 ## Picture in Picture
 

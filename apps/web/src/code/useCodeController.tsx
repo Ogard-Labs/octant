@@ -2558,6 +2558,7 @@ export function useCodeController(options: CodeControllerOptions) {
       readonly requireGitRepository?: boolean;
       readonly defaultDiffLayout?: CodeBootstrap["settings"]["defaultDiffLayout"];
       readonly bundledLanguageServer?: boolean;
+      readonly defaultAutoApprove?: boolean;
     }): Promise<boolean> => {
       if (bootstrap === undefined) return false;
       const result = await execute({

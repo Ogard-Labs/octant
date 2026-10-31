@@ -23,6 +23,8 @@ import { OctantSlider } from "../ui/base/OctantSlider";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { rememberModelChoice } from "./modelChoiceMemory";
 import { readRecentModels, rememberModel } from "./modelRecents";
+import { isConstrained, roomOf } from "../usage/providerRoom";
+import { useProviderRooms } from "../usage/useProviderRooms";
 import { ProviderGlyph } from "./ProviderGlyph";
 import { useModelToolVerifier } from "./ModelToolVerificationContext";
 
@@ -151,9 +153,19 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
     () => props.groups.filter((group) => group.runtime === "octant-harness"),
     [props.groups],
   );
+  const rooms = useProviderRooms();
+  // Accounts with room come first and the ones at their limit last; within
+  // each, the person's own provider order stands (the sort is stable).
   const railGroups = useMemo(
-    () => props.groups.filter((group) => group.runtime !== "octant-harness"),
-    [props.groups],
+    () =>
+      props.groups
+        .filter((group) => group.runtime !== "octant-harness")
+        .sort(
+          (a, b) =>
+            Number(isConstrained(roomOf(rooms, String(a.instance.id)))) -
+            Number(isConstrained(roomOf(rooms, String(b.instance.id)))),
+        ),
+    [props.groups, rooms],
   );
   // The Octant entry sits where the first harness endpoint sat in the user's
   // provider order, so folding endpoints together does not move Octant to
@@ -506,9 +518,22 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
 
   function renderRailItem(group: PickerGroup) {
     const active = !searching && group.instance.id === activeRailId;
-    const status = readinessStatus(group.readiness);
+    const room = roomOf(rooms, String(group.instance.id));
+    const usageStatus = isConstrained(room)
+      ? room.standing === "limited"
+        ? "Usage limit reached"
+        : "Near usage limit"
+      : undefined;
+    const status = readinessStatus(group.readiness) ?? usageStatus;
     return (
-      <OctantTooltip key={String(group.instance.id)} label={group.instance.displayName}>
+      <OctantTooltip
+        key={String(group.instance.id)}
+        label={
+          usageStatus === undefined
+            ? group.instance.displayName
+            : `${group.instance.displayName}: ${usageStatus}`
+        }
+      >
         <OctantButton
           aria-label={group.instance.displayName}
           aria-selected={active}
@@ -537,7 +562,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
           <span className="composer-model-picker__rail-label">{group.instance.displayName}</span>
           {status === undefined ? null : (
             <span
-              className={`composer-model-picker__rail-status composer-model-picker__rail-status--${group.readiness}`}
+              className={`composer-model-picker__rail-status composer-model-picker__rail-status--${group.readiness}${readinessStatus(group.readiness) === undefined && room.standing === "limited" ? " composer-model-picker__rail-status--limited" : ""}`}
               title={status}
             >
               <span className="sr-only">{status}</span>

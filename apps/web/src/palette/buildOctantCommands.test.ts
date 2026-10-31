@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildOctantCommands, type OctantCommandSources } from "./buildOctantCommands";
+import { keybindingActionForCommand } from "./commandKeybinding";
 
 function sources(overrides: Partial<OctantCommandSources> = {}): OctantCommandSources {
   return {
@@ -80,5 +81,48 @@ describe("plugin MCP server commands", () => {
       detail: "MCP server · Notes",
       action: { kind: "address", reference: "@notes-plugin/mcp-notes" },
     });
+  });
+});
+
+describe("Project action commands", () => {
+  const dev = { actionId: "a1", name: "Dev", command: "bun run dev", projectName: "Octant" };
+
+  it("runs the action the person saved, from the palette", () => {
+    const onRunProjectAction = vi.fn();
+    const command = buildOctantCommands(
+      sources({ projectActions: [dev], onRunProjectAction }),
+    ).find((candidate) => candidate.group === "Actions");
+
+    expect(command).toMatchObject({ title: "Dev", detail: "Octant · bun run dev" });
+    if (command?.action.kind !== "run") throw new Error("Expected a run action.");
+    command.action.run();
+    expect(onRunProjectAction).toHaveBeenCalledWith(dev);
+  });
+
+  it("offers none where the window has no way to run one", () => {
+    expect(
+      buildOctantCommands(sources({ projectActions: [dev] })).some(
+        (candidate) => candidate.group === "Actions",
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("the jump to the next waiting thread command", () => {
+  it("runs the jump and shows the chord in effect", () => {
+    const onJumpToNextWaiting = vi.fn();
+    const command = buildOctantCommands(sources({ onJumpToNextWaiting })).find(
+      (candidate) => candidate.id === "thread:next-waiting",
+    );
+
+    expect(command?.title).toBe("Jump to the next thread that needs you");
+    if (command?.action.kind !== "run") throw new Error("expected a run command");
+    command.action.run();
+    expect(onJumpToNextWaiting).toHaveBeenCalledTimes(1);
+    expect(keybindingActionForCommand("thread:next-waiting")).toBe("next-waiting-thread");
+  });
+
+  it("is absent when no thread waits", () => {
+    expect(buildOctantCommands(sources()).some((c) => c.id === "thread:next-waiting")).toBe(false);
   });
 });

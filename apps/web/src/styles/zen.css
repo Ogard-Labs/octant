@@ -346,7 +346,7 @@
 }
 
 /* ─── panels ───────────────────────────────────────────────────────────
-   Panels ride the OctantCard adapter (see docs/decisions/0046); a panel
+   Panels ride the OctantCard adapter; a panel
    scrolls itself rather than the surface behind it. */
 .zen-panel {
   min-width: 0;

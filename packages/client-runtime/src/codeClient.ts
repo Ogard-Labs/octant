@@ -5,7 +5,11 @@ import {
   decodeCodeProjectPullRequestRefreshCommand,
   decodeCodeProjectPullRequestDetailQuery,
   decodeCodeProjectPullRequestDetailRefreshCommand,
+  decodeCodeProjectPullRequestAutoFixCommand,
   decodeCodeProjectPullRequestMergeCommand,
+  decodeCodeProjectPullRequestMergeWhenReadyCommand,
+  decodeCodeProjectPullRequestSwitchTarget,
+  decodeCodeThreadComposerActivity,
   decodeCodeCommand,
   decodeCodeEvidenceContentId,
   decodeCodeEvidenceBatchRequest,
@@ -33,8 +37,13 @@ import {
   type CodeProjectPullRequestDetailQuery,
   type CodeProjectPullRequestDetailRefreshCommand,
   CodeProjectPullRequestDetailView,
+  type CodeProjectPullRequestAutoFixCommand,
   type CodeProjectPullRequestMergeCommand,
   CodeProjectPullRequestMergeOutcome,
+  type CodeProjectPullRequestMergeWhenReadyCommand,
+  CodeProjectPullRequestSwitchOutcome,
+  type CodeProjectPullRequestSwitchTarget,
+  CodeProjectPullRequestSwitchesView,
   type CodeBootstrap,
   CodeNavigation,
   type CodeCheckoutId,
@@ -184,6 +193,18 @@ export interface CodeClient {
   mergeProjectPullRequest?(
     command: CodeProjectPullRequestMergeCommand,
   ): Promise<CodeProjectPullRequestMergeOutcome>;
+  /** A pull request's Merge when ready and Auto-fix switches. */
+  queryProjectPullRequestSwitches?(
+    target: CodeProjectPullRequestSwitchTarget,
+  ): Promise<CodeProjectPullRequestSwitchesView>;
+  setProjectPullRequestMergeWhenReady?(
+    command: CodeProjectPullRequestMergeWhenReadyCommand,
+  ): Promise<CodeProjectPullRequestSwitchOutcome>;
+  setProjectPullRequestAutoFix?(
+    command: CodeProjectPullRequestAutoFixCommand,
+  ): Promise<CodeProjectPullRequestSwitchOutcome>;
+  /** Tells the host the person is composing in a Code thread, so Auto-fix holds back. */
+  noteComposerActivity?(threadId: CodeThreadId): Promise<void>;
   readFollowUp(threadId: CodeThreadId): Promise<CodeThreadFollowUpView>;
   executeFollowUp(command: CodeFollowUpCommand): Promise<CodeThreadFollowUpUpdated>;
   /**
@@ -538,6 +559,78 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         },
         decodeHostAnswer(CodeProjectPullRequestMergeOutcome),
       );
+    },
+    async queryProjectPullRequestSwitches(target) {
+      let validated: CodeProjectPullRequestSwitchTarget;
+      try {
+        validated = decodeCodeProjectPullRequestSwitchTarget(target);
+      } catch {
+        throw invalidProjectPullRequestSwitch();
+      }
+      return request(
+        fetch,
+        new URL("/api/code/project-pull-requests/switches", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(validated),
+        },
+        decodeHostAnswer(CodeProjectPullRequestSwitchesView),
+      );
+    },
+    async setProjectPullRequestMergeWhenReady(command) {
+      let validated: CodeProjectPullRequestMergeWhenReadyCommand;
+      try {
+        validated = decodeCodeProjectPullRequestMergeWhenReadyCommand(command);
+      } catch {
+        throw invalidProjectPullRequestSwitch();
+      }
+      return request(
+        fetch,
+        new URL("/api/code/project-pull-requests/merge-when-ready", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(validated),
+        },
+        decodeHostAnswer(CodeProjectPullRequestSwitchOutcome),
+      );
+    },
+    async setProjectPullRequestAutoFix(command) {
+      let validated: CodeProjectPullRequestAutoFixCommand;
+      try {
+        validated = decodeCodeProjectPullRequestAutoFixCommand(command);
+      } catch {
+        throw invalidProjectPullRequestSwitch();
+      }
+      return request(
+        fetch,
+        new URL("/api/code/project-pull-requests/auto-fix", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(validated),
+        },
+        decodeHostAnswer(CodeProjectPullRequestSwitchOutcome),
+      );
+    },
+    async noteComposerActivity(threadId) {
+      let validated: { readonly threadId: CodeThreadId };
+      try {
+        validated = decodeCodeThreadComposerActivity({ threadId });
+      } catch {
+        throw invalidProjectPullRequestSwitch();
+      }
+      const response = await requestRaw(
+        fetch,
+        new URL("/api/code/composer-activity", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(validated),
+        },
+      );
+      if (!response.ok) await rejectFailure(response);
     },
     readFollowUp(threadId) {
       try {
@@ -1577,6 +1670,13 @@ function invalidProjectPullRequestMerge(): CodeClientFailure {
   return new CodeClientFailure({
     category: "invalid",
     message: "Code project pull-request merge is invalid.",
+  });
+}
+
+function invalidProjectPullRequestSwitch(): CodeClientFailure {
+  return new CodeClientFailure({
+    category: "invalid",
+    message: "Code project pull-request switch command is invalid.",
   });
 }
 

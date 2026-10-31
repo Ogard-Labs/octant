@@ -515,8 +515,8 @@ export const ShellSettings = Schema.Struct({
   lastContextSurface: Schema.NullOr(ContextSurfaceId),
   sidebarMaterial: Schema.Literal("system", "opaque"),
   /**
-   * Extends translucency from the sidebar to the workspace background
-   * (docs/decisions/0047). Only takes effect when the sidebar itself
+   * Extends translucency from the sidebar to the workspace background.
+   * Only takes effect when the sidebar itself
    * resolves translucent; a store persisted before this setting shipped
    * decodes to opaque, matching the workspace's prior always-solid look.
    */
@@ -575,7 +575,7 @@ export const ShellSettings = Schema.Struct({
   /**
    * Whether Octant may check for updates on its own. Off means no request is
    * made at all rather than a check whose answer is withheld — what leaves the
-   * machine is the point of the switch (`docs/decisions/0034`). A store
+   * machine is the point of the switch. A store
    * persisted before updates shipped decodes to on, which is the behaviour the
    * release notes describe.
    */
@@ -595,8 +595,8 @@ export const ShellSettings = Schema.Struct({
   /**
    * How long a put-away thread rests in the Put away shelf before the host
    * archives it. `null` means never. Archiving keeps everything and is the
-   * only thing this timer does; a purge still needs its own confirmation
-   * (`docs/decisions/0035`). A store persisted before completion shipped
+   * only thing this timer does; a purge still needs its own confirmation.
+   * A store persisted before completion shipped
    * decodes to the week the feature was introduced with.
    */
   completedThreadArchiveAfterDays: Schema.optionalWith(
@@ -610,7 +610,7 @@ export const ShellSettings = Schema.Struct({
    * its version, and a default here would overrule it — a preview build would
    * quietly move itself to stable the first time these settings loaded. Absent
    * means "nobody has chosen", which the host reads as "follow the ring you
-   * were built for" (`docs/decisions/0034`).
+   * were built for".
    */
   releaseRing: Schema.optional(AppReleaseRing),
   /** Enabled Open in applications, in the order shown by the native shell. */

@@ -4,7 +4,7 @@
    Every list, board, reader, and preference page in the renderer is a
    "surface". A surface has a header (title, one-line subtitle, actions),
    an optional toolbar, and sections separated by hairlines. Nothing here
-   paints a control; adapters own controls (0046). This file owns the
+   paints a control; adapters own controls. This file owns the
    hierarchy the marketing site and the app share (DESIGN.md "Language").
    ───────────────────────────────────────────────────────────────────────── */
 
@@ -196,7 +196,7 @@
 }
 
 /* ── Sections and rows ─────────────────────────────────────────────────
-   The same hairline grammar Settings uses (0072): a label, a rule, rows. */
+   The same hairline grammar Settings uses: a label, a rule, rows. */
 
 .surface-section {
   display: grid;
@@ -674,7 +674,7 @@
 
 /* Under a Zen space the ground is the floor of the window, not a wash behind
    a page: there is no composer to clear and no transcript reading through it,
-   because Zen's cards carry their own glass (0107). So it takes no mask, and
+   because Zen's cards carry their own glass. So it takes no mask, and
    it stays at level 0 under the space's dimmer and its canvas rather than
    dropping behind the surface the way the shell's does. */
 .app-backdrop[data-placement="zen"] {
@@ -885,7 +885,7 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 }
 
 /* A conversation needs one quiet reading surface: separate reply cards over
-   the dither made even short answers compete with the composer (0155). It is
+   the dither made even short answers compete with the composer. It is
    a veil rather than a wall: the ground stays faintly visible behind a thread
    so the window keeps its character, but at a fifth of its strength it does
    not pull at the transcript. Opaque is the fallback, including when

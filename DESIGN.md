@@ -4,8 +4,7 @@ This is the current visual specification for Octant surfaces: desktop and web,
 mobile, public documentation, and marketing material. [Workspace behavior](docs/design/workspace.md)
 owns navigation and pane interactions; [architecture](docs/architecture.md) owns
 system and authority boundaries. Use the [design workflow](docs/design/README.md)
-to update this document in place with an approved design change. Historical ADR
-numbers explain provenance; their older visual rules do not override this text.
+to update this document in place with an approved design change.
 
 Read the relevant section rather than the entire document:
 
@@ -55,7 +54,7 @@ cards, pill-shaped everything, and invented data. Gradients belong to the
 application ground, to a Vivid tile's face, and to a Project's letter tile;
 chrome stays flat. A feature that is not available must explain why and offer the
 next useful action, or stay out of the primary layout. The one thing allowed
-to be decorative is the application ground (0091): a first-party picture or a
+to be decorative is the application ground: a first-party picture or a
 person's photo, shown plain or through one print effect, or the field of
 Pulsing characters or Dithered pixels, behind the start screens or behind
 every page.
@@ -75,11 +74,10 @@ but they do not own a second palette or visual language.
   that already is. Weights follow the one ladder in [Scale](#scale).
 - **Sentence case everywhere**: titles, labels, buttons, tabs, menu items.
   Product nouns keep their capital (Project, Chat, Work, Code, Environment).
-- **Say what happens.** A posture name never promises more than the runtime
-  does. Where a session-only Full access leaves Octant Harness asking, the
-  access control and the dock's Access fact read "Full access · asks first",
-  and the control's tooltip says "Full access this session. Octant Harness
-  still asks before writes and commands."
+- **Say what happens.** A mode name never promises more than the runtime
+  does. Where a thread's provider has no reviewer, a thread set to Auto reads
+  "Ask first" and says why; Full access says it has no sandbox and no
+  prompts.
 - **One sentence of help.** A subtitle or row description is one sentence
   that says what the thing does. Longer explanations move to the docs.
 - **Numbers read in English.** Counts, sizes, and token figures use the
@@ -102,7 +100,7 @@ but they do not own a second palette or visual language.
   a host fact (see "Host platform in copy" under
   [Security and authority](docs/architecture.md#security-and-authority)).
 - **Vocabulary.** `Project`, `thread`, `checkout`, `worktree`, `base branch`,
-  `Environment`, `access` (Plan / Approval / Auto-accept edits / Full access),
+  `Environment`, `mode` (Auto / Ask first / Accept edits / Plan / Full access),
   `delivery` (Investigation / Local implementation / Pull request / Merged).
   The word "target" does not appear in the interface.
 
@@ -537,6 +535,21 @@ controls: the access chip carries its shield icon beside the label, the model
 button names the model with a chosen effort in muted ink, the microphone sits
 just before send, and send is the round accent-filled button with an up arrow.
 
+**Usage-limit warning.** On a start screen, when the chosen account has a window
+that is spent or at 80% used (the same levels the meters colour), a warning
+callout takes the full row above the context chips: which account, that it has
+reached or is close to its usage limit, and the reset time the provider gave.
+For each other ready account that has room (an observed window below the near
+level; an account with no observed window is never offered as having room) up to
+three `Use <account>` buttons follow, each choosing that account and its model
+(the current model when it lists it) exactly as the model menu would. Nothing
+switches on its own and the warning never blocks sending: the provider's own
+limit decides whether a turn runs. The model menu's rail lists accounts with
+room first and the ones at their limit last, in the person's own order within
+each, and marks a limited account with the danger dot and "Usage limit reached"
+(a near one with the warning dot and "Near usage limit"); a readiness problem
+takes the dot first.
+
 Work follow-up composers use the same attached context strip as Code, showing
 the project and working folder instead of Git controls. Full paths require a
 matching project binding revision; missing metadata never borrows another root.
@@ -633,7 +646,15 @@ tabs or action tiles: adding a folder lives in the composer's Project picker. Th
 behavior is in [Workspace](docs/design/workspace.md#start-screen-cards).
 
 First-run setup asks only what a first task needs — a usable provider, a
-Project folder, and a model — and ends in one primary action, Start a task,
+Project folder, a model, and the
+[mode](docs/architecture.md#security-and-authority) new threads start in
+(Auto pre-selected and marked Recommended, then Ask first, Accept edits, Plan,
+and Full access, in that order; Full access reads "No sandbox, no prompts"
+and is never pre-selected; Auto uses the provider's own reviewer or
+[Octant Shield](docs/architecture.md#octant-shield), so it is listed for every
+runtime, and where no reviewer can run the picker shows it unavailable with
+the reason; the pick becomes the default for every new Work and Code thread
+until changed in Settings › Access; this question is allowed, not built yet) — and ends in one primary action, Start a task,
 that opens the new-task composer in that Project. Every step is optional from
 the first one. Opening setup focuses the current step's heading so a long
 provider list does not scroll past its introduction; Tab then reaches the
@@ -684,7 +705,7 @@ scrolls within the bounded popup at narrow or short viewport sizes.
 Model choices and settings wait for an asynchronous model change to finish before
 accepting another edit, so the next configuration choice uses the confirmed pairing.
 
-The screen sits on the application ground (0091, 0129), set as two plain
+The screen sits on the application ground, set as two plain
 choices. What: one of the first-party Zen pictures, a person's photo, a field
 of pulsing characters, a field of dithered pixels, or the plain page. A fresh install starts on Soft glow, one of three Gradient
 pictures (Soft glow, Graphite, Sunset) that each carry a light and a dark
@@ -726,7 +747,7 @@ may instead put the ground behind every page, from the workspace's leading
 edge, and under the sidebar too when they ask for it (see Shapes and depth). Every
 surface that shows text or information softens it beneath one continuous
 reading veil, the sheet colour at 80%, so it shows at about a fifth of its
-strength and agent replies remain bare prose (0155): a thread, every other pane
+strength and agent replies remain bare prose: a thread, every other pane
 (a Project's page, Settings, a file, a preview), and every destination page
 (Inbox, Board, Archive, Review, Projects, Agents, Automations, Artifacts, Image
 generator). A start screen (a welcome or a new thread) is the one exception and
@@ -780,7 +801,7 @@ light/dark preview swatches in Settings, carries
 outside an accessibility fallback, any `font-weight` heavier than 600 outside
 the title roles (see [Scale](#scale)), and any paint
 (colour, background, border, radius, shadow, outline) that a feature rule puts
-on a class handed to an Octant primitive (0046: place or size a shared control,
+on a class handed to an Octant primitive (place or size a shared control,
 never repaint it; pick a recipe variant instead) ratchet against
 `scripts/ui-stylesheet-baseline.json`: a file may not add one, and a fix must
 re-record the lower count with `--write-baseline` so the baseline never
@@ -794,14 +815,16 @@ merges, because removing a repaint changes what the control looks like.
 The `control-repaint` rule reads the classes feature code hands to an Octant
 primitive. A control marked `unstyled` is feature-owned paint by design and is
 skipped; `unstyled={false}` is not, and stays under the rule. The checker also
-skips `composer-input`, the system prompt (0038), because that surface is
+skips `composer-input`, the system prompt, because that surface is
 already painted twice; the rule still holds for it — feature CSS must not
 repaint it a third time — it is simply not machine-checked.
 
 The shadcn registry metadata is in `apps/web/components.json` (`base-nova`,
 Tailwind v4, CSS variables, Lucide). The checked-in recipes are owned source
-and use `@base-ui/react` primitives behind the Octant adapters; 0089 settles
-the style, its density, and the three divergences kept from it. This
+and use `@base-ui/react` primitives behind the Octant adapters. They follow the Base UI-native shadcn `nova` style and its
+denser controls, except that recipes paint no focus ring (the global
+`:focus-visible` rule is the only keyboard focus treatment) and the badge and
+the card keep the shape and elevation set in this document. This
 keeps the interaction backend accessible and editable while preserving the
 shadcn composition and visual vocabulary. Feature code imports `ui/base`, not
 `ui/shadcn` or `@base-ui/react` directly. Project and split-workspace context
@@ -847,9 +870,9 @@ above it than the reply before it. A reply (`turn-agent`) is bare prose at the
 transcript size with 1.5 leading, with no card of its own: only the work a turn
 produced is boxed. Over the application ground, the conversation supplies one quiet,
 continuous reading veil below the title band: the sheet colour at 80%, so the
-ground stays faintly visible behind the transcript (0155). Replies remain bare prose, including on translucent
+ground stays faintly visible behind the transcript. Replies remain bare prose, including on translucent
 workspaces; user bubbles and the composer retain glass over the application
-ground (0150). Under Glass the thread's container stays clear, the ground steps down to a fifth of its strength while a thread is on screen, and keeps a quarter of it under the sidebar, so it never reads as letters behind text. Reduced transparency keeps the reading background opaque.
+ground. Under Glass the thread's container stays clear, the ground steps down to a fifth of its strength while a thread is on screen, and keeps a quarter of it under the sidebar, so it never reads as letters behind text. Reduced transparency keeps the reading background opaque.
 The follow-up composer has 24px of space above it outside the transcript
 scroll frame, so a reply never touches the input. Running text keeps a 72ch
 measure; tables and code blocks run the column's width, ending on the same edge
@@ -859,7 +882,7 @@ as the composer; markdown headings inside it are labels
 then detail-size mono on the application ground. Tool rows are 28px each, the
 name at the body size and the state at the right as detail text with a 12px
 mark (spinner, check, cross), parted by hairlines and indented together; a
-settled turn folds them behind "N tool calls". A Code turn that changed files ends with one card, the only card in a reply: "N files changed while this ran", then a 28px row per path with the folder in the meta ink, the name in the primary ink, and the added and removed line counts in the diff inks at the right. It folds after five rows, says "Showing n of N" when the record is incomplete rather than summing rows it never saw, and never says who wrote a file (0141). A turn paused on the person uses a neutral composer-adjacent request row with
+settled turn folds them behind "N tool calls". A Code turn that changed files ends with one card, the only card in a reply: "N files changed while this ran", then a 28px row per path with the folder in the meta ink, the name in the primary ink, and the added and removed line counts in the diff inks at the right. It folds after five rows, says "Showing n of N" when the record is incomplete rather than summing rows it never saw, and never says who wrote a file. A turn paused on the person uses a neutral composer-adjacent request row with
 an icon and explicit answer controls. Follow-up composers use one compact
 hairline message surface across Chat, Work, and Code. Feedback above the toolbar
 appears only when it has content; empty feedback consumes no space. A held
@@ -871,7 +894,7 @@ approval-review choice and starting-profile detail. The Code checkout strip is
 attached underneath, rather than floating above the input. It keeps its height
 and border when checkout metadata is unavailable: missing project, branch and
 diff values stay blank, and unavailable checkout actions are not shown. Input growth from
-extra typed lines and visible notices is intentional (0114). Repository, branch
+extra typed lines and visible notices is intentional. Repository, branch
 and PR actions stay visible below the input. Utility panels keep one resize
 boundary and a compact tab row without a second horizontal divider.
 
@@ -923,7 +946,7 @@ Attachment and model controls sit on the left; access, context usage and send
 stay together at the right edge even when the controls wrap. Menus use compact
 interface text, and model choices stay in a bounded scrollable popup.
 Sent messages do not repeat an access caption; the underlying history remains
-authoritative (0114).
+authoritative.
 
 ## Colour system
 
@@ -1247,7 +1270,7 @@ and unshadowed; setup objects and cards use the card recipe (`OctantCard`), and
 a Settings section's group is the same hairline-ringed shape in its own fill,
 and neither draws a shadow —
 a card sits in the page, and shadow is reserved for something that floats
-above it (0090). Welcome composers keep their raised frame.
+above it. Welcome composers keep their raised frame.
 Chat, Work, and Code welcome composers share the `.composer` frame (`--oct-radius-lg`,
 `--octant-shadow-md`) and one first-read hierarchy: one question, then the
 composer. Starter actions appear only when recent work does not already give
@@ -1281,8 +1304,12 @@ All six composers use `ComposerAttachButton` for their file chooser. The visible
 button is the only tab stop; an unsupported model keeps the button reachable
 and explains the refusal in the surface's status line. It never opens the file
 chooser or uploads while refused. Model, access, and destination controls keep
-one type scale. Access labels read "Plan · read-only"
-and "Ask for approvals" in both new and existing threads.
+one type scale. The mode picker reads the same in new and existing threads:
+Auto (with "Recommended" where the provider has a reviewer, otherwise
+listed disabled with the reason), Ask first, Accept edits, Plan, and Full
+access, each with a one-line description. Choosing a mode is one click and
+changes the thread; the first Full access pick on this machine or in a
+Project shows the one-time warning first.
 The Code start screen's agent home (suggested prompts, Up next, Start something
 new, and Continue) is laid out in
 [Start screen: Code agent home](docs/design/start-screen.md#code-agent-home). The start screen has no image-generation control: a job needs a thread to
@@ -1365,7 +1392,7 @@ Shadow tokens are `--octant-shadow-hairline`, `--octant-shadow-xs`,
 `--octant-shadow-sm`, `--octant-shadow-md`, `--octant-shadow-lg`,
 `--octant-shadow-overlay`, and `--octant-shadow-pop`. Use the smallest level
 that establishes a genuine layer: navigation panes and open form layouts stay
-unshadowed; the card recipe uses a hairline ring instead of a shadow (0090);
+unshadowed; the card recipe uses a hairline ring instead of a shadow;
 compact state and grouped surfaces use `--octant-shadow-sm`; welcome composers
 and follow-up composers use `--octant-shadow-md` over a hairline ring; focused or promoted raised
 objects may use `--octant-shadow-lg`; overlays use only their overlay or pop
@@ -1565,7 +1592,7 @@ for the kit). Discrete editors and install reviews keep their own boundaries
 inside a section. Everything inside takes the card's 16px inset, including
 content that is not a row. Keybindings have their own destination and raw JSON
 stays behind an advanced disclosure. Inline profile and provider editors keep
-their aligned row edges (0096), measured from the card's inset. Ready providers
+their aligned row edges, measured from the card's inset. Ready providers
 open onto a bounded model list with search, shown counts, and shared visibility
 switches. Routine connection diagnostics and capabilities use a separate
 disclosure; setup and authentication guidance remains visible. Visual theme
@@ -2042,7 +2069,7 @@ convention and let the recipe size them. Icons clarify labels and do not
 replace an essential label without an accessible name.
 
 Provider identity uses locally bundled, licensed provider logos selected by
-`ProviderGlyph` (0095). This is the explicit identity-asset exception to the
+`ProviderGlyph`. This is the explicit identity-asset exception to the
 originality rule; it does not permit copying another application’s UI assets or
 implementation. Keep source and license provenance with each mark. Never fetch
 a logo at runtime, use emoji, or draw an approximate brand mark. Unknown or
@@ -2093,7 +2120,26 @@ proceed. Native Code approvals keep their isolated host-owned document. The
 extension tool request names the plugin, its server, and the tool, and adds
 "Always allow in this Project" only when the host marks the call rememberable
 and the window is a local one. Settings › Permissions lists those answers by
-Project, each with Revoke, beside Remembered websites. A Browser request from a
+Project, each with Revoke, beside Remembered websites. Its Access section
+(Settings › Access) shows the global guardrail level with one-click change,
+which governs Work and Code alike. The levels, top to bottom, are Ask first,
+Accept edits, Auto, and Full access; Full access is the lowest, and there is
+no separate switch below it. The first time a machine or a Project picks Full
+access, a one-time warning asks to confirm, in the warning role: "Agents can
+change any file and run any command without asking, with no sandbox, so they
+can read your whole home folder, including SSH and cloud keys." It offers
+Cancel (focused) and Use Full access, and is not shown again for that scope.
+At Full access a tool row that read outside content carries a quiet tag and
+the thread card a small mark; neither prompts. The section also shows, each
+as an account default a Project
+may override: **Auto reviewer** (Provider's own / Octant Shield), **Safe
+networks** (trusted hosts, domains, address ranges, and private-network tags),
+and **Servers** (registered SSH hosts, each with a Read-only, Operate, or Admin
+profile and an optional notes file). The rules behind them are in
+[Octant Shield](docs/architecture.md#octant-shield); allowed, not built yet.
+A Work Project's **Developer tools** switch is presentation, not a
+permission, so it lives on that Project's overview, not here
+([Workspace](docs/design/workspace.md); allowed, not built yet). A Browser request from a
 CLI in a Code thread's terminal names the origin and the thread and says a
 program in the terminal asked, not the thread's agent
 ([Terminal Browser grant](docs/design/terminal-browser-grant.md#the-window)).
@@ -2122,8 +2168,8 @@ Cancel; Tab can leave the warning to continue reviewing. Escape within the warni
 or Cancel returns focus to Merge (or the review heading if Merge is unavailable).
 An attempted merge keeps its existing freshness and reviewed-head checks, and
 focus moves to its result when the attempt completes. It is not a trusted task
-approval surface. Only the person at a local window can merge; who may merge and
-what the host checks are owned by
+approval surface. Who may merge (a person, or a Code thread the person
+allowed) and what the host checks are owned by
 [architecture](docs/architecture.md#modes-chat-work-and-code).
 
 A dialog with a visible heading uses that heading as its accessible name through
@@ -2287,6 +2333,26 @@ or execution. Saved Chat/Code revisions reconcile untouched fields without
 remounting the form. Keep deliberate section expansion, text growth, and manual
 resizing distinct from unsolicited layout movement.
 
+### Secret stores
+
+Settings › Secret stores sits with Permissions under Privacy & data and is
+host-scoped. It has two cards. **Linked secret stores** is a plain row per
+tool: the tool's name, one line saying whether it is linked and whether the
+store is ready, locked, not installed, or unreachable, and one button, Link or
+Unlink. Unlink waits for a confirmation that says which providers stop getting
+their key and that nothing in the store is changed. A refusal (a locked store,
+a missing tool) appears in the card's feedback slot, in the host's own words.
+**Check an item** takes an item reference and answers Found, locked, missing, or
+unreachable; it never shows what an item holds. On a host with no credential
+broker the card says so and offers no button.
+
+A provider's key from a store lives on the provider's own card, under **Key from
+a secret store**, beside the API keys. It appears only when a store is linked or
+the provider already points at an item, so a card never carries a section most
+people do not use. It shows the item reference in code type with Check, Change
+item, and Remove, or one reference field with Use this item. No control on
+either surface has a field for a key, and nothing on them shows one.
+
 ### Optional Settings details
 
 Keep common preferences and host health visible. Use the shared
@@ -2303,6 +2369,23 @@ secondary, and metadata remain the only text strengths. The theme schema keeps
 its focus compatibility role for imports, but Appearance does not expose a
 Focus ring color control because the focus indicator is the neutral edge,
 never the theme's focus role.
+
+### Save diagnostics
+
+Host › Maintenance holds Save diagnostics beside the failure report. The row's
+button, **Save diagnostics…**, saves nothing: it opens a plain list in place,
+headed "This file will include", with one row per section (name, how many
+entries it holds now or "Not available", and one sentence on what it holds),
+then "It never includes" and its plain lines. Only **Save file** asks the host
+to build the bundle; **Cancel** closes the list. In the desktop app Save file
+opens the native save dialog, offering `octant-diagnostics-<date>.zip` in
+Downloads; dismissing it returns to the list with nothing written. A browser or
+paired client downloads the zip instead. The saved line names the file and says
+nothing was sent. A host that cannot list or
+build the bundle shows one error sentence and keeps the button. The list is
+text and tabular counts on the page ground, with a hairline between rows and no
+cards. The rule for what the file holds is in
+[Architecture: persistence](docs/architecture.md#persistence).
 
 ### Shell edge cases
 
@@ -2348,7 +2431,8 @@ Message text and local input state reset only for an explicit New task action.
 A refused binding keeps the prior authorized Project and draft. Cross-Project
 notices appear once beside the active draft composer, with a separate-window
 action when available, and reveal upward behind the message surface.
-Authority confirmations follow the trusted inline-surface direction in 0100;
+Authority confirmations appear beside the owning composer in a trusted surface
+owned by the desktop main process;
 ordinary notice content cannot issue an approval receipt.
 
 ## Usage surface ownership

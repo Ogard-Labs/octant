@@ -11,8 +11,7 @@ posture and what **Allow input** grants
 
 The iOS Simulator dock tab
 is a device pane: the Simulator's screen streamed through the
-host as it changes, authorized like a screenshot and never stored (see
-[decisions/0139-the-simulator-frame-is-a-live-view-streamed-through-the-host.md](../decisions/0139-the-simulator-frame-is-a-live-view-streamed-through-the-host.md)),
+host as it changes, authorized like a screenshot and never stored,
 or the latest host-held screenshot evidence when there is no live view — with
 honest setup, unavailable, booting, live, interrupted, and stale-after-restart
 states; closing the tab does not shut down the destination. When Apple
@@ -36,8 +35,7 @@ saying it is outside the checkout, when it does not. An agent's
 `octant_apple` `boot`, `run`, or `open` raises that pane once per request
 instead of launching Simulator.app. That request lives only in server memory,
 keyed by thread and served only to the same thread and checkout; it is never
-journaled and dies with the process (see
-[decisions/0151-the-agent-opens-the-in-app-simulator-pane.md](../decisions/0151-the-agent-opens-the-in-app-simulator-pane.md)).
+journaled and dies with the process.
 Apple artifact and restart-receipt reads validate regular-file identity and size
 on an open handle before allocation. Reads reject linked files and size changes,
 with a 16 MiB artifact limit and 1 MiB receipt limit; existing records are not
@@ -55,14 +53,12 @@ acceptable here because the directory holds only host-minted, per-attempt UUID
 names, re-read with no-follow, single-link, size-bound, and PNG-signature checks
 before becoming an artifact. Redirecting the whole Apple temporary directory
 instead was measured and reverted: `xcrun` and the Simulator services need the
-host's real temporary and cache roots
-([decisions/0160-an-apple-screen-capture-lands-in-a-directory-only-its-launch-can-write.md](../decisions/0160-an-apple-screen-capture-lands-in-a-directory-only-its-launch-can-write.md)).
+host's real temporary and cache roots.
 
 ## Android
 
 An Android emulator is a separate dock destination and `octant_android` tool,
-not an iOS helper feature
-([decisions/0153-android-emulator-is-a-separate-device-destination.md](../decisions/0153-android-emulator-is-a-separate-device-destination.md)).
+not an iOS helper feature.
 `octant_android` installs only a checkout-relative APK; an absolute path or
 one that resolves outside the checkout is refused (`invalid-destination`).
 Android commands are one-shot `adb` clients. The shared `adb` server that a
@@ -84,8 +80,7 @@ Tap, typed text,
 and hardware-key input ride the same Apple workbench control channel as boot
 and screenshot, with XCTest-less host injection behind that channel only,
 computer-use-style actor attribution, and the same remote/headless fail-closed
-attach gate (see
-[decisions/0062-simulator-frame-input-transport.md](../decisions/0062-simulator-frame-input-transport.md)).
+attach gate.
 
 Evidence for each action keeps `requestedBy`, and the pane's Diagnostics
 "Recent" list shows it on every line that has one: "Agent" for an agent's
@@ -96,7 +91,7 @@ the host's bounded recent-evidence list.
 
 ## Native device helper and typed text
 
-Under the desktop app that injection is the native device helper of 0137: a
+Under the desktop app that injection is the native device helper: a
 tap is a point on the captured screen, typed text is letters, digits, spaces
 and new lines, and every refusal names the helper's own reason. Typed text is
 sent only when the guest keyboard is a QWERTY software layout with an
@@ -110,14 +105,12 @@ only the helper's refusal code, never a message that could quote the text. A
 point outside the screen is refused (`point-off-screen`), never clamped.
 Without that
 helper every input kind is unavailable; Octant does not script Simulator.app
-to inject a tap, swipe, typed text, or key
-([decisions/0151-the-agent-opens-the-in-app-simulator-pane.md](../decisions/0151-the-agent-opens-the-in-app-simulator-pane.md)). A swipe is a
+to inject a tap, swipe, typed text, or key. A swipe is a
 fourth input kind on the same channel, for the pane and for `octant_apple`
 alike, and the live screen is driven directly: a press and release is a tap, a
 drag is one swipe sent when it ends, keys typed on the focused screen go to
 the device as one text per pause, Home and Lock are buttons, and what a person
-does while an action runs is kept and sent in order (see
-[decisions/0140-the-live-simulator-screen-is-driven-directly.md](../decisions/0140-the-live-simulator-screen-is-driven-directly.md)).
+does while an action runs is kept and sent in order.
 
 ## Swipes
 
@@ -362,8 +355,7 @@ action, and the reason when a check or activation fails. A release that fails
 verification or does not start keeps the previous managed copy. Update never
 replaces a binary outside that managed location. Choosing Octant's copy
 switches the provider's configured path to the managed executable; it does
-not overwrite an OpenCode the person installed elsewhere. See
-[decisions/0162-managed-npm-device-tools-share-one-release-channel.md](../decisions/0162-managed-npm-device-tools-share-one-release-channel.md).
+not overwrite an OpenCode the person installed elsewhere.
 
 ## Streaming attach and fallbacks
 
@@ -464,9 +456,7 @@ outlives its emulator.
 These limits are accepted, not pending work. They follow from the input channel
 recording one request and one evidence record per input, from the host running
 one device action at a time, and from what the native helper can send. Each
-statement below is what the code shows today; the rationale for the non-goals
-is in [ADR 0137](../decisions/0137-simulator-input-reaches-the-guest-through-a-native-device-helper.md)
-and [ADR 0140](../decisions/0140-the-live-simulator-screen-is-driven-directly.md).
+statement below is what the code shows today.
 Anything the code does not settle is marked not verified.
 
 **What works on the iOS Simulator's live screen.** A press and release less
@@ -502,9 +492,8 @@ and a key outside the typable set is refused with the same reason.
 point per call, and there is no second-finger operation, so the channel cannot
 carry two fingers. The pane acts only on the primary pointer: a second finger
 neither starts nor ends a gesture, and a secondary button does nothing on the
-screen. Neither pinch nor a second finger reaches the device
-([ADR 0140](../decisions/0140-the-live-simulator-screen-is-driven-directly.md)
-lists pinch and other multi-touch as non-goals).
+screen. Neither pinch nor a second finger reaches the device;
+pinch and other multi-touch are non-goals.
 
 **Long press is not sent.** A press that stays within 10 px is a tap on release,
 however long it was held: the duration is not part of a tap. On the managed
@@ -523,10 +512,9 @@ straight one. A slow drag that holds still before it moves is the same swipe.
 The Android pane sends the same straight swipe with `input swipe` (or
 `serve-avd`'s swipe). The reason is the same as for multi-touch: a stream of
 move events would be dozens of journaled actions per drag, or an unjournaled
-side path, which [ADR 0062](../decisions/0062-simulator-frame-input-transport.md)
-rejects, and gestures that depend on the path or on holding still need touch
+side path, which the input channel rejects, and gestures that depend on the path or on holding still need touch
 phases on the channel, which is a separate decision about what an input session
-records ([ADR 0140](../decisions/0140-the-live-simulator-screen-is-driven-directly.md)).
+records.
 
 **The still-image fallback** takes a click as a tap at the same place. It sends
 no swipe and no keys from the picture itself. The toolbar's Type text still

@@ -91,8 +91,6 @@ export interface CodeWorkspaceProjections {
 }
 
 export interface CodeWorkspaceApprovals {
-  /** Native confirmation for raising a thread to Full access. */
-  readonly access?: React.ComponentProps<typeof CodeThreadWorkspace>["requestFullAccessApproval"];
   readonly git?: React.ComponentProps<typeof CodeGitPane>["requestApproval"];
   readonly pullRequest?: React.ComponentProps<typeof CodePullRequestPane>["requestApproval"];
   readonly review?: React.ComponentProps<typeof CodeReviewPane>["requestApproval"];
@@ -126,7 +124,6 @@ export interface CodeWorkspaceProps {
   readonly holdAccessNotice?: CodeThreadControllers["holdAccessNotice"];
   readonly extensionClient?: ExtensionClient;
   readonly automationClient?: AutomationClient;
-  readonly projectRemembersFullAccess?: boolean;
   readonly createUuid?: () => string;
   readonly projections?: CodeWorkspaceProjections;
   readonly hostBridge?: OctantHostBridge;
@@ -250,10 +247,6 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         {...(props.onNewThreadInProject === undefined
           ? {}
           : { onNewThreadInProject: props.onNewThreadInProject })}
-        {...(props.approvals?.access === undefined
-          ? {}
-          : { requestFullAccessApproval: props.approvals.access })}
-        {...(props.projectRemembersFullAccess !== true ? {} : { projectRemembersFullAccess: true })}
         {...(props.approvals?.updateAnchor === undefined
           ? {}
           : { updateApprovalAnchor: props.approvals.updateAnchor })}

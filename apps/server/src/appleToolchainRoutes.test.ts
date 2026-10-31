@@ -83,7 +83,7 @@ describe("Apple toolchain routes", () => {
       discover: vi.fn(async () => ({ kind: "discovered", ...discovery })),
       execute: vi.fn(),
       cancel: vi.fn(),
-      snapshot: vi.fn(),
+      refreshedSnapshot: vi.fn(),
       readScreenshotArtifact: vi.fn(),
     };
     const resolveContext = vi.fn(async () => context);
@@ -136,7 +136,7 @@ describe("Apple toolchain routes", () => {
       discover: vi.fn(),
       execute: vi.fn(),
       cancel: vi.fn(),
-      snapshot: vi.fn(() => snapshot),
+      refreshedSnapshot: vi.fn(async () => snapshot),
       readScreenshotArtifact: vi.fn(),
     };
     const grants = [
@@ -188,7 +188,7 @@ describe("Apple toolchain routes", () => {
       discover: vi.fn(),
       execute: vi.fn(async () => evidence),
       cancel: vi.fn(),
-      snapshot: vi.fn(),
+      refreshedSnapshot: vi.fn(),
       readScreenshotArtifact: vi.fn(),
     };
     const afterAction = vi.fn();
@@ -256,7 +256,7 @@ describe("Apple toolchain routes", () => {
           completedAt: "2026-10-14T20:00:01.000Z",
         })),
         cancel: vi.fn(),
-        snapshot: vi.fn(),
+        refreshedSnapshot: vi.fn(),
         readScreenshotArtifact: vi.fn(),
       };
       const handler = createAppleToolchainRouteHandler({
@@ -322,7 +322,7 @@ describe("Apple toolchain routes", () => {
         discover: vi.fn(),
         execute: vi.fn(async () => evidence),
         cancel: vi.fn(),
-        snapshot: vi.fn(),
+        refreshedSnapshot: vi.fn(),
         readScreenshotArtifact: vi.fn(),
       };
       const handler = createAppleToolchainRouteHandler({
@@ -408,7 +408,7 @@ describe("Apple toolchain routes", () => {
           completedAt: "2026-10-14T20:00:01.000Z",
         })),
         cancel: vi.fn(),
-        snapshot: vi.fn(),
+        refreshedSnapshot: vi.fn(),
         readScreenshotArtifact: vi.fn(),
       };
       const handler = createAppleToolchainRouteHandler({
@@ -493,7 +493,7 @@ describe("Apple toolchain routes", () => {
           completedAt: "2026-10-14T20:00:01.000Z",
         })),
         cancel: vi.fn(),
-        snapshot: vi.fn(),
+        refreshedSnapshot: vi.fn(),
         readScreenshotArtifact: vi.fn(),
       };
       const handler = createAppleToolchainRouteHandler({
@@ -551,7 +551,7 @@ describe("Apple toolchain routes", () => {
       discover: vi.fn(),
       execute: vi.fn(),
       cancel: vi.fn(),
-      snapshot: vi.fn(),
+      refreshedSnapshot: vi.fn(),
       readScreenshotArtifact: vi.fn(),
     };
     const handler = createAppleToolchainRouteHandler({
@@ -564,7 +564,7 @@ describe("Apple toolchain routes", () => {
       request({ kind: "apple-snapshot-request", authority, ...scope }, "invalid"),
     );
     expect(response?.status).toBe(401);
-    expect(service.snapshot).not.toHaveBeenCalled();
+    expect(service.refreshedSnapshot).not.toHaveBeenCalled();
   });
 
   it("does not leak a denied root or unrelated log detail", async () => {
@@ -573,7 +573,7 @@ describe("Apple toolchain routes", () => {
       discover: vi.fn(),
       execute: vi.fn(),
       cancel: vi.fn(),
-      snapshot: vi.fn(),
+      refreshedSnapshot: vi.fn(),
       readScreenshotArtifact: vi.fn(),
     };
     const handler = createAppleToolchainRouteHandler({
@@ -587,7 +587,7 @@ describe("Apple toolchain routes", () => {
     );
     expect(response?.status).toBe(400);
     expect(await response?.text()).not.toContain(privatePath);
-    expect(service.snapshot).not.toHaveBeenCalled();
+    expect(service.refreshedSnapshot).not.toHaveBeenCalled();
   });
 
   it("refuses screenshot bytes outside the window's authorized thread scope", async () => {
@@ -595,7 +595,7 @@ describe("Apple toolchain routes", () => {
       discover: vi.fn(),
       execute: vi.fn(),
       cancel: vi.fn(),
-      snapshot: vi.fn(),
+      refreshedSnapshot: vi.fn(),
       readScreenshotArtifact: vi.fn(),
     };
     const resolveContext = vi.fn(async () => undefined);
@@ -636,7 +636,7 @@ describe("Apple toolchain routes", () => {
       discover: vi.fn(),
       execute: vi.fn(),
       cancel: vi.fn(),
-      snapshot: vi.fn(),
+      refreshedSnapshot: vi.fn(),
       readScreenshotArtifact: vi.fn(async () => ({ kind: "found" as const, bytes: png })),
     };
     const handler = createAppleToolchainRouteHandler({
@@ -684,7 +684,7 @@ describe("Apple toolchain routes", () => {
       discover: vi.fn(),
       execute: vi.fn(),
       cancel: vi.fn(),
-      snapshot: vi.fn(),
+      refreshedSnapshot: vi.fn(),
       readScreenshotArtifact: vi.fn(),
     };
 

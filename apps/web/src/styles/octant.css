@@ -316,7 +316,7 @@
      radii, and a touch target that sets the floor for everything.
 
      Glass earns its place wherever a person has put an atmospheric
-     ground behind the work, which is the phone and Zen (0107). Elsewhere
+     ground behind the work, which is the phone and Zen. Elsewhere
      on desktop this system draws elevation as a hairline ring and no
      shadow, because a dense information surface wants edges, not depth.
      A phone shows one thing at a time over a photographic ground, and a
@@ -912,7 +912,7 @@ h4 {
    content, transcript, callouts, and composer all wear this one class, so
    a callout is exactly as wide as the transcript above it and the composer
    anchors under both — a full-bleed strip over a centered transcript is
-   the drift this exists to prevent (ADR 0038). A surface positions the
+   the drift this exists to prevent. A surface positions the
    column (block margins, padding); it never redefines the measure. */
 .thread-column {
   width: min(100% - 40px, var(--oct-thread-measure));
@@ -2543,7 +2543,7 @@ input.switch:checked::after {
   text-align: end;
 }
 
-/* Replies read as prose on the conversation's shared ground (0155).
+/* Replies read as prose on the conversation's shared ground.
    Only structured results, code, and requests need their own containers. */
 .turn-agent {
   min-width: 0;
@@ -4509,7 +4509,7 @@ input.switch:checked::after {
   border-radius: var(--oct-radius-pill);
 }
 /* Controls riding the composer row are one treatment across Chat, Work, and
-   Code; a surface may position them, never restyle them (ADR 0038). Selects
+   Code; a surface may position them, never restyle them. Selects
    are quiet until pointed at; the provider/model picker trigger is the small
    bordered picker, opening from the row's left edge. */
 .composer-row [role="combobox"] {
@@ -5831,7 +5831,7 @@ input.switch:checked::after {
   background-size: 22px 22px;
 }
 
-/* A card is glass over the person's ground (0107). It carries a
+/* A card is glass over the person's ground. It carries a
    transcript, so it takes the thick step of the ladder: a thicker glass is
    both more opaque and more diffuse, which is what keeps running text
    readable as the panel carries more weight. */
@@ -6063,7 +6063,7 @@ input.switch:checked::after {
 
 /* ─── the material ────────────────────────────────────────────────────
    Zen is the desktop's one surface with a ground behind it, so it is the
-   one that wears glass (0107). Every Zen rule above paints an opaque fill
+   one that wears glass. Every Zen rule above paints an opaque fill
    and this block pours the tint over it, in that order: the blur is the
    whole point, and where the engine cannot draw one the text would land
    on the person's photograph directly.
@@ -6080,7 +6080,7 @@ input.switch:checked::after {
    2.97:1; over the floor it reads 8.36:1. A dark ground is unaffected —
    the floor is already darker than what is behind it — so the material
    loses nothing where the reference grounds actually sit. */
-/* A card that asked for the glass variant (0107). The recipe hands over an
+/* A card that asked for the glass variant. The recipe hands over an
    unpainted section and names the material; the fill, the fallback, and both
    opt-outs live here with the surfaces that already wear it, so the ladder
    keeps one definition. A panel carries running text — sliders, labels, a
@@ -6156,8 +6156,8 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   }
 }
 
-/* Input surfaces retain the glass material over the application ground
-   (0150, narrowed by 0155), and under window Glass with no ground too, so the
+/* Input surfaces retain the glass material over the application ground,
+   and under window Glass with no ground too, so the
    composer is one material whichever of the two a window shows. Under Glass
    alone it was the opaque card colour, a black slab on an OLED preset.
    Replies share the quiet conversation ground; adding glass to each one would
@@ -8169,7 +8169,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
    into a flat desktop screen by accident. Drop a component out of .phone
    and it loses its material rather than quietly bringing a blur onto a
    surface that was designed flat. Zen carries the same material under
-   its own scope, for the same reason (0107).
+   its own scope, for the same reason.
    ══════════════════════════════════════════════════════════════════════ */
 
 /* ─── device ──────────────────────────────────────────────────────────

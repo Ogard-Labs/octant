@@ -53,7 +53,7 @@ icon buttons (Work presents the Chat and Work domains together; see
 threads, and settings (the sidebar's anatomy is in [DESIGN.md](../../DESIGN.md#shell-and-layout)); an
 integrated borderless top chrome; a central workspace; and an optional right
 dock. Mode changes alter content, authority, default composition, and density,
-never the navigation grammar. See [decisions/0015-workspace-shell-model.md](../decisions/0015-workspace-shell-model.md).
+never the navigation grammar.
 
 **Home** leads the places: first in the icon rail, above Inbox, and among the
 sidebar's own actions when no rail stands beside it. It closes any reader and
@@ -82,8 +82,18 @@ posture as quiet text (it is a standing setting, not a state or a control, so
 it takes no chip), and facts on one line beneath it, then Details. A Work
 Project's thread list takes the same labelled card. Settings
 rows split into **Context** (Memory, Brand kit, Canvases) and **Access and
-limits** (Provider access, Disposable desktop, Status file, Spend ceiling); a
-group with no rows is not drawn. Over an application ground the cards keep the
+limits** (Provider access, Guardrail level, Developer tools on a Work
+Project, Disposable desktop, Status file, Spend ceiling); a group with no
+rows is not drawn. **Guardrail level** shows the level the Project's threads
+start at and where it came from, changeable in one click, and is the same row
+in Work and Code. **Developer tools** is the Work Project's switch for
+showing developer surfaces (Git panels, pull request and review surfaces,
+issue-tracker integrations, the worktree and checkout pickers, and the
+Project terminal), off by default, set only by a person. Its row says it
+changes what the Project shows, not what its threads may do: a Work thread
+has the same shell, Git, and tools as a Code thread at the same level either
+way ([Modes](../architecture.md#modes-chat-work-and-code); allowed, not built
+yet). Code Projects have no such row, since Code always shows them. Over an application ground the cards keep the
 opaque card step even under Glass, and the header's text takes the start
 screen's page-colour glow: set straight on the ground, the overview's rows
 read through the ground's letters (October 2026).
@@ -135,6 +145,22 @@ recover them; available and unavailable checkouts are not re-probed, and the
 sidebar timer never walks the checkout tree. Inactive modes and hidden windows
 pause those refreshes so background ticks do not contend with the next
 interaction.
+
+### Jump to the next waiting thread
+
+The `next-waiting-thread` keybinding (Mod+Shift+J by default) and the palette
+command **Jump to the next thread that needs you** open the next thread waiting
+on the person. The renderer reads the attention signals the sidebar and Inbox
+already render and adds no host read. Each thread counts once, at its strongest
+reason, in this order: approval, question, finished turn not yet looked at;
+within a reason, in the order the signals are listed. The jump goes to the entry
+after the open thread and wraps from the last to the first; when the open thread
+is not waiting it goes to the first, and when nothing waits it does nothing and
+the command is absent from the palette. A failed turn is not in the order: the
+thread listing reports no failure, and a status is never inferred from silence.
+A due follow-up is a reminder, not a waiting thread, and is left out. The
+Status arrangement's **Needs input** and **Ready for review** headings are the
+list-side counterpart, so no second priority group is added to the Projects tree.
 
 ### Sidebar thread status
 
@@ -189,8 +215,7 @@ thread a turn reopens or wakes it on the server. One host sweep archives
 completed threads of every mode once their completion is older than the
 `completedThreadArchiveAfterDays` shell setting (default seven days, `null`
 for never), re-deciding against each mode's authoritative record and
-journaling the ordinary thread update as the `system` actor. It archives only;
-see [decisions/0088-completed-and-snoozed-threads.md](../decisions/0088-completed-and-snoozed-threads.md).
+journaling the ordinary thread update as the `system` actor. It archives only.
 
 **Put away** is the only name people see for this state, beside the board's
 Done: the sidebar shelf, the row-menu action, the Review page action, the
@@ -279,8 +304,7 @@ so a later per-environment icon can replace it in place. Tab
 geometry and close-control presentation are shared with dock tools under
 [Content tabs](../../DESIGN.md#content-tabs).
 
-These tabs add no persisted layout or authority; see
-[decision 0156](../decisions/0156-content-opens-beside-the-conversation.md).
+These tabs add no persisted layout or authority.
 
 **Opening into tabs.** A single click on a sidebar thread opens it in the
 active pane in place: it takes over the pane's open tab unless that tab was
@@ -399,6 +423,25 @@ through `GitHistoryReader` and the authenticated Code checkout-read boundary;
 its Git subprocesses are network-denied and its data is an ephemeral read,
 not a second journal. Pages anchor to immutable Git tips, and commit details
 compare immutable object IDs with an explicit parent for merges.
+Review also owns Local commits: the commits on the thread's branch that its
+upstream does not have, or that its base branch does not have when it has no
+upstream, each opening to its own diff. The host picks the comparison and
+names it in the view; it never fetches. A listing holds the newest 100
+commits and says when older ones are not shown. **Ignore whitespace** is one
+per-person choice, kept in the browser profile and followed by every mounted view, that the Working tree and
+commit diffs apply by asking Git for `-w`. It changes only the diff text: the
+changed-path list, line totals and checkout state token are unchanged.
+A pull request opened in Review shows, under its header, an **Automatic
+actions** section with two switches: **Merge when ready** and **Auto-fix**.
+Each has one status line under its name that says what it is doing now (off,
+on and waiting on checks, reviews, or a conflict, merged, turned off by
+GitHub; on and watching, waiting while you type or while a turn runs, last
+woke the thread and which try, stopped and why). Auto-fix names the linked
+thread it wakes, the first linked one; with none linked it stays off and its
+hover reason says to link a thread. A refused or unsupported change keeps the
+switch where it was and says why in one alert line under the section. The
+review re-reads the switches every 20 seconds while open. Rules and limits are
+owned by [Architecture: modes](../architecture.md#modes-chat-work-and-code).
 The top-right control reveals the dock only when the active pane has a bound thread
 or a valid launchable tool. A new Code task's pane, before its thread exists, keeps
 the dock: its title band shows the common tools disabled ("Available once the task
@@ -469,8 +512,7 @@ rather than given an assumed scope. Hand off
 own provider for a six-section hand-off document in one tool-free request,
 keeps it as a Canvas of the thread, and opens that Canvas in the dock; a
 running turn, an unready provider, or a thread outside a Project is refused as
-an ordinary answer (see
-[decisions/0080-hand-off-writes-a-canvas-from-the-export-cut.md](../decisions/0080-hand-off-writes-a-canvas-from-the-export-cut.md)). The dock follows the active
+an ordinary answer. The dock follows the active
 pane's thread and Project, restores that subject's open tools, and presents an
 explicit unavailable state when the newly active pane cannot describe the
 selected tool — never the previous pane's content. Hiding a Browser or Terminal
@@ -651,8 +693,7 @@ forest of parent threads and the runs they launched, and Graph can save that for
 cursor-readable and byte- and count-bounded, with explicit complete, stale, and
 unavailable states. Provider-native live transcripts remain unavailable unless
 their normalized provider capability supplies an equivalent host-authorized
-read; a host-retained final reply stays readable after completion. See
-[decisions/0050-bounded-live-child-conversation.md](../decisions/0050-bounded-live-child-conversation.md).
+read; a host-retained final reply stays readable after completion.
 
 Saved child-generation file comparisons open in the existing Review tool from
 Agents result history. The selection carries the parent, managed child and
@@ -687,10 +728,7 @@ concurrently, results reconcile in stable Project order, and every refresh path
 remains within preview bounds. The journal never stores that cache and never
 sees a per-poll event; it stores only the user's opt-in toggle and exact PR
 identities already produced by Code operations. The bounded list cache survives
-host restart and is cleared when GitHub authority is revoked (see
-[decisions/0064-pull-request-observation-cadence.md](../decisions/0064-pull-request-observation-cadence.md)
-and
-[decisions/0076-pull-request-snapshot-survives-restart.md](../decisions/0076-pull-request-snapshot-survives-restart.md)).
+host restart and is cleared when GitHub authority is revoked.
 
 **Answering from a Board card.** A Work or Code card whose thread waits on the
 person shows what it asks and the answers, so a column of waiting cards is
@@ -845,7 +883,13 @@ a Project terminal and pins a card that names the Project and the terminal,
 never a thread. The card is a window onto the shell and grants nothing: a card
 naming a terminal this window does not own is refused. Authority, lifecycle,
 and the journal record follow the
-[Project terminal rule](../architecture.md#security-and-authority). Add browser
+[Project terminal rule](../architecture.md#security-and-authority). A Code
+Project's saved actions (Run, Test, Dev) are buttons in the window header, three
+inline and the rest under More, and entries in the command palette's Actions
+group; the Project overview's Actions section edits them and offers suggestions
+the person confirms. Choosing one runs it in the window's pinned Project
+terminal, or opens and pins one, and enters Zen to show it (see
+[Project actions](../architecture.md#security-and-authority)). Add browser
 likewise offers the window's Work or Code Project as "This Project": the dock
 names the Project, never a thread, and shows that Project's own page under the
 Project browsing context rule in the same section.

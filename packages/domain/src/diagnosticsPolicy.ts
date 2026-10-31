@@ -174,7 +174,13 @@ export function serializeDiagnosticsEvidencePacket(packet: DiagnosticEvidencePac
   });
 }
 
-function stillContainsSecret(text: string): boolean {
+/**
+ * Whether text still carries a shape redaction must have removed: a private
+ * key, a provider key, a credentialed address, a secret assignment, or an
+ * absolute home path. Every diagnostics surface checks redacted text against
+ * this before it leaves the host.
+ */
+export function stillContainsSecret(text: string): boolean {
   return RESIDUAL_SECRET_PATTERNS.some((pattern) => pattern.test(text));
 }
 

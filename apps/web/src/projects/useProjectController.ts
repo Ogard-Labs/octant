@@ -1,3 +1,4 @@
+import type { PermissionMode } from "@octant/contracts/providers";
 import {
   decodeBindingReceiptId,
   decodeMemoryEntryId,
@@ -13,6 +14,7 @@ import {
   type CodeAccessPersistence,
   type CodeNewThreadWorkspace,
   type CodeProjectPullRequestBackgroundRefresh,
+  type ProjectAction,
   type ProjectColor,
   type ProjectProviderPolicy,
   type WorkProjectStatusFile,
@@ -230,6 +232,25 @@ export function useProjectController(options: ProjectControllerOptions) {
    * default; the create dialog still overrides it for one thread without
    * coming through here.
    */
+  /** Record the mode a Code Project's new threads start in; absent follows Settings. */
+  async function setCodePermissionMode(
+    projectId: ProjectId,
+    permissionMode: PermissionMode | undefined,
+  ): Promise<boolean> {
+    const project = projectById.get(projectId);
+    if (project?.type !== "code") return false;
+    if (project.defaultPermissionMode === permissionMode) return true;
+    return execute(
+      {
+        kind: "change-code-project-permission-mode",
+        projectId,
+        expectedVersion: project.version,
+        ...(permissionMode === undefined ? {} : { permissionMode }),
+      },
+      "Code Project default mode updated.",
+    );
+  }
+
   async function setCodeNewThreadWorkspace(
     projectId: ProjectId,
     newThreadWorkspace: CodeNewThreadWorkspace,
@@ -338,6 +359,22 @@ export function useProjectController(options: ProjectControllerOptions) {
           : key?.action === "enter"
             ? "Desktop recipe and key saved."
             : "Desktop recipe saved.",
+    );
+  }
+
+  /**
+   * Save the whole list of a Code Project's terminal actions. The host
+   * refuses a Work or archived Project and a list that changes nothing.
+   */
+  async function setActions(
+    projectId: ProjectId,
+    actions: ReadonlyArray<ProjectAction>,
+  ): Promise<boolean> {
+    const project = projectById.get(projectId);
+    if (project?.type !== "code") return false;
+    return execute(
+      { kind: "change-code-project-actions", projectId, expectedVersion: project.version, actions },
+      "Project actions saved.",
     );
   }
 
@@ -707,10 +744,12 @@ export function useProjectController(options: ProjectControllerOptions) {
     setCodeAccessPersistence,
     setColor,
     setCodeNewThreadWorkspace,
+    setCodePermissionMode,
     setCodePullRequestBackgroundRefresh,
     setProviderPolicy,
     setBrandKit,
     setDesktopRecipe,
+    setActions,
     setWorkStatusFile,
     setArchived,
     status,

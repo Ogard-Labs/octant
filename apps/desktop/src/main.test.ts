@@ -1135,6 +1135,56 @@ function credentialStore(values = new Map<string, string>()): CredentialStore {
   };
 }
 
+describe("provider credential that points at a linked secret store", () => {
+  const providerInstanceId = "7d444840-9dc0-11d1-b245-5ffdce74fad2";
+  const pointer = `octant-linked-secret:v1:${JSON.stringify({
+    store: "onepassword",
+    reference: "op://Private/Gateway/credential",
+  })}`;
+
+  function installPointed() {
+    const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
+    const store = credentialStore(new Map([[providerInstanceId, pointer]]));
+    installProviderCredentialIpcHandlers({
+      handle: (channel, handler) => void handlers.set(channel, handler),
+      resolveOwnedWindow: vi.fn(),
+      store,
+    });
+    return { handlers, store };
+  }
+
+  it("keeps a pasted key, a clear, and a key edit from silently replacing the pointer", async () => {
+    const { handlers, store } = installPointed();
+    const message =
+      "This provider's key comes from a linked secret store. Remove the link in Settings first.";
+
+    await expect(
+      handlers.get("octant:provider-credential:set")?.({}, providerInstanceId, "sk-pasted"),
+    ).rejects.toThrow(message);
+    await expect(
+      handlers.get("octant:provider-credential:clear")?.({}, providerInstanceId),
+    ).rejects.toThrow(message);
+    await expect(
+      handlers.get("octant:provider-api-key:add")?.({}, providerInstanceId, "sk-pasted"),
+    ).rejects.toThrow(message);
+    await expect(
+      handlers.get("octant:provider-api-key:remove")?.({}, providerInstanceId, "default"),
+    ).rejects.toThrow(message);
+    expect(store.set).not.toHaveBeenCalled();
+    expect(store.delete).not.toHaveBeenCalled();
+  });
+
+  it("lists no keys for a pointer and reports the credential as stored", async () => {
+    const { handlers } = installPointed();
+    await expect(
+      handlers.get("octant:provider-api-key:list")?.({}, providerInstanceId),
+    ).resolves.toEqual([]);
+    await expect(
+      handlers.get("octant:provider-credential:status")?.({}, providerInstanceId),
+    ).resolves.toBe("stored");
+  });
+});
+
 describe("provider API key host operations", () => {
   const providerInstanceId = "7d444840-9dc0-11d1-b245-5ffdce74fad2";
   const FIRST = "sk-ant-first-0000";
@@ -1200,10 +1250,22 @@ describe("provider API key host operations", () => {
     for (const [cause, words] of [
       ["locked", "Your keyring is locked"],
       ["no-login-collection", "no Login keyring"],
+      ["no-service", "No keyring is running"],
+      ["no-tool", "secret-tool program"],
+      ["denied", "refused Octant access"],
+      ["timed-out", "did not answer"],
     ] as const) {
       vi.mocked(store.set).mockRejectedValueOnce(new CredentialStoreFailure("unavailable", cause));
       await expect(call("add", providerInstanceId, FIRST, "Work")).rejects.toThrow(words);
     }
+    vi.mocked(store.set).mockRejectedValueOnce(new CredentialStoreFailure("unavailable"));
+    await expect(call("add", providerInstanceId, FIRST, "Work")).rejects.toThrow(
+      "could not reach a secure credential store",
+    );
+    vi.mocked(store.set).mockRejectedValueOnce(new CredentialStoreFailure("failed"));
+    await expect(call("add", providerInstanceId, FIRST, "Work")).rejects.toThrow(
+      "keyring refused to keep the key",
+    );
   });
 
   it("removes the last key by deleting the stored entry", async () => {

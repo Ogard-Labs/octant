@@ -145,6 +145,62 @@ describe("endpoint row state", () => {
       "Add key",
     ],
     [
+      "a key the service took but denied the request for",
+      { failure: failure("unauthorized", "The provider denied this request.") },
+      "Request denied",
+      "The service took the key but denied this request. Check what the key is allowed to do.",
+      "Try again",
+    ],
+    [
+      "a saved key the credential store could not give back",
+      {
+        failure: failure("unavailable", "The provider credential store is unavailable."),
+        hostPlatform: "linux",
+      },
+      "Can't read key",
+      "Octant couldn't read the saved key from this computer's credential store. Check that it is running and unlocked, then try again.",
+      "Try again",
+    ],
+    [
+      "a stored check that never had a key to send, after a reload",
+      {
+        observed: observed({
+          readiness: "unauthenticated",
+          models: [],
+          message: "The provider credential is missing or unavailable.",
+        }),
+      },
+      "Needs key",
+      "No API key is saved for it.",
+      "Add key",
+    ],
+    [
+      "a stored check the service turned down, after a reload",
+      {
+        observed: observed({
+          readiness: "unauthenticated",
+          models: [],
+          message: "The provider rejected the configured credential.",
+        }),
+      },
+      "Key refused",
+      "The service turned down the API key.",
+      "Replace key",
+    ],
+    [
+      "a stored check the credential store failed, after a reload",
+      {
+        observed: observed({
+          readiness: "unavailable",
+          models: [],
+          message: "The provider credential store is unavailable.",
+        }),
+      },
+      "Can't read key",
+      "Octant couldn't read the saved key from this computer's credential store. Check that it is running and unlocked, then try again.",
+      "Try again",
+    ],
+    [
       "an address that answers with something other than models",
       { failure: failure("protocol", "The provider returned an invalid models response.") },
       "Not working",

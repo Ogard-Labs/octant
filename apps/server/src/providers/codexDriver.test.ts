@@ -1,5 +1,5 @@
 import { BROWSER_TOOL_DEFINITION } from "../browser/browserToolDefinition";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,6 +19,7 @@ import {
   makeCodexProcessLive,
   type CodexAppServerConnection,
   type CodexProcessPort,
+  type CodexLaunchAuthority,
 } from "./codexProcess";
 import { CodexRpcClientFailure } from "./codexRpcClient";
 import type { CodexServerMessage } from "./codexProtocol";
@@ -115,6 +116,7 @@ interface Fixture {
   readonly listenerCount: () => number;
   readonly options: (overrides?: Partial<CodexDriverOptions>) => CodexDriverOptions;
   readonly startCount: () => number;
+  readonly authorities: () => ReadonlyArray<CodexLaunchAuthority>;
 }
 
 function fixture(
@@ -235,11 +237,13 @@ function fixture(
       };
     },
   };
+  const authorities: CodexLaunchAuthority[] = [];
   const processPort: CodexProcessPort = {
-    start: () =>
+    start: ({ authority }) =>
       Effect.acquireRelease(
         Effect.sync(() => {
           starts += 1;
+          authorities.push(authority);
           const exited = new Promise<void>((resolve) => {
             resolveExit = resolve;
           });
@@ -261,6 +265,7 @@ function fixture(
     exit: () => resolveExit(),
     listenerCount: () => listeners.size,
     startCount: () => starts,
+    authorities: () => authorities,
     options: (overrides = {}) => ({
       instanceId,
       binaryPath: "/usr/local/bin/codex",
@@ -640,6 +645,7 @@ describe("Codex driver probe and runtime lifecycle", () => {
       const acquired = await acquireConnection(
         makeCodexDriver(f.options({ runtimeRegistry: registry })),
       );
+      await startSession(acquired.connection);
       expect(await readdir(receiptDirectory)).toHaveLength(1);
       await acquired.close();
       await registry.closeAll();
@@ -891,7 +897,16 @@ describe("Codex driver probe and runtime lifecycle", () => {
       Effect.either(
         makeCodexDriver(unprobed.options({ environment: bearer }))
           .acquire({ instanceId, projectRoot })
-          .pipe(Effect.provideService(Scope.Scope, scope)),
+          .pipe(
+            Effect.flatMap((connection) =>
+              connection.start({
+                sessionId,
+                modelId: "gpt-5.4" as never,
+                executionPolicy: "approval-gated",
+              }),
+            ),
+            Effect.provideService(Scope.Scope, scope),
+          ),
       ),
     );
     await Effect.runPromise(Scope.close(scope, Exit.void));
@@ -900,44 +915,96 @@ describe("Codex driver probe and runtime lifecycle", () => {
     expect(unprobed.calls.some(({ method }) => method === "thread/start")).toBe(false);
   });
 
-  it("shares one concurrent runtime per instance, isolates instances, and idles for 30 seconds", async () => {
+  it("shares one process per root and posture, separates postures and instances, and idles for 30 seconds", async () => {
     vi.useFakeTimers();
     const registry = new ProviderRuntimeRegistry();
     const f = fixture();
     const driver = makeCodexDriver(f.options({ runtimeRegistry: registry }));
-    const firstScope = await Effect.runPromise(Scope.make());
-    const secondScope = await Effect.runPromise(Scope.make());
+    const first = await Effect.runPromise(Scope.make());
+    const second = await Effect.runPromise(Scope.make());
+    const third = await Effect.runPromise(Scope.make());
+    const open = (
+      scope: Scope.CloseableScope,
+      policy: ProviderExecutionPolicy,
+      id: typeof sessionId,
+    ) =>
+      Effect.runPromise(
+        driver.acquire({ instanceId, projectRoot }).pipe(
+          Effect.flatMap((connection) =>
+            connection.start({
+              sessionId: id,
+              modelId: "gpt-5.4" as never,
+              executionPolicy: policy,
+            }),
+          ),
+          Effect.provideService(Scope.Scope, scope),
+        ),
+      );
     await Promise.all([
-      Effect.runPromise(
-        driver
-          .acquire({ instanceId, projectRoot })
-          .pipe(Effect.provideService(Scope.Scope, firstScope)),
-      ),
-      Effect.runPromise(
-        driver
-          .acquire({ instanceId, projectRoot })
-          .pipe(Effect.provideService(Scope.Scope, secondScope)),
-      ),
+      open(first, "approval-gated", sessionId),
+      open(second, "approval-gated", secondSessionId),
     ]);
+    // Acquiring a connection leases nothing; the first session names the posture.
     expect(f.startCount()).toBe(1);
-    await Promise.all([
-      Effect.runPromise(Scope.close(firstScope, Exit.void)),
-      Effect.runPromise(Scope.close(secondScope, Exit.void)),
+    await open(third, "plan", sessionId);
+    expect(f.startCount()).toBe(2);
+    expect(f.authorities()).toEqual([
+      { kind: "thread", root: projectRoot, mode: "code", executionPolicy: "approval-gated" },
+      { kind: "thread", root: projectRoot, mode: "code", executionPolicy: "plan" },
     ]);
+    await Promise.all(
+      [first, second, third].map((scope) => Effect.runPromise(Scope.close(scope, Exit.void))),
+    );
     await vi.advanceTimersByTimeAsync(29_999);
     expect(f.closeCount()).toBe(0);
     await vi.advanceTimersByTimeAsync(1);
-    expect(f.closeCount()).toBe(1);
+    expect(f.closeCount()).toBe(2);
 
-    const second = fixture();
+    const other = fixture();
     await Effect.runPromise(
       Effect.scoped(
-        makeCodexDriver(
-          second.options({ instanceId: otherInstanceId, runtimeRegistry: registry }),
-        ).acquire({ instanceId: otherInstanceId, projectRoot }),
+        makeCodexDriver(other.options({ instanceId: otherInstanceId, runtimeRegistry: registry }))
+          .acquire({ instanceId: otherInstanceId, projectRoot })
+          .pipe(
+            Effect.flatMap((connection) =>
+              connection.start({
+                sessionId,
+                modelId: "gpt-5.4" as never,
+                executionPolicy: "approval-gated",
+              }),
+            ),
+          ),
       ),
     );
-    expect(second.startCount()).toBe(1);
+    expect(other.startCount()).toBe(1);
+  });
+
+  it("reads the account and models through a process that carries no thread", async () => {
+    const f = fixture();
+    await Effect.runPromise(Effect.scoped(makeCodexDriver(f.options()).probe({ instanceId })));
+    expect(f.authorities()).toEqual([{ kind: "catalog" }]);
+  });
+
+  it("refuses to change the posture of a connection's confined process", async () => {
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()));
+    try {
+      await startSession(acquired.connection, sessionId, "plan");
+      const widened = await Effect.runPromise(
+        Effect.either(
+          acquired.connection.start({
+            sessionId: secondSessionId,
+            modelId: "gpt-5.4" as never,
+            executionPolicy: "approval-gated",
+          }),
+        ),
+      );
+      expect(widened._tag).toBe("Left");
+      if (widened._tag === "Left") expect(widened.left.category).toBe("unauthorized");
+      expect(f.startCount()).toBe(1);
+    } finally {
+      await acquired.close();
+    }
   });
 });
 
@@ -1070,7 +1137,7 @@ describe("Codex thread and turn lifecycle", () => {
     expect(starts[0]?.input).toEqual({
       cwd: projectRoot,
       model: "gpt-5.4",
-      approvalPolicy: "on-request",
+      approvalPolicy: "untrusted",
       sandbox: "read-only",
       approvalsReviewer: "user",
       serviceTier: "fast",
@@ -1079,7 +1146,7 @@ describe("Codex thread and turn lifecycle", () => {
     expect(starts[1]?.input).toEqual({
       cwd: projectRoot,
       model: "gpt-5.4",
-      approvalPolicy: "on-request",
+      approvalPolicy: "untrusted",
       sandbox: "read-only",
       approvalsReviewer: "user",
       config: { skills: { config: [] } },
@@ -1169,7 +1236,7 @@ describe("Codex thread and turn lifecycle", () => {
     expect(f.calls.find(({ method }) => method === "thread/start")?.input).toMatchObject({
       cwd: projectRoot,
       model: "gpt-5.4",
-      approvalPolicy: "on-request",
+      approvalPolicy: "untrusted",
       sandbox: "read-only",
       approvalsReviewer: "user",
     } satisfies Partial<CodexThreadStartInput>);
@@ -1191,8 +1258,8 @@ describe("Codex thread and turn lifecycle", () => {
     expect(f.calls.at(-1)?.input).toEqual({
       threadId: "thread-1",
       input: [{ type: "text", text: "Explain the repository." }],
-      approvalPolicy: "on-request",
-      sandboxPolicy: { type: "readOnly" },
+      approvalPolicy: "untrusted",
+      sandboxPolicy: { type: "externalSandbox", networkAccess: "restricted" },
       approvalsReviewer: "user",
     });
     await Effect.runPromise(acquired.connection.interrupt(sessionId));
@@ -1401,8 +1468,8 @@ describe("Codex thread and turn lifecycle", () => {
         { type: "text", text: "Compare the image." },
         { type: "image", url: "data:image/png;base64,AQID" },
       ],
-      approvalPolicy: "on-request",
-      sandboxPolicy: { type: "readOnly" },
+      approvalPolicy: "untrusted",
+      sandboxPolicy: { type: "externalSandbox", networkAccess: "restricted" },
       approvalsReviewer: "user",
     });
     await acquired.close();
@@ -1802,6 +1869,64 @@ describe("Codex thread and turn lifecycle", () => {
     await acquired.close();
   });
 
+  it("resumes a thread under a new posture by closing the idle process that still holds it, but never one in use", async () => {
+    // Measured with codex-cli 0.164.0: a thread stays loaded in its app-server
+    // after `thread/unsubscribe`, so only that process ending frees the writer.
+    let oldPostureAlive = () => false;
+    const f = fixture({
+      threadResume: async () => {
+        if (oldPostureAlive()) {
+          throw new CodexRpcClientFailure("remote", "Codex request failed.", {
+            remoteCode: -32600,
+            remoteMessage: "thread t already has an active writer",
+          });
+        }
+        return {
+          thread: { id: "thread-moved" },
+          model: "gpt-5.4",
+          modelProvider: "openai",
+          serviceTier: null,
+          cwd: projectRoot,
+        };
+      },
+    });
+    const driver = makeCodexDriver(f.options());
+    const resume = (
+      connection: Awaited<ReturnType<typeof acquireConnection>>["connection"],
+      executionPolicy: ProviderExecutionPolicy,
+    ) =>
+      Effect.runPromise(
+        Effect.exit(
+          connection.resume({
+            sessionId,
+            resumeCursor: { driverKind: "codex", value: "thread-moved" },
+            executionPolicy,
+          }),
+        ),
+      );
+
+    const planTurn = await acquireConnection(driver);
+    expect(Exit.isSuccess(await resume(planTurn.connection, "plan"))).toBe(true);
+    const otherPlanTurn = await acquireConnection(driver);
+    expect(Exit.isSuccess(await resume(otherPlanTurn.connection, "plan"))).toBe(true);
+    oldPostureAlive = () => f.closeCount() === 0;
+
+    await planTurn.close();
+    const held = await acquireConnection(driver);
+    const refused = await resume(held.connection, "approval-gated");
+    expect(String(refused)).toContain("Another Codex process is still using this thread");
+    expect(f.closeCount()).toBe(0);
+    await held.close();
+
+    await otherPlanTurn.close();
+    const gatedTurn = await acquireConnection(driver);
+    expect(Exit.isSuccess(await resume(gatedTurn.connection, "approval-gated"))).toBe(true);
+    // The Plan process closed; the approval-gated process that resumed stays.
+    expect(f.closeCount()).toBe(1);
+    expect(f.startCount()).toBe(2);
+    await gatedTurn.close();
+  });
+
   it("resume reports another Codex process using the thread when the writer conflict persists", async () => {
     const delays: number[] = [];
     const f = fixture({
@@ -1922,7 +2047,7 @@ describe("Codex thread and turn lifecycle", () => {
         acquired.connection.resume({
           sessionId: secondSessionId,
           resumeCursor: { driverKind: "codex", value: "thread-overlap" },
-          executionPolicy: "plan",
+          executionPolicy: "approval-gated",
         }),
       ),
     );
@@ -2209,6 +2334,8 @@ describe("Codex thread and turn lifecycle", () => {
     "fails closed once, releases listeners, and starts fresh after %s while the child stays alive",
     async (mode) => {
       const target = processFixture(mode);
+      // A real launch resolves the thread's root before it starts the process.
+      mkdirSync(projectRoot, { recursive: true });
       const registry = new ProviderRuntimeRegistry();
       let triggerFailure = true;
       let activeListeners = 0;
@@ -2224,6 +2351,9 @@ describe("Codex thread and turn lifecycle", () => {
           // profile would deny the fixture the records file it writes beside
           // itself.
           versionProbeConfinement: {
+            prepare: (input) => ({ command: input.executable, args: input.args }),
+          },
+          confinement: {
             prepare: (input) => ({ command: input.executable, args: input.args }),
           },
         }),
@@ -2299,12 +2429,12 @@ describe("Codex execution authority and approvals", () => {
       approvalsReviewer: "user",
     });
     expect(codexExecutionSettings("approval-gated")).toEqual({
-      approvalPolicy: "on-request",
+      approvalPolicy: "untrusted",
       sandbox: "read-only",
       approvalsReviewer: "user",
     });
     expect(codexExecutionSettings("auto-accept-edits")).toEqual({
-      approvalPolicy: "on-request",
+      approvalPolicy: "untrusted",
       sandbox: "read-only",
       approvalsReviewer: "user",
     });
@@ -2315,17 +2445,19 @@ describe("Codex execution authority and approvals", () => {
     });
   });
 
-  it("keeps a sandbox that still refuses an in-root write on both prompting postures", () => {
-    // Measured against codex-cli 0.154.0: `on-request` only means the model may
-    // escalate, so under `workspace-write` it ran `printf ... > NOTES.md` inside
-    // the bound root and sent no request at all — silently waiving the
-    // `shell-commands` class for both postures. Under `read-only` the same
-    // prompt raised `item/commandExecution/requestApproval` ("The workspace is
-    // read-only") and declining it left no file. The sandbox is what decides
-    // whether the handler below is ever consulted, so it has to keep refusing.
+  it("asks before every command on both prompting postures, since the sandbox outside Codex never escalates", () => {
+    // Below Full access the process runs inside Octant's profile and macOS
+    // refuses Codex's own Seatbelt inside it, so turns name the sandbox
+    // external. Under an external sandbox `on-request` runs every command
+    // without asking (codex-rs `exec_policy.rs`, rust-v0.164.0), which would
+    // silently waive the `shell-commands` class both postures keep. `untrusted`
+    // asks for each command Codex does not know to be read-only.
     for (const policy of ["approval-gated", "auto-accept-edits"] as const) {
-      expect(codexExecutionSettings(policy).sandbox).toBe("read-only");
-      expect(codexExecutionSettings(policy).approvalPolicy).toBe("on-request");
+      expect(codexExecutionSettings(policy).approvalPolicy).toBe("untrusted");
+      expect(codexTurnExecutionSettings(policy).sandboxPolicy).toEqual({
+        type: "externalSandbox",
+        networkAccess: "restricted",
+      });
     }
   });
 
@@ -2350,21 +2482,21 @@ describe("Codex execution authority and approvals", () => {
       acquired.connection.send({ sessionId, prompt: "Write a file.", attachments: [], tools: [] }),
     );
     expect(f.calls.find(({ method }) => method === "turn/start")?.input).toMatchObject({
-      approvalPolicy: "on-request",
-      sandboxPolicy: { type: "readOnly" },
+      approvalPolicy: "untrusted",
+      sandboxPolicy: { type: "externalSandbox", networkAccess: "restricted" },
     });
     await acquired.close();
   });
 
   it.each([
-    ["full-access", "never", "dangerFullAccess"],
-    ["approval-gated", "on-request", "readOnly"],
-    ["auto-accept-edits", "on-request", "readOnly"],
-    ["plan", "never", "readOnly"],
-  ] as const)("re-asserts %s authority on every turn", (policy, approvalPolicy, sandboxType) => {
+    ["full-access", "never", { type: "dangerFullAccess" }],
+    ["approval-gated", "untrusted", { type: "externalSandbox", networkAccess: "restricted" }],
+    ["auto-accept-edits", "untrusted", { type: "externalSandbox", networkAccess: "restricted" }],
+    ["plan", "never", { type: "externalSandbox", networkAccess: "restricted" }],
+  ] as const)("re-asserts %s authority on every turn", (policy, approvalPolicy, sandboxPolicy) => {
     expect(codexTurnExecutionSettings(policy)).toEqual({
       approvalPolicy,
-      sandboxPolicy: { type: sandboxType },
+      sandboxPolicy,
       approvalsReviewer: "user",
     });
   });
@@ -2387,18 +2519,14 @@ describe("Codex execution authority and approvals", () => {
     );
   });
 
-  it("never delegates the edit waiver to the harness reviewer", () => {
-    // `read-only` turns an in-root patch edit into an escalation. Codex's
-    // reviewer is thread-wide and risk-based, so delegating it on a posture that
-    // already waives project file writes would let the reviewer deny an edit
-    // 0018 says proceeds. Approval-gated has no waiver, so it may delegate.
+  it("lets the reviewer answer on both prompting postures when the thread asks for Auto", () => {
     expect(codexExecutionSettings("auto-accept-edits", true)).toEqual({
-      approvalPolicy: "on-request",
+      approvalPolicy: "untrusted",
       sandbox: "read-only",
-      approvalsReviewer: "user",
+      approvalsReviewer: "auto_review",
     });
     expect(codexExecutionSettings("approval-gated", true)).toEqual({
-      approvalPolicy: "on-request",
+      approvalPolicy: "untrusted",
       sandbox: "read-only",
       approvalsReviewer: "auto_review",
     });
@@ -2406,8 +2534,8 @@ describe("Codex execution authority and approvals", () => {
 
   it.each([
     ["full-access", "never", "danger-full-access"],
-    ["approval-gated", "on-request", "read-only"],
-    ["auto-accept-edits", "on-request", "read-only"],
+    ["approval-gated", "untrusted", "read-only"],
+    ["auto-accept-edits", "untrusted", "read-only"],
     ["plan", "never", "read-only"],
   ] as const)(
     "starts %s with only the Project root and exact authority",

@@ -26,7 +26,7 @@ const GitHubRepositoryOnboardingFlow = lazy(() =>
 /**
  * One row in the composer's Project picker: a Project already saved on this
  * host, the control that creates one from a folder, or the default folder.
- * A Work or Code thread still belongs to a Project (decision 0037); the
+ * A Work or Code thread still belongs to a Project; the
  * default-folder row is how a thread gets one without the person choosing a
  * folder — the host provisions a Project under the default folder for it.
  */

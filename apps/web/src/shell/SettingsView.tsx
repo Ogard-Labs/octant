@@ -73,6 +73,7 @@ import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { UsageClient } from "@octant/client-runtime/usage-client";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import { DiagnosticsExportControl } from "../support/DiagnosticsExportControl";
+import { SupportBundleControl } from "../support/SupportBundleControl";
 import { JournalGrowthTable } from "../support/JournalGrowthTable";
 import type { DiagnosticsExportClient } from "@octant/client-runtime/diagnostics-export-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
@@ -89,10 +90,13 @@ import { RememberedToolApprovalsPanel } from "../extensions/RememberedToolApprov
 import { BrowserHubSection } from "../host/BrowserHubSection";
 import { RemoteAccessSettingsSection } from "../host/RemoteAccessSettingsSection";
 import { PublicLinkSettings } from "../settings/PublicLinkSettings";
+import { SecretStoresClientContext } from "../settings/SecretStoresClientContext";
+import { SecretStoresSettingsSection } from "../settings/SecretStoresSettingsSection";
 import { SyncSettingsSection } from "../settings/SyncSettingsSection";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ReplicaMembershipClient } from "@octant/client-runtime/replica-membership-client";
 import type { ReplicaStoreSettingsClient } from "@octant/client-runtime/replica-store-settings-client";
+import type { SecretStoresClient } from "@octant/client-runtime/secret-stores-client";
 import type { ReplicaSyncStatusClient } from "@octant/client-runtime/replica-sync-status-client";
 import { AutomationNotificationSettings } from "../host/AutomationNotificationSettings";
 import { PhoneNotificationSettings } from "../host/PhoneNotificationSettings";
@@ -213,6 +217,8 @@ export interface SettingsViewProps {
   readonly desktopPaneClient?: Pick<DesktopPaneClient, "request">;
   /** Settings › Sync on this host; absent off it, where store setup is not offered. */
   readonly replicaStoreSettingsClient?: ReplicaStoreSettingsClient;
+  /** Absent off the host: linking a secret store and pointing a key at it are host authority. */
+  readonly secretStoresClient?: SecretStoresClient;
   /** Creating, joining, and revoking on this host; absent off it. */
   readonly replicaMembershipClient?: ReplicaMembershipClient;
   /** Read-only sync status, used when this client is not on the host. */
@@ -279,6 +285,8 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   host: "The host process: its status, startup, notifications, and maintenance.",
   permissions: "What you have already allowed: websites, extension tools, and public links.",
   data: "What this host stores, how long it keeps threads, and how to back it up.",
+  "secret-stores":
+    "Keep API keys in a password manager you already use. Octant keeps a reference and fetches the key when it is used.",
   sync: "Where artifact versions go when sync is on, in a store you own.",
   usage: "Activity and usage across providers.",
 };
@@ -714,17 +722,19 @@ export function SettingsView(props: SettingsViewProps) {
             ) : (
               <SettingsOutlineRegistration.Provider value={registerSection}>
                 <SettingsPageScope.Provider value={activeSectionScope}>
-                  <ActiveSectionContent
-                    activeSection={route.activeSection}
-                    capabilities={capabilities}
-                    focusedSetting={route.focusedSetting}
-                    onApplyDeepLink={route.applyDeepLink}
-                    onHarnessEndpointChange={setHarnessEndpoint}
-                    onCatalogEntryChange={setCatalogEntry}
-                    harnessEndpointOpen={subPage !== undefined}
-                    pluginSettingsEntryPoints={pluginSettingsEntryPoints}
-                    props={savingProps}
-                  />
+                  <SecretStoresClientContext.Provider value={props.secretStoresClient}>
+                    <ActiveSectionContent
+                      activeSection={route.activeSection}
+                      capabilities={capabilities}
+                      focusedSetting={route.focusedSetting}
+                      onApplyDeepLink={route.applyDeepLink}
+                      onHarnessEndpointChange={setHarnessEndpoint}
+                      onCatalogEntryChange={setCatalogEntry}
+                      harnessEndpointOpen={subPage !== undefined}
+                      pluginSettingsEntryPoints={pluginSettingsEntryPoints}
+                      props={savingProps}
+                    />
+                  </SecretStoresClientContext.Provider>
                 </SettingsPageScope.Provider>
               </SettingsOutlineRegistration.Provider>
             )}
@@ -1221,6 +1231,13 @@ function ActiveSectionContent({
         </section>
       );
     }
+    case "secret-stores":
+      return (
+        <SecretStoresSettingsSection
+          client={props.secretStoresClient}
+          focusedSetting={focusedSetting}
+        />
+      );
     case "sync":
       return (
         <SyncSettingsSection
@@ -2490,9 +2507,25 @@ function MaintenanceSection({
         ) : null}
         {diagnosticsExportClient !== undefined ? (
           <SettingRow
-            description="Creates a local support bundle from the selected host. Review it before sharing."
+            description="Saves a file about this host for you to read and send yourself. It lists versions, provider status, recent log lines, and activity names, never messages or keys. Nothing is uploaded."
+            focused={focusedSetting === settingId("save-diagnostics")}
+            label="Save diagnostics"
+            scope="host"
+            settingId="save-diagnostics"
+          >
+            <SupportBundleControl
+              client={diagnosticsExportClient}
+              {...(props.hostBridge?.saveSupportBundle === undefined
+                ? {}
+                : { saveNatively: props.hostBridge.saveSupportBundle })}
+            />
+          </SettingRow>
+        ) : null}
+        {diagnosticsExportClient !== undefined ? (
+          <SettingRow
+            description="Exports a redacted report about one failed operation, found by its correlation ID. Review it before sharing."
             focused={focusedSetting === settingId("export-diagnostics")}
-            label="Export diagnostics"
+            label="Failure report"
             scope="host"
             settingId="export-diagnostics"
           >

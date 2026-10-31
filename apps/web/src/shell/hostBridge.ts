@@ -24,6 +24,9 @@ import type {
   CanvasPrototypeOpenRequest,
   CanvasPrototypeOpenResult,
   CanvasPrototypeSurfacePreparation,
+  CaptureWindowList,
+  CaptureWindowPermissionOutcome,
+  CaptureWindowResult,
   CodeCheckoutOpenRequest,
   CodeDeepLink,
   CodeExternalEditorRequest,
@@ -66,6 +69,9 @@ export type {
   CanvasPrototypeOpenRequest,
   CanvasPrototypeOpenResult,
   CanvasPrototypeSurfacePreparation,
+  CaptureWindowList,
+  CaptureWindowPermissionOutcome,
+  CaptureWindowResult,
   CodeCheckoutOpenRequest,
   CodeDeepLink,
   CodeExternalEditorRequest,
@@ -306,6 +312,10 @@ export function ownerUnlockOf(bridge: OctantHostBridge | undefined): OwnerUnlock
   };
 }
 
+export type SupportBundleSaveResult =
+  | { readonly kind: "cancelled" }
+  | { readonly kind: "saved"; readonly fileName: string };
+
 export interface OctantHostBridge
   extends
     Partial<RemoteAccessAdministrationBridge>,
@@ -451,6 +461,21 @@ export interface OctantHostBridge
    * the host later redeems for the chosen path; the renderer never sees it.
    */
   readonly selectRuntimeBinary?: () => Promise<LocalPluginFolderPickerResult>;
+  /**
+   * Opens the desktop app's native save dialog for the diagnostics bundle and
+   * has the host write it to the chosen path. Answers the saved file's name,
+   * never the path. Absent in a browser or on a paired device, which download.
+   */
+  readonly saveSupportBundle?: () => Promise<SupportBundleSaveResult>;
+  /**
+   * Window capture for the composer's attach menu. Present only where the host
+   * can capture a window (the macOS desktop app), so a web or phone client
+   * never offers it. Listing reads titles only; the permission is requested
+   * only on the person's say-so; a capture reads the one window picked.
+   */
+  readonly listCaptureWindows?: () => Promise<CaptureWindowList>;
+  readonly requestCaptureWindowPermission?: () => Promise<CaptureWindowPermissionOutcome>;
+  readonly captureWindow?: (windowId: string) => Promise<CaptureWindowResult>;
   readonly setProviderCredential: (providerInstanceId: string, credential: string) => Promise<void>;
   readonly listProviderApiKeys: (
     providerInstanceId: string,

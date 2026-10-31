@@ -18,6 +18,8 @@ import { CodeOperationEventStore } from "../code/codeOperationEventStore";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { requireJournalHydration } from "../persistence/journalHydration";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import { HostMemoryGuard } from "../hostMemoryGuard";
+import { readSystemMemory } from "../hostMemorySignal";
 import { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
 import { WorkArtifactProjection } from "../work/workArtifactProjection";
 import { hydrateWorkArtifactProjectionFromJournal } from "../work/workPromotionProjectPort";
@@ -104,6 +106,27 @@ export function wireFoundations(deps: FoundationsDependencies) {
         ),
     });
 
+  // The guard eases the host before the system has to kill it: it stops only
+  // what is idle and never a running turn. `start` and `stop` belong to the
+  // server's startup and shutdown, so a host that never binds writes nothing.
+  const hostMemoryGuard = new HostMemoryGuard({
+    stateFile: join(persistence.dataDirectory, "host-memory.json"),
+    readSystem: () => readSystemMemory(),
+    readProcessRssBytes: () => process.memoryUsage.rss(),
+    relief: {
+      releaseIdle: () => providerRuntimeRegistry.releaseIdle(),
+      trimCaches: () => {
+        persistence.connection.exec("PRAGMA shrink_memory");
+        // Bun frees its heap garbage on demand; Node has no such call.
+        const bun = (globalThis as { readonly Bun?: { readonly gc?: (force: boolean) => void } })
+          .Bun;
+        bun?.gc?.(true);
+        return true;
+      },
+      activeTurns: () => providerRuntimeRegistry.activeSessionTotal(),
+    },
+  });
+
   const browserAuthority = new ServerBrowserAuthorityResolver({
     hostId: deriveToolHostId(persistence.dataDirectory),
     workspaceHostId: LOCAL_HOST_ID,
@@ -180,6 +203,7 @@ export function wireFoundations(deps: FoundationsDependencies) {
     browserAuthority,
     codeBoardEventStore,
     codeEvidence,
+    hostMemoryGuard,
     isProjectPolicyTargetAllowed,
     providerRuntimeRegistry,
     selectCodeConversation,

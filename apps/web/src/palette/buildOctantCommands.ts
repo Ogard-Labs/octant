@@ -17,6 +17,8 @@ export interface OctantCommandSources {
   readonly onOpenSettings: () => void;
   /** Opens the Review page for the finished threads the person has not looked at. */
   readonly onOpenReview?: () => void;
+  /** Jumps to the next thread waiting on the person. Absent when none waits. */
+  readonly onJumpToNextWaiting?: () => void;
   /** Opens Zen. Absent when this window cannot enter it. */
   readonly onOpenZen?: () => void;
   readonly threads: ReadonlyArray<CommandThread>;
@@ -32,6 +34,20 @@ export interface OctantCommandSources {
    */
   readonly appleProjects: ReadonlyArray<CommandAppleProject>;
   readonly onOpenAppleProject: (project: CommandAppleProject) => void;
+  /**
+   * The saved actions of the Code Project in view. A window with no such
+   * Project contributes none, so the palette never offers a button the header
+   * would not show.
+   */
+  readonly projectActions?: ReadonlyArray<CommandProjectAction>;
+  readonly onRunProjectAction?: (action: CommandProjectAction) => void;
+}
+
+export interface CommandProjectAction {
+  readonly actionId: string;
+  readonly name: string;
+  readonly command: string;
+  readonly projectName: string;
 }
 
 export interface CommandThread {
@@ -123,6 +139,15 @@ export function buildOctantCommands(sources: OctantCommandSources): ReadonlyArra
     keywords: ["find", "filter"],
     action: { kind: "run", run: sources.onOpenSearch },
   });
+  if (sources.onJumpToNextWaiting !== undefined) {
+    commands.push({
+      id: "thread:next-waiting",
+      title: "Jump to the next thread that needs you",
+      group: "Threads",
+      keywords: ["waiting", "needs you", "approval", "question", "unread", "next"],
+      action: { kind: "run", run: sources.onJumpToNextWaiting },
+    });
+  }
   if (sources.onOpenReview !== undefined) {
     commands.push({
       id: "thread:review",
@@ -178,6 +203,19 @@ export function buildOctantCommands(sources: OctantCommandSources): ReadonlyArra
         server.reference,
       ],
       action: { kind: "address", reference: server.reference },
+    });
+  }
+
+  for (const action of sources.projectActions ?? []) {
+    const run = sources.onRunProjectAction;
+    if (run === undefined) break;
+    commands.push({
+      id: `project-action:${action.actionId}`,
+      title: action.name,
+      group: "Actions",
+      detail: `${action.projectName} · ${action.command}`,
+      keywords: ["run", "action", action.command, action.projectName],
+      action: { kind: "run", run: () => run(action) },
     });
   }
 

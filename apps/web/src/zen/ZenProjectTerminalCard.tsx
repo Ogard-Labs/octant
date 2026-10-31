@@ -74,8 +74,12 @@ export function ZenProjectTerminalCard(props: ZenProjectTerminalCardProps) {
           continue;
         }
         if (controller.signal.aborted) return;
-        if (result.kind === "project-terminal-refused") {
-          setFailure(result.message);
+        if (result.kind !== "project-terminal") {
+          setFailure(
+            result.kind === "project-terminal-refused"
+              ? result.message
+              : "This terminal is unavailable.",
+          );
           return;
         }
         const read = result.output;
@@ -130,8 +134,13 @@ export function ZenProjectTerminalCard(props: ZenProjectTerminalCardProps) {
   const stop = async () => {
     try {
       const result = await send({ kind: "stop", projectId, terminalId });
-      if (result.kind === "project-terminal-refused") setFailure(result.message);
-      else {
+      if (result.kind !== "project-terminal") {
+        setFailure(
+          result.kind === "project-terminal-refused"
+            ? result.message
+            : "The terminal did not stop.",
+        );
+      } else {
         setStopped(true);
         setTerminal(result.terminal);
       }

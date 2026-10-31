@@ -16,9 +16,9 @@ const VERSION = /^(0|[1-9]\d{0,7})\.(0|[1-9]\d{0,7})\.(0|[1-9]\d{0,7})$/;
 export const CUA_DRIVER_PUBLISHER_REQUIREMENT =
   'anchor apple generic and identifier "cua-driver" and certificate leaf[subject.OU] = "YCK386LBJ7"';
 export const BUNDLED_CUA_DRIVER: ComputerDriverRelease = {
-  version: "0.26.0",
-  url: "https://github.com/trycua/cua/releases/download/cua-driver-rs-v0.26.0/cua-driver-rs-0.26.0-darwin-universal-binary.tar.gz",
-  sha256: "dccfb8f06a5b22a976a2391ca994d8c9ed8562a2cb16e779ee5428204666f265",
+  version: "0.38.0",
+  url: "https://github.com/trycua/cua/releases/download/cua-driver-rs-v0.38.0/cua-driver-rs-0.38.0-darwin-universal-binary.tar.gz",
+  sha256: "2bb8dc4a7e69185ffd04c4a9c0eab590bd2c54b72c2c1be13ab675be4f487732",
 };
 
 function record(value: unknown): value is Record<string, unknown> {

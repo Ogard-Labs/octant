@@ -38,7 +38,7 @@ describe("useThreadUtilityPresentation", () => {
   });
 
   // A wide window that arrives with the dock hidden leaves the workspace as one
-  // column against an empty region, which is the layout 0041 exists to prevent.
+  // column against an empty region, which is the layout the pane rules exist to prevent.
   // Two shell passes have flipped this default while restyling; the argument is
   // optional, so the fallback has to be the wide-window answer on its own.
   it("shows the dock when a caller passes no arrival width", () => {

@@ -121,6 +121,44 @@ function makeClient(overrides: ClientOverrides = {}): HostControlClient {
 }
 
 describe("HostSettingsSection", () => {
+  it("shows the memory level, the last relief, and an unexpected stop under Readiness", async () => {
+    const withMemory: HostControlStatus = {
+      ...serviceStatus,
+      memory: {
+        pressure: "elevated",
+        processMegabytes: 2_300,
+        lastRelief: {
+          at: "2026-10-31T10:00:00.000Z",
+          pressure: "elevated",
+          source: "system",
+          idleProviderRuntimesStopped: 1,
+          idleSessionsReleased: 0,
+          cachesTrimmed: true,
+          activeTurnsKept: 2,
+        },
+        previousStop: {
+          lastSeenAt: "2026-10-31T09:00:00.000Z",
+          pressure: "critical",
+          processMegabytes: 4_100,
+        },
+      },
+    };
+    render(<HostSettingsSection client={makeClient({ status: async () => withMemory })} />);
+    expect(await screen.findByText("Low, host using 2300 MB")).toBeTruthy();
+    expect(
+      screen.getByText(
+        /stopped 1 idle provider process, released 0 paused sessions, 2 running turns kept going/,
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("Last unexpected stop")).toBeTruthy();
+  });
+
+  it("leaves the memory rows out when the host reports none", async () => {
+    render(<HostSettingsSection client={makeClient()} />);
+    await screen.findByText("Readiness");
+    expect(screen.queryByText("Memory")).toBeNull();
+  });
+
   it("keeps host controls on screen when refreshing status fails", async () => {
     const pending = Promise.withResolvers<HostControlStatus>();
     const status = vi

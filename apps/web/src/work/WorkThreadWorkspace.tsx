@@ -2395,7 +2395,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
             </>
           ),
           // Two groups: what the person adds sits left, how the task runs
-          // (0073) sits right beside send. The model used to hug the attach
+          // sits right beside send. The model used to hug the attach
           // button, so it jumped sides between a new task and the thread it
           // became.
           trailing: (

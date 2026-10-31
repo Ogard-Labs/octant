@@ -75,6 +75,7 @@
     "./folder-browse-client": "./src/folderBrowseClient.ts",
     "./replica-membership-client": "./src/replicaMembershipClient.ts",
     "./replica-store-settings-client": "./src/replicaStoreSettingsClient.ts",
+    "./secret-stores-client": "./src/secretStoresClient.ts",
     "./replica-sync-status-client": "./src/replicaSyncStatusClient.ts",
     "./provider-client": "./src/providerClient.ts",
     "./provider-usage-limits-client": "./src/providerUsageLimitsClient.ts",

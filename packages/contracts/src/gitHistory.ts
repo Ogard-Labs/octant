@@ -41,6 +41,13 @@ export const GitHistoryQuery = Schema.Union(
     ...scope,
     oid: GitHistoryOid,
     parent: Schema.Int.pipe(Schema.between(0, 63)),
+    ignoreWhitespace: Schema.optional(Schema.Boolean),
+  }).annotations(strict),
+  // Commits on the checkout's branch that its upstream (or, without one, the
+  // thread's base branch) does not have yet. The host picks the comparison.
+  Schema.Struct({
+    kind: Schema.Literal("local-commits"),
+    ...scope,
   }).annotations(strict),
 );
 export type GitHistoryQuery = typeof GitHistoryQuery.Type;
@@ -64,6 +71,10 @@ export type GitHistoryRef = typeof GitHistoryRef.Type;
 export const GitHistoryPage = Schema.Struct({
   status: Schema.Literal("history"),
   ...scope,
+  /** Local-commits only: the ref the commits are measured against, as the host resolved it. */
+  comparedWith: Schema.optional(text(512)),
+  /** Local-commits only: true when older commits exist than the listing holds. */
+  commitsTruncated: Schema.optional(Schema.Boolean),
   commits: Schema.Array(GitHistoryCommit).pipe(Schema.maxItems(MAX_GIT_HISTORY_PAGE)),
   refs: Schema.Array(GitHistoryRef).pipe(Schema.maxItems(256)),
   head: Schema.NullOr(GitHistoryOid),

@@ -2,7 +2,7 @@
  * Artifact sync through the replica store: publish and pull.
  *
  * Publish. Every committed artifact version, and every deletion, reaches this
- * service through the same hook the 0029 mirror listens on, whichever surface
+ * service through the same hook the artifact mirror listens on, whichever surface
  * made it. It is queued in the journal first and published after, oldest
  * first, so a host that is offline or stops publishes it later in the order
  * it was made. A failed upload is a journaled receipt; the local version is
@@ -895,7 +895,7 @@ export class ReplicaArtifactSyncService {
 }
 
 /**
- * The bundle a version becomes in the store: the 0029 document, with the
+ * The bundle a version becomes in the store: the artifact bundle document, with the
  * header naming the artifact's replica origin rather than `local`.
  */
 function bundleFor(version: CanvasVersion, originHostId: HostId): ArtifactBundle {

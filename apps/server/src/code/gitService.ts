@@ -2,6 +2,7 @@ import type { ProviderExecutionPolicy } from "@octant/contracts";
 import type { GitMutationPort, GitMutationResult, GitTreeSnapshot } from "./gitMutationPort";
 import type {
   GitBranchComparisonResult,
+  GitDiffOptions,
   GitObservation,
   GitObservationPort,
   GitObservationResult,
@@ -11,7 +12,11 @@ import type {
 } from "./gitObservationPort";
 
 interface ObservationPort {
-  observe(root: string, signal?: AbortSignal): Promise<GitObservationResult>;
+  observe(
+    root: string,
+    signal?: AbortSignal,
+    options?: GitDiffOptions,
+  ): Promise<GitObservationResult>;
   observeRemotes?(
     root: string,
     signal?: AbortSignal,
@@ -121,8 +126,12 @@ export class GitService {
     this.#mutation = mutation;
   }
 
-  observe(root: string, signal?: AbortSignal): Promise<GitObservationResult> {
-    return this.#observation.observe(root, signal);
+  observe(
+    root: string,
+    signal?: AbortSignal,
+    options?: GitDiffOptions,
+  ): Promise<GitObservationResult> {
+    return this.#observation.observe(root, signal, options);
   }
 
   observeRemotes(

@@ -42,8 +42,8 @@ export function combineAppManagedToolSets(
 
 /**
  * Answer `operation: "help"` for an offered tool family from its own usage
- * text. Decision 0067 keeps the always-visible tool prefix small and loads
- * capability detail lazily on use; 0093 allows that detail through a
+ * text. The always-visible tool prefix stays small and capability detail loads
+ * lazily on use; that detail is allowed through a
  * read-only operation on a tool that is already offered. Help is static text,
  * so it never reaches the family's executor and every other action passes the
  * same authority path it did before. A family the set does not offer gets no

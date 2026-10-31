@@ -4,6 +4,8 @@ import { join } from "node:path";
 import {
   decodeCodeEvidenceContentId,
   decodeCodeFailure,
+  decodeCodeOperationId,
+  decodeProviderSessionId,
   decodeCodeRelativePath,
   decodeCodeThreadId,
   decodeContextSubjectRef,
@@ -23,6 +25,10 @@ import {
 } from "../code/codeOperationRuntime";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { CodePlannerService } from "../code/codePlannerService";
+import { CodeProjectPullRequestSwitchService } from "../code/codeProjectPullRequestSwitchService";
+import { createGhCommandPort } from "../code/ghPullRequestPort";
+import { GhPullRequestSwitchPort } from "../code/ghPullRequestSwitchPort";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { INHERITED_MARK_REFUSAL } from "../context/inheritedExternalContentMark";
 import {
   createCodeProfileSkillResolver,
@@ -1220,6 +1226,121 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         return board.query(query);
       },
     );
+    // Merge when ready and Auto-fix. The forge calls run through the host's
+    // own `gh`; with none installed every switch answers unavailable.
+    const pullRequestSwitchForge = (() => {
+      if (options.ghExecutable === undefined) return undefined;
+      try {
+        return new GhPullRequestSwitchPort({
+          command: createGhCommandPort({ ghPath: options.ghExecutable }),
+        });
+      } catch {
+        return undefined;
+      }
+    })();
+    const pullRequestSwitchService = new CodeProjectPullRequestSwitchService({
+      authority: projectPullRequestService,
+      forge: pullRequestSwitchForge ?? {
+        readAutoMergeSettings: async () => ({ status: "unavailable", reason: "unavailable" }),
+        enableAutoMerge: async () => ({ status: "unavailable", reason: "unavailable" }),
+        disableAutoMerge: async () => ({ status: "unavailable", reason: "unavailable" }),
+        observe: async () => ({ status: "unavailable" }),
+      },
+      threads: {
+        inspect: (threadId) => {
+          const thread = persistence.readCodeThread(threadId);
+          if (
+            thread === undefined ||
+            thread.lifecycle !== "active" ||
+            thread.completedAt !== undefined
+          ) {
+            return { status: "gone" };
+          }
+          const compacting = contextHarness.compactionRunning(
+            decodeContextSubjectRef({ aggregateType: "code-thread", aggregateId: threadId }),
+          );
+          return {
+            status: "available",
+            turnActive:
+              compacting ||
+              persistence
+                .readCodeRuntimeWorks(threadId)
+                .some(
+                  ({ work }) =>
+                    work.kind === "provider-turn" &&
+                    (work.state === "running" ||
+                      work.state === "waiting" ||
+                      work.state === "ambiguous"),
+                ),
+          };
+        },
+        markOutsideContent: (threadId, contentReference) => {
+          const marked = externalContentIngestionStore.record({
+            threadId,
+            provenance: { origin: "external-content", sourceLabel: "pull-request-auto-fix" },
+            contentReference,
+            correlationId: randomUUID(),
+            authorized: true,
+          });
+          return marked.kind === "recorded" || marked.kind === "already-recorded";
+        },
+        // The same host path a routine's follow-up and a child's result take:
+        // the thread's own access level and approvals apply to the turn.
+        startTurn: async (threadId, text) => {
+          const thread = persistence.readCodeThread(threadId);
+          const stage = boardRouteCodeService.stageEvidence;
+          const execute = boardRouteCodeService.executeOperation;
+          if (thread === undefined || stage === undefined || execute === undefined) return false;
+          const prompt = await stage(ROUTINE_HOST_SCOPE_ID, threadId, text);
+          const result = await execute(ROUTINE_HOST_SCOPE_ID, {
+            kind: "start-provider-turn",
+            operationId: decodeCodeOperationId(randomUUID()),
+            threadId,
+            checkoutId: thread.checkoutId,
+            sessionId: decodeProviderSessionId(randomUUID()),
+            prompt,
+          });
+          return (
+            result.kind === "provider-turn-state" &&
+            (result.state === "running" ||
+              result.state === "waiting" ||
+              result.state === "completed")
+          );
+        },
+        notifyPerson: async (threadId, reason) => {
+          const view = codeFollowUpService.read(threadId);
+          await codeFollowUpService.observeTrigger({
+            threadId,
+            sourceEventId: randomUUID(),
+            sourceSequence:
+              Math.max(
+                view.followUp?.triggerSequence ?? 0,
+                view.followUp?.acknowledgedThroughSequence ?? 0,
+              ) + 1,
+            reason,
+            origin: "automatic",
+            triggeredAt: new Date().toISOString(),
+          });
+        },
+      },
+      journal: persistence.journal,
+      uuid: randomUUID,
+    });
+    // Host-local and idle-free: the forge is read only while a switch is on.
+    const pullRequestSwitchAbort = new AbortController();
+    const pullRequestSwitchTimer = setInterval(() => {
+      if (!pullRequestSwitchService.watching) return;
+      pullRequestSwitchService
+        .tick(pullRequestSwitchAbort.signal)
+        .catch((error: unknown) => console.error("[pull-request-switches] pass failed", error));
+    }, 60_000);
+    pullRequestSwitchTimer.unref?.();
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        clearInterval(pullRequestSwitchTimer);
+        pullRequestSwitchAbort.abort();
+      }),
+    );
     const routeCodeService: CodeRouteService = {
       ...boardRouteCodeService,
       readFollowUp: (_windowId, threadId) => codeFollowUpService.read(threadId),
@@ -1261,6 +1382,14 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           signal ?? new AbortController().signal,
         );
       },
+      queryProjectPullRequestSwitches: (windowId, target) =>
+        pullRequestSwitchService.query(windowId, target),
+      setProjectPullRequestMergeWhenReady: (windowId, command, signal, initiator) =>
+        pullRequestSwitchService.setMergeWhenReady(windowId, command, initiator, signal),
+      setProjectPullRequestAutoFix: (windowId, command, initiator) =>
+        pullRequestSwitchService.setAutoFix(windowId, command, initiator),
+      noteComposerActivity: (_windowId, activity) =>
+        pullRequestSwitchService.noteComposerActivity(activity.threadId),
     };
     return {
       androidToolchainRoutes,

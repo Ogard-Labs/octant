@@ -27,7 +27,13 @@ above everything else. Each waiting thread is one row that shows its mode, what
 it waits on (approval or your answer), and how long it has waited; Enter opens
 the thread, where the request is waiting. Every approval also has **Approve** and **Deny**
 commands, so typing "approve" finds them and answers without opening the
-thread. A question is answered in its thread, not in the palette. The list is
+thread. A question is answered in its thread, not in the palette.
+**Jump to the next thread that needs you** (**⌘/Ctrl+Shift+J**, also in the
+palette) opens the next waiting thread without the palette: threads with an
+approval first, then threads with a question, then threads whose finished turn
+you have not looked at. Press it again to move to the one after, and past the
+last it returns to the first. It does nothing when nothing is waiting. A failed
+turn is not in the order, because the thread list does not report one. The list is
 read when the palette opens, so it is current at that moment and is not kept
 fresh while the palette stays open. If an answer is refused, for example because
 it was answered elsewhere first, a notice says so. The group is absent when
@@ -91,6 +97,7 @@ The remappable set:
 - **Toggle Zen mode** — **⌘/Ctrl+Shift+Z**
 - **Show or hide the sidebar** — **⌘/Ctrl+\\**
 - **Go to the home screen** — **⌘/Ctrl+Shift+H**
+- **Jump to the next thread that needs you** — **⌘/Ctrl+Shift+J**
 - **Show the next focus space** — **⌘/Ctrl+Alt+]**
 - **Show the previous focus space** — **⌘/Ctrl+Alt+[**
 - **Find a file by name** — **⌘/Ctrl+P**, in the active Code thread

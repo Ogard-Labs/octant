@@ -42,7 +42,7 @@ export const DESKTOP_PACKAGE_IDENTITY = {
   /**
    * The release this repository is working toward. One place, because the
    * updater compares it against the feed and an app that cannot say which
-   * version it is cannot refuse to go backwards (`docs/decisions/0034`).
+   * version it is cannot refuse to go backwards.
    *
    * A stable release is this exact version; a preview is a prerelease of it.
    * Both are supplied per build by {@link resolveReleaseVersion}, which is why

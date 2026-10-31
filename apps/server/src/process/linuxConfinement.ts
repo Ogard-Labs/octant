@@ -449,7 +449,7 @@ export function buildBubblewrapLaunch(
   // Bubblewrap applies seccomp before execve of the command, so a filter that
   // blocked execve would prevent the launch itself. Overlay host executable
   // search paths, re-bind this launch's binary, then load a process-deny
-  // seccomp program that blocks fork/clone (and execveat) after start. See 0068.
+  // seccomp program that blocks fork/clone (and execveat) after start.
   const denyProcessFork = input.allowProcessFork === false;
   const denyProcessExec = input.allowProcessExec === false;
   if (denyProcessFork || denyProcessExec) {
@@ -528,6 +528,18 @@ export function buildBubblewrapLaunch(
       return;
     }
 
+    // A write denial inside a writable mount guards a path the capsule already
+    // reads through that mount, so it keeps the original contents read-only,
+    // as Seatbelt's write denial does. An empty cover there hid the account
+    // configuration a runtime reads on start (`config.toml`, `skills`).
+    if (kind === "write" && existing === undefined) {
+      const original = readableThroughWritableMount(normalized, mounts);
+      if (original !== undefined) {
+        addMount("ro-bind", original, normalized);
+        return;
+      }
+    }
+
     // A writable child bound under this path must be able to create its
     // mountpoint, and a read-only bind of an empty directory would block that.
     // Create a fresh tmpfs at the deny path instead; it is remounted read-only
@@ -545,6 +557,12 @@ export function buildBubblewrapLaunch(
         "invalid-configuration",
         `Linux confinement deny ${kind} path "${normalized}" could not be overlaid.`,
       );
+    }
+    // A read-only bind of the original (a write denial, or a read root naming
+    // the file itself) would otherwise keep the file readable.
+    if (kind === "read" && existing?.kind === "ro-bind") {
+      existing.source = source;
+      return;
     }
     addMount("ro-bind", source, normalized);
   }
@@ -797,6 +815,24 @@ function hostPathInCapsule(path: string, mounts: ReadonlyMap<string, Mount>): st
   const mount = mountExposing(path, mounts);
   if (mount === undefined || (mount.kind !== "bind" && mount.kind !== "ro-bind")) return undefined;
   return join(mount.source, relative(mount.target, path));
+}
+
+/**
+ * The host path a write-denied target shows inside the capsule, when the
+ * nearest mount exposing it is writable and its real path stays inside that
+ * mount's source: binding it read-only then changes what can be written and
+ * nothing that can be read. A link out of the mount, or a missing path, keeps
+ * the empty cover instead.
+ */
+function readableThroughWritableMount(
+  path: string,
+  mounts: ReadonlyMap<string, Mount>,
+): string | undefined {
+  const exposing = mountExposing(path, mounts);
+  if (exposing === undefined || exposing.kind !== "bind") return undefined;
+  const original = safeRealpathSync(path);
+  if (original === undefined || !isSameOrInside(original, exposing.source)) return undefined;
+  return original;
 }
 
 function mountExposing(path: string, mounts: ReadonlyMap<string, Mount>): Mount | undefined {

@@ -209,13 +209,30 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
       // "project-default" is what lets thread creation skip native
       // confirmation, so the decision cannot arrive from a paired device.
       if (
-        command.kind === "change-code-project-access" &&
+        (command.kind === "change-code-project-access" ||
+          (command.kind === "change-code-project-permission-mode" &&
+            command.permissionMode === "full-access")) &&
         readPrincipalRouteContext(request)?.principal.kind === "remote-device"
       ) {
         return response(
           {
             category: "unauthorized",
             message: "A Code Project's access grant is decided on the host.",
+          },
+          403,
+          origin,
+        );
+      }
+      // A saved action is a command the person later clicks to run in their own
+      // shell, so only a window on the host writes the list.
+      if (
+        command.kind === "change-code-project-actions" &&
+        readPrincipalRouteContext(request)?.principal.kind === "remote-device"
+      ) {
+        return response(
+          {
+            category: "unauthorized",
+            message: "A Code Project's actions are set on the host.",
           },
           403,
           origin,

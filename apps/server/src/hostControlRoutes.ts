@@ -5,6 +5,7 @@ import {
   type HostControlPolicy,
   type HostControlStatus,
   type HostLifecycleAction,
+  type HostMemoryStatus,
   type HostLifecycleOutcome,
   type HostRestoreOutcome,
 } from "@octant/contracts/host-control";
@@ -112,6 +113,8 @@ export interface HostControlRouteDependencies {
   /** Graceful owner drain request (the same authority the control socket uses). */
   readonly requestOwnerStop?: () => void;
   readonly backup?: (label: string) => HostControlBackupReceipt;
+  /** The memory guard's report; omitting it leaves `memory` off the status. */
+  readonly memory?: () => HostMemoryStatus;
   /**
    * Verified host-runtime locations and Project list for the data map.
    * Omitting it is a test seam: every location category reports `unknown`.
@@ -416,6 +419,7 @@ async function composeStatus(
       active: diagnostics.work.active,
       attentionRequired: diagnostics.work.attentionRequired,
     },
+    ...(dependencies.memory === undefined ? {} : { memory: dependencies.memory() }),
     lifecycle,
   };
 }

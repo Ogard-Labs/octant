@@ -70,7 +70,7 @@ Hardening in progress for the preview:
 - Dogfood-driven fixes as they surface.
 - Internal TestFlight packaging for the existing mobile remote client: signing,
   protected CI, Apple processing, and real-device acceptance are separate
-  gates under [0147](decisions/0147-internal-testflight-carries-the-existing-remote-client.md).
+  gates.
 - Four shipped features take bug fixes only until the preview ships: artifact
   replica sync, the artifact mirror, model role slots, and local provider usage
   history.
@@ -81,7 +81,7 @@ Hardening in progress for the preview:
   separable first-party features ship as toggleable `@octant/*` plugins with
   the same manifest, activation ladder, and enable/disable controls as
   third-party ones. Direction and migration order are in
-  [decisions/0001-plugin-architecture.md](decisions/0001-plugin-architecture.md).
+  [Architecture: plugin boundaries and remaining extraction](architecture.md#plugin-boundaries-and-remaining-extraction).
   - `@octant/plugin-api` extracted as a narrow, curated re-export of
     `@octant/contracts/extensions` (manifest, component kinds, capabilities),
     plus `board`/`integration`/`ui-surface`/`appearance-pack`/`preview-viewer`
@@ -139,7 +139,7 @@ design-first: work starts only once its owning specification documents its
 authority, privacy, and release boundaries.
 
 - **Windows desktop confinement, credentials, and packaging** — the identical
-  desktop app (0058) sequences Windows after the macOS technical preview and
+  desktop app sequences Windows after the macOS technical preview and
   Linux self-update evidence on a real image, per the
   [release boundary](architecture.md#current-release-boundary); no Windows
   work starts before both exist; Work/Code stay `incompatible` until an
@@ -154,8 +154,8 @@ authority, privacy, and release boundaries.
   Octant-run relay waits on written evidence of one. Design: [design/hosted-relay.md](design/hosted-relay.md).
 - **Full LSP / extension host / debugger** — Monaco and explicit external-editor
   handoff remain primary; a full IDE would run as a separately launched
-  companion. Design gates:
-  [release-boundary holds](release-boundary-holds.md#full-lsp--extension-host--debugger).
+  companion. Design:
+  [Language services](design/language-services.md).
 - **Provider identity extensions** — Azure Entra ID/OAuth and full Amazon
   Bedrock Converse/IAM adapters beyond the API-key paths. Design:
   [Enterprise provider identity](design/enterprise-provider-identity.md).
@@ -175,14 +175,15 @@ Intentionally out of scope; changing this requires an approved design change.
   boards only; Chat has no board and work-list items never become cards.
 - **Swarm, Dispatch, race, or model-comparison launch surfaces** — replaced by
   unified subagents. The one authorized exception is the Project planner
-  thread ([0065](decisions/0065-project-planner-thread.md)): a single
+  thread: a single
   designated Code thread per Code Project that reads the Project's board and
   proposes work the user must explicitly confirm. It launches and redirects
   nothing.
-- **Other pull-request mutation and agent-initiated merge** — force-push,
-  review approval, comments, closing, and any merge an agent or remote client
-  starts. The person's own confirmed merge is the one exception
-  ([architecture](architecture.md#modes-chat-work-and-code)).
+- **Merges and force-pushes an agent starts on its own initiative** — and any
+  merge a hub or peer host starts. A Code thread's own pull-request work, a
+  merge or plain force-push the person asked for or allowed, and a person's
+  merge from any of their clients are allowed under
+  [Git and pull requests](architecture.md#modes-chat-work-and-code).
 - **Octant-operated cloud accounts or telemetry** — the product stays
   local-first and privacy-preserving by default.
 - **Auto-installing or auto-updating provider runtimes** — Octant detects
@@ -190,7 +191,8 @@ Intentionally out of scope; changing this requires an approved design change.
   them; explicit provider-owned update actions remain user-triggered.
 - **Core capabilities that depend on an optional extension** — browser/computer
   use, tests, Apple validation, approvals, memory, and subagents stay
-  app-managed and provider-neutral. Beyond them, a first-class provider may
-  offer a capability in full while every other provider gets a documented
-  degraded form or reports the capability unsupported
+  app-managed and provider-neutral. Beyond them, the first-class providers
+  (Claude Code, Codex, Mistral Vibe, and OpenCode) are to keep their own
+  native capabilities (mostly not built yet) while every other provider gets a documented degraded form or
+  reports the capability unsupported
   ([architecture](architecture.md#overview-and-principles)).
