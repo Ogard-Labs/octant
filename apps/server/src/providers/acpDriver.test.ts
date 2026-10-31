@@ -349,7 +349,8 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
         usage: "unsupported",
         fileChanges: "unavailable",
         nativeChildAgents: "unavailable",
-        harnessAutoReview: "unsupported",
+        // Mistral Vibe's auto-approve mode is its own reviewer; no other agent has one.
+        harnessAutoReview: profile.ownReviewer === true ? "supported" : "unsupported",
         acpClientCapabilities: "supported",
       },
     });
@@ -1633,6 +1634,41 @@ describe("ACP provider driver profile quirks", () => {
       expect(profile.sessionMode(mode, policy)).toBe(expected);
     },
   );
+
+  it("launches Mistral Vibe with the person's setup and its own reviewer only when the session asks", async () => {
+    const own = {
+      subagents: false,
+      webTools: true,
+      skills: true,
+      toolServers: true,
+      hooks: true,
+      projectCode: false,
+    } as const;
+    for (const [autoApprove, nativeSetup, mode] of [
+      [true, own, "auto-approve"],
+      [false, undefined, "ask"],
+    ] as const) {
+      const { driver, client, starts } = fixture(vibe);
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+            yield* connection.start({
+              sessionId,
+              modelId,
+              executionPolicy: "approval-gated",
+              autoApprove,
+              ...(nativeSetup === undefined ? {} : { nativeSetup }),
+            });
+          }),
+        ),
+      );
+      const sessionStart = starts.find((start) => start.purpose !== "probe");
+      if (nativeSetup === undefined) expect(sessionStart).not.toHaveProperty("nativeSetup");
+      else expect(sessionStart?.nativeSetup).toEqual(nativeSetup);
+      expect(client.setConfigOption).toHaveBeenCalledWith(expect.anything(), "mode", mode);
+    }
+  });
 
   it("refuses fx where it would run with runtime tools Octant did not admit", () => {
     // fx always advertises runtime tools, so a read-only product mode cannot

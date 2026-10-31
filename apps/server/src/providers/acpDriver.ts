@@ -11,6 +11,8 @@ import {
   type ProviderFailure,
   type ProviderInstanceId,
   type ProviderModelOptionValues,
+  type ProviderNativeSetup,
+  type ProviderCapabilities,
   type ProviderProbeResult,
   type ProviderRuntimeEvent,
   type ProviderSessionId,
@@ -218,12 +220,25 @@ function baseCapabilities(
     diffs: "unavailable",
     taskProgress: "supported",
     nativeChildAgents: "unavailable",
-    harnessAutoReview: "unsupported",
+    // Only an agent whose own mode answers its prompts (Mistral Vibe's
+    // auto-approve) can be Reviewed's reviewer.
+    harnessAutoReview: profile.ownReviewer === true ? "supported" : "unsupported",
     ...unsupportedChatCapabilities,
     appManagedTools,
     acpClientCapabilities: "supported",
+    nativeSetup: profile.nativeSetupSupport ?? NO_NATIVE_SETUP,
   } as const;
 }
+
+/** Every ACP agent but a key provider loads none of its own setup. */
+const NO_NATIVE_SETUP = {
+  subagents: "unsupported",
+  webTools: "unsupported",
+  skills: "unsupported",
+  toolServers: "unsupported",
+  hooks: "unsupported",
+  projectCode: "unsupported",
+} as const satisfies NonNullable<ProviderCapabilities["nativeSetup"]>;
 
 function negotiatedAppManagedTools(
   initialized: AcpConnection["initialized"],
@@ -1099,6 +1114,7 @@ function makeConnection(
       executionPolicy: ProviderExecutionPolicy,
       loopbackPorts: ReadonlyArray<number> = [],
       tools: ReadonlyArray<ProviderToolDefinition> = [],
+      nativeSetup?: ProviderNativeSetup,
     ): Promise<{
       readonly scope: Scope.CloseableScope;
       readonly client: AcpClientPort;
@@ -1126,6 +1142,7 @@ function makeConnection(
               executionPolicy,
               ...(apiKey === undefined ? {} : { apiKey }),
               ...(loopbackPorts.length === 0 ? {} : { loopbackPorts }),
+              ...(nativeSetup === undefined ? {} : { nativeSetup }),
               clientCapabilities,
               onProcessStarted: async (process) => {
                 receipt = await options.runtimeRegistry.trackProcess(options.instanceId, process);
@@ -1167,6 +1184,8 @@ function makeConnection(
       readonly modelId: string;
       readonly executionPolicy: ProviderExecutionPolicy;
       readonly modelOptionValues?: ProviderModelOptionValues;
+      readonly autoApprove?: boolean;
+      readonly nativeSetup?: ProviderNativeSetup;
       readonly sourceSessionId?: string;
       readonly tools: ReadonlyArray<ProviderToolDefinition>;
     }) =>
@@ -1277,6 +1296,7 @@ function makeConnection(
               input.executionPolicy,
               managedTools?.bridge.port === undefined ? [] : [managedTools.bridge.port],
               input.tools,
+              input.nativeSetup,
             );
             scope = started.scope;
             const { client, connection } = started;
@@ -1372,7 +1392,11 @@ function makeConnection(
                 await client.call(setModelCall.method, setModelCall.params);
               }
             }
-            const modeValue = profile.sessionMode(mode, input.executionPolicy);
+            const modeValue = profile.sessionMode(
+              mode,
+              input.executionPolicy,
+              profile.ownReviewer === true && input.autoApprove === true,
+            );
             if (
               profile.acceptsUnknownModeIds === true &&
               !configOptions.some(
@@ -1583,6 +1607,8 @@ function makeConnection(
           modelId: identity.modelId,
           executionPolicy: input.executionPolicy,
           sourceSessionId: input.resumeCursor.value,
+          ...(input.autoApprove === undefined ? {} : { autoApprove: input.autoApprove }),
+          ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
           tools: input.tools ?? identity.tools,
           ...(input.modelOptionValues === undefined
             ? {}

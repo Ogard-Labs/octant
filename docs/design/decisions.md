@@ -185,7 +185,7 @@ At the Reviewed level a reviewer stands in for the person's click: the provider'
 - The person chooses the reviewer in Settings › Access with a Project override; the provider's own is the default where it exists.
 - A verdict the provider reports is journaled with the provider as approver and shown like a person's approval (not built yet: today the journal records the thread setting, not per-call verdicts).
 - Taint withdraws the provider's own reviewer for irreversible, publish and new-egress classes.
-- Built for the two key CLI providers in Code; one ACP agent's auto-approve mode is not built yet.
+- Built in Code for the two key CLI providers and for Mistral Vibe's auto-approve mode.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Security and authority, Reviewed](../architecture.md#security-and-authority).
 
@@ -242,7 +242,7 @@ The key providers run inside Octant as they run on their own, with their native 
 - Claude Code loads its own subagents (each shown as a child run, every call through the parent's gate), web search and fetch (asking below Full access, marking the thread), home skills, settings and hooks, and a trusted Project's settings, hooks, skills, MCP servers and plugins; its account's MCP servers start only with a trusted Project's.
 - Codex keeps its Project skills and, in Chat, the person's tool servers and plugins; its own subagents run only at Full access, because their approvals never reach Octant, each shown as a child run, with their web searches marking the thread.
 - OpenCode loads its own skills and answers a remembered 2.x approval `always`, saying the grant lives in OpenCode's own store; the person's own OpenCode config and permission rules, its delegation as child runs, and Reviewed through Octant Shield are not built yet.
-- Mistral Vibe's driver still switches these native features off (not built yet).
+- Mistral Vibe loads its own skills and Project context, the account's MCP servers, connectors and hooks, and a trusted Project's `.vibe` tools, MCP servers, hooks, plugins and agents under its own folder trust; it still runs through the ACP bridge (promotion not built yet).
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Providers](../architecture.md#providers) and [Provider runtimes: Key providers](provider-runtimes.md#key-providers).
 
