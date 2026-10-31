@@ -48,7 +48,7 @@ export function createGitHistoryClient(options: {
         result.status !== "unavailable" &&
         (String(result.threadId) !== String(query.threadId) ||
           String(result.checkoutId) !== String(query.checkoutId) ||
-          result.status !== query.kind ||
+          result.status !== (query.kind === "commit" ? "commit" : "history") ||
           (result.status === "commit" &&
             query.kind === "commit" &&
             result.commit.oid !== query.oid))

@@ -2559,7 +2559,18 @@ export class CodeService {
     );
     if (root === undefined || this.#gitHistory === undefined)
       return { status: "unavailable", message: "Git history is unavailable for this checkout." };
-    const result = await this.#gitHistory.read(root.rootPath, query, signal);
+    const target = authorized.effectiveThread.deliveryTarget;
+    const result = await this.#gitHistory.read(
+      root.rootPath,
+      query,
+      signal,
+      query.kind === "local-commits"
+        ? [
+            `refs/remotes/${target.remoteName}/${target.proposedBaseBranch}`,
+            `refs/heads/${target.proposedBaseBranch}`,
+          ]
+        : [],
+    );
     // A read may outlive a checkout rebind or Project revocation. Recheck before releasing repository data.
     const current = await this.#authorizeCheckoutRead(
       windowId,

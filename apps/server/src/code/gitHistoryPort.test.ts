@@ -112,6 +112,72 @@ describe("local Git history", () => {
     ).toBe("unavailable");
   });
 
+  it("hides whitespace-only changes from a commit when asked", async () => {
+    const root = repository();
+    writeFileSync(join(root, "note.txt"), "alpha\nbeta\n");
+    git(root, "add", "--", "note.txt");
+    git(root, "commit", "-qm", "Add note");
+    writeFileSync(join(root, "note.txt"), "alpha\n    beta\ngamma\n");
+    git(root, "add", "--", "note.txt");
+    git(root, "commit", "-qm", "Indent and extend");
+    const oid = git(root, "rev-parse", "HEAD");
+    const reader = port();
+    const shown = await reader.read(
+      root,
+      decodeGitHistoryQuery({ kind: "commit", ...scope, oid, parent: 0 }),
+    );
+    const ignored = await reader.read(
+      root,
+      decodeGitHistoryQuery({ kind: "commit", ...scope, oid, parent: 0, ignoreWhitespace: true }),
+    );
+    if (shown.status !== "commit" || ignored.status !== "commit") throw new Error("not a commit");
+    expect(shown.diff).toContain("-beta");
+    expect(ignored.diff).not.toContain("-beta");
+    expect(ignored.diff).toContain("+gamma");
+    expect(ignored.deletions).toBe(0);
+  });
+
+  it("lists only commits the upstream does not have, and falls back to the base branch", async () => {
+    const remote = repository();
+    commit(remote, "Shared");
+    const clone = mkdtempSync(join(tmpdir(), "octant-history-clone-"));
+    directories.push(clone);
+    execFileSync("git", ["clone", "-q", remote, clone]);
+    git(clone, "config", "user.name", "Octant Test");
+    git(clone, "config", "user.email", "test@octant.local");
+    git(clone, "config", "commit.gpgsign", "false");
+    commit(clone, "Only here one");
+    commit(clone, "Only here two");
+    const reader = port();
+    const query = decodeGitHistoryQuery({ kind: "local-commits", ...scope });
+    const tracked = await reader.read(clone, query);
+    if (tracked.status !== "history") throw new Error("not a listing");
+    expect(tracked.commits.map((entry) => entry.subject)).toEqual([
+      "Only here two",
+      "Only here one",
+    ]);
+    expect(tracked.comparedWith).toMatch(/^origin\//);
+    // A branch that was never pushed is measured against the base instead.
+    git(clone, "checkout", "-qb", "feature");
+    commit(clone, "Feature work");
+    const branch = git(clone, "rev-parse", "--abbrev-ref", "origin/HEAD");
+    const unpushed = await reader.read(clone, query, undefined, [`refs/remotes/${branch}`]);
+    if (unpushed.status !== "history") throw new Error("not a listing");
+    expect(unpushed.commits.map((entry) => entry.subject)).toEqual([
+      "Feature work",
+      "Only here two",
+      "Only here one",
+    ]);
+    expect(unpushed.comparedWith).toBe(branch);
+    // With nothing to compare against it says so rather than listing everything.
+    const lonely = repository();
+    commit(lonely, "Alone");
+    const none = await reader.read(lonely, query);
+    if (none.status !== "history") throw new Error("not a listing");
+    expect(none.commits).toEqual([]);
+    expect(none.comparedWith).toBeUndefined();
+  });
+
   it("keeps non-text and renamed files and reports bounded diffs honestly", async () => {
     const root = repository();
     commit(root, "First note");

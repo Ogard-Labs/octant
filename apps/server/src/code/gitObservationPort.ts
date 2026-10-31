@@ -113,6 +113,15 @@ function validRevision(value: string): boolean {
   );
 }
 
+/** How a diff is read. `-w` is Git's own whitespace-ignoring comparison. */
+export interface GitDiffOptions {
+  readonly ignoreWhitespace?: boolean;
+}
+
+function whitespaceArguments(options: GitDiffOptions): readonly string[] {
+  return options.ignoreWhitespace === true ? ["-w"] : [];
+}
+
 interface CommandResult {
   readonly exitCode: number;
   readonly stdout: string;
@@ -198,7 +207,11 @@ export class GitObservationPort {
     }
   }
 
-  async observe(root: string, signal?: AbortSignal): Promise<GitObservationResult> {
+  async observe(
+    root: string,
+    signal?: AbortSignal,
+    options: GitDiffOptions = {},
+  ): Promise<GitObservationResult> {
     if (!Number.isSafeInteger(this.#maxDiffBytes) || this.#maxDiffBytes < 1)
       return { status: "failed" };
     let checkoutRoot: string;
@@ -262,7 +275,14 @@ export class GitObservationPort {
           return { status: "failed" };
         baseline = emptyTree;
       }
-      const diffResult = await run(["diff", "--no-ext-diff", "--no-color", baseline, "--"]);
+      const diffResult = await run([
+        "diff",
+        "--no-ext-diff",
+        "--no-color",
+        ...whitespaceArguments(options),
+        baseline,
+        "--",
+      ]);
       if (diffResult.exitCode !== 0) return { status: "failed" };
       const diff = boundUtf8(diffResult.stdout, this.#maxDiffBytes);
       // Numstat is the same baseline as the unified diff, in the same
@@ -373,6 +393,7 @@ export class GitObservationPort {
       readonly scope:
         | { readonly kind: "staged" }
         | { readonly kind: "branch"; readonly baseRef: string };
+      readonly ignoreWhitespace?: boolean;
     },
     signal?: AbortSignal,
   ): Promise<GitScopedDiffResult> {
@@ -391,7 +412,13 @@ export class GitObservationPort {
       input.scope.kind === "staged" ? ["--cached"] : [`${input.scope.baseRef}...HEAD`];
     const run = (args: readonly string[]) => this.#run(["-C", checkoutRoot, ...args], signal);
     try {
-      const base = ["diff", "--no-ext-diff", "--no-color", ...revisions];
+      const base = [
+        "diff",
+        "--no-ext-diff",
+        "--no-color",
+        ...whitespaceArguments(input),
+        ...revisions,
+      ];
       const names = await run([...base, "--name-only", "--"]);
       if (names.exitCode !== 0) return { status: "unavailable" };
       const text = await run([...base, "--"]);

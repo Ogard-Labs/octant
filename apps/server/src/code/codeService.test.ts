@@ -3690,6 +3690,7 @@ describe("Git history authority", () => {
       "/private/authorized-root",
       expect.objectContaining({ checkoutId: checkout.id }),
       undefined,
+      [],
     );
     read.mockClear();
     fixture.roots.resolve.mockResolvedValueOnce(undefined as never);
@@ -3701,6 +3702,26 @@ describe("Git history authority", () => {
       }),
     ).toMatchObject({ status: "unavailable" });
     expect(read).not.toHaveBeenCalled();
+  });
+
+  it("measures local commits against the thread's base branch, remote-tracking first", async () => {
+    const read = vi.fn(async () => ({ status: "unavailable" as const, message: "Test reader" }));
+    const target = thread().deliveryTarget;
+    const fixture = serviceFixture({ gitHistory: { read }, threads: [thread()] });
+    await fixture.service.readGitHistory(ids.window, {
+      kind: "local-commits",
+      threadId: ids.thread,
+      checkoutId: checkout.id,
+    });
+    expect(read).toHaveBeenCalledWith(
+      "/private/authorized-root",
+      expect.objectContaining({ kind: "local-commits" }),
+      undefined,
+      [
+        `refs/remotes/${target.remoteName}/${target.proposedBaseBranch}`,
+        `refs/heads/${target.proposedBaseBranch}`,
+      ],
+    );
   });
 
   it("refuses another checkout before invoking the history reader", async () => {
