@@ -107,7 +107,9 @@ export function createExtensionPopupHost(options: ExtensionPopupHostOptions) {
           webSecurity: true,
         },
       });
-      const origin = new URL(url).origin;
+      // Compared by protocol and host, never by origin: the origin of an extension
+      // or file address is the string "null", which would equal every other one.
+      const home = new URL(url);
       view.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
       view.webContents.session.setPermissionCheckHandler(() => false);
       view.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) =>
@@ -117,7 +119,10 @@ export function createExtensionPopupHost(options: ExtensionPopupHostOptions) {
         const target = details.find((detail): detail is string => typeof detail === "string");
         let inside = false;
         try {
-          inside = target !== undefined && new URL(target).origin === origin;
+          if (target !== undefined) {
+            const next = new URL(target);
+            inside = next.protocol === home.protocol && next.hostname === home.hostname;
+          }
         } catch {
           inside = false;
         }

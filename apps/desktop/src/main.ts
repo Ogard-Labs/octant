@@ -122,7 +122,7 @@ import {
   type ExtensionPopupShellWindow,
   type ExtensionPopupView,
 } from "./browserExtensionPopupHost";
-import { validateExtensionPopupRequest } from "./browserExtensionPopupRequest";
+import { fitPopupBounds, validateExtensionPopupRequest } from "./browserExtensionPopupRequest";
 import { openCodeExternalEditorFromServer } from "./codeExternalEditor";
 import {
   detectOpenInApplications,
@@ -3490,7 +3490,8 @@ function installIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.browserExtensionPopupOpen, async (event, value: unknown) => {
     const context = ownedTopLevelWindowContext(event);
     const request = validateExtensionPopupRequest(value);
-    validateBrowserSurfaceBounds(request.bounds, context.window);
+    const bounds = fitPopupBounds(request.anchor, request.size, context.window.getContentBounds());
+    validateBrowserSurfaceBounds(bounds, context.window);
     if (browserExtensionPopupHost === undefined) return { opened: false };
     return await browserExtensionPopupHost.open({
       windowId: context.windowId,
@@ -3498,7 +3499,7 @@ function installIpcHandlers(): void {
       profile: decodeStoredBrowserProfile(request.profile),
       extensionId: request.extensionId,
       kind: request.kind,
-      bounds: request.bounds,
+      bounds,
     });
   });
   ipcMain.handle(IPC_CHANNELS.browserExtensionPopupClose, (event) => {

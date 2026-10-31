@@ -198,6 +198,30 @@ describe("browser profile store extensions", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("applies a disable that arrives while an earlier load is still pending", async () => {
+    const host = extensionHost();
+    let finish: (() => void) | undefined;
+    host.loadExtension.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = () => resolve({ id: "electron-slow" });
+        }),
+    );
+    const profiles = storeWith(host);
+    const personal = { kind: "personal" } as const;
+    const path = folder({ action: { default_popup: "popup.html" } });
+    const id = "9".repeat(32);
+
+    const loading = profiles.syncExtensions(personal, [{ id, path, contentHash: "1".repeat(64) }]);
+    const disabling = profiles.syncExtensions(personal, []);
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    finish?.();
+    await Promise.all([loading, disabling]);
+
+    expect(host.removeExtension).toHaveBeenCalledWith("electron-slow");
+    expect(profiles.extensionPage(personal, id, "popup")).toBeUndefined();
+  });
+
   it("refuses a page path that leaves the extension's folder", async () => {
     const host = extensionHost();
     const profiles = storeWith(host);

@@ -68,7 +68,8 @@ export function BrowserExtensionsButton(props: BrowserExtensionsButtonProps) {
           : { kind: "project", projectId: String(profile.projectId) },
       extensionId,
       kind,
-      bounds: { x: rect.left, y: rect.bottom + 4, width: POPUP_WIDTH, height: POPUP_HEIGHT },
+      anchor: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
+      size: { width: POPUP_WIDTH, height: POPUP_HEIGHT },
     });
   };
 

@@ -80,36 +80,53 @@ export function createBrowserProfileStore(
 ): BrowserProfileStore {
   // Electron keeps a loaded extension for the life of the app, per session.
   const loaded = new Map<string, Map<string, LoadedExtension>>();
+  // One sync at a time per profile: a load that is still pending must finish
+  // before a later change (a disable, a removal, a wider update) is applied, or
+  // the later change would find nothing loaded and the revoked extension would
+  // be recorded as running when the load ended.
+  const queues = new Map<string, Promise<void>>();
+  const syncOne = async (
+    profile: StoredBrowserProfile,
+    wanted: ReadonlyArray<EnabledExtensionFolder>,
+  ): Promise<void> => {
+    const partition = browserProfilePartition(profile, "");
+    const host = options.sessionFor(partition).extensions;
+    if (host === undefined) return;
+    const here = loaded.get(partition) ?? new Map<string, LoadedExtension>();
+    loaded.set(partition, here);
+    for (const [id, extension] of here) {
+      const keep = wanted.some(
+        (entry) => entry.id === id && entry.contentHash === extension.contentHash,
+      );
+      if (!keep) {
+        host.removeExtension(extension.electronId);
+        here.delete(id);
+      }
+    }
+    for (const entry of wanted) {
+      if (here.has(entry.id)) continue;
+      try {
+        const extension = await host.loadExtension(entry.path, { allowFileAccess: false });
+        here.set(entry.id, {
+          electronId: extension.id,
+          path: entry.path,
+          contentHash: entry.contentHash,
+        });
+      } catch {
+        // An extension Electron cannot load fails inside itself, as the design
+        // says; the rest of the profile's extensions still load.
+      }
+    }
+  };
   return Object.freeze<BrowserProfileStore>({
-    async syncExtensions(profile, wanted) {
+    syncExtensions(profile, wanted) {
       const partition = browserProfilePartition(profile, "");
-      const host = options.sessionFor(partition).extensions;
-      if (host === undefined) return;
-      const here = loaded.get(partition) ?? new Map<string, LoadedExtension>();
-      loaded.set(partition, here);
-      for (const [id, extension] of here) {
-        const keep = wanted.some(
-          (entry) => entry.id === id && entry.contentHash === extension.contentHash,
-        );
-        if (!keep) {
-          host.removeExtension(extension.electronId);
-          here.delete(id);
-        }
-      }
-      for (const entry of wanted) {
-        if (here.has(entry.id)) continue;
-        try {
-          const extension = await host.loadExtension(entry.path, { allowFileAccess: false });
-          here.set(entry.id, {
-            electronId: extension.id,
-            path: entry.path,
-            contentHash: entry.contentHash,
-          });
-        } catch {
-          // An extension Electron cannot load fails inside itself, as the design
-          // says; the rest of the profile's extensions still load.
-        }
-      }
+      const run = (queues.get(partition) ?? Promise.resolve()).then(() => syncOne(profile, wanted));
+      queues.set(
+        partition,
+        run.catch(() => undefined),
+      );
+      return run;
     },
     extensionPage(profile, extensionId, kind) {
       const extension = loaded.get(browserProfilePartition(profile, ""))?.get(extensionId);

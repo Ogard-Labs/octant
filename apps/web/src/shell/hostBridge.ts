@@ -391,12 +391,14 @@ export interface OctantHostBridge
       | { readonly kind: "project"; readonly projectId: string };
     readonly extensionId: string;
     readonly kind: "popup" | "options";
-    readonly bounds: {
+    /** The extensions button's rectangle; the desktop app places the popup beside it. */
+    readonly anchor: {
       readonly x: number;
       readonly y: number;
       readonly width: number;
       readonly height: number;
     };
+    readonly size: { readonly width: number; readonly height: number };
   }) => Promise<{ readonly opened: boolean }>;
   readonly closeBrowserExtensionPopup?: () => Promise<void>;
   readonly commandBrowserSurface?: (

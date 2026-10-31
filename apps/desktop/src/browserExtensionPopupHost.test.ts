@@ -4,7 +4,7 @@ import {
   type ExtensionPopupShellWindow,
   type ExtensionPopupView,
 } from "./browserExtensionPopupHost";
-import { validateExtensionPopupRequest } from "./browserExtensionPopupRequest";
+import { fitPopupBounds, validateExtensionPopupRequest } from "./browserExtensionPopupRequest";
 
 const projectId = "40000000-0000-4000-8000-000000000001";
 const extensionId = "a".repeat(32);
@@ -172,12 +172,82 @@ describe("extension popup host", () => {
   });
 });
 
+describe("extension popup navigation", () => {
+  async function opened(url: string) {
+    const fake = fakeView();
+    const host = createExtensionPopupHost({
+      store: { extensionPage: () => url },
+      createView: () => fake.view,
+    });
+    await host.open({
+      windowId: "w1",
+      window: shellWindow(),
+      profile: { kind: "personal" },
+      extensionId,
+      kind: "popup",
+      bounds: { x: 0, y: 0, width: 300, height: 300 },
+    });
+    const refused = (target: string) => {
+      const event = { preventDefault: vi.fn() };
+      fake.listeners.get("will-navigate")?.(event, target);
+      return event.preventDefault.mock.calls.length > 0;
+    };
+    return refused;
+  }
+
+  it("will not leave for another extension, a file address, or the web", async () => {
+    const refused = await opened("chrome-extension://abc/popup.html");
+
+    expect(refused("chrome-extension://other/popup.html")).toBe(true);
+    expect(refused("file:///etc/hosts")).toBe(true);
+    expect(refused("https://example.com/")).toBe(true);
+    expect(refused("chrome-extension://abc/elsewhere.html")).toBe(false);
+  });
+});
+
+describe("extension popup placement", () => {
+  const content = { width: 1000, height: 700 };
+  const size = { width: 360, height: 480 };
+
+  it("sits below the button when it fits", () => {
+    expect(fitPopupBounds({ x: 100, y: 40, width: 30, height: 30 }, size, content)).toEqual({
+      x: 100,
+      y: 74,
+      width: 360,
+      height: 480,
+    });
+  });
+
+  it("shifts left from the right edge so it stays inside the window", () => {
+    const placed = fitPopupBounds({ x: 980, y: 40, width: 30, height: 30 }, size, content);
+    expect(placed.x + placed.width).toBeLessThanOrEqual(content.width);
+    expect(placed.x).toBe(640);
+  });
+
+  it("flips above the button near the bottom when there is more room there", () => {
+    const placed = fitPopupBounds({ x: 100, y: 650, width: 30, height: 30 }, size, content);
+    expect(placed.y + placed.height).toBeLessThanOrEqual(650);
+    expect(placed.y).toBeGreaterThanOrEqual(36);
+  });
+
+  it("shrinks to the space a small window has and stays inside it", () => {
+    const small = { width: 300, height: 260 };
+    const placed = fitPopupBounds({ x: 250, y: 50, width: 30, height: 30 }, size, small);
+    expect(placed.x).toBeGreaterThanOrEqual(0);
+    expect(placed.y).toBeGreaterThanOrEqual(36);
+    expect(placed.x + placed.width).toBeLessThanOrEqual(small.width);
+    expect(placed.y + placed.height).toBeLessThanOrEqual(small.height);
+    expect(placed.width).toBe(300);
+  });
+});
+
 describe("extension popup request", () => {
   const valid = {
     profile: { kind: "project", projectId },
     extensionId,
     kind: "options",
-    bounds: { x: 1, y: 2, width: 300, height: 400 },
+    anchor: { x: 1, y: 2, width: 30, height: 30 },
+    size: { width: 300, height: 400 },
   };
 
   it("accepts exactly the shapes the renderer may send", () => {
@@ -195,9 +265,10 @@ describe("extension popup request", () => {
       { ...valid, extensionId: "/Users/x/ext" },
       { ...valid, kind: "background" },
       { ...valid, path: "/Users/x/ext" },
-      { ...valid, bounds: { ...valid.bounds, x: Number.NaN } },
-      { ...valid, bounds: { ...valid.bounds, width: 1e9 } },
-      { ...valid, bounds: "wide" },
+      { ...valid, anchor: { ...valid.anchor, x: Number.NaN } },
+      { ...valid, anchor: { ...valid.anchor, width: 1e9 } },
+      { ...valid, size: { width: 0, height: 400 } },
+      { ...valid, size: "wide" },
       null,
       "popup",
     ]) {
