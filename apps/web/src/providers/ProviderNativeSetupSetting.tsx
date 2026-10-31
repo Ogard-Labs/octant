@@ -31,7 +31,7 @@ const FEATURE_NAMES: Readonly<Record<ProviderNativeSetupFeature, string>> = {
   subagents: "its own subagents",
   webTools: "web search and fetch",
   skills: "skills",
-  toolServers: "MCP servers and plugins",
+  toolServers: "the MCP servers in its home folder",
   hooks: "settings and hooks",
   projectCode: "a trusted Project’s own code",
 };
