@@ -72,6 +72,16 @@ describe("BrowserCaptureList", () => {
     await waitFor(() => expect(screen.getAllByRole("img", { name: /Capture of/ })).toHaveLength(2));
   });
 
+  it("names the profile of a capture taken in a signed-in page, and none for a Private page", async () => {
+    const { client } = clientWith([capture(2, { profile: { kind: "personal" } }), capture(1)]);
+    render(<BrowserCaptureList client={client} threadId={threadId} />);
+
+    await screen.findByRole("region", { name: "Browser captures" });
+    const items = screen.getAllByRole("listitem");
+    expect(items[0]).toHaveTextContent("https://example.com · Personal profile");
+    expect(items[1]).not.toHaveTextContent("profile");
+  });
+
   it("opens the full image in the workspace when a capture is chosen", async () => {
     const open =
       vi.fn<(key: string, title: string, render: (close: () => void) => ReactNode) => void>();
