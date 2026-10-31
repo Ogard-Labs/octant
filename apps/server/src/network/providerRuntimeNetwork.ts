@@ -130,7 +130,7 @@ export interface RuntimeNetworkReviewer {
 
 export interface ProviderRuntimeNetworkOptions {
   readonly journal: Pick<Journal, "append" | "replayAggregateType">;
-  readonly safeNetworks: Pick<SafeNetworkStore, "placesFor" | "onChanged">;
+  readonly safeNetworks: Pick<SafeNetworkStore, "placesFor" | "onChanged" | "limitsOn">;
   /** The Project's live egress rules, read for every decision. */
   readonly projectRules: (projectId: string) => ReadonlyArray<ToolEgressRule>;
   /** Puts the proxy on the egress rules' recheck, so a revocation closes an idle tunnel at once. */
@@ -233,7 +233,13 @@ export class ProviderRuntimeNetwork implements ProviderRuntimeNetworkPort {
   }
 
   async start(input: ProviderRuntimeNetworkStartInput): Promise<ProviderRuntimeNetworkStart> {
-    if (input.executionPolicy === "full-access" || !this.#options.enforced)
+    // Network limits ship off: a launch reads the switch once, so a change
+    // applies from the next launch and never moves a running runtime.
+    if (
+      input.executionPolicy === "full-access" ||
+      !this.#options.enforced ||
+      !this.#options.safeNetworks.limitsOn()
+    )
       return { status: "open" };
     const refused = {
       status: "refused",

@@ -25,7 +25,10 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 export const SAFE_NETWORKS_AGGREGATE = "safe-networks";
 /** The account default's aggregate id; a Project's list lives under the Project's id. */
 export const SAFE_NETWORKS_ACCOUNT_AGGREGATE_ID = "5afe0000-0000-4000-8000-000000000000";
+/** The Network limits switch's aggregate id, beside the account default's. */
+export const SAFE_NETWORKS_LIMITS_AGGREGATE_ID = "5afe0000-0000-4000-8000-000000000001";
 export const SAFE_NETWORKS_EVENT_NAMES = {
+  limitsSet: "safe-networks.limits-set@1",
   placesSet: "safe-networks.places-set@1",
   projectOverrideCleared: "safe-networks.project-override-cleared@1",
 } as const;
@@ -108,6 +111,13 @@ export const SafeNetworksPlacesSetPayload = Schema.Struct({
   principal: localWindow,
 }).annotations(strict);
 export type SafeNetworksPlacesSetPayload = typeof SafeNetworksPlacesSetPayload.Type;
+
+/** Network limits turned on or off for runtimes launched from now on. */
+export const SafeNetworksLimitsSetPayload = Schema.Struct({
+  enabled: Schema.Boolean,
+  principal: localWindow,
+}).annotations(strict);
+export type SafeNetworksLimitsSetPayload = typeof SafeNetworksLimitsSetPayload.Type;
 
 /** A Project goes back to the account default. */
 export const SafeNetworksProjectOverrideClearedPayload = Schema.Struct({
@@ -203,12 +213,17 @@ export const SafeNetworksView = Schema.Struct({
     }).annotations(strict),
   ),
   refused: Schema.Array(SafeNetworkRefusalView).pipe(Schema.maxItems(MAX_SAFE_NETWORK_REFUSALS)),
-  /** Whether provider runtimes on this host run through the proxy at all. */
+  /** Whether this computer can route provider runtimes through the proxy at all. */
   enforced: Schema.Boolean,
+  /** The Network limits switch: whether runtimes launched from now on run through it. Off by default. */
+  limitsOn: Schema.Boolean,
 }).annotations(strict);
 export type SafeNetworksView = typeof SafeNetworksView.Type;
 
 export const SafeNetworksCommand = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("set-limits"), enabled: Schema.Boolean }).annotations(
+    strict,
+  ),
   Schema.Struct({
     kind: Schema.Literal("set-places"),
     scope: SafeNetworkScope,
@@ -250,6 +265,9 @@ export const decodeSafeNetworksView = Schema.decodeUnknownSync(SafeNetworksView)
 export const decodeSafeNetworksCommandResult = Schema.decodeUnknownSync(SafeNetworksCommandResult);
 export const decodeSafeNetworksPlacesSetPayload = Schema.decodeUnknownSync(
   SafeNetworksPlacesSetPayload,
+);
+export const decodeSafeNetworksLimitsSetPayload = Schema.decodeUnknownSync(
+  SafeNetworksLimitsSetPayload,
 );
 export const decodeSafeNetworksProjectOverrideClearedPayload = Schema.decodeUnknownSync(
   SafeNetworksProjectOverrideClearedPayload,

@@ -215,6 +215,7 @@ import {
   RuntimeNetworkLaunchSummarizedPayload,
   RuntimeNetworkReviewerAllowedPayload,
   SAFE_NETWORKS_EVENT_NAMES,
+  SafeNetworksLimitsSetPayload,
   SafeNetworksPlacesSetPayload,
   SafeNetworksProjectOverrideClearedPayload,
 } from "@octant/contracts/safe-networks";
@@ -504,6 +505,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       ThreadEgressDecisionsRecordedPayload,
     )
     .register(CODE_DEBUG_EVENT_NAMES.egressLaunchSummarized, 1, ThreadEgressLaunchSummarizedPayload)
+    .register(SAFE_NETWORKS_EVENT_NAMES.limitsSet, 1, SafeNetworksLimitsSetPayload)
     .register(SAFE_NETWORKS_EVENT_NAMES.placesSet, 1, SafeNetworksPlacesSetPayload)
     .register(
       SAFE_NETWORKS_EVENT_NAMES.projectOverrideCleared,

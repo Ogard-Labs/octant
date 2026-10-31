@@ -256,9 +256,16 @@ the file you approved publishing, and never downloads the page.
 
 ### Network limits for agents and safe networks
 
-On a Mac, below Full access, each provider runtime Octant starts (Codex,
-OpenCode, Pi, and ACP agents such as Mistral Vibe) gets a network guard of
-its own. The runtime can reach:
+Network limits are off by default, because no live turn with a real
+provider has run through the guard yet. Turn them on in **Settings → Access →
+Network limits**. The switch applies to the next runtime you start; runtimes
+already running keep the network they began with. While it is off, runtimes
+have open network and the safe networks lists are saved but not applied. You
+can edit the lists either way, and the page says whether limits are on.
+
+With limits on, on a Mac, below Full access, each provider runtime Octant
+starts (Codex, OpenCode, Pi, and ACP agents such as Mistral Vibe) gets a
+network guard of its own. The runtime can reach:
 
 - its provider's own endpoints, for sign-in and the model;
 - the hosts your Project's network rules allow;
@@ -297,8 +304,10 @@ What this does not cover yet:
   built-in web fetch; only its commands go through the guard.
 - Octant Harness commands keep their own per-thread network rules (Network
   access in a Code thread's Agents tab) and do not read safe networks yet.
-- No live turn with a real provider has run through the guard yet. A runtime
-  whose network client ignores the proxy settings cannot reach anything.
+- No live turn with a real provider has run through the guard yet, which is
+  why limits ship off. With limits on, a runtime whose network client ignores
+  the proxy settings cannot reach anything; turn the switch off to get its
+  network back.
 
 ## Remote transport
 

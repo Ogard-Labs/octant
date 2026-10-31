@@ -81,7 +81,7 @@ describe("octantSettingsRegistry", () => {
     ]);
     expect(section("access")?.label).toBe("Access");
     expect(section("access")?.scope).toBe("host");
-    expect(ids("access")).toEqual(["safe-networks"]);
+    expect(ids("access")).toEqual(["network-limits", "safe-networks"]);
     expect(section("secret-stores")?.label).toBe("Secret stores");
     expect(section("secret-stores")?.scope).toBe("host");
     expect(ids("secret-stores")).toEqual(["secret-store-link", "secret-store-check"]);

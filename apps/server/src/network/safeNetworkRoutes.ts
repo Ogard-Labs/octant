@@ -21,7 +21,10 @@ const HEADERS = "content-type, x-octant-window-capability";
 
 export interface SafeNetworkRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
-  readonly store: Pick<SafeNetworkStore, "account" | "projectOverride" | "set" | "clearProject">;
+  readonly store: Pick<
+    SafeNetworkStore,
+    "account" | "projectOverride" | "set" | "clearProject" | "limitsOn" | "setLimits"
+  >;
   readonly network: Pick<ProviderRuntimeNetwork, "refusals" | "enforced">;
   /** Whether a Project with this id exists on this host. */
   readonly projectExists: (projectId: string) => boolean;
@@ -106,13 +109,15 @@ export function createSafeNetworkRouteHandler(dependencies: SafeNetworkRouteDepe
       return failure("Safe network command is invalid.", 400, origin);
     }
     const change: SafeNetworksChange =
-      command.kind === "set-places"
-        ? dependencies.store.set({ scope: command.scope, places: command.places, principal })
-        : dependencies.store.clearProject({ projectId: String(command.projectId), principal });
+      command.kind === "set-limits"
+        ? dependencies.store.setLimits({ enabled: command.enabled, principal })
+        : command.kind === "set-places"
+          ? dependencies.store.set({ scope: command.scope, places: command.places, principal })
+          : dependencies.store.clearProject({ projectId: String(command.projectId), principal });
     const projectId =
       command.kind === "clear-project-override"
         ? String(command.projectId)
-        : command.scope.kind === "project"
+        : command.kind === "set-places" && command.scope.kind === "project"
           ? String(command.scope.projectId)
           : (url.searchParams.get("projectId") ?? undefined);
     const result: SafeNetworksCommandResult =
@@ -140,6 +145,7 @@ function view(
       : {}),
     refused: dependencies.network.refusals(known ? projectId : undefined),
     enforced: dependencies.network.enforced,
+    limitsOn: dependencies.store.limitsOn(),
   };
 }
 

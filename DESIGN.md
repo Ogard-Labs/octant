@@ -2149,7 +2149,10 @@ endpoint). The rules behind them are in
 reviewer and Shield model in Settings › Code › Access, and the reviewer
 override as a select on a Code Project's overview; servers are allowed, not
 built yet. **Safe networks** is built as Settings › Access, in the
-Privacy & data group after Permissions: an intro sentence, the **Every
+Privacy & data group after Permissions: a **Network limits** panel with a
+switch that is off by default, a sentence saying plainly whether limits are on,
+and a note that a change applies to the next runtime started; then an intro
+sentence, the **Every
 Project** list, a **Project** picker that says whether the chosen Project
 follows the every-Project list or has its own (with **Use its own list** and
 **Follow every-Project list**), and **Recently refused**. A place row shows its
@@ -2159,8 +2162,8 @@ Save sends the whole list. A refusal from the host shows inline in the alert
 role and marks the refused row; nothing decides validity in the renderer
 beyond a port's range. Each refused host row shows `host:port`, the runtime,
 its count and age, and a quiet **Trust**, which adds that host and port to
-the list being edited. When the host does not route runtimes through these
-rules, a plain note says the lists are saved but not applied
+the list being edited. While limits are off, or when the host cannot route
+runtimes through these rules, a plain note says the lists are saved but not applied
 ([Provider runtime network](docs/architecture.md#provider-runtime-network)).
 A Work Project's **Developer tools** switch is presentation, not a
 permission, so it lives on that Project's overview, not here

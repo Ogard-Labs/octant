@@ -991,6 +991,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         "access network safe networks trusted hosts domains address ranges local network this mac private network overlay egress proxy refused recently refused trust allow outbound connections",
       settings: [
         {
+          id: settingId("network-limits"),
+          label: "Network limits",
+          scope: "host",
+          keywords:
+            "network limits switch on off runtime egress proxy open network restrict outbound next launch",
+        },
+        {
           id: settingId("safe-networks"),
           label: "Safe networks",
           scope: "host",

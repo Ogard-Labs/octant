@@ -6644,12 +6644,25 @@ proofs that suite already holds:
 
 ### Provider runtime network
 
-**Status: built on macOS (maintainer request, 2026-10-31).** The decision is
+**Status: built on macOS, behind the Network limits switch, off by default (maintainer request, 2026-10-31).** The decision is
 `decideProviderRuntimeEgress` in `packages/domain/src/safeNetworkPolicy.ts`,
 the places and records are in `packages/contracts/src/safeNetworks.ts`, and
 the host side is `apps/server/src/network/` (`providerRuntimeNetwork.ts`,
 `safeNetworkStore.ts`, `safeNetworkRoutes.ts`), composed in
 `wiring/runtimeNetwork.ts`. Linux keeps open network for runtimes (below).
+
+**Network limits ship off.** No real provider turn has run through the proxy
+yet, and a runtime that ignores the proxy settings would lose all its
+network, so the proxy is behind a host setting, Settings › Access › Network
+limits, off by default. The switch is journaled whole as
+`safe-networks.limits-set@1` (on its own fixed aggregate id under
+`safe-networks`), changes only from a local window, and replays at startup.
+`ProviderRuntimeNetwork.start` reads it at each launch: off, it answers
+`open` for every runtime (open network as before, and Claude's sandbox without
+the proxy port); on, it does what follows. A change therefore applies to the
+next launch and never moves a running runtime. Safe networks stay editable
+either way, and `SafeNetworksView.limitsOn` lets the page say which it is.
+Everything below describes limits on.
 
 **Outcome.** Below Full access a provider runtime reaches its provider's own
 endpoints, the loopback ports its own launch serves Octant's tools on, the
@@ -8170,8 +8183,9 @@ access` agree); a thread's own change is journaled as
   a host allowlist, so on macOS the runtime runs on `proxied` under the
   [provider runtime network](#provider-runtime-network): its OS rules reach
   only its own listener, which allows the provider's endpoints, the Project's
-  rules, and the person's safe networks. On Linux, and wherever the host does
-  not route runtimes, `provider-endpoints-only` still materializes as plain OS
+  rules, and the person's safe networks, once the person turns Network limits
+  on (they ship off). On Linux, while the limits are off, and wherever the host
+  does not route runtimes, `provider-endpoints-only` still materializes as plain OS
   network `allow` (`materializeOsNetworkEgress`). Native-harness commands run
   on `proxied` under the [harness tool egress rules](#harness-tool-egress-rules)
   (`materializeHarnessToolNetwork`). The persisted value keeps its name for
@@ -8227,7 +8241,8 @@ access` agree); a thread's own change is journaled as
     process exec and fork allowed and writes held to the Project root, so the
     shell runs confined; unwrapped at Full access, with no sandbox. Egress at Guarded and Reviewed is
     the provider's endpoints, the Project's egress rules, and the person's
-    safe networks rather than a blanket `allow` (built on macOS;
+    safe networks rather than a blanket `allow` (built on macOS, behind the
+    Network limits switch, which ships off;
     [provider runtime network](#provider-runtime-network)).
   - **Claude Agent SDK:** unwrapped as in Code's approval-gated posture; the
     runtime's own sandbox holds commands to the Project root, and its
@@ -10343,8 +10358,8 @@ tool row and a small mark on the thread card, never a prompt or a block.
 (account default, Project override): hosts, domains, address ranges, and
 private-network tags. Egress to a trusted place passes by rule; anything else
 goes to the Judge at Reviewed and to the person at Guarded. Each decision is
-journaled per host. Built for provider runtimes on macOS
-([provider runtime network](#provider-runtime-network)): a `host` place
+journaled per host. Built for provider runtimes on macOS, behind the Network limits switch, which
+ships off ([provider runtime network](#provider-runtime-network)): a `host` place
 matches that name, a `domain` the name and every name under it, a range is
 CIDR, and the tags are `this-mac` (loopback), `local-network` (the private
 IPv4 ranges and IPv6 unique-local addresses), and `overlay-network`
@@ -10352,7 +10367,8 @@ IPv4 ranges and IPv6 unique-local addresses), and `overlay-network`
 link-local address is refused. Each list is journaled whole, journal first, as
 `safe-networks.places-set@1` on the `safe-networks` aggregate (the account's
 fixed id, or the Project's), and `safe-networks.project-override-cleared@1`
-returns a Project to the default; startup replays them. Only a person at a
+returns a Project to the default, and `safe-networks.limits-set@1` records the
+Network limits switch; startup replays them. Only a person at a
 local window changes them (`GET`/`POST /api/access/safe-networks`). The
 reviewer hook is in place and no reviewer is composed, so today every unlisted
 host goes to the person. Not built yet: safe networks for harness commands,

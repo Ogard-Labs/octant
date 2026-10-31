@@ -12,7 +12,8 @@ import { relativeTimeLabel } from "../lib/relativeTime";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import { SettingsPanel, SettingsState } from "./primitives";
+import { OctantSwitch } from "../ui/base/OctantSwitch";
+import { SettingRow, SettingsPanel, SettingsState } from "./primitives";
 
 export interface SafeNetworksSettingsProps {
   /** Absent where the host has no Safe networks route. */
@@ -24,6 +25,13 @@ export interface SafeNetworksSettingsProps {
 
 export const SAFE_NETWORKS_INTRO =
   "Below Full access, provider runtimes and Claude's commands reach only their provider's own endpoints, the Project's network rules, and the places listed here. Anything else is refused and shows under Recently refused.";
+
+export const NETWORK_LIMITS_ON_NOTE =
+  "Network limits are on. Runtimes launched from now on reach only the places below.";
+export const NETWORK_LIMITS_OFF_NOTE =
+  "Network limits are off. Runtimes have open network, and the places below are saved but not applied.";
+export const NETWORK_LIMITS_TIMING_NOTE =
+  "A change applies to the next runtime you start. Runtimes already running keep the network they began with.";
 
 const NOT_ENFORCED_NOTE =
   "Runtimes on this computer do not run through these rules yet, so the lists below are saved but not applied.";
@@ -323,6 +331,7 @@ export function SafeNetworksSettings(props: SafeNetworksSettingsProps) {
   const [projectDraft, setProjectDraft] = useState<ReadonlyArray<SafeNetworkPlace> | null>(null);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<Problem | undefined>(undefined);
+  const [limitsProblem, setLimitsProblem] = useState<string | undefined>(undefined);
 
   const focused = props.focusedSetting === "safe-networks";
   useEffect(() => {
@@ -402,6 +411,28 @@ export function SafeNetworksSettings(props: SafeNetworksSettingsProps) {
       });
     } catch {
       setProblem({ scope, message: "Safe networks could not be saved." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function setLimits(enabled: boolean) {
+    if (client === undefined) return;
+    setLimitsProblem(undefined);
+    setBusy(true);
+    try {
+      const result = await client.command({ kind: "set-limits", enabled });
+      if (result.kind === "safe-networks-updated") {
+        // Only the switch is taken from the answer: it describes no Project
+        // and must not overwrite a list being edited.
+        setView((current) =>
+          current === undefined ? current : { ...current, limitsOn: result.view.limitsOn },
+        );
+      } else {
+        setLimitsProblem(result.message);
+      }
+    } catch {
+      setLimitsProblem("Network limits could not be changed.");
     } finally {
       setBusy(false);
     }
@@ -494,6 +525,27 @@ export function SafeNetworksSettings(props: SafeNetworksSettingsProps) {
       tabIndex={-1}
     >
       {view.enforced ? null : <SettingsState kind="empty">{NOT_ENFORCED_NOTE}</SettingsState>}
+      <SettingsPanel
+        description={view.limitsOn ? NETWORK_LIMITS_ON_NOTE : NETWORK_LIMITS_OFF_NOTE}
+        title="Network limits"
+      >
+        <SettingRow
+          description={NETWORK_LIMITS_TIMING_NOTE}
+          label="Limit runtime network"
+          scope="host"
+          settingId="network-limits"
+        >
+          <OctantSwitch
+            checked={view.limitsOn}
+            disabled={busy || !view.enforced}
+            label="Limit runtime network"
+            onCheckedChange={(checked) => void setLimits(checked)}
+          />
+        </SettingRow>
+        {limitsProblem === undefined ? null : (
+          <SettingsState kind="error">{limitsProblem}</SettingsState>
+        )}
+      </SettingsPanel>
       <SettingsPanel description={SAFE_NETWORKS_INTRO} title="Safe networks">
         <h3 className="safe-networks__heading">Every Project</h3>
         <PlaceList

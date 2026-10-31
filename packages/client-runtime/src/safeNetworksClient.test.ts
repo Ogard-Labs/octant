@@ -15,6 +15,7 @@ const view = {
     },
   ],
   enforced: true,
+  limitsOn: false,
 };
 
 function json(body: unknown, status = 200): Response {

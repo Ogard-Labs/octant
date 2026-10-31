@@ -9,11 +9,13 @@ import {
   type EventActor as EventActorValue,
 } from "@octant/contracts";
 import {
+  decodeSafeNetworksLimitsSetPayload,
   decodeSafeNetworksPlacesSetPayload,
   decodeSafeNetworksProjectOverrideClearedPayload,
   SAFE_NETWORKS_ACCOUNT_AGGREGATE_ID,
   SAFE_NETWORKS_AGGREGATE,
   SAFE_NETWORKS_EVENT_NAMES,
+  SAFE_NETWORKS_LIMITS_AGGREGATE_ID,
   type SafeNetworkPlace,
   type SafeNetworkScope,
   type SafeNetworksRefusalReason,
@@ -68,6 +70,7 @@ export class SafeNetworkStore {
   readonly #options: SafeNetworkStoreOptions;
   readonly #actor: EventActorValue;
   #account: ReadonlyArray<SafeNetworkPlace> = [];
+  #limitsOn = false;
   readonly #projects = new Map<string, ReadonlyArray<SafeNetworkPlace>>();
   readonly #versions = new Map<string, number>();
   readonly #listeners = new Set<() => void>();
@@ -80,6 +83,7 @@ export class SafeNetworkStore {
   /** Rebuilds every scope from the journal, in journal order. A record that no longer decodes changes nothing. */
   load(): void {
     this.#account = [];
+    this.#limitsOn = false;
     this.#projects.clear();
     let after = 0;
     for (;;) {
@@ -120,6 +124,28 @@ export class SafeNetworkStore {
       if (override !== undefined) return override;
     }
     return this.#account;
+  }
+
+  /** The Network limits switch; off until a person at a local window turns it on. */
+  limitsOn(): boolean {
+    return this.#limitsOn;
+  }
+
+  setLimits(input: {
+    readonly enabled: boolean;
+    readonly principal: SafeNetworkPrincipal;
+  }): SafeNetworksChange {
+    if (input.principal !== "local-window")
+      return { kind: "refused", reason: "needs-local-window" };
+    const payload = { enabled: input.enabled, principal: { kind: "local-window" as const } };
+    if (
+      !this.#append(SAFE_NETWORKS_LIMITS_AGGREGATE_ID, SAFE_NETWORKS_EVENT_NAMES.limitsSet, payload)
+    ) {
+      return { kind: "refused", reason: "unavailable" };
+    }
+    this.#apply(SAFE_NETWORKS_EVENT_NAMES.limitsSet, payload);
+    this.#changed();
+    return { kind: "changed" };
   }
 
   account(): ReadonlyArray<SafeNetworkPlace> {
@@ -192,6 +218,10 @@ export class SafeNetworkStore {
   }
 
   #apply(eventName: string, payload: unknown): void {
+    if (eventName === SAFE_NETWORKS_EVENT_NAMES.limitsSet) {
+      this.#limitsOn = decodeSafeNetworksLimitsSetPayload(payload).enabled;
+      return;
+    }
     if (eventName === SAFE_NETWORKS_EVENT_NAMES.placesSet) {
       const set = decodeSafeNetworksPlacesSetPayload(payload);
       if (set.scope.kind === "account") this.#account = set.places;

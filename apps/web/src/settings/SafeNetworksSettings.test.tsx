@@ -23,7 +23,13 @@ const ACCOUNT: ReadonlyArray<SafeNetworkPlace> = [
 ];
 
 function view(overrides: Partial<SafeNetworksView> = {}): SafeNetworksView {
-  return { account: ACCOUNT, refused: [], enforced: true, ...overrides } as SafeNetworksView;
+  return {
+    account: ACCOUNT,
+    refused: [],
+    enforced: true,
+    limitsOn: false,
+    ...overrides,
+  } as SafeNetworksView;
 }
 
 function setup(options: {
@@ -336,6 +342,20 @@ describe("SafeNetworksSettings", () => {
       scope: { kind: "project", projectId: PROJECT_ID },
       places: ACCOUNT,
     });
+  });
+
+  it("says plainly that Network limits are off, and turns them on with a note that it applies at the next launch", async () => {
+    const { command, user } = setup({
+      answer: () => ({ kind: "safe-networks-updated", view: view({ limitsOn: true }) }),
+    });
+
+    expect(await screen.findByText(/Network limits are off\./)).toBeVisible();
+    expect(screen.getByText(/applies to the next runtime you start/i)).toBeVisible();
+    await user.click(screen.getByRole("switch", { name: "Limit runtime network" }));
+
+    await waitFor(() => expect(command).toHaveBeenCalledOnce());
+    expect(command.mock.calls[0]?.[0]).toEqual({ kind: "set-limits", enabled: true });
+    expect(await screen.findByText(/Network limits are on\./)).toBeVisible();
   });
 
   it("says runtimes on this computer do not run through the rules yet when they are not enforced", async () => {
