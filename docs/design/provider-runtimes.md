@@ -16,12 +16,12 @@ target wire behaviour, gated by the thread's
 [guardrail level](../architecture.md#security-and-authority) (off at Guarded
 and Reviewed until the person turns it on, on at Full access):
 
-| Provider     | Switched off today                                                                                    | Target                                                                                                                                                                                                   | Built                                        |
-| ------------ | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| Claude Code  | `settingSources: []`, `skills: []`, no subagent tool, `WebSearch` and `WebFetch` left out and refused | The person's setting sources (home and trusted Project), skills, plugins, hooks, and MCP servers; its subagent tool; `WebSearch` and `WebFetch`; `permissionMode: "auto"` as Reviewed's default reviewer | Reviewed with its own reviewer, in Code only |
-| Codex        | Its subagents; Project skills disabled by path; in Chat each named MCP server switched off            | Its subagents; Project skills; the person's MCP servers in Chat; `approvalsReviewer: "auto_review"` as Reviewed's default reviewer                                                                       | Reviewed with its own reviewer, in Code only |
-| Mistral Vibe | `VIBE_SKILL_PATHS="[]"`, `VIBE_DISABLED_SKILLS='["*"]'`, `VIBE_INCLUDE_PROJECT_CONTEXT="false"`       | Its own skills and Project context; a trusted Project's tools and MCP servers; its auto-approve mode as Reviewed's default reviewer, reported `unsupported` until mapped                                 | No                                           |
-| OpenCode     | Skills and project config off, `skill` denied; Octant's denies outrank saved grants; `once` only      | The person's own permission rules; "always" answers; its `subagent` delegation; its skills; `bash` and `task` in Work as in Code; Reviewed through Octant Shield                                         | No                                           |
+| Provider     | Switched off today                                                                                    | Target                                                                                                                                                                                                   | Built                                                                                                                                                            |
+| ------------ | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code  | `settingSources: []`, `skills: []`, no subagent tool, `WebSearch` and `WebFetch` left out and refused | The person's setting sources (home and trusted Project), skills, plugins, hooks, and MCP servers; its subagent tool; `WebSearch` and `WebFetch`; `permissionMode: "auto"` as Reviewed's default reviewer | Reviewed with its own reviewer, in Code only                                                                                                                     |
+| Codex        | Its subagents; Project skills disabled by path; in Chat each named MCP server switched off            | Its subagents; Project skills; the person's MCP servers in Chat; `approvalsReviewer: "auto_review"` as Reviewed's default reviewer                                                                       | Reviewed with its own reviewer, in Code only                                                                                                                     |
+| Mistral Vibe | `VIBE_SKILL_PATHS="[]"`, `VIBE_DISABLED_SKILLS='["*"]'`, `VIBE_INCLUDE_PROJECT_CONTEXT="false"`       | Its own skills and Project context; a trusted Project's tools and MCP servers; its auto-approve mode as Reviewed's default reviewer, reported `unsupported` until mapped                                 | No                                                                                                                                                               |
+| OpenCode     | Skills and project config off, `skill` denied; Octant's denies outrank saved grants; `once` only      | The person's own permission rules; "always" answers; its `subagent` delegation; its skills; `bash` and `task` in Work as in Code; Reviewed through Octant Shield                                         | With the setup on: `skill` asked rather than denied with the three skill switches unset, and a remembered 2.x approval answered `always`; the rest not built yet |
 
 With the setup on, Claude Code starts with `settingSources: ["user"]` (plus
 `project` and `local` in a trusted Project), `skills: "all"`, and the `Agent`,
@@ -249,13 +249,18 @@ the turn keeps running while OpenCode retries. Queueing, lifecycle, part start a
 usage totals report nothing (each step reports its own usage); any other
 event fails the turn closed with an error naming it. Approvals map
 through 2.0.22's `permission.asked` event and its reply route, whose body
-is `{decision}`. Today an approval is answered
-`once`, never `always`, even when approvals are remembered for the Project:
-`always` would save a grant in OpenCode's data directory, which it shares
-with the person's own use, outside Octant's revocation. The rule is that the
-person may answer `always` ([Key providers](#key-providers); allowed, not
-built yet): the answer is journaled, and the approval says that the grant
-lives in OpenCode's own store, where clearing it is the way to revoke it. Approval-gated on
+is `{decision}`. An approval is answered `once` unless approvals are
+remembered for the Project and the person let OpenCode run as itself
+([Key providers](#key-providers)): `always` saves a grant in OpenCode's data
+directory, which it shares with the person's own use, outside Octant's
+revocation. Then it is answered `always` (built): the answer is journaled
+like any other, and the approval's description says the grant lives in
+OpenCode's own settings for the repository, where clearing it is the way to
+revoke it. OpenCode then makes later matching edits without asking and
+settles other pending requests the grant covers, so the files an `always`
+answer names, and those of a request OpenCode settled by itself, stay
+admitted by the file-change check for that Project root while the host runs;
+after a host restart such an edit fails the turn until it is approved again. Approval-gated on
 2.x honours permission grants the person saved in OpenCode itself for the
 same repository: OpenCode keys them by the repository's root commit, keeps
 them in its own data store (shared with the person's own use because
