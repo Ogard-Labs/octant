@@ -786,8 +786,8 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
       input.temporaryDirectory,
       ...additionalWriteRoots,
     ]),
-    ...(writeBoundRoot ? boundRoots.flatMap((root) => resolvedRootForms(root)) : []).map(
-      (path) => seatbeltAllowRule("file-write*", path),
+    ...(writeBoundRoot ? boundRoots.flatMap((root) => resolvedRootForms(root)) : []).map((path) =>
+      seatbeltAllowRule("file-write*", path),
     ),
     ...resolvedRootForms(input.temporaryDirectory).map((path) =>
       seatbeltAllowRule("file-write*", path),
@@ -837,8 +837,8 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     // and stays writable: Chat binds a provider's managed home as its root and
     // lists the same directory as a write root. Denying last would have taken
     // that away, so these are allowed again after the denial.
-    ...writeGrantsBeneathBoundRoot(input, boundRoots, additionalWriteRoots, writeBoundRoot).map((path) =>
-      seatbeltAllowRule("file-write*", path),
+    ...writeGrantsBeneathBoundRoot(input, boundRoots, additionalWriteRoots, writeBoundRoot).map(
+      (path) => seatbeltAllowRule("file-write*", path),
     ),
     '(allow file-write-data (literal "/dev/null"))',
     ...(input.extraRules ?? []),

@@ -1134,7 +1134,12 @@ describe("ProjectService", () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-project-extra-folders-"));
     const projectId = decodeProjectId("00000000-0000-4000-8000-000000000694");
     const olderId = decodeProjectId("00000000-0000-4000-8000-000000000693");
-    const roots = ["/Users/example/Work", "/Users/example/Older", "/Users/example/Notes", "/Volumes/Specs"];
+    const roots = [
+      "/Users/example/Work",
+      "/Users/example/Older",
+      "/Users/example/Notes",
+      "/Volumes/Specs",
+    ];
     const consume = () => ({ canonicalRoot: roots.shift() ?? "/unused" });
     const run = <A>(body: (service: ProjectService) => Promise<A>) =>
       Effect.runPromise(

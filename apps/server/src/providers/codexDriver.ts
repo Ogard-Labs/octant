@@ -920,13 +920,14 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
           extraFolders,
           mode,
           {
-          instanceId: options.instanceId,
-          clock,
-          makeCorrelation,
-          makeRequestId,
-          makeTaskId,
-          makeToolCallId,
-        });
+            instanceId: options.instanceId,
+            clock,
+            makeCorrelation,
+            makeRequestId,
+            makeTaskId,
+            makeToolCallId,
+          },
+        );
       });
     },
   };
@@ -2119,16 +2120,10 @@ export function approvalRequestIsProjectConfined(
   const inProject = (path: string, cwd: string) =>
     [projectRoot, ...extraFolders].some((root) => pathIsProjectConfined(path, root, cwd));
   if (pending.kind === "command") {
-    return (
-      typeof pending.requestedCwd === "string" &&
-      inProject(pending.requestedCwd, projectRoot)
-    );
+    return typeof pending.requestedCwd === "string" && inProject(pending.requestedCwd, projectRoot);
   }
   if (pending.kind === "file-change") {
-    return (
-      pending.grantRoot == null ||
-      inProject(pending.grantRoot, projectRoot)
-    );
+    return pending.grantRoot == null || inProject(pending.grantRoot, projectRoot);
   }
   if (pending.requestedCwd !== projectRoot) return false;
   const fileSystem = pending.permissions.fileSystem;
@@ -2143,10 +2138,7 @@ export function approvalRequestIsProjectConfined(
     }
     if (path.type === "glob_pattern") return false;
     if (path.value.kind !== "project_roots") return false;
-    return (
-      path.value.subpath === null ||
-      inProject(path.value.subpath, projectRoot)
-    );
+    return path.value.subpath === null || inProject(path.value.subpath, projectRoot);
   });
 }
 

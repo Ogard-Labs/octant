@@ -1750,7 +1750,10 @@ describe("WorkTurnService", () => {
         extraFolders: [
           {
             canonicalRoot: "/private/tmp/research",
-            addedBy: { kind: "local-user", actorId: "72000000-0000-4000-8000-000000000009" as never },
+            addedBy: {
+              kind: "local-user",
+              actorId: "72000000-0000-4000-8000-000000000009" as never,
+            },
             addedAt: now as never,
           },
         ],

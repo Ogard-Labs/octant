@@ -1118,7 +1118,12 @@ function confineClaudeLaunch(
       temporaryDirectory,
       additionalWriteRoots: stateRoots.writeRoots,
       readRoots: [boundRoot, temporaryDirectory, ...stateRoots.readRoots],
-      privateHomeAllowPaths: [boundRoot, ...extraFolders, temporaryDirectory, ...stateRoots.readRoots],
+      privateHomeAllowPaths: [
+        boundRoot,
+        ...extraFolders,
+        temporaryDirectory,
+        ...stateRoots.readRoots,
+      ],
       // The runtime calls its own control plane, so it resolves the runtime
       // egress policy rather than the thread default (0132, 0145). This driver
       // carries Code threads, and the policy no longer reads the mode.

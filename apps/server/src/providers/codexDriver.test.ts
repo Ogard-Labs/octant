@@ -2431,7 +2431,9 @@ describe("Codex execution authority and approvals", () => {
       true,
     );
     expect(approvalRequestIsProjectConfined(fileChange("/work/notes"), root, extra)).toBe(true);
-    expect(approvalRequestIsProjectConfined(fileChange("/work/notes-old"), root, extra)).toBe(false);
+    expect(approvalRequestIsProjectConfined(fileChange("/work/notes-old"), root, extra)).toBe(
+      false,
+    );
     expect(approvalRequestIsProjectConfined(fileChange("/work/notes/drafts"), root)).toBe(false);
     const command = (requestedCwd: string) => ({
       kind: "command" as const,

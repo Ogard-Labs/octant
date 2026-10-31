@@ -356,9 +356,7 @@ describe("ProjectOverview", () => {
     expect(screen.queryByRole("heading", { name: "Project workspace" })).not.toBeInTheDocument();
     expect(screen.queryByText(/Git|worktree|pull request/i)).not.toBeInTheDocument();
     expect(
-      screen.getByText(
-        "Confined to the Project's folders. Knowledge-work stays inside them.",
-      ),
+      screen.getByText("Confined to the Project's folders. Knowledge-work stays inside them."),
     ).toBeVisible();
   });
 

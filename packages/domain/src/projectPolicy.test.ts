@@ -762,15 +762,23 @@ describe("Project binding relink", () => {
   });
 });
 
-
 describe("Project extra folders", () => {
   const work = () => makeProject(ids.work, "0/1", { type: "work" });
   const add = (project: Project, canonicalRoot: string) =>
-    addProjectExtraFolder(project, { canonicalRoot, actor, addedAt: updatedAt, homeDirectory: home });
+    addProjectExtraFolder(project, {
+      canonicalRoot,
+      actor,
+      addedAt: updatedAt,
+      homeDirectory: home,
+    });
 
   it("adds a folder with who added it and when, and counts it as inside the Project", () => {
     const { project, folder } = add(work(), "/Users/example/Notes");
-    expect(folder).toEqual({ canonicalRoot: "/Users/example/Notes", addedBy: actor, addedAt: updatedAt });
+    expect(folder).toEqual({
+      canonicalRoot: "/Users/example/Notes",
+      addedBy: actor,
+      addedAt: updatedAt,
+    });
     expect(project).toMatchObject({ version: 2, updatedAt, extraFolders: [folder] });
     const folders = projectFolderRoots(project);
     expect(folders).toEqual(["/Users/example/Workspace", "/Users/example/Notes"]);
@@ -823,7 +831,10 @@ describe("Project extra folders", () => {
       ProjectPolicyRejected,
     );
     expect(() =>
-      add(makeProject(ids.work, "0/1", { type: "work", lifecycle: "archived" }), "/Users/example/N"),
+      add(
+        makeProject(ids.work, "0/1", { type: "work", lifecycle: "archived" }),
+        "/Users/example/N",
+      ),
     ).toThrow(ProjectPolicyRejected);
     let project: Project = work();
     for (let index = 0; index < 16; index += 1) {
@@ -837,9 +848,9 @@ describe("Project extra folders", () => {
     const removed = removeProjectExtraFolder(withNotes, "/Users/example/Notes", updatedAt);
     expect(removed.extraFolders).toBeUndefined();
     expect(removed.version).toBe(3);
-    expect(() => removeProjectExtraFolder(withNotes, "/Users/example/Workspace", updatedAt)).toThrow(
-      /main folder/,
-    );
+    expect(() =>
+      removeProjectExtraFolder(withNotes, "/Users/example/Workspace", updatedAt),
+    ).toThrow(/main folder/);
     expect(() => removeProjectExtraFolder(withNotes, "/Users/example/Other", updatedAt)).toThrow(
       ProjectPolicyRejected,
     );

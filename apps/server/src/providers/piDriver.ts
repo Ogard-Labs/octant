@@ -367,19 +367,26 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
           ),
         );
       }
-      return makeConnection(options, projectRoot, mode === "chat" ? [] : extraFolders, mode, resumeIdentities, {
-        clientFactory,
-        managedToolsFactory,
-        clock,
-        makeCorrelation,
-        makeRequestId,
-        appManagedTools: {
-          get: () => appManagedToolsVerified,
-          set: (verified) => {
-            appManagedToolsVerified = verified;
+      return makeConnection(
+        options,
+        projectRoot,
+        mode === "chat" ? [] : extraFolders,
+        mode,
+        resumeIdentities,
+        {
+          clientFactory,
+          managedToolsFactory,
+          clock,
+          makeCorrelation,
+          makeRequestId,
+          appManagedTools: {
+            get: () => appManagedToolsVerified,
+            set: (verified) => {
+              appManagedToolsVerified = verified;
+            },
           },
         },
-      });
+      );
     },
   };
 }
