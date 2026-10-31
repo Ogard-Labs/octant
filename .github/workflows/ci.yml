@@ -59,6 +59,8 @@ jobs:
           for profile in production android-internal; do
             EAS_BUILD_PROFILE="$profile" bunx expo config --type introspect --json >/dev/null
           done
+          # The same, with the push capability on, so its config plugin runs.
+          OCTANT_MOBILE_PUSH=1 EAS_BUILD_PROFILE=production bunx expo config --type introspect --json >/dev/null
       - run: bun run build --filter=!@octant/desktop --filter=!@octant/scripts
 
   packages:

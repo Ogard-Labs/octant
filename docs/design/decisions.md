@@ -457,6 +457,7 @@ Modes are server-enforced domain policy, not renderer flags. The shell shows two
 - A new-thread composer chooses Chat (no folder) or In a folder (a Work thread bound to a Project root). The choice only selects the create command, and nothing converts a thread between Chat and Work.
 - Chat binds a virtual, memory-scoped Project or none; Work binds exactly one OS-confined root; Code binds exactly one directory and selects a checkout inside it.
 - Memory is scoped to one Project and keeps source, kind, timestamps and supersession; moving it across Projects or modes is explicit and keeps provenance. _Here only._
+- Move to Project: a No-project Chat can be filed into a Chat Project, and a Work or Code thread into another Project of its own mode. The thread keeps its kind, history and guardrail level and gains no filesystem reach: a Work or Code thread moves only into an active Project whose folder is its own folder or contains it, and is refused while a turn runs or the thread waits on the person. A Code thread also needs its checkout to stay valid, so only a Project bound to the same repository folder is accepted. The server checks authority before the move, only a person can make it, and it is journaled with who and when.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
@@ -733,6 +734,7 @@ A turn stopped by an explicit provider usage-limit signal carries a provider-neu
 - The reset timer is an in-process host timer that continues through the ordinary turn-admission path, with no cloud wake and no billing automation.
 - A stale recovery settles as invalidated rather than firing against newer state.
 - Chat, Work and Code each cut a turn off after five minutes without a provider event, because a long tool call can leave a provider silent. _Here only._
+- A provider whose sessions each own a process offers Force stop in Chat ten seconds after a Stop that did not end the turn. It kills that attempt's process and nothing else, leaves the thread usable and resumable, and is refused for a provider that shares one process across threads (built for Claude; Work and Code turns not built yet).
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
@@ -1934,6 +1936,7 @@ Status: Built. Since: —. Detail: [Workspace: Boards and integrations](workspac
 A thread or Project can start from a forge issue, a tracker issue or a cloned repository, without write-back.
 
 - Creating from an issue attaches only its identity. The server reauthorizes, frames redacted text as external content and journals the ingestion. There is no write-back.
+- A local window may start a Work or Code thread from a Claude Code or Codex terminal session of the Project's own folder. Creating attaches only the provider and session id; the server rereads the session, refuses another folder, keeps only the person's and the assistant's words within a fixed bound, marks the thread with outside content before it exists, and journals the history with the thread so purging erases it. The first admitted turn hands the history to the model once, framed as outside data. A paired device cannot start one, and a thread starts from an issue or a session, never both. The provider's session is not resumed, nothing is uploaded, and nothing is written back.
 - Cloning verifies identity and origin before materializing, promotes atomically without overwriting, and issues a one-time binding receipt.
 
 Status: Built. Since: —. Detail: [Workspace: Boards and integrations](workspace.md#boards-and-integrations).

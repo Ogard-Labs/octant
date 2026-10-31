@@ -289,6 +289,48 @@ describe("Code routes", () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
+  it("refuses a paired device starting a thread from a terminal session on this host", async () => {
+    const execute = vi.fn(async () => ({ kind: "thread-created" }));
+    const route = routeFixture({ execute });
+    const remoteDeviceId = "00000000-0000-4000-8000-000000000950";
+    const create = (terminalSession?: { provider: "claude"; sessionId: string }) =>
+      JSON.stringify({
+        kind: "create-code-thread",
+        thread: { ...thread, executionPolicy: "approval-gated" },
+        ...(terminalSession === undefined ? {} : { terminalSession }),
+      });
+    const fromDevice = (body: string) => {
+      const remote = request("/api/code/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "00000000-0000-4000-8000-000000000951" as never,
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return remote;
+    };
+
+    const refused = await route(
+      fromDevice(create({ provider: "claude", sessionId: "0b4c1f2e-1111-4111-8111-111111111111" })),
+    );
+    expect(refused?.status).toBe(403);
+    expect(await refused?.json()).toMatchObject({ category: "unauthorized" });
+    expect(execute).not.toHaveBeenCalled();
+
+    expect((await route(fromDevice(create())))?.status).toBe(200);
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
   it("never lets a paired device ask for a terminal Browser grant as the person", async () => {
     // The host mints a grant only for the person at a local window; a request
     // that reaches it as anything else is refused and starts no terminal.

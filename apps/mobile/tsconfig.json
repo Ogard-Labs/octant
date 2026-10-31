@@ -8,5 +8,5 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src", "design-system", "index.ts", "app.config.ts", "vitest.config.ts"]
+  "include": ["src", "design-system", "index.ts", "app.config.ts", "plugins", "vitest.config.ts"]
 }

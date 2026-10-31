@@ -1138,6 +1138,11 @@ function seedFollowUp(harness: Harness, thread: SeededThread): void {
     threadId: thread.id,
     followUps: [{ title: thread.marker }],
   });
+  // An imported terminal session is the person's own conversation text.
+  insertEvent(harness.connection, "thread-terminal-session", thread.id, {
+    threadId: thread.id,
+    imported: { title: thread.marker, entries: [{ role: "user", text: thread.marker }] },
+  });
   insertEvent(harness.connection, "thread-follow-up", thread.id, {
     kind: "follow-up-updated",
     followUp: { threadId: thread.id, reason: thread.marker },

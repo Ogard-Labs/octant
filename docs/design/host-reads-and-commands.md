@@ -205,6 +205,26 @@ Create from an issue frames redacted issue text through
 `apps/server/src/context/externalContentFraming.ts` and appends
 `thread.external-content-ingested@1`.
 
+## Terminal sessions
+
+`POST /api/terminal-sessions/list` (`{ projectId }`) and
+`POST /api/terminal-sessions/history` (`{ threadId }`) are local-window only.
+The list reads `projects/<folder>` under `CLAUDE_CONFIG_DIR` (default
+`~/.claude`) and the newest day folders of `sessions` under `CODEX_HOME`
+(default `~/.codex`), the head and tail of each file only, and keeps a session
+whose recorded working directory is the Project's bound root. Codex titles come
+from its `session_index.jsonl` when it names the session.
+
+A create command's `terminalSession` is refused when it comes from a paired
+device or arrives together with an issue context (one outside source per
+thread), and is otherwise read by
+`apps/server/src/terminalSessions/terminalSessionImports.ts`: the thread is
+marked under the source label `terminal-session` in the creation's journal
+unit, `thread.terminal-session-imported@1` holds the bounded history on the
+`thread-terminal-session` aggregate (erased with the thread), and
+`thread.terminal-session-delivered@1` records the first admitted turn that
+carried it, so a restart before that turn still delivers it.
+
 ## Linear issues
 
 Browse goes through the Integration port operations `list-issues`, `get-issue`,

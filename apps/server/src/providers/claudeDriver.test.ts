@@ -131,6 +131,7 @@ class FakeQuery implements ClaudeQueryPort {
   readonly compactionRequests = vi.fn(() => Effect.void);
   readonly requestCompaction = () => this.compactionRequests();
   readonly interrupt = vi.fn(() => Effect.void);
+  readonly forceKill = vi.fn(() => Effect.void);
   readonly setPermissionMode = vi.fn(() => Effect.void);
   readonly supportedModels = vi.fn(() => Effect.succeed(this.initialization.models));
   readonly accountInfo = vi.fn<ClaudeQueryPort["accountInfo"]>(() =>
@@ -2639,6 +2640,31 @@ describe("Claude execution policy", () => {
       ),
     );
     expect(String(lateApproval)).toContain("protocol");
+  });
+
+  it("kills a turn that ignored interrupt and ends the session as interrupted", async () => {
+    const stuckHarness = harness();
+    const stuckConnection = await acquire(stuckHarness.driver);
+    await Effect.runPromise(
+      stuckConnection.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    await Effect.runPromise(
+      stuckConnection.connection.send({ sessionId, prompt: "hang", attachments: [], tools: [] }),
+    );
+    const terminalEvent = Effect.runPromise(
+      collectTerminal(Stream.unwrapScoped(stuckConnection.connection.subscribe)),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await Effect.runPromise(stuckConnection.connection.forceStop!(sessionId));
+    expect(stuckHarness.queries[0]?.forceKill).toHaveBeenCalledOnce();
+    const terminalResult = await terminalEvent;
+    expect(terminalResult._tag).toBe("Some");
+    if (terminalResult._tag === "Some") expect(terminalResult.value.kind).toBe("interrupted");
+    const again = await Effect.runPromise(
+      Effect.exit(stuckConnection.connection.forceStop!(sessionId)),
+    );
+    expect(String(again)).toContain("protocol");
+    await stuckConnection.close();
   });
 
   it("settles pending questions on interrupt and pending approvals on stop", async () => {

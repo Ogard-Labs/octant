@@ -1,4 +1,5 @@
 import type { ExtensionSelection } from "@octant/contracts/extensions";
+import type { ProjectId } from "@octant/contracts/projects";
 import type { AutoReviewer, ShieldModelChoice } from "@octant/contracts/shield";
 import {
   CodeClientFailure,
@@ -105,6 +106,7 @@ import {
 import {
   archiveCodeThread,
   completeCodeThread,
+  moveCodeThread,
   findCodeThread,
   pinCodeThread,
   renameCodeThread,
@@ -2455,6 +2457,11 @@ export function useCodeController(options: CodeControllerOptions) {
     (threadId: CodeThreadId) => restCommand(threadId, wakeCodeThread),
     [restCommand],
   );
+  const moveThread = useCallback(
+    (threadId: CodeThreadId, projectId: ProjectId) =>
+      restCommand(threadId, (thread) => moveCodeThread(thread, projectId)),
+    [restCommand],
+  );
 
   /**
    * Hand a finished thread one more turn without opening it. The host starts
@@ -3068,6 +3075,7 @@ export function useCodeController(options: CodeControllerOptions) {
     reopenThread,
     snoozeThread,
     wakeThread,
+    moveThread,
     sendBackTurn,
     bootstrap,
     client,

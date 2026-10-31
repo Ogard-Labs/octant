@@ -273,6 +273,14 @@ export interface ProviderConnection {
   ) => Effect.Effect<ProviderSessionCompaction, ProviderFailure>;
   readonly interrupt: (sessionId: ProviderSessionId) => Effect.Effect<void, ProviderFailure>;
   readonly stop: (sessionId: ProviderSessionId) => Effect.Effect<void, ProviderFailure>;
+  /**
+   * Kills the runtime process this one session runs in, without asking it to
+   * stop first, for a turn that ignored `interrupt`. Present only on a
+   * connection whose sessions each own a process, so killing it cannot end
+   * another thread's turn; a connection that shares a process across sessions
+   * omits it and a host fails closed.
+   */
+  readonly forceStop?: (sessionId: ProviderSessionId) => Effect.Effect<void, ProviderFailure>;
   readonly answerApproval: (input: ProviderApprovalAnswer) => Effect.Effect<void, ProviderFailure>;
   /**
    * The pending call behind an approval request this connection raised and
