@@ -881,7 +881,13 @@ a Project terminal and pins a card that names the Project and the terminal,
 never a thread. The card is a window onto the shell and grants nothing: a card
 naming a terminal this window does not own is refused. Authority, lifecycle,
 and the journal record follow the
-[Project terminal rule](../architecture.md#security-and-authority). Add browser
+[Project terminal rule](../architecture.md#security-and-authority). A Code
+Project's saved actions (Run, Test, Dev) are buttons in the window header, three
+inline and the rest under More, and entries in the command palette's Actions
+group; the Project overview's Actions section edits them and offers suggestions
+the person confirms. Choosing one runs it in the window's pinned Project
+terminal, or opens and pins one, and enters Zen to show it (see
+[Project actions](../architecture.md#security-and-authority)). Add browser
 likewise offers the window's Work or Code Project as "This Project": the dock
 names the Project, never a thread, and shows that Project's own page under the
 Project browsing context rule in the same section.
