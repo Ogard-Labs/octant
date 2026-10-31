@@ -9,6 +9,7 @@ import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
 import { ChangeWorkingFolder, workingFolderLabel } from "./WorkingDirectoryControl";
 import { EnvironmentSubagents } from "./EnvironmentSubagents";
 import { EnvironmentRoutines } from "./EnvironmentRoutines";
+import { EnvironmentFollowUps } from "./EnvironmentFollowUps";
 import { ThreadGoalPanel } from "../goal/ThreadGoalPanel";
 import { ThreadUsagePanel } from "../usage/ThreadUsagePanel";
 import type { GoalClient } from "@octant/client-runtime/goal-client";
@@ -121,6 +122,14 @@ export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
               client={props.automationClient}
               mode="work"
               {...(props.onOpenRoutine === undefined ? {} : { onOpenRoutine: props.onOpenRoutine })}
+              projectId={String(project.id)}
+              threadId={String(props.tab.threadId)}
+            />
+          )}
+          {props.automationClient === undefined || project === undefined ? null : (
+            <EnvironmentFollowUps
+              client={props.automationClient}
+              mode="work"
               projectId={String(project.id)}
               threadId={String(props.tab.threadId)}
             />

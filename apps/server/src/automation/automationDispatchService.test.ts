@@ -10,7 +10,7 @@ import {
   type UtcTimestamp,
 } from "@octant/contracts";
 import { EventActor } from "@octant/contracts/events";
-import { isAutomationMutationAllowed } from "@octant/domain";
+import { isAutomationMutationAllowed, type AutomationFollowUpThreadFacts } from "@octant/domain";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
@@ -653,6 +653,134 @@ describe("AutomationDispatchService", () => {
     void deriveAutomationOccurrenceKey;
     void automationRunIdForOccurrence;
     void automationRunForDefinition;
+    session.connection.close();
+  });
+});
+
+describe("one-time follow-ups into their own thread", () => {
+  const ORIGIN = "aa000000-0000-4000-8000-0000000000f1";
+  const AT = "2026-08-10T13:00:00.000Z";
+  const idleThread = {
+    kind: "present" as const,
+    projectId: AUTOMATION_TEST_IDS.project,
+    archived: false,
+    done: false,
+    busy: false,
+    providerInstanceId: AUTOMATION_TEST_IDS.providerInstance,
+    modelId: workDefinition().executionProfile.modelId,
+  };
+
+  function followUpDefinition(): AutomationDefinition {
+    return workDefinition({
+      trigger: { kind: "once", scheduledAt: AT } as never,
+      nextDueAt: AT as never,
+      missedRunPolicy: "run-once",
+      targetPolicy: "same-thread",
+      originThreadId: ORIGIN as never,
+    });
+  }
+
+  function claim(session: Session, definition: AutomationDefinition, now: string): AutomationRun {
+    session.store.appendDefinitionCreated({ automation: definition });
+    const scheduler = new AutomationSchedulerService({
+      store: session.store,
+      projection: session.projection,
+      dispatch: { offer: () => undefined },
+      now: () => now as UtcTimestamp,
+    });
+    const claimed = scheduler.runPass().claimedRunIds[0];
+    const run = claimed === undefined ? undefined : session.projection.getRun(claimed);
+    if (run === undefined) throw new Error("expected a claimed follow-up");
+    return run;
+  }
+
+  async function fire(input: {
+    readonly thread: AutomationFollowUpThreadFacts;
+    readonly now?: string;
+  }) {
+    const session = openSession();
+    const definition = followUpDefinition();
+    const now = input.now ?? "2026-08-10T13:00:10.000Z";
+    const run = claim(session, definition, now);
+    const create = vi.fn();
+    const launch = vi.fn(async (_input: { readonly threadId: string }) => ({
+      kind: "accepted" as const,
+      runtimeReceipt: "work-turn:follow-up",
+      acceptedAt: now as UtcTimestamp,
+    }));
+    const dispatcher = new AutomationDispatchService({
+      store: session.store,
+      projection: session.projection,
+      code: createCodePort().port,
+      work: {
+        available: true,
+        unavailableReason: undefined,
+        createThread: create,
+        startOrRecoverFirstTurn: launch,
+      },
+      capacity: alwaysAdmit(),
+      resolveFacts: () => matchingFacts(definition),
+      readFollowUpThread: () => input.thread,
+      now: () => now as UtcTimestamp,
+    });
+    await dispatcher.dispatchNow(definition.id, run.id);
+    // The next scheduler pass ends a once routine whose run is terminal.
+    new AutomationSchedulerService({
+      store: session.store,
+      projection: session.projection,
+      dispatch: { offer: () => undefined },
+      now: () => now as UtcTimestamp,
+    }).runPass();
+    return { session, definition, run, create, launch };
+  }
+
+  it("sends one turn into the thread it came from and creates no thread", async () => {
+    const { session, run, create, launch } = await fire({ thread: idleThread });
+    expect(create).not.toHaveBeenCalled();
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(launch.mock.calls[0]?.[0]).toMatchObject({ threadId: ORIGIN });
+    const after = session.projection.getRun(run.id);
+    expect(after?.lifecycle).toBe("running");
+    expect(after?.dispatchIntent?.threadId).toBe(ORIGIN);
+    session.connection.close();
+  });
+
+  it.each([
+    ["archived", { ...idleThread, archived: true }, "thread-unavailable"],
+    ["marked done", { ...idleThread, done: true }, "thread-done"],
+    ["running a turn", { ...idleThread, busy: true }, "thread-busy"],
+    ["on another model", { ...idleThread, modelId: "other-model" }, "execution-profile-mismatch"],
+  ] as const)(
+    "never runs when its thread is %s, records why, and ends itself",
+    async (_label, thread, reason) => {
+      const { session, definition, run, launch } = await fire({ thread });
+      expect(launch).not.toHaveBeenCalled();
+      expect(session.projection.getRun(run.id)).toMatchObject({
+        lifecycle: "failed",
+        failure: { reason },
+      });
+      expect(session.projection.getDefinition(definition.id)?.lifecycle).toBe("exhausted");
+      session.connection.close();
+    },
+  );
+
+  it("records a follow-up missed by more than a day instead of running it", async () => {
+    const { session, definition, run, launch } = await fire({
+      thread: idleThread,
+      now: "2026-08-11T13:00:01.000Z",
+    });
+    expect(launch).not.toHaveBeenCalled();
+    expect(session.projection.getRun(run.id)?.failure?.reason).toBe("follow-up-missed");
+    expect(session.projection.getDefinition(definition.id)?.lifecycle).toBe("exhausted");
+    session.connection.close();
+  });
+
+  it("still runs a follow-up missed by less than a day", async () => {
+    const { session, launch } = await fire({
+      thread: idleThread,
+      now: "2026-08-11T12:59:00.000Z",
+    });
+    expect(launch).toHaveBeenCalledTimes(1);
     session.connection.close();
   });
 });

@@ -640,3 +640,34 @@ html[data-octant-increased-contrast="true"] .environment-card__rows {
   flex-wrap: wrap;
   gap: var(--oct-space-1);
 }
+
+/* Follow-up: the empty line and the picker sit in the row's body, in the same
+   small type as a routine's schedule. */
+.environment-follow-ups__empty,
+.environment-follow-up-picker__note {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-body);
+}
+
+.environment-follow-up-picker {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-2);
+}
+
+.environment-follow-up-picker__picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-1);
+}
+
+.environment-follow-up-picker__field {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+}

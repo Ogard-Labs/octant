@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
-import type { AutomationRun, WorkThreadId, UtcTimestamp, WindowId } from "@octant/contracts";
+import {
+  automationFollowUpTurnPrompt,
+  type AutomationRun,
+  type WorkThreadId,
+  type UtcTimestamp,
+  type WindowId,
+} from "@octant/contracts";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { decodeWorkTurnId, decodeWorkTurnRequestId } from "@octant/contracts/work-turns";
 import { WorkTurnServiceError } from "../work/workTurnService";
@@ -19,7 +25,10 @@ export interface AutomationWorkRouteService {
     readonly thread?: { readonly id: WorkThreadId };
   }>;
   readonly bootstrap: (windowId: WindowId) => Promise<{
-    readonly threads: ReadonlyArray<{ readonly id: WorkThreadId }>;
+    readonly threads: ReadonlyArray<{
+      readonly id: WorkThreadId;
+      readonly workingDirectory?: string | undefined;
+    }>;
   }>;
 }
 
@@ -147,6 +156,13 @@ async function startOrRecover(
     };
   }
   void input.promptDigest;
+  // A follow-up goes back into a thread a person made, which may work in a
+  // subfolder of the Project; its turn names that folder, as the person's own
+  // next turn would.
+  const followUp = snapshot.targetPolicy === "same-thread";
+  const workingDirectory = followUp
+    ? ((await readThreadWorkingDirectory(options.threads, input.scopeId, input.threadId)) ?? ".")
+    : ".";
   const turnId = decodeWorkTurnId(
     deterministicUuid(`automation-work-turn:${String(input.run.occurrenceKey)}`),
   );
@@ -155,12 +171,12 @@ async function startOrRecover(
     requestId: decodeWorkTurnRequestId(String(input.firstTurnRequestId)),
     threadId: input.threadId,
     turnId,
-    prompt: snapshot.taskPrompt,
+    prompt: followUp ? automationFollowUpTurnPrompt(snapshot.taskPrompt) : snapshot.taskPrompt,
     authority: {
       hostId: LOCAL_HOST_ID,
       projectId: snapshot.projectId,
       bindingRevisionId: snapshot.binding.bindingRevisionId,
-      workingDirectory: "." as const,
+      workingDirectory,
       confinementPosture: "project-root-confined" as const,
       providerInstanceId: snapshot.executionProfile.providerInstanceId,
       modelId: snapshot.executionProfile.modelId,
@@ -226,6 +242,20 @@ async function readThreadIfPresent(
     return bootstrap.threads.some((thread) => String(thread.id) === String(threadId));
   } catch {
     return false;
+  }
+}
+
+async function readThreadWorkingDirectory(
+  threads: AutomationWorkRouteService,
+  scopeId: WindowId,
+  threadId: WorkThreadId,
+): Promise<string | undefined> {
+  try {
+    const bootstrap = await threads.bootstrap(scopeId);
+    return bootstrap.threads.find((thread) => String(thread.id) === String(threadId))
+      ?.workingDirectory;
+  } catch {
+    return undefined;
   }
 }
 

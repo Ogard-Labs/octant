@@ -178,6 +178,13 @@ export class AutomationCommandService {
         automationId: command.automationId,
       });
     }
+    // Only the host makes a follow-up, from a thread it vouches for; an edit
+    // can neither turn a routine into one nor turn one back.
+    if (command.definition.targetPolicy !== current.targetPolicy) {
+      return failure("invalid", "A routine's target cannot change after it is created.", {
+        automationId: command.automationId,
+      });
+    }
     const now = this.#now();
     const lifecycle = current.lifecycle === "paused" ? "paused" : "enabled";
     const updated = validateAutomationDefinition(
@@ -247,6 +254,13 @@ export class AutomationCommandService {
     const gate = this.#gateDefinitionMutation(definition, command);
     if (gate !== undefined) return gate;
     const current = definition as AutomationDefinition;
+    // A follow-up's one turn is its scheduled one; running it now would send
+    // a second turn into the person's thread.
+    if (current.targetPolicy === "same-thread") {
+      return failure("unsupported", "A follow-up runs only at its time.", {
+        automationId: current.id,
+      });
+    }
 
     const occurrence = {
       kind: "manual",

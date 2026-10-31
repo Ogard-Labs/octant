@@ -45,7 +45,11 @@ export function EnvironmentRoutines(props: {
       const listed = await client.list({ mode, projectId, limit: ROUTINE_READ_LIMIT }, signal);
       if (signal?.aborted === true) return;
       const next = listed.items.filter(
-        (item) => String(item.originThreadId) === threadId && item.lifecycle !== "archived",
+        // A follow-up into this thread has its own row.
+        (item) =>
+          String(item.originThreadId) === threadId &&
+          item.targetPolicy !== "same-thread" &&
+          item.lifecycle !== "archived",
       );
       setRoutines((current) => (samePollingData(current, next) ? current : next));
     },

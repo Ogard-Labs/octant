@@ -88,6 +88,7 @@ export function RoutineProposalPrompt(props: {
     }
   }
 
+  const followUp = pending.targetPolicy === "same-thread";
   const schedule =
     pending.trigger.kind === "weekly-local"
       ? `${routineScheduleLabel(pending.trigger)} (${pending.trigger.timeZone})`
@@ -102,7 +103,7 @@ export function RoutineProposalPrompt(props: {
             size="sm"
             type="button"
           >
-            Create routine
+            {followUp ? "Schedule follow-up" : "Create routine"}
           </OctantButton>
           <OctantButton
             disabled={busy}
@@ -116,10 +117,18 @@ export function RoutineProposalPrompt(props: {
         </>
       }
       className={props.className}
-      detail={`${schedule} · First run ${formatAutomationInstant(pending.firstRunAt)} · ${automationMissedRunPolicyLabel(pending.missedRunPolicy)}. Each run starts a new ${automationModeLabel(pending.mode)} thread in this Project with this prompt, and asks before it changes anything.`}
+      detail={
+        followUp
+          ? `Once, ${formatAutomationInstant(pending.firstRunAt)}. It sends this prompt as a new turn in this thread, asks before it changes anything, and is skipped if the thread is busy, done, or archived by then.`
+          : `${schedule} · First run ${formatAutomationInstant(pending.firstRunAt)} · ${automationMissedRunPolicyLabel(pending.missedRunPolicy)}. Each run starts a new ${automationModeLabel(pending.mode)} thread in this Project with this prompt, and asks before it changes anything.`
+      }
       error={message}
-      label="Routine proposal"
-      summary={`Create the routine “${pending.displayName}”?`}
+      label={followUp ? "Follow-up proposal" : "Routine proposal"}
+      summary={
+        followUp
+          ? `Follow up in this thread: “${pending.displayName}”?`
+          : `Create the routine “${pending.displayName}”?`
+      }
     >
       <code className="approval-row__code">{pending.taskPrompt}</code>
     </OctantApprovalCard>

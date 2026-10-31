@@ -576,6 +576,22 @@ the missed-run policy, that each run starts a new thread in this Project that
 asks before it changes anything, and the exact prompt, with **Create routine**
 and **Decline**.
 
+A routine that follows up in this thread (target policy `same-thread`) is not
+listed under Routines. It has its own **Follow-up** row, which every Work and
+Code thread's Environment shows, because setting one up starts there: the row
+carries a **Follow up later** action that opens a small picker with **In 1
+hour**, **Tomorrow at 9:00** (the person's local clock), and **Pick a time**,
+and a short prompt, prefilled, for what to check. A pending follow-up is
+listed under the row as "Follows up tomorrow at 9:00", with the header
+repeating the time, and has **Change time** and **Cancel**. Nothing pending
+reads "Nothing scheduled". An agent's follow-up proposal uses the same
+confirmation card, labelled as a follow-up in this thread, with **Schedule
+follow-up** and **Decline**. The turn a follow-up sends is shown in the
+transcript under a "Scheduled follow-up" line with only its prompt, so a
+reader can tell it was scheduled and not typed. The sidebar row shows no mark
+for a pending follow-up: no existing row mark fits a scheduled turn, and the
+Environment row is where it is managed.
+
 ### Subagents
 
 Environment belongs to a

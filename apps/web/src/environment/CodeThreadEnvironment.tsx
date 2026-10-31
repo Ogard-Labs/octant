@@ -48,6 +48,7 @@ import type { OctantHostBridge } from "../shell/hostBridge";
 import { EnvironmentGoal } from "./EnvironmentGoal";
 import { EnvironmentSubagents } from "./EnvironmentSubagents";
 import { EnvironmentRoutines } from "./EnvironmentRoutines";
+import { EnvironmentFollowUps } from "./EnvironmentFollowUps";
 import { ThreadUsagePanel } from "../usage/ThreadUsagePanel";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
@@ -330,6 +331,14 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                 {...(props.onOpenRoutine === undefined
                   ? {}
                   : { onOpenRoutine: props.onOpenRoutine })}
+                projectId={String(props.project.id)}
+                threadId={String(props.tab.threadId)}
+              />
+            )}
+            {props.automationClient === undefined || props.project === undefined ? null : (
+              <EnvironmentFollowUps
+                client={props.automationClient}
+                mode="code"
                 projectId={String(props.project.id)}
                 threadId={String(props.tab.threadId)}
               />

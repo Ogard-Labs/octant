@@ -26,14 +26,15 @@ const definition: ProviderToolDefinition = {
     "The person sees a card with exactly what will run and when, and only their confirmation creates it; this call waits for that answer and reports confirmed (with the routine id), declined, or expired.",
     "Each run is a fresh thread in this Project with the same kind of access as a thread the person starts, always asking before effects; you cannot choose another Project or wider access.",
     'trigger "once" runs at `at` (an ISO time with Z or an offset); "interval" runs every `everyMinutes` (15 to 43200), first at `startAt` or one interval from now; "weekly" runs on `weekdays` (1 = Monday … 7 = Sunday) at `localTime` (HH:MM) in `timeZone` (an IANA zone such as Europe/Oslo).',
-    "The prompt must stand alone: a run has none of this conversation.",
+    'trigger "follow-up" is the exception: once, at `at`, it sends the prompt as a new turn in this same thread, so you will have this conversation then (for example "check whether the reply arrived and summarise"). It does not run if the thread is busy, done, archived, or changed by then.',
+    "Otherwise the prompt must stand alone: a run has none of this conversation.",
   ].join(" "),
   inputSchema: {
     type: "object",
     properties: {
       name: { type: "string", maxLength: MAX_AUTOMATION_DISPLAY_NAME_LENGTH },
       prompt: { type: "string", maxLength: MAX_AUTOMATION_TASK_PROMPT_LENGTH },
-      trigger: { type: "string", enum: ["once", "interval", "weekly"] },
+      trigger: { type: "string", enum: ["once", "interval", "weekly", "follow-up"] },
       at: { type: "string" },
       everyMinutes: { type: "integer", minimum: 15, maximum: 43_200 },
       startAt: { type: "string" },
@@ -126,6 +127,7 @@ export function createRoutineProposalTools(input: {
           taskPrompt: parsed.prompt,
           trigger: parsed.trigger,
           missedRunPolicy: parsed.missedRunPolicy,
+          ...(parsed.followUp ? { targetPolicy: "same-thread" as const } : {}),
           firstRunAt: parsed.firstRunAt,
         },
         ...(signal === undefined ? {} : { signal }),
@@ -179,6 +181,7 @@ type ParsedInput =
       readonly prompt: string;
       readonly trigger: AutomationTrigger;
       readonly missedRunPolicy: AutomationMissedRunPolicy;
+      readonly followUp: boolean;
       readonly firstRunAt: UtcTimestamp;
     }
   | { readonly kind: "invalid"; readonly message: string };
@@ -212,6 +215,7 @@ function parseInput(inputJson: string, nowMs: number): ParsedInput {
   if (missed !== "skip" && missed !== "run-once") {
     return { kind: "invalid", message: 'missedRuns is "skip" or "run-once".' };
   }
+  const followUp = fields.get("trigger") === "follow-up";
   const trigger = parseTrigger(fields, nowMs);
   if (trigger.kind === "invalid") return trigger;
   const now = new Date(nowMs).toISOString() as UtcTimestamp;
@@ -228,7 +232,9 @@ function parseInput(inputJson: string, nowMs: number): ParsedInput {
     name,
     prompt,
     trigger: trigger.trigger,
-    missedRunPolicy: missed,
+    // A follow-up runs late rather than never, within its missed window.
+    missedRunPolicy: followUp ? "run-once" : missed,
+    followUp,
     firstRunAt,
   };
 }
@@ -241,7 +247,8 @@ function parseTrigger(
   | { readonly kind: "invalid"; readonly message: string } {
   try {
     switch (fields.get("trigger")) {
-      case "once": {
+      case "once":
+      case "follow-up": {
         const at = instant(fields.get("at"));
         if (at === undefined) {
           return {
@@ -290,7 +297,10 @@ function parseTrigger(
           }),
         };
       default:
-        return { kind: "invalid", message: 'trigger is "once", "interval", or "weekly".' };
+        return {
+          kind: "invalid",
+          message: 'trigger is "once", "interval", "weekly", or "follow-up".',
+        };
     }
   } catch {
     return {

@@ -222,7 +222,9 @@ A Code thread's agent can also propose a scheduled routine, confirmed by you
 in the thread and listed under Routines here; see
 [Routines from a thread](/guide/work#routines-from-a-thread). A Code routine
 runs in this thread's checkout, asks before effects, and cannot be proposed
-from Plan.
+from Plan. A Code thread can also [follow up later](/guide/work#follow-up-later)
+in the same thread; that turn asks before effects even if the thread has
+since been given more access, and does not run if the thread has Full access.
 
 ## Managed worktrees
 

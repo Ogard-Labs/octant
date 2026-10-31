@@ -57,7 +57,7 @@ import type { ChatWiring } from "./chat";
 import type { WorkWiring } from "./work";
 
 export type AutomationDependencies = Pick<ServerStart, "persistence"> &
-  Pick<AuthorityWiring, "routineProposalService" | "windowAuthorityStore"> &
+  Pick<AuthorityWiring, "liveTurns" | "routineProposalService" | "windowAuthorityStore"> &
   Pick<AgentRunsWiring, "capacityScheduler"> &
   Pick<WorkspaceWiring, "projectService"> &
   Pick<
@@ -74,6 +74,7 @@ export function wireAutomation(deps: AutomationDependencies) {
     chatService,
     codeCompletedThreadSource,
     contributeCodeTools,
+    liveTurns,
     persistence,
     projectService,
     routeCodeService,
@@ -241,7 +242,10 @@ export function wireAutomation(deps: AutomationDependencies) {
       bootstrap: async (windowId) => {
         const bootstrap = await workThreadServiceWithWorkflows.bootstrap(windowId);
         return {
-          threads: bootstrap.threads.map((thread) => ({ id: thread.id })),
+          threads: bootstrap.threads.map((thread) => ({
+            id: thread.id,
+            workingDirectory: thread.workingDirectory,
+          })),
         };
       },
     },
@@ -309,6 +313,40 @@ export function wireAutomation(deps: AutomationDependencies) {
           };
         }
       },
+    },
+    readFollowUpThread: ({ mode, threadId }) => {
+      if (mode === "work") {
+        const thread = workThreadProjection.read(decodeWorkThreadId(String(threadId)));
+        if (
+          thread === undefined ||
+          thread.lifecycle === "deleting" ||
+          thread.lifecycle === "deleted"
+        )
+          return { kind: "missing" };
+        return {
+          kind: "present",
+          projectId: String(thread.projectId),
+          archived: thread.lifecycle === "archived",
+          done: thread.completionConfirmed === true || thread.completedAt !== undefined,
+          busy:
+            liveTurns.read(String(thread.id)) !== undefined ||
+            workTurnService.isTurnStarting(thread.id),
+          providerInstanceId: String(thread.providerInstanceId),
+          modelId: String(thread.modelId),
+        };
+      }
+      const thread = persistence.readCodeThread(decodeCodeThreadId(String(threadId)));
+      if (thread === undefined) return { kind: "missing" };
+      return {
+        kind: "present",
+        projectId: String(thread.projectId),
+        archived: thread.lifecycle === "archived",
+        done: thread.completedAt !== undefined,
+        busy: liveTurns.read(String(thread.id)) !== undefined,
+        providerInstanceId: String(thread.providerInstanceId),
+        modelId: String(thread.modelId),
+        executionPolicy: thread.executionPolicy,
+      };
     },
     resolveFacts: ({ definition, run }) =>
       resolveAutomationAuthorityLiveFacts(

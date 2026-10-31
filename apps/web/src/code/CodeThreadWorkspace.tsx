@@ -51,6 +51,8 @@ import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceCompos
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { ChildResultCards } from "../agents/ChildResultCards";
 import { isChildResultDelivery } from "../agents/childResultDelivery";
+import { parseAutomationFollowUpTurnPrompt } from "@octant/contracts/automation";
+import { ScheduledFollowUpMark } from "../automation/ScheduledFollowUpMark";
 import { InlineThreadPlan } from "../plan/InlineThreadPlan";
 import { ThreadPlanProposal } from "../plan/ThreadPlanProposal";
 import { useThreadPlan } from "../plan/ThreadPlanContext";
@@ -1435,6 +1437,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             // host's own delivery wording is what says this is a subagent's
             // result and not something the person typed.
             const delivered = message.role === "user" && isChildResultDelivery(message.text);
+            // A follow-up's turn is marked the same way, by the host's heading.
+            const followUpPrompt =
+              message.role === "user" ? parseAutomationFollowUpTurnPrompt(message.text) : undefined;
             const workedFor =
               message.role === "assistant" &&
               message.status === "completed" &&
@@ -1483,9 +1488,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   aria-label={
                     delivered
                       ? "Subagent results"
-                      : message.role === "user"
-                        ? "Your message"
-                        : "Assistant message"
+                      : followUpPrompt !== undefined
+                        ? "Scheduled follow-up"
+                        : message.role === "user"
+                          ? "Your message"
+                          : "Assistant message"
                   }
                   className={`code-thread-workspace__message ${delivered ? "turn-child-result" : message.role === "user" ? "turn-user" : "turn-agent"}`}
                 >
@@ -1550,10 +1557,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       <>
                         {/* What the user typed stays exactly as they typed it,
                             in the shared bubble, with the time beneath it. */}
+                        {followUpPrompt === undefined ? null : <ScheduledFollowUpMark />}
                         <div className="bubble">
                           {gallery}
                           {message.text.length > 0 ? (
-                            <TrackerReferenceText asParagraph text={message.text} />
+                            <TrackerReferenceText
+                              asParagraph
+                              text={followUpPrompt ?? message.text}
+                            />
                           ) : null}
                         </div>
                         {message.at === undefined ? null : (

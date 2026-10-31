@@ -108,6 +108,7 @@ export function buildThreadRoutineDraft(
     permissionPersistence: sessionOnly ? "current-session" : "project-default",
   };
   const now = deps.clock();
+  const followUp = proposal.targetPolicy === "same-thread";
   const bindingRevisionId = project.bindingRevisionId;
   const projectId = String(proposal.projectId);
   const binding =
@@ -169,14 +170,16 @@ export function buildThreadRoutineDraft(
           revisionId: deps.uuid(),
           revision: 1,
           mode,
-          summary: `A new ${mode === "work" ? "Work" : "Code"} thread in ${project.name} for each run, from a routine proposed in one of its threads.`,
+          summary: followUp
+            ? `One follow-up turn in the ${mode === "work" ? "Work" : "Code"} thread it was set up from, in ${project.name}.`
+            : `A new ${mode === "work" ? "Work" : "Code"} thread in ${project.name} for each run, from a routine proposed in one of its threads.`,
           confirmed: true,
           confirmedBy: deps.actorId,
           confirmedAt: now,
         },
         trigger: proposal.trigger,
         missedRunPolicy: proposal.missedRunPolicy,
-        targetPolicy: "new-thread",
+        targetPolicy: followUp ? "same-thread" : "new-thread",
       }),
     };
   } catch {

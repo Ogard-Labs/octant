@@ -1,3 +1,4 @@
+import { automationFollowUpTurnPrompt } from "@octant/contracts/automation";
 import { queueTestHost } from "../messageQueue/queueTestHost.test-fixture";
 import {
   decodeWorkThreadTranscript,
@@ -1228,6 +1229,37 @@ describe("WorkThreadWorkspace", () => {
     expect(
       within(entry).getByRole("article", { name: "Research subagent finished" }),
     ).toHaveTextContent("MATRIX-A3");
+    expect(screen.queryByRole("article", { name: "Your message" })).not.toBeInTheDocument();
+  });
+
+  it("marks a turn a follow-up sent as scheduled and shows only its prompt", async () => {
+    const sent = automationFollowUpTurnPrompt("Check whether the reply arrived.");
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const turnClient = {
+      transcript: vi.fn(async () => ({
+        threadId,
+        turns: [workTurn({ prompt: sent, transcript: [{ role: "user", text: sent }] })],
+      })),
+    };
+    const requestClient = { list: vi.fn(async () => ({ requests: [] })) };
+
+    render(
+      <WorkThreadWorkspace
+        requestClient={requestClient as never}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+
+    const entry = await screen.findByRole("article", { name: "Scheduled follow-up" });
+    expect(entry).toHaveTextContent("Scheduled follow-up");
+    expect(entry).toHaveTextContent("Check whether the reply arrived.");
+    expect(entry).not.toHaveTextContent("set up earlier");
     expect(screen.queryByRole("article", { name: "Your message" })).not.toBeInTheDocument();
   });
 

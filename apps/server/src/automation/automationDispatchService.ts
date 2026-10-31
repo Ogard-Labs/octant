@@ -11,6 +11,7 @@ import type {
   WorkThreadId,
   UtcTimestamp,
 } from "@octant/contracts";
+import { decideAutomationFollowUp, type AutomationFollowUpThreadFacts } from "@octant/domain";
 import {
   automationPromptDigest,
   revalidateAutomationAuthority,
@@ -46,6 +47,15 @@ export interface AutomationDispatchServiceOptions {
     readonly definition: AutomationDefinition;
     readonly run: AutomationRun;
   }) => AutomationAuthorityLiveFacts;
+  /**
+   * What the host knows now of a follow-up's own thread. Absent, every
+   * follow-up is refused as `thread-unavailable`: a dispatcher that cannot
+   * see the thread never sends a turn into it.
+   */
+  readonly readFollowUpThread?: (input: {
+    readonly mode: AutomationRun["definitionSnapshot"]["mode"];
+    readonly threadId: AutomationThreadId;
+  }) => AutomationFollowUpThreadFacts;
   readonly now: () => UtcTimestamp;
   readonly launchClaimLeaseMs?: number;
   /**
@@ -80,6 +90,7 @@ export class AutomationDispatchService implements AutomationDispatchPort {
   readonly #work: AutomationWorkDispatchPort;
   readonly #capacity: AutomationCapacityAdmissionPort;
   readonly #resolveFacts: AutomationDispatchServiceOptions["resolveFacts"];
+  readonly #readFollowUpThread: AutomationDispatchServiceOptions["readFollowUpThread"];
   readonly #now: () => UtcTimestamp;
   readonly #launchClaimLeaseMs: number;
   readonly #schedule: (work: () => Promise<void>) => void;
@@ -93,6 +104,7 @@ export class AutomationDispatchService implements AutomationDispatchPort {
     this.#work = options.work;
     this.#capacity = options.capacity;
     this.#resolveFacts = options.resolveFacts;
+    this.#readFollowUpThread = options.readFollowUpThread;
     this.#now = options.now;
     this.#launchClaimLeaseMs = options.launchClaimLeaseMs ?? DEFAULT_LAUNCH_CLAIM_LEASE_MS;
     this.#schedule =
@@ -142,11 +154,11 @@ export class AutomationDispatchService implements AutomationDispatchPort {
         facts: this.#resolveFacts({ definition, run }),
       });
       if (revalidation.kind === "blocked") {
-        this.#failAndBlock(definition, run, revalidation.reason, revalidation.message);
+        this.#refuse(definition, run, revalidation.reason, revalidation.message);
         return;
       }
       if (run.definitionSnapshot.mode === "work" && !this.#work.available) {
-        this.#failAndBlock(
+        this.#refuse(
           definition,
           run,
           "unsupported-mode",
@@ -155,7 +167,10 @@ export class AutomationDispatchService implements AutomationDispatchPort {
         );
         return;
       }
-      const created = await this.#createThread(definition, run);
+      const created =
+        run.definitionSnapshot.targetPolicy === "same-thread"
+          ? this.#targetOriginThread(definition, run)
+          : await this.#createThread(definition, run);
       if (created === undefined) return;
       run = this.#projection.getRun(runId);
       if (run === undefined || run.dispatchIntent === undefined) return;
@@ -220,6 +235,40 @@ export class AutomationDispatchService implements AutomationDispatchPort {
     }
   }
 
+  /**
+   * A follow-up creates no thread: it goes back to the one it came from,
+   * after that thread passes the follow-up's fire-time checks. A refusal
+   * fails the run with its typed reason and the once trigger then ends the
+   * routine, so a follow-up never runs twice and never waits paused.
+   */
+  #targetOriginThread(
+    definition: AutomationDefinition,
+    run: AutomationRun,
+  ): AutomationThreadId | undefined {
+    const threadId = definition.originThreadId;
+    const snapshot = run.definitionSnapshot;
+    const decision = decideAutomationFollowUp({
+      projectId: String(snapshot.projectId),
+      providerInstanceId: String(snapshot.executionProfile.providerInstanceId),
+      modelId: String(snapshot.executionProfile.modelId),
+      scheduledAt: run.scheduledAt ?? run.claimedAt,
+      now: this.#now(),
+      thread:
+        threadId === undefined || this.#readFollowUpThread === undefined
+          ? { kind: "missing" }
+          : this.#readFollowUpThread({ mode: snapshot.mode, threadId }),
+    });
+    if (threadId === undefined || decision.kind === "blocked") {
+      const blocked =
+        decision.kind === "blocked"
+          ? decision
+          : { reason: "thread-unavailable" as const, message: "The follow-up has no thread." };
+      this.#failRun(run, blocked.reason, blocked.message);
+      return undefined;
+    }
+    return this.#recordIntent(definition, run, threadId);
+  }
+
   async #createThread(
     definition: AutomationDefinition,
     run: AutomationRun,
@@ -245,10 +294,18 @@ export class AutomationDispatchService implements AutomationDispatchPort {
       this.#failRun(run, "thread-creation-failed", outcome.message);
       return undefined;
     }
+    return this.#recordIntent(definition, run, outcome.threadId);
+  }
+
+  #recordIntent(
+    definition: AutomationDefinition,
+    run: AutomationRun,
+    threadId: AutomationThreadId,
+  ): AutomationThreadId | undefined {
     const now = this.#now();
     const intent: AutomationDispatchIntent = {
       firstTurnRequestId: run.firstTurnRequestId,
-      threadId: outcome.threadId,
+      threadId,
       authoritySnapshot: run.authoritySnapshot,
       promptDigest: automationPromptDigest(run.definitionSnapshot.taskPrompt),
       recordedAt: now,
@@ -269,7 +326,7 @@ export class AutomationDispatchService implements AutomationDispatchPort {
       }
       throw error;
     }
-    return outcome.threadId;
+    return threadId;
   }
 
   #acquireLaunchClaim(run: AutomationRun): AutomationRuntimeLaunchClaim | undefined {
@@ -378,6 +435,17 @@ export class AutomationDispatchService implements AutomationDispatchPort {
     } catch (error) {
       if (!isConflict(error)) throw error;
     }
+  }
+
+  /** A follow-up ends on a refusal; any other routine is paused with the reason. */
+  #refuse(
+    definition: AutomationDefinition,
+    run: AutomationRun,
+    reason: AutomationBlockReason,
+    message: string,
+  ): void {
+    if (run.definitionSnapshot.targetPolicy === "same-thread") this.#failRun(run, reason, message);
+    else this.#failAndBlock(definition, run, reason, message);
   }
 
   #failAndBlock(

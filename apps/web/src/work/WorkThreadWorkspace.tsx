@@ -76,6 +76,8 @@ import { appendTranscript } from "../voice/appendTranscript";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import type { ImageGenerationProfileView } from "@octant/contracts";
 import { decodeBrowserThreadId, decodeImageGenerationScopeId } from "@octant/contracts";
+import { parseAutomationFollowUpTurnPrompt } from "@octant/contracts/automation";
+import { ScheduledFollowUpMark } from "../automation/ScheduledFollowUpMark";
 import { BrowserCaptureList } from "../browser/BrowserCaptureList";
 import { GeneratedImageList } from "../image/GeneratedImageList";
 import { ImageGenerationAction } from "../image/ImageGenerationAction";
@@ -1877,6 +1879,20 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                 return (
                   <article aria-label="Subagent results" className="turn-child-result">
                     <ChildResultCards providerGroups={props.providerGroups} text={row.entry.text} />
+                  </article>
+                );
+              }
+              const followUpPrompt = parseAutomationFollowUpTurnPrompt(row.entry.text);
+              if (followUpPrompt !== undefined) {
+                return (
+                  <article aria-label="Scheduled follow-up" className="turn-user">
+                    <ScheduledFollowUpMark />
+                    <div className="bubble">
+                      <TrackerReferenceText asParagraph text={followUpPrompt} />
+                    </div>
+                    {row.at === undefined ? null : (
+                      <TurnTime at={row.at} copyValue={followUpPrompt} />
+                    )}
                   </article>
                 );
               }

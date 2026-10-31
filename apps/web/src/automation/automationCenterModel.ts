@@ -75,6 +75,11 @@ const blockReasonLabels: Record<AutomationBlockReason, string> = {
     "Full access authority is not eligible for automations. Choose an approval-gated profile.",
   "unsupported-mode": "This mode is not supported for automations.",
   "automation-recursion": "Automation-created work cannot manage automations.",
+  "thread-unavailable":
+    "The follow-up did not run: its thread was gone, archived, or in another Project.",
+  "thread-done": "The follow-up did not run: its thread was marked done.",
+  "thread-busy": "The follow-up was skipped: a turn was already running in its thread.",
+  "follow-up-missed": "The follow-up was more than a day late, so it was recorded as missed.",
 };
 
 export function automationBlockReasonLabel(reason: AutomationBlockReason): string {

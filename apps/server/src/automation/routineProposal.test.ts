@@ -397,3 +397,183 @@ describe("routine proposals from a thread", () => {
     ).toBe(THREAD);
   });
 });
+
+const followUpInput = JSON.stringify({
+  name: "Check for the reply",
+  prompt: "Check whether the reply arrived and summarise it.",
+  trigger: "follow-up",
+  at: "2026-11-01T08:00:00Z",
+});
+
+async function followUps(
+  handler: (request: Request) => Promise<Response | undefined>,
+  body: unknown,
+  key = capability,
+) {
+  const response = await handler(
+    new Request("http://127.0.0.1/api/automations/follow-ups", {
+      method: "POST",
+      headers: { "x-octant-window-capability": key, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
+  return { status: response?.status, body: await response?.json() };
+}
+
+describe("one-time follow-ups in the same thread", () => {
+  it("proposes a follow-up that creates nothing until the person confirms it", async () => {
+    const h = harness();
+    const { call, proposal } = await propose(h, followUpInput);
+    expect(proposal).toMatchObject({
+      targetPolicy: "same-thread",
+      trigger: { kind: "once", scheduledAt: "2026-11-01T08:00:00.000Z" },
+      missedRunPolicy: "run-once",
+    });
+    expect(
+      h.projection.listSummaries({ hostId: "local" as never, mode: "all", limit: 10 }).items,
+    ).toEqual([]);
+    const answer = await decide(h.handler, String(proposal.proposalId), "confirm");
+    await call;
+    if (answer.kind !== "routine-proposal-confirmed") throw new Error(JSON.stringify(answer));
+    expect(answer.automation).toMatchObject({
+      targetPolicy: "same-thread",
+      originThreadId: THREAD,
+      authorityProfile: {
+        effective: { shell: false, git: false, executionPolicy: "approval-gated" },
+      },
+    });
+  });
+
+  it("refuses a follow-up proposal from a routine's own turn", async () => {
+    const h = harness();
+    const outcome = await h
+      .tools(windowId, true)
+      .execute({ name: "octant_propose_routine", inputJson: followUpInput });
+    expect(outcome).toMatchObject({ isError: true, result: { reason: "automation-recursion" } });
+    expect(await listed(h.handler)).toEqual([]);
+  });
+
+  it("lets the person set one up from the thread, then move it, and never run it on demand", async () => {
+    const h = harness();
+    const created = await followUps(h.handler, {
+      kind: "schedule-follow-up",
+      threadId: THREAD,
+      mode: "work",
+      projectId: PROJECT,
+      scheduledAt: "2026-11-01T08:00:00.000Z",
+      taskPrompt: "See what changed and summarise it.",
+    });
+    expect(created.body).toMatchObject({
+      kind: "automation-created",
+      automation: {
+        targetPolicy: "same-thread",
+        originThreadId: THREAD,
+        createdBy: { kind: "local-window", windowId: String(windowId) },
+        trigger: { kind: "once", scheduledAt: "2026-11-01T08:00:00.000Z" },
+      },
+    });
+    const automation = created.body.automation;
+    const moved = await followUps(h.handler, {
+      kind: "reschedule-follow-up",
+      automationId: automation.id,
+      expectedVersion: automation.version,
+      scheduledAt: "2026-11-02T08:00:00.000Z",
+    });
+    expect(moved.body).toMatchObject({
+      kind: "automation-updated",
+      automation: { nextDueAt: "2026-11-02T08:00:00.000Z", targetPolicy: "same-thread" },
+    });
+    const runNow = await h.handler(
+      new Request("http://127.0.0.1/api/automations/commands", {
+        method: "POST",
+        headers: { "x-octant-window-capability": capability, "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "run-now-automation",
+          automationId: automation.id,
+          expectedVersion: moved.body.automation.version,
+          runNowRequestId: uuid(),
+        }),
+      }),
+    );
+    expect(await runNow?.json()).toMatchObject({
+      kind: "automation-command-failed",
+      reason: "unsupported",
+    });
+  });
+
+  it("refuses a follow-up for a Chat thread", async () => {
+    const h = harness();
+    const refused = await followUps(h.handler, {
+      kind: "schedule-follow-up",
+      threadId: THREAD,
+      mode: "chat",
+      projectId: PROJECT,
+      scheduledAt: "2026-11-01T08:00:00.000Z",
+      taskPrompt: "See what changed.",
+    });
+    expect(refused.status).toBe(400);
+    expect(
+      h.projection.listSummaries({ hostId: "local" as never, mode: "all", limit: 10 }).items,
+    ).toEqual([]);
+  });
+
+  it("refuses a routine created through the editor that claims to be a follow-up", async () => {
+    const h = harness();
+    const { call, proposal } = await propose(h);
+    const answer = await decide(h.handler, String(proposal.proposalId), "confirm");
+    await call;
+    if (answer.kind !== "routine-proposal-confirmed") throw new Error(JSON.stringify(answer));
+    const {
+      id,
+      version,
+      lifecycle: _l,
+      definitionRevision: _r,
+      nextDueAt: _n,
+      ...rest
+    } = answer.automation;
+    const draft = {
+      displayName: rest.displayName,
+      taskPrompt: rest.taskPrompt,
+      hostId: rest.hostId,
+      mode: rest.mode,
+      projectId: rest.projectId,
+      projectVersion: rest.projectVersion,
+      binding: rest.binding,
+      executionProfile: rest.executionProfile,
+      authorityProfile: rest.authorityProfile,
+      deliveryTarget: rest.deliveryTarget,
+      trigger: { kind: "once", scheduledAt: "2026-11-01T08:00:00.000Z" },
+      missedRunPolicy: "run-once",
+      targetPolicy: "same-thread",
+    };
+    const send = async (body: unknown) =>
+      (
+        await h.handler(
+          new Request("http://127.0.0.1/api/automations/commands", {
+            method: "POST",
+            headers: {
+              "x-octant-window-capability": capability,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify(body),
+          }),
+        )
+      )?.json();
+    expect(
+      await send({
+        kind: "update-automation",
+        automationId: id,
+        expectedVersion: version,
+        definition: draft,
+      }),
+    ).toMatchObject({ kind: "automation-command-failed", reason: "invalid" });
+    expect(
+      await send({
+        kind: "create-automation",
+        automationId: uuid(),
+        expectedVersion: 0,
+        definition: draft,
+      }),
+    ).toMatchObject({ kind: "automation-command-failed" });
+  });
+});

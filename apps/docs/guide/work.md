@@ -177,6 +177,25 @@ routine's own run cannot propose more routines. A provider that cannot use
 Octant's tools does not get this; create the routine in Automation Center
 instead.
 
+### Follow up later
+
+A follow-up is a one-time turn sent back into the same thread at a time you
+pick, so the agent picks up the conversation where it left off ("tomorrow
+morning, check whether the reply arrived and summarise it"). Set one up from
+the thread's Environment with **Follow up later**: choose **In 1 hour**,
+**Tomorrow at 9:00**, or **Pick a time**, and say what to check. The agent can
+also propose one; it shows as a card, and nothing is scheduled until you
+choose **Schedule follow-up**.
+
+A pending follow-up is listed in Environment ("Follows up tomorrow at 9:00")
+with **Change time** and **Cancel**. When it runs, the transcript marks the
+turn as a scheduled follow-up. It runs once, with the thread's own access and
+asking before it changes anything, then ends. It does not run if the thread
+is busy with a turn, marked Done, archived, moved to another Project, or now
+on another provider or model; if the computer was asleep, it runs when Octant
+is back, unless it is more than a day late, in which case it is recorded as
+missed. Automation Center keeps its history. Chat threads have no follow-ups.
+
 ## Next steps
 
 - [Work Thread Board](/advanced/work-board) for derived status, grouping, and marking a thread Done

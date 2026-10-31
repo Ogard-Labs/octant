@@ -1,5 +1,6 @@
 import { decodeAgentRunAuthority, type AgentRunAuthority } from "@octant/contracts/agent-run";
 import {
+  AUTOMATION_FOLLOW_UP_MISSED_WINDOW_MS,
   decodeAutomationId,
   decodeAutomationRunNowRequestId,
   decodeAutomationDefinition,
@@ -10,6 +11,7 @@ import {
   type AutomationLocalDate,
   type AutomationLocalTime,
   type AutomationOccurrenceKeyText,
+  type AutomationBlockReason,
   type AutomationOrigin,
   type AutomationRunLifecycle,
   type AutomationTrigger,
@@ -852,6 +854,91 @@ export function classifyAutomationRunNow(input: {
     };
   }
   return { kind: "allowed" };
+}
+
+/** What the host knows, at fire time, of the thread a follow-up goes back to. */
+export type AutomationFollowUpThreadFacts =
+  | { readonly kind: "missing" }
+  | {
+      readonly kind: "present";
+      readonly projectId: string;
+      readonly archived: boolean;
+      /** Work: a person marked it Done. Either mode: a person marked it Complete. */
+      readonly done: boolean;
+      /** A turn is running or being started in it. */
+      readonly busy: boolean;
+      readonly providerInstanceId: string;
+      readonly modelId: string;
+      /** Code only: the thread's own posture. */
+      readonly executionPolicy?: string;
+    };
+
+export type AutomationFollowUpDecision =
+  | { readonly kind: "ready" }
+  | {
+      readonly kind: "blocked";
+      readonly reason: AutomationBlockReason;
+      readonly message: string;
+    };
+
+/**
+ * Whether a follow-up may send its turn into its thread now. Each check
+ * refuses rather than adapts: the follow-up was confirmed for that thread as
+ * it was, so a thread that has moved on is told nothing. A thread already
+ * running a turn is skipped, not waited on: waiting would put a scheduled
+ * turn behind the person's own, at a time nobody chose.
+ */
+export function decideAutomationFollowUp(input: {
+  readonly projectId: string;
+  readonly providerInstanceId: string;
+  readonly modelId: string;
+  readonly scheduledAt: UtcTimestamp;
+  readonly now: UtcTimestamp;
+  readonly thread: AutomationFollowUpThreadFacts;
+}): AutomationFollowUpDecision {
+  const blocked = (reason: AutomationBlockReason, message: string): AutomationFollowUpDecision => ({
+    kind: "blocked",
+    reason,
+    message,
+  });
+  if (
+    Date.parse(input.now) - Date.parse(input.scheduledAt) >
+    AUTOMATION_FOLLOW_UP_MISSED_WINDOW_MS
+  ) {
+    return blocked(
+      "follow-up-missed",
+      "The follow-up was more than a day late, so it was recorded as missed and did not run.",
+    );
+  }
+  const thread = input.thread;
+  if (thread.kind === "missing" || thread.archived || thread.projectId !== input.projectId) {
+    return blocked(
+      "thread-unavailable",
+      "The thread is gone, archived, or in another Project, so the follow-up did not run.",
+    );
+  }
+  if (thread.done) {
+    return blocked("thread-done", "The thread was marked done, so the follow-up did not run.");
+  }
+  if (thread.executionPolicy === "full-access") {
+    return blocked(
+      "full-access-ineligible",
+      "The thread now has Full access, which a follow-up never runs under.",
+    );
+  }
+  if (thread.providerInstanceId !== input.providerInstanceId || thread.modelId !== input.modelId) {
+    return blocked(
+      "execution-profile-mismatch",
+      "The thread's provider or model changed since the follow-up was set, so it did not run.",
+    );
+  }
+  if (thread.busy) {
+    return blocked(
+      "thread-busy",
+      "A turn was already running in the thread, so the follow-up was skipped.",
+    );
+  }
+  return { kind: "ready" };
 }
 
 export function validateAutomationDefinition(input: AutomationDefinition): AutomationDefinition {

@@ -73,6 +73,26 @@ describe("RoutineProposalPrompt", () => {
     expect(fake.decideProposal).toHaveBeenCalledWith({ proposalId, decision: "decline" });
   });
 
+  it("says a follow-up goes back into this thread, and schedules it only when confirmed", async () => {
+    const fake = client([
+      proposal({
+        displayName: "Check for the reply",
+        trigger: { kind: "once", scheduledAt: "2026-11-01T08:00:00.000Z" },
+        missedRunPolicy: "run-once",
+        targetPolicy: "same-thread",
+        firstRunAt: "2026-11-01T08:00:00.000Z",
+      } as never),
+    ]);
+    renderPrompt(fake);
+
+    const card = await screen.findByRole("group", { name: "Follow-up proposal" });
+    expect(card).toHaveTextContent("Follow up in this thread: “Check for the reply”?");
+    expect(card).toHaveTextContent("new turn in this thread");
+    expect(fake.decideProposal).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Schedule follow-up" }));
+    expect(fake.decideProposal).toHaveBeenCalledWith({ proposalId, decision: "confirm" });
+  });
+
   it("shows nothing for another thread's proposal", async () => {
     const fake = client([proposal({ threadId: otherThread } as never)]);
     const { container } = renderPrompt(fake);

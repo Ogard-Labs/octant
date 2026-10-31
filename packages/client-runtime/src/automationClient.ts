@@ -7,6 +7,7 @@ import {
   type AutomationListResponse,
   AutomationQueryResponse,
   decodeHostAnswer,
+  type AutomationFollowUpRequest,
   type RoutineProposal,
   type RoutineProposalDecision,
   RoutineProposalDecisionResult,
@@ -56,6 +57,14 @@ export interface AutomationClient {
   get(automationId: AutomationId, signal?: AbortSignal): Promise<AutomationDetailResponse>;
   history(input: AutomationHistoryInput, signal?: AbortSignal): Promise<AutomationHistoryResponse>;
   execute(command: AutomationClientCommand, signal?: AbortSignal): Promise<AutomationCommandResult>;
+  /**
+   * Set up or move a one-time follow-up in a thread. Setting one up creates
+   * the routine as this window, from the thread's own facts.
+   */
+  followUp(
+    request: AutomationFollowUpRequest,
+    signal?: AbortSignal,
+  ): Promise<AutomationCommandResult>;
   /** Routines this window's thread agents proposed, waiting for the person. */
   listProposals(signal?: AbortSignal): Promise<ReadonlyArray<RoutineProposal>>;
   /** Confirm or decline one proposal. A confirm creates the routine as this window. */
@@ -141,6 +150,21 @@ export function createAutomationClient(options: AutomationClientOptions): Automa
         },
         decodeCommandResult,
         maxAttempts,
+        signal,
+      );
+    },
+    followUp(followUpRequest, signal) {
+      // One attempt: a replayed set-up would create a second follow-up.
+      return request(
+        options.fetch,
+        new URL("/api/automations/follow-ups", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(followUpRequest),
+        },
+        decodeCommandResult,
+        1,
         signal,
       );
     },

@@ -289,6 +289,7 @@ export class AutomationProjection implements Projection {
       ...(definition.originThreadId === undefined
         ? {}
         : { originThreadId: definition.originThreadId }),
+      targetPolicy: definition.targetPolicy,
       version: definition.version,
       updatedAt: definition.updatedAt,
     } as AutomationSummary;

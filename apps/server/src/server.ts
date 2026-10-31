@@ -979,6 +979,7 @@ export function startOctantServer(
       chatService,
       codeCompletedThreadSource,
       contributeCodeTools,
+      liveTurns,
       persistence,
       projectService,
       routeCodeService,
