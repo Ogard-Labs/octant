@@ -39,7 +39,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [App-managed tools](#app-managed-tools)                                               | 2         | 2       | 0            | 0                   |
 | [Canvas authority](#canvas-authority)                                                 | 2         | 2       | 0            | 0                   |
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
-| [Modes, Projects and authority](#modes-projects-and-authority)                        | 12        | 10      | 2            | 0                   |
+| [Modes, Projects and authority](#modes-projects-and-authority)                        | 13        | 10      | 3            | 0                   |
 | [Agents and delegation](#agents-and-delegation)                                       | 4         | 4       | 0            | 0                   |
 | [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 2       | 3            | 1                   |
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 3       | 0            | 1                   |
@@ -68,8 +68,8 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Hubs, relay and Nightly](#hubs-relay-and-nightly)                                    | 5         | 3       | 1            | 1                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
-| [Decided, pending a specification update](#decided-pending-a-specification-update)    | 5         | 0       | 0            | 5                   |
-| **All areas**                                                                         | **222**   | **173** | **35**       | **14**              |
+| [Decided, pending a specification update](#decided-pending-a-specification-update)    | 4         | 0       | 0            | 4                   |
+| **All areas**                                                                         | **222**   | **173** | **36**       | **13**              |
 
 ## Principles and hard lines
 
@@ -574,6 +574,19 @@ A project scaffold is a curated catalog entry with a pinned generator, run as an
 - Plan refuses a scaffold. It runs confined with network egress allowed and caches redirected to a private directory, installs no dependencies, and a run that does not exit cleanly is never reported as a created project. _Here only._
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
+
+### Projects with several folders
+
+A Work or Code Project has one main folder plus extra folders the person adds; each extra folder gets the main folder's access at the thread's level, and commands, checkouts and Git start in the main folder.
+
+- Only a person adds or removes an extra folder, through a folder-picker receipt; each change is journaled with who and when and replays, and a Project made before the field existed has none.
+- An extra folder is never the home folder or above it, a system or credential folder, the main folder, or inside or around the main folder or another extra folder; a Project has at most 16.
+- The OS profiles, the provider sandboxes and approval scopes, the Octant Harness file tools and Octant Shield's fast read and edit rules grant an extra folder exactly what they grant the main folder; Plan reads it without writing, and Full access stays unwrapped.
+- Each Work and Code turn names the extra folders to the agent.
+- Worktrees, checkouts, Git, terminals and Project actions stay in the main folder; an extra folder is a plain folder.
+- Not built yet: the `@file` picker, the Work Files and overview listings, Work artifact paths and Code search still address only the main folder.
+
+Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Projects with several folders](../architecture.md#projects-with-several-folders).
 
 ## Agents and delegation
 
@@ -2606,14 +2619,6 @@ Browser pages can keep sign-ins in named profiles, and a person may import cooki
 - The current Browser profiles design says Octant never imports another browser's profile; this decision replaces that sentence when the specification is updated.
 
 Status: Designed, not built. Since: 2026-10-31. Detail: pending spec update (owner to be [Browser profiles and extensions](browser-profiles.md#profiles)).
-
-### Projects with several folders
-
-A Work or Code Project may bind several folders instead of exactly one.
-
-- Today a Work Project binds one root and a Code Project one directory; the specification change defines how confinement, checkouts and Git apply to several.
-
-Status: Designed, not built. Since: 2026-10-31. Detail: pending spec update (owner to be [Architecture: Modes](../architecture.md#modes-chat-work-and-code)).
 
 ### Local diagnostics export
 
