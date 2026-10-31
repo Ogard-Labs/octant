@@ -9,7 +9,7 @@ function entry(
   windows: ReadonlyArray<{
     window: string;
     status: string;
-    utilization: number;
+    utilization?: number;
     resetsAt?: string;
   }>,
 ): ProviderUsageLimitsEntry {
@@ -63,6 +63,19 @@ describe("providerRoomByInstance", () => {
     );
     expect(rooms.get("near")).toEqual({ standing: "near", resetsAt: "2026-10-31T14:00:00Z" });
     expect(rooms.get("room")).toEqual({ standing: "room" });
+  });
+
+  it("calls an account limited when a window is exhausted without a utilization figure", () => {
+    const rooms = providerRoomByInstance(
+      [
+        entry("a", [
+          { window: "five_hour", status: "allowed", utilization: 0.1 },
+          { window: "seven_day", status: "exhausted", resetsAt: "2026-11-02T12:00:00Z" },
+        ]),
+      ],
+      NOW,
+    );
+    expect(rooms.get("a")).toEqual({ standing: "limited", resetsAt: "2026-11-02T12:00:00Z" });
   });
 
   it("says nothing about an account whose window already reset", () => {
