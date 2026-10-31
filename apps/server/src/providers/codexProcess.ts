@@ -28,6 +28,11 @@ import {
   resolveProbeEgressPolicy,
   resolveProviderRuntimeEgressPolicy,
 } from "../process/threadEgressPolicy";
+import {
+  acquireProviderRuntimeNetwork,
+  type ProviderRuntimeNetworkPort,
+  type ProviderRuntimeProxiedNetwork,
+} from "../network/providerRuntimeNetwork";
 import { decodeInitializeResult } from "./codexProtocol";
 import {
   CodexRpcClientFailure,
@@ -100,6 +105,8 @@ export interface CodexProcessOptions {
   /** Confinement for the app-server below Full access; defaults to the platform's. */
   readonly confinement?: ProcessConfinementPort;
   readonly platform?: NodeJS.Platform;
+  /** Routes the app-server through its own egress proxy below Full access. */
+  readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
 }
 
 const DEFAULT_OCTANT_VERSION = "0.0.0";
@@ -683,6 +690,8 @@ export function prepareCodexLaunch(input: {
   readonly environment: NodeJS.ProcessEnv;
   readonly confinement: ProcessConfinementPort;
   readonly platform: NodeJS.Platform;
+  /** The launch's own egress proxy; absent keeps open network below Full access. */
+  readonly network?: ProviderRuntimeProxiedNetwork;
 }):
   | { readonly status: "prepared"; readonly launch: CodexLaunch }
   | { readonly status: "refused"; readonly failure: ProviderFailure } {
@@ -727,12 +736,19 @@ export function prepareCodexLaunch(input: {
       dirname(input.binaryPath),
       codexPackageRoot(input.binaryPath),
     ]);
-    const networkEgress = materializeOsNetworkEgress(
-      authority.kind === "thread"
-        ? resolveProviderRuntimeEgressPolicy({ mode, executionPolicy })
-        : resolveProbeEgressPolicy(),
-    );
-    const environment: NodeJS.ProcessEnv = { ...input.environment, TMPDIR: temporaryDirectory };
+    const networkEgress =
+      input.network === undefined
+        ? materializeOsNetworkEgress(
+            authority.kind === "thread"
+              ? resolveProviderRuntimeEgressPolicy({ mode, executionPolicy })
+              : resolveProbeEgressPolicy(),
+          )
+        : ({ kind: "proxied", endpoint: input.network.endpoint } as const);
+    const environment: NodeJS.ProcessEnv = {
+      ...input.environment,
+      ...input.network?.environment,
+      TMPDIR: temporaryDirectory,
+    };
     const launch = input.confinement.prepare({
       executable: input.binaryPath,
       args: input.args,
@@ -1002,6 +1018,18 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
                 ? {}
                 : { confinement: resolved.versionProbeConfinement }),
             });
+            const appServerEnvironment =
+              launchEnvironment ?? codexProcessEnvironment(binaryPath, process.env);
+            const runtimePolicy = authority.kind === "thread" ? authority.executionPolicy : "plan";
+            const network =
+              runtimePolicy === "full-access"
+                ? undefined
+                : yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
+                    runtime: "codex",
+                    root: authority.kind === "thread" ? authority.root : "",
+                    executionPolicy: runtimePolicy,
+                    environment: appServerEnvironment,
+                  });
             const prepared = prepareCodexLaunch({
               binaryPath,
               args: codexAppServerArgs(
@@ -1011,9 +1039,10 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
                   : {},
               ),
               authority,
-              environment: launchEnvironment ?? codexProcessEnvironment(binaryPath, process.env),
+              environment: appServerEnvironment,
               confinement,
               platform,
+              ...(network === undefined ? {} : { network }),
             });
             if (prepared.status === "refused") return yield* Effect.fail(prepared.failure);
             const managed = yield* acquireCodexAppServer(

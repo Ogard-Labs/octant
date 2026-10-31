@@ -505,6 +505,7 @@ describe("WorkspaceView Code tab registration", () => {
         context: {
           contextId: "30000000-0000-4000-8000-000000000001",
           threadId: codeIds.thread,
+          policy: {},
           state: "active",
         },
         observation: {
@@ -571,6 +572,7 @@ describe("WorkspaceView Code tab registration", () => {
       context: {
         contextId: "30000000-0000-4000-8000-000000000002",
         threadId: codeIds.thread,
+        policy: {},
         state: "active",
       },
       observation: {

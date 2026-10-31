@@ -401,8 +401,9 @@ function dedupe(issues: readonly string[]): readonly string[] {
 
 /**
  * Client-side mirror of the server's definition policy: every selection must
- * name the same host, mode, and Project, and Work authority can never carry
- * shell or Git capability. The server re-validates authoritatively on save.
+ * name the same host, mode, and Project, and Work authority must carry the
+ * shell and Git every Work turn holds, or the routine would never run. The
+ * server re-validates authoritatively on save and again at every run.
  */
 function crossConsistencyIssues(input: AutomationDraftFormInput): readonly string[] {
   const project = input.project;
@@ -420,6 +421,6 @@ function crossConsistencyIssues(input: AutomationDraftFormInput): readonly strin
         (project !== undefined && execution.projectId !== project.projectId))) ||
     (authority !== undefined &&
       input.mode === "work" &&
-      (authority.effective.shell || authority.effective.git));
+      !(authority.effective.shell && authority.effective.git));
   return mismatch ? [CONTRACT_ISSUE] : [];
 }

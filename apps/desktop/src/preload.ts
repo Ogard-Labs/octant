@@ -1,5 +1,9 @@
 import type { NativeMenuRequest, NativeMenuOutcome } from "@octant/contracts/shell";
 import { decodeMenuBarOpenThread, type MenuBarOpenThread } from "./menuBar";
+import {
+  validateExtensionPopupRequest,
+  type ExtensionPopupRequest,
+} from "./browserExtensionPopupRequest";
 import type {
   OwnerUnlockChallenge,
   OwnerUnlockKeyOutcome,
@@ -235,6 +239,11 @@ export interface OctantHostBridge {
       readonly command: BrowserSurfaceTabCommand;
     },
   ) => Promise<BrowserSurfaceState>;
+  /** Shows an extension's popup or options page beside the Browser toolbar's extensions button. */
+  readonly openBrowserExtensionPopup: (
+    request: ExtensionPopupRequest,
+  ) => Promise<{ readonly opened: boolean }>;
+  readonly closeBrowserExtensionPopup: () => Promise<void>;
   readonly checkForAppUpdate: () => Promise<AppUpdateState>;
   readonly downloadAppUpdate: () => Promise<AppUpdateState>;
   readonly installAppUpdate: () => Promise<AppUpdateInstallOutcome>;
@@ -555,6 +564,12 @@ export function createHostBridge(
       }
       return decodeBrowserSurfaceState(await ipc.invoke(IPC_CHANNELS.browserSurfaceTab, request));
     },
+    openBrowserExtensionPopup: async (request: ExtensionPopupRequest) => {
+      const checked = validateExtensionPopupRequest(request);
+      const answer: unknown = await ipc.invoke(IPC_CHANNELS.browserExtensionPopupOpen, checked);
+      return { opened: isRecord(answer) && answer.opened === true };
+    },
+    closeBrowserExtensionPopup: () => invoke(IPC_CHANNELS.browserExtensionPopupClose),
     getComputerUseStatus: () => ipc.invoke(IPC_CHANNELS.computerUseStatus),
     requestComputerUsePermissions: () => ipc.invoke(IPC_CHANNELS.computerUsePermissions),
     openComputerUsePermissionSettings: async () => {

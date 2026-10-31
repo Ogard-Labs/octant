@@ -1478,6 +1478,38 @@ describe("what Octant Shield reads from a Code thread", () => {
       turns: [{ steps: [{ kind: "review", summary: "bash: git status", decision }] }],
     });
   });
+
+  it("keeps a tool row's outside-content mark for a reopened thread", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    store.append({
+      threadId,
+      operationId,
+      expectedCursor: 0,
+      event: turnStarted("89000000-0000-4000-8000-000000000040"),
+    });
+    const tool = {
+      kind: "tool-activity" as const,
+      toolCallId: "call-1" as never,
+      toolName: "web-fetch",
+    };
+    store.append({
+      threadId,
+      operationId,
+      expectedCursor: 1,
+      event: { ...tool, state: "started" },
+    });
+    const outsideContent = { labels: ["fake-authority" as const], recordedOnly: true as const };
+    store.append({
+      threadId,
+      operationId,
+      expectedCursor: 2,
+      event: { ...tool, state: "completed", outsideContent },
+    });
+    expect(store.conversation({ threadId, afterCursor: 0, limit: 10 })).toMatchObject({
+      turns: [{ steps: [{ kind: "tool", state: "completed", outsideContent }] }],
+    });
+  });
 });
 
 function turnOperation(index: number): CodeOperationId {

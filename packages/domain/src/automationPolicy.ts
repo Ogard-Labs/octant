@@ -749,9 +749,9 @@ export function intersectAutomationAuthority(
   const capabilityKeys = ["filesystem", "shell", "git", "network", "tools", "subagents"] as const;
   const effective: AgentRunAuthority = {
     filesystem: requested.filesystem && ceilings.every((ceiling) => ceiling.filesystem),
-    shell:
-      input.mode === "work" ? false : requested.shell && ceilings.every((ceiling) => ceiling.shell),
-    git: input.mode === "work" ? false : requested.git && ceilings.every((ceiling) => ceiling.git),
+    // Work and Code share the shell and Git at the routine's level.
+    shell: requested.shell && ceilings.every((ceiling) => ceiling.shell),
+    git: requested.git && ceilings.every((ceiling) => ceiling.git),
     network: requested.network && ceilings.every((ceiling) => ceiling.network),
     tools: requested.tools && ceilings.every((ceiling) => ceiling.tools),
     subagents: requested.subagents && ceilings.every((ceiling) => ceiling.subagents),
@@ -1045,12 +1045,6 @@ export function validateAutomationDefinition(input: AutomationDefinition): Autom
     authorityRank[definition.authorityProfile.requested.executionPolicy]
   ) {
     return reject("authority-widening", "Automation authority cannot widen execution policy.");
-  }
-  if (
-    definition.mode === "work" &&
-    (definition.authorityProfile.effective.shell || definition.authorityProfile.effective.git)
-  ) {
-    return reject("authority-widening", "Work automation cannot receive shell or Git authority.");
   }
   if (
     (definition.lifecycle === "archived" || definition.lifecycle === "exhausted") &&

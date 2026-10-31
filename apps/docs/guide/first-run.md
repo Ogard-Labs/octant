@@ -152,8 +152,7 @@ no sandbox and no prompts: agents can change any file and run any command
 without asking, with no sandbox, so they can read your whole home folder,
 including SSH and cloud keys. The first time this computer or a Project picks
 it, Octant shows that warning once. At Full access, outside content an agent
-read is only marked on the tool row and the thread card; nothing asks. Not
-built yet.
+read is only marked on the tool row and the thread card; nothing asks.
 
 Destinations that this host cannot back — Navigator without a model, a Work
 board that is not wired, GitHub pull requests without a working GitHub

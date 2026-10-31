@@ -43,7 +43,12 @@ describe("work thread contracts", () => {
     expect(decodeWorkThread({ ...threadFixture, access: "auto-accept-edits" }).access).toBe(
       "auto-accept-edits",
     );
-    expect(() => decodeWorkThread({ ...threadFixture, access: "full-access" })).toThrow();
+    // Work shares Code's levels, Full access and Auto included; it has no Plan.
+    expect(decodeWorkThread({ ...threadFixture, access: "full-access" }).access).toBe(
+      "full-access",
+    );
+    expect(decodeWorkThread({ ...threadFixture, access: "auto" }).access).toBe("auto");
+    expect(() => decodeWorkThread({ ...threadFixture, access: "plan" })).toThrow();
     expect(
       decodeWorkThread({
         ...threadFixture,

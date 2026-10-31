@@ -201,10 +201,11 @@ export interface ToolEgressRulesOptions {
     "append" | "replayAggregateType" | "aggregateVersions" | "transaction"
   >;
   /**
-   * The Code thread rules may be granted on, or nothing for any other thread,
-   * and whether its harness commands run on `proxied` network now.
+   * The Work or Code thread rules may be granted on, or nothing for any other
+   * thread, and whether its harness commands run on `proxied` network now.
+   * Work and Code share the shell at the thread's level, so both hold rules.
    */
-  readonly readCodeThread: (
+  readonly readThread: (
     threadId: string,
   ) => { readonly projectId: string; readonly commandsProxied?: boolean } | undefined;
   /** Whether the thread has taken in outside content. A read that throws counts as tainted. */
@@ -561,7 +562,7 @@ export class ToolEgressRules {
    * cannot be read offers nothing, as it allows nothing.
    */
   commandConfirmationHosts(threadId: string): ReadonlyArray<NativeHarnessCommandHost> {
-    const thread = this.#options.readCodeThread(threadId);
+    const thread = this.#options.readThread(threadId);
     if (thread === undefined) return [];
     this.#sweepExpiredRules();
     const now = this.#timestamp();
@@ -645,7 +646,7 @@ export class ToolEgressRules {
     /** The approval answered, when it has an id of its own; otherwise one is minted. */
     readonly approvalId?: string;
   }): ToolEgressAnswerOutcome {
-    const thread = this.#options.readCodeThread(input.threadId);
+    const thread = this.#options.readThread(input.threadId);
     if (thread === undefined) return { kind: "refused", reason: "not-a-code-thread" };
     this.#sweepExpiredRules();
     const now = this.#timestamp();
@@ -769,7 +770,7 @@ export class ToolEgressRules {
     readonly principal: ToolEgressPerson;
     readonly proposalIds: ReadonlyArray<string>;
   }): ToolEgressAnswerOutcome {
-    if (this.#options.readCodeThread(input.threadId) === undefined) {
+    if (this.#options.readThread(input.threadId) === undefined) {
       return { kind: "refused", reason: "not-a-code-thread" };
     }
     const open = this.#proposals.get(input.threadId);
@@ -802,7 +803,7 @@ export class ToolEgressRules {
     readonly principal: ToolEgressPerson;
     readonly ruleId: string;
   }): ToolEgressAnswerOutcome {
-    const thread = this.#options.readCodeThread(input.threadId);
+    const thread = this.#options.readThread(input.threadId);
     if (thread === undefined) return { kind: "refused", reason: "not-a-code-thread" };
     this.#sweepExpiredRules();
     const actor = this.#actorFor(input.principal);
@@ -853,7 +854,7 @@ export class ToolEgressRules {
     readonly principal: ToolEgressPerson;
     readonly enabled: boolean;
   }): ToolEgressAnswerOutcome {
-    if (this.#options.readCodeThread(input.threadId) === undefined) {
+    if (this.#options.readThread(input.threadId) === undefined) {
       return { kind: "refused", reason: "not-a-code-thread" };
     }
     const appended = this.#append(
@@ -874,7 +875,7 @@ export class ToolEgressRules {
 
   /** The thread's rules lists and open proposals as this caller may act on them. */
   view(threadId: string, caller: ToolEgressPerson["kind"]): ToolEgressThreadView | undefined {
-    const thread = this.#options.readCodeThread(threadId);
+    const thread = this.#options.readThread(threadId);
     if (thread === undefined) return undefined;
     this.#sweepExpiredRules();
     const now = this.#timestamp() ?? "";

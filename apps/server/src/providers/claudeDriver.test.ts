@@ -36,6 +36,7 @@ import { draftGitText } from "../code/codeGitDraftService";
 import { makeContextSummaryGenerator } from "../context/contextSummaryGenerator";
 import { completeOnceOutcome } from "../harness/nativeHarnessSingleShot";
 import { makeThreadHandOffCompletion } from "../threadHandOffCompletion";
+import type { ProviderRuntimeNetworkPort } from "../network/providerRuntimeNetwork";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000701");
 const otherInstanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000702");
@@ -196,6 +197,7 @@ function harness(
     readonly compactAnnounced?: boolean;
     readonly configDirectory?: string;
     readonly artifactDelivery?: () => boolean;
+    readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
     readonly makeEnvironmentScope?: (
       authentication: ClaudeAuthentication,
       options?: ClaudeEnvironmentScopeOptions,
@@ -330,6 +332,7 @@ function harness(
       ...(options.artifactDelivery === undefined
         ? {}
         : { artifactDelivery: options.artifactDelivery }),
+      ...(options.runtimeNetwork === undefined ? {} : { runtimeNetwork: options.runtimeNetwork }),
       process,
       sdk,
       credentialResolver,
@@ -463,22 +466,24 @@ describe("Claude execution policy", () => {
       allowDangerouslySkipPermissions: false,
       tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "AskUserQuestion", "TodoWrite"],
     });
-    expect(claudeExecutionOptions("approval-gated", false, "work").tools).toEqual([
-      "Read",
-      "Grep",
-      "Glob",
-      "Edit",
-      "Write",
-      "AskUserQuestion",
-      "TodoWrite",
-    ]);
+    // Work and Code share one capability set at the thread's level.
+    for (const [policy, autoApprove] of [
+      ["approval-gated", false],
+      ["approval-gated", true],
+      ["auto-accept-edits", false],
+      ["full-access", false],
+    ] as const) {
+      expect(claudeExecutionOptions(policy, autoApprove, "work")).toEqual(
+        claudeExecutionOptions(policy, autoApprove, "code"),
+      );
+    }
     expect(claudeExecutionOptions("plan")).toEqual({
       permissionMode: "plan",
       allowDangerouslySkipPermissions: false,
       tools: ["Read", "Glob", "Grep", "TodoWrite"],
     });
     // A Code Plan turn runs read-only commands only where its Seatbelt profile
-    // can name the programs; Chat and Work have no shell in any posture.
+    // can name the programs; Chat has no shell, and Work never runs in Plan.
     expect(claudeExecutionOptions("plan", false, "code", "darwin").tools).toEqual([
       "Read",
       "Glob",
@@ -570,6 +575,50 @@ describe("Claude execution policy", () => {
 
       await acquired.close();
     }
+  });
+
+  it("points the sandbox's network at the session's egress proxy where the host routes it, and releases it when the session ends", async () => {
+    const started: Array<{ readonly runtime: string; readonly autoReview: boolean | undefined }> =
+      [];
+    let released = 0;
+    const runtimeNetwork: ProviderRuntimeNetworkPort = {
+      start: async (input) => {
+        started.push({ runtime: input.runtime, autoReview: input.autoReview });
+        expect(input.authentication).toBe("none");
+        return {
+          status: "proxied",
+          endpoint: { kind: "loopback", port: 47005 },
+          environment: {},
+          release: async () => {
+            released += 1;
+          },
+        };
+      },
+    };
+    for (const executionPolicy of [
+      "approval-gated",
+      "auto-accept-edits",
+      "plan",
+      "full-access",
+    ] as const) {
+      const f = harness("subscription", "current-session", { runtimeNetwork });
+      const acquired = await acquire(f.driver);
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy, autoApprove: true }),
+      );
+      expect(f.opens[0]?.sandbox?.network).toEqual(
+        executionPolicy === "approval-gated" || executionPolicy === "auto-accept-edits"
+          ? { httpProxyPort: 47005 }
+          : undefined,
+      );
+      await Effect.runPromise(acquired.connection.stop(sessionId));
+      await acquired.close();
+    }
+    expect(started).toEqual([
+      { runtime: "claude-sandbox", autoReview: true },
+      { runtime: "claude-sandbox", autoReview: true },
+    ]);
+    expect(released).toBe(2);
   });
 
   it("grants a Project's extra folder what the root gets, in its sandbox and its tool gate", async () => {
@@ -1175,37 +1224,43 @@ describe("Claude execution policy", () => {
     await acquired.close();
   });
 
-  it("never offers a Work session a shell, and refuses one it asks for without raising an approval", async () => {
-    const f = harness();
-    const acquired = await acquire(f.driver, "work");
-    await Effect.runPromise(
-      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
-    );
-    const open = f.opens[0]!;
-    expect(open.tools).not.toContain("Bash");
-    expect(open.tools).toEqual(expect.arrayContaining(["Read", "Edit", "Write"]));
-    const approvals: ProviderRuntimeEvent[] = [];
-    const subscription = Effect.runFork(
-      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
-        Effect.sync(() => {
-          if (event.kind === "approval-request") approvals.push(event);
-        }),
-      ),
-    );
-    await expect(
-      open.preToolUse({
-        sessionId: "sdk-session-1",
-        projectRoot,
-        toolName: "Bash",
-        input: { command: "git status", description: "Show working tree status" },
-        toolUseId: "work-bash",
-        signal: new AbortController().signal,
-      }),
-    ).resolves.toMatchObject({ behavior: "deny" });
-    expect(approvals).toEqual([]);
-    await Effect.runPromise(Fiber.interrupt(subscription));
-    await acquired.close();
-  });
+  it.each([
+    ["approval-gated", false],
+    ["approval-gated", true],
+    ["auto-accept-edits", false],
+    ["full-access", false],
+  ] as const)(
+    "starts a Work session at %s (auto %s) with the shell, posture, sandbox and Bash gate of the same Code session",
+    async (executionPolicy, autoApprove) => {
+      const sessionFor = async (mode: "work" | "code") => {
+        const f = harness();
+        const acquired = await acquire(f.driver, mode);
+        await Effect.runPromise(
+          acquired.connection.start({ sessionId, modelId, executionPolicy, autoApprove }),
+        );
+        const open = f.opens[0]!;
+        const bash = await open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Bash",
+          input: { command: "git status", description: "Show working tree status" },
+          toolUseId: `${mode}-bash`,
+          signal: new AbortController().signal,
+        });
+        await acquired.close();
+        return {
+          tools: open.tools,
+          executionPolicy: open.executionPolicy,
+          autoApprove: open.autoApprove,
+          sandbox: open.sandbox,
+          bash,
+        };
+      };
+      const work = await sessionFor("work");
+      expect(work.tools).toContain("Bash");
+      expect(work).toEqual(await sessionFor("code"));
+    },
+  );
 
   it("allows reads from the hook alone, so a read-heavy turn never trips the grant cap", async () => {
     const f = harness();

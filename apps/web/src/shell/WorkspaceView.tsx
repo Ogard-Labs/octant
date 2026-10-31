@@ -1974,6 +1974,9 @@ function renderNonCodeTab(
           ? {}
           : { windowCapability: props.projectWindowCapability })}
         {...(props.onDockResearch === undefined ? {} : { onDockResearch: props.onDockResearch })}
+        {...(props.onOpenSettings === undefined
+          ? {}
+          : { onManageExtensions: props.onOpenSettings })}
         tab={tab}
       />
     );

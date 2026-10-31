@@ -254,6 +254,7 @@ html[data-octant-reduced-transparency="true"] .thread-activity-pip__collapsed-co
    and nothing else, since the picture already carries the shadow. */
 html[data-octant-reduced-transparency="true"] .browser-pip__caption,
 html[data-octant-reduced-transparency="true"] .browser-pip__count,
+html[data-octant-reduced-transparency="true"] .browser-pip__profile,
 html[data-octant-reduced-transparency="true"] .browser-pip__close {
   background: var(--octant-floating);
   backdrop-filter: none;
@@ -262,6 +263,7 @@ html[data-octant-reduced-transparency="true"] .browser-pip__close {
 @media (prefers-reduced-transparency: reduce) {
   .browser-pip__caption,
   .browser-pip__count,
+  .browser-pip__profile,
   .browser-pip__close {
     background: var(--octant-floating);
     backdrop-filter: none;
@@ -271,6 +273,7 @@ html[data-octant-reduced-transparency="true"] .browser-pip__close {
 @supports not (backdrop-filter: blur(1px)) {
   .browser-pip__caption,
   .browser-pip__count,
+  .browser-pip__profile,
   .browser-pip__close {
     background: var(--octant-floating);
   }
@@ -1399,6 +1402,35 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
 .turn-activity__status-icon {
   flex: none;
   color: var(--oct-meta);
+}
+
+/* A tool row whose result brought outside content in. Quiet when nothing was
+   found, and at Full access, where outside content is recorded only; a
+   Watcher finding elsewhere takes the warning role. */
+.turn-activity__outside {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 50%;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
+}
+
+.turn-activity__outside[data-found="true"][data-quiet="false"] {
+  color: var(--oct-warn-fg);
+}
+
+.turn-activity__outside > svg {
+  flex: none;
+}
+
+.turn-activity__outside-text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .turn-activity__disclosure[data-state="failed"] .turn-activity__outcome,

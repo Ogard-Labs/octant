@@ -3,6 +3,7 @@ import { decodeChatThreadId, decodeCodeThreadId, decodeWorkThreadId } from "@oct
 import { createAgentRunInteractions } from "../agentRun/agentRunInteractions";
 import {
   readApprovalOutsideContent,
+  readShieldWatcherLabels,
   readThreadExternalContentTaint,
 } from "../context/externalContentTaintProjection";
 import type { ShieldReviewPort } from "../shield/octantShield";
@@ -89,6 +90,7 @@ export function wireHarnessState(deps: HarnessStateDependencies) {
     childTainted: (run) =>
       readThreadExternalContentTaint(persistence.connection, String(run.id))
         .externalContentIngested,
+    childWatcherLabels: (run) => readShieldWatcherLabels(persistence.connection, String(run.id)),
     approvals: nativeHarnessApprovals,
     questions: nativeHarnessQuestions,
     providerName: (id) => persistence.readProviderInstance(id)?.displayName,

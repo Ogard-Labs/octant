@@ -19,6 +19,7 @@ import {
   type ToolEgressProxy,
   type ToolEgressProxyEndpointRequest,
   type ToolEgressProxyLimits,
+  type ToolEgressProxyOptions,
   type ToolEgressRecordAppend,
 } from "./nativeHarnessEgressProxy";
 
@@ -85,7 +86,8 @@ export interface EgressHarnessOptions {
   readonly taint?: () => { readonly threadTainted: boolean; readonly parentTainted: boolean };
   readonly rulesRead?: () => ReadonlyArray<ToolEgressRule>;
   readonly clock?: () => string;
-  readonly decision?: "tool-rules" | "public-destinations";
+  readonly decision?: ToolEgressProxyOptions["decision"];
+  readonly authentication?: ToolEgressProxyOptions["authentication"];
 }
 
 export interface EgressHarness {
@@ -135,6 +137,7 @@ export async function startEgressHarness(
     endpoint: options.endpoint ?? { kind: "loopback" },
     ...(options.limits === undefined ? {} : { limits: options.limits }),
     ...(options.decision === undefined ? {} : { decision: options.decision }),
+    ...(options.authentication === undefined ? {} : { authentication: options.authentication }),
     resolveAll: async (host) => {
       resolved.push(host);
       return options.resolve === undefined ? ["93.184.216.10"] : options.resolve(host);

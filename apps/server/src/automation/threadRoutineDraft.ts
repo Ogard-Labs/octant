@@ -3,8 +3,9 @@
 // that carries authority is read here from the host's own records at the
 // moment of confirmation: the thread's Project, its binding, its checkout, its
 // provider and model, and an approval-gated profile. Nothing is ever wider
-// than the thread: Work gets no shell or Git, Code runs ask first, network and
-// subagents stay off, and a session-only permission stays session-only.
+// than the thread: Work and Code get the shell and Git the thread has and run
+// ask first, network and subagents stay off, and a session-only permission
+// stays session-only.
 
 import { createHash } from "node:crypto";
 import {
@@ -99,8 +100,8 @@ export function buildThreadRoutineDraft(
     thread.permissionPersistence === "current-session";
   const authority: AgentRunAuthority = {
     filesystem: true,
-    shell: mode === "code",
-    git: mode === "code",
+    shell: true,
+    git: true,
     network: false,
     tools: true,
     subagents: false,

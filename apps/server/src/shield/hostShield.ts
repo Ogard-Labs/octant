@@ -10,6 +10,7 @@ import {
   type ProviderModelId,
   type ShieldDecision,
   type ShieldModelChoice,
+  type ShieldWatcherLabel,
   type TurnUsage,
 } from "@octant/contracts";
 import { shieldReviewsPrompts } from "@octant/domain/guardrail-policy";
@@ -41,6 +42,8 @@ export interface HostShieldDependencies {
   ) => ReadonlyArray<{ readonly id: ProviderModelId; readonly displayName: string }> | undefined;
   readonly resolveDriver: (providerInstanceId: ProviderInstanceId) => ProviderDriver | undefined;
   readonly tainted: (threadId: string) => boolean;
+  /** What the Watcher found in what the thread read: kinds only, never text. */
+  readonly watcherLabels: (threadId: string) => ReadonlyArray<ShieldWatcherLabel>;
   /** The thread's own turn prompts, oldest first: what the person wrote. */
   readonly personMessages: (threadId: CodeThread["id"], limit: number) => ReadonlyArray<string>;
   /** The person's chosen Shield model, when they picked one. */
@@ -140,6 +143,7 @@ export function createHostShield(deps: HostShieldDependencies): HostShield {
         };
       },
       tainted: deps.tainted,
+      watcherLabels: deps.watcherLabels,
       personMessages: (threadId) => {
         const thread = readThread(threadId);
         return thread === undefined

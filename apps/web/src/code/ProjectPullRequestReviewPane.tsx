@@ -751,7 +751,13 @@ function mergeOutcomeCopy(outcome: CodeProjectPullRequestMergeOutcome): string {
             ? "the pull request changed since this review"
             : outcome.reason === "conflict"
               ? "GitHub reported a merge conflict"
-              : "GitHub rejected the merge";
+              : outcome.reason === "not-confirmed"
+                ? "the merge was not confirmed"
+                : outcome.reason === "checks-not-passing"
+                  ? "the required checks have not all passed"
+                  : outcome.reason === "checks-unknown"
+                    ? "the required checks could not be read"
+                    : "GitHub rejected the merge";
   return `Merge refused: ${reason}.`;
 }
 

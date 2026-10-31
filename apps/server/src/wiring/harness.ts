@@ -23,7 +23,10 @@ import { codeTurnExecutionPolicyReader } from "../code/codeTurnExecutionPolicy";
 import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
 import { nativeHarnessRecoveryBlockers } from "../harness/nativeHarnessRecovery";
 import { newestChatAttemptSession } from "../harness/nativeHarnessJournalLookup";
-import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
+import {
+  readShieldWatcherLabels,
+  readThreadExternalContentTaint,
+} from "../context/externalContentTaintProjection";
 import { createNativeHarnessAuthority } from "../harness/nativeHarnessAuthority";
 import {
   createNativeHarnessComposition,
@@ -55,7 +58,7 @@ import { parseFollowUpSuggestions } from "../followUps/followUpSuggestionParsing
 import { fetchPublicUrl, PublicFetchRefused } from "../harness/nativeHarnessWebFetch";
 import { searxngHarnessWebSearch } from "../harness/nativeHarnessWebSearch";
 import { deriveToolHostId } from "../browser/browserAuthorityResolver";
-import { isNativeHarnessDriverKind } from "@octant/domain";
+import { isNativeHarnessDriverKind, workThreadAccessOf } from "@octant/domain";
 import { type AgentRunsWiring, authorizeAgentRunParentThread } from "./agentRuns";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
 import type { ServerStart } from "./serverShape";
@@ -541,6 +544,7 @@ export function wireHarness(deps: HarnessDependencies) {
     resolveDriver: resolveConfiguredDriver,
     tainted: (threadId) =>
       readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
+    watcherLabels: (threadId) => readShieldWatcherLabels(persistence.connection, threadId),
     personMessages: (threadId, limit) =>
       codeBoardEventStore.personPromptsForThread(threadId, limit).flatMap((prompt) => {
         const text = codeEvidence.read(prompt);
@@ -643,6 +647,10 @@ export function wireHarness(deps: HarnessDependencies) {
     // The posture a command's network follows is the one its turn may use:
     // the window's session grant, clamped to the running turn's posture, so
     // a thread widened mid-turn keeps that turn's commands on `proxied`.
+    readWorkExecutionPolicy: (threadId) => {
+      const access = runningWorkTurnAccess(threadId);
+      return access === undefined ? undefined : workThreadAccessOf(access).executionPolicy;
+    },
     readCodeExecutionPolicy: codeTurnExecutionPolicyReader({
       readCodeThread: (threadId) => persistence.readCodeThread(threadId),
       codeSessionAuthority,
