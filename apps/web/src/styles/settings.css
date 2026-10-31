@@ -3738,5 +3738,6 @@ html[data-octant-increased-contrast="true"]
 }
 
 .protected-files__paths {
+  display: block;
   overflow-wrap: anywhere;
 }

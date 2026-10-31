@@ -407,7 +407,7 @@ export function protectedEntryDisplay(
 
 function describeNamePattern(name: string): string {
   if (name === SSH_PRIVATE_KEY_NAME) return "id_* (not .pub)";
-  if (name === "[^/]*") return "*";
+  if (name === "[^/]*") return "* (not the login keychain)";
   if (name === PROFILE_STORE_NAME || name === PROFILE_LOGIN_STORE_NAME)
     return "…/cookie and login stores";
   return name
