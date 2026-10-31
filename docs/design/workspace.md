@@ -450,8 +450,16 @@ woke the thread and which try, stopped and why). Auto-fix names the linked
 thread it wakes, the first linked one; with none linked it stays off and its
 hover reason says to link a thread. A refused or unsupported change keeps the
 switch where it was and says why in one alert line under the section. The
-review re-reads the switches every 20 seconds while open. Rules and limits are
-owned by [Architecture: modes](../architecture.md#modes-chat-work-and-code).
+review re-reads the switches every 20 seconds while open. Turning Merge when
+ready on first opens an inline confirmation naming the reviewed head, as Merge
+does. Under the switches a **Your actions** section holds the person's own
+controls: the pull request's labels (a button removes one) and the
+repository's other labels (a button adds one; no free-text label), a comment
+box, a reply box on each open review thread, and Close or Reopen pull request.
+A comment or reply says it posts under the person's name; a refusal is one
+alert line under the section, and a paired device is told only the desktop
+window can do it. Rules and limits are owned by
+[Architecture: modes](../architecture.md#modes-chat-work-and-code).
 The top-right control reveals the dock only when the active pane has a bound thread
 or a valid launchable tool. A new Code task's pane, before its thread exists, keeps
 the dock: its title band shows the common tools disabled ("Available once the task

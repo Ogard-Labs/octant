@@ -1429,10 +1429,12 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         projectPullRequestActionService.mergeStack(windowId, command, signal, caller),
       actOnProjectPullRequest: (windowId, command, signal, caller) =>
         projectPullRequestActionService.act(windowId, command, signal, caller),
+      readProjectPullRequestActionContext: (windowId, query, signal, caller) =>
+        projectPullRequestActionService.readContext(windowId, query, signal, caller),
       queryProjectPullRequestSwitches: (windowId, target) =>
         pullRequestSwitchService.query(windowId, target),
-      setProjectPullRequestMergeWhenReady: (windowId, command, signal, initiator) =>
-        pullRequestSwitchService.setMergeWhenReady(windowId, command, initiator, signal),
+      setProjectPullRequestMergeWhenReady: (windowId, command, signal, caller) =>
+        pullRequestSwitchService.setMergeWhenReady(windowId, command, caller, signal),
       setProjectPullRequestAutoFix: (windowId, command, initiator) =>
         pullRequestSwitchService.setAutoFix(windowId, command, initiator),
       noteComposerActivity: (_windowId, activity) =>

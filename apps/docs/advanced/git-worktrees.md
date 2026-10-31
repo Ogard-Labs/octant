@@ -112,9 +112,11 @@ receives an explicit normalized path set.
   if it moved or if a required check has not passed, and uses your signed-in
   `gh`. A paired phone or web client can merge a pull request, or a whole
   stack from the bottom, the same way; a stack that is not one chain is
-  refused before anything merges. Labels, comments, replies, close, and
-  reopen from the desktop window have a route but no controls yet. You can also turn on
-  **Merge when ready** and **Auto-fix** there; see
+  refused before anything merges. Under **Your actions** in the review you can
+  add or remove a label the repository already has, post a comment, reply in an
+  open review thread, and close or reopen the pull request. Comments and replies
+  post under your name, and these controls work in the desktop window only. You
+  can also turn on **Merge when ready** and **Auto-fix** there; see
   [Automatic actions](#automatic-actions-on-a-pull-request). Durable local review findings stay thread-owned; publishing
   them to GitHub is a later phase.
 
@@ -168,8 +170,10 @@ force-pushes.
 ### Automatic actions on a pull request
 
 A pull request's review has two switches under **Automatic actions**. Only you
-can turn them on, with a click in a desktop window on the computer running
-Octant; a paired phone or browser cannot.
+can turn them on. **Auto-fix** needs a click in a desktop window on the computer
+running Octant. **Merge when ready** also works from a paired phone or browser,
+and asks you to confirm the head you reviewed first, in a window or on the
+phone, before it turns on.
 
 - **Merge when ready** asks GitHub to merge the pull request itself once its
   required checks and reviews pass, using the merge method selected beside

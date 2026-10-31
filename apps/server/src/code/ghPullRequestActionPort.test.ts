@@ -41,6 +41,80 @@ const view = (state: string) => ({
   }),
 });
 
+describe("pull-request action context", () => {
+  const ok = (value: unknown) => ({ exitCode: 0, stdout: JSON.stringify(value) });
+
+  it("reads the pull request's labels, the repository's labels, and its review threads", async () => {
+    const { port, run } = fixture([
+      ok({ labels: [{ name: "bug" }] }),
+      ok([{ name: "bug" }, { name: "p1" }]),
+      ok({
+        data: {
+          repository: {
+            pullRequest: {
+              reviewThreads: {
+                nodes: [
+                  {
+                    id: "PRRT_1",
+                    isResolved: false,
+                    isOutdated: true,
+                    path: "src/a.ts",
+                    comments: {
+                      nodes: [{ author: { login: "reviewer" }, body: "Please rename." }],
+                    },
+                  },
+                  { id: "bad id!", isResolved: false, comments: { nodes: [] } },
+                ],
+              },
+            },
+          },
+        },
+      }),
+    ]);
+    await expect(port.readContext(identity, signal)).resolves.toEqual({
+      status: "read",
+      labels: ["bug"],
+      repositoryLabels: ["bug", "p1"],
+      reviewThreads: [
+        {
+          id: "PRRT_1",
+          resolved: false,
+          outdated: true,
+          path: "src/a.ts",
+          author: "reviewer",
+          excerpt: "Please rename.",
+        },
+      ],
+    });
+    expect(run).toHaveBeenCalledTimes(3);
+  });
+
+  it("sends the owner and repository name as strings so a name like 2048 still reads", async () => {
+    const { port, run } = fixture([ok({ labels: [] }), ok([]), ok({})]);
+    await port.readContext({ owner: "2048", name: "true", number: 7 }, signal);
+    const graphql = run.mock.calls.map((call) => call[0]).find((args) => args[0] === "api");
+    expect(graphql).toEqual(expect.arrayContaining(["-f", "owner=2048", "-f", "name=true"]));
+    expect(graphql).not.toContain("owner=2048-F");
+    expect(graphql?.filter((arg) => arg === "-F")).toHaveLength(1);
+  });
+
+  it("reports a signed-out GitHub as unavailable and writes nothing", async () => {
+    const { port, run } = fixture([
+      { exitCode: 1, stdout: "", stderr: "HTTP 401: Bad credentials" },
+      ok([]),
+      ok({}),
+    ]);
+    await expect(port.readContext(identity, signal)).resolves.toEqual({
+      status: "unavailable",
+      reason: "unauthenticated",
+    });
+    for (const call of run.mock.calls) {
+      expect(call[0]).not.toContain("--add-label");
+      expect(call[0]).not.toContain("mutation");
+    }
+  });
+});
+
 describe("pull-request action port", () => {
   it("adds and removes existing labels without a token in the environment", async () => {
     const { port, run } = fixture([{ exitCode: 0, stdout: "" }]);

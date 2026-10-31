@@ -447,6 +447,7 @@ const unavailableActionForge = {
   setState: async () => ({ status: "unavailable", reason: "unavailable" }) as const,
   summary: async () => ({ status: "unavailable" }) as const,
   requiredChecks: async () => "unknown" as const,
+  readContext: async () => ({ status: "unavailable", reason: "unavailable" }) as const,
 };
 
 function createProjectPullRequestPorts(ghExecutable: string | undefined): {
@@ -494,6 +495,7 @@ function createProjectPullRequestPorts(ghExecutable: string | undefined): {
         setState: (request, signal) => actions.setState(request, signal),
         summary: (request, signal) => actions.summary(request, signal),
         requiredChecks: (request, signal) => actions.requiredChecks(request, signal),
+        readContext: (request, signal) => actions.readContext(request, signal),
       },
       ghAvailable: true,
     };

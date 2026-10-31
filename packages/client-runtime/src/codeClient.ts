@@ -7,6 +7,7 @@ import {
   decodeCodeProjectPullRequestDetailRefreshCommand,
   decodeCodeProjectPullRequestAutoFixCommand,
   decodeCodeProjectPullRequestActionCommand,
+  decodeCodeProjectPullRequestActionContextQuery,
   decodeCodeProjectPullRequestMergeCommand,
   decodeCodeProjectPullRequestStackMergeCommand,
   decodeCodeProjectPullRequestMergeWhenReadyCommand,
@@ -41,6 +42,8 @@ import {
   CodeProjectPullRequestDetailView,
   type CodeProjectPullRequestAutoFixCommand,
   type CodeProjectPullRequestActionCommand,
+  CodeProjectPullRequestActionContext,
+  type CodeProjectPullRequestActionContextQuery,
   CodeProjectPullRequestActionOutcome,
   type CodeProjectPullRequestMergeCommand,
   CodeProjectPullRequestMergeOutcome,
@@ -207,6 +210,10 @@ export interface CodeClient {
   actOnProjectPullRequest?(
     command: CodeProjectPullRequestActionCommand,
   ): Promise<CodeProjectPullRequestActionOutcome>;
+  /** The labels and review threads the person's pull-request controls name. */
+  readProjectPullRequestActionContext?(
+    query: CodeProjectPullRequestActionContextQuery,
+  ): Promise<CodeProjectPullRequestActionContext>;
   /** A pull request's Merge when ready and Auto-fix switches. */
   queryProjectPullRequestSwitches?(
     target: CodeProjectPullRequestSwitchTarget,
@@ -608,6 +615,24 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           body: JSON.stringify(validated),
         },
         decodeHostAnswer(CodeProjectPullRequestActionOutcome),
+      );
+    },
+    async readProjectPullRequestActionContext(query) {
+      let validated: CodeProjectPullRequestActionContextQuery;
+      try {
+        validated = decodeCodeProjectPullRequestActionContextQuery(query);
+      } catch {
+        throw invalidProjectPullRequestAction();
+      }
+      return request(
+        fetch,
+        new URL("/api/code/project-pull-requests/action-context", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(validated),
+        },
+        decodeHostAnswer(CodeProjectPullRequestActionContext),
       );
     },
     async queryProjectPullRequestSwitches(target) {

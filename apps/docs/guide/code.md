@@ -154,6 +154,13 @@ earlier ones exist; it has no Load earlier, so read those on the desktop.
 `octant agent` shows a Code thread's newest 50 turns, and its footer then
 counts them as **newest 50 turns**.
 
+On the phone, a Code thread's pull-request panel has **Merge…** and **Merge when
+ready…** for an open pull request. Each re-reads the pull request from GitHub,
+shows the short head it read, and waits for your **Confirm**. A merge goes
+ahead only if that head is still current and the required checks have passed;
+**Merge when ready** hands the merge to GitHub once they do. Labels, comments,
+replies, close, and reopen stay on the desktop.
+
 In `octant agent`, Stop reports an interruption only when the host confirms it.
 If the turn finishes before Stop arrives, it reports that nothing is running;
 if the host refuses, the terminal shows the reason.
