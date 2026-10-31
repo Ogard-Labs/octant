@@ -198,6 +198,8 @@ A turn carries at most eight images, each up to 10 MB, alongside a written messa
 
 Images stay readable in the transcript after a restart. Removing a chip before sending discards the image on the host too.
 
+In the macOS desktop app, the paperclip opens a menu: **Choose file…** or **Capture window…**. Capture window lists your open windows by title and attaches a picture of the one you choose, as an image like any other. The first time, Octant explains why macOS needs Screen Recording permission and asks only when you press **Continue**; if you turned it off, Octant opens System Settings instead. Octant reads a window only after you choose it, and the picture goes only to the thread you attach it to. The web app and the phone app do not offer it.
+
 ## Thread environment
 
 Each Code thread owns an Environment tab in the right dock. Open it from the

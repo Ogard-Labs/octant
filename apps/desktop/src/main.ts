@@ -13,6 +13,7 @@ import {
   type ComputerUseDesktopService,
 } from "./computerUseDesktopService";
 import { CUA_DRIVER_FILENAME, DEVICE_HELPER_FILENAME } from "./runtimePaths";
+import { createWindowCapture } from "./windowCapture";
 import { createManagedToolService, type ManagedToolService } from "./managedToolService";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -31,6 +32,7 @@ import {
   nativeImage,
   nativeTheme,
   Notification,
+  desktopCapturer,
   powerMonitor,
   screen,
   session,
@@ -3540,6 +3542,37 @@ function installIpcHandlers(): void {
   });
   ipcMain.handle(IPC_CHANNELS.selectLocalPluginFolder, async (event) => {
     return await ownedWindowContext(event).localPluginFolderPicker(event);
+  });
+  // Window capture for the composer. Each step re-checks that the caller is
+  // this app's own top-level window; the renderer never names a screen or a
+  // file, only a window id the list just returned.
+  const windowCapture = createWindowCapture({
+    platform: process.platform,
+    screenAccess: () => systemPreferences.getMediaAccessStatus("screen"),
+    windowSources: async (thumbnail) =>
+      await desktopCapturer.getSources({
+        types: ["window"],
+        thumbnailSize: thumbnail,
+        fetchWindowIcons: false,
+      }),
+    openScreenRecordingSettings: () =>
+      shell.openExternal(
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+      ),
+  });
+  ipcMain.handle(IPC_CHANNELS.windowCaptureList, async (event) => {
+    ownedTopLevelWindowContext(event);
+    return await windowCapture.list();
+  });
+  ipcMain.handle(IPC_CHANNELS.windowCapturePermission, async (event) => {
+    ownedTopLevelWindowContext(event);
+    return await windowCapture.requestPermission();
+  });
+  ipcMain.handle(IPC_CHANNELS.windowCaptureTake, async (event, windowId: unknown) => {
+    ownedTopLevelWindowContext(event);
+    if (typeof windowId !== "string" || windowId.length === 0 || windowId.length > 256)
+      throw new Error("Octant rejected an invalid window to capture.");
+    return await windowCapture.capture(windowId);
   });
   ipcMain.handle(IPC_CHANNELS.selectRuntimeBinary, async (event) => {
     return await ownedWindowContext(event).runtimeBinaryPicker(event);
