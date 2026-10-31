@@ -26,6 +26,7 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { openLocalControlSession, type OpenedLocalControlSession } from "./localControl";
 import { resolveProjectCliCommand, runProjectCliCommand } from "./projectCommand";
+import { resolvePluginCliCommand, runPluginCliCommand } from "./pluginCommand";
 import { resolveDiagnosticsCliCommand, runDiagnosticsCliCommand } from "./diagnosticsCommand";
 import { resolveAgentCliCommand, runAgentCliCommand } from "./agentCommand";
 import { runMcpCliCommand } from "./mcpCommand";
@@ -287,6 +288,21 @@ async function main(): Promise<number> {
         command,
         session,
         cwd: process.cwd(),
+        stdout: process.stdout,
+        stderr: process.stderr,
+      }),
+    );
+  }
+  if (args.command === "plugin") {
+    const command = resolvePluginCliCommand(args.positional, args.flags);
+    if (command === undefined) {
+      printUsage();
+      return 1;
+    }
+    return await withLocalControlSession((session) =>
+      runPluginCliCommand({
+        command,
+        session,
         stdout: process.stdout,
         stderr: process.stderr,
       }),
@@ -582,6 +598,8 @@ function printUsage(): void {
       "  octant project remove <name>",
       "  octant project rename <name> <new name>",
       "  octant project access <name> full-access|approval-gated",
+      "  octant plugin install npm:<package>[@<version or range>]",
+      "  octant plugin check-update <package>",
       "  octant provider key set <instance> [--replace] [--stdin]",
       "  octant provider key status|remove <instance>",
       "  octant provider remove <instance>",
