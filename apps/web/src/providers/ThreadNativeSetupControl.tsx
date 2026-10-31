@@ -63,6 +63,12 @@ const OPTIONS: ReadonlyArray<{
   },
 ];
 
+const DEFAULT_OPTION = OPTIONS[0] ?? {
+  id: "inherit" as const,
+  label: "Account default",
+  detail: "",
+};
+
 /**
  * Turns a key provider's own setup on or off for one thread, or leaves it to
  * the account. Shown only where the host allows the change: a window on this
@@ -97,7 +103,7 @@ export function ThreadNativeSetupControl(props: {
     };
   }, [services, eligible, props.threadId]);
   if (services === undefined || !eligible) return null;
-  const selected = OPTIONS.find((option) => option.id === choice) ?? OPTIONS[0]!;
+  const selected = OPTIONS.find((option) => option.id === choice) ?? DEFAULT_OPTION;
   return (
     <OctantMenuRoot>
       <OctantMenuTrigger
