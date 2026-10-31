@@ -181,6 +181,23 @@ describe("categorizeSupportBundleDestination", () => {
   });
 });
 
+describe("path handling on long runs of slashes", () => {
+  it("finishes quickly on paths and home folders padded with slashes", () => {
+    const padding = "/".repeat(200_000);
+    const started = performance.now();
+    expect(categorizeSupportBundleDestination(`/Users/ada${padding}Downloads/x`, HOME)).toBe(
+      "downloads",
+    );
+    expect(categorizeSupportBundleDestination(`/Volumes${padding}x`, `${HOME}${padding}x`)).toBe(
+      "other-folder",
+    );
+    expect(sanitizeSupportBundleText(`at ${padding}x`, [`${HOME}${padding}x`])).toBe(
+      `at ${padding}x`,
+    );
+    expect(performance.now() - started).toBeLessThan(1_000);
+  });
+});
+
 describe("buildSupportBundleZip", () => {
   it("writes an archive whose central directory names every file and sizes", () => {
     const files = buildSupportBundleFiles(facts, [HOME]);

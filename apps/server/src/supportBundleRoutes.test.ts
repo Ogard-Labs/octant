@@ -93,6 +93,22 @@ describe("support bundle routes", () => {
     expect(await setup().handler(call("/api/other"))).toBeUndefined();
   });
 
+  it("answers a preflight with an empty 204 that names the allowed headers", async () => {
+    const { handler, builds } = setup();
+    const request = new Request("http://127.0.0.1:3100/api/diagnostics/bundle", {
+      method: "OPTIONS",
+      headers: { origin: "http://localhost:5173" },
+    });
+    const response = await handler(request);
+    expect(response?.status).toBe(204);
+    expect(await response!.text()).toBe("");
+    expect(response!.headers.get("access-control-allow-origin")).toBe("http://localhost:5173");
+    expect(response!.headers.get("access-control-allow-headers")).toContain(
+      "x-octant-window-capability",
+    );
+    expect(builds()).toBe(0);
+  });
+
   it("lists what a bundle holds for a local window, without recording anything", async () => {
     const { handler, connection } = setup();
     const response = await handler(

@@ -1217,7 +1217,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Save diagnostics",
           scope: "host",
           keywords:
-            "save diagnostics support bundle zip file host versions system providers log lines journal events names confinement guardrails process memory redacted send yourself about",
+            "save diagnostics support bundle zip file host versions system log lines journal events names confinement guardrails process memory redacted send yourself",
         },
         {
           id: settingId("export-diagnostics"),

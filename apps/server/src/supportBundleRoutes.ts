@@ -30,15 +30,21 @@ export interface SupportBundleRouteDependencies {
   readonly now?: () => number;
 }
 
+function corsHeaders(origin: string | null): Record<string, string> {
+  return {
+    "access-control-allow-origin": origin ?? "",
+    "access-control-allow-methods": METHODS,
+    "access-control-allow-headers": HEADERS,
+  };
+}
+
 function json(body: unknown, status: number, origin: string | null): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
       "content-type": "application/json",
       "cache-control": "no-store",
-      "access-control-allow-origin": origin ?? "",
-      "access-control-allow-methods": METHODS,
-      "access-control-allow-headers": HEADERS,
+      ...corsHeaders(origin),
     },
   });
 }
@@ -57,7 +63,10 @@ export function createSupportBundleRouteHandler(dependencies: SupportBundleRoute
     if (origin !== null && !isAllowedOrigin(origin)) {
       return json({ error: "Renderer origin is not allowed." }, 400, null);
     }
-    if (request.method === "OPTIONS") return json(null, 204, origin);
+    // A 204 carries no body: passing even "null" as one makes the runtime refuse it.
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: corsHeaders(origin) });
+    }
     if (request.method !== (isPreview ? "GET" : "POST")) {
       return json({ error: "Method not allowed." }, 405, origin);
     }

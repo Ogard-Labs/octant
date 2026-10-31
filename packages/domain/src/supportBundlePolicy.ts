@@ -188,6 +188,25 @@ const README_HEADER = [
   "",
 ];
 
+// Path text can be any length and made of any run of slashes, so these walk the
+// string once instead of using a backtracking pattern.
+function trimTrailingSlashes(path: string): string {
+  let end = path.length;
+  while (end > 0 && path.charCodeAt(end - 1) === 47) end -= 1;
+  return path.slice(0, end);
+}
+
+function collapseSlashes(path: string): string {
+  let collapsed = "";
+  let previousWasSlash = false;
+  for (const character of path) {
+    const isSlash = character === "/";
+    if (!(isSlash && previousWasSlash)) collapsed += character;
+    previousWasSlash = isSlash;
+  }
+  return collapsed;
+}
+
 /**
  * One string, made safe: your home folder becomes `~`, then the diagnostics
  * redaction strips secrets and any other person's home path. Text that still
@@ -199,7 +218,7 @@ export function sanitizeSupportBundleText(
 ): string {
   let text = raw;
   for (const home of [...homeDirectories].sort((a, b) => b.length - a.length)) {
-    const trimmed = home.replace(/\/+$/, "");
+    const trimmed = trimTrailingSlashes(home);
     if (trimmed.length < 2) continue;
     text = text.split(trimmed).join("~");
   }
@@ -374,8 +393,8 @@ export function categorizeSupportBundleDestination(
   path: string,
   homeDirectory: string,
 ): SupportBundleDestinationCategory {
-  const home = homeDirectory.replace(/\/+$/, "");
-  const normalized = path.replace(/\/+/g, "/");
+  const home = trimTrailingSlashes(homeDirectory);
+  const normalized = collapseSlashes(path);
   for (const [folder, category] of [
     ["Downloads", "downloads"],
     ["Desktop", "desktop"],
