@@ -7101,7 +7101,11 @@ top-level window: listing reads window titles only (a zero-size thumbnail, so
 no pixels), the macOS Screen Recording permission is requested only after the
 composer explained it and the person chose Continue (a person who denied it is
 sent to System Settings instead of prompted again), and a capture reads exactly
-the one window id the list returned. A window that closed before the capture is
+the one window id the list returned, through a display-media stream
+opened for that source alone in a hidden, network-free page on its own in-memory
+session, from which a single frame is drawn. Electron's thumbnail call is never
+used for the capture, because a non-zero thumbnail size reads the pixels of
+every open window before any can be filtered out. A window that closed before the capture is
 reported, never retargeted. Web and phone clients lack the bridge methods, so
 they never offer the entry; other desktop platforms omit them until their
 capture permission model is designed. Capture bytes go to the attachment path

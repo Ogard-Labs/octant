@@ -14,6 +14,7 @@ import {
 } from "./computerUseDesktopService";
 import { CUA_DRIVER_FILENAME, DEVICE_HELPER_FILENAME } from "./runtimePaths";
 import { createWindowCapture } from "./windowCapture";
+import { grabWindowFrame } from "./windowFrameGrab";
 import { createManagedToolService, type ManagedToolService } from "./managedToolService";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -3544,12 +3545,15 @@ function installIpcHandlers(): void {
   const windowCapture = createWindowCapture({
     platform: process.platform,
     screenAccess: () => systemPreferences.getMediaAccessStatus("screen"),
-    windowSources: async (thumbnail) =>
+    // Zero-size thumbnails: titles and ids only. A non-zero size would make
+    // Electron read every open window's pixels, not just the chosen one's.
+    windowSources: async () =>
       await desktopCapturer.getSources({
         types: ["window"],
-        thumbnailSize: thumbnail,
+        thumbnailSize: { width: 0, height: 0 },
         fetchWindowIcons: false,
       }),
+    grabFrame: grabWindowFrame,
     openScreenRecordingSettings: () =>
       shell.openExternal(
         "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
