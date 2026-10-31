@@ -1,4 +1,4 @@
-import { unsupportedModelOptionValues } from "@octant/domain";
+import { projectExtraFolderRoots, unsupportedModelOptionValues } from "@octant/domain";
 import {
   CODE_FORK_HANDOFF_REFUSALS,
   selectCodeForkHandoff,
@@ -2486,6 +2486,16 @@ export class CodeService {
     });
   }
 
+  /** The Project's extra folders, for a read that spans them. */
+  #extraFolderRequest(projectId: CodeThread["projectId"]): {
+    readonly extraFolders?: ReadonlyArray<string>;
+  } {
+    const project = this.#persistence.readProject?.(projectId);
+    const folders =
+      project === undefined || project.type === "chat" ? [] : projectExtraFolderRoots(project);
+    return folders.length === 0 ? {} : { extraFolders: folders };
+  }
+
   /**
    * Search the checkout bound to a Code thread by path or by content.
    *
@@ -2526,6 +2536,7 @@ export class CodeService {
       threadId: authorized.thread.id,
       checkoutId: authorized.checkout.id,
       rootPath: root.rootPath,
+      ...this.#extraFolderRequest(authorized.thread.projectId),
       scope: input.scope,
       query: input.query,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
