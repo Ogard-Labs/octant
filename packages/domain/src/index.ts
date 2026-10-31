@@ -1,6 +1,7 @@
 export * from "./browserAutomationPolicy";
 export * from "./browserCapturePolicy";
 export * from "./browserProfilePolicy";
+export * from "./browserExtensionPolicy";
 export * from "./computerUsePolicy";
 export * from "./desktopLeasePolicy";
 export * from "./validationCompositionPolicy";
@@ -139,6 +140,7 @@ export * from "./themePolicy";
 export * from "./toolActionPolicy";
 export * from "./toolCallPolicy";
 export * from "./toolEgressPolicy";
+export * from "./safeNetworkPolicy";
 export * from "./untrustedContentPolicy";
 export * from "./artifactLibraryPolicy";
 export * from "./artifactMirrorPolicy";

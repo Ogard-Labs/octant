@@ -869,6 +869,87 @@ describe("OpenCodeProcessPort", () => {
     ).toBe(false);
   });
 
+  it("starts the server on its own egress proxy below Full access and keeps loopback off the proxy", async () => {
+    const fixture = profileRecordingWrapper("isolation-supported");
+    let captured: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
+    const confinement: ProcessConfinementPort = {
+      prepare: (input) => {
+        captured = input;
+        return { command: input.executable, args: input.args };
+      },
+    };
+    const started: Array<{ readonly runtime: string; readonly root: string }> = [];
+    let released = 0;
+    await Effect.runPromise(
+      Effect.scoped(
+        makeOpenCodeProcessLive({
+          confinement,
+          platform: "darwin",
+          runtimeConfigResolver: async () => undefined,
+          startupTimeoutMs: 2_000,
+          runtimeNetwork: {
+            start: async (input) => {
+              started.push({ runtime: input.runtime, root: input.root });
+              return {
+                status: "proxied",
+                endpoint: { kind: "loopback", port: 47003 },
+                environment: { HTTPS_PROXY: "http://octant:token@127.0.0.1:47003" },
+                release: async () => {
+                  released += 1;
+                },
+              };
+            },
+          },
+        }).start({
+          binaryPath: fixture.binaryPath,
+          cwd: fixture.root,
+          mode: "code",
+          executionPolicy: "approval-gated",
+        }),
+      ),
+    );
+    expect(started).toEqual([{ runtime: "opencode", root: fixture.root }]);
+    expect(captured?.networkEgress).toEqual({
+      kind: "proxied",
+      endpoint: { kind: "loopback", port: 47003 },
+    });
+    expect(released).toBe(1);
+  });
+
+  it.each(["approval-gated", "auto-accept-edits", "full-access"] as const)(
+    "launches a Work session at %s under the confinement a Code session at that level gets",
+    async (executionPolicy) => {
+      const launchFor = async (mode: "work" | "code") => {
+        const fixture = profileRecordingWrapper("isolation-supported");
+        const prepared: Parameters<ProcessConfinementPort["prepare"]>[0][] = [];
+        const confinement: ProcessConfinementPort = {
+          prepare: (input) => {
+            prepared.push(input);
+            return { command: input.executable, args: input.args };
+          },
+        };
+        await Effect.runPromise(
+          Effect.scoped(
+            makeOpenCodeProcessLive({
+              confinement,
+              platform: "darwin",
+              runtimeConfigResolver: async () => undefined,
+              startupTimeoutMs: 2_000,
+            }).start({ binaryPath: fixture.binaryPath, cwd: fixture.root, mode, executionPolicy }),
+          ),
+        );
+        return prepared.map((input) => ({
+          writeBoundRoot: input.writeBoundRoot,
+          allowProcessExec: input.allowProcessExec,
+          allowProcessFork: input.allowProcessFork,
+          networkEgress: input.networkEgress,
+        }));
+      };
+      const work = await launchFor("work");
+      expect(work).toEqual(await launchFor("code"));
+    },
+  );
+
   // The agent is a loopback HTTP server, so the confinement has to let it
   // listen on the port this launch reserved. Without the bind it exits before
   // readiness when OS egress is none. Chat and Work turns now allow the
@@ -907,10 +988,10 @@ describe("OpenCodeProcessPort", () => {
     );
     expect(rules.some((rule) => rule.includes("network-inbound"))).toBe(true);
     expect(rules).toContain('(allow network-outbound (remote ip "localhost:41234"))');
-    // Work declares shell "denied": the provider process itself must not be
-    // able to exec, or an in-process shell would bypass the refused tools.
-    expect(captured?.allowProcessExec).toBe(false);
-    expect(captured?.allowProcessFork).toBe(false);
+    // Work shares Code's shell at the thread's level, so a Work launch may
+    // exec and fork exactly as a Code launch at the same level does.
+    expect(captured?.allowProcessExec).toBe(true);
+    expect(captured?.allowProcessFork).toBe(true);
   });
 
   // Bubblewrap refuses any rule it cannot express: per-port loopback has no

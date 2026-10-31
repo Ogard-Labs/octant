@@ -310,6 +310,24 @@ describe("Claude Agent SDK port", () => {
     },
   );
 
+  test("sends the sandbox's network to the session's egress proxy port and nothing else", async () => {
+    const harness = makeHarness();
+    const proxied = {
+      ...openInput,
+      sandbox: { ...openInput.sandbox, network: { httpProxyPort: 47004 } },
+    } as const;
+    await expect(
+      Effect.runPromise(Effect.scoped(harness.port.openQuery(proxied))),
+    ).resolves.toBeDefined();
+    expect(harness.invocation?.options).toMatchObject({
+      sandbox: { network: { httpProxyPort: 47004 } },
+    });
+    const options = harness.invocation?.options as
+      | { readonly sandbox?: { readonly network?: object } }
+      | undefined;
+    expect(Object.keys(options?.sandbox?.network ?? {})).toEqual(["httpProxyPort"]);
+  });
+
   test("accepts a structurally valid available output-style catalog without activating it", async () => {
     const harness = makeHarness();
     harness.query.initializationResult.mockResolvedValueOnce({
@@ -347,6 +365,20 @@ describe("Claude Agent SDK port", () => {
     [
       "an unsupported sandbox surface",
       { ...openInput, sandbox: { ...openInput.sandbox, network: { allowedDomains: ["*"] } } },
+    ],
+    [
+      "a network setting beside the proxy port",
+      {
+        ...openInput,
+        sandbox: {
+          ...openInput.sandbox,
+          network: { httpProxyPort: 47004, allowLocalBinding: true },
+        },
+      },
+    ],
+    [
+      "a proxy port that is not a port",
+      { ...openInput, sandbox: { ...openInput.sandbox, network: { httpProxyPort: 70_000 } } },
     ],
   ] as const)("rejects %s before allocating the SDK query", async (_name, candidate) => {
     const harness = makeHarness();

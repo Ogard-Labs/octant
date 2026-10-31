@@ -1,3 +1,4 @@
+import type { CodeOperationPullRequestActions } from "./codeOperationService";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -4872,6 +4873,372 @@ describe("CodeOperationRuntime", () => {
     expect(changed).toMatchObject({ kind: "pull-request-state", state: "existing", number: 7 });
     expect(run.mock.calls.some(([args]) => args[0] === "pr" && args[1] === "ready")).toBe(true);
     fixture.close();
+  });
+
+  describe("pull-request actions beyond the title and body", () => {
+    const remotes = [
+      {
+        name: "origin",
+        fetchUrl: "https://github.com/octant/octant.git",
+        pushUrl: "https://github.com/octant/octant.git",
+      },
+    ];
+    const identity = {
+      number: 7,
+      url: "https://github.com/octant/octant/pull/7",
+      baseRepository: "octant/octant",
+      baseBranch: "development",
+      headOwner: "octant",
+      headBranch: "feature/runtime",
+    };
+    const head = "c".repeat(40);
+
+    function actionFixture(
+      overrides: Partial<CodeOperationPullRequestActions> & { readonly approved?: boolean },
+    ) {
+      const done = { status: "done" as const };
+      const actions = {
+        editLabels: vi.fn(overrides.editLabels ?? (async () => done)),
+        comment: vi.fn(overrides.comment ?? (async () => done)),
+        replyToReviewThread: vi.fn(overrides.replyToReviewThread ?? (async () => done)),
+        retarget: vi.fn(overrides.retarget ?? (async () => done)),
+        setState: vi.fn(overrides.setState ?? (async () => done)),
+        summary: vi.fn(
+          overrides.summary ??
+            (async () => ({
+              status: "read" as const,
+              state: "open" as const,
+              headBranch: "feature/runtime",
+              baseBranch: "development",
+              headSha: head,
+            })),
+        ),
+        requiredChecks: vi.fn(overrides.requiredChecks ?? (async () => "passing" as const)),
+        merge: vi.fn(overrides.merge ?? (async () => ({ status: "merged" as const }))),
+      };
+      const locate = vi.fn(
+        async (_threadId: unknown, _state: "open" | "closed", _signal: AbortSignal) => ({
+          status: "found" as const,
+          pullRequest: identity,
+        }),
+      );
+      const fixture = runtimeFixture({
+        pullRequestTarget: true,
+        gitRemotes: remotes,
+        approvalValidator: () => overrides.approved ?? true,
+        pullRequestPort: {
+          ensure: async () => ({ status: "unavailable" }),
+          update: async () => ({ status: "none" }),
+          observeReview: async () => ({ status: "unavailable" }),
+          locate,
+          actions,
+        },
+      });
+      return { fixture, actions, locate };
+    }
+
+    const scope = (operation: number) => ({
+      operationId: operationId(operation),
+      threadId,
+      checkoutId,
+    });
+    const approved = (approval: number) =>
+      ({ kind: "approved", approvalId: operationId(approval) }) as const;
+
+    it("adds and removes existing labels on the thread's own pull request only with an approval", async () => {
+      const { fixture, actions } = actionFixture({ approved: false });
+      const command = {
+        kind: "update-pull-request" as const,
+        ...scope(140),
+        addLabels: ["bug"],
+        removeLabels: ["wip"],
+      };
+
+      expect(
+        await fixture.runtime.execute(windowId, {
+          ...command,
+          authorization: { kind: "full-access" },
+        }),
+      ).toMatchObject({ failure: { category: "waiting" } });
+      expect(actions.editLabels).not.toHaveBeenCalled();
+
+      const approvedFixture = actionFixture({});
+      const changed = await approvedFixture.fixture.runtime.execute(windowId, {
+        ...command,
+        authorization: approved(141),
+      });
+      expect(approvedFixture.actions.editLabels).toHaveBeenCalledWith(
+        { owner: "octant", name: "octant", number: 7, add: ["bug"], remove: ["wip"] },
+        expect.any(AbortSignal),
+      );
+      expect(changed).toMatchObject({ kind: "pull-request-state", state: "existing", number: 7 });
+      fixture.close();
+      approvedFixture.fixture.close();
+    });
+
+    it("refuses a label the repository does not have rather than creating it", async () => {
+      const { fixture } = actionFixture({
+        editLabels: async () => ({
+          status: "refused" as const,
+          reason: "label-not-found" as const,
+        }),
+      });
+      const result = await fixture.runtime.execute(windowId, {
+        kind: "update-pull-request",
+        ...scope(142),
+        addLabels: ["brand-new"],
+        authorization: approved(143),
+      });
+      expect(result).toMatchObject({
+        kind: "pull-request-state",
+        state: "unavailable",
+        failureCode: "label-not-found",
+      });
+      fixture.close();
+    });
+
+    it("closes the open pull request and reopens a closed one, keeping the branch", async () => {
+      const { fixture, actions, locate } = actionFixture({});
+      const closed = await fixture.runtime.execute(windowId, {
+        kind: "update-pull-request",
+        ...scope(144),
+        state: "closed",
+        authorization: approved(145),
+      });
+      const reopened = await fixture.runtime.execute(windowId, {
+        kind: "update-pull-request",
+        ...scope(146),
+        state: "open",
+        authorization: approved(147),
+      });
+      expect(locate.mock.calls.map((call) => call[1])).toEqual(["open", "closed"]);
+      expect(actions.setState.mock.calls.map(([request]) => request.state)).toEqual([
+        "closed",
+        "open",
+      ]);
+      expect(closed).toMatchObject({ kind: "pull-request-state", number: 7 });
+      expect(reopened).toMatchObject({ kind: "pull-request-state", number: 7 });
+      fixture.close();
+    });
+
+    it("reports a pull request that is already merged as not reopenable", async () => {
+      const { fixture } = actionFixture({
+        setState: async () => ({ status: "refused" as const, reason: "merged" as const }),
+      });
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "update-pull-request",
+          ...scope(148),
+          state: "open",
+          authorization: approved(149),
+        }),
+      ).toMatchObject({ state: "unavailable", failureCode: "already-merged" });
+      fixture.close();
+    });
+
+    it("posts a comment or a review reply only with an approval for that act", async () => {
+      const { fixture, actions } = actionFixture({});
+      const refused = await fixture.runtime.execute(windowId, {
+        kind: "comment-pull-request",
+        ...scope(150),
+        body: "Looks right.",
+        authorization: { kind: "full-access" },
+      });
+      expect(refused).toMatchObject({
+        kind: "operation-failed",
+        failure: { category: "unauthorized" },
+      });
+      expect(actions.comment).not.toHaveBeenCalled();
+
+      await fixture.runtime.execute(windowId, {
+        kind: "comment-pull-request",
+        ...scope(151),
+        body: "Looks right.",
+        authorization: approved(152),
+      });
+      await fixture.runtime.execute(windowId, {
+        kind: "comment-pull-request",
+        ...scope(153),
+        body: "Fixed in the next commit.",
+        reviewThreadId: "PRRT_abc",
+        authorization: approved(154),
+      });
+      expect(actions.comment).toHaveBeenCalledWith(
+        { owner: "octant", name: "octant", number: 7, body: "Looks right." },
+        expect.any(AbortSignal),
+      );
+      expect(actions.replyToReviewThread).toHaveBeenCalledWith(
+        expect.objectContaining({ threadNodeId: "PRRT_abc", body: "Fixed in the next commit." }),
+        expect.any(AbortSignal),
+      );
+      fixture.close();
+    });
+
+    it("merges on the person's approval only when the head and required checks match", async () => {
+      const refusedFixture = actionFixture({});
+      const base = {
+        kind: "merge-pull-request" as const,
+        method: "squash" as const,
+        headSha: head,
+      };
+      expect(
+        await refusedFixture.fixture.runtime.execute(windowId, {
+          ...base,
+          ...scope(160),
+          authorization: { kind: "full-access" },
+        }),
+      ).toMatchObject({ kind: "operation-failed", failure: { category: "unauthorized" } });
+      expect(refusedFixture.actions.merge).not.toHaveBeenCalled();
+
+      expect(
+        await refusedFixture.fixture.runtime.execute(windowId, {
+          ...base,
+          headSha: "d".repeat(40),
+          ...scope(161),
+          authorization: approved(162),
+        }),
+      ).toMatchObject({ state: "unavailable", failureCode: "sha-mismatch" });
+
+      const failing = actionFixture({ requiredChecks: async () => "failing" });
+      expect(
+        await failing.fixture.runtime.execute(windowId, {
+          ...base,
+          ...scope(163),
+          authorization: approved(164),
+        }),
+      ).toMatchObject({ state: "unavailable", failureCode: "checks-not-passing" });
+      expect(failing.actions.merge).not.toHaveBeenCalled();
+
+      const unknown = actionFixture({ requiredChecks: async () => "unknown" });
+      expect(
+        await unknown.fixture.runtime.execute(windowId, {
+          ...base,
+          ...scope(165),
+          authorization: approved(166),
+        }),
+      ).toMatchObject({ state: "unavailable", failureCode: "checks-unknown" });
+
+      const merged = actionFixture({});
+      const result = await merged.fixture.runtime.execute(windowId, {
+        ...base,
+        ...scope(167),
+        authorization: approved(168),
+      });
+      expect(merged.actions.merge).toHaveBeenCalledWith(
+        { owner: "octant", name: "octant", number: 7, method: "squash", headSha: head },
+        expect.any(AbortSignal),
+      );
+      expect(result).toMatchObject({ kind: "pull-request-state", state: "merged", number: 7 });
+      expect(merged.fixture.runtimeWorks().at(-1)).toMatchObject({
+        kind: "delivery",
+        state: "completed",
+      });
+      for (const each of [refusedFixture, failing, unknown, merged]) each.fixture.close();
+    });
+
+    it("refuses to merge a pull request that is closed or already merged", async () => {
+      const closed = actionFixture({
+        summary: async () => ({
+          status: "read" as const,
+          state: "closed" as const,
+          headBranch: "feature/runtime",
+          baseBranch: "development",
+          headSha: head,
+        }),
+      });
+      expect(
+        await closed.fixture.runtime.execute(windowId, {
+          kind: "merge-pull-request",
+          ...scope(169),
+          method: "merge",
+          headSha: head,
+          authorization: approved(170),
+        }),
+      ).toMatchObject({ state: "unavailable", failureCode: "not-open" });
+      expect(closed.actions.merge).not.toHaveBeenCalled();
+      closed.fixture.close();
+    });
+
+    describe("force pushes", () => {
+      const push = {
+        kind: "push-git" as const,
+        remote: "origin",
+        expectedHeadOid: "a".repeat(40),
+        expectedStateToken: "b".repeat(64),
+      };
+      const to = (branch: string, force?: (typeof push & { force?: unknown })["force"]) => ({
+        ...push,
+        localRef: "refs/heads/feature/runtime",
+        remoteRef: `refs/heads/${branch}`,
+        confirmation: {
+          remote: "origin",
+          refspec: `refs/heads/feature/runtime:refs/heads/${branch}`,
+        },
+        ...(force === undefined ? {} : { force }),
+      });
+      const lease = { mode: "with-lease", expectedRemoteOid: "e".repeat(40) } as const;
+
+      it("lets a thread force-with-lease its own branch past the policy", async () => {
+        const fixture = runtimeFixture({});
+        const result = await fixture.runtime.execute(windowId, {
+          ...to("feature/runtime", lease),
+          ...scope(180),
+          gitOperationId: operationId(181),
+          authorization: { kind: "full-access" },
+        } as never);
+        // The fixture's Git stub fails the push itself; the policy did not refuse it.
+        expect(result).not.toMatchObject({ failure: { category: "unauthorized" } });
+        fixture.close();
+      });
+
+      it("refuses a plain force-push or the default branch without an approval for that act", async () => {
+        const fixture = runtimeFixture({});
+        for (const [index, command] of [
+          to("feature/runtime", { mode: "plain" }),
+          to("development"),
+          to("development", lease),
+        ].entries()) {
+          const result = await fixture.runtime.execute(windowId, {
+            ...command,
+            ...scope(182 + index * 2),
+            gitOperationId: operationId(183 + index * 2),
+            authorization: { kind: "full-access" },
+          } as never);
+          expect(result).toMatchObject({
+            kind: "operation-failed",
+            failure: { category: "unauthorized" },
+          });
+        }
+        fixture.close();
+      });
+
+      it("refuses any force to another thread's branch even with an approval", async () => {
+        const fixture = runtimeFixture({ approvalValidator: () => true });
+        const result = await fixture.runtime.execute(windowId, {
+          ...to("feature/someone-else", lease),
+          ...scope(190),
+          gitOperationId: operationId(191),
+          authorization: approved(192),
+        } as never);
+        expect(result).toMatchObject({
+          kind: "operation-failed",
+          failure: { category: "unauthorized" },
+        });
+        fixture.close();
+      });
+
+      it("lets an approved plain force-push through the policy", async () => {
+        const fixture = runtimeFixture({ approvalValidator: () => true });
+        const result = await fixture.runtime.execute(windowId, {
+          ...to("feature/runtime", { mode: "plain" }),
+          ...scope(193),
+          gitOperationId: operationId(194),
+          authorization: approved(195),
+        } as never);
+        expect(result).not.toMatchObject({ failure: { category: "unauthorized" } });
+        fixture.close();
+      });
+    });
   });
 
   // A record whose work resolves inside the call could only ever say "already

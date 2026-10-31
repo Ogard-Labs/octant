@@ -278,7 +278,7 @@ describe("AutomationCenter detail disclosure", () => {
     ).toBeVisible();
 
     const authoritySummary = within(detail).getByText(
-      "Ask for approvals · filesystem, tools · this session only",
+      "Ask for approvals · filesystem, shell, git, tools · this session only",
     );
     expect(authoritySummary).not.toBeVisible();
     await userEvent.click(within(detail).getByText("Advanced"));

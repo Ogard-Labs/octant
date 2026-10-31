@@ -102,8 +102,8 @@ issue-tracker integrations, the worktree and checkout pickers, and the
 Project terminal), off by default, set only by a person. Its row says it
 changes what the Project shows, not what its threads may do: a Work thread
 has the same shell, Git, and tools as a Code thread at the same level either
-way ([Modes](../architecture.md#modes-chat-work-and-code); allowed, not built
-yet). Code Projects have no such row, since Code always shows them. Over an application ground the cards keep the
+way ([Modes](../architecture.md#modes-chat-work-and-code)). Built today it
+shows the Project terminal and Project actions. Code Projects have no such row, since Code always shows them. Over an application ground the cards keep the
 opaque card step even under Glass, and the header's text takes the start
 screen's page-colour glow: set straight on the ground, the overview's rows
 read through the ground's letters (October 2026).
@@ -562,8 +562,11 @@ to the host; a running server's address is not repeated there, and choosing a ro
 opens it. With neither, the start page invites an address. **Browser profiles.**
 A page is Private unless the person picks the Project or Personal profile from
 the control at the left of the address field, whose menu also signs out of a
-stored profile (the toolbar's extensions button is part of the not-yet-built
-extensions design). The Project browser dock has the same control. The rules are in
+stored profile. A puzzle-piece extensions button follows it when an extension is
+enabled in the page's profile: it lists them, opens a popup or options page, and
+carries a count while the agent drives the page; the driver indicator and the
+floating preview name a stored profile while the agent drives it. The Project
+browser dock has the same controls. The rules are in
 [Browser profiles and extensions](browser-profiles.md). **Browser captures.** The Browser pane toolbar has a
 Screenshot button (a camera icon beside Open in default browser) that keeps the
 page's picture with the thread, and a thread that kept screenshots shows a

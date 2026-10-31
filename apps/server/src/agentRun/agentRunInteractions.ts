@@ -8,6 +8,7 @@ import type {
   ProviderRuntimeEvent,
   ProviderInstanceId,
   NativeHarnessSlotCandidate,
+  ShieldWatcherLabel,
 } from "@octant/contracts";
 import {
   clampAgentRunAuthority,
@@ -41,6 +42,8 @@ export interface AgentRunInteractionOptions {
   readonly shield?: () => ShieldReviewPort | undefined;
   /** Whether the child run has itself taken in outside content. */
   readonly childTainted?: (run: AgentRun) => boolean;
+  /** What the Watcher found in what a child read, which counts beside its parent's. */
+  readonly childWatcherLabels?: (run: AgentRun) => ReadonlyArray<ShieldWatcherLabel>;
   readonly providerName?: (id: ProviderInstanceId) => string | undefined;
   readonly parentLead: (run: AgentRun) => NativeHarnessSlotCandidate | undefined;
   readonly parentAuthority: (run: AgentRun) => AgentRunAuthority | undefined;
@@ -155,6 +158,7 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
         boundRoot,
         // A child whose own taint cannot be read is treated as marked.
         alsoTainted: options.childTainted?.(input.run) ?? true,
+        alsoWatcherLabels: options.childWatcherLabels?.(input.run) ?? [],
         signal: input.signal,
       });
       if (!current(input.run, input.signal)) return { outcome: "cancelled" };

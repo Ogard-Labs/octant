@@ -207,17 +207,17 @@ export function resolveToolCall(input: ToolCallPolicyInput): ToolCallPolicyDecis
   }
 
   // 8. Thread elevation / approval / taint (untrusted-content taint hook)
-  // At Full access in Code outside content is recorded only: the thread keeps
-  // its taint for the tool row, the card and the journal, but it neither asks
-  // nor blocks, so it does not reach the gates below. Work keeps its own
-  // access and is not on the shared levels, so its taint gates as before.
+  // At Full access in Work or Code outside content is recorded only: the
+  // thread keeps its taint for the tool row, the card and the journal, but it
+  // neither asks nor blocks, so it does not reach the gates below. Chat never
+  // reaches Full access.
   const guardrail = resolveGuardrail({
     access: { executionPolicy: input.thread.executionPolicy },
     capabilities: { providerReview: true, providerSandbox: false },
     mode: input.mode,
   });
   const asksNobody =
-    input.mode === "code" &&
+    input.mode !== "chat" &&
     guardrail.status === "supported" &&
     guardrail.outsideContent === "recorded";
   const outsideContentGates = input.thread.externalContentIngested && !asksNobody;

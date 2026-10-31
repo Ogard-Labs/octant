@@ -35,6 +35,11 @@ import {
 } from "../process/threadEgressPolicy";
 import type { AcpClientCapabilities } from "./acpProtocol";
 import { makeBoundedProviderStderr } from "./providerProcessDiagnostic";
+import {
+  acquireProviderRuntimeNetwork,
+  type ProviderRuntimeNetworkPort,
+  type ProviderRuntimeProxiedNetwork,
+} from "../network/providerRuntimeNetwork";
 
 export type { AcpSessionMode } from "./acpProfiles";
 
@@ -59,6 +64,13 @@ export interface AcpConfinementInput {
   readonly environment: NodeJS.ProcessEnv;
   /** Exact loopback ports owned by app-managed ACP tool bridges for this process. */
   readonly loopbackPorts?: ReadonlyArray<number>;
+  /**
+   * The launch's own egress proxy. Present, the runtime's OS rules reach
+   * only that listener (and the bridge ports above); absent, a runtime below
+   * Full access keeps open network, as on a host that does not route
+   * runtimes through the proxy.
+   */
+  readonly network?: ProviderRuntimeProxiedNetwork;
 }
 
 export interface AcpConfinementPort {
@@ -112,6 +124,8 @@ export interface AcpProcessOptions {
   readonly shutdownTimeoutMs?: number;
   readonly startupTimeoutMs?: number;
   readonly stderrBytes?: number;
+  /** Routes the runtime through its own egress proxy below Full access. */
+  readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
 }
 
 export interface AcpConfinementOptions {
@@ -464,14 +478,17 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
         // Connection checks are not Chat threads. They must reach the
         // provider's own control plane to authenticate and discover models,
         // while remaining read-only and rooted in the managed home.
-        const networkEgress = materializeOsNetworkEgress(
-          input.purpose === "probe"
-            ? resolveProbeEgressPolicy()
-            : resolveProviderRuntimeEgressPolicy({
-                mode: input.mode,
-                executionPolicy: input.executionPolicy,
-              }),
-        );
+        const networkEgress =
+          input.network === undefined
+            ? materializeOsNetworkEgress(
+                input.purpose === "probe"
+                  ? resolveProbeEgressPolicy()
+                  : resolveProviderRuntimeEgressPolicy({
+                      mode: input.mode,
+                      executionPolicy: input.executionPolicy,
+                    }),
+              )
+            : ({ kind: "proxied", endpoint: input.network.endpoint } as const);
         const confinement = makeProcessConfinementLive({
           platform,
           sandboxPath,
@@ -514,17 +531,18 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
               temporaryDirectory,
               networkEgress,
               writeBoundRoot: !(input.executionPolicy === "plan" || input.mode === "chat"),
-              // Work declares shell "denied": ACP terminal/* refusals only
+              // Chat and Plan have no shell: ACP terminal/* refusals only
               // cover providers that route shell through the protocol, so an
               // in-process shell would otherwise still exec inside the jail.
-              allowProcessExec: !(input.executionPolicy === "plan" || input.mode !== "code"),
+              // Work launches exactly as Code does at the same level.
+              allowProcessExec: !(input.executionPolicy === "plan" || input.mode === "chat"),
               // A profile whose entrypoint spawns its own stdio server keeps
               // fork: the child re-execs the provider's own binary, which the
               // exec literals and binds already permit, and fork without a
               // second exec target cannot reach a shell. Chat and Plan never
               // get here — such profiles are refused above.
               allowProcessFork:
-                !(input.executionPolicy === "plan" || input.mode !== "code") ||
+                !(input.executionPolicy === "plan" || input.mode === "chat") ||
                 profile.process.requiresChildServer === true,
               additionalWriteRoots: [managedHome, ...hostAuthentication.writePaths],
               additionalDenyReadPaths: confinedDenyPaths,
@@ -564,7 +582,11 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
           command: launch.command,
           args: launch.args,
           cwd: root,
-          environment: { ...input.environment, ...hostAuthentication.environment },
+          environment: {
+            ...input.environment,
+            ...hostAuthentication.environment,
+            ...input.network?.environment,
+          },
         };
       }),
   };
@@ -1185,6 +1207,17 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           executionPolicy: input.executionPolicy,
           ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
         });
+        const network =
+          input.executionPolicy === "full-access"
+            ? undefined
+            : yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
+                runtime: "acp",
+                profileId: profile.kind,
+                root: input.root,
+                executionPolicy: input.executionPolicy,
+                loopbackPorts: input.loopbackPorts ?? [],
+                environment,
+              });
         const launch = yield* confinement.prepare({
           profile,
           binaryPath: input.binaryPath,
@@ -1196,6 +1229,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           ...(input.purpose === undefined ? {} : { purpose: input.purpose }),
           environment,
           ...(input.loopbackPorts === undefined ? {} : { loopbackPorts: input.loopbackPorts }),
+          ...(network === undefined ? {} : { network }),
         });
         const managed = yield* Effect.acquireRelease(
           acquireConnection(

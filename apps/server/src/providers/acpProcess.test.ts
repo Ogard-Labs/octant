@@ -673,31 +673,38 @@ describe("ACP child-server profiles", () => {
     expect(planning).not.toContain(`(allow file-write* (subpath "${notes}"))`);
   });
 
-  it("keeps fork for the nested server in Work while exec stays denied", async () => {
-    const target = fixture(opencode);
-    const launch = await Effect.runPromise(
-      makeAcpConfinementLive({
+  it.each(["approval-gated", "auto-accept-edits", "full-access"] as const)(
+    "launches a Work session at %s under the Seatbelt profile a Code session at that level gets",
+    async (executionPolicy) => {
+      const target = fixture(opencode);
+      const confinement = makeAcpConfinementLive({
         platform: "darwin",
         sandboxPath: target.sandboxPath,
         temporaryDirectory: join(target.canonicalRoot, "tmp"),
         hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
-      }).prepare({
-        profile: opencode,
-        binaryPath: target.binaryPath,
-        root: target.canonicalRoot,
-        managedHome: join(target.canonicalRoot, "managed-home"),
-        mode: "work",
-        executionPolicy: "approval-gated",
-        environment: { PATH: "/usr/bin" },
-      }),
-    );
-    // The stdio child server re-execs the provider's own binary, which the
-    // exec literals already permit; Work's shell denial still holds for every
-    // other exec target.
-    expect(launch.args[1]).toContain("(allow process-fork)");
-    expect(launch.args[1]).not.toContain("(allow process-exec)\n");
-    expect(launch.args[1]).toContain(`(allow process-exec (literal "${target.binaryPath}"))`);
-  });
+      });
+      const launchFor = (mode: "work" | "code") =>
+        Effect.runPromise(
+          confinement.prepare({
+            profile: opencode,
+            binaryPath: target.binaryPath,
+            root: target.canonicalRoot,
+            managedHome: join(target.canonicalRoot, "managed-home"),
+            mode,
+            executionPolicy,
+            environment: { PATH: "/usr/bin" },
+          }),
+        );
+      const work = await launchFor("work");
+      expect(work.args).toEqual((await launchFor("code")).args);
+      // Work shares Code's shell at the thread's level: below Full access the
+      // jail lets the agent exec and fork its commands inside the root.
+      if (executionPolicy !== "full-access") {
+        expect(work.args[1]).toContain("(allow process-fork)");
+        expect(work.args[1]).toContain("(allow process-exec)");
+      }
+    },
+  );
 
   it("reads the existing user configuration without granting it write access", async () => {
     const target = fixture(opencode);
@@ -1795,6 +1802,43 @@ describe("ACP probe confinement", () => {
     expect(profileText).not.toContain("(allow process-exec)\n");
     expect(profileText).not.toContain("(allow process-fork)");
   });
+
+  it("reaches only the launch's own egress proxy and its tool bridge when the host routes the runtime through it", async () => {
+    const target = fixture(kilo);
+    const managedHome = join(target.canonicalRoot, "managed-home");
+    const hostAuthenticationPath = join(target.canonicalRoot, "host-auth");
+    mkdirSync(hostAuthenticationPath, { recursive: true });
+    const launch = await Effect.runPromise(
+      makeAcpConfinementLive({
+        platform: "darwin",
+        sandboxPath: target.sandboxPath,
+        temporaryDirectory: join(target.canonicalRoot, "tmp"),
+        hostAuthenticationPath,
+      }).prepare({
+        profile: kilo,
+        binaryPath: target.binaryPath,
+        root: managedHome,
+        managedHome,
+        mode: "code",
+        executionPolicy: "approval-gated",
+        environment: sanitizeAcpEnvironment(
+          kilo,
+          { PATH: "/usr/bin", HOME: "/Users/octant-test" },
+          { managedHome, executionPolicy: "approval-gated" },
+        ),
+        loopbackPorts: [43124],
+        network: {
+          endpoint: { kind: "loopback", port: 47001 },
+          environment: { HTTPS_PROXY: "http://octant:token@127.0.0.1:47001" },
+        },
+      }),
+    );
+    const profileText = seatbeltProfile(launch);
+    expect(profileText).not.toContain("(allow network*)");
+    expect(profileText).toContain('(allow network-outbound (remote ip "localhost:47001"))');
+    expect(profileText).toContain('(allow network-outbound (remote ip "localhost:43124"))');
+    expect(launch.environment.HTTPS_PROXY).toBe("http://octant:token@127.0.0.1:47001");
+  });
 });
 
 it("ships every ACP profile through deny-default confinement", () => {
@@ -1929,8 +1973,8 @@ describe("Kimi Code provider-owned profile", () => {
     }
 
     // Work keeps the bound root writable — approval-gated fs/* writes go
-    // through the client — but its declared shell is "denied", and an
-    // in-process provider shell emits no permission request to refuse.
+    // through the client — and shares Code's shell at the thread's level, so
+    // its jail lets the agent run commands inside the root.
     const work = await Effect.runPromise(
       prepared.prepare({
         profile: kimi,
@@ -1942,8 +1986,8 @@ describe("Kimi Code provider-owned profile", () => {
         environment: {},
       }),
     );
-    expect(work.args[1]).not.toContain("(allow process-fork)");
-    expect(work.args[1]).not.toContain("(allow process-exec)");
+    expect(work.args[1]).toContain("(allow process-fork)");
+    expect(work.args[1]).toContain("(allow process-exec)");
   });
 
   it("allows the owned ACP tool bridge port and provider endpoints on a Work turn", async () => {

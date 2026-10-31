@@ -295,6 +295,8 @@ export function codeRuntimeWorkPlan(
       };
     case "create-pull-request":
     case "update-pull-request":
+    case "comment-pull-request":
+    case "merge-pull-request":
       return { id: command.operationId, kind: "delivery", starts: true, reachesNetwork: true };
     default:
       return undefined;

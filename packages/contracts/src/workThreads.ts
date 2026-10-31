@@ -37,14 +37,17 @@ export const WorkThreadCompletionEvidence = Schema.Struct({
 export type WorkThreadCompletionEvidence = typeof WorkThreadCompletionEvidence.Type;
 
 /**
- * What an agent in a Work thread may do to files inside the Project folder
- * without asking. `ask-first` raises every edit for approval, which is what
- * Work always did. `auto-accept-edits` lets edits inside the confined folder
- * land without a prompt; reaching outside the folder stays refused, and the
- * rest of the turn's posture is unchanged. Providers without an auto-accept
- * path keep asking.
+ * The guardrail level a Work thread runs at, in the words a Code thread's
+ * mode picker uses: Work and Code share one capability set (shell, Git, file
+ * writes, local tools) and differ only in what they show. `ask-first` asks
+ * the person for every command and edit, `auto-accept-edits` lets edits
+ * inside the Project folder land without a prompt while commands still ask,
+ * `auto` lets the provider's own reviewer answer (a provider without one asks
+ * first), and `full-access` runs with no sandbox and no prompts. Work has no
+ * Plan overlay. The first two are what Work threads recorded before the
+ * levels were shared, so older journals replay unchanged.
  */
-export const WorkAccess = Schema.Literal("ask-first", "auto-accept-edits");
+export const WorkAccess = Schema.Literal("ask-first", "auto-accept-edits", "auto", "full-access");
 export type WorkAccess = typeof WorkAccess.Type;
 
 /** The access a Work thread starts with when nothing else is set. */
@@ -64,9 +67,9 @@ export const WorkThread = Schema.Struct({
   bindingRevisionId: Schema.optional(BindingRevisionId),
   workingDirectory: Schema.optional(ThreadWorkingDirectory),
   /**
-   * The access this thread started with, taken from Work settings when it was
-   * created. A thread journaled before access existed decodes as ask-first,
-   * which is what it had.
+   * The level this thread runs at: taken from Work settings when it was
+   * created, and changed from its composer since. A thread journaled before
+   * access existed decodes as ask-first, which is what it had.
    */
   access: Schema.optionalWith(WorkAccess, { default: () => DEFAULT_WORK_ACCESS }),
   /**
@@ -230,6 +233,19 @@ export type ChangeWorkThreadDocumentDeliveryCommand =
   typeof ChangeWorkThreadDocumentDeliveryCommand.Type;
 
 /**
+ * Moves a Work thread to another guardrail level from its composer, as a Code
+ * thread switches mode. The next turn runs at the new level; a running turn
+ * keeps the one it started with. Raising a thread to Full access is chosen at
+ * a window on this host; a paired device may lower one.
+ */
+export const ChangeWorkThreadAccessCommand = Schema.Struct({
+  kind: Schema.Literal("change-work-thread-access"),
+  ...WorkThreadCommandFields,
+  access: WorkAccess,
+}).annotations(strict);
+export type ChangeWorkThreadAccessCommand = typeof ChangeWorkThreadAccessCommand.Type;
+
+/**
  * Opts this thread into resuming a usage-limited turn when the provider's
  * declared reset arrives. The server reads the limit and reset from the
  * journaled turn rather than trusting the command, and journals the opt-in on
@@ -306,6 +322,7 @@ export const WorkThreadCommand = Schema.Union(
   MoveWorkThreadCommand,
   ChangeWorkThreadProviderCommand,
   ChangeWorkThreadDocumentDeliveryCommand,
+  ChangeWorkThreadAccessCommand,
   ScheduleWorkUsageResumeCommand,
   CancelWorkUsageResumeCommand,
   UpdateWorkSettingsCommand,

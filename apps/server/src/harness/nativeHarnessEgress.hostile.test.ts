@@ -577,7 +577,8 @@ describe("native harness hostile content", () => {
     expect(lead.asked).toHaveLength(2);
     expect(lead.asked[1]).toMatchObject({ approvalClass: "shell-commands", singleUse: true });
     // It names what marked the thread, so the person knows why it asks.
-    expect(lead.asked[1]?.outsideSources).toEqual(["web-fetch"]);
+    // Octant Shield's Watcher names what it found in the page beside it.
+    expect(lead.asked[1]?.outsideSources).toEqual(["shield-watcher-fake-authority", "web-fetch"]);
 
     // An "always" answered on the tainted thread covers only that one command.
     expect(await lead.call("bash", { command: "bun test" })).toMatchObject({ isError: false });
@@ -2761,7 +2762,7 @@ describe("native harness tool egress grants and learn mode", () => {
     let elapsed = 0;
     const rules = new ToolEgressRules({
       journal: options.journal?.(base.journal) ?? base.journal,
-      readCodeThread: (threadId) =>
+      readThread: (threadId) =>
         threadId === String(egressThread) || threadId === String(egressOtherThread)
           ? { projectId: String(egressProject) }
           : undefined,

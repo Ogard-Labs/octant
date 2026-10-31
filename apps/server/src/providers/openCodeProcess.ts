@@ -38,6 +38,11 @@ import {
 } from "../process/threadEgressPolicy";
 import { makeBoundedProviderStderr } from "./providerProcessDiagnostic";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
+import {
+  acquireProviderRuntimeNetwork,
+  type ProviderRuntimeNetworkPort,
+  type ProviderRuntimeProxiedNetwork,
+} from "../network/providerRuntimeNetwork";
 
 export interface OpenCodeBinaryProbe {
   readonly binaryPath: string;
@@ -82,6 +87,11 @@ export interface OpenCodeProcessStartInput {
    */
   readonly betaPermissions?: ReadonlyArray<PermissionV2Rule>;
   /**
+   * The launch's own egress proxy, set by this port below Full access when
+   * the host routes runtimes through it. A caller's value is ignored.
+   */
+  readonly network?: ProviderRuntimeProxiedNetwork;
+  /**
    * The person let OpenCode load its own skills: the launch keeps the
    * `.claude/skills` and `.agents/skills` discovery OpenCode does by itself and
    * does not deny the `skill` permission. Its project configuration and
@@ -111,6 +121,8 @@ export interface OpenCodeProcessOptions {
   readonly onDiagnostic?: (message: string) => void;
   readonly shutdownTimeoutMs?: number;
   readonly startupTimeoutMs?: number;
+  /** Routes the runtime through its own egress proxy below Full access. */
+  readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
 }
 
 export interface OpenCodeProbeOptions {
@@ -1005,11 +1017,12 @@ function prepareOpenCodeLaunch(
           environment: profile.environment,
         };
       }
-      // Work declares shell "denied"; an in-process provider shell emits
-      // no permission request, so the jail itself must refuse to spawn it.
-      const jailDeniesProcess = executionPolicy === "plan" || mode !== "code";
+      // Chat and Plan have no shell; an in-process provider shell emits no
+      // permission request, so the jail itself must refuse to spawn it. Work
+      // launches exactly as Code does at the same level.
+      const jailDeniesProcess = executionPolicy === "plan" || mode === "chat";
       // OpenCode 2 runs `git rev-parse` at startup to resolve its project.
-      // Under the Chat/Plan/Work jail that spawn fails with EPERM and the
+      // Under the Chat/Plan jail that spawn fails with EPERM and the
       // server answers 500 for every route in a work tree. On macOS the
       // stand-in puts an always-failing `git` first on PATH so the spawn
       // succeeds and git exits non-zero, which OpenCode reads as "not a git
@@ -1017,7 +1030,7 @@ function prepareOpenCodeLaunch(
       // and nothing else. Linux confinement cannot express that one exec
       // without also allowing fork, which is the hole the Plan jail exists
       // to close, so Linux keeps fork denied and the probe fails closed.
-      // OpenCode 1.x and Code mode are unchanged.
+      // OpenCode 1.x and Work and Code modes are unchanged.
       const betaGitStandin = runtime === "beta" && jailDeniesProcess && platform === "darwin";
       if (betaGitStandin) {
         const standinBin = prepareGitStandinDirectory(profile);
@@ -1027,9 +1040,23 @@ function prepareOpenCodeLaunch(
             ? standinBin
             : `${standinBin}:${existingPath}`;
       }
-      const networkEgress = materializeOsNetworkEgress(
-        resolveProviderRuntimeEgressPolicy({ mode, executionPolicy }),
-      );
+      const networkEgress =
+        input.network === undefined
+          ? materializeOsNetworkEgress(
+              resolveProviderRuntimeEgressPolicy({ mode, executionPolicy }),
+            )
+          : ({ kind: "proxied", endpoint: input.network.endpoint } as const);
+      // OpenCode is a loopback server, and its OS rules open only its own
+      // port and the tool bridge ports, so loopback stays off the proxy.
+      const environment =
+        input.network === undefined
+          ? profile.environment
+          : {
+              ...profile.environment,
+              ...input.network.environment,
+              NO_PROXY: "127.0.0.1,localhost,::1",
+              no_proxy: "127.0.0.1,localhost,::1",
+            };
       const launch = confinement.prepare({
         executable: input.binaryPath,
         args,
@@ -1076,7 +1103,7 @@ function prepareOpenCodeLaunch(
             }
           : {}),
       });
-      return { ...launch, cwd: root, environment: profile.environment };
+      return { ...launch, cwd: root, environment };
     },
     catch: (error) =>
       failure(
@@ -1553,10 +1580,22 @@ export function makeOpenCodeProcessLive(
           catch: () =>
             failure("invalid-configuration", "OpenCode runtime routing could not be prepared."),
         });
+        const executionPolicy = input.executionPolicy ?? "approval-gated";
+        const network =
+          executionPolicy === "full-access"
+            ? undefined
+            : yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
+                runtime: "opencode",
+                root: input.cwd,
+                executionPolicy,
+                loopbackPorts: input.loopbackPorts ?? [],
+                environment: options.inheritedEnvironment ?? process.env,
+              });
+        const { network: _ignored, ...requested } = input;
         let terminate: (() => Promise<void>) | undefined;
         return yield* Effect.acquireReleaseInterruptible(
           acquireOpenCodeServer(
-            input,
+            network === undefined ? requested : { ...requested, network },
             { ...resolvedOptions, runtimeConfig },
             runtime,
             probe.version,

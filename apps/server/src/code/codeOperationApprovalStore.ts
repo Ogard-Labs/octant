@@ -250,7 +250,9 @@ function normalizeEffect(effect: CodeApprovalEffect): unknown {
   if (
     effect.command.kind !== "push-git" &&
     effect.command.kind !== "create-pull-request" &&
-    effect.command.kind !== "update-pull-request"
+    effect.command.kind !== "update-pull-request" &&
+    effect.command.kind !== "comment-pull-request" &&
+    effect.command.kind !== "merge-pull-request"
   ) {
     return effect;
   }
