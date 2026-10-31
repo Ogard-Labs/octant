@@ -23,7 +23,7 @@ export interface AppleToolchainRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly service: Pick<
     AppleToolchainService,
-    "discover" | "execute" | "cancel" | "snapshot" | "readScreenshotArtifact"
+    "discover" | "execute" | "cancel" | "refreshedSnapshot" | "readScreenshotArtifact"
   >;
   readonly resolveContext: (
     windowId: WindowId,
@@ -210,6 +210,7 @@ export function createAppleToolchainRouteHandler(dependencies: AppleToolchainRou
           );
         case "apple-snapshot-request": {
           const inputGrants = dependencies.inputGrants?.(windowId, context.threadId) ?? [];
+          const snapshot = await dependencies.service.refreshedSnapshot(context);
           return encoded(
             {
               kind: "apple-runtime-snapshot",
@@ -217,11 +218,8 @@ export function createAppleToolchainRouteHandler(dependencies: AppleToolchainRou
               // leave as the contract's branded identifiers or not at all.
               snapshot:
                 inputGrants.length === 0
-                  ? dependencies.service.snapshot(context)
-                  : decodeAppleRuntimeSnapshot({
-                      ...dependencies.service.snapshot(context),
-                      inputGrants,
-                    }),
+                  ? snapshot
+                  : decodeAppleRuntimeSnapshot({ ...snapshot, inputGrants }),
             },
             200,
             origin,
