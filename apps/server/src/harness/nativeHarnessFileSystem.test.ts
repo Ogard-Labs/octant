@@ -16,6 +16,31 @@ async function fixture(): Promise<{ readonly root: string; readonly fs: NativeHa
 }
 
 describe("native harness file system", () => {
+  it("reads and writes a Project's extra folder by absolute path and refuses the folder beside it", async () => {
+    const { root } = await fixture();
+    const notes = await realpath(await mkdtemp(join(tmpdir(), "octant-harness-notes-")));
+    const beside = await realpath(await mkdtemp(join(tmpdir(), "octant-harness-beside-")));
+    await writeFile(join(notes, "today.md"), "notes\n");
+    await writeFile(join(beside, "secret.md"), "no\n");
+    const fs = new NativeHarnessFileSystem({ root, extraRoots: [notes] });
+
+    const read = await fs.read({ path: join(notes, "today.md") });
+    expect(read.kind).toBe("file");
+    expect(await fs.write({ path: join(notes, "new.md"), content: "x" })).toMatchObject({
+      kind: "written",
+    });
+    expect(await fs.read({ path: join(beside, "secret.md") })).toEqual({
+      kind: "refused",
+      reason: "path-escapes-root",
+    });
+    expect(await fs.write({ path: join(beside, "new.md"), content: "x" })).toEqual({
+      kind: "refused",
+      reason: "path-escapes-root",
+    });
+    // Relative paths still resolve against the main folder.
+    expect((await fs.read({ path: "README.md" })).kind).toBe("file");
+  });
+
   it("refuses a symlink that points outside the root", async () => {
     const { root, fs } = await fixture();
     await symlink("/etc", join(root, "escape"));

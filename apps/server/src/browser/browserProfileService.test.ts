@@ -18,6 +18,7 @@ import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
 import { BROWSER_PROFILE_AGGREGATE, BrowserProfileService } from "./browserProfileService";
 import type { BrowserRuntimePort } from "./browserRuntimePort";
+import type { BrowserCookieReader } from "./cookieImport/browserCookieReader";
 
 const now = "2026-10-31T12:00:00.000Z";
 const projectId = decodeProjectId("a0000000-0000-4000-8000-000000000002");
@@ -87,7 +88,12 @@ function harness(
   const runtime: BrowserRuntimePort = {
     available: async () => true,
     nativeAvailable: async () => options.native ?? true,
-    profiles: { list: async () => stored, clear, syncExtensions: async () => undefined },
+    profiles: {
+      list: async () => stored,
+      clear,
+      syncExtensions: async () => undefined,
+      importCookies: async () => ({ imported: 0, skipped: 0 }),
+    },
     createContext: async () => undefined,
     inspectTarget: async () => ({ sensitive: false }),
     act: async () => ({}),
@@ -240,5 +246,232 @@ describe("Browser profiles service", () => {
     await service.eraseProject(projectId);
 
     expect(clear).not.toHaveBeenCalled();
+  });
+});
+
+describe("Browser profile cookie import", () => {
+  const SENTINEL = "SENTINEL-cookie-value-7f3a9c";
+  const cookie = (name: string) => ({
+    domain: ".example.com",
+    hostOnly: false,
+    name,
+    value: SENTINEL,
+    path: "/",
+    secure: true,
+    httpOnly: true,
+    sameSite: "lax" as const,
+  });
+
+  function importHarness(
+    options: {
+      readonly read?: Awaited<ReturnType<BrowserCookieReader["read"]>>;
+      readonly importCookies?: BrowserRuntimePort["profiles"] extends infer P
+        ? P extends { importCookies: infer F }
+          ? F
+          : never
+        : never;
+      readonly native?: boolean;
+    } = {},
+  ) {
+    const live = journal();
+    const batches: Array<ReadonlyArray<unknown>> = [];
+    const read = vi.fn<BrowserCookieReader["read"]>(
+      async () =>
+        options.read ?? {
+          status: "read",
+          cookies: [cookie("a"), cookie("b"), cookie("c")],
+          skipped: 2,
+        },
+    );
+    const runtime: BrowserRuntimePort = {
+      available: async () => true,
+      nativeAvailable: async () => options.native ?? true,
+      profiles: {
+        list: async () => [],
+        clear: async () => undefined,
+        syncExtensions: async () => undefined,
+        importCookies:
+          options.importCookies ??
+          (async (_profile, cookies) => {
+            batches.push(cookies);
+            return { imported: cookies.length, skipped: 0 };
+          }),
+      },
+      createContext: async () => undefined,
+      inspectTarget: async () => ({ sensitive: false }),
+      act: async () => ({}),
+      closeContext: async () => undefined,
+      closeAll: async () => undefined,
+    };
+    const service = new BrowserProfileService({
+      runtime,
+      readProject: () => undefined,
+      journal: live,
+      actor: decodeEventActor({ kind: "local-user", actorId }),
+      closePages: async () => undefined,
+      cookieReader: {
+        listSources: () => [
+          {
+            browser: "chrome",
+            label: "Google Chrome",
+            profiles: [{ id: "Default", label: "Person 1" }],
+          },
+        ],
+        read,
+      },
+      uuid: randomUUID,
+      clock: () => now,
+    });
+    return { service, read, batches, journal: live };
+  }
+
+  const importCommand = {
+    kind: "import-cookies",
+    profile: { kind: "personal" },
+    browser: "chrome",
+    sourceProfile: "Default",
+  } as const;
+  const replay = (live: Journal) =>
+    live.replayAggregateType({
+      aggregateType: BROWSER_PROFILE_AGGREGATE,
+      afterSequence: 0,
+      limit: 10,
+    });
+
+  it("lists the browsers and profiles a person can import from, reading no cookie to do it", async () => {
+    const { service, read } = importHarness();
+
+    expect(await service.execute("local-window", { kind: "import-sources" })).toEqual({
+      kind: "browser-cookie-sources",
+      sources: [
+        {
+          browser: "chrome",
+          label: "Google Chrome",
+          profiles: [{ id: "Default", label: "Person 1" }],
+        },
+      ],
+    });
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("imports the picked profile's cookies into the picked Octant profile and reports counts only", async () => {
+    const { service, read, batches, journal: live } = importHarness();
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const result = await service.execute("local-window", importCommand);
+
+    expect(read).toHaveBeenCalledWith("chrome", "Default");
+    expect(batches.flat()).toHaveLength(3);
+    expect(result).toEqual({
+      kind: "browser-cookies-imported",
+      profile: { kind: "personal" },
+      browser: "chrome",
+      sourceProfile: "Default",
+      imported: 3,
+      skipped: 2,
+    });
+    // No cookie value reaches what the window is told, the journal, or any log.
+    expect(JSON.stringify(result)).not.toContain(SENTINEL);
+    const events = replay(live);
+    expect(events.map((event) => event.eventName)).toEqual([
+      BROWSER_PROFILE_EVENT_NAMES.cookiesImported,
+    ]);
+    expect(JSON.stringify(events)).not.toContain(SENTINEL);
+    expect(events[0]?.payload).toEqual({
+      kind: "browser-cookies-imported",
+      profile: { kind: "personal" },
+      browser: "chrome",
+      sourceProfile: "Default",
+      imported: 3,
+      skipped: 2,
+    });
+    for (const spy of [log, warn, error]) {
+      expect(JSON.stringify(spy.mock.calls)).not.toContain(SENTINEL);
+      spy.mockRestore();
+    }
+  });
+
+  it("hands the desktop app bounded batches", async () => {
+    const many = Array.from({ length: 450 }, (_, index) => cookie(`c${String(index)}`));
+    const { service, batches } = importHarness({
+      read: { status: "read", cookies: many, skipped: 0 },
+    });
+
+    const result = await service.execute("local-window", importCommand);
+
+    expect(batches.map((batch) => batch.length)).toEqual([200, 200, 50]);
+    expect(result).toMatchObject({ kind: "browser-cookies-imported", imported: 450 });
+  });
+
+  it("imports nothing and journals nothing when the Keychain prompt is refused", async () => {
+    const {
+      service,
+      batches,
+      journal: live,
+    } = importHarness({
+      read: { status: "refused", reason: "keychain-refused" },
+    });
+
+    const result = await service.execute("local-window", importCommand);
+
+    expect(result).toMatchObject({ kind: "browser-profiles-refused", reason: "keychain-refused" });
+    expect(batches).toEqual([]);
+    expect(live.headSequence()).toBe(0);
+  });
+
+  it("says in words why a source could not be read", async () => {
+    for (const reason of ["source-not-found", "source-unreadable"] as const) {
+      const { service } = importHarness({ read: { status: "refused", reason } });
+
+      const result = await service.execute("local-window", importCommand);
+
+      expect(result).toMatchObject({ kind: "browser-profiles-refused", reason });
+    }
+  });
+
+  it("refuses a paired device before it reads anything", async () => {
+    const { service, read } = importHarness();
+
+    expect(await service.execute("remote-device", importCommand)).toMatchObject({
+      kind: "browser-profiles-refused",
+      reason: "profile-not-local",
+    });
+    expect(await service.execute("remote-device", { kind: "import-sources" })).toMatchObject({
+      reason: "profile-not-local",
+    });
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("reads nothing when no desktop app holds the store", async () => {
+    const { service, read } = importHarness({ native: false });
+
+    expect(await service.execute("local-window", importCommand)).toMatchObject({
+      reason: "profile-unavailable",
+    });
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("records what arrived when the store fails part way, and says it failed", async () => {
+    let calls = 0;
+    const many = Array.from({ length: 300 }, (_, index) => cookie(`c${String(index)}`));
+    const { service, journal: live } = importHarness({
+      read: { status: "read", cookies: many, skipped: 0 },
+      importCookies: async (_profile, cookies) => {
+        calls += 1;
+        if (calls === 2) throw new Error(`failed on ${SENTINEL}`);
+        return { imported: cookies.length, skipped: 0 };
+      },
+    });
+
+    const result = await service.execute("local-window", importCommand);
+
+    expect(result).toMatchObject({
+      kind: "browser-profiles-refused",
+      reason: "profile-unavailable",
+    });
+    expect(JSON.stringify(result)).not.toContain(SENTINEL);
+    expect(replay(live)[0]?.payload).toMatchObject({ imported: 200 });
   });
 });

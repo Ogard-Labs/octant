@@ -69,6 +69,18 @@ choose a profile from the control at the left of the address bar:
 - Purging a Project removes its profile with the Project's other data. Archiving
   a Project closes its profile's pages and keeps the profile.
 
+**Import cookies from another browser.** In **Settings → Data & storage →
+Browser profiles**, **Import cookies…** on a Project or Personal profile copies the
+cookies of one profile of a browser installed on this Mac (Chrome, Chromium, Brave,
+Edge, Vivaldi, Arc, or Firefox) so you stay signed in. Nothing is read until you
+pick a browser and profile and press **Import**. For a Chromium-family browser
+macOS then asks whether Octant may read that browser's cookie key from your
+Keychain; if you decline, nothing is imported and Octant says so. The cookies go
+only into that profile, on this Mac: they are not uploaded, logged, exported, or
+shown to an agent, and Octant records only the browser, its profile, and how many
+cookies arrived. Expired and malformed cookies are left behind and counted.
+**Clear cookies…** removes a profile's cookies and keeps its other data.
+
 **What the agent may do on a signed-in page.** A Project or Personal page is
 treated as signed in, because Octant cannot tell. The agent can ask for one by
 passing `profile` (`project` or `personal`) when it opens a page. Octant asks

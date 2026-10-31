@@ -66,7 +66,7 @@ import { readThreadExternalContentTaint } from "../context/externalContentTaintP
 import { CodeTurnDecisions } from "../turnDecisions/codeTurnDecisions";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
 import { isReplayedAndroidEvidence } from "../android/androidToolchainService";
-import { isNativeHarnessDriverKind } from "@octant/domain";
+import { isNativeHarnessDriverKind, projectExtraFolderRoots } from "@octant/domain";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { type CodeWiring, stableCodeFileId } from "./code";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
@@ -290,7 +290,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   Pick<CanvasWiring, "canvasAgentToolPort"> &
   Pick<
     HarnessWiring,
-    "nativeHarnessComposition" | "nativeHarnessHooks" | "onHarnessRecoveryLifted"
+    "hostShield" | "nativeHarnessComposition" | "nativeHarnessHooks" | "onHarnessRecoveryLifted"
   > & {
     /** Wired by wireChat; read only after startup. */
     readonly codeThreadMentionDirectory: () => ReturnType<typeof createCodeThreadMentionDirectory>;
@@ -349,6 +349,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     isCodeProviderModelAllowed,
     liveTurns,
     machineChangeFeed,
+    hostShield,
     nativeHarnessComposition,
     nativeHarnessHooks,
     onHarnessQuestionAsked,
@@ -508,6 +509,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         }),
       );
       codeOperationRuntime = createCodeOperationRuntime({
+        shield: hostShield,
         liveTurns,
         activeTurns: codeActiveTurns,
         terminalBrowserGrants: grants,
@@ -613,6 +615,12 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             projectId: input.thread.projectId,
           }),
         nativeHarnessTools: (input) => nativeHarnessComposition.forCode(input),
+        readProjectExtraFolders: (projectId) => {
+          const project = persistence.readProject(projectId);
+          return project === undefined || project.type === "chat"
+            ? []
+            : projectExtraFolderRoots(project);
+        },
         nativeHarness: nativeHarnessHooks,
         onProviderTurnRequested: (threadId) => {
           if (codeService instanceof CodeService) codeService.noteProviderTurnRequested(threadId);

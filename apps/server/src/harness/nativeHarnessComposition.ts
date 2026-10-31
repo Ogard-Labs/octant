@@ -209,11 +209,15 @@ export interface NativeHarnessComposition {
   readonly forWork: (input: {
     readonly thread: WorkThread;
     readonly projectRoot: string;
+    /** The Project's extra folders, which the file tools treat as the root. */
+    readonly extraFolders?: ReadonlyArray<string>;
     readonly windowId: string;
   }) => AppManagedToolSet | undefined;
   readonly forCode: (input: {
     readonly thread: CodeThread;
     readonly checkoutRoot: string;
+    /** The Project's extra folders, which the file tools treat as the checkout. */
+    readonly extraFolders?: ReadonlyArray<string>;
     readonly windowId: string;
     /**
      * The credential values the turn resolved. A lookup redacts them from
@@ -382,6 +386,8 @@ export function createNativeHarnessComposition(
     readonly windowId?: string;
     /** A Code thread's checkout, the root Octant Shield judges its calls against. */
     readonly boundRoot?: string;
+    /** The Project's extra folders, which Shield judges as it judges the root. */
+    readonly extraRoots?: ReadonlyArray<string> | undefined;
   }): Pick<NativeHarnessToolPorts, "askUser" | "approvals" | "steering" | "callEnded"> => ({
     callEnded: (callId) => {
       confirmedCommandHosts.delete(callId);
@@ -439,6 +445,7 @@ export function createNativeHarnessComposition(
                   command: input.command,
                 }),
                 boundRoot: scope.boundRoot,
+                ...(scope.extraRoots === undefined ? {} : { extraRoots: scope.extraRoots }),
                 signal: input.signal,
               });
               if (decision !== undefined) {
@@ -605,7 +612,7 @@ export function createNativeHarnessComposition(
         },
       });
     },
-    forWork: ({ thread, projectRoot, windowId }) => {
+    forWork: ({ thread, projectRoot, extraFolders, windowId }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
       const threadId = String(thread.id);
       return compose({
@@ -626,7 +633,10 @@ export function createNativeHarnessComposition(
             projectId: thread.projectId,
             lead: leadOf(thread),
           }),
-          filesystem: new NativeHarnessFileSystem({ root: projectRoot }),
+          filesystem: new NativeHarnessFileSystem({
+            root: projectRoot,
+            ...(extraFolders === undefined ? {} : { extraRoots: extraFolders }),
+          }),
           ...webPorts(),
           ...contextRemainingFor("work-thread", threadId),
           ...journalLookupFor({
@@ -644,7 +654,7 @@ export function createNativeHarnessComposition(
         },
       });
     },
-    forCode: ({ thread, checkoutRoot, windowId, secrets }) => {
+    forCode: ({ thread, checkoutRoot, extraFolders, windowId, secrets }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
       const threadId = String(thread.id);
       const shell = codeShell({ threadId, projectId: String(thread.projectId) }, windowId);
@@ -676,8 +686,12 @@ export function createNativeHarnessComposition(
             lead: leadOf(thread),
             windowId,
             boundRoot: checkoutRoot,
+            ...(extraFolders === undefined ? {} : { extraRoots: extraFolders }),
           }),
-          filesystem: new NativeHarnessFileSystem({ root: checkoutRoot }),
+          filesystem: new NativeHarnessFileSystem({
+            root: checkoutRoot,
+            ...(extraFolders === undefined ? {} : { extraRoots: extraFolders }),
+          }),
           ...(shell === undefined ? {} : { shell }),
           ...webPorts(),
           ...contextRemainingFor("code-thread", threadId),

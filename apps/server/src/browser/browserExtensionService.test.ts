@@ -119,6 +119,7 @@ function harness(options: { readonly native?: boolean } = {}) {
       list: async () => [],
       clear: async () => undefined,
       syncExtensions: async (profile, extensions) => void syncs.push({ profile, extensions }),
+      importCookies: async () => ({ imported: 0, skipped: 0 }),
     },
     createContext: async () => undefined,
     inspectTarget: async () => ({ sensitive: false }),

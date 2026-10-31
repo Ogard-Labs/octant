@@ -7,8 +7,11 @@ import {
   EventId,
   EventName,
   UtcTimestamp,
+  decodeBrowserCookiesImported,
   decodeBrowserProfileCleared,
   decodeBrowserProfilesResult,
+  MAX_COOKIES_PER_IMPORT_BATCH,
+  type CookieImportBrowserId,
   type BrowserProfileClearScope,
   type BrowserProfilesCommand,
   type BrowserProfilesResult,
@@ -21,6 +24,7 @@ import {
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
 import type { BrowserRuntimePort } from "./browserRuntimePort";
+import type { BrowserCookieReader, CookieReadRefusal } from "./cookieImport/browserCookieReader";
 
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
 const decodeAggregateVersion = Schema.decodeUnknownSync(AggregateVersion);
@@ -31,6 +35,14 @@ const decodeEventName = Schema.decodeUnknownSync(EventName);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 
 export const BROWSER_PROFILE_AGGREGATE = "browser-profile";
+
+/** What a person is told when an import found nothing to import; no reason carries a site or a cookie. */
+const IMPORT_REFUSALS: Readonly<Record<CookieReadRefusal, string>> = {
+  "source-not-found": "That browser or profile is not on this Mac.",
+  "keychain-refused":
+    "macOS did not allow Octant to read the browser's cookie key, so nothing was imported.",
+  "source-unreadable": "Octant could not read that browser's cookies, so nothing was imported.",
+};
 
 /** Who is asking. Only the person at a local window manages a profile. */
 export type BrowserProfilesCaller = "local-window" | "remote-device";
@@ -46,6 +58,8 @@ export interface BrowserProfileServiceOptions {
    * instead of on the next poll.
    */
   readonly closePages: (profile: StoredBrowserProfile) => Promise<void>;
+  /** Reads another browser's cookies on the person's pick; absent where the host has none to offer. */
+  readonly cookieReader?: BrowserCookieReader;
   readonly uuid: () => string;
   readonly clock: () => string;
 }
@@ -80,7 +94,82 @@ export class BrowserProfileService {
       );
     }
     if (command.kind === "list") return this.#list(store);
+    if (command.kind === "import-sources") {
+      return decodeBrowserProfilesResult({
+        kind: "browser-cookie-sources",
+        sources: this.#options.cookieReader?.listSources() ?? [],
+      });
+    }
+    if (command.kind === "import-cookies") {
+      return this.#importCookies(store, command.profile, command.browser, command.sourceProfile);
+    }
     return this.#clear(store, command.profile, command.scope);
+  }
+
+  /**
+   * Copies one browser profile's cookies into one Octant profile, only because
+   * the person picked both. The cookies move from the source database to the
+   * desktop app's store and stop there: nothing here returns, journals, or logs
+   * a cookie, a site, or a value, and a failure at any step reports a fixed
+   * sentence.
+   */
+  async #importCookies(
+    store: NonNullable<BrowserRuntimePort["profiles"]>,
+    profile: StoredBrowserProfile,
+    browser: CookieImportBrowserId,
+    sourceProfile: string,
+  ): Promise<BrowserProfilesResult> {
+    const reader = this.#options.cookieReader;
+    if (reader === undefined) {
+      return refused("source-not-found", "This Mac has no other browser to import cookies from.");
+    }
+    const read = await reader.read(browser, sourceProfile);
+    if (read.status === "refused") return refused(read.reason, IMPORT_REFUSALS[read.reason]);
+    let imported = 0;
+    let skipped = read.skipped;
+    try {
+      for (let start = 0; start < read.cookies.length; start += MAX_COOKIES_PER_IMPORT_BATCH) {
+        const batch = await store.importCookies(
+          profile,
+          read.cookies.slice(start, start + MAX_COOKIES_PER_IMPORT_BATCH),
+        );
+        imported += batch.imported;
+        skipped += batch.skipped;
+      }
+    } catch {
+      // Whatever arrived before the failure is in the profile and is recorded.
+      if (imported > 0) this.#journalImported(profile, browser, sourceProfile, imported, skipped);
+      return refused("profile-unavailable", "The cookies could not be added to this profile.");
+    }
+    this.#journalImported(profile, browser, sourceProfile, imported, skipped);
+    return decodeBrowserProfilesResult({
+      kind: "browser-cookies-imported",
+      profile,
+      browser,
+      sourceProfile,
+      imported,
+      skipped,
+    });
+  }
+
+  #journalImported(
+    profile: StoredBrowserProfile,
+    browser: CookieImportBrowserId,
+    sourceProfile: string,
+    imported: number,
+    skipped: number,
+  ): void {
+    this.#append(
+      BROWSER_PROFILE_EVENT_NAMES.cookiesImported,
+      decodeBrowserCookiesImported({
+        kind: "browser-cookies-imported",
+        profile,
+        browser,
+        sourceProfile,
+        imported,
+        skipped,
+      }),
+    );
   }
 
   async #list(store: NonNullable<BrowserRuntimePort["profiles"]>): Promise<BrowserProfilesResult> {
@@ -152,6 +241,13 @@ export class BrowserProfileService {
   }
 
   #journalCleared(profile: StoredBrowserProfile, scope: BrowserProfileClearScope): void {
+    this.#append(
+      BROWSER_PROFILE_EVENT_NAMES.cleared,
+      decodeBrowserProfileCleared({ kind: "browser-profile-cleared", profile, scope }),
+    );
+  }
+
+  #append(eventName: string, payload: unknown): void {
     this.#options.journal.append({
       aggregate: {
         aggregateType: BROWSER_PROFILE_AGGREGATE,
@@ -161,16 +257,12 @@ export class BrowserProfileService {
       events: [
         {
           eventId: decodeEventId(this.#options.uuid()),
-          eventName: decodeEventName(BROWSER_PROFILE_EVENT_NAMES.cleared),
+          eventName: decodeEventName(eventName),
           eventVersion: 1,
           correlationId: decodeCorrelationId(this.#options.uuid()),
           actor: decodeEventActor(this.#options.actor),
           occurredAt: decodeTimestamp(this.#options.clock()),
-          payload: decodeBrowserProfileCleared({
-            kind: "browser-profile-cleared",
-            profile,
-            scope,
-          }),
+          payload,
         },
       ],
     });

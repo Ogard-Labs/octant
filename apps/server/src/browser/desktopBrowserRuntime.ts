@@ -108,6 +108,22 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
     syncExtensions: async (profile, extensions) => {
       await this.#request("/v1/extensions/sync", { profile, extensions });
     },
+    importCookies: async (profile, cookies) => {
+      const answer = await this.#request<unknown>("/v1/profiles/import-cookies", {
+        profile,
+        cookies,
+      });
+      const row = answer as { imported?: unknown; skipped?: unknown };
+      if (
+        typeof row.imported !== "number" ||
+        typeof row.skipped !== "number" ||
+        !Number.isInteger(row.imported) ||
+        !Number.isInteger(row.skipped)
+      ) {
+        throw new Error("Octant desktop Browser broker rejected the request.");
+      }
+      return { imported: Math.max(0, row.imported), skipped: Math.max(0, row.skipped) };
+    },
   };
 
   async createContext(
