@@ -144,7 +144,8 @@ OpenCode, and Devin turn theirs off through their own settings. Codex starts
 with its multi-agent features and `agents.enabled` switched off for that run
 only; your `CODEX_HOME` and `config.toml` are left as they are. For Claude Code
 and Codex you can let the provider run as itself, which turns its own subagents
-on and shows each one in the thread as a subagent run; see
+on and shows each one in the thread as a subagent run. Codex also needs the
+thread at Full access before it starts them; see
 [Let a provider run as itself](/advanced/providers#let-a-provider-run-as-itself).
 
 ## Posture and clamps

@@ -138,7 +138,9 @@ The thread starts in the mode you chose in the Mode step, or the one its
 Project chose.
 
 Auto, Ask first, Accept edits, Plan, and Full access are the same modes you
-meet everywhere else; your pick is the default for new threads. Change it in
+meet everywhere else; your pick is the default for new Code threads. New Work
+threads take their level from Settings › Work, and Work Projects have no
+access override. Change it in
 Settings › Access, per Project, or on any thread from the composer in one
 click. Where a provider has no reviewer of its own, Octant Shield, Octant's
 own reviewer, can answer approval prompts. Shield runs on your provider's
