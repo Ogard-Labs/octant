@@ -3,6 +3,7 @@ import {
   type ApprovalOutsideContent,
   decodeNativeHarnessApprovalId,
   decodeUtcTimestamp,
+  NATIVE_HARNESS_BUILT_IN_SLOTS,
   type NativeHarnessApproval,
   type NativeHarnessApprovalId,
   type NativeHarnessCommandHost,
@@ -11,6 +12,7 @@ import {
   type NativeHarnessInteractionSource,
   type OctantMode,
   type ProjectId,
+  type ShieldDecision,
 } from "@octant/contracts";
 import { canonicalToolEgressRuleHost } from "@octant/domain/tool-egress-policy";
 import type { ToolEgressCallConfirmation, ToolEgressPerson } from "./nativeHarnessEgressRules";
@@ -76,6 +78,8 @@ export interface NativeHarnessApprovalAsk {
   readonly approvalClass: string;
   readonly singleUse?: boolean;
   readonly signal?: AbortSignal | undefined;
+  /** Why Octant Shield handed this call to the person, at Auto with Shield reviewing. */
+  readonly shield?: ShieldDecision | undefined;
 }
 
 function commandHostKey(host: string, port: number): string {
@@ -120,6 +124,49 @@ export class NativeHarnessApprovalStore {
 
   async ask(input: NativeHarnessApprovalAsk): Promise<NativeHarnessApprovalOutcome> {
     return (await this.#ask(input)).outcome;
+  }
+
+  /**
+   * Whether the person already allowed this class for the thread's session, so
+   * the call goes through on their word and no reviewer is asked. A
+   * single-use ask is never answered by a remembered class.
+   */
+  remembers(threadId: string, approvalClass: string, singleUse: boolean): boolean {
+    return !singleUse && this.#remembered.get(threadId)?.has(approvalClass) === true;
+  }
+
+  /**
+   * Journals a call Octant Shield allowed or denied, settled at once and never
+   * remembered: Shield's answer covers this one call. Nothing waits on it and
+   * no surface is told to show it as pending.
+   */
+  recordReviewed(
+    input: NativeHarnessApprovalAsk,
+    shield: ShieldDecision & { readonly verdict: "allow" | "deny" },
+  ): void {
+    this.#options.sessions.ensure({
+      threadId: input.threadId,
+      mode: input.mode,
+      projectId: input.projectId,
+      leadSlotId: NATIVE_HARNESS_BUILT_IN_SLOTS.default,
+      lead: input.lead,
+    });
+    const at = decodeUtcTimestamp(this.#options.clock());
+    this.#options.sessions.askApproval(
+      input.threadId,
+      decodeNativeHarnessApproval({
+        id: decodeNativeHarnessApprovalId(this.#options.uuid()),
+        toolName: input.toolName,
+        ...(input.source === undefined ? {} : { source: input.source }),
+        summary: input.summary.length > 240 ? input.summary.slice(0, 240) : input.summary,
+        approvalClass: input.approvalClass,
+        ...(input.singleUse === true ? { singleUse: true } : {}),
+        shield,
+        status: shield.verdict === "allow" ? "approved" : "denied",
+        askedAt: at,
+        settledAt: at,
+      }),
+    );
   }
 
   /**
@@ -178,6 +225,7 @@ export class NativeHarnessApprovalStore {
       ...(singleUse ? { singleUse: true } : {}),
       ...this.#outsideContentFor(input.threadId, singleUse && input.source === undefined),
       ...(commandHosts === undefined ? {} : { commandHosts }),
+      ...(input.shield === undefined ? {} : { shield: input.shield }),
       status: "pending",
       askedAt,
     });

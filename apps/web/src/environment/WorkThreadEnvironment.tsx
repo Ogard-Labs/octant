@@ -5,6 +5,7 @@ import { deriveWorkEnvironmentProjection } from "@octant/domain/shell-policy";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { FolderOpen, Repeat } from "lucide-react";
 import { EnvironmentCard, EnvironmentGroup } from "./EnvironmentGroup";
+import { EnvironmentExtraFolders } from "./EnvironmentExtraFolders";
 import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
 import { ChangeWorkingFolder, workingFolderLabel } from "./WorkingDirectoryControl";
 import { EnvironmentSubagents } from "./EnvironmentSubagents";
@@ -181,6 +182,7 @@ export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
               />
             </EnvironmentGroup>
           )}
+          <EnvironmentExtraFolders folders={project?.extraFolders} />
         </EnvironmentCard>
       </ThreadEnvironmentPanel>
       <div className="code-thread-environment__content">{props.children}</div>

@@ -408,7 +408,7 @@ function mapToolCompletion(
   ];
 }
 
-type CodexSubagentCall = Extract<ThreadItem, { readonly type: "collabAgentToolCall" }>;
+export type CodexSubagentCall = Extract<ThreadItem, { readonly type: "collabAgentToolCall" }>;
 
 const CODEX_SUBAGENT_STATUS: Readonly<
   Record<string, "starting" | "running" | "completed" | "failed">
@@ -428,18 +428,28 @@ const CODEX_SUBAGENT_STATUS: Readonly<
  * shown as a child run of this thread, by the thread id Codex gave it. A
  * started subagent is `running`; a wait or close reports how each stands.
  * The prompt is shown as the run's task, cut to one line; nothing a subagent
- * said is read.
+ * said is read. A call one subagent made names that subagent's thread as the
+ * runs' parent (`parentChildAgentId`), so nested runs keep their lineage.
  */
-function mapCodexSubagentCall(
+export function mapCodexSubagentCall(
   context: CodexEventContext,
   item: CodexSubagentCall,
+  parentChildAgentId?: string,
 ): ReadonlyArray<CodexMappedMessage> {
   const results: CodexMappedMessage[] = [];
   const task =
     item.tool === "spawnAgent" && typeof item.prompt === "string"
       ? truncate(item.prompt.split("\n")[0]?.trim() ?? "", 200)
       : "";
-  for (const threadId of item.receiverThreadIds) {
+  const parent = parentChildAgentId?.trim();
+  const lineage =
+    parent === undefined || parent.length === 0 || parent.length > 255
+      ? {}
+      : { parentChildAgentId: parent };
+  const threads = [
+    ...new Set([...item.receiverThreadIds, ...Object.keys(item.agentsStates ?? {})]),
+  ];
+  for (const threadId of threads) {
     const childAgentId = threadId.trim();
     if (childAgentId.length === 0 || childAgentId.length > 255) continue;
     const reported = item.agentsStates?.[threadId]?.status;
@@ -456,6 +466,7 @@ function mapCodexSubagentCall(
       event(context, {
         kind: "child-agent-activity",
         childAgentId,
+        ...lineage,
         ...(task.length === 0 ? {} : { task }),
         status,
         summary:

@@ -25,6 +25,7 @@ import {
   makeOpenCodeDriver,
   normalizeOpenCodeProbe,
   openCodePromptParts,
+  permissionRules,
   type OpenCodeClientPort,
 } from "./openCodeDriver";
 import type { OpenCodeEvent } from "./openCodeEventMapper";
@@ -914,6 +915,33 @@ describe("OpenCode driver", () => {
     );
     expect(String(exit)).toContain("unauthorized");
     expect(fixture.calls.some((call) => call.startsWith("permission.reply"))).toBe(false);
+  });
+
+  it("answers a one-call approval once, even when the person remembers approvals for the Project", async () => {
+    const fixture = driverFixture({
+      permissionPersistence: "project-default",
+      events: [permissionEvent("provider-session", "one")],
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project" }).pipe(
+          Effect.flatMap((connection) =>
+            connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }).pipe(
+              Effect.tap(() =>
+                connection.answerApproval({
+                  sessionId,
+                  requestId: "one",
+                  approved: true,
+                  scope: "once",
+                }),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(fixture.calls).toContain("permission.reply:once");
+    expect(fixture.calls).not.toContain("permission.reply:always");
   });
 
   it("maps remembered approval to always and denial to reject", async () => {
@@ -1988,6 +2016,83 @@ describe("OpenCode driver", () => {
     expect(locked.approvals.at(-1)).not.toContain("OpenCode's own settings");
   });
 
+  it("admits the edits OpenCode makes later on a grant it remembers from an always answer, and the requests it settles by itself", async () => {
+    const asked = (id: string, file: string) =>
+      ({
+        type: "permission.v2.asked",
+        properties: { id, sessionID: "provider-session", action: "edit", resources: [file] },
+      }) as unknown as Event;
+    const fixture = betaDriver({
+      permissionPersistence: "project-default",
+      events: [asked("perm-a", "/tmp/project/a.ts"), asked("perm-b", "/tmp/project/b.ts")],
+      eventsOnReply: [
+        {
+          type: "permission.v2.replied",
+          properties: { sessionID: "provider-session", requestID: "perm-a", reply: "always" },
+        } as unknown as Event,
+        // OpenCode settles the other pending request by the remembered grant.
+        {
+          type: "permission.v2.replied",
+          properties: { sessionID: "provider-session", requestID: "perm-b", reply: "always" },
+        } as unknown as Event,
+        {
+          type: "file.edited",
+          properties: { sessionID: "provider-session", file: "/tmp/project/a.ts" },
+        } as unknown as Event,
+        // A later edit of the same file asks nothing: OpenCode applies its grant.
+        {
+          type: "file.edited",
+          properties: { sessionID: "provider-session", file: "/tmp/project/a.ts" },
+        } as unknown as Event,
+        {
+          type: "file.edited",
+          properties: { sessionID: "provider-session", file: "/tmp/project/b.ts" },
+        } as unknown as Event,
+        { type: "session.idle", properties: { sessionID: "provider-session" } } as unknown as Event,
+      ],
+    });
+    const output = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.gen(function* () {
+              const stream = yield* connection.subscribe;
+              const collector = yield* Effect.fork(
+                Stream.runCollect(
+                  stream.pipe(
+                    Stream.takeUntil((event) =>
+                      ["completed", "failed", "interrupted"].includes(event.kind),
+                    ),
+                  ),
+                ),
+              );
+              yield* connection.start({
+                sessionId,
+                modelId,
+                executionPolicy: "approval-gated",
+                nativeSetup: {
+                  subagents: false,
+                  webTools: true,
+                  skills: true,
+                  toolServers: true,
+                  hooks: true,
+                  projectCode: false,
+                },
+              });
+              yield* Effect.sleep("20 millis");
+              yield* connection.answerApproval({ sessionId, requestId: "perm-a", approved: true });
+              return yield* Fiber.join(collector);
+            }),
+          ),
+        ),
+      ),
+    );
+    const events = Array.from(output);
+    expect(fixture.calls).toContain("permission.reply:always");
+    expect(events.filter((event) => event.kind === "file-change")).toHaveLength(3);
+    expect(events.some((event) => event.kind === "failed")).toBe(false);
+  });
+
   it("does not reply to an approval-gated 2.x write until the user approves it", async () => {
     const fixture = betaDriver({
       events: [
@@ -2496,6 +2601,35 @@ describe("OpenCode driver", () => {
   ] as const)("maps 2.x agent permission rules for %s %s as %s", (policy, action, effect) => {
     const rules = betaAgentPermissionRules(policy, "code");
     expect(evaluateV2Permission(rules, action)).toBe(effect);
+  });
+
+  it("lets a session reach a Project's extra folder and still denies every other outside folder", () => {
+    for (const policy of ["plan", "approval-gated", "auto-accept-edits"] as const) {
+      const beta = betaAgentPermissionRules(policy, "code", ["/work/notes"]);
+      const allowed = beta.filter(
+        (rule) => rule.action === "external_directory" && rule.effect === "allow",
+      );
+      expect(allowed.map((rule) => rule.resource)).toEqual(["/work/notes", "/work/notes/*"]);
+      // The outside-folder deny for every other path stays, and comes first,
+      // so only the folder is reopened; the posture's edit rule is unchanged.
+      const denyIndex = beta.findIndex(
+        (rule) =>
+          rule.action === "external_directory" && rule.resource === "*" && rule.effect === "deny",
+      );
+      expect(denyIndex).toBeGreaterThanOrEqual(0);
+      expect(denyIndex).toBeLessThan(beta.indexOf(allowed[0]!));
+      expect(evaluateV2Permission(beta, "edit")).toBe(
+        evaluateV2Permission(betaAgentPermissionRules(policy, "code"), "edit"),
+      );
+      const legacy = permissionRules(policy, "code", undefined, ["/work/notes"]);
+      expect(
+        legacy.filter((rule) => rule.permission === "external_directory").map((rule) => rule),
+      ).toEqual([
+        { permission: "external_directory", pattern: "*", action: "deny" },
+        { permission: "external_directory", pattern: "/work/notes", action: "allow" },
+        { permission: "external_directory", pattern: "/work/notes/*", action: "allow" },
+      ]);
+    }
   });
 
   it("denies the shell and child agents in 2.x Work mode agent permission rules", () => {

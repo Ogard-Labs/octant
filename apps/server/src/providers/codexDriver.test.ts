@@ -33,6 +33,7 @@ import type {
   RateLimitSnapshot,
 } from "./codexProtocol";
 import {
+  approvalRequestIsProjectConfined,
   codexExecutionSettings,
   codexTurnExecutionSettings,
   makeCodexClient,
@@ -291,11 +292,17 @@ function fixture(
 async function acquireConnection(
   driver: ReturnType<typeof makeCodexDriver>,
   mode?: "chat" | "work" | "code",
+  extraFolders?: ReadonlyArray<string>,
 ) {
   const scope = await Effect.runPromise(Scope.make());
   const connection = await Effect.runPromise(
     driver
-      .acquire({ instanceId, projectRoot, ...(mode === undefined ? {} : { mode }) })
+      .acquire({
+        instanceId,
+        projectRoot,
+        ...(mode === undefined ? {} : { mode }),
+        ...(extraFolders === undefined ? {} : { extraFolders }),
+      })
       .pipe(Effect.provideService(Scope.Scope, scope)),
   );
   return { connection, close: () => Effect.runPromise(Scope.close(scope, Exit.void)) };
@@ -1928,6 +1935,52 @@ describe("Codex thread and turn lifecycle", () => {
     await gatedTurn.close();
   });
 
+  it("resumes a thread after the Project's extra folders changed by closing the idle process that still holds it", async () => {
+    // Adding or removing a folder changes the lease's folder set, so the
+    // process the thread last ran in is idle under the old set.
+    let oldFoldersAlive = () => false;
+    const f = fixture({
+      threadResume: async () => {
+        if (oldFoldersAlive()) {
+          throw new CodexRpcClientFailure("remote", "Codex request failed.", {
+            remoteCode: -32600,
+            remoteMessage: "thread t already has an active writer",
+          });
+        }
+        return {
+          thread: { id: "thread-moved" },
+          model: "gpt-5.4",
+          modelProvider: "openai",
+          serviceTier: null,
+          cwd: projectRoot,
+        };
+      },
+    });
+    const driver = makeCodexDriver(f.options());
+    const resume = (connection: Awaited<ReturnType<typeof acquireConnection>>["connection"]) =>
+      Effect.runPromise(
+        Effect.exit(
+          connection.resume({
+            sessionId,
+            resumeCursor: { driverKind: "codex", value: "thread-moved" },
+            executionPolicy: "approval-gated",
+          }),
+        ),
+      );
+
+    const before = await acquireConnection(driver, "code");
+    expect(Exit.isSuccess(await resume(before.connection))).toBe(true);
+    await before.close();
+    oldFoldersAlive = () => f.closeCount() === 0;
+
+    const after = await acquireConnection(driver, "code", ["/tmp/octant-codex-notes"]);
+    const resumed = await resume(after.connection);
+    expect(Exit.isSuccess(resumed)).toBe(true);
+    expect(f.closeCount()).toBe(1);
+    expect(f.startCount()).toBe(2);
+    await after.close();
+  });
+
   it("resume reports another Codex process using the thread when the writer conflict persists", async () => {
     const delays: number[] = [];
     const f = fixture({
@@ -2423,6 +2476,27 @@ describe("Codex thread and turn lifecycle", () => {
 });
 
 describe("Codex execution authority and approvals", () => {
+  it("lets an approval inside a Project's extra folder reach a person and declines one beside it", () => {
+    const root = "/work/main";
+    const extra = ["/work/notes"];
+    const fileChange = (grantRoot: string) => ({ kind: "file-change" as const, grantRoot });
+    expect(approvalRequestIsProjectConfined(fileChange("/work/notes/drafts"), root, extra)).toBe(
+      true,
+    );
+    expect(approvalRequestIsProjectConfined(fileChange("/work/notes"), root, extra)).toBe(true);
+    expect(approvalRequestIsProjectConfined(fileChange("/work/notes-old"), root, extra)).toBe(
+      false,
+    );
+    expect(approvalRequestIsProjectConfined(fileChange("/work/notes/drafts"), root)).toBe(false);
+    const command = (requestedCwd: string) => ({
+      kind: "command" as const,
+      requestedCwd,
+      networkApprovalContext: null,
+    });
+    expect(approvalRequestIsProjectConfined(command("/work/notes"), root, extra)).toBe(true);
+    expect(approvalRequestIsProjectConfined(command("/work"), root, extra)).toBe(false);
+  });
+
   it("maps all execution policies to exact stable Codex settings", () => {
     expect(codexExecutionSettings("full-access")).toEqual({
       approvalPolicy: "never",
@@ -2597,6 +2671,36 @@ describe("Codex execution authority and approvals", () => {
     },
   );
 
+  it.each([
+    ["command", commandApproval],
+    ["file change", fileApproval],
+  ] as const)(
+    "accepts a one-call %s answer for that call only, even under current-session persistence",
+    async (_name, makeRequest) => {
+      const f = fixture();
+      const acquired = await acquireConnection(
+        makeCodexDriver(f.options({ permissionPersistence: () => "current-session" })),
+      );
+      await startSession(acquired.connection);
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "approval", attachments: [], tools: [] }),
+      );
+      const event = takeEvents(acquired.connection, 1);
+      f.emit(makeRequest());
+      await event;
+      await Effect.runPromise(
+        acquired.connection.answerApproval({
+          sessionId,
+          requestId: "request-1",
+          approved: true,
+          scope: "once",
+        }),
+      );
+      expect(f.calls.at(-1)?.input).toMatchObject({ result: { decision: "accept" } });
+      await acquired.close();
+    },
+  );
+
   it("defaults approval persistence to the current session", async () => {
     const f = fixture();
     const acquired = await acquireConnection(makeCodexDriver(f.options()));
@@ -2694,9 +2798,18 @@ describe("Codex execution authority and approvals", () => {
       expect(JSON.stringify(approvalEvents)).not.toMatch(
         /octant-codex-project|curl|private\.example/,
       );
+      // The command reaches an automatic reviewer through the connection
+      // alone, with its working directory and without the runtime's reason.
+      const call = acquired.connection.approvalCall?.({ sessionId, requestId: "request-1" });
+      expect(call).toMatchObject({ tool: "command", workingDirectory: cwd });
+      expect(call?.input).toContain("curl private.example/secret");
+      expect(call?.input).not.toContain("must-not-cross");
       await Effect.runPromise(
         acquired.connection.answerApproval({ sessionId, requestId: "request-1", approved: false }),
       );
+      expect(
+        acquired.connection.approvalCall?.({ sessionId, requestId: "request-1" }),
+      ).toBeUndefined();
       expect(f.calls.at(-1)?.input).toMatchObject({ result: { decision: "decline" } });
       await acquired.close();
     },
@@ -3467,6 +3580,172 @@ describe("Codex running as itself", () => {
       "features.memories=false",
     ]);
     expect(codexAppServerArgs("0.164.0")).toContain("agents.enabled=false");
+  });
+
+  it("keeps a subagent's web searches marking its parent after the parent's thread resumes on a new connection", async () => {
+    let emit: (message: CodexServerMessage) => void = () => undefined;
+    let turn = 0;
+    const f = fixture({
+      turnStart: async () => {
+        turn += 1;
+        emit(
+          notification("turn/started", {
+            threadId: "thread-1",
+            turn: { id: `turn-${turn}`, status: "inProgress" },
+          }),
+        );
+        if (turn === 1) {
+          emit(
+            notification("item/completed", {
+              threadId: "thread-1",
+              turnId: "turn-1",
+              item: {
+                type: "collabAgentToolCall",
+                id: "collab-1",
+                tool: "wait",
+                status: "completed",
+                receiverThreadIds: ["thread-child"],
+                agentsStates: { "thread-child": { status: "completed" } },
+              },
+              completedAtMs: 20,
+            }),
+          );
+        } else {
+          emit(
+            notification("item/started", {
+              threadId: "thread-child",
+              turnId: "turn-child",
+              item: { type: "webSearch", id: "search-late", query: "late search" },
+              startedAtMs: 30,
+            }),
+          );
+        }
+        return { turn: { id: `turn-${turn}`, status: "inProgress" } };
+      },
+    });
+    emit = f.emit;
+    const driver = makeCodexDriver(f.options());
+    const first = await acquireConnection(driver, "code");
+    await Effect.runPromise(
+      first.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "full-access",
+        nativeSetup: ownSetup,
+      }),
+    );
+    const firstEvents = takeEvents(first.connection, 1);
+    await Effect.runPromise(
+      first.connection.send({ sessionId, prompt: "Wait.", attachments: [], tools: [] }),
+    );
+    expect((await firstEvents)[0]).toMatchObject({
+      kind: "child-agent-activity",
+      childAgentId: "thread-child",
+      status: "completed",
+    });
+    await first.close();
+
+    const second = await acquireConnection(driver, "code");
+    await Effect.runPromise(
+      second.connection.resume({
+        sessionId: secondSessionId,
+        resumeCursor: { driverKind: "codex", value: "thread-1" },
+        executionPolicy: "full-access",
+        nativeSetup: ownSetup,
+      }),
+    );
+    const secondEvents = takeEvents(second.connection, 1);
+    await Effect.runPromise(
+      second.connection.send({
+        sessionId: secondSessionId,
+        prompt: "Go on.",
+        attachments: [],
+        tools: [],
+      }),
+    );
+    expect((await secondEvents)[0]).toMatchObject({
+      kind: "outside-content-read",
+      target: "late search",
+    });
+    await second.close();
+  });
+
+  it("shows a subagent's own subagents as child runs under it and marks the thread for their searches", async () => {
+    let emit: (message: CodexServerMessage) => void = () => undefined;
+    const f = fixture({
+      turnStart: async () => {
+        emit(
+          notification("turn/started", {
+            threadId: "thread-1",
+            turn: { id: "turn-1", status: "inProgress" },
+          }),
+        );
+        emit(
+          notification("item/completed", {
+            threadId: "thread-1",
+            turnId: "turn-1",
+            item: {
+              type: "collabAgentToolCall",
+              id: "collab-1",
+              tool: "spawnAgent",
+              status: "completed",
+              receiverThreadIds: ["thread-child"],
+            },
+            completedAtMs: 20,
+          }),
+        );
+        emit(
+          notification("item/completed", {
+            threadId: "thread-child",
+            turnId: "turn-child",
+            item: {
+              type: "collabAgentToolCall",
+              id: "collab-2",
+              tool: "spawnAgent",
+              status: "completed",
+              receiverThreadIds: ["thread-grandchild"],
+              prompt: "Check the changelog",
+            },
+            completedAtMs: 25,
+          }),
+        );
+        emit(
+          notification("item/started", {
+            threadId: "thread-grandchild",
+            turnId: "turn-grandchild",
+            item: { type: "webSearch", id: "search-deep", query: "deep search" },
+            startedAtMs: 30,
+          }),
+        );
+        return { turn: { id: "turn-1", status: "inProgress" } };
+      },
+    });
+    emit = f.emit;
+    const acquired = await acquireConnection(makeCodexDriver(f.options()), "code");
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "full-access",
+        nativeSetup: ownSetup,
+      }),
+    );
+    const events = takeEvents(acquired.connection, 3);
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "Research.", attachments: [], tools: [] }),
+    );
+    const [child, grandchild, mark] = await events;
+    expect(child).toMatchObject({ kind: "child-agent-activity", childAgentId: "thread-child" });
+    expect(child).not.toHaveProperty("parentChildAgentId");
+    expect(grandchild).toMatchObject({
+      kind: "child-agent-activity",
+      childAgentId: "thread-grandchild",
+      parentChildAgentId: "thread-child",
+      task: "Check the changelog",
+      status: "running",
+    });
+    expect(mark).toMatchObject({ kind: "outside-content-read", target: "deep search" });
+    await acquired.close();
   });
 
   it("shows Codex's own subagent as a child run and marks the thread when the subagent searches the web", async () => {

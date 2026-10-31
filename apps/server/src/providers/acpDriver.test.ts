@@ -176,7 +176,12 @@ function permissionRequest(id: string, toolCallId: string) {
     method: "session/request_permission" as const,
     params: {
       sessionId: "agent-session-1",
-      toolCall: { toolCallId, title: "Write fixture file", kind: "edit" as const },
+      toolCall: {
+        toolCallId,
+        title: "Write fixture file",
+        kind: "edit" as const,
+        rawInput: { path: "/tmp/acp-project/fixture.txt", content: "kept out of the reviewer" },
+      },
       options: [
         { optionId: "allow_once", name: "Allow once", kind: "allow_once" },
         { optionId: "reject_once", name: "Reject", kind: "reject_once" },
@@ -1457,7 +1462,15 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
             yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
             client.request(permissionRequest("permission-provider", "tool-1"));
             yield* Effect.sleep("1 millis");
+            // The reviewer gets the path the write names, never what it writes.
+            expect(connection.approvalCall?.({ sessionId, requestId: "request-1" })).toEqual({
+              tool: "edit",
+              input: JSON.stringify({ path: "/tmp/acp-project/fixture.txt" }),
+            });
             yield* connection.answerApproval({ sessionId, requestId: "request-1", approved: true });
+            expect(
+              connection.approvalCall?.({ sessionId, requestId: "request-1" }),
+            ).toBeUndefined();
             expect(client.respondPermission).toHaveBeenCalledWith(
               "permission-provider",
               "allow_once",

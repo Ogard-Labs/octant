@@ -185,7 +185,8 @@ The design rests on a small set of invariants that every package obeys:
   ([Modes](#modes-chat-work-and-code)).
 - **Work and Code share one capability set.** Chat Projects are virtual,
   memory-scoped containers with no implicit filesystem or shell authority.
-  Work binds one project root and Code binds one directory, each meant to be
+  Work binds one project root and Code binds one directory (each with any extra
+  folders the person adds, granted the same access), each meant to be
   OS-confined, and both run under the same guardrail levels: shell, local
   command-line tools, SSH to the person's own machines, file reads and
   writes, Git, provider-native tools, subagents, routines, and Full access
@@ -995,11 +996,11 @@ reaches its own kind's commands, and nothing in the renderer can turn a Chat
 into Work or a Work thread into Chat. Settings' Chat and Work switches still
 gate their domains: with one off, the composer offers only the other kind.
 
-| Mode     | Binds to                                                                                                                            | Authority                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Chat** | A virtual, memory-scoped Project, or no Project at all                                                                              | No filesystem or shell authority. Optional safe research tools; scratch space is isolated per thread.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| **Work** | Exactly one OS-confined project root                                                                                                | The shared capability set at the thread's [guardrail level](#security-and-authority): file reads and writes, shell, Git, local command-line tools, SSH to the person's own machines, provider-native tools, and subagents, as in Code. Focus: documents and artifacts with document adapters (docx, pptx, pdf, image), research with citations, local tasks, and the server-authoritative board; Done by a person. Developer surfaces stay hidden until the person turns them on for the Project (below). Today's build is narrower: confined reads and approval-gated writes (or auto-accept-edits), no shell or Git, never Full access; the shared level is allowed; not built yet.                                                               |
-| **Code** | Exactly one directory, ideally a repository root; Code threads select a checkout (current checkout or a managed worktree) inside it | The same shared capability set at the thread's guardrail level, which starts in the mode the person picked at first run (Auto pre-selected; Ask first where the provider has no Auto) or later set for the Project or in Settings › Code › Access; any thread switches mode from its composer. Plan mode is always read-only. Focus: Git, terminals, tests, pull requests, review, and managed subagents inside the bound root, with checkouts, managed worktrees, and the objective delivery target. Creating a Code Project may explicitly initialize Git in that folder so a Code thread can prepare a checkout immediately; if that initialization fails, creation is refused and no Project is journaled. Binding without Git remains allowed. |
+| Mode     | Binds to                                                                                                                                                                                                                   | Authority                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Chat** | A virtual, memory-scoped Project, or no Project at all                                                                                                                                                                     | No filesystem or shell authority. Optional safe research tools; scratch space is isolated per thread.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **Work** | One OS-confined main folder, plus any [extra folders](#projects-with-several-folders) the person adds                                                                                                                      | The shared capability set at the thread's [guardrail level](#security-and-authority): file reads and writes, shell, Git, local command-line tools, SSH to the person's own machines, provider-native tools, and subagents, as in Code. Focus: documents and artifacts with document adapters (docx, pptx, pdf, image), research with citations, local tasks, and the server-authoritative board; Done by a person. Developer surfaces stay hidden until the person turns them on for the Project (below). Today's build is narrower: confined reads and approval-gated writes (or auto-accept-edits), no shell or Git, never Full access; the shared level is allowed; not built yet.                                                               |
+| **Code** | One main directory, ideally a repository root, plus any [extra folders](#projects-with-several-folders) the person adds; Code threads select a checkout (current checkout or a managed worktree) inside the main directory | The same shared capability set at the thread's guardrail level, which starts in the mode the person picked at first run (Auto pre-selected; Ask first where the provider has no Auto) or later set for the Project or in Settings › Code › Access; any thread switches mode from its composer. Plan mode is always read-only. Focus: Git, terminals, tests, pull requests, review, and managed subagents inside the bound root, with checkouts, managed worktrees, and the objective delivery target. Creating a Code Project may explicitly initialize Git in that folder so a Code thread can prepare a checkout immediately; if that initialization fails, creation is refused and no Project is journaled. Binding without Git remains allowed. |
 
 A No-project Chat thread can be filed into a Chat Project from its thread menu
 (**Move to Project…**), picking one or creating it there. The move is the
@@ -2482,6 +2483,68 @@ or stops a thread.
   the Code `#thread` mention read for the window the turn runs for, judged on
   that window's standing authority like every Project check in a turn's tool
   call (see [Security and authority](#security-and-authority)).
+
+### Projects with several folders
+
+A Work or Code Project has one **main folder** (its bound root) and any
+number of **extra folders** the person adds, up to 16 (maintainer decision,
+2026-10-31). An extra folder gets the same access as the main folder at each
+thread's [guardrail level](#security-and-authority); commands, checkouts and
+Git start in the main folder. Built.
+
+- **Adding and removing.** Only a person adds or removes one, from the
+  Project page's folders card. Add folder… opens the native folder picker on
+  desktop (the host folder browser elsewhere), which issues the same
+  single-use binding receipt a Project's creation or relink consumes, so the
+  path is the folder's real path and an agent, a routine, or an import never
+  supplies one. `add-project-extra-folder` and `remove-project-extra-folder`
+  journal `project.extra-folder-added@1` (the folder, who added it, and
+  when) and `project.extra-folder-removed@1` (the folder, who removed it,
+  and when), each with the whole Project after the change, so replay rebuilds
+  the list. A Project journaled before the field existed replays with none.
+- **What can be a folder.** The domain policy refuses the home folder and
+  any folder above it, a system folder (`/`, `/System`, `/Library`, `/usr`,
+  `/etc`, `/private`, `/Volumes` itself and their peers) or a folder inside
+  a system-owned tree, a credential folder in home (`.ssh`, `.aws`,
+  `.azure`, `.gnupg`, `.kube`, `.docker`, `.password-store`,
+  `.config/gcloud`, `.config/gh`, `Library/Keychains`), anything inside or
+  containing one of those, the main folder, a folder inside or around the
+  main folder or another extra folder, and a seventeenth. Relinking the main
+  folder onto or around an extra folder is refused until that folder is
+  removed. A Chat Project has no folders.
+- **What the folders grant.** Every place that confines a thread treats
+  main and extra folders as the Project: the OS profiles give each extra
+  folder exactly the main folder's rule at that level (Seatbelt reads, and
+  writes or a trailing write denial; Bubblewrap a writable or read-only
+  bind), Claude's sandbox lists them in its read and write allow lists and
+  its `additionalDirectories`, Codex's wrapped profile and its approval
+  scope include them, OpenCode's session rules allow reaching them as a
+  folder of the session rather than an outside directory, ACP and Pi
+  profiles bind them, and the Octant Harness file tools accept an absolute
+  path in one, and Octant Shield's fast rules allow reads and edits in one
+  as in the main folder (its command rules keep to the main folder). Plan
+  reads them and writes none, as it does the main folder.
+  Full access stays unwrapped. The deny rules for secrets and the
+  `DEFAULT_DENY_READ_PATHS` refusal of ancestor roots apply to extra folders
+  unchanged. A folder missing on disk at launch is left out of the profile
+  rather than failing it. The lease or connection a runtime reuses is keyed
+  by its folders, and a change applies from the next turn. A Codex thread
+  that resumes after its folders changed first closes the idle lease of the
+  same root and mode that still holds it, as after a posture change.
+- **What the agent is told.** The runtime only sees its working directory,
+  so each Work and Code turn carries an instruction naming the extra folders
+  by absolute path and saying that commands, Git and checkouts start in the
+  main folder.
+- **Code.** Worktrees, checkouts, Git, pull requests, tests, language
+  services, debug adapters, terminals and Project actions stay keyed to the
+  main folder; an extra folder is a plain folder with no checkout
+  management. Octant's own shell port for the harness and the ACP client
+  file and terminal tools also keep the main folder's root.
+- **Not yet.** The host's own file surfaces address files by a path
+  relative to the main folder, so the `@file` picker, the Work Files and
+  overview listings, Work artifact paths, and Code search do not list or
+  resolve files in an extra folder yet. An agent reaches them through its
+  runtime's own tools.
 
 ## Agent task display
 
@@ -7658,7 +7721,7 @@ mechanisms are:
   Allowed; not built yet: the single
   level setting with its global and Project defaults, the first-run
   question, the header indicator, the one-time warning,
-  Reviewed in Work, Octant Shield, and Full access
+  Reviewed in Work, Octant Shield's picker and Settings, and Full access
   without a sandbox or prompts for every runtime.
 
 - **Reviewed.** A reviewer answers the prompts that would otherwise go to
@@ -7812,8 +7875,7 @@ access` agree); a thread's own change is journaled as
   repository, so such an action runs without an Octant prompt. Octant's
   denies still win, and Octant never writes such a grant; the
   [OpenCode runtime specification](design/provider-runtimes.md#opencode) states the details.
-  [Octant Shield](#octant-shield) answers these prompts at Reviewed; it does
-  not yet run.
+  [Octant Shield](#octant-shield) answers these prompts at Reviewed.
   Three provider tool requests denied in one Code turn end it as
   interrupted, with the reason journaled, so a provider cannot loop a
   person's refusals.
@@ -8098,6 +8160,9 @@ access` agree); a thread's own change is journaled as
   | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only | `allow` on Plan; not limited by Octant otherwise | Octant sandbox: project and checkout read-only; write only `sessions/` and this session's own transcript and folder; on macOS exec only zsh and listed read-only tools, which get no network and write only the launch temporary directory |
   | Codex app-server (`codexProcess.ts`)                                      | Wrapped                         | Wrapped                                             | `allow`                                          | Octant sandbox: root read-only; writes only the account home (not its configuration) and a private temporary directory; Codex's own sandbox set to external                                                                                |
   | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | No turn runs                                                                                                                                                                                                                               |
+
+  Wherever a row names the root or the checkout, a Project's extra folders
+  get the same rule ([Projects with several folders](#projects-with-several-folders)).
 
   The columns are today's postures. On the
   [guardrail levels](#security-and-authority): Guarded and Reviewed run
@@ -10169,7 +10234,10 @@ in this document describe the build as it ships.
 ### Octant Shield
 
 Octant Shield is Octant's own automatic approval reviewer (maintainer
-decision, 2026-10-31; designed, not built). It answers the approval prompts
+decision, 2026-10-31). Its Judge is built for every runtime below, subagents
+included (build order steps 1 and 2); the picker and Settings, the Watcher,
+safe networks, and the server registry are designed, not built. It answers the
+approval prompts
 that would otherwise go to the person, for every runtime that routes
 approvals through Octant: Octant Harness, Claude Code (`canUseTool`), Codex
 (app-server approval requests), OpenCode (`permission.asked`), ACP agents
@@ -10195,7 +10263,8 @@ the picker says why.
    the person or is refused; Shield never allows it. The malicious-call rules
    below belong here.
 2. **Fast allow rules,** with no model call: reads and edits inside the bound
-   root, the Project's own test or build command, read-only Git, egress to a
+   root or one of the Project's extra folders, the Project's own test or build
+   command, read-only Git, egress to a
    safe network, and SSH to a registered server within its profile.
 3. **Model judgment** for everything else. The Judge sees only the person's
    own messages in this thread, the pending call (tool, arguments, working
@@ -10278,7 +10347,68 @@ wall. A model reviewer is not a guarantee.
 
 **Evaluation.** The repository keeps a fixture set of known-safe and
 known-unsafe calls, and a release with Shield requires measuring its
-false-allow rate on that set.
+false-allow rate on that set. The set lives in
+`packages/domain/src/shieldEvaluationFixtures.ts`; every test run checks that
+the rule stages answer each fixture as recorded and never allow a
+known-unsafe one, and `bun run shield:eval` measures the whole pipeline,
+running the model stage only against an endpoint named in its environment.
+
+**As built.** The rule stages, the prompt the model sees, the answer it must
+give, and the brakes are pure policy in `packages/domain/src/shieldJudgePolicy.ts`;
+the host runs them in `apps/server/src/shield/`. The Judge's input type has no
+field for a tool result, a file's contents, or a fetched page, and the
+person's messages are read from the thread's own turn prompts, never from what
+the agent read, so nothing outside can reach the model. The Project's own
+test and build commands are the `test`, `build`, `typecheck`, and `lint`
+scripts of its root `package.json` under the package manager its lockfile
+names, and the standard commands of a Cargo, Swift, or Go package at the
+root; a command passes by rule only with plain arguments after it. Read-only
+Git is `status`, `diff`, `log`, `show`, `blame`, and the other subcommands
+that only read, with no shell composition and no flag that writes a file.
+The model is a tool-less one-shot session started in a scratch folder
+outside every Project, on the thread's provider account with the catalogue's
+smallest tier by name (a nano, mini, or haiku model, for example), else the
+thread's own model; it has 20 seconds. Each model call reserves a small
+bound against the thread's and Project's spend ceilings first, so a ceiling
+that refuses hands the call to the person, and what the call used is
+journaled under the reviewed thread (request shape `shield-review`, on its
+own `shield-review-usage` aggregate) before the reservation is released, so
+the usage ledger and every ceiling over the thread count it; a call that
+reported nothing is recorded as unreported spend. A fast allow reads a
+command exactly as written: any quoting, escape, expansion, glob, separator,
+redirection, or whitespace other than a space or a tab sends it to the model,
+and read-only Git refuses any option, or unambiguous prefix of one, that
+writes a file, runs a program, reads outside the repository, or switches
+repositories (`--output`, `--ext-diff`, `--textconv`, `--no-index`,
+`--exec-path`, `--git-dir`, `--work-tree`, `-O`, and the like). The brakes are kept per thread in
+the host process: a restart gives a paused thread back to Shield, which
+widens nothing because every counted decision was a refusal. A class the
+person already allowed for the session goes through on their word without
+asking Shield. On the Octant Harness an allow or deny is journaled as a
+settled harness approval carrying the decision, an ask is journaled as the
+pending approval with Shield's reason, and the Code transcript shows each
+decision as an `approval-reviewed` row beside the tool rows. A subagent asks
+under its parent's reviewer, judged against its own worktree, with its own
+taint counted beside the parent's. A provider runtime's prompt reaches
+Shield with the pending call the runtime described: each driver keeps it
+beside the pending request and hands it over through the provider seam's
+`approvalCall`, never on the approval event, so nothing journaled, exported,
+or shown carries it. Only the fields a reviewer judges cross (the command, its
+working directory, the paths and URLs the call names, a sandbox request's
+permissions), with credential-shaped text redacted and cut to 8 KB; a write's
+contents, a tool's output, and the runtime's own reason stay out. Codex's
+request to widen its own sandbox is a privilege change, which Shield hands to
+the person. An allow or deny goes straight back to the runtime for that one
+call and does not count toward the three refusals that end a turn; an ask is
+the ordinary approval. Every automatic answer, and every answer on a child
+run's behalf, carries the seam's one-call scope (`ProviderApprovalAnswer.scope:
+"once"`): no driver remembers it for the session or the Project or asks the
+runtime to, whatever the person's persistence setting, so one allow never
+authorizes a later call nobody reviewed. An OpenCode v2 permission's
+`resources` are read as the paths, command, or address it targets. Claude Code and Codex keep their own reviewer at Auto
+by default, so Shield answers their prompts only once the person chooses it;
+Mistral Vibe's own auto-approve mode is not built, so Shield reviews it, as it
+reviews OpenCode, every other ACP agent, and Pi.
 
 **Build order.** (1) Octant Harness; (2) every runtime through the approval
 path; (3) the picker and Settings; (4) the Watcher; (5) safe networks; (6)
@@ -10375,8 +10505,8 @@ in the credential broker, the value fetched at use and never kept.
 The [guardrail levels](#security-and-authority) and the
 [key providers' native features](#providers) are in scope; of them only
 Guarded, Accept edits, Reviewed for Claude Code and Codex in Code, and
-Full access in Code are built; [Octant Shield](#octant-shield) is in scope and
-designed, not built. A merge or force-push an agent starts on its own
+Full access in Code are built; [Octant Shield](#octant-shield) is in scope,
+and its Judge is built for every runtime that routes approvals through Octant. A merge or force-push an agent starts on its own
 initiative, and cloud scheduling, are not in scope. A self-hosted wake service
 that runs in the Octant server on a person's hub and wakes their own spokes is
 in scope under [Hub and spokes](design/hub-and-spokes.md#wake-service); an

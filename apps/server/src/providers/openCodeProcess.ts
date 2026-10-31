@@ -67,6 +67,8 @@ export interface OpenCodeServerConnection {
 export interface OpenCodeProcessStartInput {
   readonly binaryPath: string;
   readonly cwd: string;
+  /** The Project's extra folders, granted what `cwd` is granted. */
+  readonly extraFolders?: ReadonlyArray<string>;
   /** Product mode used to derive the OS process policy before launch. */
   readonly mode?: "chat" | "work" | "code";
   /** Effective thread policy used to derive filesystem/process/network limits. */
@@ -1032,6 +1034,9 @@ function prepareOpenCodeLaunch(
         executable: input.binaryPath,
         args,
         boundRoot: root,
+        ...(mode === "chat" || input.extraFolders === undefined
+          ? {}
+          : { extraBoundRoots: input.extraFolders }),
         temporaryDirectory,
         additionalWriteRoots: writeRoots,
         readRoots,

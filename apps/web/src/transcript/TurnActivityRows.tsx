@@ -1,5 +1,15 @@
 import { ChatRichText } from "../chat/ChatRichText";
-import { Check, ChevronRight, Circle, CircleX, Clock3, LoaderCircle } from "lucide-react";
+import {
+  Check,
+  ChevronRight,
+  Circle,
+  CircleX,
+  Clock3,
+  LoaderCircle,
+  ShieldAlert,
+  ShieldCheck,
+  ShieldX,
+} from "lucide-react";
 import { useState, type KeyboardEvent, type ReactNode, type ToggleEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { PublishedPageCard } from "./PublishedPageCard";
@@ -37,11 +47,15 @@ export const TOOL_SUMMARY_PREVIEW_LIMIT = 1_200;
  */
 export const ACCESSIBLE_SUMMARY_LIMIT = 120;
 
-function unfinishedTool(row: TurnActivityRow, settled: boolean): boolean {
+/** A row drawn as a disclosure: every row but Octant Shield's decisions. */
+type DisclosureRow = Exclude<TurnActivityRow, { readonly kind: "review" }>;
+type ReviewRow = Extract<TurnActivityRow, { readonly kind: "review" }>;
+
+function unfinishedTool(row: DisclosureRow, settled: boolean): boolean {
   return settled && row.kind === "tool" && (row.state === "started" || row.state === "running");
 }
 
-function outcomeLabel(row: TurnActivityRow, settled = false): string {
+function outcomeLabel(row: DisclosureRow, settled = false): string {
   if (unfinishedTool(row, settled)) return "unfinished";
   switch (row.state) {
     // A started tool is running: the host journals "started" when the call
@@ -66,7 +80,7 @@ function outcomeLabel(row: TurnActivityRow, settled = false): string {
  * so a running tool and a running turn spin the same way and a finished one
  * carries the same check.
  */
-function outcomeIcon(row: TurnActivityRow, settled: boolean) {
+function outcomeIcon(row: DisclosureRow, settled: boolean) {
   if (unfinishedTool(row, settled)) return Circle;
   switch (row.state) {
     case "started":
@@ -96,11 +110,11 @@ function boundAccessibleSummary(text: string): string {
   return `${text.slice(0, ACCESSIBLE_SUMMARY_LIMIT - 1)}…`;
 }
 
-function collapsedName(row: TurnActivityRow): string {
+function collapsedName(row: DisclosureRow): string {
   return row.kind === "tool" ? row.toolName : row.summary;
 }
 
-function disclosureName(row: TurnActivityRow, settled: boolean): string {
+function disclosureName(row: DisclosureRow, settled: boolean): string {
   const name = row.kind === "tool" ? row.toolName : boundAccessibleSummary(row.summary);
   return `${name}, ${outcomeLabel(row, settled)}`;
 }
@@ -174,6 +188,7 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
 
   const renderDisclosure = (row: TurnActivityRow) => {
     const id = rowKey(row);
+    if (row.kind === "review") return <ShieldReviewLine key={id} row={row} />;
     return (
       <ActivityDisclosure
         key={id}
@@ -275,8 +290,49 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
   );
 }
 
+const SHIELD_VERDICT_WORDS = {
+  allow: "Octant Shield allowed",
+  ask: "Octant Shield asked you",
+  deny: "Octant Shield denied",
+} as const;
+
+const SHIELD_VERDICT_ICONS = { allow: ShieldCheck, ask: ShieldAlert, deny: ShieldX } as const;
+
+/**
+ * One approval Octant Shield answered: the call, its verdict, and why, with
+ * the rule or model that decided and how long it took. Always in Shield's own
+ * name, never the provider's or the person's.
+ */
+function ShieldReviewLine(props: { readonly row: ReviewRow }) {
+  const { decision, summary } = props.row;
+  const Icon = SHIELD_VERDICT_ICONS[decision.verdict];
+  const decidedBy =
+    decision.rule ??
+    (decision.model === undefined ? decision.stage : String(decision.model.modelId));
+  return (
+    <div
+      aria-label={`${SHIELD_VERDICT_WORDS[decision.verdict]}: ${boundAccessibleSummary(summary)}. ${decision.reason}`}
+      className="turn-activity__review"
+      data-verdict={decision.verdict}
+      role="note"
+    >
+      <Icon aria-hidden="true" className="turn-activity__review-icon" size={14} strokeWidth={1.8} />
+      <span className="turn-activity__review-verdict">
+        {SHIELD_VERDICT_WORDS[decision.verdict]}
+      </span>
+      <span className="turn-activity__review-call" title={summary}>
+        {summary}
+      </span>
+      <span className="turn-activity__review-reason">{decision.reason}</span>
+      <span className="turn-activity__outcome">
+        {decidedBy} · {String(decision.latencyMs)} ms
+      </span>
+    </div>
+  );
+}
+
 function ActivityDisclosure(props: {
-  readonly row: TurnActivityRow;
+  readonly row: DisclosureRow;
   readonly settled: boolean;
   readonly open: boolean;
   readonly revealed: boolean;
@@ -321,7 +377,7 @@ function ActivityDisclosure(props: {
 }
 
 function activityDetail(
-  row: TurnActivityRow,
+  row: DisclosureRow,
   props: { readonly revealed: boolean; readonly onReveal: () => void },
 ): ReactNode {
   const summary = row.summary;

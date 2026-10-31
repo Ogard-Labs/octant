@@ -249,7 +249,11 @@ directory, which it shares with the person's own use, outside Octant's
 revocation. Then it is answered `always` (built): the answer is journaled
 like any other, and the approval's description says the grant lives in
 OpenCode's own settings for the repository, where clearing it is the way to
-revoke it. Approval-gated on
+revoke it. OpenCode then makes later matching edits without asking and
+settles other pending requests the grant covers, so the files an `always`
+answer names, and those of a request OpenCode settled by itself, stay
+admitted by the file-change check for that Project root while the host runs;
+after a host restart such an edit fails the turn until it is approved again. Approval-gated on
 2.x honours permission grants the person saved in OpenCode itself for the
 same repository: OpenCode keys them by the repository's root commit, keeps
 them in its own data store (shared with the person's own use because

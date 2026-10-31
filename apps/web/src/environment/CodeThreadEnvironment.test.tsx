@@ -15,6 +15,7 @@ import {
 } from "@octant/contracts";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { decodeProjectExtraFolder } from "@octant/contracts/projects";
 import { describe, expect, it, vi } from "vitest";
 import { CodeCheckoutBar } from "../code/CodeCheckoutBar";
 import { CodeThreadEnvironment } from "./CodeThreadEnvironment";
@@ -719,5 +720,47 @@ describe("CodeThreadEnvironment", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("lists the Project's extra folders from home, and shows nothing when it has none", async () => {
+    const user = userEvent.setup();
+    const withExtras = {
+      ...codeProject(),
+      extraFolders: [
+        decodeProjectExtraFolder({
+          canonicalRoot: "/Users/example/Dev/Research",
+          addedBy: { kind: "local-user", actorId: "30000000-0000-4000-8000-000000000102" },
+          addedAt: "2026-07-17T08:00:00.000Z",
+        }),
+      ],
+    } as ProjectSummary;
+    const { unmount } = render(
+      <CodeThreadEnvironment
+        environmentOpen
+        project={codeProject()}
+        tab={codeTab()}
+        projectClient={projectClient(readyObservation())}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+    await openEnvironment();
+    expect(screen.queryByRole("button", { name: /^Extra folders/ })).not.toBeInTheDocument();
+    unmount();
+
+    render(
+      <CodeThreadEnvironment
+        environmentOpen
+        project={withExtras}
+        tab={codeTab()}
+        projectClient={projectClient(readyObservation())}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+    await openEnvironment();
+    await user.click(screen.getByRole("button", { name: /^Extra folders/ }));
+
+    expect(screen.getByTitle("/Users/example/Dev/Research")).toHaveTextContent("~/Dev/Research");
   });
 });
