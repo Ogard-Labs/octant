@@ -39,6 +39,25 @@ You see a short notice only when something was stopped or memory was very low.
 Settings, then Host, shows the current memory level, the host's size, and the
 last relief.
 
+### Memory limits
+
+The host counts its own size as low memory at one limit and as very low at a
+higher one. Settings, then Host, then Memory, has a **Memory limits** control:
+
+- **Automatic** (the default) uses 2 GB for low and 4 GB for very low, or a
+  quarter and a half of the memory on a Mac with less than 8 GB. The row shows
+  the sizes that apply on your Mac.
+- **Custom** lets you enter both sizes in GB, from 0.5 to 64. Very low must be
+  above low. Custom sizes apply exactly as you enter them, on any Mac.
+
+A change takes effect right away, without restarting Octant. If you enter sizes
+that are out of range or in the wrong order, Octant says why and keeps the
+limits you had. Only a window on the Mac that runs the host can change the
+limits; a paired phone or other device cannot see or change them. Each change
+is recorded in the journal with the time and the old and new sizes, so a
+rebuild of Octant's state brings the same limits back. The limits decide only
+when Octant frees idle work. They never stop a running turn.
+
 If the host ends without a clean stop, for example because the system ran out
 of memory, the per-user service starts it again. The next time Octant opens, it
 tells you the host stopped unexpectedly and shows the last memory reading it

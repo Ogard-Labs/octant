@@ -207,6 +207,29 @@ describe("ChatComposer", () => {
     expect(onSend).toHaveBeenCalledWith("Reply");
   });
 
+  it("offers Force stop beside Stop only when the workspace says Stop did not end the response", async () => {
+    const user = userEvent.setup();
+    const onForceStop = vi.fn();
+    const { rerender, props } = renderComposer({
+      draft: "Reply",
+      isSending: true,
+      onStop: vi.fn(),
+    });
+    expect(screen.queryByRole("button", { name: "Force stop" })).toBeNull();
+
+    rerender(
+      <ChatComposer
+        {...props}
+        draft="Reply"
+        isSending
+        onForceStop={onForceStop}
+        onStop={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Force stop" }));
+    expect(onForceStop).toHaveBeenCalledOnce();
+  });
+
   it("marks a running turn on the composer so the streaming state is visible", () => {
     renderComposer({ isSending: true });
 

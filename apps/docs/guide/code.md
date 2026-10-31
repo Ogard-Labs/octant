@@ -76,6 +76,16 @@ typed text persist; staged attachments and extra selections do not, and the
 composer says so if they were dropped. Deleting or purging the thread removes
 its draft.
 
+## Continue a terminal session
+
+If you started something in Claude Code or Codex in a terminal, you can carry
+it into a new thread. In a new Code thread with a Project, choose
+**Create from…**, then **Terminal**, and pick a session from that Project's
+folder. Octant reads the session from this Mac and never uploads it. The
+thread starts with the conversation as folded, read-only history, and the
+assistant reads it once at the start. Tool runs from the old session are left
+out, and the thread is marked as holding outside content.
+
 ## Modes
 
 Each Code thread runs in one of five server-enforced modes. The mode picker
@@ -354,6 +364,17 @@ Put-away threads move to the archive on their own after a week. Change that
 window, or turn it off, under **Settings › General › Archive put-away
 threads**. Archiving keeps every thread and its history; only a confirmed purge
 in **Settings › Data & storage** deletes anything.
+
+## Move to a Project
+
+Choose **Move to Project…** from a Code thread's row menu to file it into
+another Code Project. The thread stays a Code thread and keeps its history,
+its guardrail level, and its checkout or managed worktree. It can move only to
+a Code Project bound to the same repository folder, so the checkout stays
+valid; a Project bound to any other folder is greyed out with the reason, and
+the host refuses it too. A Full access grant you made for the current session
+does not carry over: the thread returns to its saved level. Octant refuses the
+move while a turn is running or the agent is waiting on you.
 
 ## Agents that see the other threads of a Project
 

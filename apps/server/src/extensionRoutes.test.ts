@@ -487,6 +487,47 @@ describe("bounded authenticated extension routes", () => {
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
+  it("looks up an npm package for a local window only, and only on its own route", async () => {
+    const execute = vi.fn(
+      async (): Promise<ExtensionCommandResult> => ({
+        kind: "extension-command-failed",
+        failure: {
+          category: "unavailable",
+          message: "The npm registry has no package with that name.",
+        },
+      }),
+    );
+    const handler = setup({ snapshot: setupSnapshot, execute });
+    const lookup = { kind: "resolve-npm-package", packageName: "demo-plugin", range: "^1.0.0" };
+
+    const denied = await handler(pairedDeviceRequest("/api/extensions/npm", lookup));
+    expect(denied?.status).toBe(401);
+    expect(execute).not.toHaveBeenCalled();
+
+    expect((await handler(request("/api/extensions/npm", lookup)))?.status).toBe(200);
+    expect(
+      (await handler(request("/api/extensions/npm", { kind: "check-npm-update", extensionId })))
+        ?.status,
+    ).toBe(200);
+    expect(execute).toHaveBeenCalledTimes(2);
+
+    // The lookup is not a lifecycle command, and a lifecycle command is not a lookup.
+    expect((await handler(request("/api/extensions/lifecycle", lookup)))?.status).toBe(400);
+    expect(
+      (
+        await handler(
+          request("/api/extensions/npm", {
+            kind: "install-package",
+            extensionId,
+            packageId,
+            version: "1.0.0",
+            digest,
+          }),
+        )
+      )?.status,
+    ).toBe(400);
+  });
+
   it("refuses a paired device the inspection of an outside provider driver folder", async () => {
     const execute = vi.fn(
       async (): Promise<ExtensionCommandResult> => ({

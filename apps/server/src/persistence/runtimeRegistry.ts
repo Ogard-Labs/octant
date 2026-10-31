@@ -174,6 +174,8 @@ import {
   ImageJobStatusChanged,
   BROWSER_CAPTURE_KEPT,
   BrowserCaptureKept,
+  HOST_MEMORY_LIMITS_EVENT_NAME,
+  HostMemoryLimitsChanged,
   THREAD_RETENTION_EVENT_NAMES,
   ThreadRetentionThreadPurged,
   ThreadRetentionWindowSet,
@@ -255,6 +257,7 @@ import {
 } from "./productFeedbackProjection";
 import { ProjectTerminalProjection } from "./projectTerminalProjection";
 import { RemoteServerGrantProjection } from "./remoteServerGrantProjection";
+import { HostMemoryLimitsProjection } from "./hostMemoryLimitsProjection";
 import { ThreadRetentionProjection } from "./threadRetentionProjection";
 import { SpendCeilingProjection } from "./spendCeilingProjection";
 import { UsageResumeProjection } from "./usageResumeProjection";
@@ -291,6 +294,7 @@ import {
 import { registerArtifactMirrorEvents } from "../canvas/artifactMirrorEventStore";
 import { registerGoalLoopEvents } from "../goal/goalLoopEventStore";
 import { registerFollowUpSuggestionEvents } from "../followUps/threadFollowUpSuggestionStore";
+import { registerTerminalSessionEvents } from "../terminalSessions/terminalSessionImports";
 import { registerNativeHarnessEvents } from "../harness/nativeHarnessEvents";
 import { registerTurnMetricsEvents } from "../metrics/turnMetricsStore";
 import { registerSideTaskEvents } from "../sideTasks/sideTaskStore";
@@ -559,6 +563,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(IMAGE_JOB_QUEUED, 1, ImageJobQueued)
     .register(IMAGE_JOB_STATUS_CHANGED, 1, ImageJobStatusChanged)
     .register(BROWSER_CAPTURE_KEPT, 1, BrowserCaptureKept)
+    .register(HOST_MEMORY_LIMITS_EVENT_NAME, 1, HostMemoryLimitsChanged)
     .register(THREAD_RETENTION_EVENT_NAMES.windowSet, 1, ThreadRetentionWindowSet)
     .register(THREAD_RETENTION_EVENT_NAMES.threadPurged, 1, ThreadRetentionThreadPurged)
     .register(THREAD_EXTERNAL_CONTENT_EVENT_NAMES.ingested, 1, ContentIngestedPayload)
@@ -585,6 +590,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerNativeHarnessEvents(events);
   registerTurnMetricsEvents(events);
   registerFollowUpSuggestionEvents(events);
+  registerTerminalSessionEvents(events);
   registerSideTaskEvents(events);
   registerShipEvents(events);
   registerThreadMessageQueueEvents(events);
@@ -643,6 +649,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(new ProjectTerminalProjection())
       .register(new RemoteServerGrantProjection())
       .register(new ThreadRetentionProjection())
+      .register(new HostMemoryLimitsProjection())
       .register(new ExternalContentTaintProjection())
       .register(new UsageResumeProjection())
       .register(new SpendCeilingProjection())

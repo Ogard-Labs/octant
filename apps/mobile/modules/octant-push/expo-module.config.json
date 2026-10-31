@@ -1,0 +1,10 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["OctantPushModule"],
+    "appDelegateSubscribers": ["OctantPushAppDelegateSubscriber"]
+  },
+  "android": {
+    "modules": ["sh.octant.push.OctantPushModule"]
+  }
+}

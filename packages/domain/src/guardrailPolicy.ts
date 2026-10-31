@@ -1,4 +1,5 @@
 import type {
+  AutoReviewer,
   GuardrailLevel,
   PermissionMode,
   ProviderExecutionPolicy,
@@ -22,10 +23,20 @@ export interface GuardrailCapabilities {
   readonly providerReview: boolean;
   /** The provider runs its tools inside a sandbox of its own. */
   readonly providerSandbox: boolean;
+  /**
+   * Whether Octant Shield can review this thread's prompts: the runtime routes
+   * its approvals through Octant and a Shield model resolves. Absent means
+   * Shield cannot run, which is what every caller from before Shield sees.
+   */
+  readonly shield?: ShieldAvailability | undefined;
 }
 
+export type ShieldAvailability =
+  | { readonly available: true }
+  | { readonly available: false; readonly reason: string };
+
 export type GuardrailSandbox = "octant" | "provider" | "both" | "none";
-export type GuardrailApprover = "person" | "provider-review" | "none";
+export type GuardrailApprover = "person" | "provider-review" | "octant-shield" | "none";
 
 export type GuardrailResolution =
   | {
@@ -59,6 +70,43 @@ export type GuardrailResolution =
 
 export const AUTO_UNSUPPORTED_REASON =
   "This provider has no reviewer of its own, so this thread asks first.";
+
+export const SHIELD_UNAVAILABLE_REASON =
+  "No Octant Shield model can run for this thread, so it asks first.";
+
+/**
+ * Who answers a Reviewed thread's prompts. The person's choice (a Project's,
+ * else Settings') wins; absent, the provider's own reviewer where it has one
+ * and Octant Shield everywhere else. "Provider's own" on a provider without
+ * one means Shield, since that choice only ever meant "where it exists". A
+ * chosen Shield that cannot run leaves no reviewer: the thread asks first and
+ * says why, rather than quietly handing the prompts to a reviewer the person
+ * did not pick.
+ */
+export function resolveAutoReviewer(input: {
+  readonly chosen?: AutoReviewer | undefined;
+  readonly providerReview: boolean;
+  readonly shield?: ShieldAvailability | undefined;
+}):
+  | { readonly status: "reviewer"; readonly reviewer: AutoReviewer }
+  | { readonly status: "none"; readonly reason: string } {
+  const preferred = input.chosen ?? (input.providerReview ? "provider" : "octant-shield");
+  if (preferred === "provider" && input.providerReview) {
+    return { status: "reviewer", reviewer: "provider" };
+  }
+  const shield = input.shield;
+  if (shield?.available === true) return { status: "reviewer", reviewer: "octant-shield" };
+  if (shield === undefined) {
+    return {
+      status: "none",
+      reason:
+        preferred === "octant-shield" && input.providerReview
+          ? SHIELD_UNAVAILABLE_REASON
+          : AUTO_UNSUPPORTED_REASON,
+    };
+  }
+  return { status: "none", reason: shield.reason };
+}
 
 /** The picker's words for a stored posture. */
 export function permissionModeOf(access: ThreadAccess): PermissionMode {
@@ -116,6 +164,8 @@ export function resolveGuardrail(input: {
   readonly access: ThreadAccess;
   readonly capabilities: GuardrailCapabilities;
   readonly mode?: ToolActionAuthority["mode"];
+  /** The person's Auto reviewer choice: the Project's, else Settings'. */
+  readonly reviewer?: AutoReviewer | undefined;
 }): GuardrailResolution {
   const surfaceMode = input.mode ?? "code";
   const mode = permissionModeOf(input.access);
@@ -123,11 +173,16 @@ export function resolveGuardrail(input: {
   const readOnly = input.access.executionPolicy === "plan";
   const egress = guardrailEgress(surfaceMode, input.access.executionPolicy);
   const ownSandbox = input.capabilities.providerSandbox;
-  if (level === "provider-review" && !input.capabilities.providerReview) {
+  const reviewer = resolveAutoReviewer({
+    chosen: input.reviewer,
+    providerReview: input.capabilities.providerReview,
+    shield: input.capabilities.shield,
+  });
+  if (level === "provider-review" && reviewer.status === "none") {
     return {
       status: "unsupported",
       mode: "auto",
-      reason: AUTO_UNSUPPORTED_REASON,
+      reason: reviewer.reason,
       fallback: {
         status: "supported",
         level: "guarded",
@@ -151,7 +206,12 @@ export function resolveGuardrail(input: {
         readOnly,
         folderEditsWaived: input.access.executionPolicy === "auto-accept-edits",
         sandbox: ownSandbox ? "both" : "octant",
-        approver: level === "provider-review" ? "provider-review" : "person",
+        approver:
+          level !== "provider-review"
+            ? "person"
+            : reviewer.status === "reviewer" && reviewer.reviewer === "octant-shield"
+              ? "octant-shield"
+              : "provider-review",
         egress,
         outsideContent: "gates",
       };
@@ -170,6 +230,23 @@ export function resolveGuardrail(input: {
         outsideContent: "recorded",
       };
   }
+}
+
+/**
+ * Whether Octant Shield answers this thread's approval prompts: Auto on a
+ * prompting posture, with Shield the reviewer that runs. Everywhere else the
+ * prompts go to the person, the provider's own reviewer, or nobody (Full
+ * access).
+ */
+export function shieldReviewsPrompts(input: {
+  readonly access: ThreadAccess;
+  readonly capabilities: GuardrailCapabilities;
+  readonly reviewer?: AutoReviewer | undefined;
+}): boolean {
+  const posture = input.access.executionPolicy;
+  if (posture !== "approval-gated" && posture !== "auto-accept-edits") return false;
+  const resolved = resolveGuardrail(input);
+  return resolved.status === "supported" && resolved.approver === "octant-shield";
 }
 
 /**
