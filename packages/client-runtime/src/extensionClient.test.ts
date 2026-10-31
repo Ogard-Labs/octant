@@ -49,6 +49,11 @@ describe("extension client", () => {
     await client.execute({ kind: "search-catalog", query: "fixture" });
     await client.execute({ kind: "preview-package", source });
     await client.execute({ kind: "inspect-package", source });
+    await client.execute({ kind: "resolve-npm-package", packageName: "demo-plugin" });
+    await client.execute({
+      kind: "check-npm-update",
+      extensionId: "44000000-0000-4000-8000-000000000002" as never,
+    });
     await client.execute({
       kind: "uninstall-package",
       extensionId: "44000000-0000-4000-8000-000000000002" as never,
@@ -60,6 +65,8 @@ describe("extension client", () => {
       "/api/extensions/catalog",
       "/api/extensions/preview",
       "/api/extensions/inspect",
+      "/api/extensions/npm",
+      "/api/extensions/npm",
       "/api/extensions/lifecycle",
     ]);
   });
