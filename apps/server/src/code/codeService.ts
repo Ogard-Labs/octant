@@ -112,6 +112,7 @@ import {
   decideCompleteThread,
   decideSnoozeThread,
 } from "@octant/domain/thread-completion-policy";
+import { THREAD_MOVE_REFUSALS, decideThreadMove } from "@octant/domain/thread-project-move-policy";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
 import {
@@ -752,6 +753,12 @@ function withoutRest<T extends Pick<CodeThread, "completedAt" | "snooze">>(
   const { completedAt: _completedAt, snooze: _snooze, ...rest } = thread;
   return rest;
 }
+
+const CODE_MOVE_REFUSALS = {
+  "checkout-unreadable": "That Project's repository folder cannot be read right now.",
+  "checkout-would-not-stay-valid":
+    "This thread's checkout would not stay valid in that Project. A Code thread can only move to a Project bound to the same repository folder.",
+} as const;
 
 const COMPLETE_REFUSALS = {
   archived: "An archived thread cannot be put away.",
@@ -1661,6 +1668,9 @@ export class CodeService {
       await this.#authorizeThread(authenticatedWindowId, current);
       if (current.version !== command.expectedVersion) {
         throw this.#failure("stale", "Code state changed; reload and retry.");
+      }
+      if (command.kind === "move-code-thread") {
+        return await this.#moveThread(authenticatedWindowId, current, command);
       }
       const updatedAt = decodeTimestamp(this.#clock());
       if (command.kind === "schedule-code-usage-resume") {
@@ -2949,6 +2959,119 @@ export class CodeService {
       defaultDiffLayout: "unified",
       version: 0 as AggregateVersion,
       updatedAt: decodeTimestamp(this.#clock()),
+    };
+  }
+
+  /**
+   * Files a Code thread into another Code Project. The thread keeps its kind,
+   * history and guardrail level and is moved only when its checkout stays valid
+   * under the new Project: the same repository, at the same folder. A Project
+   * whose folder merely contains the thread's is refused, because the thread's
+   * checkout would then belong to a repository it never worked in.
+   */
+  async #moveThread(
+    authenticatedWindowId: WindowId,
+    current: CodeThread,
+    command: Extract<CodeCommand, { readonly kind: "move-code-thread" }>,
+  ): Promise<CodeCommandResult> {
+    // A routine acts as the host, never as the person; filing a thread is the person's call.
+    if (isRoutineHostScope(authenticatedWindowId)) {
+      throw this.#failure("unauthorized", "Only a person can move a thread to another Project.");
+    }
+    const source = this.#persistence.readProject?.(current.projectId);
+    const destination = (await this.#access.canAccessProject(
+      authenticatedWindowId,
+      command.projectId,
+    ))
+      ? this.#persistence.readProject?.(command.projectId)
+      : undefined;
+    if (source?.type !== "code" || destination === undefined) {
+      throw this.#failure("invalid", THREAD_MOVE_REFUSALS["destination-unavailable"]);
+    }
+    const signals = boardRuntimeActivityFromWorks(
+      this.#persistence.readCodeRuntimeWorks(current.id),
+    );
+    const decision = decideThreadMove({
+      thread: { lifecycle: current.lifecycle, ...signals },
+      source: { id: String(source.id), mode: "code", folder: source.binding.canonicalRoot },
+      destination: {
+        id: String(destination.id),
+        mode: destination.type,
+        lifecycle: destination.lifecycle,
+        folder: destination.type === "chat" ? "" : destination.binding.canonicalRoot,
+      },
+    });
+    if (decision.status === "refused") {
+      throw this.#failure("invalid", THREAD_MOVE_REFUSALS[decision.reason]);
+    }
+    if (destination.type !== "code") {
+      throw this.#failure("invalid", THREAD_MOVE_REFUSALS["different-mode"]);
+    }
+    if (
+      this.#isProviderModelAllowed?.({
+        projectId: destination.id,
+        providerInstanceId: current.providerInstanceId,
+        modelId: current.modelId,
+      }) === false
+    ) {
+      throw this.#failure(
+        "unauthorized",
+        "This provider or model is not allowed by that Code Project's provider policy.",
+      );
+    }
+    const held = this.#persistence.readCodeCheckout(current.checkoutId);
+    if (held === undefined || held.availability !== "available" || held.kind === "remote-root") {
+      throw this.#failure("unavailable", "Code thread checkout is unavailable.");
+    }
+    let prepared;
+    try {
+      prepared = await this.#checkouts.observe(authenticatedWindowId, destination.id);
+    } catch {
+      throw this.#failure("unavailable", CODE_MOVE_REFUSALS["checkout-unreadable"]);
+    }
+    if (
+      prepared.checkout.availability !== "available" ||
+      String(prepared.checkout.repositoryId) !== String(current.repositoryId) ||
+      destination.binding.canonicalRoot !== source.binding.canonicalRoot
+    ) {
+      throw this.#failure("invalid", CODE_MOVE_REFUSALS["checkout-would-not-stay-valid"]);
+    }
+    // A managed worktree is the thread's own tree and keeps its identity; a
+    // checkout of the Project's folder is derived from the Project, so the
+    // thread takes up the one the destination binds, in the same folder.
+    const landed = held.kind === "managed-worktree" ? held : prepared.checkout;
+    const updatedAt = decodeTimestamp(this.#clock());
+    if (
+      landed === prepared.checkout &&
+      !repeatsJournaledCheckout(this.#persistence.readCodeCheckout(landed.id), landed)
+    ) {
+      this.#append(
+        "code-checkout",
+        landed.id,
+        this.#persistence.readCodeCheckoutAggregateVersion(landed.id),
+        "code.checkout-observed@1",
+        { kind: "checkout-observed", checkout: landed },
+      );
+    }
+    const moved = decodeCodeThread({
+      ...current,
+      projectId: destination.id,
+      bindingRevisionId: prepared.bindingRevisionId,
+      repositoryId: landed.repositoryId,
+      checkoutId: landed.id,
+      version: command.expectedVersion + 1,
+      updatedAt,
+    });
+    this.#append("code-thread", current.id, command.expectedVersion, "code.thread-updated@1", {
+      kind: "thread-updated",
+      thread: moved,
+    });
+    // A session grant of Full access was minted under the Project the thread
+    // just left; authority is discarded on a move, never carried over.
+    this.#sessionAuthority.revokeThreadEverywhere(current.id);
+    return {
+      kind: "thread-updated",
+      thread: this.#sessionAuthority.effectiveThread(authenticatedWindowId, moved),
     };
   }
 

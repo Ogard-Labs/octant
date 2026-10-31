@@ -139,6 +139,16 @@ Put-away threads move to the archive on their own after a week. Change that
 window, or turn it off, under **Settings › General › Archive put-away
 threads**. Archiving keeps every thread; only a confirmed purge deletes.
 
+## Move to a Project
+
+Choose **Move to Project…** from a Work thread's row menu to file it into
+another Work Project. The thread stays a Work thread and keeps its history and
+its access level. It can move only to a Work Project whose folder is the same
+as, or contains, the folder it works in; Projects bound to any other folder are
+listed greyed out with the reason, and the host refuses them too. The thread
+keeps working in the same place inside the new Project's folder. Octant refuses
+the move while a turn is running or the agent is waiting on you.
+
 ## Export
 
 **Export…** downloads a portable JSON cut of this Work thread: the

@@ -296,6 +296,22 @@ describe("Code aggregate contracts", () => {
         workingDirectory: "packages/app",
       }).kind,
     ).toBe("change-code-thread-working-directory");
+    expect(
+      decodeCodeCommand({
+        kind: "move-code-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        projectId: ids.project,
+      }),
+    ).toEqual({
+      kind: "move-code-thread",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      projectId: ids.project,
+    });
+    expect(() =>
+      decodeCodeCommand({ kind: "move-code-thread", threadId: ids.thread, expectedVersion: 1 }),
+    ).toThrow();
     for (const kind of [
       "complete-code-thread",
       "reopen-code-thread",
