@@ -1,12 +1,16 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import { homedir, tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   CONFIGURATION_FAILURE_EXIT_CODE,
+  linkedSecretStoresStatePath,
+  makeLinkedSecretStores,
   makeSecretServiceCredentialStore,
   nextRestartBackoff,
-  probeSecretService,
+  resolveHostRuntimePaths,
   startCredentialBroker,
   type CredentialBroker,
+  type LinkedSecretStores,
 } from "@octant/host-runtime";
 import {
   installedArtifactServerStartCommand,
@@ -136,11 +140,37 @@ export async function runServerRunCommand(options: ServerRunOptions = {}): Promi
   }
 }
 
-async function defaultCredentialBrokerFactory(): Promise<CredentialBroker | undefined> {
-  if (process.platform !== "linux") return undefined;
-  const availability = await probeSecretService();
-  if (!availability.available) return undefined;
-  return startSecretServiceCredentialBroker();
+/**
+ * Linux starts the broker without asking whether a keyring answers. Each call
+ * the server makes through it reaches the keyring then, so one started after
+ * `octant server run`, or unlocked later, works on the next key without a
+ * restart, and a missing one fails that call with its cause.
+ */
+export async function defaultCredentialBrokerFactory(
+  platform: NodeJS.Platform = process.platform,
+): Promise<CredentialBroker | undefined> {
+  if (platform !== "linux") return undefined;
+  return startSecretServiceCredentialBroker(
+    makeSecretServiceCredentialStore,
+    linkedSecretStoresForThisHost(),
+  );
+}
+
+/** The record of linked secret stores sits in the host's data directory. */
+function linkedSecretStoresForThisHost(): LinkedSecretStores | undefined {
+  try {
+    const paths = resolveHostRuntimePaths({
+      env: process.env,
+      platform: process.platform,
+      home: homedir(),
+      temporaryDirectory: tmpdir(),
+      uid: process.getuid?.() ?? 0,
+    });
+    return makeLinkedSecretStores({ statePath: linkedSecretStoresStatePath(paths.dataDirectory) });
+  } catch {
+    // A data directory that fails validation stops the server anyway.
+    return undefined;
+  }
 }
 
 /**
@@ -150,6 +180,7 @@ async function defaultCredentialBrokerFactory(): Promise<CredentialBroker | unde
  */
 export function startSecretServiceCredentialBroker(
   makeStore: typeof makeSecretServiceCredentialStore = makeSecretServiceCredentialStore,
+  linkedSecretStores?: LinkedSecretStores,
 ): Promise<CredentialBroker> {
   return startCredentialBroker(
     makeStore(),
@@ -160,6 +191,8 @@ export function startSecretServiceCredentialBroker(
     makeStore({ namespace: "canvas-public-share-secret" }),
     makeStore({ namespace: "mcp-server-credential" }),
     makeStore({ namespace: "desktop-provider-credential" }),
+    undefined,
+    linkedSecretStores,
   );
 }
 

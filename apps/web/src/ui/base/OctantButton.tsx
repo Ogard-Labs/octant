@@ -1,8 +1,16 @@
 import { forwardRef, type ComponentProps, type ReactNode } from "react";
-import { Button as ShadcnButton, type ButtonProps } from "../shadcn/button";
+import { Button as ShadcnButton, buttonVariants, type ButtonProps } from "../shadcn/button";
 import { cn } from "../shadcn/utils";
 
 export type OctantButtonProps = ButtonProps;
+
+/**
+ * The class list of an Octant button, for a control another recipe renders as
+ * its own element (a menu trigger) that must still look like the button.
+ */
+export function octantButtonClassName(options: Pick<ButtonProps, "variant" | "size"> = {}): string {
+  return cn(buttonVariants(options), "window-no-drag");
+}
 
 /** Octant button adapter over the owned shadcn/Base UI Button recipe. */
 export const OctantButton = forwardRef<HTMLButtonElement, OctantButtonProps>(function OctantButton(

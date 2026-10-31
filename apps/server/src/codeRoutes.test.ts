@@ -210,6 +210,46 @@ describe("Code routes", () => {
     expect(executeOperation).toHaveBeenCalledOnce();
   });
 
+  it("refuses a paired device raising a thread to Full access, and lets it lower one", async () => {
+    const execute = vi.fn(async () => ({ kind: "thread-updated" }));
+    const route = routeFixture({ execute });
+    const remoteDeviceId = "00000000-0000-4000-8000-000000000940";
+    const fromDevice = (executionPolicy: "full-access" | "approval-gated") => {
+      const remote = request("/api/code/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "change-code-thread-access",
+          threadId,
+          expectedVersion: 1,
+          executionPolicy,
+          permissionPersistence: "project-default",
+        }),
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "00000000-0000-4000-8000-000000000941" as never,
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return remote;
+    };
+
+    const refused = await route(fromDevice("full-access"));
+    expect(refused?.status).toBe(403);
+    expect(await refused?.json()).toMatchObject({ category: "unauthorized" });
+    expect(execute).not.toHaveBeenCalled();
+
+    expect((await route(fromDevice("approval-gated")))?.status).toBe(200);
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
   it("refuses a paired device turning on Claude artifacts for a thread, and lets it choose Canvas", async () => {
     const execute = vi.fn(async () => ({ kind: "thread-updated" }));
     const route = routeFixture({ execute });
@@ -2008,6 +2048,72 @@ describe("Code project pull-request detail routes", () => {
 
     expect(response?.status).toBe(403);
     expect(mergeProjectPullRequest).not.toHaveBeenCalled();
+  });
+
+  it("turns Merge when ready and Auto-fix on only for the local user, never for a paired device", async () => {
+    const view = {
+      version: 1 as const,
+      target: detailQuery,
+      mergeWhenReady: { status: "off" as const },
+      autoFix: { status: "off" as const },
+      generatedAt: now,
+    };
+    const setProjectPullRequestMergeWhenReady = vi.fn(async () => ({
+      status: "applied" as const,
+      view,
+    }));
+    const setProjectPullRequestAutoFix = vi.fn(async () => ({ status: "applied" as const, view }));
+    const route = routeFixture({
+      setProjectPullRequestMergeWhenReady,
+      setProjectPullRequestAutoFix,
+    });
+    const bodies = {
+      "/api/code/project-pull-requests/merge-when-ready": {
+        kind: "enable",
+        target: detailQuery,
+        headSha: mergeHeadSha,
+      },
+      "/api/code/project-pull-requests/auto-fix": { kind: "enable", target: detailQuery, threadId },
+    };
+
+    for (const [path, body] of Object.entries(bodies)) {
+      const local = await route(
+        request(path, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      );
+      expect(local?.status).toBe(200);
+
+      const remoteDeviceId = "00000000-0000-4000-8000-000000000917";
+      const remoteRequest = request(path, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      bindPrincipalRouteContext(remoteRequest, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "00000000-0000-4000-8000-000000000918" as never,
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      expect((await route(remoteRequest))?.status).toBe(403);
+    }
+    expect(setProjectPullRequestMergeWhenReady).toHaveBeenCalledTimes(1);
+    expect(setProjectPullRequestMergeWhenReady).toHaveBeenCalledWith(
+      windowId,
+      bodies["/api/code/project-pull-requests/merge-when-ready"],
+      expect.any(AbortSignal),
+      "user",
+    );
+    expect(setProjectPullRequestAutoFix).toHaveBeenCalledTimes(1);
   });
 });
 

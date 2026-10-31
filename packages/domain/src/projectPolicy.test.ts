@@ -9,6 +9,7 @@ import type { UtcTimestamp } from "@octant/contracts/events";
 import {
   decodeBindingRevisionId,
   decodeProject,
+  decodeProjectAction,
   decodeProjectId,
   decodeProjectRank,
   type CanonicalProjectBinding,
@@ -19,6 +20,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ProjectPolicyRejected,
   changeCodeProjectAccess,
+  changeCodeProjectActions,
+  changeCodeProjectPermissionMode,
   changeCodeProjectDesktopRecipe,
   changeCodeProjectPullRequestBackgroundRefresh,
   changeProjectBrandKit,
@@ -182,6 +185,36 @@ describe("Project creation and lifecycle", () => {
     ).toThrow(ProjectPolicyRejected);
   });
 
+  it("sets a Code Project's default mode and keeps its remembered Full access in step", () => {
+    const project = makeProject(ids.code, "0/1", { type: "code" });
+    const full = changeCodeProjectPermissionMode(project, "full-access", updatedAt);
+    expect(full).toMatchObject({
+      defaultPermissionMode: "full-access",
+      codeAccessPersistence: "project-default",
+      version: 2,
+    });
+    const followsSettings = changeCodeProjectPermissionMode(full, undefined, updatedAt);
+    expect(followsSettings).not.toHaveProperty("defaultPermissionMode");
+    expect(followsSettings.codeAccessPersistence).toBe("current-session");
+    expect(() => changeCodeProjectPermissionMode(full, "full-access", updatedAt)).toThrow(
+      ProjectPolicyRejected,
+    );
+    expect(() =>
+      changeCodeProjectPermissionMode(makeProject(ids.chat, "0/1"), "auto", updatedAt),
+    ).toThrow(ProjectPolicyRejected);
+    // A Project that remembered Full access before Project modes existed has no
+    // mode of its own; returning it to Settings must still clear the memory.
+    const legacyFull = changeCodeProjectAccess(project, "project-default", updatedAt);
+    expect(legacyFull).not.toHaveProperty("defaultPermissionMode");
+    expect(changeCodeProjectPermissionMode(legacyFull, undefined, updatedAt)).toMatchObject({
+      codeAccessPersistence: "current-session",
+    });
+    // The older remembered-access switch speaks for the whole mode when used.
+    expect(changeCodeProjectAccess(full, "current-session", updatedAt)).not.toHaveProperty(
+      "defaultPermissionMode",
+    );
+  });
+
   it("enables background pull-request refresh on a Code Project and bumps its version", () => {
     const project = makeProject(ids.code, "0/1", { type: "code" });
     const enabled = changeCodeProjectPullRequestBackgroundRefresh(project, "enabled", updatedAt);
@@ -262,6 +295,48 @@ describe("Project creation and lifecycle", () => {
     ).toThrow(ProjectPolicyRejected);
   });
 
+  describe("a Code Project's terminal actions", () => {
+    const action = (name: string, command: string) =>
+      decodeProjectAction({
+        id: crypto.randomUUID(),
+        name,
+        command,
+        directory: ".",
+      });
+
+    it("are replaced as a whole list and cleared by an empty one", () => {
+      const project = makeProject(ids.code, "0/1", { type: "code" });
+      const dev = action("Dev", "bun run dev");
+      const saved = changeCodeProjectActions(project, [dev], updatedAt);
+      expect(saved).toMatchObject({ actions: [dev], version: 2 });
+      const cleared = changeCodeProjectActions(saved, [], updatedAt);
+      expect(cleared).not.toHaveProperty("actions");
+      expect(cleared.version).toBe(3);
+    });
+
+    it("refuse a Work Project, an archived Project, and a list that changes nothing", () => {
+      const dev = action("Dev", "bun run dev");
+      expect(() =>
+        changeCodeProjectActions(makeProject(ids.work, "0/1", { type: "work" }), [dev], updatedAt),
+      ).toThrow(ProjectPolicyRejected);
+      expect(() =>
+        changeCodeProjectActions(
+          makeProject(ids.code, "0/1", { type: "code", lifecycle: "archived" }),
+          [dev],
+          updatedAt,
+        ),
+      ).toThrow(ProjectPolicyRejected);
+      const saved = changeCodeProjectActions(
+        makeProject(ids.code, "0/1", { type: "code" }),
+        [dev],
+        updatedAt,
+      );
+      expect(() => changeCodeProjectActions(saved, [dev], updatedAt)).toThrow(
+        ProjectPolicyRejected,
+      );
+    });
+  });
+
   describe("a Code Project's desktop recipe", () => {
     const hostLocal = decodeLeasableDesktopProvider({
       providerId: "host-local",
@@ -305,6 +380,34 @@ describe("Project creation and lifecycle", () => {
           updatedAt,
         ),
       ).toThrow(ProjectPolicyRejected);
+    });
+
+    it("refuses a recipe moving to a provider that needs setup, and lets one already on it be edited or removed", () => {
+      const cloud = decodeLeasableDesktopProvider({
+        providerId: "e2b",
+        displayName: "E2B",
+        locality: "cloud",
+        billed: true,
+        needsSetup: "no-credential-store",
+      });
+      const keyed = {
+        ...recipe,
+        providerId: cloud.providerId,
+        hourlyCostUsdCents: 25,
+        credentialRef: decodeDesktopCredentialRef("5f0c6f7e-7b0a-4d43-9a3c-2f1d8f4e6a10"),
+      };
+      const project = makeProject(ids.code, "0/1", { type: "code" });
+      expect(() => changeCodeProjectDesktopRecipe(project, keyed, [cloud], updatedAt)).toThrow(
+        ProjectPolicyRejected,
+      );
+      const onCloud = { ...project, desktopRecipe: keyed } as typeof project;
+      const edited = { ...keyed, idleMinutes: 30 };
+      expect(
+        changeCodeProjectDesktopRecipe(onCloud, edited, [cloud], updatedAt).desktopRecipe,
+      ).toEqual(edited);
+      expect(changeCodeProjectDesktopRecipe(onCloud, null, [cloud], updatedAt)).not.toHaveProperty(
+        "desktopRecipe",
+      );
     });
 
     it("keeps a cloud recipe only when it names a credential, and lets it reach the network", () => {

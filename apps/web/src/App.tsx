@@ -21,13 +21,19 @@ import { ImageJobChangeRevisionContext } from "./image/ImageJobChangeRevision";
 import type { ContextClient } from "@octant/client-runtime/context-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
-import { harnessAsksUnderSessionFullAccess, listEligibleImageProfiles } from "@octant/domain";
+import {
+  defaultPermissionModeFor,
+  listEligibleImageProfiles,
+  permissionModeOf,
+  threadAccessOf,
+} from "@octant/domain";
 import { SpeechCapabilityProvider } from "./voice/SpeechCapabilityContext";
 import { buildAutomationEditorCatalog } from "./automation/automationEditorCatalog";
 import type { ComputerUseClient } from "@octant/client-runtime/computer-use-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import { useWorkSettings } from "./work/useWorkSettings";
 import { useAppUpdateReadyNotice } from "./settings/useAppUpdateReadyNotice";
+import { useHostMemoryNotice } from "./host/useHostMemoryNotice";
 import type { WorkTurnClient } from "@octant/client-runtime/work-turn-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ShipClient } from "@octant/client-runtime/ship-client";
@@ -84,12 +90,9 @@ import {
   decodeCodeTestRunId,
   decodeCodeThreadId,
   type CodeDeliveryOutcomeKind,
+  type CodeTerminalId,
 } from "@octant/contracts/code";
-import {
-  decodeCodeApprovalId,
-  decodeCodeOperationId,
-  type CodeOperationApprovalRequest,
-} from "@octant/contracts/code-operations";
+import { decodeCodeOperationId } from "@octant/contracts/code-operations";
 import type { CodeComposerSubmitInput } from "./code/composer/CodeComposerAdapter";
 import { decodeContextSubjectRef, type ContextHealth } from "@octant/contracts/context";
 import {
@@ -138,7 +141,12 @@ import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { ProviderClient } from "@octant/client-runtime/provider-client";
 import { decodeAppleProjectPath } from "@octant/contracts/apple-toolchain";
 import { LOCAL_TOOL_HOST_ID } from "@octant/contracts/tool-actions";
-import { decodeProjectId, type ProjectId, type ProjectSummary } from "@octant/contracts/projects";
+import {
+  decodeProjectId,
+  type ProjectAction,
+  type ProjectId,
+  type ProjectSummary,
+} from "@octant/contracts/projects";
 import { enabledModes } from "@octant/domain/mode-policy";
 import { resolveModelContextWindow } from "@octant/domain/model-context-window";
 import {
@@ -200,6 +208,7 @@ import { useDesktopWindowAuthority } from "./shell/useDesktopWindowAuthority";
 import { buildInboxAttentionItems } from "./inbox/inboxModel";
 import { loadAssignedLinearIssues as fetchAssignedLinearIssues } from "./inbox/loadAssignedLinearIssues";
 import { collectThreadAttentionSignals } from "./notifications/collectThreadAttention";
+import { nextWaitingThread } from "./notifications/nextWaitingThread";
 import { evaluateThreadAttention } from "./notifications/threadAttention";
 import { useThreadAttentionNotifications } from "./notifications/useThreadAttentionNotifications";
 import { useShellController, type NativeShellHost } from "./shell/useShellController";
@@ -273,6 +282,7 @@ import {
   writeSidebarCollapsed,
 } from "./shell/useShellPresentation";
 import { useHomeShortcut } from "./shell/useHomeShortcut";
+import { useJumpToWaitingShortcut } from "./shell/useJumpToWaitingShortcut";
 import { useSidebarToggleShortcut } from "./shell/useSidebarToggleShortcut";
 import { PlanUsageProvider } from "./usage/PlanUsageContext";
 import { RailUsageRings } from "./usage/RailUsageRings";
@@ -304,6 +314,8 @@ import {
 import { projectPullRequestKey } from "./code/CodeProjectPullRequests";
 import { OctantToast } from "./ui/base/OctantToast";
 import { useProjectController } from "./projects/useProjectController";
+import { ProjectActionButtons } from "./projects/ProjectActionButtons";
+import { runProjectAction as runSavedProjectAction } from "./projects/runProjectAction";
 import { ProjectThreadsProvider } from "./projects/ProjectThreadsSection";
 import { useProviderController } from "./providers/useProviderController";
 import { ModelToolVerificationContext } from "./providers/ModelToolVerificationContext";
@@ -379,10 +391,7 @@ import {
   navigatorConfigurationKey,
   useNavigatorAssistant,
 } from "./navigator/useNavigatorAssistant";
-import {
-  CODE_ACCESS_POSTURE_LABEL,
-  HARNESS_SESSION_FULL_ACCESS_LABEL,
-} from "./code/CodeAccessPicker";
+import { PERMISSION_MODE_LABEL } from "./code/PermissionModePicker";
 import { useThreadTurnMetrics } from "./threadStats/useThreadTurnMetrics";
 import { useContextController } from "./context/useContextController";
 import { useSessionCompaction } from "./context/useSessionCompaction";
@@ -506,6 +515,7 @@ export interface AppProps {
   readonly zenClient?: ZenClient;
 }
 
+const NO_PROJECT_ACTIONS: ReadonlyArray<ProjectAction> = [];
 const NO_PROVIDER_INSTANCES: ReadonlyArray<ProviderInstance> = [];
 const NO_VOICE_SETTINGS: VoiceSettings = {};
 const NO_IMAGE_PROFILES: ReadonlyArray<never> = [];
@@ -902,7 +912,7 @@ function LaunchedShell(
       }));
     }
     if (mode === "code") {
-      setDraftExecutionPolicy(undefined);
+      setDraftPermissionMode(undefined);
       setDraftPermissionPersistence(undefined);
       setPendingDraftBranch(undefined);
     }
@@ -983,8 +993,8 @@ function LaunchedShell(
     readonly providerInstanceId: import("@octant/contracts/providers").ProviderInstanceId;
     readonly modelId: import("@octant/contracts/providers").ProviderModelId;
   }>();
-  const [draftExecutionPolicy, setDraftExecutionPolicy] = useState<
-    import("@octant/contracts/providers").ProviderExecutionPolicy | undefined
+  const [draftPermissionMode, setDraftPermissionMode] = useState<
+    import("@octant/contracts/providers").PermissionMode | undefined
   >();
   const [draftPermissionPersistence, setDraftPermissionPersistence] = useState<
     import("@octant/contracts/providers").PermissionPersistence | undefined
@@ -1654,6 +1664,9 @@ function LaunchedShell(
   const [updateReadyNotice, dismissUpdateReadyNotice] = useAppUpdateReadyNotice(
     props.hostBridge?.subscribeAppUpdateState,
   );
+  const [hostMemoryNotice, dismissHostMemoryNotice] = useHostMemoryNotice(
+    launchedClients.hostControlClient,
+  );
   const threadExportClient = useMemo(
     () =>
       resolveThreadExportClient({
@@ -2124,6 +2137,19 @@ function LaunchedShell(
       codeController.navigation,
     ],
   );
+  // The jump reads the signals the sidebar and Inbox already render, so it
+  // opens exactly the threads they mark as waiting.
+  const nextWaiting = nextWaitingThread(attentionSignals, watchedThreadId);
+  const jumpToNextWaiting = (): void => {
+    if (nextWaiting === undefined) return;
+    openCommandThread({
+      threadId: nextWaiting.threadId,
+      title: nextWaiting.title,
+      mode: nextWaiting.source,
+      ...(nextWaiting.projectId === undefined ? {} : { projectId: nextWaiting.projectId }),
+    });
+  };
+  useJumpToWaitingShortcut(jumpToNextWaiting);
   useThreadAttentionNotifications({
     ...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge }),
     signals: attentionSignals,
@@ -3371,8 +3397,12 @@ function LaunchedShell(
   const effectiveDraftModelId =
     activeMode === "work" ? workProviderChoice?.modelId : visibleDraftSelection?.modelId;
   const localHost = hosts.find((host) => String(host.hostId) === String(LOCAL_HOST_ID));
-  const codeDefaultExecutionPolicy =
-    codeController.bootstrap?.settings.defaultExecutionPolicy ?? "approval-gated";
+  const activeCodeProject =
+    projectController.activeProject?.type === "code" ? projectController.activeProject : undefined;
+  const codeDefaultPermissionMode = defaultPermissionModeFor({
+    project: activeCodeProject,
+    settings: codeController.bootstrap?.settings ?? { defaultExecutionPolicy: "approval-gated" },
+  });
   const agentProfiles = useAgentProfiles(agentProfileClient);
   // Editor catalog from Projects already loaded in App, approval-gated agent
   // profiles, and Code bootstrap / prepared checkout receipts when present.
@@ -4452,19 +4482,9 @@ function LaunchedShell(
       : workNavigation.bootstrap?.threads.find(
           (thread) => String(thread.id) === String(dockThreadId),
         );
-  const overviewCodeDriverKind = providerController.instances.find(
-    (instance) => String(instance.id) === String(overviewCodeThread?.providerInstanceId),
-  )?.driverKind;
   const overviewAccess =
     overviewCodeThread !== undefined
-      ? overviewCodeDriverKind !== undefined &&
-        harnessAsksUnderSessionFullAccess({
-          executionPolicy: overviewCodeThread.executionPolicy,
-          permissionPersistence: overviewCodeThread.permissionPersistence,
-          driverKind: overviewCodeDriverKind,
-        })
-        ? HARNESS_SESSION_FULL_ACCESS_LABEL
-        : CODE_ACCESS_POSTURE_LABEL[overviewCodeThread.executionPolicy]
+      ? PERMISSION_MODE_LABEL[permissionModeOf(overviewCodeThread)]
       : overviewWorkThread === undefined
         ? undefined
         : overviewWorkThread.access === "auto-accept-edits"
@@ -4652,7 +4672,7 @@ function LaunchedShell(
       setDockSidecarsByThread,
       setDockStatesByThread,
       setDraftError,
-      setDraftExecutionPolicy,
+      setDraftPermissionMode,
       setDraftModelId,
       setDraftPendingMessage,
       setDraftPermissionPersistence,
@@ -4673,8 +4693,10 @@ function LaunchedShell(
       setProjectArchived: projectController.setArchived,
       setProjectColor: projectController.setColor,
       setProjectProviderPolicy: projectController.setProviderPolicy,
+      setProjectPermissionMode: projectController.setCodePermissionMode,
       setProjectBrandKit: projectController.setBrandKit,
       setProjectDesktopRecipe: projectController.setDesktopRecipe,
+      setProjectActions: projectController.setActions,
       setProjectWorkStatusFile: projectController.setWorkStatusFile,
       setProjectsListOpen,
       setRailPlaceholder,
@@ -5839,7 +5861,6 @@ function LaunchedShell(
           ? {
               id: localProject.id,
               name: localProject.name,
-              remembersFullAccess: localProject.codeAccessPersistence === "project-default",
             }
           : undefined;
       if (project === undefined) {
@@ -5912,43 +5933,7 @@ function LaunchedShell(
         setDraftError(plan.message);
         return false;
       }
-      let command = plan.command;
-      const projectRemembersFullAccess =
-        input.executionPolicy === "full-access" &&
-        input.permissionPersistence === "project-default" &&
-        project.remembersFullAccess;
-      if (input.executionPolicy === "full-access" && !projectRemembersFullAccess) {
-        const requestApproval = props.hostBridge?.requestCodeOperationApproval;
-        const presentation = input.presentation;
-        if (requestApproval === undefined || presentation === undefined) {
-          setDraftError(
-            "Full access needs the native approval surface. Keep Ask for approvals, or remember Full access for this Project on the host with `octant project access <name> full-access` and choose Remember for this Project.",
-          );
-          return false;
-        }
-        const approvalRequest: CodeOperationApprovalRequest | undefined =
-          command.kind === "create-managed-code-thread"
-            ? { effect: { kind: "create-managed-code-thread-full-access", command } }
-            : command.kind === "create-code-thread"
-              ? { effect: { kind: "create-thread-full-access", thread: command.thread } }
-              : undefined;
-        if (approvalRequest === undefined) {
-          setDraftError("Full access could not be prepared for this Code thread.");
-          return false;
-        }
-        const approvalId = await requestApproval(approvalRequest, {
-          projectId: String(project.id),
-          composerId: presentation.composerId,
-        });
-        if (approvalId === undefined) {
-          setDraftError("Full access was not confirmed. Nothing was created.");
-          return false;
-        }
-        command =
-          command.kind === "create-managed-code-thread" || command.kind === "create-code-thread"
-            ? { ...command, approvalId: decodeCodeApprovalId(approvalId) }
-            : command;
-      }
+      const command = plan.command;
       const created = await codeController.execute(command);
       if (created?.kind !== "managed-thread-created" && created?.kind !== "thread-created") {
         setDraftError(
@@ -6254,6 +6239,10 @@ function LaunchedShell(
           modelId,
           executionPolicy:
             executionPolicy ?? codeController.bootstrap.settings.defaultExecutionPolicy,
+          ...(executionPolicy === undefined &&
+          codeController.bootstrap.settings.defaultAutoApprove === true
+            ? { autoApprove: true }
+            : {}),
           permissionPersistence:
             permissionPersistence ?? codeController.bootstrap.settings.defaultPermissionPersistence,
           deliveryTarget: {
@@ -6454,7 +6443,7 @@ function LaunchedShell(
    * holds, with no thread, and pins it. The host decides the root and whether
    * this window may open it; a refusal leaves the space as it was.
    */
-  async function addZenProjectTerminal(projectId: ProjectId): Promise<void> {
+  async function addZenProjectTerminal(projectId: ProjectId): Promise<CodeTerminalId | undefined> {
     const terminalId = decodeCodeTerminalId(crypto.randomUUID());
     // No card means no way back to a shell: a Project terminal has no thread
     // or listing to reopen it from, so one without a card stops rather than
@@ -6477,15 +6466,45 @@ function LaunchedShell(
       // The reply was lost, not necessarily the start.
       setThreadExportNotice("The Project terminal could not be started.");
       await stop();
-      return;
+      return undefined;
     }
     if (started.kind === "project-terminal-refused") {
       setThreadExportNotice(started.message);
-      return;
+      return undefined;
     }
-    if (started.kind !== "project-terminal" || started.terminal.state !== "running") return;
-    if (await zen.pinProjectTerminal({ projectId, terminalId })) return;
+    if (started.kind !== "project-terminal" || started.terminal.state !== "running") {
+      return undefined;
+    }
+    if (await zen.pinProjectTerminal({ projectId, terminalId })) return terminalId;
     await stop();
+    return undefined;
+  }
+
+  /**
+   * Types a saved action into the Project's terminal and shows it in Zen. A
+   * terminal this window already pinned for the Project is reused while its
+   * shell runs; otherwise a new one is opened and pinned. The host reads the
+   * line from the Project record and applies the terminal's own confinement
+   * and approval posture, so this only names the action.
+   */
+  async function runProjectAction(projectId: ProjectId, action: ProjectAction): Promise<void> {
+    // Zen holds the card, so its space has to be loaded before a shell starts:
+    // a shell with no card to show it would only be stopped again.
+    if (!zen.active) await zen.enterZen();
+    await runSavedProjectAction(
+      {
+        execute: (command) => projectTerminalClient.execute(command),
+        pinnedTerminals: (zen.space?.elements ?? []).flatMap((element) =>
+          element.kind === "project-terminal" && String(element.projectId) === String(projectId)
+            ? [element.terminalId]
+            : [],
+        ),
+        openTerminal: () => addZenProjectTerminal(projectId),
+        notify: setThreadExportNotice,
+      },
+      projectId,
+      action,
+    );
   }
 
   function addZenBrowser(sourceContext: import("@octant/contracts/zen").ZenSourceContext): void {
@@ -6507,6 +6526,14 @@ function LaunchedShell(
    * control already uses, so a command is a second route to an action, never a
    * second authority for it.
    */
+  const actionsProject = projectController.projects.find(
+    (project) =>
+      project.type === "code" && project.lifecycle === "active" && project.id === activeProjectId,
+  );
+  const activeProjectActions =
+    actionsProject?.type === "code"
+      ? (actionsProject.actions ?? NO_PROJECT_ACTIONS)
+      : NO_PROJECT_ACTIONS;
   const octantCommands = buildOctantCommands({
     activeMode,
     modes: enabledModes(controller.settings),
@@ -6515,6 +6542,7 @@ function LaunchedShell(
     onOpenSearch: openThreadSearch,
     onOpenSettings: () => void controller.openSettings(),
     onOpenReview: openReview,
+    ...(nextWaiting === undefined ? {} : { onJumpToNextWaiting: jumpToNextWaiting }),
     onOpenZen: () => {
       if (zen.active) zen.exitZen();
       else void zen.enterZen();
@@ -6539,6 +6567,22 @@ function LaunchedShell(
     skills: commandExtensions.skills,
     pluginServers: commandExtensions.pluginServers,
     appleProjects,
+    ...(actionsProject === undefined || activeProjectActions.length === 0
+      ? {}
+      : {
+          projectActions: activeProjectActions.map((action) => ({
+            actionId: String(action.id),
+            name: action.name,
+            command: action.command,
+            projectName: actionsProject.name,
+          })),
+          onRunProjectAction: (commandAction: { readonly actionId: string }) => {
+            const action = activeProjectActions.find(
+              (candidate) => String(candidate.id) === commandAction.actionId,
+            );
+            if (action !== undefined) void runProjectAction(actionsProject.id, action);
+          },
+        }),
     onOpenAppleProject: (project) => {
       // The thread's own controller, not the window's reader: the window's
       // reader binds to no thread and so knows no checkout to open against.
@@ -6852,7 +6896,7 @@ function LaunchedShell(
                   clients={launchedClients}
                   codeBoardProjects={codeBoardProjects}
                   codeController={codeController}
-                  codeDefaultExecutionPolicy={codeDefaultExecutionPolicy}
+                  codeDefaultPermissionMode={codeDefaultPermissionMode}
                   codeProviderChoices={codeProviderChoices}
                   codeProviderGroups={codeProviderGroups}
                   codeThreadControllers={codeThreadControllers}
@@ -6870,7 +6914,7 @@ function LaunchedShell(
                   {...(dockSurface === undefined ? {} : { dockSurface })}
                   draftCreating={draftCreating}
                   {...(draftError === undefined ? {} : { draftError })}
-                  {...(draftExecutionPolicy === undefined ? {} : { draftExecutionPolicy })}
+                  {...(draftPermissionMode === undefined ? {} : { draftPermissionMode })}
                   {...(draftPendingMessage === undefined ? {} : { draftPendingMessage })}
                   {...(draftPermissionPersistence === undefined
                     ? {}
@@ -7122,6 +7166,19 @@ function LaunchedShell(
             codeModelGroups: codeProviderGroups,
             controller: firstRunController,
             onSelectModel: selectFirstRunModel,
+            autoSupportedFor: (providerInstanceId) =>
+              providerController.observedByInstance.get(providerInstanceId)?.capabilities
+                .harnessAutoReview === "supported",
+            onSetDefaultMode: async (mode) => {
+              const settings = codeController.bootstrap?.settings;
+              if (settings === undefined) return false;
+              const access = threadAccessOf(mode);
+              return codeController.updateSettings({
+                defaultExecutionPolicy: access.executionPolicy,
+                defaultPermissionPersistence: settings.defaultPermissionPersistence,
+                defaultAutoApprove: access.autoApprove,
+              });
+            },
             workEnabled: controller.settings?.workEnabled ?? true,
             workModel:
               workSettings.status === "unsupported" ? rawDraftSelection : firstRunWorkModel,
@@ -7150,8 +7207,22 @@ function LaunchedShell(
           projectAnnouncementSequence={projectController.announcementSequence}
         />
       </ShellFrame>
-      {threadExportNotice !== undefined || updateReadyNotice || quitHintVisible ? (
+      {threadExportNotice !== undefined ||
+      updateReadyNotice ||
+      quitHintVisible ||
+      hostMemoryNotice !== undefined ? (
         <div className="toast-stack">
+          {hostMemoryNotice === undefined ? null : (
+            <OctantToast
+              action={{
+                label: "View host",
+                onSelect: () => void controller.openSettings({ section: "host" }),
+              }}
+              detail={hostMemoryNotice.detail}
+              onDismiss={dismissHostMemoryNotice}
+              title={hostMemoryNotice.title}
+            />
+          )}
           {updateReadyNotice ? (
             <OctantToast
               action={{
@@ -7198,6 +7269,12 @@ function LaunchedShell(
           settings={controller.settings?.voice ?? NO_VOICE_SETTINGS}
         >
           <OctantCommandProvider commands={octantCommands}>
+            {actionsProject === undefined ? null : (
+              <ProjectActionButtons
+                actions={activeProjectActions}
+                onRun={(action) => void runProjectAction(actionsProject.id, action)}
+              />
+            )}
             <NeedsYouProvider source={needsYouSource}>
               {/* Held here rather than with any Code pane: a thread's controller has to
         outlive the surfaces reading it, so closing a diff tab never tears down

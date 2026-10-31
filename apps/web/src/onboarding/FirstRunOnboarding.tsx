@@ -1,3 +1,4 @@
+import type { PermissionMode } from "@octant/contracts/providers";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
@@ -14,6 +15,7 @@ import {
   type FirstRunHandoffSetupTarget,
   type FirstRunTaskMode,
 } from "./firstRunHandoffModel";
+import { FirstRunModeStep } from "./FirstRunModeStep";
 import { FirstRunModelStep } from "./FirstRunModelStep";
 import { FirstRunProjectStep } from "./FirstRunProjectStep";
 import { FirstRunProviderStep } from "./FirstRunProviderStep";
@@ -74,6 +76,10 @@ export interface FirstRunOnboardingProps {
     mode: FirstRunTaskMode,
     selection: ModelPickerSelection,
   ) => Promise<boolean>;
+  /** Whether this provider has a reviewer of its own, so Auto applies to it. */
+  readonly autoSupportedFor?: (providerInstanceId: ProviderInstanceId) => boolean;
+  /** Records the mode new threads start in. Absent hides the step's answer. */
+  readonly onSetDefaultMode?: (mode: PermissionMode) => Promise<boolean>;
 
   readonly projects: ReadonlyArray<FirstRunHandoffProject>;
   /** Open the Project create surface — the same Choose a folder flow the shell uses. */
@@ -89,8 +95,8 @@ export interface FirstRunOnboardingProps {
  * Octant's first-run surface.
  *
  * It exists to get a new user from a clean launch to a real task without a
- * hidden prerequisite. Three setup steps — providers, a Project folder, a
- * model — then a readiness view that reports provider, Project, and a
+ * hidden prerequisite. Four setup steps — providers, a Project folder, a
+ * model, the mode new threads start in — then a readiness view that reports provider, Project, and a
  * mode-valid model separately, and one primary action, Start a task, that
  * opens the new-task composer in that Project. Every step can be walked past;
  * the handoff does not invent readiness they skipped.
@@ -110,6 +116,8 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   const hostPlatform = useHostPlatform();
   const { controller } = props;
   const [step, setStep] = useState<FirstRunStepId>("providers");
+  const [chosenMode, setChosenMode] = useState<PermissionMode>();
+  const [modeRecorded, setModeRecorded] = useState(false);
   const [handoffOpen, setHandoffOpen] = useState(false);
   const [selectedMode, setSelectedMode] = useState<FirstRunTaskMode>("code");
   const [chosenProjectId, setChosenProjectId] = useState<ProjectId>();
@@ -178,6 +186,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
     providersReady: props.readiness.overall === "ready",
     projectReady: handoff.project !== undefined,
     modelChosen: modeModel !== undefined,
+    modeChosen: modeRecorded,
   }).map((descriptor) => ({ ...descriptor, current: descriptor.current && !handoffOpen }));
   const currentStepIndex = Math.max(
     0,
@@ -231,7 +240,26 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
     return !answerLost.current;
   }
 
+  // The provider new tasks start with decides whether Auto applies: the one
+  // chosen in the model step, else the first that offers a model.
+  const modeProviderId =
+    modeModel?.providerInstanceId ??
+    modeGroups.find((group) => group.sections.some((section) => section.models.length > 0))
+      ?.instance.id;
+  const autoSupported =
+    modeProviderId !== undefined && props.autoSupportedFor?.(modeProviderId) === true;
+  const permissionMode: PermissionMode = chosenMode ?? (autoSupported ? "auto" : "ask-first");
+
+  /** The pre-selected mode is an answer too, so leaving the step records it. */
+  function recordMode(mode: PermissionMode) {
+    const write = props.onSetDefaultMode;
+    if (write === undefined) return;
+    setModeRecorded(true);
+    track(write(mode));
+  }
+
   function goTo(target: FirstRunStepId) {
+    if (step === "mode" && !modeRecorded) recordMode(permissionMode);
     setHandoffOpen(false);
     setStep(target);
   }
@@ -395,6 +423,17 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
             />
           )}
 
+          {handoffOpen || step !== "mode" ? null : (
+            <FirstRunModeStep
+              autoSupported={autoSupported}
+              onSelect={(mode) => {
+                setChosenMode(mode);
+                recordMode(mode);
+              }}
+              value={permissionMode}
+            />
+          )}
+
           {handoffOpen || step !== "model" ? null : (
             <FirstRunModelStep
               ariaLabel={`Model for new ${MODE_LABEL[mode]} tasks`}
@@ -457,8 +496,12 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
             ) : (
               <OctantButton
                 onClick={() => {
-                  if (forward === undefined) setHandoffOpen(true);
-                  else goTo(forward);
+                  if (forward !== undefined) {
+                    goTo(forward);
+                    return;
+                  }
+                  if (step === "mode" && !modeRecorded) recordMode(permissionMode);
+                  setHandoffOpen(true);
                 }}
                 type="button"
               >

@@ -8,13 +8,12 @@ import {
   type CodeThreadId,
 } from "@octant/contracts/code";
 import type { CodeCheckpoint, CodeThreadChangedFileState } from "@octant/contracts/code-operations";
-import type { ProviderExecutionPolicy } from "@octant/contracts";
+import type { PermissionMode } from "@octant/contracts";
 import {
-  ACCESS_POSTURE_RANK,
-  clampTurnAccessPosture,
   decidesCodeEffectsByApproval,
-  harnessAsksUnderSessionFullAccess,
+  permissionModeOf,
   startedCodeThreadPickerGroups,
+  threadAccessOf,
   type PickerGroup,
 } from "@octant/domain";
 import { CirclePause, FileOutput, X } from "lucide-react";
@@ -120,7 +119,7 @@ import { useScaffoldCatalog } from "../scaffolds/useScaffoldCatalog";
 import { WorkspacePresetPicker } from "../workspacePresets/WorkspacePresetPicker";
 import { useWorkspacePresets } from "../workspacePresets/useWorkspacePresets";
 import { PathMentionTypeahead, useCodePathMentions } from "./CodePathMentionPicker";
-import { CodeAccessPicker } from "./CodeAccessPicker";
+import { PermissionModePicker } from "./PermissionModePicker";
 import type { CodeFileListingClient } from "@octant/client-runtime";
 import { useAgentProfileName } from "../agentProfile/AgentProfileNames";
 import type { ExtensionProviderFamily } from "@octant/contracts/extensions";
@@ -161,7 +160,7 @@ export interface CodeThreadWorkspaceProps {
   /**
    * Whether the thread's provider advertises native harness-delegated
    * approvals (Codex `auto_review`, Claude `permissionMode: "auto"`). When
-   * false or absent the "Approve for me" toggle is hidden (0104).
+   * false or absent Auto is shown disabled with the reason.
    */
   readonly harnessAutoReviewSupported?: boolean;
   readonly threadId: CodeThreadId;
@@ -198,23 +197,6 @@ export interface CodeThreadWorkspaceProps {
    * attachment it could never send.
    */
   readonly attachmentClient?: CodeAttachmentClient;
-  /**
-   * Raises the host's native Full access confirmation. Absent on a host that
-   * cannot raise one, which keeps Full access out of reach rather than letting
-   * the composer ask for a change the host would refuse.
-   */
-  readonly requestFullAccessApproval?: (effect: {
-    readonly kind: "change-thread-full-access";
-    readonly threadId: CodeThreadId;
-    readonly expectedVersion: number;
-    readonly permissionPersistence: "current-session" | "project-default";
-  }) => Promise<CodeApprovalId | undefined>;
-  /**
-   * The Project's remembered Full-access decision, recorded on the host. Lets
-   * Full access be raised without the native confirmation, matching the
-   * server gate.
-   */
-  readonly projectRemembersFullAccess?: boolean;
   /** Positions the desktop-owned approval view beside this thread's composer. */
   readonly updateApprovalAnchor?: (bounds: {
     readonly x: number;
@@ -292,6 +274,22 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     setDraft(text);
     props.controller.setPendingDraft?.(text, text.length);
   });
+  // Auto-fix holds its wake back while the person composes here. The host
+  // keeps a note for a minute, so one every fifteen seconds is enough.
+  const composerActivityAtRef = useRef(0);
+  const codeClient = props.controller.client;
+  useEffect(() => {
+    if (draft.trim() === "" || codeClient?.noteComposerActivity === undefined) return;
+    const now = Date.now();
+    if (now - composerActivityAtRef.current < 15_000) return;
+    composerActivityAtRef.current = now;
+    // A pause hint must never disturb typing, so even a synchronous throw is
+    // kept out of the render.
+    const threadId = props.threadId;
+    void Promise.resolve()
+      .then(() => codeClient.noteComposerActivity?.(threadId))
+      .catch(() => undefined);
+  }, [codeClient, draft, props.threadId]);
   const compacting = useComposerCompacting();
   // User edits are counted separately from the internal clear performed when
   // an acknowledged message leaves the composer, so an async mention lookup cannot
@@ -328,7 +326,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   });
   const threadVersionRef = useRef<CodeThread["version"] | undefined>(undefined);
   const [accessChanging, setAccessChanging] = useState(false);
-  const [turnAccessOverride, setTurnAccessOverride] = useState<ProviderExecutionPolicy>();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     const update = props.updateApprovalAnchor;
@@ -462,19 +459,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     );
   }, [composerReady, props.threadId]);
   useEffect(() => {
-    setTurnAccessOverride(undefined);
     imageSaveThreadKey.current = String(props.threadId);
     setImageSaveMessage(undefined);
   }, [props.threadId]);
-  useEffect(() => {
-    const nextCeiling = view?.thread.executionPolicy;
-    if (nextCeiling === undefined) return;
-    setTurnAccessOverride((current) =>
-      current !== undefined && ACCESS_POSTURE_RANK[current] > ACCESS_POSTURE_RANK[nextCeiling]
-        ? undefined
-        : current,
-    );
-  }, [view?.thread.executionPolicy]);
 
   // §8.1: `#` must open the same cross-mode picker here as in Chat. The host
   // owns which threads are mentionable and how much of each transcript rides
@@ -624,10 +611,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
 
   const { thread } = view;
   threadVersionRef.current = thread.version;
-  const nextTurnAccess = clampTurnAccessPosture({
-    thread: thread.executionPolicy,
-    ...(turnAccessOverride === undefined ? {} : { requested: turnAccessOverride }),
-  });
   const trimmed = draft.trim();
   // The host stated that this thread's saved provider session cannot be
   // resumed — the observed case is Mistral Vibe's "resume identity does not
@@ -722,16 +705,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       setConfirmArtifacts(false);
     }
   };
-  const threadDriverKind = providerGroups.find(
-    (group) => String(group.instance.id) === String(thread.providerInstanceId),
-  )?.instance.driverKind;
-  const harnessAsksUnderFullAccess =
-    threadDriverKind !== undefined &&
-    harnessAsksUnderSessionFullAccess({
-      executionPolicy: thread.executionPolicy,
-      permissionPersistence: thread.permissionPersistence,
-      driverKind: threadDriverKind,
-    });
   const messages = props.controller.conversation;
   // The host only binds a thread to its provider once a provider session
   // exists, and a completed reply is the renderer's proof of one. A thread
@@ -838,15 +811,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     setSendNotice(undefined);
     setImageSaveMessage(undefined);
     const originThreadKey = String(props.threadId);
-    const override = turnAccessOverride;
-    const access = nextTurnAccess;
     if (queueFollowUp) {
-      if (override !== undefined && override !== thread.executionPolicy) {
-        setSendNotice(
-          "A one-shot access change cannot be queued. Use the thread's normal access before queuing this message.",
-        );
-        return;
-      }
       queuePreparingRef.current = true;
       setQueuePreparing(true);
       const captured = attachments.claimForQueue();
@@ -889,7 +854,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       }
       return;
     }
-    setTurnAccessOverride(undefined);
     // The chips stay until the host accepts the turn: a refused or dropped send
     // must leave the message retryable with the same images, not just its text.
     const threadMentionIds = await threadMentions.resolveForSend();
@@ -899,7 +863,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       threadMentionIds,
       attachments.peekForSend(),
       fileMentionPaths,
-      access,
+      thread.executionPolicy,
     ];
     if (extensionSelections.length > 0) sendArguments[7] = extensionSelections;
     const sent = await props.controller.sendFollowUp(...sendArguments);
@@ -917,8 +881,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         pathMentions.clear();
         extensionDraft.clear();
       }
-    } else {
-      setTurnAccessOverride((current) => current ?? override);
     }
   }
   function attachFromTransfer(items: DataTransfer | null): boolean {
@@ -1091,56 +1053,18 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     }
   }
 
-  async function changeAccess(next: ProviderExecutionPolicy) {
-    if (next === thread.executionPolicy) return;
-    const originThreadKey = activeThreadKeyRef.current;
+  async function changeMode(next: PermissionMode) {
     props.controller.setAccessNotice(undefined);
-    const remembered = next === "full-access" && props.projectRemembersFullAccess === true;
     setAccessChanging(true);
     try {
-      let approvalId: CodeApprovalId | undefined;
-      if (next === "full-access" && !remembered) {
-        approvalId = await props.requestFullAccessApproval?.({
-          kind: "change-thread-full-access",
-          threadId: thread.id,
-          expectedVersion: thread.version,
-          permissionPersistence: thread.permissionPersistence,
-        });
-        if (approvalId === undefined) {
-          const text =
-            !mountedRef.current || activeThreadKeyRef.current !== originThreadKey
-              ? "Full access confirmation was cancelled when you left this thread. It keeps its current access."
-              : "Full access was not confirmed. This thread keeps its current access.";
-          if (props.holdAccessNotice === undefined) props.controller.setAccessNotice(text);
-          else props.holdAccessNotice(thread.id, text);
-          return;
-        }
-      }
+      const access = threadAccessOf(next);
       await props.controller.execute({
         kind: "change-code-thread-access",
         threadId: thread.id,
         expectedVersion: thread.version,
-        executionPolicy: next,
-        permissionPersistence: remembered ? "project-default" : thread.permissionPersistence,
-        ...(approvalId === undefined ? {} : { approvalId }),
-      });
-    } finally {
-      setAccessChanging(false);
-    }
-  }
-
-  async function changeAutoApprove(next: boolean) {
-    if (thread.autoApprove === next) return;
-    props.controller.setAccessNotice(undefined);
-    setAccessChanging(true);
-    try {
-      await props.controller.execute({
-        kind: "change-code-thread-access",
-        threadId: thread.id,
-        expectedVersion: thread.version,
-        executionPolicy: thread.executionPolicy,
+        executionPolicy: access.executionPolicy,
         permissionPersistence: thread.permissionPersistence,
-        autoApprove: next,
+        autoApprove: access.autoApprove,
       });
     } finally {
       setAccessChanging(false);
@@ -2116,27 +2040,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   pending={deliveryChanging}
                 />
               ) : null}
-              <CodeAccessPicker
-                {...(props.harnessAutoReviewSupported === true
-                  ? {
-                      autoApprove: {
-                        checked: thread.autoApprove === true,
-                        onChange: (checked: boolean) => void changeAutoApprove(checked),
-                      },
-                    }
-                  : {})}
-                {...(profileName === undefined ? {} : { profileName })}
-                ceiling={thread.executionPolicy}
+              <PermissionModePicker
+                autoSupported={props.harnessAutoReviewSupported === true}
                 disabled={accessChanging}
-                harnessAsksUnderFullAccess={harnessAsksUnderFullAccess}
-                nativeConfirmationAvailable={
-                  props.requestFullAccessApproval !== undefined ||
-                  props.projectRemembersFullAccess === true
-                }
-                onLowerThread={(next) => void changeAccess(next)}
-                onRaiseThread={(next) => void changeAccess(next)}
-                onSelect={setTurnAccessOverride}
-                value={nextTurnAccess}
+                onChange={(next) => void changeMode(next)}
+                {...(profileName === undefined ? {} : { profileName })}
+                warningScope={{ projectId: String(thread.projectId) }}
+                value={permissionModeOf(thread)}
               />
             </>
           ),

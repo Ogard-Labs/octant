@@ -90,13 +90,14 @@ function authorize(
   connection: SqliteConnection,
   capabilityId: "computer-use" | "browser-automation",
   args: unknown,
+  executionPolicy: "auto-accept-edits" | "full-access" = "auto-accept-edits",
 ) {
   const service = new ToolCallAuthorityService({
     resolveGrantedAuthority: () => granted,
     resolveLiveFacts: ({ threadId }) => ({
       providerAppManagedTools: "supported",
       host: { computerUseEnabled: true },
-      executionPolicy: "full-access",
+      executionPolicy,
       approvalSatisfied: true,
       externalContentIngested: readThreadExternalContentTaint(connection, threadId)
         .externalContentIngested,
@@ -274,7 +275,7 @@ describe("ExternalContentIngestionStore", () => {
 });
 
 describe("replayed taint still gates irreversible actions", () => {
-  it("requires fresh confirmation after restart even with remembered Full access", () => {
+  it("requires fresh confirmation after restart even with a standing approval, and only records the content at Full access", () => {
     const { connection, store, directory } = openHarness();
     store.record({
       threadId: ids.thread,
@@ -320,6 +321,8 @@ describe("replayed taint still gates irreversible actions", () => {
       reason: "taint-requires-fresh-confirmation",
     });
     expect(authorize(reopened, "browser-automation", browserArgs).kind).toBe("allow");
+    // Full access keeps the taint on the thread but asks nobody.
+    expect(authorize(reopened, "computer-use", computerUseArgs, "full-access").kind).toBe("allow");
     reopened.close();
   });
 });

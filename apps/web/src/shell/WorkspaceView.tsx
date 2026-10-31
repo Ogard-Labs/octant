@@ -35,6 +35,7 @@ import type {
   ThreadBoardPullRequestIdentity,
 } from "@octant/contracts";
 import type {
+  ProjectAction,
   ProjectAvailability,
   ProjectId,
   ProjectColor,
@@ -421,11 +422,19 @@ export interface WorkspaceViewProps {
     projectId: ProjectId,
     policy: ProjectProviderPolicy,
   ) => Promise<boolean>;
+  readonly onProjectPermissionModeChange?: (
+    projectId: ProjectId,
+    permissionMode: import("@octant/contracts/providers").PermissionMode | undefined,
+  ) => Promise<boolean>;
   readonly onBrandKitChange?: (
     projectId: ProjectId,
     brandKit: CanvasDesignBrand,
   ) => Promise<boolean>;
   readonly onWorkStatusFileChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
+  readonly onActionsChange?: (
+    projectId: ProjectId,
+    actions: ReadonlyArray<ProjectAction>,
+  ) => Promise<boolean>;
   readonly onDesktopRecipeChange?: (
     projectId: ProjectId,
     recipe: DesktopRecipe | null,
@@ -475,15 +484,14 @@ export interface WorkspaceViewProps {
   readonly draftApprovalLabel?: string;
   readonly draftSelectedProviderInstanceId?: import("@octant/contracts/providers").ProviderInstanceId;
   readonly draftSelectedModelId?: import("@octant/contracts/providers").ProviderModelId;
-  readonly draftDefaultExecutionPolicy?: import("@octant/contracts/providers").ProviderExecutionPolicy;
+  readonly draftDefaultPermissionMode?: import("@octant/contracts/providers").PermissionMode;
   readonly draftDefaultPermissionPersistence?: import("@octant/contracts/providers").PermissionPersistence;
   readonly onDraftSelectProvider?: (selection: {
     readonly providerInstanceId: import("@octant/contracts/providers").ProviderInstanceId;
     readonly modelId: import("@octant/contracts/providers").ProviderModelId;
   }) => void;
-  readonly onDraftExecutionPolicyChange?: (
-    policy: import("@octant/contracts/providers").ProviderExecutionPolicy,
-    persistence: import("@octant/contracts/providers").PermissionPersistence,
+  readonly onDraftPermissionModeChange?: (
+    mode: import("@octant/contracts/providers").PermissionMode,
   ) => void;
   readonly onDraftCreateThread?: (
     mode: string,
@@ -1206,9 +1214,6 @@ function renderCodeTab(
                 }),
             })}
         tab={tab}
-        {...(project?.type === "code" && project.codeAccessPersistence === "project-default"
-          ? { projectRemembersFullAccess: true }
-          : {})}
         {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
         {...(props.codeProviderGroups === undefined && props.draftProviderGroups === undefined
           ? {}
@@ -1570,15 +1575,20 @@ function renderNonCodeTab(
           {...(props.draftSelectedModelId === undefined
             ? {}
             : { selectedModelId: props.draftSelectedModelId })}
-          {...(props.draftDefaultExecutionPolicy === undefined
+          {...(props.draftDefaultPermissionMode === undefined
             ? {}
-            : { defaultExecutionPolicy: props.draftDefaultExecutionPolicy })}
+            : { defaultPermissionMode: props.draftDefaultPermissionMode })}
           {...(props.draftDefaultPermissionPersistence === undefined
             ? {}
             : { defaultPermissionPersistence: props.draftDefaultPermissionPersistence })}
-          {...(props.onDraftExecutionPolicyChange === undefined
+          {...(props.onDraftPermissionModeChange === undefined
             ? {}
-            : { onExecutionPolicyChange: props.onDraftExecutionPolicyChange })}
+            : { onPermissionModeChange: props.onDraftPermissionModeChange })}
+          {...(props.draftSelectedProviderInstanceId !== undefined &&
+          props.providerController.observedByInstance.get(props.draftSelectedProviderInstanceId)
+            ?.capabilities.harnessAutoReview === "supported"
+            ? { autoSupported: true }
+            : {})}
           onSelectProvider={props.onDraftSelectProvider ?? (() => {})}
           {...(props.draftCodeExecute === undefined ? {} : { codeExecute: props.draftCodeExecute })}
           {...(props.onDraftCreateCodeThread === undefined
@@ -2219,6 +2229,9 @@ function renderNonCodeTab(
         {...(props.onProviderPolicyChange === undefined
           ? {}
           : { onProviderPolicyChange: props.onProviderPolicyChange })}
+        {...(props.onProjectPermissionModeChange === undefined
+          ? {}
+          : { onPermissionModeChange: props.onProjectPermissionModeChange })}
         {...(props.onBrandKitChange === undefined
           ? {}
           : { onBrandKitChange: props.onBrandKitChange })}
@@ -2228,6 +2241,7 @@ function renderNonCodeTab(
         {...(props.onDesktopRecipeChange === undefined
           ? {}
           : { onDesktopRecipeChange: props.onDesktopRecipeChange })}
+        {...(props.onActionsChange === undefined ? {} : { onActionsChange: props.onActionsChange })}
         {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
         {...(props.projectWindowCapability === undefined
           ? {}

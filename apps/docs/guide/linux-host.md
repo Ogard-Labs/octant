@@ -113,7 +113,9 @@ preserve its data until cleanup is explicitly authorized.
 - **A Secret Service session and `secret-tool`**, only for storing provider
   credentials. Without one, `octant status` reports
   `Secret store: unavailable`; Chat, Work, and Code still run, but no stored
-  credential is available to a provider.
+  credential is available to a provider. Octant looks for the keyring each
+  time it keeps or reads a key, so one you start after Octant works on the
+  next key, with no restart.
 - **A provider.** Use a provider CLI that keeps its own login (install it under
   `~/.local/bin` and point the provider at that absolute path), or an endpoint
   that needs no key, such as a model server on the same machine. An endpoint
@@ -219,12 +221,14 @@ which only processes running as your user can open, and the server stores it
 in Secret Service. The next connection check or turn uses it without a
 restart.
 
-If the server started without Secret Service, the command says
-`Nothing was saved: the Octant server has no credential store.` Start and
-unlock the keyring (see
-[Installation](./installation#headless-linux-for-ade-testing)), then run
-`octant server restart` and try again. Octant never falls back to a file or
-an environment variable.
+If the keyring cannot take the key, the command names the cause and leaves
+the key unsaved. It says whether your keyring is locked, your session has no
+`Login` keyring, no keyring is running on the session bus, `secret-tool` is
+not installed, the keyring refused access, or the keyring did not answer. Fix
+that (see [Installation](./installation#headless-linux-for-ade-testing)) and
+run the command again; the server notices a keyring started or unlocked after
+it, so it needs no restart. Octant never falls back to a file or an
+environment variable.
 
 ## Sign in an organization endpoint with a code
 
@@ -336,6 +340,6 @@ Each item is a known gap on a Linux host, not a permanent limit.
 | Enabling the remote listener and approving pairing        | No command exists, and Settings → Remote access, which does both, is only in the desktop app.                                                                                                                               |
 | The listener after a server restart                       | It comes back disabled.                                                                                                                                                                                                     |
 | Terminals and other Full-access tools from `octant agent` | `octant agent` opens Code threads approval-gated, so the tool answers `This tool needs Full access for the thread.` Remembered Full access (`octant project access <name> full-access`) applies to threads that ask for it. |
-| Raising a thread to Full access for one session           | Refused by design on a host with no native confirmation; use the remembered Project decision above.                                                                                                                         |
+| Raising a thread to Full access from a paired device      | Refused: Full access is chosen in an Octant window on this host.                                                                                                                                                            |
 | Browser tool from `octant agent`                          | The site approval is not shown in the terminal, so the turn waits.                                                                                                                                                          |
 | Apple and Xcode tools                                     | Unavailable on Linux.                                                                                                                                                                                                       |

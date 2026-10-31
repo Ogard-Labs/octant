@@ -3,7 +3,7 @@ import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { Effect } from "effect";
+import { Effect, Exit, Scope } from "effect";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000001");
@@ -30,6 +30,55 @@ const capabilities = {
 } as const;
 
 describe("ProviderRuntimeRegistry", () => {
+  it("keeps leased runtimes apart, survives one lease's exit, and closes idle leases beyond three", async () => {
+    vi.useFakeTimers();
+    const registry = new ProviderRuntimeRegistry();
+    const closed: string[] = [];
+    const exits = new Map<string, () => void>();
+    let invalidated = 0;
+    registry.onRuntimeInvalidated(instanceId, () => {
+      invalidated += 1;
+    });
+    const lease = (name: string) =>
+      Effect.runPromise(
+        Effect.scoped(
+          registry.acquireRuntime(instanceId, {
+            idleMs: 30_000,
+            lease: name,
+            start: async () => ({
+              value: name,
+              exited: new Promise<void>((resolve) => exits.set(name, resolve)),
+              close: async () => void closed.push(name),
+            }),
+          }),
+        ),
+      );
+    try {
+      expect(await lease("a")).toBe("a");
+      expect(await lease("b")).toBe("b");
+      expect(registry.hasRuntime(instanceId)).toBe(true);
+
+      // One thread's process ending is that thread's to observe.
+      exits.get("a")?.();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(invalidated).toBe(0);
+      expect(closed).toEqual(["a"]);
+
+      for (const name of ["c", "d", "e"]) {
+        await lease(name);
+        await vi.advanceTimersByTimeAsync(1);
+      }
+      // Four idle leases on the instance; the one idle longest is closed.
+      expect(closed).toEqual(["a", "b"]);
+      await registry.invalidateRuntime(instanceId);
+      expect([...closed].sort()).toEqual(["a", "b", "c", "d", "e"]);
+      expect(invalidated).toBe(1);
+    } finally {
+      await registry.closeAll();
+      vi.useRealTimers();
+    }
+  });
+
   it("expires idle native sessions and retains only four most recently released runtimes", async () => {
     vi.useFakeTimers();
     const registry = new ProviderRuntimeRegistry();
@@ -366,6 +415,54 @@ describe("ProviderRuntimeRegistry", () => {
     await registry.invalidateRuntime(instanceId);
     expect(close).toHaveBeenCalledOnce();
     expect(registry.hasRuntime(instanceId)).toBe(false);
+  });
+
+  it("releases idle runtimes and parked sessions under memory pressure but never a leased runtime", async () => {
+    const registry = new ProviderRuntimeRegistry();
+    const idleClose = vi.fn(async () => undefined);
+    const leasedClose = vi.fn(async () => undefined);
+    await Effect.runPromise(
+      Effect.scoped(
+        registry.acquireRuntime(instanceId, {
+          idleMs: 30_000,
+          start: async () => ({ value: "idle", close: idleClose }),
+        }),
+      ),
+    );
+    const leaseScope = await Effect.runPromise(Scope.make());
+    await Effect.runPromise(
+      registry
+        .acquireRuntime(otherId, {
+          idleMs: 30_000,
+          start: async () => ({ value: "leased", close: leasedClose }),
+        })
+        .pipe(Scope.extend(leaseScope)),
+    );
+    const claim = registry.claimNativeSession(instanceId, "parked");
+    if (claim.status !== "claimed") throw new Error("Expected reservation");
+    const parkedClose = vi.fn(async () => claim.release());
+    await registry.retainNativeSessionRuntime(instanceId, "parked", {
+      value: 1,
+      compatibility: "same",
+      close: parkedClose,
+    });
+
+    await expect(registry.releaseIdle()).resolves.toEqual({
+      idleRuntimesStopped: 1,
+      idleSessionsReleased: 1,
+    });
+
+    expect(idleClose).toHaveBeenCalledOnce();
+    expect(parkedClose).toHaveBeenCalledOnce();
+    expect(leasedClose).not.toHaveBeenCalled();
+    expect(registry.hasRuntime(instanceId)).toBe(false);
+    expect(registry.hasRuntime(otherId)).toBe(true);
+    await expect(registry.releaseIdle()).resolves.toEqual({
+      idleRuntimesStopped: 0,
+      idleSessionsReleased: 0,
+    });
+    await Effect.runPromise(Scope.close(leaseScope, Exit.void));
+    await registry.closeAll();
   });
 
   it("rejects explicit runtime invalidation while sessions are active", async () => {

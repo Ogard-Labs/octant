@@ -50,6 +50,7 @@ import type { ProviderOAuthCommand } from "./ProviderOAuthSignIn";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { providerWithheldReason } from "./providerSettingsPresentation";
 import { useRetainedRecord } from "../polling/useRetainedRecord";
+import { isKeyringAdvice } from "@octant/domain/keyring-advice";
 import { failureMessage } from "../lib/failureMessage";
 import {
   getInjectedHostBridge,
@@ -530,7 +531,12 @@ export function useProviderController(options: ProviderControllerOptions) {
           } catch (error) {
             if (keyHost !== undefined && created) {
               if (mounted.current) {
-                setMessage("The provider was created, but its credential could not be stored.");
+                setMessage(
+                  storeFailureMessage(
+                    "The provider was created, but its credential could not be stored.",
+                    error,
+                  ),
+                );
               }
             } else {
               await recoverRegistryFailure(error, "Provider configuration could not be created.");
@@ -584,9 +590,14 @@ export function useProviderController(options: ProviderControllerOptions) {
           try {
             await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
-          } catch {
+          } catch (storeError) {
             if (mounted.current) {
-              setMessage("The provider was created, but its credential could not be stored.");
+              setMessage(
+                storeFailureMessage(
+                  "The provider was created, but its credential could not be stored.",
+                  storeError,
+                ),
+              );
             }
             return false;
           }
@@ -636,9 +647,14 @@ export function useProviderController(options: ProviderControllerOptions) {
           try {
             await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
-          } catch {
+          } catch (storeError) {
             if (mounted.current) {
-              setMessage("The provider was created, but its credential could not be stored.");
+              setMessage(
+                storeFailureMessage(
+                  "The provider was created, but its credential could not be stored.",
+                  storeError,
+                ),
+              );
             }
             return false;
           }
@@ -686,9 +702,14 @@ export function useProviderController(options: ProviderControllerOptions) {
           try {
             await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
-          } catch {
+          } catch (storeError) {
             if (mounted.current) {
-              setMessage("The provider was created, but its credential could not be stored.");
+              setMessage(
+                storeFailureMessage(
+                  "The provider was created, but its credential could not be stored.",
+                  storeError,
+                ),
+              );
             }
             return false;
           }
@@ -744,9 +765,14 @@ export function useProviderController(options: ProviderControllerOptions) {
           try {
             await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
-          } catch {
+          } catch (storeError) {
             if (mounted.current) {
-              setMessage("The provider was created, but its credential could not be stored.");
+              setMessage(
+                storeFailureMessage(
+                  "The provider was created, but its credential could not be stored.",
+                  storeError,
+                ),
+              );
             }
             return false;
           }
@@ -797,9 +823,14 @@ export function useProviderController(options: ProviderControllerOptions) {
           try {
             await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
-          } catch {
+          } catch (storeError) {
             if (mounted.current) {
-              setMessage("The provider was created, but its credential could not be stored.");
+              setMessage(
+                storeFailureMessage(
+                  "The provider was created, but its credential could not be stored.",
+                  storeError,
+                ),
+              );
             }
             return false;
           }
@@ -850,9 +881,14 @@ export function useProviderController(options: ProviderControllerOptions) {
           try {
             await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
-          } catch {
+          } catch (storeError) {
             if (mounted.current) {
-              setMessage("The provider was created, but its credential could not be stored.");
+              setMessage(
+                storeFailureMessage(
+                  "The provider was created, but its credential could not be stored.",
+                  storeError,
+                ),
+              );
             }
             return false;
           }
@@ -903,9 +939,14 @@ export function useProviderController(options: ProviderControllerOptions) {
           try {
             await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
-          } catch {
+          } catch (storeError) {
             if (mounted.current) {
-              setMessage("The provider was created, but its credential could not be stored.");
+              setMessage(
+                storeFailureMessage(
+                  "The provider was created, but its credential could not be stored.",
+                  storeError,
+                ),
+              );
             }
             return false;
           }
@@ -956,9 +997,14 @@ export function useProviderController(options: ProviderControllerOptions) {
           try {
             await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
-          } catch {
+          } catch (storeError) {
             if (mounted.current) {
-              setMessage("The provider was created, but its credential could not be stored.");
+              setMessage(
+                storeFailureMessage(
+                  "The provider was created, but its credential could not be stored.",
+                  storeError,
+                ),
+              );
             }
             return false;
           }
@@ -1038,7 +1084,12 @@ export function useProviderController(options: ProviderControllerOptions) {
           } catch (error) {
             if (configuration.authentication === "api-key" && created) {
               if (mounted.current) {
-                setMessage("The provider was created, but its credential could not be stored.");
+                setMessage(
+                  storeFailureMessage(
+                    "The provider was created, but its credential could not be stored.",
+                    error,
+                  ),
+                );
               }
             } else {
               await recoverRegistryFailure(error, "Provider configuration could not be created.");
@@ -1229,10 +1280,13 @@ export function useProviderController(options: ProviderControllerOptions) {
           if (mustSet && bridge !== undefined) {
             try {
               await bridge.addProviderApiKey(instanceId, credentialValue);
-            } catch {
+            } catch (storeError) {
               if (mounted.current) {
                 setMessage(
-                  "The provider credential could not be stored, so the configuration was unchanged.",
+                  storeFailureMessage(
+                    "The provider credential could not be stored, so the configuration was unchanged.",
+                    storeError,
+                  ),
                 );
               }
               return false;
@@ -1375,10 +1429,13 @@ export function useProviderController(options: ProviderControllerOptions) {
           if (mustSet && bridge !== undefined) {
             try {
               await bridge.addProviderApiKey(instanceId, credentialValue);
-            } catch {
+            } catch (storeError) {
               if (mounted.current) {
                 setMessage(
-                  "The provider credential could not be stored, so the configuration was unchanged.",
+                  storeFailureMessage(
+                    "The provider credential could not be stored, so the configuration was unchanged.",
+                    storeError,
+                  ),
                 );
               }
               return false;
@@ -1502,9 +1559,14 @@ export function useProviderController(options: ProviderControllerOptions) {
           try {
             await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
-          } catch {
+          } catch (storeError) {
             if (mounted.current) {
-              setMessage("The provider was changed, but its credential could not be stored.");
+              setMessage(
+                storeFailureMessage(
+                  "The provider was changed, but its credential could not be stored.",
+                  storeError,
+                ),
+              );
             }
             return false;
           }
@@ -1611,10 +1673,13 @@ export function useProviderController(options: ProviderControllerOptions) {
           try {
             await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
-          } catch {
+          } catch (storeError) {
             if (mounted.current) {
               setMessage(
-                "Provider configuration was saved, but its credential could not be stored.",
+                storeFailureMessage(
+                  "Provider configuration was saved, but its credential could not be stored.",
+                  storeError,
+                ),
               );
             }
             return false;
@@ -1665,10 +1730,13 @@ export function useProviderController(options: ProviderControllerOptions) {
           try {
             await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
-          } catch {
+          } catch (storeError) {
             if (mounted.current) {
               setMessage(
-                "Provider configuration was saved, but its credential could not be stored.",
+                storeFailureMessage(
+                  "Provider configuration was saved, but its credential could not be stored.",
+                  storeError,
+                ),
               );
             }
             return false;
@@ -1719,10 +1787,13 @@ export function useProviderController(options: ProviderControllerOptions) {
           try {
             await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
-          } catch {
+          } catch (storeError) {
             if (mounted.current) {
               setMessage(
-                "Provider configuration was saved, but its credential could not be stored.",
+                storeFailureMessage(
+                  "Provider configuration was saved, but its credential could not be stored.",
+                  storeError,
+                ),
               );
             }
             return false;
@@ -1773,10 +1844,13 @@ export function useProviderController(options: ProviderControllerOptions) {
           try {
             await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
-          } catch {
+          } catch (storeError) {
             if (mounted.current) {
               setMessage(
-                "Provider configuration was saved, but its credential could not be stored.",
+                storeFailureMessage(
+                  "Provider configuration was saved, but its credential could not be stored.",
+                  storeError,
+                ),
               );
             }
             return false;
@@ -1827,10 +1901,13 @@ export function useProviderController(options: ProviderControllerOptions) {
           try {
             await hostBridge.addProviderApiKey(instanceId, credentialValue);
             return true;
-          } catch {
+          } catch (storeError) {
             if (mounted.current) {
               setMessage(
-                "Provider configuration was saved, but its credential could not be stored.",
+                storeFailureMessage(
+                  "Provider configuration was saved, but its credential could not be stored.",
+                  storeError,
+                ),
               );
             }
             return false;
@@ -1891,12 +1968,15 @@ export function useProviderController(options: ProviderControllerOptions) {
             if (mustSet && !setAfterChange) {
               await hostBridge!.addProviderApiKey(instanceId, credentialValue);
             }
-          } catch {
+          } catch (storeError) {
             if (mounted.current) {
               setMessage(
-                mustClear
-                  ? "The provider credential could not be cleared, so the authentication change was cancelled."
-                  : "The provider credential could not be stored, so the configuration was unchanged.",
+                storeFailureMessage(
+                  mustClear
+                    ? "The provider credential could not be cleared, so the authentication change was cancelled."
+                    : "The provider credential could not be stored, so the configuration was unchanged.",
+                  storeError,
+                ),
               );
             }
             return false;
@@ -1920,10 +2000,13 @@ export function useProviderController(options: ProviderControllerOptions) {
           try {
             await hostBridge!.addProviderApiKey(instanceId, credentialValue);
             return true;
-          } catch {
+          } catch (storeError) {
             if (mounted.current) {
               setMessage(
-                "Provider configuration was saved, but its credential could not be stored. Enter the API key again.",
+                storeFailureMessage(
+                  "Provider configuration was saved, but its credential could not be stored. Enter the API key again.",
+                  storeError,
+                ),
               );
             }
             return false;
@@ -1980,13 +2063,16 @@ export function useProviderController(options: ProviderControllerOptions) {
           if (mustSet) {
             try {
               await hostBridge!.addProviderApiKey(instanceId, credentialValue);
-            } catch {
+            } catch (storeError) {
               // The prior key went with the prior base URL, so rolling back
               // would only restore an endpoint without a key.
               if (priorKeyDeleted) {
                 if (mounted.current) {
                   setMessage(
-                    "The new endpoint was saved, but its API key could not be stored. Enter the API key again.",
+                    storeFailureMessage(
+                      "The new endpoint was saved, but its API key could not be stored. Enter the API key again.",
+                      storeError,
+                    ),
                   );
                 }
                 return false;
@@ -2024,9 +2110,12 @@ export function useProviderController(options: ProviderControllerOptions) {
               }
               if (mounted.current) {
                 setMessage(
-                  rollbackConfirmed
-                    ? "The new API key could not be stored. The configuration was rolled back; the prior endpoint and key remain active."
-                    : "The new API key could not be stored and the automatic rollback could not be confirmed. Reload Settings to verify the saved endpoint and re-enter the API key.",
+                  storeFailureMessage(
+                    rollbackConfirmed
+                      ? "The new API key could not be stored. The configuration was rolled back; the prior endpoint and key remain active."
+                      : "The new API key could not be stored and the automatic rollback could not be confirmed. Reload Settings to verify the saved endpoint and re-enter the API key.",
+                    storeError,
+                  ),
                 );
               }
               return false;
@@ -2546,6 +2635,18 @@ function queueProviderMutation(
   });
   queue.current = task.catch(() => undefined);
   return task.then(() => result);
+}
+
+/**
+ * The base sentence, plus the reason the host gave for not keeping the key when
+ * it gave one (a locked keyring, no keyring running, a missing tool). Only the
+ * host's own advice sentences are shown; any other failure text may carry a
+ * store diagnostic and stays out of the message.
+ */
+export function storeFailureMessage(base: string, error: unknown): string {
+  if (!(error instanceof Error)) return base;
+  const reason = error.message.trim();
+  return isKeyringAdvice(reason) ? `${base} ${reason}` : base;
 }
 
 async function withTransientCredential(

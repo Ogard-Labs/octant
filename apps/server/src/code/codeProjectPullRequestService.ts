@@ -485,6 +485,44 @@ export class CodeProjectPullRequestService {
     });
   }
 
+  /**
+   * Whether this window may act on one pull request, and which Code threads
+   * are linked to it. The pull-request switches ask before every effect, with
+   * the same Project-to-repository check the merge makes.
+   */
+  async authorizePullRequest(
+    windowId: WindowId,
+    target: CodeProjectPullRequestDetailQuery,
+  ): Promise<
+    | { readonly status: "authorized"; readonly linkedThreadIds: ReadonlyArray<string> }
+    | { readonly status: "not-authorized" }
+    | { readonly status: "disconnected" }
+  > {
+    const projects = await this.#resolveProjects(windowId);
+    const authorized = this.#authorizedConnection(projects, target);
+    if (authorized === undefined) return { status: "not-authorized" };
+    if (this.#githubRevoked) return { status: "disconnected" };
+    const cached = this.#detailCache.get(detailKey(target))?.detail;
+    const row = this.#cache?.rows.find(
+      (entry) =>
+        String(entry.projectId) === String(target.projectId) &&
+        entry.repositoryOwner === target.repositoryOwner &&
+        entry.repositoryName === target.repositoryName &&
+        entry.number === target.number,
+    );
+    const linked = matchLinkedThreadsToPullRequest({
+      pullRequest: {
+        repository: { owner: authorized.repositoryOwner, name: authorized.repositoryName },
+        projectId: String(authorized.projectId),
+        number: target.number,
+        headBranch: cached?.headBranch ?? row?.headBranch ?? "",
+        title: cached?.title ?? row?.title ?? "",
+      },
+      threads: await this.#threads.list(),
+    });
+    return { status: "authorized", linkedThreadIds: linked.map((thread) => thread.threadId) };
+  }
+
   async merge(
     windowId: WindowId,
     command: CodeProjectPullRequestMergeCommand,

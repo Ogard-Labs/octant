@@ -51,6 +51,32 @@ export type LocalPluginFolderPickerResult =
   | Readonly<{ kind: "cancelled" }>
   | Readonly<{ kind: "selected"; receiptId: string; displayName: string }>;
 
+/** A window the person could pick to capture. Names only: no pixels are read to list it. */
+export interface CaptureWindowSummary {
+  readonly id: string;
+  readonly name: string;
+}
+
+/**
+ * What the capture list answers. Listing never reads another window's
+ * contents; when macOS has not granted Screen Recording it answers
+ * `permission-needed` instead of prompting, so the person is asked only after
+ * Octant has explained why.
+ */
+export type CaptureWindowList =
+  | Readonly<{ kind: "windows"; windows: ReadonlyArray<CaptureWindowSummary> }>
+  | Readonly<{ kind: "permission-needed"; access: "not-determined" | "denied" | "restricted" }>;
+
+/** `granted` after the person allowed it; `needs-settings` when macOS wants System Settings or a relaunch. */
+export type CaptureWindowPermissionOutcome = Readonly<{ kind: "granted" | "needs-settings" }>;
+
+export type CaptureWindowResult =
+  | Readonly<{ kind: "captured"; name: string; mimeType: "image/png"; bytes: Uint8Array }>
+  /** The picked window closed (or moved off screen) before it could be captured. */
+  | Readonly<{ kind: "gone" }>
+  | Readonly<{ kind: "permission-needed" }>
+  | Readonly<{ kind: "failed"; message: string }>;
+
 export interface CodeExternalEditorRequest {
   readonly threadId: string;
   readonly checkoutId: string;

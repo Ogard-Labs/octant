@@ -16,6 +16,7 @@ import {
   nativeHarnessToolNameForCapability,
 } from "@octant/contracts";
 import { decideProfileToolConstraint } from "./agentProfilePolicy";
+import { resolveGuardrail } from "./guardrailPolicy";
 import { authorizePrincipalAction, type PrincipalKind } from "./remoteAccessPolicy";
 import { searchQueryRefusalUnderTaint } from "./untrustedContentPolicy";
 
@@ -206,11 +207,25 @@ export function resolveToolCall(input: ToolCallPolicyInput): ToolCallPolicyDecis
   }
 
   // 8. Thread elevation / approval / taint (untrusted-content taint hook)
+  // At Full access in Code outside content is recorded only: the thread keeps
+  // its taint for the tool row, the card and the journal, but it neither asks
+  // nor blocks, so it does not reach the gates below. Work keeps its own
+  // access and is not on the shared levels, so its taint gates as before.
+  const guardrail = resolveGuardrail({
+    access: { executionPolicy: input.thread.executionPolicy },
+    capabilities: { providerReview: true, providerSandbox: false },
+    mode: input.mode,
+  });
+  const asksNobody =
+    input.mode === "code" &&
+    guardrail.status === "supported" &&
+    guardrail.outsideContent === "recorded";
+  const outsideContentGates = input.thread.externalContentIngested && !asksNobody;
   // A tainted thread's web search does not ask a person; it reaches only the
   // endpoint the person configured, so a query that looks like it carries
-  // data is refused outright, under every posture.
+  // data is refused outright, below Full access.
   if (
-    input.thread.externalContentIngested &&
+    outsideContentGates &&
     String(catalogEntry.capabilityId) === nativeHarnessToolCapabilityId("web-search")
   ) {
     const query = searchQueryOf(input.arguments);
@@ -222,8 +237,9 @@ export function resolveToolCall(input: ToolCallPolicyInput): ToolCallPolicyDecis
   const elevation = resolveThreadElevation({
     entry: catalogEntry,
     executionPolicy: input.thread.executionPolicy,
+    asksNobody,
     approvalSatisfied: input.thread.approvalSatisfied,
-    externalContentIngested: input.thread.externalContentIngested,
+    externalContentIngested: outsideContentGates,
   });
   if (elevation.kind === "deny") {
     return deny("thread-elevation", elevation.reason);
@@ -262,23 +278,21 @@ export function resolveToolCall(input: ToolCallPolicyInput): ToolCallPolicyDecis
 }
 
 /**
- * Approved egress defaults (2026-08-12): Work/Plan → none; Code approval-gated
- * and auto-accept-edits → provider-endpoints-only; Code full-access →
- * unrestricted. Seatbelt materialization is owned by the shared Seatbelt
- * builder; this resolution is the policy choke-point export.
+ * The egress a tool call runs under, as the thread's guardrail level decides
+ * it (see `resolveGuardrail`). This is the policy choke-point export the
+ * Seatbelt builder materializes.
  */
 export function resolveNetworkEgressPolicy(input: {
   readonly mode: ToolActionAuthority["mode"];
   readonly executionPolicy: ProviderExecutionPolicy;
 }): ToolNetworkEgressPolicy {
-  if (input.mode !== "code") return "none";
-  if (input.executionPolicy === "plan") return "none";
-  // Auto-accepting edits says nothing about the network, so it keeps exactly
-  // the egress approval-gated Code already has.
-  if (input.executionPolicy === "approval-gated" || input.executionPolicy === "auto-accept-edits") {
-    return "provider-endpoints-only";
-  }
-  return "unrestricted";
+  const guardrail = resolveGuardrail({
+    access: { executionPolicy: input.executionPolicy },
+    // Egress does not depend on what the provider can do for itself.
+    capabilities: { providerReview: true, providerSandbox: false },
+    mode: input.mode,
+  });
+  return guardrail.status === "supported" ? guardrail.egress : guardrail.fallback.egress;
 }
 
 /**
@@ -344,9 +358,15 @@ export function planRefusesApprovalClass(approvalClass: ToolApprovalClass): bool
   );
 }
 
-function resolveThreadElevation(input: {
-  readonly entry: ClosedToolCatalogEntry;
+/**
+ * Step 8 on its own: whether a call the earlier steps admitted runs, asks, or
+ * is refused by the thread's posture, approvals and taint.
+ */
+export function resolveThreadElevation(input: {
+  readonly entry: Pick<ClosedToolCatalogEntry, "approvalClass" | "irreversibleUnderTaint">;
   readonly executionPolicy: ProviderExecutionPolicy;
+  /** Code at Full access: see `resolveGuardrail`. */
+  readonly asksNobody: boolean;
   readonly approvalSatisfied: boolean;
   readonly externalContentIngested: boolean;
 }):
@@ -355,6 +375,14 @@ function resolveThreadElevation(input: {
   | { readonly kind: "deny"; readonly reason: string } {
   if (input.executionPolicy === "plan" && planRefusesApprovalClass(input.entry.approvalClass)) {
     return { kind: "deny", reason: "plan-mode-denied" };
+  }
+
+  // Full access asks nobody, for any class: irreversible actions and
+  // publication included. The agent pushes, merges or publishes because the
+  // person asked in the thread, and the journal records the call; it is not a
+  // prompt. Plan's read-only refusal above still holds as an overlay.
+  if (input.asksNobody) {
+    return { kind: "allow" };
   }
 
   // Taint hook: thread-lifetime taint forces fresh confirmation for irreversible classes.
@@ -375,7 +403,8 @@ function resolveThreadElevation(input: {
   // Publication is approved one act at a time, against the exact target and
   // bytes about to leave the machine. A satisfied standing approval is exactly
   // what must not carry it, so this sits above the postures rather than inside
-  // them: no execution policy, including full access, turns it into an allow.
+  // them: no prompting posture turns it into an allow. Full access, which
+  // asks nobody, returned above.
   if (input.entry.approvalClass === "publish-to-target") {
     return { kind: "prompt", reason: "approval-required" };
   }

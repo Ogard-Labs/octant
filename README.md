@@ -27,9 +27,11 @@ requires a specific vendor or an Octant-operated cloud service.
 - **Code** — engineering confined to one user-approved folder: approval-gated
   access, managed worktrees, terminals, an editor, tests, and a thread board.
 
-Modes are enforced on the server, not toggled in the renderer. Work never
-silently becomes Code; promotion to a linked Code thread requires explicit
-approval.
+Modes are enforced on the server, not toggled in the renderer. Work and Code
+are meant to do the same things under the same guardrail level; they differ
+in focus, with Work hiding Git and other developer tools unless you turn them
+on (the shared capability set is not built yet). Work never silently becomes
+Code; moving to a linked Code thread requires explicit approval.
 
 ## Key features
 
