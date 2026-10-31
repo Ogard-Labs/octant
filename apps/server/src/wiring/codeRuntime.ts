@@ -290,7 +290,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   Pick<CanvasWiring, "canvasAgentToolPort"> &
   Pick<
     HarnessWiring,
-    "nativeHarnessComposition" | "nativeHarnessHooks" | "onHarnessRecoveryLifted"
+    "hostShield" | "nativeHarnessComposition" | "nativeHarnessHooks" | "onHarnessRecoveryLifted"
   > & {
     /** Wired by wireChat; read only after startup. */
     readonly codeThreadMentionDirectory: () => ReturnType<typeof createCodeThreadMentionDirectory>;
@@ -349,6 +349,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     isCodeProviderModelAllowed,
     liveTurns,
     machineChangeFeed,
+    hostShield,
     nativeHarnessComposition,
     nativeHarnessHooks,
     onHarnessQuestionAsked,
@@ -508,6 +509,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         }),
       );
       codeOperationRuntime = createCodeOperationRuntime({
+        shield: hostShield,
         liveTurns,
         activeTurns: codeActiveTurns,
         terminalBrowserGrants: grants,

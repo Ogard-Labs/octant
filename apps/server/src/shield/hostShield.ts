@@ -12,6 +12,7 @@ import {
   type ShieldModelChoice,
   type TurnUsage,
 } from "@octant/contracts";
+import { isAcpAgentKind } from "@octant/contracts";
 import { isNativeHarnessDriverKind } from "@octant/domain";
 import { shieldReviewsPrompts } from "@octant/domain/guardrail-policy";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
@@ -213,8 +214,17 @@ function shieldSpend(
 /**
  * Runtimes whose approval prompts reach Octant before the call runs, so
  * Shield can answer them: the Octant Harness, whose tool calls pass Octant's
- * approval path.
+ * approval path, Claude Code (`canUseTool`), Codex (app-server approval
+ * requests), OpenCode (`permission.asked`), every ACP agent
+ * (`session/request_permission`), and Pi (its extension's confirmation).
  */
 export function shieldRoutesApprovals(driverKind: ProviderDriverKind): boolean {
-  return isNativeHarnessDriverKind(driverKind);
+  if (isNativeHarnessDriverKind(driverKind)) return true;
+  if (isAcpAgentKind(driverKind)) return true;
+  return (
+    driverKind === "claude" ||
+    driverKind === "codex" ||
+    driverKind === "opencode" ||
+    driverKind === "pi"
+  );
 }
