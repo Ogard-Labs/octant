@@ -2,11 +2,10 @@ import type { GoalLoopClient, GoalLoopProjection } from "@octant/client-runtime/
 import {
   decodeAggregateVersion,
   decodeGoalLoopId,
-  type AgentRunAuthority,
   type GoalLoop,
   type ThreadGoal,
 } from "@octant/contracts";
-import { goalLoopBurnDown, goalLoopPauseText } from "@octant/domain";
+import { WORK_GOAL_LOOP_CEILING, goalLoopBurnDown, goalLoopPauseText } from "@octant/domain";
 import { useCallback, useEffect, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 
@@ -94,7 +93,7 @@ export function GoalLoopPanel(props: GoalLoopPanelProps) {
               expectedVersion: decodeAggregateVersion(0),
               loopId: decodeGoalLoopId(crypto.randomUUID()),
               goalId: goal.id,
-              ceiling: LOOP_CEILING,
+              ceiling: WORK_GOAL_LOOP_CEILING,
               trigger: { kind: "continuous" },
             })
           }
@@ -209,25 +208,6 @@ export function GoalLoopPanel(props: GoalLoopPanelProps) {
     </section>
   );
 }
-
-/**
- * The ceiling an unattended loop starts under.
- *
- * Work already denies shell, Git, and reach outside the Project, so this
- * declares exactly that and nothing more. A ceiling asking for less than the
- * mode fixes is refused by the host rather than quietly ignored, which is why
- * this matches rather than under-states it.
- */
-const LOOP_CEILING: AgentRunAuthority = {
-  filesystem: true,
-  shell: false,
-  git: false,
-  network: false,
-  tools: true,
-  subagents: false,
-  executionPolicy: "approval-gated",
-  permissionPersistence: "current-session",
-};
 
 function statusLabel(loop: GoalLoop): string {
   switch (loop.status) {

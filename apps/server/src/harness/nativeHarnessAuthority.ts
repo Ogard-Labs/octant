@@ -6,6 +6,7 @@ import type {
   ToolActionAuthority,
   ToolHostId,
 } from "@octant/contracts";
+import { workThreadAccessOf } from "@octant/domain";
 import { ServerBrowserAuthorityResolver } from "../browser/browserAuthorityResolver";
 import type { PersistenceService } from "../persistence/persistenceService";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
@@ -61,14 +62,12 @@ export function createNativeHarnessAuthority(
     resolveLiveFacts: ({ threadId, mode }) => {
       const code =
         mode === "code" ? options.persistence.readCodeThread(threadId as never) : undefined;
-      // A Work turn's access is the running turn's: the thread's own, or
-      // ask-first when a goal-loop round's ceiling is narrower. Auto-accept
-      // lets the harness write project files without asking, as it does for a
-      // Code thread; anything else, including no turn at all, asks.
+      // A Work turn's access is the running turn's: the thread's own, clamped
+      // to a goal-loop round's or routine's ceiling. It means what the same
+      // Code posture means, Full access included; no turn at all asks.
       const workAccess = mode === "work" ? options.runningWorkTurnAccess?.(threadId) : undefined;
       const executionPolicy =
-        code?.executionPolicy ??
-        (workAccess === "auto-accept-edits" ? "auto-accept-edits" : "approval-gated");
+        code?.executionPolicy ?? workThreadAccessOf(workAccess ?? "ask-first").executionPolicy;
       return {
         // The harness is only composed for a provider that runs app-managed
         // tools; a provider that cannot never reaches this service.

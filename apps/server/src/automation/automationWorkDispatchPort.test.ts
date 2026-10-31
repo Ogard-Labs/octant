@@ -186,7 +186,7 @@ describe("createAutomationWorkDispatchPort", () => {
           modelId: run.definitionSnapshot.executionProfile.modelId,
         }),
       }),
-      { holdAskFirst: true },
+      { accessCeiling: "ask-first" },
     );
   });
 
@@ -217,8 +217,8 @@ describe("createAutomationWorkDispatchPort", () => {
       });
     }
 
-    const holds = vi.mocked(turns.startFirstTurn).mock.calls.map((call) => call[2]?.holdAskFirst);
-    expect(holds).toEqual([true, false]);
+    const holds = vi.mocked(turns.startFirstTurn).mock.calls.map((call) => call[2]?.accessCeiling);
+    expect(holds).toEqual(["ask-first", "auto-accept-edits"]);
   });
 
   it("is idempotent on firstTurnRequestId by returning the existing accepted turn", async () => {

@@ -309,8 +309,8 @@ describe("routine proposals from a thread", () => {
     expect(routine.originThreadId).toBe(THREAD);
     expect(routine.lifecycle).toBe("enabled");
     expect(routine.authorityProfile.effective).toMatchObject({
-      shell: false,
-      git: false,
+      shell: true,
+      git: true,
       network: false,
       subagents: false,
       executionPolicy: "approval-gated",
@@ -444,7 +444,7 @@ describe("one-time follow-ups in the same thread", () => {
       targetPolicy: "same-thread",
       originThreadId: THREAD,
       authorityProfile: {
-        effective: { shell: false, git: false, executionPolicy: "approval-gated" },
+        effective: { shell: true, git: true, executionPolicy: "approval-gated" },
       },
     });
   });
@@ -628,7 +628,7 @@ describe("routines a person creates from a thread's Environment", () => {
         missedRunPolicy: "skip",
         createdBy: { kind: "local-window", windowId: String(windowId) },
         authorityProfile: {
-          effective: { shell: false, git: false, executionPolicy: "approval-gated" },
+          effective: { shell: true, git: true, executionPolicy: "approval-gated" },
         },
       },
     });

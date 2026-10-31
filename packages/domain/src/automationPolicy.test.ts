@@ -278,6 +278,31 @@ describe("automation identity and authority policy", () => {
     ).toThrowError(AutomationPolicyRejected);
   });
 
+  it("lets a Work routine capture the shell and Git its ceilings grant, as a Code routine does", () => {
+    const withShell = { ...approval, shell: true, git: true };
+    expect(
+      intersectAutomationAuthority({
+        requested: withShell,
+        hostCapability: withShell,
+        modeProjectCeiling: withShell,
+        savedProfile: withShell,
+        providerCapability: withShell,
+        mode: "work",
+      }),
+    ).toMatchObject({ shell: true, git: true });
+    // A ceiling that withholds them still withholds them.
+    expect(
+      intersectAutomationAuthority({
+        requested: withShell,
+        hostCapability: withShell,
+        modeProjectCeiling: withShell,
+        savedProfile: { ...withShell, shell: false, git: false },
+        providerCapability: withShell,
+        mode: "work",
+      }),
+    ).toMatchObject({ shell: false, git: false });
+  });
+
   it("rejects automation-origin mutation and accepts interactive origin", () => {
     expect(isAutomationMutationAllowed({ kind: "interactive" })).toBe(true);
     expect(

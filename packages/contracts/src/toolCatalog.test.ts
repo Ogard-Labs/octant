@@ -89,11 +89,11 @@ describe("closed tool catalog", () => {
 });
 
 describe("native harness catalog entries", () => {
-  it("keeps the shell out of Chat and Work, and every read available in Work and Code", () => {
+  it("keeps the shell out of Chat, shares it between Work and Code, and every read available in both", () => {
     const bash = lookupClosedToolCatalogEntry(
       decodeToolActionCapability({ id: "harness-bash", version: 1 }),
     );
-    expect(bash?.modes).toEqual(["code"]);
+    expect(bash?.modes).toEqual(["work", "code"]);
     expect(bash?.approvalClass).toBe("shell-commands");
     expect(bash?.irreversibleUnderTaint).toBe(true);
     const read = lookupClosedToolCatalogEntry(

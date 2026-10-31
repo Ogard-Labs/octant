@@ -23,7 +23,7 @@ const CORE = [
 
 const MODE: Readonly<Record<OctantMode, string>> = {
   chat: "This is a Chat thread. It has no filesystem and no shell. Your tool definitions and the list of Octant tools in this session are exactly what you can call; check them before saying a tool is unavailable.",
-  work: "This is a Work thread bound to one folder: read, search, and edit files inside it. There is no shell. Document changes in files the user can open.",
+  work: "This is a Work thread bound to one folder: read, search, and edit files inside it, and run commands in it with bash at the thread's level, which may ask the user first. Document changes in files the user can open.",
   code: "This is a Code thread on one checkout: read, search, edit, and run commands in the sandboxed checkout. Prefer edit over write. Run the repository's own checks before saying work is done.",
 };
 

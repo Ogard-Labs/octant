@@ -58,7 +58,7 @@ import { parseFollowUpSuggestions } from "../followUps/followUpSuggestionParsing
 import { fetchPublicUrl, PublicFetchRefused } from "../harness/nativeHarnessWebFetch";
 import { searxngHarnessWebSearch } from "../harness/nativeHarnessWebSearch";
 import { deriveToolHostId } from "../browser/browserAuthorityResolver";
-import { isNativeHarnessDriverKind } from "@octant/domain";
+import { isNativeHarnessDriverKind, workThreadAccessOf } from "@octant/domain";
 import { type AgentRunsWiring, authorizeAgentRunParentThread } from "./agentRuns";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
 import type { ServerStart } from "./serverShape";
@@ -647,6 +647,10 @@ export function wireHarness(deps: HarnessDependencies) {
     // The posture a command's network follows is the one its turn may use:
     // the window's session grant, clamped to the running turn's posture, so
     // a thread widened mid-turn keeps that turn's commands on `proxied`.
+    readWorkExecutionPolicy: (threadId) => {
+      const access = runningWorkTurnAccess(threadId);
+      return access === undefined ? undefined : workThreadAccessOf(access).executionPolicy;
+    },
     readCodeExecutionPolicy: codeTurnExecutionPolicyReader({
       readCodeThread: (threadId) => persistence.readCodeThread(threadId),
       codeSessionAuthority,
