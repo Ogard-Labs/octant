@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 import {
   decodeCodeThreadId,
   decodeSpendCeilingReservationId,
+  decodeWorkThreadId,
   type CodeThread,
+  type WorkAccess,
+  type WorkThread,
   type ProviderCapabilities,
   type ProviderDriverKind,
   type ProviderExecutionPolicy,
@@ -13,7 +16,7 @@ import {
   type TurnUsage,
 } from "@octant/contracts";
 import { isNativeHarnessDriverKind } from "@octant/domain";
-import { shieldReviewsPrompts } from "@octant/domain/guardrail-policy";
+import { shieldReviewsPrompts, workThreadAccessOf } from "@octant/domain/guardrail-policy";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type { SpendCeilingService } from "../spendCeilingService";
 import { OctantShield, type ShieldModelPort, type ShieldReviewPort } from "./octantShield";
@@ -26,6 +29,19 @@ const SHIELD_CALL_TOKEN_BOUND = 4_096;
 
 export interface HostShieldDependencies {
   readonly readCodeThread: (threadId: CodeThread["id"]) => CodeThread | undefined;
+  /**
+   * A Work thread, which Shield reviews at Auto as it reviews a Code thread:
+   * Work and Code share one capability set at the thread's level. Absent,
+   * Shield reviews Code threads only.
+   */
+  readonly readWorkThread?: (threadId: WorkThread["id"]) => WorkThread | undefined;
+  /** The level a Work thread's running turn runs at, when one runs. */
+  readonly readWorkTurnAccess?: (threadId: string) => WorkAccess | undefined;
+  /** A Work thread's own turn prompts, oldest first: what the person wrote. */
+  readonly workPersonMessages?: (
+    threadId: WorkThread["id"],
+    limit: number,
+  ) => ReadonlyArray<string>;
   /** The posture the thread's running turn may use, when one runs. */
   readonly readTurnExecutionPolicy?: (threadId: string) => ProviderExecutionPolicy | undefined;
   readonly providerCapabilities: (
@@ -76,7 +92,7 @@ export interface HostShield extends ShieldReviewPort {
 }
 
 /**
- * Octant Shield as this host wires it, for Code threads. It is the thread's
+ * Octant Shield as this host wires it, for Work and Code threads. It is the thread's
  * reviewer at Auto on a prompting posture when the person chose it, or when
  * the thread's provider has no reviewer of its own; the provider's own
  * reviewer keeps answering where it exists and was not overruled.
@@ -96,7 +112,42 @@ export function createHostShield(deps: HostShieldDependencies): HostShield {
       return undefined;
     }
   };
-  const modelFor = (thread: CodeThread): ShieldModelPort | undefined => {
+  const readWorkThread = (threadId: string): WorkThread | undefined => {
+    if (deps.readWorkThread === undefined) return undefined;
+    try {
+      return deps.readWorkThread(decodeWorkThreadId(threadId));
+    } catch {
+      return undefined;
+    }
+  };
+  /**
+   * The thread Shield would review, Work or Code, with the posture its
+   * running turn may use (or its stored one between turns).
+   */
+  const subjectOf = (threadId: string) => {
+    const code = readThread(threadId);
+    if (code !== undefined) {
+      return {
+        kind: "code-thread" as const,
+        thread: code,
+        access: {
+          executionPolicy: deps.readTurnExecutionPolicy?.(threadId) ?? code.executionPolicy,
+          autoApprove: code.autoApprove,
+        },
+      };
+    }
+    const work = readWorkThread(threadId);
+    if (work === undefined) return undefined;
+    return {
+      kind: "work-thread" as const,
+      thread: work,
+      access: workThreadAccessOf(deps.readWorkTurnAccess?.(threadId) ?? work.access),
+    };
+  };
+  const modelFor = (thread: {
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly modelId: ProviderModelId;
+  }): ShieldModelPort | undefined => {
     const model = resolveShieldModel({
       chosen: deps.chosenModel?.(),
       thread: { providerInstanceId: thread.providerInstanceId, modelId: thread.modelId },
@@ -115,11 +166,11 @@ export function createHostShield(deps: HostShieldDependencies): HostShield {
   const shield = new OctantShield({
     facts: {
       reviewing: (threadId) => {
-        const thread = readThread(threadId);
-        if (thread === undefined || thread.lifecycle !== "active") return undefined;
-        const executionPolicy = deps.readTurnExecutionPolicy?.(threadId) ?? thread.executionPolicy;
+        const subject = subjectOf(threadId);
+        if (subject === undefined || subject.thread.lifecycle !== "active") return undefined;
+        const thread = subject.thread;
         const reviews = shieldReviewsPrompts({
-          access: { executionPolicy, autoApprove: thread.autoApprove },
+          access: subject.access,
           capabilities: {
             providerReview:
               deps.providerCapabilities(thread.providerInstanceId)?.harnessAutoReview ===
@@ -140,15 +191,24 @@ export function createHostShield(deps: HostShieldDependencies): HostShield {
       tainted: deps.tainted,
       personMessages: (threadId) => {
         const thread = readThread(threadId);
-        return thread === undefined
+        if (thread !== undefined)
+          return deps.personMessages(thread.id, SHIELD_PERSON_MESSAGE_COUNT);
+        const work = readWorkThread(threadId);
+        return work === undefined
           ? []
-          : deps.personMessages(thread.id, SHIELD_PERSON_MESSAGE_COUNT);
+          : (deps.workPersonMessages?.(work.id, SHIELD_PERSON_MESSAGE_COUNT) ?? []);
       },
       projectCommands: projectCommandsIn,
     },
     ...(deps.spendCeiling === undefined && deps.recordUsage === undefined
       ? {}
-      : { spend: shieldSpend(deps.spendCeiling, deps.recordUsage) }),
+      : {
+          spend: shieldSpend(
+            deps.spendCeiling,
+            deps.recordUsage,
+            (threadId) => subjectOf(threadId)?.kind ?? "code-thread",
+          ),
+        }),
     clock: deps.clock ?? (() => new Date().toISOString()),
   });
   return {
@@ -172,6 +232,7 @@ export function createHostShield(deps: HostShieldDependencies): HostShield {
 function shieldSpend(
   spendCeiling: Pick<SpendCeilingService, "admit" | "settle" | "abandon"> | undefined,
   recordUsage: HostShieldDependencies["recordUsage"],
+  threadTypeOf: (threadId: string) => "work-thread" | "code-thread",
 ): NonNullable<ConstructorParameters<typeof OctantShield>[0]["spend"]> {
   return {
     admit: ({ threadId, projectId, model }) => {
@@ -179,7 +240,7 @@ function shieldSpend(
       const admission = spendCeiling?.admit({
         reservationId,
         threadId,
-        threadType: "code-thread",
+        threadType: threadTypeOf(threadId),
         ...(projectId === undefined ? {} : { projectId }),
         turnUpperBoundTokens: SHIELD_CALL_TOKEN_BOUND,
         // A review is spend, not a turn of the thread's own.

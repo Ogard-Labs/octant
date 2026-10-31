@@ -522,6 +522,18 @@ export function wireHarness(deps: HarnessDependencies) {
   const hostShield = createHostShield({
     readCodeThread: (threadId) => persistence.readCodeThread(threadId),
     readTurnExecutionPolicy: (threadId) => readTurnExecutionPolicy(threadId),
+    // Work threads are reviewed at Auto as Code threads are; a Work turn's
+    // level is its running turn's, else the thread's own.
+    readWorkThread: (threadId) => workThreadProjection.read(threadId),
+    readWorkTurnAccess: (threadId) => runningWorkTurnAccess(threadId),
+    // What the person wrote: each turn's prompt, leaving out the turns the host
+    // itself accepted to deliver a subagent's result.
+    workPersonMessages: (threadId, limit) =>
+      workTurnProjection
+        .listForThread(threadId)
+        .filter((turn) => turn.delivery === undefined)
+        .map((turn) => turn.prompt)
+        .slice(-limit),
     providerCapabilities: (providerInstanceId) =>
       providerRuntimeRegistry.observedState(providerInstanceId)?.capabilities,
     routesApprovals: (providerInstanceId) => {

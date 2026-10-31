@@ -1081,6 +1081,69 @@ describe("native harness composition", () => {
       );
     });
 
+    it("lets Shield answer a Work thread's command at Auto, judged against its Project folder", async () => {
+      const ran: string[] = [];
+      const asked = vi.fn(async (_ask: unknown) => "approved" as const);
+      const review = vi.fn(async () => decision("allow"));
+      const workAutoThread = {
+        id: "00000000-0000-4000-8000-000000000052",
+        lifecycle: "active",
+        projectId,
+        providerInstanceId,
+        modelId: "harness-model",
+        bindingRevisionId: revisionId,
+        access: "auto",
+      } as unknown as WorkThread;
+      const composition = createNativeHarnessComposition({
+        isChildAuthorityCurrent: () => true,
+        authority: createNativeHarnessAuthority({
+          hostId: "00000000-0000-4000-8000-0000000000aa" as never,
+          persistence: {
+            readChatThread: () => undefined,
+            readProject: () =>
+              ({ type: "work", lifecycle: "active", bindingHistory: [{ revisionId }] }) as never,
+            readCodeThread: () => undefined,
+            readProviderInstance: () => ({ enabled: true }) as never,
+          },
+          workThreads: { read: () => workAutoThread as never },
+          runningWorkTurnAccess: () => "auto",
+          readThreadTaint: () => ({ externalContentIngested: false }) as never,
+        }),
+        isHarnessProvider: () => true,
+        shell: {
+          run: async (call) => {
+            ran.push(call.command);
+            return { status: "ran", exitCode: 0, output: "", truncated: false };
+          },
+        },
+        approvals: { ask: asked, recordReviewed: vi.fn(), remembers: () => false },
+        shield: { review },
+        hostId: "00000000-0000-4000-8000-0000000000aa" as never,
+        readThreadTaint: () => false,
+        recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }),
+        uuid: () => "00000000-0000-4000-8000-000000000099",
+        clock: () => "2026-10-31T00:00:00.000Z",
+      });
+      const tools = composition.forWork({
+        thread: workAutoThread,
+        projectRoot: "/Users/dev/offer",
+        windowId: "window-1",
+      })!;
+      await tools.execute({
+        name: "bash",
+        inputJson: JSON.stringify({ command: "ls -la" }),
+        signal: new AbortController().signal,
+      });
+      expect(review).toHaveBeenCalledWith(
+        expect.objectContaining({
+          threadId: String(workAutoThread.id),
+          boundRoot: "/Users/dev/offer",
+        }),
+      );
+      expect(asked).not.toHaveBeenCalled();
+      expect(ran).toEqual(["ls -la"]);
+    });
+
     it("never overrules a class the person already allowed for the session", async () => {
       const harness = setup({ verdict: "deny", remembered: true });
       await harness.bash("ls -la");

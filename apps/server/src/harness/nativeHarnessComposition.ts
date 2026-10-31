@@ -158,7 +158,7 @@ export interface NativeHarnessCompositionOptions {
   readonly approvals?: Pick<NativeHarnessApprovalStore, "ask"> &
     Partial<Pick<NativeHarnessApprovalStore, "askCommand" | "recordReviewed" | "remembers">>;
   /**
-   * Octant Shield, which answers a Code thread's prompts at Auto when it is
+   * Octant Shield, which answers a Work or Code thread's prompts at Auto when it is
    * the thread's reviewer. Absent, or answering nothing for a thread, the
    * person is asked as before.
    */
@@ -386,7 +386,10 @@ export function createNativeHarnessComposition(
     readonly lead: NativeHarnessSlotCandidate;
     /** The window a Code turn runs in, whose grant its commands' network follows. */
     readonly windowId?: string;
-    /** A Code thread's checkout, the root Octant Shield judges its calls against. */
+    /**
+     * A Work thread's Project folder or a Code thread's checkout, the root
+     * Octant Shield judges its calls against.
+     */
     readonly boundRoot?: string;
   }): Pick<NativeHarnessToolPorts, "askUser" | "approvals" | "steering" | "callEnded"> => ({
     callEnded: (callId) => {
@@ -425,7 +428,7 @@ export function createNativeHarnessComposition(
             // asked. A class the person already allowed for the session goes
             // through on their word, so Shield never overrules the person.
             const shieldReviews =
-              scope.mode === "code" &&
+              scope.mode !== "chat" &&
               scope.boundRoot !== undefined &&
               options.shield !== undefined &&
               approvalStore.remembers?.(
@@ -647,6 +650,7 @@ export function createNativeHarnessComposition(
             mode: "work",
             projectId: thread.projectId,
             lead: leadOf(thread),
+            boundRoot: projectRoot,
           }),
           filesystem: new NativeHarnessFileSystem({ root: projectRoot }),
           ...(shell === undefined ? {} : { shell }),
