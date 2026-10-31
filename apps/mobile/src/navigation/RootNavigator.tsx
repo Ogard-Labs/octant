@@ -14,8 +14,11 @@ import { OwnerAlertsPanel } from "../hosts/OwnerAlertsPanel";
 import type { GuestSpokeRefusal } from "../hosts/hubGuestFlow";
 import { PairingPanel } from "../hosts/PairingPanel";
 import { RemoveHostPanel } from "../hosts/RemoveHostPanel";
-import { createUnavailableNotificationPermissionPort } from "../notifications/notificationPermissionPort";
+import { forgetPhoneNotificationsForHost } from "../notifications/enablePhoneNotifications";
+import { mobileNotificationPort } from "../notifications/mobileNotificationPort";
+import { mobilePushRegistrationBook } from "../notifications/mobilePushRegistrationBook";
 import { PushNotificationsPanel } from "../notifications/PushNotificationsPanel";
+import { usePhoneNotificationRotation } from "../notifications/usePhoneNotificationRotation";
 import { createUnavailableDeviceIntegrityPort } from "../security/deviceIntegrityPort";
 import { mobileKeyStorageProtection, mobileScreenshotPrivacy } from "../security/deviceProtection";
 import { createExpoBiometricAuthenticator } from "../security/expoBiometricAuthenticator";
@@ -75,21 +78,35 @@ function HostsBody(props: {
     () => createMobileHostRemover({ registry, hub, deviceKeyStore }),
     [deviceKeyStore, hub, registry],
   );
-  const notificationPermission = useMemo(() => createUnavailableNotificationPermissionPort(), []);
+  const notificationPermission = mobileNotificationPort;
+  const pushRegistrations = mobilePushRegistrationBook();
   const removeHost = useCallback(
     (hostId: string) => {
       setRemoveFailed(false);
-      // Notifications already shown for this computer go with it, and so does
+      // The computer is asked to drop its registration while the connection
+      // still stands, then notifications already shown for it go, and so does
       // the key that opens them, whether or not the rest of the removal lands.
-      void notificationPermission.forgetHost(hostId).catch(() => undefined);
-      removeMobileHostInTurn(hostId)
+      void forgetPhoneNotificationsForHost({
+        hostId,
+        permission: notificationPermission,
+        book: pushRegistrations,
+        transport: transportForHost(hostId),
+      })
+        .catch(() => undefined)
+        .then(() => removeMobileHostInTurn(hostId))
         .then((result) => {
           if (!result.localCredentialRemoved) setKeyNotDeleted(true);
           return refreshHosts();
         })
         .catch(() => setRemoveFailed(true));
     },
-    [notificationPermission, refreshHosts, removeMobileHostInTurn],
+    [
+      notificationPermission,
+      pushRegistrations,
+      refreshHosts,
+      removeMobileHostInTurn,
+      transportForHost,
+    ],
   );
   const authenticator = useMemo(() => createExpoBiometricAuthenticator(), []);
   const unlockKey = useMemo(() => createExpoPhoneUnlockKey(), []);
@@ -323,6 +340,14 @@ function HostsBody(props: {
                           hostKeyFingerprint={host.hostKeyFingerprint}
                           permission={notificationPermission}
                           transport={transportForHost(host.hostId)}
+                          book={pushRegistrations}
+                          resolveDeviceId={() =>
+                            deviceKeyStore
+                              .findByOrigin(host.origin)
+                              .then((found) =>
+                                found?.hostId === host.hostId ? found.deviceId : undefined,
+                              )
+                          }
                         />
                         <DeviceRevokePanel
                           authenticator={authenticator}
@@ -390,7 +415,14 @@ export function RootNavigator(props: RootNavigatorProps) {
   const [hostEntryMode, setHostEntryMode] = useState<"manage" | "add" | "scan">("manage");
   const [agentListView, setAgentListView] = useState<AgentListView>("all");
   const [deepLinkNotice, setDeepLinkNotice] = useState<string | undefined>();
-  const { setInboxHostFilter, hosts, hostsLoaded, hostsError } = useMobileSession();
+  const { setInboxHostFilter, hosts, hostsLoaded, hostsError, transportForHost, transports } =
+    useMobileSession();
+  usePhoneNotificationRotation({
+    book: mobilePushRegistrationBook(),
+    permission: mobileNotificationPort,
+    transportForHost,
+    transports,
+  });
   const onHomeBack = useCallback(() => {
     const previous = backMobileHomeView(homeMode);
     if (previous === undefined) return false;

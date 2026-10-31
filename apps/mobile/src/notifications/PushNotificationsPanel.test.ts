@@ -20,6 +20,12 @@ describe("mobile notification settings", () => {
           transport: undefined,
           permission: createUnavailableNotificationPermissionPort(),
           hostKeyFingerprint: "f".repeat(64),
+          book: {
+            list: async () => [],
+            record: async () => undefined,
+            remove: async () => undefined,
+          },
+          resolveDeviceId: async () => undefined,
         }),
       }),
     );
@@ -29,5 +35,27 @@ describe("mobile notification settings", () => {
     expect(markup).not.toContain("Turn on for this computer");
     expect(markup).not.toContain("permission was not granted");
     expect(markup).not.toContain("Turn off for this computer");
+  });
+
+  it("offers to turn notifications on only where the build and device can receive them", () => {
+    const render = (available: boolean) =>
+      renderToStaticMarkup(
+        createElement(ThemeProvider, {
+          preference: "light",
+          children: createElement(PushNotificationsPanel, {
+            transport: undefined,
+            permission: { ...createUnavailableNotificationPermissionPort(), available },
+            hostKeyFingerprint: "f".repeat(64),
+            book: {
+              list: async () => [],
+              record: async () => undefined,
+              remove: async () => undefined,
+            },
+            resolveDeviceId: async () => undefined,
+          }),
+        }),
+      );
+    expect(render(true)).toContain("Turn on for this computer");
+    expect(render(false)).not.toContain("Turn on for this computer");
   });
 });

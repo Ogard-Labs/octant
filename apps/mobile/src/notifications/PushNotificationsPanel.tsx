@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
-import {
-  clearMobilePushToken,
-  MobileInboxFailure,
-  type MobileRemoteTransport,
-} from "@octant/client-runtime";
+import { MobileInboxFailure, type MobileRemoteTransport } from "@octant/client-runtime";
 import type { MobileNotificationPermissionPort } from "./notificationPermissionPort";
-import { ENABLE_REFUSAL_COPY, enablePhoneNotifications } from "./enablePhoneNotifications";
+import {
+  ENABLE_REFUSAL_COPY,
+  enablePhoneNotifications,
+  forgetPhoneNotificationsForHost,
+} from "./enablePhoneNotifications";
+import type { PushRegistrationBook } from "./pushRegistrationBook";
 import { mobileSpacing, mobileTypography } from "../theme/tokens";
 import { useTheme } from "../../design-system";
 
@@ -15,6 +16,10 @@ export interface PushNotificationsPanelProps {
   readonly permission: MobileNotificationPermissionPort;
   /** The paired computer's key fingerprint, which the gateway binds the capability to. */
   readonly hostKeyFingerprint: string;
+  /** Which computers this phone registered with, and under which token. */
+  readonly book: PushRegistrationBook;
+  /** The device id the computer knows this phone by, read from the pairing. */
+  readonly resolveDeviceId: () => Promise<string | undefined>;
 }
 
 export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
@@ -34,7 +39,9 @@ export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
       const result = await enablePhoneNotifications({
         transport: props.transport,
         hostKeyFingerprint: props.hostKeyFingerprint,
+        deviceId: await props.resolveDeviceId(),
         permission: props.permission,
+        book: props.book,
       });
       setMessage(
         result.status === "registered"
@@ -62,11 +69,16 @@ export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
     setBusy(true);
     setMessage(undefined);
     try {
-      const receipt = await clearMobilePushToken(props.transport);
+      const forgotten = await forgetPhoneNotificationsForHost({
+        hostId: props.transport.hostId,
+        permission: props.permission,
+        book: props.book,
+        transport: props.transport,
+      });
       setMessage(
-        receipt.result === "cleared" || receipt.result === "already-cleared"
+        forgotten.clearedOnComputer
           ? "Notifications are off for this computer."
-          : "Notifications could not be turned off for this computer.",
+          : "Notifications are off on this phone. The computer could not be told, so it may still try to send them.",
       );
     } catch (cause) {
       setMessage(
