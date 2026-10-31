@@ -151,6 +151,12 @@ switch of the runtime, not a documented interface: a runtime that ignores or
 renames it leaves the tool out, and Octant never admits a tool its own list
 did not request.
 
+Each Claude session owns its runtime process, so the connection implements
+`forceStop`, reported as the `forceStop` capability: it sends `SIGKILL` to that
+session's own process group, ends the session `interrupted`, and touches no other
+session. Codex and OpenCode serve every thread from one process and report it
+unsupported; their connections omit `forceStop` and a host fails closed.
+
 The account reports `nativeArtifacts` per mode from the setting and the
 probe's launch: supported in Work and Code once enabled on a claude.ai
 sign-in, otherwise unsupported with `unsupportedReason` (`turned-off`,

@@ -19,6 +19,7 @@ describe("authorizeHostControlAction", () => {
       retention: "host.store.retention",
       purge: "host.store.purge",
       export: "host.store.export",
+      "memory-limits": "host.service.memory-limits",
     });
   });
 
@@ -34,6 +35,7 @@ describe("authorizeHostControlAction", () => {
     "retention",
     "purge",
     "export",
+    "memory-limits",
   ] as const)("allows a local window and denies a remote device for %s", (operation) => {
     expect(authorizeHostControlAction({ principalKind: "local-window", operation })).toEqual({
       kind: "allow",

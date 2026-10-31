@@ -364,6 +364,10 @@ function assertCanonicalPluginManifest(entries: ReadonlyArray<ExtensionArchiveEn
  */
 export function extractAgentPluginEntriesFromTarball(
   tarballBytes: Uint8Array,
+  options: {
+    /** Mark a file whose tar mode has an execute bit, for layouts that must refuse programs. */
+    readonly recordExecutable?: boolean;
+  } = {},
 ): ReadonlyArray<ExtensionArchiveEntry> {
   let unzipped: Buffer;
   try {
@@ -391,6 +395,8 @@ export function extractAgentPluginEntriesFromTarball(
     const sizeText = readTarString(header, 124, 12).replaceAll("\u0000", "").trim();
     const size = sizeText === "" ? 0 : Number.parseInt(sizeText, 8);
     const typeFlag = header[156] ?? 0;
+    const modeText = readTarString(header, 100, 8).replaceAll("\u0000", "").trim();
+    const mode = modeText === "" ? 0 : Number.parseInt(modeText, 8);
     if (!Number.isFinite(size) || size < 0 || offset + size > unzipped.byteLength) {
       throw new Error("npm package archive is invalid.");
     }
@@ -426,7 +432,14 @@ export function extractAgentPluginEntriesFromTarball(
     if (content.byteLength > MAX_PLUGIN_FILE_BYTES) {
       throw new Error("npm package contains a file that exceeds size limits.");
     }
-    entries.push({ path, kind: "file", content: Buffer.from(content) });
+    entries.push({
+      path,
+      kind: "file",
+      content: Buffer.from(content),
+      ...(options.recordExecutable === true && Number.isFinite(mode) && (mode & 0o111) !== 0
+        ? { executable: true }
+        : {}),
+    });
   }
   return entries;
 }

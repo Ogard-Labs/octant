@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { HostMemoryLimits } from "@octant/contracts/host-control";
 import type { SystemMemorySignal } from "@octant/domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HostMemoryGuard } from "./hostMemoryGuard";
@@ -20,6 +21,7 @@ function harness(overrides: { activeTurns?: number } = {}) {
     signal: "normal" as SystemMemorySignal,
     rss: 500 * 1024 ** 2,
     now: Date.parse("2026-10-31T10:00:00.000Z"),
+    limits: { kind: "automatic" } as HostMemoryLimits,
   };
   const logs: string[] = [];
   const releaseIdle = vi.fn(async () => ({ idleRuntimesStopped: 2, idleSessionsReleased: 1 }));
@@ -28,6 +30,7 @@ function harness(overrides: { activeTurns?: number } = {}) {
     stateFile: join(directory, "host-memory.json"),
     readSystem: async () => ({ signal: state.signal, totalBytes: 32 * GIB }),
     readProcessRssBytes: () => state.rss,
+    readLimits: () => state.limits,
     relief: { releaseIdle, trimCaches, activeTurns: () => overrides.activeTurns ?? 0 },
     clock: () => state.now,
     log: (line) => logs.push(line),
@@ -41,7 +44,12 @@ describe("HostMemoryGuard", () => {
     const { guard, releaseIdle, trimCaches, logs } = harness();
     await guard.start();
     await guard.sample();
-    expect(guard.report()).toEqual({ pressure: "normal", processMegabytes: 500 });
+    expect(guard.report()).toEqual({
+      pressure: "normal",
+      processMegabytes: 500,
+      limits: { kind: "automatic" },
+      effectiveLimits: { pressuredMegabytes: 2048, criticalMegabytes: 4096 },
+    });
     expect(releaseIdle).not.toHaveBeenCalled();
     expect(trimCaches).not.toHaveBeenCalled();
     expect(logs).toEqual([]);
@@ -58,6 +66,8 @@ describe("HostMemoryGuard", () => {
     expect(guard.report()).toEqual({
       pressure: "elevated",
       processMegabytes: 500,
+      limits: { kind: "automatic" },
+      effectiveLimits: { pressuredMegabytes: 2048, criticalMegabytes: 4096 },
       lastRelief: {
         at: "2026-10-31T10:00:00.000Z",
         pressure: "elevated",
@@ -99,6 +109,63 @@ describe("HostMemoryGuard", () => {
     await guard.sample();
     expect(releaseIdle).toHaveBeenCalledOnce();
     expect(guard.report().lastRelief?.source).toBe("process");
+  });
+
+  it("applies new limits at the next sample without a restart", async () => {
+    const { guard, state, releaseIdle } = harness();
+    await guard.start();
+    state.rss = 5 * GIB;
+    state.limits = { kind: "custom", pressuredGb: 6, criticalGb: 10 };
+    await guard.sample();
+    expect(releaseIdle).not.toHaveBeenCalled();
+    expect(guard.report().pressure).toBe("normal");
+
+    state.limits = { kind: "custom", pressuredGb: 4, criticalGb: 8 };
+    await guard.sample();
+    expect(releaseIdle).toHaveBeenCalledOnce();
+    expect(guard.report()).toMatchObject({ pressure: "elevated" });
+    expect(guard.report().lastRelief?.source).toBe("process");
+
+    state.limits = { kind: "custom", pressuredGb: 1, criticalGb: 4.5 };
+    await guard.sample();
+    expect(guard.report().pressure).toBe("critical");
+    expect(releaseIdle).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports the limits in force, resolved for this machine, as soon as they change", async () => {
+    const { guard, state } = harness();
+    await guard.start();
+    expect(guard.report().effectiveLimits).toEqual({
+      pressuredMegabytes: 2048,
+      criticalMegabytes: 4096,
+    });
+    state.limits = { kind: "custom", pressuredGb: 1.5, criticalGb: 3 };
+    expect(guard.report()).toMatchObject({
+      limits: { kind: "custom", pressuredGb: 1.5, criticalGb: 3 },
+      effectiveLimits: { pressuredMegabytes: 1536, criticalMegabytes: 3072 },
+    });
+  });
+
+  it("falls back to the automatic limits when the stored limits cannot be read", async () => {
+    const { guard, state, releaseIdle, logs } = harness();
+    await guard.start();
+    state.rss = 3 * GIB;
+    const failing = new HostMemoryGuard({
+      stateFile: join(directory, "other.json"),
+      readSystem: async () => ({ signal: "normal", totalBytes: 32 * GIB }),
+      readProcessRssBytes: () => state.rss,
+      readLimits: () => {
+        throw new Error("projection unavailable");
+      },
+      relief: { releaseIdle, trimCaches: () => true, activeTurns: () => 0 },
+      log: (line) => logs.push(line),
+      setTimer: () => ({ unref: () => undefined, clear: () => undefined }),
+    });
+    await failing.sample();
+    expect(failing.report().limits).toEqual({ kind: "automatic" });
+    expect(failing.report().pressure).toBe("elevated");
+    expect(logs.join("\n")).toContain("memory limits could not be read");
+    expect(logs.join("\n")).not.toContain("projection unavailable");
   });
 
   it("saves the new reading before relief runs, so a kill during cleanup still leaves it behind", async () => {

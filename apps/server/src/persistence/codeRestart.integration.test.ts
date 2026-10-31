@@ -260,6 +260,7 @@ describe("Code persistence restart", () => {
       { projection_name: "extension-tool-grants", reason: "unsupported-event-version" },
       { projection_name: "extensions", reason: "unsupported-event-version" },
       { projection_name: "github-clones", reason: "unsupported-event-version" },
+      { projection_name: "host-memory-limits", reason: "unsupported-event-version" },
       { projection_name: "image-jobs", reason: "unsupported-event-version" },
       { projection_name: "product-feedback", reason: "unsupported-event-version" },
       { projection_name: "project-terminal", reason: "unsupported-event-version" },

@@ -1,4 +1,4 @@
-import type { HostMemoryStatus } from "@octant/contracts/host-control";
+import type { HostMemoryReading } from "./hostMemoryNotice";
 import { describe, expect, it } from "vitest";
 import { hostMemoryFact, hostMemoryNotices, hostReliefFact } from "./hostMemoryNotice";
 
@@ -32,7 +32,7 @@ describe("hostMemoryNotices", () => {
   });
 
   it("stays quiet about a relief that stopped nothing at elevated pressure", () => {
-    const quiet: HostMemoryStatus = {
+    const quiet: HostMemoryReading = {
       pressure: "elevated",
       processMegabytes: 2300,
       lastRelief: { ...relief, idleProviderRuntimesStopped: 0, idleSessionsReleased: 0 },

@@ -340,6 +340,28 @@ export const ExtensionCommand = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("preview-package"), source: ExtensionSource }).annotations(
     strict,
   ),
+  /**
+   * Looks a package up on the npm registry the person's npm configuration
+   * names, downloads and checks it, and answers with the review a person reads
+   * before installing. `range` is an exact version, a range, or a dist-tag;
+   * without it the `latest` tag is used. Nothing is installed.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("resolve-npm-package"),
+    packageName: boundedText(214),
+    range: Schema.optional(boundedText(128)),
+    /**
+     * The installed package this lookup is an update of. The host then asks
+     * the registry that package was installed from, whatever the npm settings
+     * name now, and refuses a result that is not the same package.
+     */
+    updateOf: Schema.optional(ToolExtensionId),
+  }).annotations(strict),
+  /** Asks the registry an installed npm package came from whether a newer version exists. Installs nothing. */
+  Schema.Struct({
+    kind: Schema.Literal("check-npm-update"),
+    extensionId: ToolExtensionId,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("inspect-package"),
     source: ExtensionSource,
@@ -600,6 +622,13 @@ export const ExtensionCommandResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("package-inspected"),
     preview: ExtensionPackagePreview,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("npm-update-checked"),
+    extensionId: ToolExtensionId,
+    installedVersion: ExtensionPackageVersion,
+    /** The newest version the registry offers, when it is newer than the installed one. */
+    available: Schema.optional(ExtensionPackageVersion),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("extension-state-updated"),

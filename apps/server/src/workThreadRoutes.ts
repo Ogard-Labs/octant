@@ -22,6 +22,10 @@ import {
 import { Schema } from "effect";
 import { authenticateRouteWindowId, readPrincipalRouteContext } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
+import {
+  refusesTerminalSessionImport,
+  TERMINAL_SESSION_LOCAL_ONLY,
+} from "./terminalSessions/terminalSessionAuthority";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 import type { WorkThreadExecutionContext } from "./work/workThreadService";
 
@@ -180,6 +184,13 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
       ) {
         return failureResponse(
           { category: "unauthorized", message: NATIVE_ARTIFACTS_LOCAL_ONLY },
+          403,
+          origin,
+        );
+      }
+      if (command.kind === "create-work-thread" && refusesTerminalSessionImport(request, command)) {
+        return failureResponse(
+          { category: "unauthorized", message: TERMINAL_SESSION_LOCAL_ONLY },
           403,
           origin,
         );

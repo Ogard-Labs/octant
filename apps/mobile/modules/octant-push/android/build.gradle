@@ -1,0 +1,21 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'sh.octant'
+version = '0.1.0'
+
+android {
+  namespace "sh.octant.push"
+  defaultConfig {
+    versionCode 1
+    versionName '0.1.0'
+  }
+}
+
+dependencies {
+  // Only the messaging client: no analytics, no in-app messaging, no remote
+  // config. It stays idle in a build that carries no Firebase project.
+  implementation 'com.google.firebase:firebase-messaging:24.1.0'
+}

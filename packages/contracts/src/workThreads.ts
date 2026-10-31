@@ -3,6 +3,7 @@ import { AggregateVersion, UtcTimestamp } from "./events";
 import { ThreadRestFields } from "./threadRest";
 import { ThreadLiveTurnFields } from "./threadLiveTurn";
 import { GithubIssueContextRequest } from "./githubIssueContext";
+import { TerminalSessionImportRequest } from "./terminalSessions";
 import { LinearIssueContextRequest } from "./linearIssueContext";
 import { HostId } from "./host";
 import { ThreadWorkingDirectory } from "./workingDirectory";
@@ -112,6 +113,8 @@ export const CreateWorkThreadCommand = Schema.Struct({
   workingDirectory: Schema.optional(ThreadWorkingDirectory),
   issueContext: Schema.optional(GithubIssueContextRequest),
   linearIssueContext: Schema.optional(LinearIssueContextRequest),
+  /** A terminal session in the Project's folder the thread starts from. */
+  terminalSession: Schema.optional(TerminalSessionImportRequest),
 }).annotations(strict);
 export type CreateWorkThreadCommand = typeof CreateWorkThreadCommand.Type;
 
@@ -193,6 +196,18 @@ export const ChangeWorkThreadWorkingDirectoryCommand = Schema.Struct({
 }).annotations(strict);
 export type ChangeWorkThreadWorkingDirectoryCommand =
   typeof ChangeWorkThreadWorkingDirectoryCommand.Type;
+
+/**
+ * Files a Work thread into another Work Project whose folder is the thread's
+ * folder or contains it. The thread keeps its kind, history and access; the
+ * host refuses any other Project and a thread with a turn in flight.
+ */
+export const MoveWorkThreadCommand = Schema.Struct({
+  kind: Schema.Literal("move-work-thread"),
+  ...WorkThreadCommandFields,
+  projectId: ProjectId,
+}).annotations(strict);
+export type MoveWorkThreadCommand = typeof MoveWorkThreadCommand.Type;
 
 export const ChangeWorkThreadProviderCommand = Schema.Struct({
   kind: Schema.Literal("change-work-thread-provider"),
@@ -304,6 +319,7 @@ export const WorkThreadCommand = Schema.Union(
   WakeWorkThreadCommand,
   ConfirmWorkThreadCompletionCommand,
   ChangeWorkThreadWorkingDirectoryCommand,
+  MoveWorkThreadCommand,
   ChangeWorkThreadProviderCommand,
   ChangeWorkThreadDocumentDeliveryCommand,
   ChangeWorkThreadAccessCommand,

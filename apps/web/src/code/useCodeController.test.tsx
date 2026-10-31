@@ -3581,6 +3581,44 @@ describe("useCodeController", () => {
     ]);
   });
 
+  it("moves a thread to another Project with the version it last saw and answers a refusal in the host's words", async () => {
+    const destination = "70000000-0000-4000-8000-0000000000aa";
+    const execute = vi
+      .fn()
+      .mockResolvedValueOnce({
+        kind: "thread-updated",
+        thread: { ...bootstrap().threads[0]!, projectId: destination, version: 2 },
+      } as never)
+      .mockRejectedValueOnce({
+        category: "invalid",
+        message: "Wait for the running turn to finish before moving this thread.",
+      });
+    const client = fakeClient({ execute });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    let moved: Awaited<ReturnType<typeof result.current.moveThread>> | undefined;
+    await act(async () => {
+      moved = await result.current.moveThread(ids.thread, destination as never);
+    });
+    expect(moved).toEqual({ status: "ok" });
+    expect(execute).toHaveBeenLastCalledWith({
+      kind: "move-code-thread",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      projectId: destination,
+    });
+
+    let refused: Awaited<ReturnType<typeof result.current.moveThread>> | undefined;
+    await act(async () => {
+      refused = await result.current.moveThread(ids.thread, destination as never);
+    });
+    expect(refused).toEqual({
+      status: "refused",
+      message: "Wait for the running turn to finish before moving this thread.",
+    });
+  });
+
   it("answers a refused snooze with the host's reason, even when the refusal only reloads the list", async () => {
     const execute = vi.fn(async () => {
       // A stale version reloads the bootstrap and reports nothing else, so
