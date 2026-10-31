@@ -383,6 +383,37 @@ describe("DockProjectPullRequestReviewTool", () => {
       expect(screen.queryByRole("textbox", { name: /label/i })).toBeNull();
     });
 
+    it("reads the labels and review threads once, however often the dock re-renders", async () => {
+      const loadActionContext = vi.fn(async () => readContext());
+      const view = detailView();
+      const props = {
+        act: vi.fn(done),
+        load: async () => view,
+        query,
+        refresh: async () => view,
+      };
+      const { rerender } = render(
+        <DockProjectPullRequestReviewTool
+          {...props}
+          loadActionContext={() => loadActionContext()}
+        />,
+      );
+      await screen.findByRole("button", { name: "Add label p1" });
+      rerender(
+        <DockProjectPullRequestReviewTool
+          {...props}
+          loadActionContext={() => loadActionContext()}
+        />,
+      );
+      rerender(
+        <DockProjectPullRequestReviewTool
+          {...props}
+          loadActionContext={() => loadActionContext()}
+        />,
+      );
+      expect(loadActionContext).toHaveBeenCalledTimes(1);
+    });
+
     it("posts a comment under the person's name and clears the box", async () => {
       const user = userEvent.setup();
       const act = vi.fn(done);

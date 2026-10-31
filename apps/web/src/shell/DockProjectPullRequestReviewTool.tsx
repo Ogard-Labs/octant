@@ -85,18 +85,21 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
     number: props.query.number,
   };
 
-  // Stable across renders: the switches poll re-renders this tool every 20
-  // seconds, and a new function identity would re-read the labels and review
-  // threads from GitHub each time.
-  const { loadActionContext } = props;
+  // Stable across renders: the dock binds a new loader function on every
+  // render and the switches poll re-renders this tool every 20 seconds, so the
+  // loader is read through a ref and only the target changes its identity. A
+  // new identity would re-read the labels and review threads from GitHub.
+  const loadActionContextRef = useRef(props.loadActionContext);
+  useEffect(() => {
+    loadActionContextRef.current = props.loadActionContext;
+  });
   const { projectId, repositoryOwner, repositoryName, number } = props.query;
-  const readActionContext = useCallback(
-    () =>
-      loadActionContext === undefined
-        ? Promise.resolve({ status: "unavailable", reason: "unavailable" } as const)
-        : loadActionContext({ projectId, repositoryOwner, repositoryName, number }),
-    [loadActionContext, projectId, repositoryOwner, repositoryName, number],
-  );
+  const readActionContext = useCallback(() => {
+    const load = loadActionContextRef.current;
+    return load === undefined
+      ? Promise.resolve({ status: "unavailable", reason: "unavailable" } as const)
+      : load({ projectId, repositoryOwner, repositoryName, number });
+  }, [projectId, repositoryOwner, repositoryName, number]);
 
   useEffect(() => {
     const load = loadSwitchesRef.current;
