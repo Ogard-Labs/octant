@@ -5,7 +5,7 @@ import {
   decodeProviderServiceLimits,
   type CorrelationId,
   type PermissionPersistence,
-  type ProviderExecutionPolicy,
+  ProviderExecutionPolicy,
   type ProviderFailure,
   type ProviderAccountAuthentication,
   type ProviderCapabilities,
@@ -45,6 +45,7 @@ import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import {
   isAtLeastRelease,
   type CodexAppServerConnection,
+  type CodexLaunchAuthority,
   type CodexProcessPort,
 } from "./codexProcess";
 import {
@@ -91,7 +92,7 @@ import { providerResumeBinding, resumeBindingRefuses } from "./resumeBinding";
 export interface CodexThreadStartInput {
   readonly cwd: string;
   readonly model: string;
-  readonly approvalPolicy: "never" | "on-request";
+  readonly approvalPolicy: "never" | "on-request" | "untrusted";
   readonly sandbox: "danger-full-access" | "workspace-write" | "read-only";
   /**
    * Who answers approval requests: the host (`user`) or the harness's own
@@ -312,11 +313,12 @@ export interface CodexTurnStartInput {
   readonly input: readonly CodexTurnInputItem[];
   /** Restated per turn, because a turn without it falls back to the thread's. */
   readonly environments?: readonly [];
-  readonly approvalPolicy: "never" | "on-request";
+  readonly approvalPolicy: "never" | "on-request" | "untrusted";
   readonly sandboxPolicy:
     | { readonly type: "dangerFullAccess" }
     | { readonly type: "workspaceWrite" }
-    | { readonly type: "readOnly" };
+    | { readonly type: "readOnly" }
+    | { readonly type: "externalSandbox"; readonly networkAccess: "restricted" };
   readonly approvalsReviewer: "auto_review" | "user";
   /**
    * The thread's current model and reasoning effort, restated per turn once a
@@ -547,16 +549,18 @@ export function codexExecutionSettings(
     return { approvalPolicy: "never", sandbox: "danger-full-access", approvalsReviewer: "user" };
   }
   if (policy === "approval-gated" || policy === "auto-accept-edits") {
-    // `on-request` lets the model decide when to escalate, so the sandbox — not
-    // this policy — settles what Octant is ever asked about. Measured against
-    // codex-cli 0.154.0: under `workspace-write` an in-root write just succeeds
-    // and Codex sends no request at all, which silently waived the
-    // `shell-commands` class 0009 keeps independent and 0018 keeps prompting
-    // under both of these postures. Under `read-only` the same write escalates,
-    // so the approval handler below decides it: a patch edit arrives as
-    // `file-change` (auto-accept edits answers those itself) and a shell write
-    // arrives as `command`, which neither posture waives. Reads still need no
-    // escalation, so only writes and network reach a person.
+    // Every posture below Full access runs inside Octant's profile, and macOS
+    // refuses a second Seatbelt inside the first (`sandbox_apply: Operation not
+    // permitted`, measured on macOS 27.0.1), so each turn tells Codex the
+    // sandbox is external (`codexTurnExecutionSettings`). Under an external
+    // sandbox `on-request` runs every command without asking (codex-rs
+    // `exec_policy.rs`, rust-v0.164.0), which would waive the `shell-commands`
+    // class 0009 keeps independent and 0018 keeps prompting under both of these
+    // postures. `untrusted` asks for every command Codex does not itself know
+    // to be read-only, and for every patch: a patch edit arrives as
+    // `file-change` (auto-accept edits answers those itself) and a command as
+    // `command`, which neither posture waives. What a command may touch once
+    // approved is Octant's profile: the root, and nothing else under `HOME`.
     //
     // A `command` is never auto-accepted from its text: Codex reports
     // `commandActions` as `unknown` for a plain `> file` redirect, so "this
@@ -571,7 +575,7 @@ export function codexExecutionSettings(
     // delegated still routing to the reviewer after taint, after the user
     // turns it off, or on a resume under this posture.
     return {
-      approvalPolicy: "on-request",
+      approvalPolicy: "untrusted",
       sandbox: "read-only",
       approvalsReviewer: autoApprove === true ? "auto_review" : "user",
     };
@@ -594,12 +598,13 @@ export function codexTurnExecutionSettings(
   autoApprove?: boolean,
 ): Pick<CodexTurnStartInput, "approvalPolicy" | "sandboxPolicy" | "approvalsReviewer"> {
   const { sandbox, ...rest } = codexExecutionSettings(policy, autoApprove);
+  // Below Full access the process already runs in Octant's profile, which is
+  // the boundary; Codex's own Seatbelt cannot start inside it. `restricted`
+  // keeps Codex from telling the model it has open network.
   const sandboxPolicy =
     sandbox === "danger-full-access"
       ? ({ type: "dangerFullAccess" } as const)
-      : sandbox === "workspace-write"
-        ? ({ type: "workspaceWrite" } as const)
-        : ({ type: "readOnly" } as const);
+      : ({ type: "externalSandbox", networkAccess: "restricted" } as const);
   return { ...rest, sandboxPolicy };
 }
 
@@ -745,7 +750,7 @@ function makeCodexContextFacts(
       }),
     observeServiceLimits: ({ instanceId }) =>
       Effect.gen(function* () {
-        const runtime = yield* acquireRuntime(options, clientFactory);
+        const runtime = yield* acquireRuntime(options, clientFactory, CATALOG_AUTHORITY);
         const result = yield* request(runtime.client.rateLimitsRead);
         const observedAt = clock() as UtcTimestamp;
         return yield* Effect.try({
@@ -815,7 +820,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
       instanceId !== options.instanceId
         ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
         : Effect.gen(function* () {
-            const runtime = yield* acquireRuntime(options, clientFactory);
+            const runtime = yield* acquireRuntime(options, clientFactory, CATALOG_AUTHORITY);
             const accountResult = yield* request(runtime.client.accountRead);
             const models = yield* readModels(runtime.client);
             const environment = yield* Effect.promise(() => resolveCodexLaunchEnvironment(options));
@@ -854,20 +859,52 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
           ),
         );
       }
+      const threadMode = mode ?? "code";
+      // The process is leased when the first session names its posture, so
+      // one lease is one root under one mode and posture and Octant's profile
+      // can be exact for it.
+      const leaseKey = (executionPolicy: ProviderExecutionPolicy) =>
+        JSON.stringify([projectRoot, threadMode, executionPolicy]);
+      const leaseFor = (executionPolicy: ProviderExecutionPolicy) =>
+        Effect.gen(function* () {
+          const runtime = yield* acquireRuntime(
+            options,
+            clientFactory,
+            { kind: "thread", root: projectRoot, mode: threadMode, executionPolicy },
+            leaseKey(executionPolicy),
+          );
+          // Turn starts probe first, but not every caller does (compaction,
+          // summaries, agent runs), so the session itself refuses too.
+          const accountResult = yield* request(runtime.client.accountRead);
+          const bedrockSignIn = yield* readCodexBedrockSignIn(
+            runtime.client,
+            accountResult,
+            options.environment ?? process.env,
+          );
+          if (bedrockSignIn?.status === "refused") {
+            return yield* Effect.fail(failure("incompatible", codexBedrockRefusal(bedrockSignIn)));
+          }
+          return runtime;
+        });
+      // Measured with codex-cli 0.164.0: a thread stays loaded in the
+      // app-server that last ran it, `thread/unsubscribe` does not unload it,
+      // and another app-server's resume is refused ("already has an active
+      // writer") until that process ends. A thread whose posture changed
+      // between turns last ran under another lease of this root and mode, idle
+      // for up to its delay, so the idle ones close now. One a connection still
+      // holds keeps running and the resume reports the conflict.
+      const closeIdleOtherPostures = (executionPolicy: ProviderExecutionPolicy) =>
+        Effect.promise(() =>
+          Promise.all(
+            ProviderExecutionPolicy.literals
+              .filter((other) => other !== executionPolicy)
+              .map((other) =>
+                options.runtimeRegistry.closeIdleLease(options.instanceId, leaseKey(other)),
+              ),
+          ),
+        ).pipe(Effect.asVoid);
       return Effect.gen(function* () {
-        const runtime = yield* acquireRuntime(options, clientFactory);
-        // Turn starts probe first, but not every caller does (compaction,
-        // summaries, agent runs), so the session itself refuses too.
-        const accountResult = yield* request(runtime.client.accountRead);
-        const bedrockSignIn = yield* readCodexBedrockSignIn(
-          runtime.client,
-          accountResult,
-          options.environment ?? process.env,
-        );
-        if (bedrockSignIn?.status === "refused") {
-          return yield* Effect.fail(failure("incompatible", codexBedrockRefusal(bedrockSignIn)));
-        }
-        return yield* makeConnection(options, runtime.client, runtime.version, projectRoot, mode, {
+        return yield* makeConnection(options, leaseFor, closeIdleOtherPostures, projectRoot, mode, {
           instanceId: options.instanceId,
           clock,
           makeCorrelation,
@@ -880,12 +917,23 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
   };
 }
 
+const CATALOG_AUTHORITY: CodexLaunchAuthority = { kind: "catalog" };
+
+interface CodexLeasedRuntime {
+  readonly client: CodexClientPort;
+  readonly version: string;
+  readonly exited: Promise<void>;
+}
+
 function acquireRuntime(
   options: CodexDriverOptions,
   clientFactory: (connection: CodexAppServerConnection) => CodexClientPort,
+  authority: CodexLaunchAuthority,
+  lease?: string,
 ) {
-  return options.runtimeRegistry.acquireRuntime(options.instanceId, {
+  return options.runtimeRegistry.acquireRuntime<CodexLeasedRuntime>(options.instanceId, {
     idleMs: options.idleLeaseMs ?? 30_000,
+    ...(lease === undefined ? {} : { lease }),
     start: async () => {
       const scope = await Effect.runPromise(Scope.make());
       let receipt: Awaited<ReturnType<ProviderRuntimeRegistry["trackProcess"]>> | undefined;
@@ -895,6 +943,7 @@ function acquireRuntime(
           options.process
             .start({
               binaryPath: options.binaryPath,
+              authority,
               ...(environment === undefined ? {} : { environment }),
               onProcessStarted: async (process) => {
                 receipt = await options.runtimeRegistry.trackProcess(options.instanceId, process);
@@ -909,7 +958,11 @@ function acquireRuntime(
         }
         const connection = processExit.value;
         return {
-          value: { client: clientFactory(connection), version: connection.version },
+          value: {
+            client: clientFactory(connection),
+            version: connection.version,
+            exited: connection.exited,
+          },
           pid: connection.pid,
           ...(receipt === undefined ? {} : { receipt }),
           exited: connection.exited,
@@ -1114,15 +1167,45 @@ interface ConnectionFactories {
   readonly makeToolCallId: () => string;
 }
 
+/**
+ * The client a connection holds before its first session leases a process.
+ * Every session operation runs after that lease, so a call here is a session
+ * Octant never started.
+ */
+const UNLEASED_CODEX_CLIENT: CodexClientPort = (() => {
+  const refused = () => Promise.reject(failure("protocol", "Codex session is not active."));
+  return {
+    accountRead: refused,
+    rateLimitsRead: refused,
+    modelList: refused,
+    configRead: refused,
+    skillsList: refused,
+    threadStart: refused,
+    threadResume: refused,
+    turnStart: refused,
+    turnInterrupt: refused,
+    respondApproval: refused,
+    respondTool: refused,
+    subscribe: () => () => undefined,
+  };
+})();
+
 function makeConnection(
   options: CodexDriverOptions,
-  client: CodexClientPort,
-  version: string,
+  leaseFor: (
+    executionPolicy: ProviderExecutionPolicy,
+  ) => Effect.Effect<CodexLeasedRuntime, ProviderFailure, Scope.Scope>,
+  closeIdleOtherPostures: (executionPolicy: ProviderExecutionPolicy) => Effect.Effect<void>,
   projectRoot: string,
   mode: ProviderAcquireInput["mode"],
   factories: ConnectionFactories,
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   return Effect.gen(function* () {
+    const connectionScope = yield* Effect.scope;
+    let client = UNLEASED_CODEX_CLIENT;
+    let version = "";
+    let leasedPolicy: ProviderExecutionPolicy | undefined;
+    let closed = false;
     const queue = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<ProviderSessionId, SessionState>();
     const sessionsByThread = new Map<string, SessionState>();
@@ -1388,23 +1471,68 @@ function makeConnection(
           Effect.onError(() => Effect.sync(unsubscribeWhenIdle)),
         );
       });
+    const runtimeLost = () => {
+      for (const state of sessions.values()) {
+        if (state.terminal) continue;
+        terminalEvent(
+          state,
+          state.activeTurnId === undefined
+            ? { kind: "waiting", message: "Provider runtime exited; resume must be verified." }
+            : { kind: "interrupted", message: "Provider runtime exited unexpectedly." },
+        );
+      }
+    };
     const removeInvalidation = options.runtimeRegistry.onRuntimeInvalidated(
       options.instanceId,
-      () => {
-        for (const state of sessions.values()) {
-          if (state.terminal) continue;
-          terminalEvent(
-            state,
-            state.activeTurnId === undefined
-              ? { kind: "waiting", message: "Provider runtime exited; resume must be verified." }
-              : { kind: "interrupted", message: "Provider runtime exited unexpectedly." },
-          );
-        }
-      },
+      runtimeLost,
     );
+    /**
+     * Leases this connection's process for the posture its first session
+     * names. A later session on the same connection must name the same one:
+     * the process was confined for it, and the profile cannot change on a
+     * running process.
+     */
+    const ensureRuntime = (
+      executionPolicy: ProviderExecutionPolicy,
+    ): Effect.Effect<void, ProviderFailure> =>
+      Effect.suspend(() => {
+        if (leasedPolicy !== undefined) {
+          return leasedPolicy === executionPolicy
+            ? Effect.void
+            : Effect.fail(
+                failure(
+                  "unauthorized",
+                  "Codex process authority cannot change on an active connection.",
+                ),
+              );
+        }
+        return Scope.extend(leaseFor(executionPolicy), connectionScope).pipe(
+          Effect.flatMap((runtime) => {
+            if (leasedPolicy !== undefined && leasedPolicy !== executionPolicy) {
+              return Effect.fail(
+                failure(
+                  "unauthorized",
+                  "Codex process authority cannot change on an active connection.",
+                ),
+              );
+            }
+            if (leasedPolicy === undefined) {
+              client = runtime.client;
+              version = runtime.version;
+              leasedPolicy = executionPolicy;
+              const lost = () => {
+                if (!closed) runtimeLost();
+              };
+              void runtime.exited.then(lost, lost);
+            }
+            return Effect.void;
+          }),
+        );
+      });
 
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
+        closed = true;
         removeInvalidation();
         unsubscribe?.();
         unsubscribe = undefined;
@@ -1475,6 +1603,7 @@ function makeConnection(
       start: (input) =>
         withPendingLifecycle(() =>
           Effect.gen(function* () {
+            yield* ensureRuntime(input.executionPolicy);
             ensureSubscribed();
             const settings = codexExecutionSettings(input.executionPolicy, input.autoApprove);
             const requestedOptions = input.modelOptionValues;
@@ -1560,6 +1689,7 @@ function makeConnection(
         }
         return withPendingLifecycle(() =>
           Effect.gen(function* () {
+            yield* ensureRuntime(input.executionPolicy);
             ensureSubscribed();
             const modeConfig = yield* modeThreadConfig();
             const resumeRequest = () =>
@@ -1587,11 +1717,21 @@ function makeConnection(
               resumeRequest().pipe(
                 Effect.catchAll((error) =>
                   isActiveWriterConflict(error) && attempt < CODEX_RESUME_WRITER_CONFLICT_ATTEMPTS
-                    ? Effect.tryPromise({
-                        try: () =>
-                          (options.sleep ?? defaultSleep)(CODEX_RESUME_WRITER_CONFLICT_DELAY_MS),
-                        catch: providerFailure,
-                      }).pipe(Effect.flatMap(() => resumeWithWriterRetry(attempt + 1)))
+                    ? (attempt === 1
+                        ? closeIdleOtherPostures(input.executionPolicy)
+                        : Effect.void
+                      ).pipe(
+                        Effect.zipRight(
+                          Effect.tryPromise({
+                            try: () =>
+                              (options.sleep ?? defaultSleep)(
+                                CODEX_RESUME_WRITER_CONFLICT_DELAY_MS,
+                              ),
+                            catch: providerFailure,
+                          }),
+                        ),
+                        Effect.flatMap(() => resumeWithWriterRetry(attempt + 1)),
+                      )
                     : Effect.fail(error),
                 ),
               );

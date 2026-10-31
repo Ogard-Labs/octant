@@ -222,6 +222,31 @@ describe("desktop preload bridge", () => {
     );
   });
 
+  it("shows the window why the keyring would not take a key, and hides any other store text", async () => {
+    const advice =
+      "keyring-advice: No keyring is running in your session, so Octant has nowhere to keep keys. Start one that provides Secret Service and unlock it, then try again. Octant notices it without a restart.";
+    const failWith = (message: string) =>
+      createHostBridge(
+        {
+          invoke: vi.fn(async () => {
+            throw new Error(`Error invoking remote method 'x': Error: ${message}`);
+          }),
+          on: vi.fn(),
+          removeListener: vi.fn(),
+        },
+        projectWindowCapability,
+      )
+        .addProviderApiKey("00000000-0000-4000-8000-000000000204", "test-key")
+        .then(
+          () => "resolved",
+          (error: unknown) => (error instanceof Error ? error.message : String(error)),
+        );
+    await expect(failWith(advice)).resolves.toBe(advice.replace("keyring-advice: ", ""));
+    await expect(failWith("secret-tool: Cannot autolaunch D-Bus")).resolves.toBe(
+      "Octant could not update the provider API keys.",
+    );
+  });
+
   it("exposes only the accepted Octant host bridge", () => {
     const invoke = vi.fn().mockResolvedValue(undefined);
     const ipc: IpcRendererPort = { invoke, on: vi.fn(), removeListener: vi.fn() };

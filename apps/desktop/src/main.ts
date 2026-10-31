@@ -72,6 +72,7 @@ import { type AppVersion, isAppReleaseRing } from "@octant/contracts/app-updates
 import { decodeCodeOperationApprovalRequest } from "@octant/contracts/code-operations";
 import {
   DESKTOP_IPC_CHANNELS as IPC_CHANNELS,
+  KEYRING_ADVICE_MARKER,
   MAX_PROVIDER_CREDENTIAL_BYTES,
   PROVIDER_INSTANCE_ID_PATTERN,
   decodeCodeCheckoutOpenRequest,
@@ -137,6 +138,7 @@ import {
   resolveDesktopCredentialBackend,
   type DesktopCredentialBackend,
 } from "./desktopCredentialStore";
+import { keyringAdvice } from "@octant/domain/keyring-advice";
 import {
   HostIdentitySigningFailure,
   makeHostIdentitySigningService,
@@ -874,19 +876,12 @@ async function requireStoredApiKeys(
   return stored;
 }
 
-// Shown to the person as written, so preload.ts lists them too.
-const KEYRING_LOCKED_MESSAGE =
-  "Your keyring is locked. Unlock it (open Passwords and Keys and unlock Login), then try again.";
-const KEYRING_MISSING_MESSAGE =
-  "Your session has no Login keyring to keep keys in. Create one named Login in Passwords and Keys, set it as default, then try again.";
-
 function sanitizeApiKeyError(error: unknown): Error {
   if (error instanceof ApiKeyPoolError) return new Error(error.message);
-  if (error instanceof CredentialStoreFailure && error.cause === "locked") {
-    return new Error(KEYRING_LOCKED_MESSAGE);
-  }
-  if (error instanceof CredentialStoreFailure && error.cause === "no-login-collection") {
-    return new Error(KEYRING_MISSING_MESSAGE);
+  // Shown to the person as written, so preload.ts lets exactly these through.
+  if (error instanceof CredentialStoreFailure) {
+    const advice = keyringAdvice(error);
+    if (advice !== undefined) return new Error(`${KEYRING_ADVICE_MARKER}${advice}`);
   }
   return new Error("Octant could not update the provider API keys.");
 }
@@ -1640,28 +1635,28 @@ function lazyCredentialStore(): CredentialStore {
     set: async (providerInstanceId, credential) => {
       const backend = await getCredentialBackend();
       if (backend.store === undefined) {
-        throw new Error("unavailable");
+        throw new CredentialStoreFailure("unavailable");
       }
       await backend.store.set(providerInstanceId, credential);
     },
     has: async (providerInstanceId) => {
       const backend = await getCredentialBackend();
       if (backend.store === undefined) {
-        throw new Error("unavailable");
+        throw new CredentialStoreFailure("unavailable");
       }
       return await backend.store.has(providerInstanceId);
     },
     resolve: async (providerInstanceId) => {
       const backend = await getCredentialBackend();
       if (backend.store === undefined) {
-        throw new Error("unavailable");
+        throw new CredentialStoreFailure("unavailable");
       }
       return await backend.store.resolve(providerInstanceId);
     },
     delete: async (providerInstanceId) => {
       const backend = await getCredentialBackend();
       if (backend.store === undefined) {
-        throw new Error("unavailable");
+        throw new CredentialStoreFailure("unavailable");
       }
       await backend.store.delete(providerInstanceId);
     },
