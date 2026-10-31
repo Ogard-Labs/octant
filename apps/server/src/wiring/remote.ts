@@ -49,6 +49,7 @@ import {
 } from "../remote/localDeviceAdministrationRoutes";
 import { createHostControlRouteHandler } from "../hostControlRoutes";
 import { desktopCredentialStore } from "../hostDataMap";
+import { HostMemoryLimitsService } from "../hostMemoryLimitsService";
 import { ThreadRetentionService } from "../threadRetentionService";
 import { createLiveHostExportService } from "../hostExportService";
 import { createAgentRemoteDelegation } from "../hub/agentRemoteDelegation";
@@ -1068,10 +1069,20 @@ export function wireRemote(deps: RemoteDependencies) {
     }),
     withThreadStanding: threadStandingFromMessageQueue(threadMessageQueue),
   });
+  const hostMemoryLimits = new HostMemoryLimitsService({
+    connection: persistence.connection,
+    journal: persistence.journal,
+    clock: () => new Date().toISOString(),
+    uuid: randomUUID,
+    // The guard reads the saved limits at every sample; this takes one now so
+    // a lowered limit acts at once instead of at the next scheduled reading.
+    onChanged: () => void hostMemoryGuard.sample().catch(() => undefined),
+  });
   const hostControlRoutes = createHostControlRouteHandler({
     windowAuthorityStore,
     diagnostics: composeHostDiagnostics,
     memory: () => hostMemoryGuard.report(),
+    memoryLimits: hostMemoryLimits,
     threadRetention,
     ...(options.hostControl?.servicePolicy === undefined
       ? {}

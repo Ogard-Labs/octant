@@ -58,6 +58,7 @@ describe("octantSettingsRegistry", () => {
       "export-diagnostics",
       "journal-growth",
       "host-automatic-startup",
+      "host-memory-limits",
       "host-backup",
       "host-lifecycle",
     ]);

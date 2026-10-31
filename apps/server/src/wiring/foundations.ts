@@ -20,6 +20,7 @@ import { requireJournalHydration } from "../persistence/journalHydration";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { HostMemoryGuard } from "../hostMemoryGuard";
 import { readSystemMemory } from "../hostMemorySignal";
+import { readHostMemoryLimits } from "../persistence/hostMemoryLimitsProjection";
 import { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
 import { WorkArtifactProjection } from "../work/workArtifactProjection";
 import { hydrateWorkArtifactProjectionFromJournal } from "../work/workPromotionProjectPort";
@@ -113,6 +114,7 @@ export function wireFoundations(deps: FoundationsDependencies) {
     stateFile: join(persistence.dataDirectory, "host-memory.json"),
     readSystem: () => readSystemMemory(),
     readProcessRssBytes: () => process.memoryUsage.rss(),
+    readLimits: () => readHostMemoryLimits(persistence.connection),
     relief: {
       releaseIdle: () => providerRuntimeRegistry.releaseIdle(),
       trimCaches: () => {

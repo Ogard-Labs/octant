@@ -56,6 +56,7 @@ interface ClientOverrides {
   readonly backup?: (label?: string) => Promise<HostBackupOutcome>;
   readonly restore?: () => Promise<HostRestoreOutcome>;
   readonly purgeThreads?: () => Promise<PurgeThreadsOutcome>;
+  readonly setMemoryLimits?: HostControlClient["setMemoryLimits"];
   readonly exportHost?: HostControlClient["exportHost"];
 }
 
@@ -101,6 +102,9 @@ function makeClient(overrides: ClientOverrides = {}): HostControlClient {
         },
       ],
     }),
+    setMemoryLimits:
+      overrides.setMemoryLimits ??
+      (async (request) => ({ kind: "saved", limits: request.limits as never })),
     readThreadRetention: async () => ({ windows: [], tombstones: [] }),
     setThreadRetention: async () => ({ windows: [], tombstones: [] }),
     purgeThreads:
@@ -127,6 +131,8 @@ describe("HostSettingsSection", () => {
       memory: {
         pressure: "elevated",
         processMegabytes: 2_300,
+        limits: { kind: "automatic" },
+        effectiveLimits: { pressuredMegabytes: 2_048, criticalMegabytes: 4_096 },
         lastRelief: {
           at: "2026-10-31T10:00:00.000Z",
           pressure: "elevated",
@@ -151,6 +157,54 @@ describe("HostSettingsSection", () => {
       ),
     ).toBeTruthy();
     expect(screen.getByText("Last unexpected stop")).toBeTruthy();
+  });
+
+  it("saves custom memory limits from the Memory section and reads the status back", async () => {
+    const memory = {
+      pressure: "normal" as const,
+      processMegabytes: 600,
+      limits: { kind: "automatic" as const },
+      effectiveLimits: { pressuredMegabytes: 2_048, criticalMegabytes: 4_096 },
+    };
+    let saved: HostControlStatus["memory"] = memory;
+    const status = vi.fn(async () => ({ ...serviceStatus, memory: saved }));
+    const setMemoryLimits = vi.fn<HostControlClient["setMemoryLimits"]>(async (request) => {
+      saved = {
+        ...memory,
+        limits: request.limits as never,
+        effectiveLimits: { pressuredMegabytes: 3_072, criticalMegabytes: 6_144 },
+      };
+      return { kind: "saved", limits: request.limits as never };
+    });
+    const user = userEvent.setup();
+    render(<HostSettingsSection client={makeClient({ status, setMemoryLimits })} />);
+    expect(
+      await screen.findByText(/Automatic\. On this Mac Octant treats 2 GB as low and 4 GB/),
+    ).toBeVisible();
+
+    await chooseSelectFieldOption(
+      user,
+      screen.getByRole("combobox", { name: "Memory limits" }),
+      "Custom",
+    );
+    const low = screen.getByLabelText("Low at (GB)");
+    const veryLow = screen.getByLabelText("Very low at (GB)");
+    await user.clear(low);
+    await user.type(low, "3");
+    await user.clear(veryLow);
+    await user.type(veryLow, "6");
+    await user.click(screen.getByRole("button", { name: "Save memory limits" }));
+
+    await waitFor(() =>
+      expect(setMemoryLimits).toHaveBeenCalledWith({
+        limits: { kind: "custom", pressuredGb: 3, criticalGb: 6 },
+      }),
+    );
+    expect(await screen.findByText("Memory limits saved.")).toBeVisible();
+    expect(
+      await screen.findByText("Custom. Octant treats 3 GB as low and 6 GB as very low."),
+    ).toBeVisible();
+    expect(status.mock.calls.length).toBeGreaterThan(1);
   });
 
   it("leaves the memory rows out when the host reports none", async () => {

@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { HostMemoryStatus } from "@octant/contracts/host-control";
+import type { HostMemoryLimits, HostMemoryStatus } from "@octant/contracts/host-control";
 import {
   classifyHostMemory,
+  resolveHostMemoryLimits,
   shouldRelieveHostMemory,
   type HostMemoryPressure,
   type SystemMemorySignal,
@@ -14,6 +15,7 @@ const CALM_INTERVAL_MS = 15_000;
 /** Pressure is sampled faster, so a crash leaves a recent reading behind. */
 const PRESSURED_INTERVAL_MS = 5_000;
 const MEGABYTE = 1024 ** 2;
+const AUTOMATIC_LIMITS: HostMemoryLimits = { kind: "automatic" };
 
 interface RepeatingTimer {
   unref(): unknown;
@@ -41,6 +43,11 @@ export interface HostMemoryGuardOptions {
   }>;
   readonly readProcessRssBytes: () => number;
   readonly relief: HostMemoryReliefPort;
+  /**
+   * The person's memory limits, read at every sample so a change applies
+   * without a restart. Omitted, the built-in automatic limits apply.
+   */
+  readonly readLimits?: () => HostMemoryLimits;
   /** Epoch milliseconds. */
   readonly clock?: () => number;
   readonly log?: (line: string) => void;
@@ -68,6 +75,7 @@ export class HostMemoryGuard {
   readonly #startTimer: (tick: () => void, delayMs: number) => RepeatingTimer;
   #pressure: HostMemoryPressure = "normal";
   #processMegabytes = 0;
+  #totalBytes = 0;
   #lastRelief: LastRelief | undefined;
   #lastReliefAt: { readonly at: number; readonly pressure: HostMemoryPressure } | undefined;
   #previousStop: HostMemoryStatus["previousStop"];
@@ -108,12 +116,30 @@ export class HostMemoryGuard {
   }
 
   report(): HostMemoryStatus {
+    const limits = this.#readLimits();
+    const effective = resolveHostMemoryLimits(limits, this.#totalBytes);
     return {
       pressure: this.#pressure,
       processMegabytes: this.#processMegabytes,
+      limits,
+      effectiveLimits: {
+        pressuredMegabytes: Math.round(effective.pressuredBytes / MEGABYTE),
+        criticalMegabytes: Math.round(effective.criticalBytes / MEGABYTE),
+      },
       ...(this.#lastRelief === undefined ? {} : { lastRelief: this.#lastRelief }),
       ...(this.#previousStop === undefined ? {} : { previousStop: this.#previousStop }),
     };
+  }
+
+  #readLimits(): HostMemoryLimits {
+    try {
+      return this.#options.readLimits?.() ?? AUTOMATIC_LIMITS;
+    } catch {
+      // Limits that cannot be read must not stop the guard: the built-in ones
+      // are the safe reading.
+      this.#log("[memory-guard] the memory limits could not be read; using the automatic limits");
+      return AUTOMATIC_LIMITS;
+    }
   }
 
   /** One reading and, when pressure calls for it, one relief. */
@@ -128,11 +154,15 @@ export class HostMemoryGuard {
   async #sample(): Promise<void> {
     const system = await this.#options.readSystem();
     const rssBytes = this.#options.readProcessRssBytes();
-    const { pressure, source } = classifyHostMemory({
-      system: system.signal,
-      processRssBytes: rssBytes,
-      totalBytes: system.totalBytes,
-    });
+    this.#totalBytes = system.totalBytes;
+    const { pressure, source } = classifyHostMemory(
+      {
+        system: system.signal,
+        processRssBytes: rssBytes,
+        totalBytes: system.totalBytes,
+      },
+      this.#readLimits(),
+    );
     const processMegabytes = Math.round(rssBytes / MEGABYTE);
     if (pressure !== this.#pressure) {
       this.#log(
