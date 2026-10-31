@@ -157,6 +157,7 @@ const LOCAL_HOST_ACTIONS = new Set([
   "host.service.disable",
   "host.service.status",
   "host.service.logs",
+  "host.service.memory-limits",
   "host.store.backup",
   "host.store.restore",
   "host.store.retention",

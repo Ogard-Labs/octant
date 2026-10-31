@@ -1,4 +1,5 @@
 import type { CodeClient } from "@octant/client-runtime/code-client";
+import type { AutoReview } from "./autoReview";
 import type { WorkspaceTab } from "@octant/contracts/shell";
 import type {
   CodeOperationResult,
@@ -91,8 +92,6 @@ export interface CodeWorkspaceProjections {
 }
 
 export interface CodeWorkspaceApprovals {
-  /** Native confirmation for raising a thread to Full access. */
-  readonly access?: React.ComponentProps<typeof CodeThreadWorkspace>["requestFullAccessApproval"];
   readonly git?: React.ComponentProps<typeof CodeGitPane>["requestApproval"];
   readonly pullRequest?: React.ComponentProps<typeof CodePullRequestPane>["requestApproval"];
   readonly review?: React.ComponentProps<typeof CodeReviewPane>["requestApproval"];
@@ -126,7 +125,6 @@ export interface CodeWorkspaceProps {
   readonly holdAccessNotice?: CodeThreadControllers["holdAccessNotice"];
   readonly extensionClient?: ExtensionClient;
   readonly automationClient?: AutomationClient;
-  readonly projectRemembersFullAccess?: boolean;
   readonly createUuid?: () => string;
   readonly projections?: CodeWorkspaceProjections;
   readonly hostBridge?: OctantHostBridge;
@@ -151,6 +149,8 @@ export interface CodeWorkspaceProps {
   ) => void;
   readonly providerGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
   readonly harnessAutoReviewSupported?: boolean;
+  /** Who answers the thread's prompts at Auto, or why nobody can. */
+  readonly autoReview?: AutoReview;
   readonly tab: CodeTab;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
@@ -222,6 +222,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         {...(props.harnessAutoReviewSupported === undefined
           ? {}
           : { harnessAutoReviewSupported: props.harnessAutoReviewSupported })}
+        {...(props.autoReview === undefined ? {} : { autoReview: props.autoReview })}
         {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
         {...(props.imageGenerationClient === undefined
           ? {}
@@ -250,10 +251,6 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         {...(props.onNewThreadInProject === undefined
           ? {}
           : { onNewThreadInProject: props.onNewThreadInProject })}
-        {...(props.approvals?.access === undefined
-          ? {}
-          : { requestFullAccessApproval: props.approvals.access })}
-        {...(props.projectRemembersFullAccess !== true ? {} : { projectRemembersFullAccess: true })}
         {...(props.approvals?.updateAnchor === undefined
           ? {}
           : { updateApprovalAnchor: props.approvals.updateAnchor })}

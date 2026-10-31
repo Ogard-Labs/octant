@@ -1,5 +1,9 @@
 import type { CodeOperationExecuteOptions } from "./code/codeOperationService";
 import {
+  refusesTerminalSessionImport,
+  TERMINAL_SESSION_LOCAL_ONLY,
+} from "./terminalSessions/terminalSessionAuthority";
+import {
   NATIVE_ARTIFACTS_LOCAL_ONLY,
   refusesThreadDocumentDelivery,
 } from "./threadDocumentDeliveryAuthority";
@@ -30,8 +34,18 @@ import {
   decodeCodeProjectPullRequestDetailQuery,
   decodeCodeProjectPullRequestDetailRefreshCommand,
   decodeCodeProjectPullRequestDetailView,
+  decodeCodeProjectPullRequestAutoFixCommand,
+  decodeCodeProjectPullRequestActionCommand,
+  decodeCodeProjectPullRequestActionOutcome,
   decodeCodeProjectPullRequestMergeCommand,
   decodeCodeProjectPullRequestMergeOutcome,
+  decodeCodeProjectPullRequestStackMergeCommand,
+  decodeCodeProjectPullRequestStackMergeOutcome,
+  decodeCodeProjectPullRequestMergeWhenReadyCommand,
+  decodeCodeProjectPullRequestSwitchOutcome,
+  decodeCodeProjectPullRequestSwitchTarget,
+  decodeCodeProjectPullRequestSwitchesView,
+  decodeCodeThreadComposerActivity,
   decodeCodeCommand,
   decodeCodeEvidenceReference,
   decodeCodeEvidenceBatchRequest,
@@ -78,8 +92,18 @@ import {
   type CodeProjectPullRequestDetailQuery,
   type CodeProjectPullRequestDetailRefreshCommand,
   type CodeProjectPullRequestDetailView,
+  type CodeProjectPullRequestAutoFixCommand,
+  type CodeProjectPullRequestActionCommand,
+  type CodeProjectPullRequestActionOutcome,
   type CodeProjectPullRequestMergeCommand,
+  type CodeProjectPullRequestStackMergeCommand,
+  type CodeProjectPullRequestStackMergeOutcome,
   type CodeProjectPullRequestMergeOutcome,
+  type CodeProjectPullRequestMergeWhenReadyCommand,
+  type CodeProjectPullRequestSwitchOutcome,
+  type CodeProjectPullRequestSwitchTarget,
+  type CodeProjectPullRequestSwitchesView,
+  type CodeThreadComposerActivity,
   type CodeAttachmentId,
   type CodeAttachmentMediaType,
   type CodeAttachmentReference,
@@ -319,9 +343,44 @@ export interface CodeRouteService {
   readonly mergeProjectPullRequest?: (
     authenticatedWindowId: WindowId,
     command: CodeProjectPullRequestMergeCommand,
-    signal?: AbortSignal,
-    initiator?: "user" | "agent",
+    signal: AbortSignal | undefined,
+    caller: "local-window" | "remote-device",
   ) => Promise<CodeProjectPullRequestMergeOutcome> | CodeProjectPullRequestMergeOutcome;
+  /** Merge a whole stack in one step, from the bottom. */
+  readonly mergeProjectPullRequestStack?: (
+    authenticatedWindowId: WindowId,
+    command: CodeProjectPullRequestStackMergeCommand,
+    signal: AbortSignal,
+    caller: "local-window" | "remote-device",
+  ) => Promise<CodeProjectPullRequestStackMergeOutcome>;
+  /** The person's labels, comment, review reply, close, and reopen. */
+  readonly actOnProjectPullRequest?: (
+    authenticatedWindowId: WindowId,
+    command: CodeProjectPullRequestActionCommand,
+    signal: AbortSignal,
+    caller: "local-window" | "remote-device",
+  ) => Promise<CodeProjectPullRequestActionOutcome>;
+  /** A pull request's Merge when ready and Auto-fix switches. */
+  readonly queryProjectPullRequestSwitches?: (
+    authenticatedWindowId: WindowId,
+    target: CodeProjectPullRequestSwitchTarget,
+  ) => Promise<CodeProjectPullRequestSwitchesView>;
+  readonly setProjectPullRequestMergeWhenReady?: (
+    authenticatedWindowId: WindowId,
+    command: CodeProjectPullRequestMergeWhenReadyCommand,
+    signal: AbortSignal,
+    initiator: "user" | "agent",
+  ) => Promise<CodeProjectPullRequestSwitchOutcome>;
+  readonly setProjectPullRequestAutoFix?: (
+    authenticatedWindowId: WindowId,
+    command: CodeProjectPullRequestAutoFixCommand,
+    initiator: "user" | "agent",
+  ) => Promise<CodeProjectPullRequestSwitchOutcome>;
+  /** A window's person is composing in a Code thread; Auto-fix holds back. */
+  readonly noteComposerActivity?: (
+    authenticatedWindowId: WindowId,
+    activity: CodeThreadComposerActivity,
+  ) => Promise<void> | void;
   /**
    * The Project's planner designation and proposals. Optional like the board:
    * a host without the planner capability answers `unavailable`, not 404.
@@ -605,6 +664,33 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           ) {
             return failureResponse(
               { category: "unauthorized", message: NATIVE_ARTIFACTS_LOCAL_ONLY },
+              403,
+              origin,
+            );
+          }
+          // Full access no longer asks for a native confirmation, so the
+          // confirmation no longer keeps a paired device from reaching it.
+          // A device may lower a thread; raising one to Full access is chosen
+          // at a window on this host.
+          if (
+            command !== undefined &&
+            callerKind === "remote-device" &&
+            raisesToFullAccess(command)
+          ) {
+            return failureResponse(
+              { category: "unauthorized", message: FULL_ACCESS_LOCAL_ONLY },
+              403,
+              origin,
+            );
+          }
+          if (
+            command !== undefined &&
+            (command.kind === "create-code-thread" ||
+              command.kind === "create-managed-code-thread") &&
+            refusesTerminalSessionImport(request, command)
+          ) {
+            return failureResponse(
+              { category: "unauthorized", message: TERMINAL_SESSION_LOCAL_ONLY },
               403,
               origin,
             );
@@ -1357,16 +1443,6 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
         case "project-pull-requests-merge": {
           requireMethodAndEmptyQuery(request, url, "POST");
           requireJsonContentType(request);
-          if (operationInitiator !== "user") {
-            return failureResponse(
-              {
-                category: "unauthorized",
-                message: "Merging a pull request requires the local user.",
-              },
-              403,
-              origin,
-            );
-          }
           if (dependencies.service.mergeProjectPullRequest === undefined) {
             return failureResponse(
               { category: "unavailable", message: "Pull-request merge is unavailable." },
@@ -1383,18 +1459,213 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           } catch {
             throw new CodeRouteRejected("Code project pull-request merge is invalid.", 400);
           }
+          // A paired phone or web client may merge, but only with the person's
+          // explicit confirmation of the head they reviewed: the service
+          // refuses an unconfirmed remote merge and one whose required checks
+          // have not passed.
           return jsonResponse(
             decodeCodeProjectPullRequestMergeOutcome(
               await dependencies.service.mergeProjectPullRequest(
                 authenticatedWindowId,
                 command,
                 request.signal,
+                callerKind,
+              ),
+            ),
+            200,
+            origin,
+          );
+        }
+        case "project-pull-requests-merge-stack": {
+          requireMethodAndEmptyQuery(request, url, "POST");
+          requireJsonContentType(request);
+          if (dependencies.service.mergeProjectPullRequestStack === undefined) {
+            return failureResponse(
+              { category: "unavailable", message: "Stack merge is unavailable." },
+              503,
+              origin,
+            );
+          }
+          const value = parseJson(await readBoundedBytes(request, jsonLimit));
+          refuseRendererAuthoredIdentity(value);
+          let command: CodeProjectPullRequestStackMergeCommand;
+          try {
+            command = decodeCodeProjectPullRequestStackMergeCommand(value);
+          } catch {
+            throw new CodeRouteRejected("Code project pull-request stack merge is invalid.", 400);
+          }
+          return jsonResponse(
+            decodeCodeProjectPullRequestStackMergeOutcome(
+              await dependencies.service.mergeProjectPullRequestStack(
+                authenticatedWindowId,
+                command,
+                request.signal,
+                callerKind,
+              ),
+            ),
+            200,
+            origin,
+          );
+        }
+        case "project-pull-requests-actions": {
+          requireMethodAndEmptyQuery(request, url, "POST");
+          requireJsonContentType(request);
+          // A comment or reply posts under the person's name, and close and
+          // labels change their repository: these are the desktop window's own
+          // controls, so a paired device is refused before anything decodes.
+          if (callerKind !== "local-window") {
+            return failureResponse(
+              {
+                category: "unauthorized",
+                message: "Pull-request actions require the local user.",
+              },
+              403,
+              origin,
+            );
+          }
+          if (dependencies.service.actOnProjectPullRequest === undefined) {
+            return failureResponse(
+              { category: "unavailable", message: "Pull-request actions are unavailable." },
+              503,
+              origin,
+            );
+          }
+          const value = parseJson(await readBoundedBytes(request, jsonLimit));
+          refuseRendererAuthoredIdentity(value);
+          let command: CodeProjectPullRequestActionCommand;
+          try {
+            command = decodeCodeProjectPullRequestActionCommand(value);
+          } catch {
+            throw new CodeRouteRejected("Code project pull-request action is invalid.", 400);
+          }
+          return jsonResponse(
+            decodeCodeProjectPullRequestActionOutcome(
+              await dependencies.service.actOnProjectPullRequest(
+                authenticatedWindowId,
+                command,
+                request.signal,
+                callerKind,
+              ),
+            ),
+            200,
+            origin,
+          );
+        }
+        case "project-pull-requests-switches": {
+          requireMethodAndEmptyQuery(request, url, "POST");
+          requireJsonContentType(request);
+          if (dependencies.service.queryProjectPullRequestSwitches === undefined) {
+            return failureResponse(
+              { category: "unavailable", message: "Pull-request switches are unavailable." },
+              503,
+              origin,
+            );
+          }
+          const value = parseJson(await readBoundedBytes(request, jsonLimit));
+          refuseRendererAuthoredIdentity(value);
+          let target: CodeProjectPullRequestSwitchTarget;
+          try {
+            target = decodeCodeProjectPullRequestSwitchTarget(value);
+          } catch {
+            throw new CodeRouteRejected("Code project pull-request switch query is invalid.", 400);
+          }
+          return jsonResponse(
+            decodeCodeProjectPullRequestSwitchesView(
+              await dependencies.service.queryProjectPullRequestSwitches(
+                authenticatedWindowId,
+                target,
+              ),
+            ),
+            200,
+            origin,
+          );
+        }
+        case "project-pull-requests-merge-when-ready":
+        case "project-pull-requests-auto-fix": {
+          requireMethodAndEmptyQuery(request, url, "POST");
+          requireJsonContentType(request);
+          // The click in a local window is the approval for both switches, as
+          // for a merge; a paired device is refused before anything decodes.
+          if (operationInitiator !== "user") {
+            return failureResponse(
+              {
+                category: "unauthorized",
+                message: "Pull-request switches require the local user.",
+              },
+              403,
+              origin,
+            );
+          }
+          const value = parseJson(await readBoundedBytes(request, jsonLimit));
+          refuseRendererAuthoredIdentity(value);
+          if (route.kind === "project-pull-requests-merge-when-ready") {
+            if (dependencies.service.setProjectPullRequestMergeWhenReady === undefined) {
+              return failureResponse(
+                { category: "unavailable", message: "Merge when ready is unavailable." },
+                503,
+                origin,
+              );
+            }
+            let command: CodeProjectPullRequestMergeWhenReadyCommand;
+            try {
+              command = decodeCodeProjectPullRequestMergeWhenReadyCommand(value);
+            } catch {
+              throw new CodeRouteRejected("Merge when ready command is invalid.", 400);
+            }
+            return jsonResponse(
+              decodeCodeProjectPullRequestSwitchOutcome(
+                await dependencies.service.setProjectPullRequestMergeWhenReady(
+                  authenticatedWindowId,
+                  command,
+                  request.signal,
+                  operationInitiator,
+                ),
+              ),
+              200,
+              origin,
+            );
+          }
+          if (dependencies.service.setProjectPullRequestAutoFix === undefined) {
+            return failureResponse(
+              { category: "unavailable", message: "Auto-fix is unavailable." },
+              503,
+              origin,
+            );
+          }
+          let command: CodeProjectPullRequestAutoFixCommand;
+          try {
+            command = decodeCodeProjectPullRequestAutoFixCommand(value);
+          } catch {
+            throw new CodeRouteRejected("Auto-fix command is invalid.", 400);
+          }
+          return jsonResponse(
+            decodeCodeProjectPullRequestSwitchOutcome(
+              await dependencies.service.setProjectPullRequestAutoFix(
+                authenticatedWindowId,
+                command,
                 operationInitiator,
               ),
             ),
             200,
             origin,
           );
+        }
+        case "composer-activity": {
+          requireMethodAndEmptyQuery(request, url, "POST");
+          requireJsonContentType(request);
+          if (dependencies.service.noteComposerActivity === undefined) {
+            return new Response(null, { status: 204, headers: corsHeaders(origin) });
+          }
+          const value = parseJson(await readBoundedBytes(request, jsonLimit));
+          refuseRendererAuthoredIdentity(value);
+          let activity: CodeThreadComposerActivity;
+          try {
+            activity = decodeCodeThreadComposerActivity(value);
+          } catch {
+            throw new CodeRouteRejected("Composer activity is invalid.", 400);
+          }
+          await dependencies.service.noteComposerActivity(authenticatedWindowId, activity);
+          return new Response(null, { status: 204, headers: corsHeaders(origin) });
         }
         case "operation-content": {
           requireMethodAndEmptyQuery(request, url, "GET");
@@ -1771,7 +2042,13 @@ type MatchedRoute =
         | "project-pull-requests-refresh"
         | "project-pull-requests-detail"
         | "project-pull-requests-detail-refresh"
-        | "project-pull-requests-merge";
+        | "project-pull-requests-merge"
+        | "project-pull-requests-merge-stack"
+        | "project-pull-requests-actions"
+        | "project-pull-requests-switches"
+        | "project-pull-requests-merge-when-ready"
+        | "project-pull-requests-auto-fix"
+        | "composer-activity";
     }>
   | Readonly<{ kind: "planner"; projectId: string }>
   | Readonly<{
@@ -1905,6 +2182,22 @@ function matchRoute(pathname: string): MatchedRoute | undefined {
   if (pathname === "/api/code/project-pull-requests/merge") {
     return { kind: "project-pull-requests-merge" };
   }
+  if (pathname === "/api/code/project-pull-requests/merge-stack") {
+    return { kind: "project-pull-requests-merge-stack" };
+  }
+  if (pathname === "/api/code/project-pull-requests/actions") {
+    return { kind: "project-pull-requests-actions" };
+  }
+  if (pathname === "/api/code/project-pull-requests/switches") {
+    return { kind: "project-pull-requests-switches" };
+  }
+  if (pathname === "/api/code/project-pull-requests/merge-when-ready") {
+    return { kind: "project-pull-requests-merge-when-ready" };
+  }
+  if (pathname === "/api/code/project-pull-requests/auto-fix") {
+    return { kind: "project-pull-requests-auto-fix" };
+  }
+  if (pathname === "/api/code/composer-activity") return { kind: "composer-activity" };
   if (pathname === "/api/code/language/documents") return { kind: "language-documents" };
   if (pathname === "/api/code/language/read") return { kind: "language-read" };
   if (pathname === "/api/code/language/approvals") return { kind: "language-approvals" };
@@ -2563,5 +2856,21 @@ class CodeRouteRejected extends Error {
     readonly status: number,
   ) {
     super(message);
+  }
+}
+
+const FULL_ACCESS_LOCAL_ONLY = "Full access is chosen in the Octant window on this host.";
+
+function raisesToFullAccess(command: CodeCommand): boolean {
+  switch (command.kind) {
+    case "change-code-thread-access":
+    case "create-managed-code-thread":
+      return command.executionPolicy === "full-access";
+    case "create-code-thread":
+      return command.thread.executionPolicy === "full-access";
+    case "update-code-settings":
+      return command.defaultExecutionPolicy === "full-access";
+    default:
+      return false;
   }
 }

@@ -76,6 +76,33 @@ The same tab also searches **standalone skills** from
 a skill, then **Confirm install**. Installed skill packages still start
 disabled — trust and enable them from **Installed**.
 
+### Install from npm
+
+Type an npm package name in **Install from npm**, with a version, range, or
+tag if you want one (`^1.2.0`, `1.4.0`, `beta`), and press **Look up**. Octant
+fetches the package from the registry your own npm settings name
+(`npm_config_registry`, or `registry=` and `@scope:registry=` in your
+`~/.npmrc`) and checks the download against the integrity that registry
+published. It reads only the registry address from those settings: it sends no
+login, so a registry that needs one cannot be used. It runs no `npm`, no
+install script, and installs no dependencies; only the files in that one
+package are kept.
+
+The review shows the package, exact version, registry, and integrity. A package
+that is neither an Agent Plugin nor a signed provider driver is refused, and so
+is one whose download does not match, with a plain sentence saying which. After
+**Confirm install** the plugin is untrusted and switched off, like any install;
+trust and enable it yourself.
+
+Under **Installed**, an npm plugin shows the same package, version, registry,
+and integrity, and **Check for update** asks that registry for its newest
+version. It never installs: if a newer version exists you can **Review** it and
+**Confirm update**.
+
+From a terminal, `octant plugin install npm:@scope/name@^1.2.0` does the same
+lookup and install, and `octant plugin check-update @scope/name` checks for a
+newer version. Trusting and enabling stay in the Octant window.
+
 Opening the tab does not contact a registry. Search, inspect, preview, and
 install are explicit buttons. Importing a local Agent Plugins folder uses the
 native folder picker and never reaches a catalog.
@@ -103,6 +130,14 @@ re-fetches that exact version's metadata and tarball from
 GitHub (`api.github.com` for the tree, then `raw.githubusercontent.com` for
 the blobs at the exact commit the catalog named). Whoever operates those
 endpoints sees your IP address, the query text or package path, and the time.
+
+**Install from npm.** **Look up** and **Check for update** contact the registry
+your npm settings name, not necessarily `registry.npmjs.org`: one request for
+the package's metadata (`Accept` and the constrained `User-Agent` are the only
+headers, and no login is sent), then one for the tarball the metadata names,
+which must be on that registry's own address. The registry operator sees your
+IP address, the package name, and the time. They obey the same **Marketplace
+fetches** switch; with it off, nothing leaves the host.
 
 **Standalone skills.** **Search skills** contacts both registries in
 parallel, even if only one will match:
@@ -293,7 +328,9 @@ Mark a value **Secret** to keep it in this computer's credential store (the
 Keychain on a Mac) instead of the package; Octant cannot show it again. The
 server appears under Extension packages by the name you gave it, as **Added
 by you**, installed, trusted and switched on, and its tools ask for approval
-on every call like any plugin's. Removing it deletes the
+on every call like any plugin's. With a secret store linked, a secret can
+instead come from an item in it (**From 1Password**): see [Use API keys from a
+secret store](../guide/secret-stores.md). Removing it deletes the
 package and its secrets. Adding a server works only from the Octant window on
 this host, not from a paired device, and a browser-hosted Settings cannot keep
 secrets.

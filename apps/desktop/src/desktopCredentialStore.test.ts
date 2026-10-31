@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { resolveDesktopCredentialBackend } from "./desktopCredentialStore";
 
 const storeScope = "7d444840-9dc0-41d1-b245-5ffdce74fad2";
@@ -10,26 +10,18 @@ describe("resolveDesktopCredentialBackend", () => {
       platform: "darwin",
       keychainHelperPath: helperPath,
       storeScope,
-      probe: vi.fn(),
     });
     expect(backend.kind).toBe("keychain");
     expect(backend.store).toBeDefined();
     expect(backend.purgeStore).toBeDefined();
   });
 
-  it("selects Secret Service on Linux when the session store answers", async () => {
-    const probe = vi.fn(async () => ({
-      available: true,
-      service: "available" as const,
-      tool: "available" as const,
-    }));
+  it("selects Secret Service on Linux without waiting for a keyring to answer", async () => {
     const backend = await resolveDesktopCredentialBackend({
       platform: "linux",
       keychainHelperPath: helperPath,
       storeScope,
-      probe,
     });
-    expect(probe).toHaveBeenCalledOnce();
     expect(backend).toEqual({
       kind: "secret-service",
       store: expect.any(Object),
@@ -43,26 +35,11 @@ describe("resolveDesktopCredentialBackend", () => {
     expect(backend.purgeStore).toBeUndefined();
   });
 
-  it("reports unavailable on Linux when Secret Service is missing", async () => {
-    const backend = await resolveDesktopCredentialBackend({
-      platform: "linux",
-      keychainHelperPath: helperPath,
-      storeScope,
-      probe: async () => ({
-        available: false,
-        service: "unavailable",
-        tool: "unavailable",
-      }),
-    });
-    expect(backend).toEqual({ kind: "unavailable" });
-  });
-
   it("uses Credential Manager on Windows", async () => {
     const backend = await resolveDesktopCredentialBackend({
       platform: "win32",
       keychainHelperPath: helperPath,
       storeScope,
-      probe: vi.fn(),
     });
     expect(backend.kind).toBe("credential-manager");
     expect(backend.store).toBeDefined();

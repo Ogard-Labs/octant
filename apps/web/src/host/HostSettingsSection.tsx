@@ -21,6 +21,7 @@ import {
   THREAD_PURGE_RETAINED_SCOPES,
 } from "@octant/domain";
 import { purgeComposerThreadDrafts } from "../composer/composerThreadDraftStore";
+import { HostMemoryLimits } from "./HostMemoryLimits";
 import { HostPrivacyExport } from "./HostPrivacyExport";
 import { driverLabel } from "../providers/providerSettingsPresentation";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -43,6 +44,7 @@ import type { HostFederationLifecycle } from "@octant/client-runtime/host-federa
 import type { HostDataMap } from "@octant/contracts/host-data-map";
 import { HostDataMapView } from "./HostDataMap";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { formatMemoryEventTime, hostMemoryFact, hostReliefFact } from "./hostMemoryNotice";
 
 /**
  * The Settings host card for one local or headless
@@ -308,9 +310,39 @@ export function HostSettingsSection({
               // qualifier only appears when there is live work to attend to.
               value: `${status.work.active}${status.work.attentionRequired && status.work.active > 0 ? " (attention required)" : ""}`,
             },
+            ...(status.memory === undefined
+              ? []
+              : [
+                  { label: "Memory", value: hostMemoryFact(status.memory) },
+                  ...(status.memory.lastRelief === undefined
+                    ? []
+                    : [
+                        {
+                          label: "Last memory relief",
+                          value: hostReliefFact(status.memory.lastRelief),
+                        },
+                      ]),
+                  ...(status.memory.previousStop === undefined
+                    ? []
+                    : [
+                        {
+                          label: "Last unexpected stop",
+                          value: `${formatMemoryEventTime(status.memory.previousStop.lastSeenAt)}, host using ${status.memory.previousStop.processMegabytes} MB`,
+                        },
+                      ]),
+                ]),
           ]}
         />
       </SettingsSection>
+
+      {status.memory === undefined ? null : (
+        <SettingsSection
+          description="When the host counts its own size as low memory and frees idle work."
+          title="Memory"
+        >
+          <HostMemoryLimits client={client} memory={status.memory} onSaved={() => void refresh()} />
+        </SettingsSection>
+      )}
 
       <SettingsSection description="Host services available to this app." title="Capabilities">
         {status.capabilities.length === 0 ? (

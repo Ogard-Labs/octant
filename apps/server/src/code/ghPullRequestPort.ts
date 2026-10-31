@@ -39,6 +39,21 @@ export interface GhPullRequestRequest {
   readonly threadId: CodeThreadId;
   readonly title: string;
   readonly body: string;
+  readonly draft?: boolean;
+  /**
+   * A base other than the delivery target's, for a stacked pull request. The
+   * port accepts it only when that branch has an open pull request of its own
+   * in the same repository.
+   */
+  readonly baseBranch?: string;
+}
+
+export interface GhPullRequestUpdate {
+  readonly threadId: CodeThreadId;
+  readonly title?: string;
+  readonly body?: string;
+  /** `false` marks a draft ready for review; `true` turns it back into a draft. */
+  readonly draft?: boolean;
 }
 
 export interface GhDeliveryTarget {
@@ -51,7 +66,7 @@ export interface GhDeliveryTarget {
 export interface GhPullRequestIdentity {
   readonly number: number;
   readonly url: string;
-  readonly state: "open";
+  readonly state: "open" | "closed";
   readonly baseRepository: string;
   readonly baseBranch: string;
   readonly headOwner: string;
@@ -62,10 +77,23 @@ export type GhPullRequestResult =
   | Readonly<{
       status: "existing" | "created";
       pullRequest: GhPullRequestIdentity;
+      draft?: boolean;
     }>
   | Readonly<{
       status: "unavailable";
-      code: "invalid-target" | "pr-observation-unavailable" | "pr-create-unavailable";
+      code:
+        | "invalid-target"
+        | "invalid-base"
+        | "pr-observation-unavailable"
+        | "pr-create-unavailable";
+    }>;
+
+export type GhPullRequestUpdateResult =
+  | Readonly<{ status: "updated"; pullRequest: GhPullRequestIdentity; draft?: boolean }>
+  | Readonly<{ status: "none" }>
+  | Readonly<{
+      status: "unavailable";
+      code: "invalid-target" | "pr-observation-unavailable" | "pr-update-unavailable";
     }>;
 
 export type GhPullRequestReviewSection =
@@ -245,6 +273,14 @@ export class GhPullRequestPort {
       return { status: "existing", pullRequest: before.pullRequest };
     }
 
+    const baseBranch = request.baseBranch ?? deliveryTarget.baseBranch;
+    if (
+      baseBranch !== deliveryTarget.baseBranch &&
+      !(await this.#isOpenStackParent(deliveryTarget.baseRepository, baseBranch, target, signal))
+    ) {
+      return { status: "unavailable", code: "invalid-base" };
+    }
+
     let createExitCode = 1;
     try {
       const created = await this.#command.run(
@@ -254,13 +290,14 @@ export class GhPullRequestPort {
           "--repo",
           deliveryTarget.baseRepository,
           "--base",
-          deliveryTarget.baseBranch,
+          baseBranch,
           "--head",
           deliveryTarget.head,
           "--title",
           request.title,
           "--body-file",
           "-",
+          ...(request.draft === true ? ["--draft"] : []),
         ],
         { environment: this.#environment, stdin: request.body },
         signal,
@@ -274,10 +311,169 @@ export class GhPullRequestPort {
     if (after.pullRequest === undefined) {
       return { status: "unavailable", code: "pr-create-unavailable" };
     }
+    return createExitCode === 0
+      ? { status: "created", pullRequest: after.pullRequest, draft: request.draft === true }
+      : { status: "existing", pullRequest: after.pullRequest };
+  }
+
+  /**
+   * Change the open pull request of the thread's own delivery branch. Only the
+   * title, the body, and the draft state can change; the pull request is
+   * found by the delivery head, never by a number the caller names.
+   */
+  async update(
+    request: GhPullRequestUpdate,
+    signal: AbortSignal,
+  ): Promise<GhPullRequestUpdateResult> {
+    if (
+      (request.title !== undefined && !validText(request.title, MAX_TITLE_BYTES)) ||
+      (request.body !== undefined && !validBody(request.body)) ||
+      (request.title === undefined && request.body === undefined && request.draft === undefined)
+    ) {
+      return { status: "unavailable", code: "invalid-target" };
+    }
+    let deliveryTarget: GhDeliveryTarget | undefined;
+    try {
+      deliveryTarget = await this.#resolveTarget(request.threadId);
+    } catch {
+      return { status: "unavailable", code: "invalid-target" };
+    }
+    const target = validateTarget(deliveryTarget);
+    if (deliveryTarget === undefined || target === undefined) {
+      return { status: "unavailable", code: "invalid-target" };
+    }
+    const observed = await this.#observe(deliveryTarget, target, signal);
+    if (observed.status === "unavailable") return observed;
+    if (observed.pullRequest === undefined) return { status: "none" };
+    const number = String(observed.pullRequest.number);
+    const repository = deliveryTarget.baseRepository;
+
+    const steps: Array<{ readonly arguments_: readonly string[]; readonly stdin?: string }> = [];
+    if (request.title !== undefined || request.body !== undefined) {
+      steps.push({
+        arguments_: [
+          "pr",
+          "edit",
+          number,
+          "--repo",
+          repository,
+          ...(request.title === undefined ? [] : ["--title", request.title]),
+          ...(request.body === undefined ? [] : ["--body-file", "-"]),
+        ],
+        ...(request.body === undefined ? {} : { stdin: request.body }),
+      });
+    }
+    if (request.draft !== undefined) {
+      steps.push({
+        arguments_: [
+          "pr",
+          "ready",
+          number,
+          "--repo",
+          repository,
+          ...(request.draft ? ["--undo"] : []),
+        ],
+      });
+    }
+    for (const step of steps) {
+      let exitCode = 1;
+      try {
+        exitCode = (
+          await this.#command.run(
+            step.arguments_,
+            { environment: this.#environment, stdin: step.stdin },
+            signal,
+          )
+        ).exitCode;
+      } catch {
+        // The edit may have reached GitHub; the caller re-reads the pull request.
+      }
+      if (exitCode !== 0) return { status: "unavailable", code: "pr-update-unavailable" };
+    }
     return {
-      status: createExitCode === 0 ? "created" : "existing",
-      pullRequest: after.pullRequest,
+      status: "updated",
+      pullRequest: observed.pullRequest,
+      ...(request.draft === undefined ? {} : { draft: request.draft }),
     };
+  }
+
+  /**
+   * The pull request of the thread's own delivery branch in the given state,
+   * found by the delivery head, never by a number the caller names. Closing
+   * and reopening act on what this returns.
+   */
+  async locate(
+    threadId: CodeThreadId,
+    state: "open" | "closed",
+    signal: AbortSignal,
+  ): Promise<
+    | Readonly<{ status: "found"; pullRequest: GhPullRequestIdentity }>
+    | Readonly<{ status: "none" }>
+    | Readonly<{ status: "unavailable" }>
+  > {
+    let deliveryTarget: GhDeliveryTarget | undefined;
+    try {
+      deliveryTarget = await this.#resolveTarget(threadId);
+    } catch {
+      return { status: "unavailable" };
+    }
+    const target = validateTarget(deliveryTarget);
+    if (deliveryTarget === undefined || target === undefined) return { status: "unavailable" };
+    const observed = await this.#observe(deliveryTarget, target, signal, state);
+    if (observed.status === "unavailable") return { status: "unavailable" };
+    return observed.pullRequest === undefined
+      ? { status: "none" }
+      : { status: "found", pullRequest: observed.pullRequest };
+  }
+
+  /**
+   * Whether `baseBranch` may carry a stacked pull request: a valid branch
+   * other than the thread's own head, with an open pull request of its own in
+   * the same repository. Anything the host cannot confirm is refused.
+   */
+  async #isOpenStackParent(
+    repository: string,
+    baseBranch: string,
+    target: Readonly<{ headOwner: string; headBranch: string }>,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    if (!validBranch(baseBranch) || baseBranch === target.headBranch) return false;
+    let result: GhCommandResult;
+    try {
+      result = await this.#command.run(
+        [
+          "pr",
+          "list",
+          "--repo",
+          repository,
+          "--head",
+          baseBranch,
+          "--state",
+          "open",
+          "--limit",
+          "1",
+          "--json",
+          "number,headRefName",
+        ],
+        { environment: this.#environment, stdin: undefined },
+        signal,
+      );
+    } catch {
+      return false;
+    }
+    if (result.exitCode !== 0) return false;
+    try {
+      const rows: unknown = JSON.parse(result.stdout);
+      return (
+        Array.isArray(rows) &&
+        rows.length === 1 &&
+        isRecord(rows[0]) &&
+        rows[0].headRefName === baseBranch &&
+        Number.isSafeInteger(rows[0].number)
+      );
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -580,6 +776,7 @@ export class GhPullRequestPort {
     request: GhDeliveryTarget,
     target: Readonly<{ headOwner: string; headBranch: string }>,
     signal: AbortSignal,
+    state: "open" | "closed" = "open",
   ): Promise<
     | Readonly<{ status: "observed"; pullRequest: GhPullRequestIdentity | undefined }>
     | Readonly<{ status: "unavailable"; code: "pr-observation-unavailable" }>
@@ -592,12 +789,10 @@ export class GhPullRequestPort {
           "list",
           "--repo",
           request.baseRepository,
-          "--base",
-          request.baseBranch,
           "--head",
           target.headBranch,
           "--state",
-          "open",
+          state,
           "--limit",
           "2",
           "--json",
@@ -612,7 +807,7 @@ export class GhPullRequestPort {
     if (result.exitCode !== 0) {
       return { status: "unavailable", code: "pr-observation-unavailable" };
     }
-    const decoded = decodePullRequests(result.stdout, request, target);
+    const decoded = decodePullRequests(result.stdout, request, target, state);
     return decoded === undefined
       ? { status: "unavailable", code: "pr-observation-unavailable" }
       : { status: "observed", pullRequest: decoded ?? undefined };
@@ -657,7 +852,7 @@ function validateTarget(
     : undefined;
 }
 
-function validRepository(value: string): boolean {
+export function validRepository(value: string): boolean {
   return REPOSITORY_PATTERN.test(value) && !value.includes("..") && !value.includes("//");
 }
 
@@ -687,7 +882,7 @@ function validBody(value: string): boolean {
   return !value.includes("\0") && Buffer.byteLength(value) <= MAX_BODY_BYTES;
 }
 
-function sanitizeGhEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+export function sanitizeGhEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   // `gh` runs extensions and credential helpers, so it never sees the broker
   // coordinates and bridge secret the desktop handed this server.
   const sanitized = childProcessEnvironment(environment);
@@ -706,6 +901,7 @@ function decodePullRequests(
   output: string,
   request: GhDeliveryTarget,
   target: Readonly<{ headOwner: string; headBranch: string }>,
+  state: "open" | "closed" = "open",
 ): GhPullRequestIdentity | undefined | null {
   let value: unknown;
   try {
@@ -734,8 +930,9 @@ function decodePullRequests(
     (item.number as number) <= 0 ||
     typeof item.url !== "string" ||
     !item.url.startsWith("https://") ||
-    item.state !== "OPEN" ||
-    item.baseRefName !== request.baseBranch ||
+    item.state !== (state === "open" ? "OPEN" : "CLOSED") ||
+    typeof item.baseRefName !== "string" ||
+    !validBranch(item.baseRefName) ||
     item.headRefName !== target.headBranch ||
     !isRecord(owner) ||
     !exactKeys(owner, ["login"]) ||
@@ -746,9 +943,11 @@ function decodePullRequests(
   return {
     number: item.number as number,
     url: item.url,
-    state: "open",
+    state,
     baseRepository: request.baseRepository,
-    baseBranch: request.baseBranch,
+    // Read from GitHub, not the delivery target: a stacked pull request sits
+    // on another open branch, and the thread still owns it by its head.
+    baseBranch: item.baseRefName,
     headOwner: target.headOwner,
     headBranch: target.headBranch,
   };

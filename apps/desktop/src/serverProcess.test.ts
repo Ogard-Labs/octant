@@ -315,6 +315,33 @@ describe("serverSpawnSpec", () => {
     expect(spec.env.OCTANT_BROWSER_BROKER_URL).toBe("http://127.0.0.1:42000/");
   });
 
+  it("tells the server where the app keeps Browser profile stores, and never inherits a stale answer", () => {
+    const base = {
+      browserBrokerToken: "browser-token",
+      browserBrokerUrl: "http://127.0.0.1:42000/",
+      desktopBridgeSecret: "desktop-secret",
+      root: "/repo",
+      port: 13_773,
+      instanceId: "managed-instance",
+      packaged: false,
+      execPath: "/usr/bin/octant",
+    };
+    const told = serverSpawnSpec({
+      ...base,
+      browserProfilesDirectory: "/Users/ada/Library/Application Support/Octant/Partitions",
+      env: { PATH: "/usr/bin" },
+    });
+    expect(told.env.OCTANT_BROWSER_PROFILES_DIRECTORY).toBe(
+      "/Users/ada/Library/Application Support/Octant/Partitions",
+    );
+
+    const inherited = serverSpawnSpec({
+      ...base,
+      env: { PATH: "/usr/bin", OCTANT_BROWSER_PROFILES_DIRECTORY: "/elsewhere" },
+    });
+    expect(inherited.env.OCTANT_BROWSER_PROFILES_DIRECTORY).toBeUndefined();
+  });
+
   it("keeps macOS listener inspection tools reachable without admitting arbitrary paths", () => {
     expect(
       resolvePackagedServerPath(

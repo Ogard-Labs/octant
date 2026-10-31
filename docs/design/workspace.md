@@ -53,7 +53,7 @@ icon buttons (Work presents the Chat and Work domains together; see
 threads, and settings (the sidebar's anatomy is in [DESIGN.md](../../DESIGN.md#shell-and-layout)); an
 integrated borderless top chrome; a central workspace; and an optional right
 dock. Mode changes alter content, authority, default composition, and density,
-never the navigation grammar. See [decisions/0015-workspace-shell-model.md](../decisions/0015-workspace-shell-model.md).
+never the navigation grammar.
 
 **Home** leads the places: first in the icon rail, above Inbox, and among the
 sidebar's own actions when no rail stands beside it. It closes any reader and
@@ -74,9 +74,19 @@ below the title band. The header sits on the page: the Project tile at 40px
 Project") as its subtitle, and the actions at the right edge, New thread in
 the neutral secondary paint beside the ghost Relink folder and Archive
 Project. Everything else reads on cards in the Settings section recipe: one
-card for the binding (the root in mono, read from home as `~/…` with the full
-path on hover and for screen readers, and its availability on the first row,
-what the binding grants on the second), then labelled groups. Threads are rows
+card for the Project's folders (the main folder first, labelled Main directory
+or Main repository, in mono, read from home as `~/…` with the full path on
+hover and for screen readers, and its availability on the first row; then
+each extra folder as an Extra folder row with Remove; then one line saying
+extra folders get the main folder's access while commands, checkouts and Git
+stay in the main folder, and **Add folder…**, which opens the native folder
+picker on desktop and the host folder browser elsewhere; then what the
+binding grants), then labelled groups. A refused folder (the home folder or
+above it, a system or credential folder, one inside or around another folder
+of the Project) shows the host's reason on the card. A thread's environment
+panel lists the Project's extra folders read-only, under the main folder, and
+shows nothing when there are none. Rules for what an extra folder grants are
+in [Architecture: Projects with several folders](../architecture.md#projects-with-several-folders). Threads are rows
 in one card: the title alone on its line, then the state chip, the approval
 posture as quiet text (it is a standing setting, not a state or a control, so
 it takes no chip), and facts on one line beneath it, then Details. A Work
@@ -146,6 +156,22 @@ sidebar timer never walks the checkout tree. Inactive modes and hidden windows
 pause those refreshes so background ticks do not contend with the next
 interaction.
 
+### Jump to the next waiting thread
+
+The `next-waiting-thread` keybinding (Mod+Shift+J by default) and the palette
+command **Jump to the next thread that needs you** open the next thread waiting
+on the person. The renderer reads the attention signals the sidebar and Inbox
+already render and adds no host read. Each thread counts once, at its strongest
+reason, in this order: approval, question, finished turn not yet looked at;
+within a reason, in the order the signals are listed. The jump goes to the entry
+after the open thread and wraps from the last to the first; when the open thread
+is not waiting it goes to the first, and when nothing waits it does nothing and
+the command is absent from the palette. A failed turn is not in the order: the
+thread listing reports no failure, and a status is never inferred from silence.
+A due follow-up is a reminder, not a waiting thread, and is left out. The
+Status arrangement's **Needs input** and **Ready for review** headings are the
+list-side counterpart, so no second priority group is added to the Projects tree.
+
 ### Sidebar thread status
 
 The sidebar speaks about what a thread is doing now with one vocabulary, in
@@ -199,8 +225,7 @@ thread a turn reopens or wakes it on the server. One host sweep archives
 completed threads of every mode once their completion is older than the
 `completedThreadArchiveAfterDays` shell setting (default seven days, `null`
 for never), re-deciding against each mode's authoritative record and
-journaling the ordinary thread update as the `system` actor. It archives only;
-see [decisions/0088-completed-and-snoozed-threads.md](../decisions/0088-completed-and-snoozed-threads.md).
+journaling the ordinary thread update as the `system` actor. It archives only.
 
 **Put away** is the only name people see for this state, beside the board's
 Done: the sidebar shelf, the row-menu action, the Review page action, the
@@ -289,8 +314,7 @@ so a later per-environment icon can replace it in place. Tab
 geometry and close-control presentation are shared with dock tools under
 [Content tabs](../../DESIGN.md#content-tabs).
 
-These tabs add no persisted layout or authority; see
-[decision 0156](../decisions/0156-content-opens-beside-the-conversation.md).
+These tabs add no persisted layout or authority.
 
 **Opening into tabs.** A single click on a sidebar thread opens it in the
 active pane in place: it takes over the pane's open tab unless that tab was
@@ -427,6 +451,25 @@ through `GitHistoryReader` and the authenticated Code checkout-read boundary;
 its Git subprocesses are network-denied and its data is an ephemeral read,
 not a second journal. Pages anchor to immutable Git tips, and commit details
 compare immutable object IDs with an explicit parent for merges.
+Review also owns Local commits: the commits on the thread's branch that its
+upstream does not have, or that its base branch does not have when it has no
+upstream, each opening to its own diff. The host picks the comparison and
+names it in the view; it never fetches. A listing holds the newest 100
+commits and says when older ones are not shown. **Ignore whitespace** is one
+per-person choice, kept in the browser profile and followed by every mounted view, that the Working tree and
+commit diffs apply by asking Git for `-w`. It changes only the diff text: the
+changed-path list, line totals and checkout state token are unchanged.
+A pull request opened in Review shows, under its header, an **Automatic
+actions** section with two switches: **Merge when ready** and **Auto-fix**.
+Each has one status line under its name that says what it is doing now (off,
+on and waiting on checks, reviews, or a conflict, merged, turned off by
+GitHub; on and watching, waiting while you type or while a turn runs, last
+woke the thread and which try, stopped and why). Auto-fix names the linked
+thread it wakes, the first linked one; with none linked it stays off and its
+hover reason says to link a thread. A refused or unsupported change keeps the
+switch where it was and says why in one alert line under the section. The
+review re-reads the switches every 20 seconds while open. Rules and limits are
+owned by [Architecture: modes](../architecture.md#modes-chat-work-and-code).
 The top-right control reveals the dock only when the active pane has a bound thread
 or a valid launchable tool. A new Code task's pane, before its thread exists, keeps
 the dock: its title band shows the common tools disabled ("Available once the task
@@ -497,8 +540,7 @@ rather than given an assumed scope. Hand off
 own provider for a six-section hand-off document in one tool-free request,
 keeps it as a Canvas of the thread, and opens that Canvas in the dock; a
 running turn, an unready provider, or a thread outside a Project is refused as
-an ordinary answer (see
-[decisions/0080-hand-off-writes-a-canvas-from-the-export-cut.md](../decisions/0080-hand-off-writes-a-canvas-from-the-export-cut.md)). The dock follows the active
+an ordinary answer. The dock follows the active
 pane's thread and Project, restores that subject's open tools, and presents an
 explicit unavailable state when the newly active pane cannot describe the
 selected tool — never the previous pane's content. Hiding a Browser or Terminal
@@ -537,8 +579,12 @@ which the computer's windows share like a browser's history, and never sent
 to the host; a running server's address is not repeated there, and choosing a row
 opens it. With neither, the start page invites an address. **Browser profiles.**
 A page is Private unless the person picks the Project or Personal profile from
-the control at the left of the address field; the toolbar's puzzle-piece button
-lists the profile's enabled extensions. The rules are in
+the control at the left of the address field, whose menu also signs out of a
+stored profile. A puzzle-piece extensions button follows it when an extension is
+enabled in the page's profile: it lists them, opens a popup or options page, and
+carries a count while the agent drives the page; the driver indicator and the
+floating preview name a stored profile while the agent drives it. The Project
+browser dock has the same controls. The rules are in
 [Browser profiles and extensions](browser-profiles.md). **Browser captures.** The Browser pane toolbar has a
 Screenshot button (a camera icon beside Open in default browser) that keeps the
 page's picture with the thread, and a thread that kept screenshots shows a
@@ -678,8 +724,7 @@ forest of parent threads and the runs they launched, and Graph can save that for
 cursor-readable and byte- and count-bounded, with explicit complete, stale, and
 unavailable states. Provider-native live transcripts remain unavailable unless
 their normalized provider capability supplies an equivalent host-authorized
-read; a host-retained final reply stays readable after completion. See
-[decisions/0050-bounded-live-child-conversation.md](../decisions/0050-bounded-live-child-conversation.md).
+read; a host-retained final reply stays readable after completion.
 
 Saved child-generation file comparisons open in the existing Review tool from
 Agents result history. The selection carries the parent, managed child and
@@ -714,10 +759,7 @@ concurrently, results reconcile in stable Project order, and every refresh path
 remains within preview bounds. The journal never stores that cache and never
 sees a per-poll event; it stores only the user's opt-in toggle and exact PR
 identities already produced by Code operations. The bounded list cache survives
-host restart and is cleared when GitHub authority is revoked (see
-[decisions/0064-pull-request-observation-cadence.md](../decisions/0064-pull-request-observation-cadence.md)
-and
-[decisions/0076-pull-request-snapshot-survives-restart.md](../decisions/0076-pull-request-snapshot-survives-restart.md)).
+host restart and is cleared when GitHub authority is revoked.
 
 **Answering from a Board card.** A Work or Code card whose thread waits on the
 person shows what it asks and the answers, so a column of waiting cards is
@@ -817,6 +859,22 @@ through the Integration port, frames redacted issue text
 journals that ingestion ([details](host-reads-and-commands.md#linear-issues)).
 Refusal fails creation visibly. No Linear write-back path exists.
 
+Composer `Create from…` also has a Terminal tab in a Work or Code draft with a
+Project, for a local window. It lists the newest sessions the Claude Code and
+Codex command-line tools kept on this Mac for the Project's bound folder, with
+their title and last activity. Selecting one attaches only
+`{ provider, sessionId }`. At creation the server reads the session again,
+refuses one started in another folder, keeps the person's and the assistant's
+words (no tool calls, results, thinking, or text the tool injected), bounds
+them to the recent part of the conversation, marks the thread with outside
+content before it exists, and journals the history on the thread
+([details](host-reads-and-commands.md#terminal-sessions)). The thread shows it
+folded and read-only above its own turns. Its first admitted turn hands the
+history to the model once, framed as outside data. The provider's native
+session is not resumed: a resumed session would hold the earlier conversation
+unframed, and the Claude runtime refuses a session id Octant did not record.
+Nothing is uploaded or written back to the tool's files.
+
 ## Context and usage
 
 The circular composer meter opens the host's attributed context breakdown without
@@ -872,7 +930,13 @@ a Project terminal and pins a card that names the Project and the terminal,
 never a thread. The card is a window onto the shell and grants nothing: a card
 naming a terminal this window does not own is refused. Authority, lifecycle,
 and the journal record follow the
-[Project terminal rule](../architecture.md#security-and-authority). Add browser
+[Project terminal rule](../architecture.md#security-and-authority). A Code
+Project's saved actions (Run, Test, Dev) are buttons in the window header, three
+inline and the rest under More, and entries in the command palette's Actions
+group; the Project overview's Actions section edits them and offers suggestions
+the person confirms. Choosing one runs it in the window's pinned Project
+terminal, or opens and pins one, and enters Zen to show it (see
+[Project actions](../architecture.md#security-and-authority)). Add browser
 likewise offers the window's Work or Code Project as "This Project": the dock
 names the Project, never a thread, and shows that Project's own page under the
 Project browsing context rule in the same section.

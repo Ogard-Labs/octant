@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   decodeCodeThreadId,
+  decodeWorkThreadId,
   THREAD_EXTERNAL_CONTENT_AGGREGATE,
   THREAD_RETENTION_EVENT_NAMES,
 } from "@octant/contracts";
@@ -15,6 +17,8 @@ import { GithubIssueContextService } from "../github/githubIssueContextService";
 import { LinearIssueContextService } from "../plugins/linear/linearIssueContextService";
 import { LINEAR_ISSUE_GET_OPERATION } from "@octant/contracts/linear-issues";
 import { GithubReadToolService } from "../github/githubReadToolService";
+import { TerminalSessionImports } from "../terminalSessions/terminalSessionImports";
+import { createTerminalSessionRouteHandler } from "../terminalSessionRoutes";
 import {
   isGithubIntegrationEffective,
   isLinearIntegrationEffective,
@@ -48,7 +52,7 @@ import {
   toolEgressLaunchTaintReference,
   ToolEgressRules,
 } from "../harness/nativeHarnessEgressRules";
-import { isNativeHarnessDriverKind } from "@octant/domain";
+import { isNativeHarnessDriverKind, workThreadAccessOf } from "@octant/domain";
 import type { ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { AgentRunsWiring } from "./agentRuns";
@@ -111,25 +115,49 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
     // thread marks it now.
     const toolEgressRules = new ToolEgressRules({
       journal: persistence.journal,
-      readCodeThread: (threadId) => {
+      readThread: (threadId) => {
         try {
-          const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
-          if (thread === undefined) return undefined;
-          const instance = persistence.readProviderInstance(thread.providerInstanceId);
-          return {
-            projectId: String(thread.projectId),
-            // Mirrors the harness composition: a harness thread's commands on
-            // macOS and Linux run on the network its posture resolves now.
-            commandsProxied:
+          const harnessCommandsProxied = (
+            providerInstanceId: Parameters<typeof persistence.readProviderInstance>[0],
+            executionPolicy: Parameters<
+              typeof resolveDefaultThreadEgressPolicy
+            >[0]["executionPolicy"],
+            mode: "work" | "code",
+          ) => {
+            const instance = persistence.readProviderInstance(providerInstanceId);
+            return (
               (process.platform === "darwin" || process.platform === "linux") &&
               instance !== undefined &&
               isNativeHarnessDriverKind(instance.driverKind) &&
               materializeHarnessToolNetwork(
-                resolveDefaultThreadEgressPolicy({
-                  mode: "code",
-                  executionPolicy: thread.executionPolicy,
-                }),
-              ) === "proxied",
+                resolveDefaultThreadEgressPolicy({ mode, executionPolicy }),
+              ) === "proxied"
+            );
+          };
+          const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+          if (thread !== undefined) {
+            return {
+              projectId: String(thread.projectId),
+              // Mirrors the harness composition: a harness thread's commands on
+              // macOS and Linux run on the network its posture resolves now.
+              commandsProxied: harnessCommandsProxied(
+                thread.providerInstanceId,
+                thread.executionPolicy,
+                "code",
+              ),
+            };
+          }
+          // Work and Code share the shell at the thread's level, so a Work
+          // thread's commands follow the same rules at its stored level.
+          const work = workThreadProjection.read(decodeWorkThreadId(threadId));
+          if (work === undefined) return undefined;
+          return {
+            projectId: String(work.projectId),
+            commandsProxied: harnessCommandsProxied(
+              work.providerInstanceId,
+              workThreadAccessOf(work.access).executionPolicy,
+              "work",
+            ),
           };
         } catch {
           return undefined;
@@ -175,7 +203,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       isMarked: (threadId: string) =>
         readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
     };
-    // Agent-to-agent messaging (decision 0063): the host owns admission,
+    // Agent-to-agent messaging: the host owns admission,
     // clamping, journaling, and delivery. The endpoint resolver is composed
     // lazily from the thread authorities declared later in this startup; a
     // send runs only inside a live turn, well after they exist.
@@ -225,7 +253,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
       // The admitting principal on a local host is the host user, whose Open
       // scope covers every mode. A remote window's narrower Open scope is a
-      // 0013 federation concern and stays out of this seam.
+      // federation concern and stays out of this seam.
       openModes: ["chat", "work", "code"],
     });
     // The sibling-threads tool's host side. It appends only to the reader's
@@ -302,12 +330,38 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       uuid: randomUUID,
       isEffective: linearIntegrationIsEffective,
     });
+    // The person's own command-line homes, where those tools keep sessions.
+    const claudeHome = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
+    const codexHome = process.env.CODEX_HOME ?? join(homedir(), ".codex");
+    const terminalSessionImports = new TerminalSessionImports({
+      journal: persistence.journal,
+      roots: () => ({
+        claudeProjects: join(claudeHome, "projects"),
+        codexSessions: join(codexHome, "sessions"),
+        codexSessionIndex: join(codexHome, "session_index.jsonl"),
+      }),
+      clock: () => new Date().toISOString(),
+      uuid: randomUUID,
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+    const terminalSessionRoutes = createTerminalSessionRouteHandler({
+      windowAuthorityStore,
+      imports: terminalSessionImports,
+      readProject: (projectId) => persistence.readProject(projectId),
+      ...(options.allowedRendererHttpOrigin === undefined
+        ? {}
+        : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
+    });
+    // A thread starts from at most one outside source: an issue, or a
+    // terminal session. Its first admitted turn carries it.
     const peekCreateFromIssueFramed = (threadId: string) =>
       githubIssueContextService.peekFramedForFirstTurn(threadId) ??
-      linearIssueContextService.peekFramedForFirstTurn(threadId);
+      linearIssueContextService.peekFramedForFirstTurn(threadId) ??
+      terminalSessionImports.peekFramedForFirstTurn(threadId);
     const consumeCreateFromIssueFramed = (threadId: string) => {
       githubIssueContextService.consumeFramedForFirstTurn(threadId);
       linearIssueContextService.consumeFramedForFirstTurn(threadId);
+      terminalSessionImports.consumeFramedForFirstTurn(threadId);
     };
     const integrationRoutes = createIntegrationRouteHandler({
       windowAuthorityStore,
@@ -333,6 +387,8 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       onGithubPullRequestsUnreadable,
       peekCreateFromIssueFramed,
       siblingThreadsService,
+      terminalSessionImports,
+      terminalSessionRoutes,
       threadOutsideContentMarks,
       toolEgressRules,
     };

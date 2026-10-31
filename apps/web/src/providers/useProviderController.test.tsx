@@ -1,3 +1,4 @@
+import { keyringAdvice } from "@octant/domain/keyring-advice";
 import {
   decodeProviderInstance,
   decodeProviderInstanceId,
@@ -1582,6 +1583,36 @@ describe("useProviderController", () => {
     expect(result.current.message).toBe(
       "The provider credential could not be stored, so the configuration was unchanged.",
     );
+  });
+
+  it("names why the keyring would not take a key and what to do next", async () => {
+    const configuration = {
+      kind: "fx-acp",
+      binaryPath: "/Users/example/.local/bin/fx",
+      authentication: "api-key",
+    } as const;
+    const api = client(
+      snapshot([dualAuthCliProvider({ driverKind: "fx", displayName: "fx local", configuration })]),
+    );
+    const host = credentialHost();
+    const advice = keyringAdvice({ category: "unavailable", cause: "no-service" });
+    vi.mocked(host.addProviderApiKey).mockRejectedValue(new Error(advice));
+    const { result } = renderHook(() => useProviderController({ client: api, hostBridge: host }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await result.current.changeAcpAgentConfiguration(
+        id,
+        { ...configuration, binaryPath: "/opt/homebrew/bin/fx" },
+        transientCredential("private-value"),
+      );
+    });
+
+    expect(result.current.message).toBe(
+      `The provider credential could not be stored, so the configuration was unchanged. ${advice}`,
+    );
+    expect(advice).toContain("No keyring is running");
+    expect(advice).toContain("without a restart");
   });
 
   it("creates Claude API-key configuration before write-only credential storage", async () => {
@@ -3562,7 +3593,7 @@ function observation(patch: Partial<ProviderObservedState> = {}): ProviderObserv
       ].map((key) => [key, "supported"]),
     ) as Omit<
       Awaited<ReturnType<ProviderClient["probe"]>>["capabilities"],
-      "sessionCompaction" | "nativeArtifacts"
+      "sessionCompaction" | "nativeArtifacts" | "nativeSetup"
     >,
     observedAt: "2026-07-14T10:00:00.000Z" as never,
     ...patch,
@@ -3578,7 +3609,10 @@ function failureObservation(
     models: [],
     capabilities: Object.fromEntries(
       Object.keys(observation().capabilities).map((key) => [key, "unavailable"]),
-    ) as Omit<ProviderObservedState["capabilities"], "sessionCompaction" | "nativeArtifacts">,
+    ) as Omit<
+      ProviderObservedState["capabilities"],
+      "sessionCompaction" | "nativeArtifacts" | "nativeSetup"
+    >,
     message: "Provider probe failed.",
   });
 }

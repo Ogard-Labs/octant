@@ -1,5 +1,8 @@
 import type { CodeDiffLayout, CodeSettings } from "@octant/contracts/code";
-import type { SettingsSettingId } from "@octant/contracts";
+import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
+import type { AutoReviewer, ShieldModelChoice } from "@octant/contracts/shield";
+import type { PermissionMode, SettingsSettingId } from "@octant/contracts";
+import { permissionModeOf, threadAccessOf } from "@octant/domain/guardrail-policy";
 import { useRef, useState } from "react";
 import { SettingRow, SettingsSection } from "../settings/primitives";
 import { OctantFieldError } from "../ui/base/OctantField";
@@ -8,10 +11,16 @@ import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
+import { useFullAccessWarning } from "./FullAccessWarning";
+import { PERMISSION_MODE_OPTIONS } from "./PermissionModePicker";
 
 export interface CodeSettingsUpdate {
   readonly defaultExecutionPolicy: CodeSettings["defaultExecutionPolicy"];
   readonly defaultPermissionPersistence: CodeSettings["defaultPermissionPersistence"];
+  readonly defaultAutoApprove?: boolean;
+  readonly autoReviewer?: AutoReviewer;
+  /** Null returns Octant Shield to each thread's own provider. */
+  readonly shieldModel?: ShieldModelChoice | null;
   readonly externalEditor?: NonNullable<CodeSettings["externalEditor"]>;
   readonly requireGitRepository?: boolean;
   readonly defaultDiffLayout?: CodeDiffLayout;
@@ -19,8 +28,7 @@ export interface CodeSettingsUpdate {
 }
 
 interface CodeSettingsDraft {
-  readonly executionPolicy: CodeSettings["defaultExecutionPolicy"];
-  readonly permissionPersistence: CodeSettings["defaultPermissionPersistence"];
+  readonly permissionMode: PermissionMode;
   readonly requireGitRepository: boolean;
   readonly defaultDiffLayout: CodeDiffLayout;
   readonly executable: string;
@@ -31,10 +39,63 @@ export interface CodeSettingsViewProps {
   readonly focusedSetting?: SettingsSettingId | undefined;
   readonly onUpdate: (input: CodeSettingsUpdate) => Promise<boolean>;
   readonly settings: CodeSettings;
+  /** The configured providers Octant Shield may judge with. */
+  readonly providerSnapshot?: ProviderRegistrySnapshot | undefined;
+}
+
+const AUTO_REVIEWER_OPTIONS: ReadonlyArray<{ readonly id: AutoReviewer; readonly label: string }> =
+  [
+    { id: "provider", label: "Provider's own" },
+    { id: "octant-shield", label: "Octant Shield" },
+  ];
+
+/** The Shield model choice as one select value; empty is each thread's own provider. */
+const THREAD_PROVIDER_MODEL = "thread-provider";
+const modelValue = (choice: ShieldModelChoice | undefined) =>
+  choice === undefined
+    ? THREAD_PROVIDER_MODEL
+    : `${String(choice.providerInstanceId)}/${String(choice.modelId)}`;
+
+/**
+ * The endpoints Octant Shield may judge with: each enabled provider's
+ * catalogued models, local ones included. The default is each thread's own
+ * provider account with that provider's smallest model.
+ */
+function shieldModelOptions(
+  snapshot: ProviderRegistrySnapshot | undefined,
+  current: ShieldModelChoice | undefined,
+): ReadonlyArray<{
+  readonly id: string;
+  readonly label: string;
+  readonly choice?: ShieldModelChoice;
+}> {
+  const options: Array<{ id: string; label: string; choice?: ShieldModelChoice }> = [
+    { id: THREAD_PROVIDER_MODEL, label: "Each thread's provider, smallest model" },
+  ];
+  for (const instance of snapshot?.instances ?? []) {
+    if (!instance.enabled) continue;
+    const catalog = snapshot?.catalogs?.find(
+      (candidate) => String(candidate.instanceId) === String(instance.id),
+    );
+    for (const model of catalog?.models ?? []) {
+      const choice = { providerInstanceId: instance.id, modelId: model.id };
+      options.push({
+        id: modelValue(choice),
+        label: `${instance.displayName} · ${model.displayName}`,
+        choice,
+      });
+    }
+  }
+  // A stored choice whose provider is gone is still shown, so the select
+  // never claims a choice the host does not hold.
+  if (current !== undefined && !options.some((option) => option.id === modelValue(current))) {
+    options.push({ id: modelValue(current), label: String(current.modelId), choice: current });
+  }
+  return options;
 }
 
 /** The section holding the control a change came from. */
-type CodeSettingsSectionId = "thread-defaults" | "editor" | "external-editor";
+type CodeSettingsSectionId = "access" | "thread-defaults" | "editor" | "external-editor";
 
 /**
  * Why the last change was not kept. A refusal is said in the section whose
@@ -49,21 +110,26 @@ interface CodeSettingsFeedback {
   readonly message: string;
 }
 
-const ACCESS_OPTIONS: ReadonlyArray<{
-  readonly id: CodeSettings["defaultExecutionPolicy"];
-  readonly label: string;
-}> = [
-  { id: "approval-gated", label: "Ask for approvals" },
-  { id: "auto-accept-edits", label: "Auto-accept edits" },
-  { id: "plan", label: "Plan · read-only" },
-  { id: "full-access", label: "Full access" },
-];
+const MODE_OPTIONS = PERMISSION_MODE_OPTIONS.map((option) => ({
+  id: option.id,
+  label: option.id === "auto" ? "Auto · Recommended" : option.label,
+}));
+
+function permissionModeOfSettings(settings: CodeSettings): PermissionMode {
+  return permissionModeOf({
+    executionPolicy: settings.defaultExecutionPolicy,
+    autoApprove: settings.defaultAutoApprove,
+  });
+}
 
 export function CodeSettingsView(props: CodeSettingsViewProps) {
-  const [executionPolicy, setExecutionPolicy] = useState(props.settings.defaultExecutionPolicy);
-  const [permissionPersistence, setPermissionPersistence] = useState(
-    props.settings.defaultPermissionPersistence,
+  const [permissionMode, setPermissionMode] = useState(permissionModeOfSettings(props.settings));
+  const [autoReviewer, setAutoReviewer] = useState<AutoReviewer>(
+    props.settings.autoReviewer ?? "provider",
   );
+  const [shieldModel, setShieldModel] = useState(modelValue(props.settings.shieldModel));
+  const shieldModels = shieldModelOptions(props.providerSnapshot, props.settings.shieldModel);
+  const fullAccessWarning = useFullAccessWarning("machine");
   const [requireGitRepository, setRequireGitRepository] = useState(
     props.settings.requireGitRepository,
   );
@@ -80,14 +146,9 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
   const [previousSettings, setPreviousSettings] = useState(props.settings);
   if (previousSettings !== props.settings) {
     setPreviousSettings(props.settings);
-    setExecutionPolicy((current) =>
-      current === previousSettings.defaultExecutionPolicy
-        ? props.settings.defaultExecutionPolicy
-        : current,
-    );
-    setPermissionPersistence((current) =>
-      current === previousSettings.defaultPermissionPersistence
-        ? props.settings.defaultPermissionPersistence
+    setPermissionMode((current) =>
+      current === permissionModeOfSettings(previousSettings)
+        ? permissionModeOfSettings(props.settings)
         : current,
     );
     setRequireGitRepository((current) =>
@@ -130,14 +191,21 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
    * can correct it.
    */
   function restoreUnsavedPicks(
-    change: Partial<CodeSettingsDraft> & { readonly bundledLanguageServer?: boolean },
+    change: Partial<CodeSettingsDraft> & {
+      readonly bundledLanguageServer?: boolean;
+      readonly autoReviewer?: AutoReviewer;
+      readonly shieldModel?: ShieldModelChoice | null;
+    },
   ) {
     const host = hostSettings.current;
-    if (change.executionPolicy !== undefined) {
-      setExecutionPolicy(host.defaultExecutionPolicy);
+    if (change.autoReviewer !== undefined) {
+      setAutoReviewer(host.autoReviewer ?? "provider");
     }
-    if (change.permissionPersistence !== undefined) {
-      setPermissionPersistence(host.defaultPermissionPersistence);
+    if (change.shieldModel !== undefined) {
+      setShieldModel(modelValue(host.shieldModel));
+    }
+    if (change.permissionMode !== undefined) {
+      setPermissionMode(permissionModeOfSettings(host));
     }
     if (change.requireGitRepository !== undefined) {
       setRequireGitRepository(host.requireGitRepository);
@@ -158,11 +226,14 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
    */
   async function commit(
     section: CodeSettingsSectionId,
-    change: Partial<CodeSettingsDraft> & { readonly bundledLanguageServer?: boolean },
+    change: Partial<CodeSettingsDraft> & {
+      readonly bundledLanguageServer?: boolean;
+      readonly autoReviewer?: AutoReviewer;
+      readonly shieldModel?: ShieldModelChoice | null;
+    },
   ) {
     const draft: CodeSettingsDraft = {
-      executionPolicy,
-      permissionPersistence,
+      permissionMode,
       requireGitRepository,
       defaultDiffLayout,
       executable,
@@ -192,9 +263,15 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     }
     let updated = false;
     try {
+      const access = threadAccessOf(draft.permissionMode);
       updated = await props.onUpdate({
-        defaultExecutionPolicy: draft.executionPolicy,
-        defaultPermissionPersistence: draft.permissionPersistence,
+        defaultExecutionPolicy: access.executionPolicy,
+        defaultPermissionPersistence: hostSettings.current.defaultPermissionPersistence,
+        // The host keeps what it stored when a change leaves these out, so
+        // only an Access change carries them.
+        ...(change.permissionMode === undefined ? {} : { defaultAutoApprove: access.autoApprove }),
+        ...(change.autoReviewer === undefined ? {} : { autoReviewer: change.autoReviewer }),
+        ...(change.shieldModel === undefined ? {} : { shieldModel: change.shieldModel }),
         requireGitRepository: draft.requireGitRepository,
         defaultDiffLayout: draft.defaultDiffLayout,
         // The host keeps the stored switch when a change leaves it out, so
@@ -222,49 +299,80 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     <section aria-label="Code defaults" className="code-settings">
       <h2 className="sr-only">Code defaults</h2>
       <SettingsSection
-        description="Access defaults apply only to new Code threads. Existing threads keep their access. The diff layout default is used until a thread has its own choice."
-        title="Thread defaults"
+        description="The mode new threads start in. A Project can choose its own, and any thread can switch from its composer. Existing threads keep their mode."
+        title="Access"
       >
         <div className="setgroup">
           <SettingRow
-            description="The authority a new Code thread requests at creation."
-            label="Default Code access"
+            description="Auto lets a reviewer approve each action: the provider's own or Octant Shield. Where none can run, threads ask first."
+            label="Default mode"
             scope="mode"
             settingId="code-default-access"
           >
             <OctantSelectField
-              aria-label="Default Code access"
+              aria-label="Default mode"
               className="settings-view__select window-no-drag"
               onValueChange={(value) => {
-                const option = ACCESS_OPTIONS.find((candidate) => candidate.id === value);
+                const option = MODE_OPTIONS.find((candidate) => candidate.id === value);
                 if (option === undefined) return;
-                setExecutionPolicy(option.id);
-                void commit("thread-defaults", { executionPolicy: option.id });
+                fullAccessWarning.guard(option.id, () => {
+                  setPermissionMode(option.id);
+                  void commit("access", { permissionMode: option.id });
+                });
               }}
-              options={ACCESS_OPTIONS}
-              value={executionPolicy}
+              options={MODE_OPTIONS}
+              value={permissionMode}
             />
           </SettingRow>
           <SettingRow
-            description="Whether approvals end with the session or follow the Project default."
-            label="Default approval persistence"
+            description="Who approves actions at Auto. Provider's own uses the provider's reviewer where it has one and Octant Shield elsewhere. A Project can choose its own."
+            focused={props.focusedSetting === "code-auto-reviewer"}
+            label="Auto reviewer"
             scope="mode"
-            settingId="code-approval-persistence"
+            settingId="code-auto-reviewer"
           >
-            <OctantToggleGroup<CodeSettings["defaultPermissionPersistence"]>
-              aria-label="Default approval persistence"
+            <OctantSelectField
+              aria-label="Auto reviewer"
+              className="settings-view__select window-no-drag"
               onValueChange={(value) => {
-                const selected = value[0];
-                if (selected === undefined) return;
-                setPermissionPersistence(selected);
-                void commit("thread-defaults", { permissionPersistence: selected });
+                const option = AUTO_REVIEWER_OPTIONS.find((candidate) => candidate.id === value);
+                if (option === undefined || option.id === autoReviewer) return;
+                setAutoReviewer(option.id);
+                void commit("access", { autoReviewer: option.id });
               }}
-              value={[permissionPersistence]}
-            >
-              <OctantToggleGroupItem value="current-session">Session</OctantToggleGroupItem>
-              <OctantToggleGroupItem value="project-default">Project</OctantToggleGroupItem>
-            </OctantToggleGroup>
+              options={AUTO_REVIEWER_OPTIONS}
+              value={autoReviewer}
+            />
           </SettingRow>
+          <SettingRow
+            description="The model Octant Shield asks about actions no rule decides. It sees only your messages and the pending action, never files, tool output, or web pages, and its use counts against your spend limits."
+            focused={props.focusedSetting === "code-shield-model"}
+            label="Shield model"
+            scope="mode"
+            settingId="code-shield-model"
+          >
+            <OctantSelectField
+              aria-label="Shield model"
+              className="settings-view__select window-no-drag"
+              onValueChange={(value) => {
+                const option = shieldModels.find((candidate) => candidate.id === value);
+                if (option === undefined || option.id === shieldModel) return;
+                setShieldModel(option.id);
+                void commit("access", { shieldModel: option.choice ?? null });
+              }}
+              options={shieldModels.map(({ id, label }) => ({ id, label }))}
+              value={shieldModel}
+            />
+          </SettingRow>
+        </div>
+        <CodeSettingsFeedbackSlot feedback={feedback} section="access" />
+      </SettingsSection>
+      {fullAccessWarning.dialog}
+      <SettingsSection
+        description="The diff layout default is used until a thread has its own choice."
+        title="Thread defaults"
+      >
+        <div className="setgroup">
           <SettingRow
             description="Off lets a Code thread start in a plain folder, the default folder included; branches, diffs, and pull requests stay unavailable there."
             label="Code needs a Git repository"

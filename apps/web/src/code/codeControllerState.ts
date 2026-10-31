@@ -569,6 +569,15 @@ async function projectConversationTurns(
           state: step.state,
           ...(step.summary === undefined ? {} : { summary: step.summary }),
           ...(step.published === undefined ? {} : { published: step.published }),
+          ...(step.outsideContent === undefined ? {} : { outsideContent: step.outsideContent }),
+        });
+        continue;
+      }
+      if (step.kind === "review") {
+        replayed = applyActivityEvent(replayed, {
+          kind: "approval-reviewed",
+          summary: step.summary,
+          decision: step.decision,
         });
         continue;
       }

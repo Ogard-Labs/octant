@@ -495,6 +495,25 @@
   justify-self: start;
 }
 
+.environment-extra-folders {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  gap: var(--oct-space-1);
+  list-style: none;
+}
+
+.environment-extra-folders li {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-fg-2);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* An empty open row still states what is true, in the summaries' register. */
 .environment-subagents__empty {
   margin: 0;

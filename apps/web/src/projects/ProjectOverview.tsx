@@ -1,7 +1,15 @@
+import type { KeyProviderDriverKinds, PermissionMode } from "@octant/contracts/providers";
+import type { AutoReviewer } from "@octant/contracts/shield";
 import { createDesktopPaneClient } from "@octant/client-runtime/desktop-pane-client";
+import { createProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
-import type { ProjectAvailability, ProjectId, ProjectSummary } from "@octant/contracts/projects";
+import type {
+  ProjectAction,
+  ProjectAvailability,
+  ProjectId,
+  ProjectSummary,
+} from "@octant/contracts/projects";
 import type { CanvasDesignBrand } from "@octant/contracts/canvas";
 import type { DesktopRecipe, DesktopRecipeKeyChange } from "@octant/contracts/desktop-lease";
 import type { ProjectColor, ProjectProviderPolicy } from "@octant/contracts/projects";
@@ -17,8 +25,14 @@ import { FolderPicker } from "./FolderPicker";
 import { ProjectMemorySection } from "./ProjectMemorySection";
 import { ProjectThreadsSection } from "./ProjectThreadsSection";
 import { ProjectBrandKitSection } from "./ProjectBrandKitSection";
+import { ProjectActionsSection } from "./ProjectActionsSection";
+import { ProjectFoldersSection } from "./ProjectFoldersSection";
+import type { ProjectChange } from "./useProjectController";
 import { ProjectDesktopRecipeSection } from "./ProjectDesktopRecipeSection";
+import { ProjectAutoReviewerSection } from "./ProjectAutoReviewerSection";
+import { ProjectPermissionModeSection } from "./ProjectPermissionModeSection";
 import { ProjectProviderPolicySection } from "./ProjectProviderPolicySection";
+import { ProjectNativeProvidersSection } from "./ProjectNativeProvidersSection";
 import {
   PROJECT_COLOR_MENU_ITEMS,
   ProjectTile,
@@ -45,12 +59,33 @@ export interface ProjectOverviewProps {
   readonly onMemoryChanged?: () => void;
   readonly onNewThread?: () => void;
   readonly onRelink: (projectId: ProjectId, receiptId: string) => Promise<boolean>;
+  /** Absent when the host cannot accept the change; the Project's folders are then read-only. */
+  readonly onAddExtraFolder?: (projectId: ProjectId, receiptId: string) => Promise<ProjectChange>;
+  readonly onRemoveExtraFolder?: (
+    projectId: ProjectId,
+    canonicalRoot: string,
+  ) => Promise<ProjectChange>;
   readonly onRename: (projectId: ProjectId, name: string) => Promise<boolean>;
   /** Absent when the host cannot accept a colour change; the tile is then only a mark. */
   readonly onColorChange?: (projectId: ProjectId, color: ProjectColor | null) => Promise<boolean>;
   readonly onProviderPolicyChange?: (
     projectId: ProjectId,
     policy: ProjectProviderPolicy,
+  ) => Promise<boolean>;
+  /** Sets which key providers run as themselves in this Work or Code Project. */
+  readonly onNativeProvidersChange?: (
+    projectId: ProjectId,
+    providers: KeyProviderDriverKinds,
+  ) => Promise<boolean>;
+  /** Sets the mode this Code Project's new threads start in; absent follows Settings. */
+  readonly onPermissionModeChange?: (
+    projectId: ProjectId,
+    permissionMode: PermissionMode | undefined,
+  ) => Promise<boolean>;
+  /** Sets who answers this Code Project's prompts at Auto; absent follows Settings. */
+  readonly onAutoReviewerChange?: (
+    projectId: ProjectId,
+    autoReviewer: AutoReviewer | undefined,
   ) => Promise<boolean>;
   /** Absent when the host cannot accept the change; the brand kit is then not shown. */
   readonly onBrandKitChange?: (
@@ -62,6 +97,11 @@ export interface ProjectOverviewProps {
     projectId: ProjectId,
     recipe: DesktopRecipe | null,
     key?: DesktopRecipeKeyChange,
+  ) => Promise<boolean>;
+  /** Absent when the host cannot accept the change; a Code Project's actions are then not shown. */
+  readonly onActionsChange?: (
+    projectId: ProjectId,
+    actions: ReadonlyArray<ProjectAction>,
   ) => Promise<boolean>;
   /** The host this window reaches, so the recipe editor can ask which desktop providers it offers. */
   readonly serverUrl?: string;
@@ -84,6 +124,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
   const archived = props.project.lifecycle === "archived";
   const connectionStale = props.connectionStale === true;
   const allowRootRelink = props.allowRootRelink !== false;
+  const { onAddExtraFolder, onRemoveExtraFolder } = props;
   const unavailable = props.project.type !== "chat" && props.availability?.status === "unavailable";
   const boundMode = props.project.type === "code" ? "code" : "work";
   // A base URL the client refuses (a remote host over plain HTTP) leaves the
@@ -93,6 +134,19 @@ export function ProjectOverview(props: ProjectOverviewProps) {
     if (serverUrl === undefined || windowCapability === undefined) return undefined;
     try {
       return createDesktopPaneClient({
+        baseUrl: serverUrl,
+        fetch: globalThis.fetch,
+        windowCapability,
+      });
+    } catch {
+      return undefined;
+    }
+  }, [serverUrl, windowCapability]);
+
+  const projectTerminalClient = useMemo(() => {
+    if (serverUrl === undefined || windowCapability === undefined) return undefined;
+    try {
+      return createProjectTerminalClient({
         baseUrl: serverUrl,
         fetch: globalThis.fetch,
         windowCapability,
@@ -270,15 +324,27 @@ export function ProjectOverview(props: ProjectOverviewProps) {
         </header>
         {props.project.type !== "chat" ? (
           <section className="project-overview__context" aria-label="Project binding">
-            <div className="project-overview__root">
-              <span>{props.project.type === "code" ? "Repository" : "Directory"}</span>
-              <strong title={props.project.binding.canonicalRoot}>
-                <span aria-hidden="true">
-                  {homeRelativePath(props.project.binding.canonicalRoot)}
-                </span>
-                <span className="sr-only">{props.project.binding.canonicalRoot}</span>
-              </strong>
-            </div>
+            <ProjectFoldersSection
+              key={String(props.project.id)}
+              disabled={archived || connectionStale}
+              {...(props.folderBrowseClient === undefined
+                ? {}
+                : { folderBrowseClient: props.folderBrowseClient })}
+              {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+              {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
+              {...(onAddExtraFolder === undefined
+                ? {}
+                : {
+                    onAdd: (receiptId: string) => onAddExtraFolder(props.project.id, receiptId),
+                  })}
+              {...(onRemoveExtraFolder === undefined
+                ? {}
+                : {
+                    onRemove: (canonicalRoot: string) =>
+                      onRemoveExtraFolder(props.project.id, canonicalRoot),
+                  })}
+              project={props.project}
+            />
             {unavailable ? (
               <OctantAlert className="project-overview__warning" tone="warning">
                 <div className="project-overview__warning-copy">
@@ -409,6 +475,69 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                   }
                   project={props.project}
                   providerInstances={props.providerInstances ?? []}
+                />
+              </ProjectOverviewInspector>
+            ) : null}
+            {props.project.type !== "chat" && props.onNativeProvidersChange !== undefined ? (
+              <ProjectOverviewInspector
+                key={`${String(props.project.id)}-native-providers`}
+                label="Trusted providers"
+                summary="Let a provider load this Project's own hooks, MCP servers, and plugins"
+              >
+                <ProjectNativeProvidersSection
+                  disabled={archived || connectionStale}
+                  onChange={async (providers) =>
+                    (await props.onNativeProvidersChange?.(props.project.id, providers)) ?? false
+                  }
+                  project={props.project}
+                />
+              </ProjectOverviewInspector>
+            ) : null}
+            {props.project.type === "code" && props.onActionsChange !== undefined ? (
+              <ProjectOverviewInspector
+                key={`${String(props.project.id)}-actions`}
+                label="Actions"
+                summary="Run, Test, Dev and other commands for this Project's terminal"
+              >
+                <ProjectActionsSection
+                  {...(projectTerminalClient === undefined
+                    ? {}
+                    : { client: projectTerminalClient })}
+                  disabled={archived || connectionStale}
+                  onChange={async (actions) =>
+                    (await props.onActionsChange?.(props.project.id, actions)) ?? false
+                  }
+                  project={props.project}
+                />
+              </ProjectOverviewInspector>
+            ) : null}
+            {props.project.type === "code" && props.onPermissionModeChange !== undefined ? (
+              <ProjectOverviewInspector
+                key={`${String(props.project.id)}-mode`}
+                label="Default mode"
+                summary="The mode this Project's new threads start in"
+              >
+                <ProjectPermissionModeSection
+                  disabled={archived || connectionStale}
+                  onChange={async (mode) =>
+                    (await props.onPermissionModeChange?.(props.project.id, mode)) ?? false
+                  }
+                  project={props.project}
+                />
+              </ProjectOverviewInspector>
+            ) : null}
+            {props.project.type === "code" && props.onAutoReviewerChange !== undefined ? (
+              <ProjectOverviewInspector
+                key={`${String(props.project.id)}-auto-reviewer`}
+                label="Auto reviewer"
+                summary="Who approves this Project's actions at Auto"
+              >
+                <ProjectAutoReviewerSection
+                  disabled={archived || connectionStale}
+                  onChange={async (reviewer) =>
+                    (await props.onAutoReviewerChange?.(props.project.id, reviewer)) ?? false
+                  }
+                  project={props.project}
                 />
               </ProjectOverviewInspector>
             ) : null}
@@ -548,15 +677,10 @@ function label(type: ProjectSummary["type"]): string {
   return type === "chat" ? "Chat" : type === "work" ? "Work" : "Code";
 }
 
-/** The home prefix repeats on every Project; the full path stays in the title. */
-function homeRelativePath(path: string): string {
-  return path.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, "~");
-}
-
 function authorityCopy(type: ProjectSummary["type"]): string {
   if (type === "chat")
     return "Virtual organization with approved memory and no implicit host access.";
   if (type === "work")
-    return "Bound to one confined directory. Knowledge-work stays inside the Project root.";
-  return "Bound to one Git repository. New Code work starts approval-gated.";
+    return "Confined to the Project's folders. Knowledge-work stays inside them.";
+  return "Checkouts and Git stay in the main repository. New Code work starts approval-gated.";
 }

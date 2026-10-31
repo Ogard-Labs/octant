@@ -246,6 +246,44 @@ describe("Code operation contracts", () => {
     expect(request.effect.kind).toBe("android-action");
   });
 
+  it("decodes labels, close, reopen, and both force modes as the commands they extend", () => {
+    const push = {
+      kind: "push-git",
+      ...scope,
+      gitOperationId: ids.git,
+      remote: "origin",
+      localRef: "refs/heads/feature/contracts",
+      remoteRef: "refs/heads/feature/contracts",
+      expectedHeadOid: "b".repeat(40),
+      expectedStateToken: "a".repeat(64),
+      confirmation: {
+        remote: "origin",
+        refspec: "refs/heads/feature/contracts:refs/heads/feature/contracts",
+      },
+      authorization: { kind: "approved", approvalId: ids.approval },
+    };
+    for (const force of [
+      { mode: "with-lease", expectedRemoteOid: "c".repeat(40) },
+      { mode: "plain" },
+    ]) {
+      expect(decodeCodeOperationCommand({ ...push, force })).toMatchObject({ force });
+    }
+    for (const update of [
+      { addLabels: ["bug"], removeLabels: ["wip"] },
+      { state: "closed" },
+      { state: "open" },
+    ]) {
+      expect(
+        decodeCodeOperationCommand({
+          kind: "update-pull-request",
+          ...scope,
+          ...update,
+          authorization: { kind: "full-access" },
+        }),
+      ).toMatchObject(update);
+    }
+  });
+
   it("decodes the complete closed command surface", () => {
     const commands = [
       {
@@ -318,6 +356,26 @@ describe("Code operation contracts", () => {
         title: "Add operation contracts",
         body: "Strict provider-neutral operation schemas.",
         idempotencyKey: "pr-create-001",
+        authorization: { kind: "full-access" },
+      },
+      {
+        kind: "update-pull-request",
+        ...scope,
+        draft: false,
+        authorization: { kind: "full-access" },
+      },
+      {
+        kind: "comment-pull-request",
+        ...scope,
+        body: "Fixed in the next commit.",
+        reviewThreadId: "PRRT_kwDOabc123",
+        authorization: { kind: "full-access" },
+      },
+      {
+        kind: "merge-pull-request",
+        ...scope,
+        method: "squash",
+        headSha: "a".repeat(40),
         authorization: { kind: "full-access" },
       },
       { kind: "observe-pull-request", ...scope, maxDiffBytes: 262_144 },
@@ -417,6 +475,125 @@ describe("Code operation contracts", () => {
         headBranch: "evil",
         baseRepository: "other/repo",
         baseBranch: "main",
+      },
+      {
+        kind: "push-git",
+        ...scope,
+        gitOperationId: ids.git,
+        remote: "origin",
+        localRef: "refs/heads/feature/contracts",
+        remoteRef: "refs/heads/feature/contracts",
+        expectedHeadOid: "b".repeat(40),
+        expectedStateToken: "a".repeat(64),
+        confirmation: {
+          remote: "origin",
+          refspec: "refs/heads/feature/contracts:refs/heads/feature/contracts",
+        },
+        force: { mode: "with-lease" },
+        authorization: { kind: "approved", approvalId: ids.approval },
+      },
+      {
+        kind: "push-git",
+        ...scope,
+        gitOperationId: ids.git,
+        remote: "origin",
+        localRef: "refs/heads/feature/contracts",
+        remoteRef: "refs/heads/feature/contracts",
+        expectedHeadOid: "b".repeat(40),
+        expectedStateToken: "a".repeat(64),
+        confirmation: {
+          remote: "origin",
+          refspec: "refs/heads/feature/contracts:refs/heads/feature/contracts",
+        },
+        force: { mode: "with-lease", expectedRemoteOid: "--force" },
+        authorization: { kind: "approved", approvalId: ids.approval },
+      },
+      {
+        kind: "push-git",
+        ...scope,
+        gitOperationId: ids.git,
+        remote: "origin",
+        localRef: "refs/heads/feature/contracts",
+        remoteRef: "refs/heads/feature/contracts",
+        expectedHeadOid: "b".repeat(40),
+        expectedStateToken: "a".repeat(64),
+        confirmation: {
+          remote: "origin",
+          refspec: "refs/heads/feature/contracts:refs/heads/feature/contracts",
+        },
+        force: { mode: "plain", expectedRemoteOid: "c".repeat(40) },
+        authorization: { kind: "approved", approvalId: ids.approval },
+      },
+      {
+        kind: "push-git",
+        ...scope,
+        gitOperationId: ids.git,
+        remote: "origin",
+        localRef: "refs/heads/feature/contracts",
+        remoteRef: "refs/heads/feature/contracts",
+        expectedHeadOid: "b".repeat(40),
+        expectedStateToken: "a".repeat(64),
+        confirmation: {
+          remote: "origin",
+          refspec: "refs/heads/feature/contracts:refs/heads/feature/contracts",
+        },
+        force: { mode: "mirror" },
+        authorization: { kind: "approved", approvalId: ids.approval },
+      },
+      { kind: "update-pull-request", ...scope, authorization: { kind: "full-access" } },
+      {
+        kind: "update-pull-request",
+        ...scope,
+        addLabels: [],
+        authorization: { kind: "full-access" },
+      },
+      {
+        kind: "update-pull-request",
+        ...scope,
+        addLabels: ["a,b"],
+        authorization: { kind: "full-access" },
+      },
+      {
+        kind: "update-pull-request",
+        ...scope,
+        state: "closed",
+        title: "Close and rename",
+        authorization: { kind: "full-access" },
+      },
+      {
+        kind: "update-pull-request",
+        ...scope,
+        state: "deleted",
+        authorization: { kind: "full-access" },
+      },
+      { kind: "comment-pull-request", ...scope, body: "", authorization: { kind: "full-access" } },
+      {
+        kind: "comment-pull-request",
+        ...scope,
+        body: "x",
+        reviewThreadId: "has spaces",
+        authorization: { kind: "full-access" },
+      },
+      {
+        kind: "merge-pull-request",
+        ...scope,
+        method: "fast-forward",
+        headSha: "a".repeat(40),
+        authorization: { kind: "full-access" },
+      },
+      {
+        kind: "merge-pull-request",
+        ...scope,
+        method: "merge",
+        headSha: "main",
+        authorization: { kind: "full-access" },
+      },
+      {
+        kind: "update-pull-request",
+        ...scope,
+        number: 12,
+        title: "Another pull request",
+        authorization: { kind: "full-access" },
       },
       {
         kind: "create-review-finding",

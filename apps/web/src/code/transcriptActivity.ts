@@ -89,6 +89,7 @@ function foldToolEvent(
 ): ToolActivityRow {
   const summary = event.summary ?? previous?.summary;
   const published = event.published ?? previous?.published;
+  const outsideContent = event.outsideContent ?? previous?.outsideContent;
   return {
     kind: "tool",
     id: String(event.toolCallId),
@@ -96,6 +97,7 @@ function foldToolEvent(
     state: event.state,
     ...(summary === undefined ? {} : { summary }),
     ...(published === undefined ? {} : { published }),
+    ...(outsideContent === undefined ? {} : { outsideContent }),
   };
 }
 
@@ -116,6 +118,20 @@ export function applyActivityEvent(
     return {
       ...rest,
       rows: upsert(activity.rows, foldToolEvent(previousTool(activity.rows, id), event)),
+    };
+  }
+  if (event.kind === "approval-reviewed") {
+    return {
+      ...activity,
+      rows: [
+        ...activity.rows,
+        {
+          kind: "review",
+          id: `${event.decision.decidedAt}:${String(activity.rows.length)}`,
+          summary: event.summary,
+          decision: event.decision,
+        },
+      ],
     };
   }
   if (event.kind === "task-progress") {

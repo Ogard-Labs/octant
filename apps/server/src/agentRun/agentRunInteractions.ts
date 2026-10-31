@@ -4,30 +4,68 @@ import type {
   AgentRunId,
   NativeHarnessApproval,
   NativeHarnessCommandHost,
+  ProviderApprovalCall,
   ProviderRuntimeEvent,
   ProviderInstanceId,
   NativeHarnessSlotCandidate,
+  ShieldWatcherLabel,
 } from "@octant/contracts";
 import {
   clampAgentRunAuthority,
   effectiveAgentRunExecutionTarget,
 } from "@octant/domain/agent-run-policy";
+import {
+  shieldCallFromHarness,
+  shieldCallFromProviderRequest,
+  type ShieldCall,
+} from "@octant/domain/shield-judge-policy";
 import type {
+  NativeHarnessApprovalAsk,
   NativeHarnessApprovalStore,
   NativeHarnessCommandApprovalOutcome,
 } from "../harness/nativeHarnessApprovals";
 import type { NativeHarnessChildInteractions } from "../harness/nativeHarnessComposition";
 import type { NativeHarnessQuestionStore } from "../harness/nativeHarnessQuestions";
+import type { ShieldReviewPort } from "../shield/octantShield";
 import { clampAgentRunSessionAuthority } from "./agentRunSessionRuntime";
 
 export interface AgentRunInteractionOptions {
   readonly getById: (id: AgentRunId) => AgentRun | undefined;
   readonly approvals: Pick<NativeHarnessApprovalStore, "ask"> &
-    Partial<Pick<NativeHarnessApprovalStore, "askCommand">>;
+    Partial<Pick<NativeHarnessApprovalStore, "askCommand" | "recordReviewed">>;
   readonly questions: Pick<NativeHarnessQuestionStore, "ask">;
+  /**
+   * Octant Shield, read when a child asks: a subagent inherits its parent's
+   * reviewer, so a Code parent at Auto with Shield reviewing has Shield answer
+   * the child's prompts too, judged against the child's own worktree.
+   */
+  readonly shield?: () => ShieldReviewPort | undefined;
+  /** Whether the child run has itself taken in outside content. */
+  readonly childTainted?: (run: AgentRun) => boolean;
+  /** What the Watcher found in what a child read, which counts beside its parent's. */
+  readonly childWatcherLabels?: (run: AgentRun) => ReadonlyArray<ShieldWatcherLabel>;
   readonly providerName?: (id: ProviderInstanceId) => string | undefined;
   readonly parentLead: (run: AgentRun) => NativeHarnessSlotCandidate | undefined;
   readonly parentAuthority: (run: AgentRun) => AgentRunAuthority | undefined;
+}
+
+/** A harness tool call as Shield judges it, from the child's own worktree. */
+function harnessShieldCall(input: {
+  readonly toolName: string;
+  readonly arguments?: unknown;
+  readonly approvalClass: string;
+  readonly freshConfirmation: boolean;
+  readonly command?: string | undefined;
+}): (boundRoot: string) => ShieldCall {
+  return (boundRoot) =>
+    shieldCallFromHarness({
+      toolName: input.toolName,
+      arguments: input.arguments,
+      approvalClass: input.approvalClass,
+      workingDirectory: boundRoot,
+      freshConfirmation: input.freshConfirmation,
+      command: input.command,
+    });
 }
 
 /** Both provider prompts and Octant tools ask the same person on the parent thread. */
@@ -74,8 +112,11 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
     readonly toolName: NativeHarnessApproval["toolName"];
     readonly summary: string;
     readonly approvalClass: string;
+    readonly shieldCall?: (boundRoot: string) => ShieldCall;
     readonly signal?: AbortSignal;
   }) => (await approveListing(input)).outcome;
+  const childRoot = (run: AgentRun): string | undefined =>
+    run.workspaceReceipt.kind === "code-worktree" ? run.workspaceReceipt.worktreeRoot : undefined;
   /**
    * Asks on the parent thread. With `commandHosts`, the ask is single-use and
    * lists them, and an approval carries the hosts the person ticked; a child
@@ -87,8 +128,9 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
     readonly summary: string;
     readonly approvalClass: string;
     readonly commandHosts?: ReadonlyArray<NativeHarnessCommandHost>;
+    readonly shieldCall?: (boundRoot: string) => ShieldCall;
     readonly signal?: AbortSignal;
-  }): Promise<NativeHarnessCommandApprovalOutcome> => {
+  }): Promise<NativeHarnessCommandApprovalOutcome | { readonly outcome: "shield-denied" }> => {
     if (!current(input.run, input.signal)) return { outcome: "cancelled" };
     // A provider's opaque prompt cannot widen Plan or the child's admitted
     // authority. Native tool prompts have already passed the tool policy.
@@ -99,7 +141,7 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
       return { outcome: "denied" };
     const parent = scope(input.run);
     if (parent.lead === undefined) return { outcome: "cancelled" };
-    const ask = {
+    let ask: NativeHarnessApprovalAsk = {
       ...parent,
       lead: parent.lead,
       toolName: input.toolName,
@@ -107,6 +149,32 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
       approvalClass: input.approvalClass,
       signal: input.signal,
     };
+    const shield = options.shield?.();
+    const boundRoot = childRoot(input.run);
+    if (shield !== undefined && boundRoot !== undefined && input.shieldCall !== undefined) {
+      const decision = await shield.review({
+        threadId: parent.threadId,
+        call: input.shieldCall(boundRoot),
+        boundRoot,
+        // A child whose own taint cannot be read is treated as marked.
+        alsoTainted: options.childTainted?.(input.run) ?? true,
+        alsoWatcherLabels: options.childWatcherLabels?.(input.run) ?? [],
+        signal: input.signal,
+      });
+      if (!current(input.run, input.signal)) return { outcome: "cancelled" };
+      if (decision !== undefined) {
+        shield.recordOnTranscript?.({
+          threadId: parent.threadId,
+          summary: input.summary,
+          decision,
+        });
+        if (decision.verdict === "allow" || decision.verdict === "deny") {
+          options.approvals.recordReviewed?.(ask, { ...decision, verdict: decision.verdict });
+          return { outcome: decision.verdict === "allow" ? "approved" : "shield-denied" };
+        }
+        ask = { ...ask, shield: decision };
+      }
+    }
     const askCommand = options.approvals.askCommand;
     const answered =
       input.commandHosts === undefined || askCommand === undefined
@@ -143,6 +211,8 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
     approve: async (input: {
       readonly run: AgentRun;
       readonly event: Extract<ProviderRuntimeEvent, { readonly kind: "approval-request" }>;
+      /** The pending call, from the child's connection, for Shield. */
+      readonly call?: ProviderApprovalCall | undefined;
       readonly signal: AbortSignal;
     }): Promise<boolean> =>
       (await approve({
@@ -150,6 +220,14 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
         toolName: "provider-action",
         summary: `${input.event.action}: ${input.event.description}`,
         approvalClass: "child-provider-action",
+        shieldCall: (boundRoot) =>
+          shieldCallFromProviderRequest({
+            tool: input.call?.tool ?? input.event.action,
+            input: input.call?.input,
+            workingDirectory: input.call?.workingDirectory,
+            description: input.event.description,
+            boundRoot,
+          }),
       })) === "approved",
     askUser: async (input: {
       readonly run: AgentRun;
@@ -174,8 +252,15 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
       return outcome.status === "answered" ? outcome.answer : undefined;
     },
     toolsFor: (run: AgentRun): NativeHarnessChildInteractions => ({
-      approvals: (input) => approve({ ...input, run }),
-      approveCommand: (input) => approveListing({ ...input, run }),
+      approvals: (input) => approve({ ...input, run, shieldCall: harnessShieldCall(input) }),
+      approveCommand: async (input) => {
+        const answered = await approveListing({
+          ...input,
+          run,
+          shieldCall: harnessShieldCall(input),
+        });
+        return answered.outcome === "shield-denied" ? { outcome: "denied" } : answered;
+      },
       askUser: async (input) => {
         const outcome = await ask({ ...input, run });
         return outcome;

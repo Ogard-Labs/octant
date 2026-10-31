@@ -20,6 +20,7 @@ import {
   type ProviderToolDefinition,
   type ProviderTurnInput,
   type UtcTimestamp,
+  type ProviderApprovalCall,
 } from "@octant/contracts";
 import type {
   ProviderAcquireInput,
@@ -41,6 +42,7 @@ import {
   type CodexEventContext,
   type CodexPendingApproval,
 } from "./codexEventMapper";
+import { providerApprovalCall } from "./providerApprovalCall";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import {
   isAtLeastRelease,
@@ -96,7 +98,7 @@ export interface CodexThreadStartInput {
   readonly sandbox: "danger-full-access" | "workspace-write" | "read-only";
   /**
    * Who answers approval requests: the host (`user`) or the harness's own
-   * reviewer (`auto_review`, 0104). Always sent, never omitted — Codex
+   * reviewer (`auto_review`). Always sent, never omitted — Codex
    * documents this as an override for "this thread and subsequent turns", so
    * leaving it out keeps whatever the thread was last told, and a thread that
    * once delegated would go on delegating after taint or after the user turned
@@ -136,14 +138,15 @@ export interface CodexThreadResumeInput {
 }
 
 /**
- * Work has no shell or Git authority, so a Work thread starts with Codex's
- * shell tools switched off rather than offered and asked about. Declining
- * `command` approvals alone is not enough: measured against codex-cli 0.155.1
- * under the read-only sandbox, `echo` ran with no approval request at all,
- * because a command that only reads never escalates. With both features off
- * the same request answered that it had no shell, while a patch edit still
- * raised `item/fileChange/requestApproval`. A thread does not keep these
- * overrides across `thread/resume`, so they are sent there too.
+ * Chat has no shell, so a Chat thread starts with Codex's shell tools
+ * switched off rather than offered and asked about. Declining `command`
+ * approvals alone is not enough: measured against codex-cli 0.155.1 under the
+ * read-only sandbox, `echo` ran with no approval request at all, because a
+ * command that only reads never escalates. With both features off the same
+ * request answered that it had no shell, while a patch edit still raised
+ * `item/fileChange/requestApproval`. A thread does not keep these overrides
+ * across `thread/resume`, so they are sent there too. Work keeps the shell at
+ * its level, as Code does.
  */
 const CODEX_SHELL_OFF_CONFIG = {
   "features.shell_tool": false,
@@ -166,7 +169,6 @@ const CODEX_SHELL_OFF_CONFIG = {
  * every release with this protocol honors it.
  */
 const CODEX_WORK_CONFIG = {
-  ...CODEX_SHELL_OFF_CONFIG,
   project_doc_max_bytes: 0,
 } as const satisfies CodexThreadConfig;
 
@@ -448,6 +450,8 @@ const capabilities = {
   nativeChildAgents: "unsupported",
   harnessAutoReview: "supported",
   modelSwitch: "supported",
+  // One app-server process serves every thread, so killing it ends them all.
+  forceStop: "unsupported",
   ...unsupportedChatCapabilities,
   appManagedTools: "supported",
 } as const;
@@ -555,7 +559,7 @@ export function codexExecutionSettings(
     // sandbox is external (`codexTurnExecutionSettings`). Under an external
     // sandbox `on-request` runs every command without asking (codex-rs
     // `exec_policy.rs`, rust-v0.164.0), which would waive the `shell-commands`
-    // class 0009 keeps independent and 0018 keeps prompting under both of these
+    // class the sandbox rules keep independent and the edit waiver keeps prompting under both of these
     // postures. `untrusted` asks for every command Codex does not itself know
     // to be read-only, and for every patch: a patch edit arrives as
     // `file-change` (auto-accept edits answers those itself) and a command as
@@ -566,22 +570,18 @@ export function codexExecutionSettings(
     // `commandActions` as `unknown` for a plain `> file` redirect, so "this
     // command only writes in-root" is not something either side can prove.
     //
-    // The reviewer is offered to `approval-gated` only (0138). Codex's reviewer
-    // is thread-wide, so it would answer the prompt an in-root patch edit
-    // raises — a write 0018 waives — and may deny it, turning the posture the
-    // user chose into a per-write verdict. 0138 is the scoped exception to
-    // 0104's rule that delegation reaches both prompting postures, and it
-    // records what that costs: this posture no longer delegates its command
-    // prompts either, because the reviewer cannot be scoped to a class. `user`
-    // is sent rather than nothing whenever delegation is off: omitting the
-    // field leaves a thread that once delegated still routing to the reviewer
-    // after taint, after the user turns it off, or on a resume under this
-    // posture.
+    // The reviewer answers both prompting postures (maintainer decision,
+    // 2026-10-31, ending the approval-gated-only exception). Codex's reviewer
+    // is thread-wide, so on auto-accept-edits it also answers the escalation
+    // an in-root patch edit raises, and may deny one: the person asked for
+    // its review there. `user` is sent rather than nothing whenever
+    // delegation is off: omitting the field leaves a thread that once
+    // delegated still routing to the reviewer after taint, after the user
+    // turns it off, or on a resume under this posture.
     return {
       approvalPolicy: "untrusted",
       sandbox: "read-only",
-      approvalsReviewer:
-        autoApprove === true && policy === "approval-gated" ? "auto_review" : "user",
+      approvalsReviewer: autoApprove === true ? "auto_review" : "user",
     };
   }
   return { approvalPolicy: "never", sandbox: "read-only", approvalsReviewer: "user" };
@@ -849,13 +849,15 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             options.runtimeRegistry.setObservedState(result);
             return result;
           }),
-    acquire: ({ instanceId, projectRoot, mode }) => {
+    acquire: ({ instanceId, projectRoot, mode, extraFolders = [] }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
           failure("invalid-configuration", "Provider instance does not match driver."),
         );
       }
-      if (!isAbsolute(projectRoot) || resolve(projectRoot) !== projectRoot) {
+      if (
+        [projectRoot, ...extraFolders].some((root) => !isAbsolute(root) || resolve(root) !== root)
+      ) {
         return Effect.fail(
           failure(
             "invalid-configuration",
@@ -868,13 +870,19 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
       // one lease is one root under one mode and posture and Octant's profile
       // can be exact for it.
       const leaseKey = (executionPolicy: ProviderExecutionPolicy) =>
-        JSON.stringify([projectRoot, threadMode, executionPolicy]);
+        JSON.stringify([projectRoot, extraFolders, threadMode, executionPolicy]);
       const leaseFor = (executionPolicy: ProviderExecutionPolicy) =>
         Effect.gen(function* () {
           const runtime = yield* acquireRuntime(
             options,
             clientFactory,
-            { kind: "thread", root: projectRoot, mode: threadMode, executionPolicy },
+            {
+              kind: "thread",
+              root: projectRoot,
+              ...(extraFolders.length === 0 ? {} : { extraFolders }),
+              mode: threadMode,
+              executionPolicy,
+            },
             leaseKey(executionPolicy),
           );
           // Turn starts probe first, but not every caller does (compaction,
@@ -894,28 +902,37 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
       // app-server that last ran it, `thread/unsubscribe` does not unload it,
       // and another app-server's resume is refused ("already has an active
       // writer") until that process ends. A thread whose posture changed
-      // between turns last ran under another lease of this root and mode, idle
-      // for up to its delay, so the idle ones close now. One a connection still
-      // holds keeps running and the resume reports the conflict.
-      const closeIdleOtherPostures = (executionPolicy: ProviderExecutionPolicy) =>
+      // between turns, or whose Project gained or lost an extra folder, last ran
+      // under another lease of this root and mode, idle for up to its delay, so
+      // every idle lease of this root and mode other than the one this resume
+      // uses closes now. The folder set is matched loosely on purpose: the old
+      // set is gone from the Project by the time the thread resumes. One a
+      // connection still holds keeps running and the resume reports the conflict.
+      const closeIdleOtherLeases = (executionPolicy: ProviderExecutionPolicy) =>
         Effect.promise(() =>
-          Promise.all(
-            ProviderExecutionPolicy.literals
-              .filter((other) => other !== executionPolicy)
-              .map((other) =>
-                options.runtimeRegistry.closeIdleLease(options.instanceId, leaseKey(other)),
-              ),
-          ),
-        ).pipe(Effect.asVoid);
+          options.runtimeRegistry.closeIdleLeasesWhere(options.instanceId, (lease) => {
+            if (lease === leaseKey(executionPolicy)) return false;
+            const parsed = codexThreadLease(lease);
+            return parsed?.root === projectRoot && parsed.mode === threadMode;
+          }),
+        );
       return Effect.gen(function* () {
-        return yield* makeConnection(options, leaseFor, closeIdleOtherPostures, projectRoot, mode, {
-          instanceId: options.instanceId,
-          clock,
-          makeCorrelation,
-          makeRequestId,
-          makeTaskId,
-          makeToolCallId,
-        });
+        return yield* makeConnection(
+          options,
+          leaseFor,
+          closeIdleOtherLeases,
+          projectRoot,
+          extraFolders,
+          mode,
+          {
+            instanceId: options.instanceId,
+            clock,
+            makeCorrelation,
+            makeRequestId,
+            makeTaskId,
+            makeToolCallId,
+          },
+        );
       });
     },
   };
@@ -927,6 +944,21 @@ interface CodexLeasedRuntime {
   readonly client: CodexClientPort;
   readonly version: string;
   readonly exited: Promise<void>;
+}
+
+/** The root and mode a thread lease key names, or undefined for any other lease. */
+function codexThreadLease(
+  lease: string,
+): { readonly root: string; readonly mode: string } | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(lease);
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(parsed) || parsed.length !== 4) return undefined;
+  const [root, , mode] = parsed;
+  return typeof root === "string" && typeof mode === "string" ? { root, mode } : undefined;
 }
 
 function acquireRuntime(
@@ -1199,8 +1231,9 @@ function makeConnection(
   leaseFor: (
     executionPolicy: ProviderExecutionPolicy,
   ) => Effect.Effect<CodexLeasedRuntime, ProviderFailure, Scope.Scope>,
-  closeIdleOtherPostures: (executionPolicy: ProviderExecutionPolicy) => Effect.Effect<void>,
+  closeIdleOtherLeases: (executionPolicy: ProviderExecutionPolicy) => Effect.Effect<void>,
   projectRoot: string,
+  extraFolders: ReadonlyArray<string>,
   mode: ProviderAcquireInput["mode"],
   factories: ConnectionFactories,
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
@@ -1214,6 +1247,8 @@ function makeConnection(
     const sessions = new Map<ProviderSessionId, SessionState>();
     const sessionsByThread = new Map<string, SessionState>();
     const pendingApprovalOwners = new Map<string, ProviderSessionId>();
+    /** Each pending approval's call, for an automatic reviewer; never published. */
+    const approvalCalls = new Map<string, ProviderApprovalCall>();
     const abortedToolSignal = (() => {
       const controller = new AbortController();
       controller.abort();
@@ -1362,16 +1397,10 @@ function makeConnection(
           }
           if (
             state.executionPolicy === "plan" ||
-            // Work has no shell or Git authority. Under the read-only sandbox
-            // every shell write escalates as `command`, and a permissions
-            // request asks to widen that sandbox, so both are declined at
-            // the agent; only a Project-confined file change may reach a
-            // person.
-            (mode === "work" && item.approval.kind !== "file-change") ||
             // Chat has no filesystem or shell authority at all, so nothing
             // Codex asks for is anyone's to approve.
             mode === "chat" ||
-            !approvalRequestIsProjectConfined(item.approval, state.projectRoot)
+            !approvalRequestIsProjectConfined(item.approval, state.projectRoot, extraFolders)
           ) {
             Effect.runFork(
               request(() =>
@@ -1420,6 +1449,10 @@ function makeConnection(
           }
           state.pendingApprovals.set(item.approval.requestId, item.approval);
           pendingApprovalOwners.set(item.approval.requestId, state.sessionId);
+          if (message.kind === "request") {
+            const call = codexApprovalCall(item.approval.event, message.params);
+            if (call !== undefined) approvalCalls.set(item.approval.requestId, call);
+          }
           offer(item.approval.event);
           continue;
         }
@@ -1722,7 +1755,7 @@ function makeConnection(
                 Effect.catchAll((error) =>
                   isActiveWriterConflict(error) && attempt < CODEX_RESUME_WRITER_CONFLICT_ATTEMPTS
                     ? (attempt === 1
-                        ? closeIdleOtherPostures(input.executionPolicy)
+                        ? closeIdleOtherLeases(input.executionPolicy)
                         : Effect.void
                       ).pipe(
                         Effect.zipRight(
@@ -1958,6 +1991,10 @@ function makeConnection(
           ),
           Effect.asVoid,
         ),
+      approvalCall: ({ sessionId, requestId }) =>
+        pendingApprovalOwners.get(requestId) === sessionId
+          ? approvalCalls.get(requestId)
+          : undefined,
       answerApproval: (input) =>
         stateFor(input.sessionId).pipe(
           Effect.flatMap((state) => {
@@ -1975,6 +2012,7 @@ function makeConnection(
               return Effect.fail(failure("protocol", "Codex session is already terminal."));
             }
             const pending = state.pendingApprovals.get(input.requestId);
+            approvalCalls.delete(input.requestId);
             if (
               pending === undefined ||
               pendingApprovalOwners.get(input.requestId) !== input.sessionId ||
@@ -1991,7 +2029,12 @@ function makeConnection(
             return request(() =>
               client.respondApproval({
                 providerRequestId: pending.providerRequestId,
-                result: approvalResult(pending, input.approved, permissionPersistence(options)),
+                result: approvalResult(
+                  pending,
+                  input.approved,
+                  // A one-call answer is never accepted for the session.
+                  input.scope === "once" ? "project-default" : permissionPersistence(options),
+                ),
               }),
             ).pipe(
               Effect.catchAll((providerFailure) =>
@@ -2091,39 +2134,41 @@ function declinedApprovalResult(pending: CodexPendingApproval): unknown {
     : { decision: "decline" };
 }
 
-function approvalRequestIsProjectConfined(
-  pending: CodexPendingApproval,
+/** What an approval asks to reach, without the request bookkeeping around it. */
+type CodexApprovalScope = CodexPendingApproval extends infer Approval
+  ? Approval extends CodexPendingApproval
+    ? Omit<Approval, "requestId" | "providerRequestId" | "threadId" | "turnId" | "itemId" | "event">
+    : never
+  : never;
+
+export function approvalRequestIsProjectConfined(
+  pending: CodexApprovalScope,
   projectRoot: string,
+  extraFolders: ReadonlyArray<string> = [],
 ): boolean {
+  // An extra folder is inside the Project exactly as the main folder is.
+  const inProject = (path: string, cwd: string) =>
+    [projectRoot, ...extraFolders].some((root) => pathIsProjectConfined(path, root, cwd));
   if (pending.kind === "command") {
-    return (
-      typeof pending.requestedCwd === "string" &&
-      pathIsProjectConfined(pending.requestedCwd, projectRoot, projectRoot)
-    );
+    return typeof pending.requestedCwd === "string" && inProject(pending.requestedCwd, projectRoot);
   }
   if (pending.kind === "file-change") {
-    return (
-      pending.grantRoot == null ||
-      pathIsProjectConfined(pending.grantRoot, projectRoot, projectRoot)
-    );
+    return pending.grantRoot == null || inProject(pending.grantRoot, projectRoot);
   }
   if (pending.requestedCwd !== projectRoot) return false;
   const fileSystem = pending.permissions.fileSystem;
   if (fileSystem === null) return true;
   const legacyPaths = [...(fileSystem.read ?? []), ...(fileSystem.write ?? [])];
-  if (legacyPaths.some((path) => !pathIsProjectConfined(path, projectRoot, pending.requestedCwd))) {
+  if (legacyPaths.some((path) => !inProject(path, pending.requestedCwd))) {
     return false;
   }
   return (fileSystem.entries ?? []).every(({ path }) => {
     if (path.type === "path") {
-      return pathIsProjectConfined(path.path, projectRoot, pending.requestedCwd);
+      return inProject(path.path, pending.requestedCwd);
     }
     if (path.type === "glob_pattern") return false;
     if (path.value.kind !== "project_roots") return false;
-    return (
-      path.value.subpath === null ||
-      pathIsProjectConfined(path.value.subpath, projectRoot, projectRoot)
-    );
+    return path.value.subpath === null || inProject(path.value.subpath, projectRoot);
   });
 }
 
@@ -2198,4 +2243,22 @@ function isTerminal(event: ProviderRuntimeEvent): boolean {
 
 function defaultSleep(milliseconds: number): Promise<void> {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, milliseconds));
+}
+
+/**
+ * The call a Codex approval request is about, from its own params without the
+ * identifiers that only correlate it: a command and its working directory, a
+ * file change's grant root, or the permissions a sandbox widening asks for.
+ */
+function codexApprovalCall(
+  event: ProviderRuntimeEvent,
+  params: object,
+): ProviderApprovalCall | undefined {
+  if (event.kind !== "approval-request") return undefined;
+  const record = params as Record<string, unknown>;
+  return providerApprovalCall({
+    tool: event.action,
+    arguments: record,
+    workingDirectory: typeof record.cwd === "string" ? record.cwd : undefined,
+  });
 }

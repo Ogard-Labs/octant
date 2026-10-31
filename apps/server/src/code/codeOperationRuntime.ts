@@ -45,11 +45,14 @@ import {
   type CodeRuntimeWorkId,
   type CodeOperationResult,
   type CodeThread,
+  type AutoReviewer,
+  type ShieldDecision,
   type ComputerUseDestinationSelection,
   type CodeThreadId,
   type EventActor,
   type PendingRequest,
   type ProviderCapabilities,
+  type ProviderNativeSetup,
   type ProviderRuntimeEvent,
   type ProviderResumeCursor,
   type ProviderProbeResult,
@@ -57,6 +60,8 @@ import {
   decodeCodeFailure,
   MAX_THREAD_TASKS_PER_TURN,
 } from "@octant/contracts";
+import { shieldCallFromProviderRequest } from "@octant/domain/shield-judge-policy";
+import type { ShieldReviewPort } from "../shield/octantShield";
 import { Effect } from "effect";
 import type {
   ProviderAcquireInput,
@@ -65,7 +70,8 @@ import type {
   ProviderSessionResume,
 } from "@octant/provider-sdk/driver";
 import type { Journal } from "../persistence/journal";
-import { GhPullRequestPort, createGhCommandPort, type GhDeliveryTarget } from "./ghPullRequestPort";
+import { createGhPullRequestPort } from "./ghPullRequestActionPort";
+import { createGhCommandPort, type GhDeliveryTarget } from "./ghPullRequestPort";
 import { GitMutationPort } from "./gitMutationPort";
 import {
   GitObservationPort,
@@ -102,6 +108,7 @@ import {
   isAndroidEmulatorOpenInputKind,
   harnessAutoReviewEffective,
   mayWriteToRepository,
+  projectExtraFoldersInstructions,
   turnBlocksInPlaceRestore,
   unsupportedModelOptionValues,
 } from "@octant/domain";
@@ -186,6 +193,7 @@ import {
   createCodeAppManagedTools,
   type CodeAppManagedToolsOptions,
   type CodeDeviceApprovalEffect,
+  type PullRequestToolCommand,
 } from "./codeAppManagedTools";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { heldTurnContext } from "../providers/heldTurnContext";
@@ -284,6 +292,11 @@ export interface CodeOperationRuntimeOptions {
     ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
   }) => AppManagedToolSet | undefined;
   readonly persistence: RuntimePersistence;
+  /**
+   * The extra folders of a Code thread's Project, read at each turn start so
+   * a folder added or removed applies from the next turn. Absent reads none.
+   */
+  readonly readProjectExtraFolders?: (projectId: CodeThread["projectId"]) => ReadonlyArray<string>;
   /**
    * The paired device a lease confirmation names, as the host last saw it.
    * Absent on a host with no device layer, where no lease is ever confirmed.
@@ -453,7 +466,7 @@ export interface CodeOperationRuntimeOptions {
   }) => AppManagedToolSet | undefined;
   /**
    * The agent-message tool set for this thread, when the host admits agent
-   * messaging (decision 0063). The service is server-owned; the tool only
+   * messaging. The service is server-owned; the tool only
    * petitions it. `readPosture` is the turn's access posture at the moment it
    * is asked, so a turn in Plan is neither offered the tool nor able to send.
    */
@@ -505,6 +518,7 @@ export interface CodeOperationRuntimeOptions {
   readonly nativeHarnessTools?: (input: {
     readonly thread: CodeThread;
     readonly checkoutRoot: string;
+    readonly extraFolders?: ReadonlyArray<string>;
     readonly windowId: WindowId;
     /** The turn's resolved credential values, which a journal read redacts. */
     readonly secrets: ReadonlyArray<string>;
@@ -539,18 +553,36 @@ export interface CodeOperationRuntimeOptions {
   /**
    * Reads whether a thread has ingested untrusted external content. Used to
    * clamp harness-delegated approvals back to user-answered prompts when taint
-   * is present (0104). Absent means no taint reader is available, so
+   * is present. Absent means no taint reader is available, so
    * delegation is never enabled.
    */
   readonly readThreadExternalContentTaint?: (threadId: CodeThreadId) => {
     readonly externalContentIngested: boolean;
   };
   /**
+   * Octant Shield, which answers a provider's approval prompts before the
+   * person is asked when it is the thread's reviewer at Auto. Absent, or
+   * answering nothing for a thread, every prompt goes to the person.
+   */
+  readonly shield?: ShieldReviewPort;
+  /**
+   * The person's Auto reviewer for a thread (its Project's, else Settings').
+   * Octant Shield chosen means the provider's own reviewer stays off, so its
+   * prompts reach Octant.
+   */
+  readonly chosenAutoReviewer?: (thread: CodeThread) => AutoReviewer | undefined;
+  /**
    * Resolves the cached provider capabilities for a thread's provider, so the
    * runtime can check `harnessAutoReview` without re-probing on every turn.
    * Absent means capabilities are unknown, so delegation is never enabled.
    */
   readonly resolveProviderCapabilities?: (thread: CodeThread) => ProviderCapabilities | undefined;
+  /**
+   * What the next session of this thread may load of the provider's own
+   * setup, from the account's switch, the Project's trust, and the thread's
+   * level. Absent keeps every native feature off.
+   */
+  readonly resolveProviderNativeSetup?: (thread: CodeThread) => ProviderNativeSetup | undefined;
   /** Reads the `#thread` mentions a turn names, on that turn's own principal. */
   readonly resolveThreadMentionContext?: CodeOperationServiceOptions["resolveThreadMentionContext"];
   /** Reads the `@file` mentions a turn names against this thread's bound root. */
@@ -729,6 +761,12 @@ export interface CodeOperationRuntime {
    * the request gone.
    */
   turnAwaitsPerson?(threadId: string): boolean;
+  /** Shows one Octant Shield decision on the thread's running turn. */
+  recordShieldReview?(input: {
+    readonly threadId: string;
+    readonly summary: string;
+    readonly decision: ShieldDecision;
+  }): void;
   /**
    * Settles as interrupted every provider turn of the thread that a host
    * restart left reading running or waiting, when nothing is running it now.
@@ -1489,6 +1527,7 @@ export function createCodeOperationRuntime(
     pendingRequests: (windowId) => service.listPendingForWindow(windowId),
     admitsTurn: (windowId, thread) => service.admitsTurn(windowId, thread),
     turnAwaitsPerson: (threadId) => turns.awaitsPerson(threadId),
+    recordShieldReview: (input) => turns.recordShieldReview(input),
     settleCutOffTurns: (threadId) => turns.settleCutOffTurns(threadId),
     threadWithActiveTurnPosture: (thread) => turns.threadWithActiveTurnPosture(thread),
     turnInProgress: (threadId) => startingTurns.has(threadId) || turns.holdsTurn(threadId),
@@ -1715,11 +1754,15 @@ async function approvalContext(
   thread: CodeThread,
   checkout: CodeCheckoutIdentity,
 ): Promise<ApprovalContext | undefined> {
-  const pullRequestTarget =
-    command?.kind === "create-pull-request"
-      ? await options.resolvePullRequestTarget(thread.id)
-      : undefined;
-  if (command?.kind === "create-pull-request" && pullRequestTarget === undefined) return undefined;
+  const changesPullRequest =
+    command?.kind === "create-pull-request" ||
+    command?.kind === "update-pull-request" ||
+    command?.kind === "comment-pull-request" ||
+    command?.kind === "merge-pull-request";
+  const pullRequestTarget = changesPullRequest
+    ? await options.resolvePullRequestTarget(thread.id)
+    : undefined;
+  if (changesPullRequest && pullRequestTarget === undefined) return undefined;
   return {
     projectId: thread.projectId,
     threadId: thread.id,
@@ -1917,16 +1960,68 @@ function approvalPrompt(
         break;
       case "push-git":
         message = "Allow Code push operation?";
-        effectDetail = `${command.remote}: ${command.localRef} → ${command.remoteRef}\nHEAD ${command.expectedHeadOid}`;
+        effectDetail = [
+          `${command.remote}: ${command.localRef} → ${command.remoteRef}`,
+          ...(command.force === undefined
+            ? []
+            : [
+                command.force.mode === "with-lease"
+                  ? `Replaces the remote branch only if it is still ${command.force.expectedRemoteOid}`
+                  : "Overwrites the remote branch, whatever is there",
+              ]),
+          `HEAD ${command.expectedHeadOid}`,
+        ].join("\n");
         break;
       case "create-pull-request":
-        message = "Allow pull request creation?";
+        message =
+          command.draft === true
+            ? "Allow draft pull request creation?"
+            : "Allow pull request creation?";
         effectDetail = [
-          `Target: ${pullRequestTarget?.baseRepository}:${pullRequestTarget?.baseBranch}`,
+          `Target: ${pullRequestTarget?.baseRepository}:${command.baseBranch ?? pullRequestTarget?.baseBranch}`,
+          ...(command.baseBranch === undefined
+            ? []
+            : ["Stacked on the open pull request of that branch"]),
           `Head: ${pullRequestTarget?.head}`,
           `Title: ${command.title}`,
           "Body:",
           command.body,
+        ].join("\n");
+        break;
+      case "update-pull-request":
+        message = "Allow pull request change?";
+        effectDetail = [
+          `Pull request of ${pullRequestTarget?.head} in ${pullRequestTarget?.baseRepository}`,
+          ...(command.draft === undefined
+            ? []
+            : [command.draft ? "Turn it back into a draft" : "Mark it ready for review"]),
+          ...(command.state === undefined
+            ? []
+            : [command.state === "closed" ? "Close it (the branch stays)" : "Reopen it"]),
+          ...((command.addLabels?.length ?? 0) === 0
+            ? []
+            : [`Add labels: ${command.addLabels?.join(", ")}`]),
+          ...((command.removeLabels?.length ?? 0) === 0
+            ? []
+            : [`Remove labels: ${command.removeLabels?.join(", ")}`]),
+          ...(command.title === undefined ? [] : [`Title: ${command.title}`]),
+          ...(command.body === undefined ? [] : ["Body:", command.body]),
+        ].join("\n");
+        break;
+      case "comment-pull-request":
+        message = "Post this under your name?";
+        effectDetail = [
+          `Pull request of ${pullRequestTarget?.head} in ${pullRequestTarget?.baseRepository}`,
+          command.reviewThreadId === undefined ? "Comment:" : "Reply in one review thread:",
+          command.body,
+        ].join("\n");
+        break;
+      case "merge-pull-request":
+        message = "Allow merging this pull request?";
+        effectDetail = [
+          `Pull request of ${pullRequestTarget?.head} in ${pullRequestTarget?.baseRepository}`,
+          `Method: ${command.method}`,
+          `Only if its head is still ${command.headSha} and its required checks pass`,
         ].join("\n");
         break;
       case "create-review-finding":
@@ -2028,6 +2123,8 @@ interface ActiveTurn {
   readonly sessionId: string;
   readonly requestedSessionId: string;
   readonly checkoutRoot: string;
+  /** The Project's extra folders, granted what the checkout is granted. */
+  readonly extraFolders: ReadonlyArray<string>;
   readonly driver: ProviderDriver;
   readonly resumeCursor?: ProviderResumeCursor;
   /** What the provider session held of Octant's per-turn context before this turn. */
@@ -2554,6 +2651,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       requestedSessionId: input.sessionId,
       ...(resumeCursor === undefined ? {} : { resumeCursor }),
       checkoutRoot: input.checkoutRoot,
+      extraFolders: this.#options.readProjectExtraFolders?.(input.thread.projectId) ?? [],
       driver,
       carriedSentContext: carriedSentContext({
         freshSession: resumeCursor === undefined,
@@ -2939,6 +3037,109 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     active.questions.delete(input.questionId);
   }
 
+  /**
+   * Journals one Octant Shield decision on the thread's running turn, where
+   * the transcript shows it beside the tool rows. A thread with no live turn
+   * has no transcript row to add it to; the approval journal that asked still
+   * holds the decision.
+   */
+  recordShieldReview(input: {
+    readonly threadId: string;
+    readonly summary: string;
+    readonly decision: ShieldDecision;
+  }): void {
+    const active = this.#active.get(input.threadId);
+    if (active === undefined || (active.state !== "running" && active.state !== "waiting")) return;
+    const summary = boundProviderSummary(input.summary) ?? "Tool call";
+    try {
+      const frame = this.#events.append({
+        threadId: active.thread.id,
+        operationId: active.operationId,
+        expectedCursor: active.cursor,
+        event: { kind: "approval-reviewed", summary, decision: input.decision },
+      });
+      active.cursor = frame.cursor;
+    } catch {
+      // A journal that refuses the row leaves the decision where it was made.
+    }
+  }
+
+  /**
+   * A provider's approval prompt, answered by Octant Shield when it reviews
+   * this thread. An allow or deny goes straight back to the provider for this
+   * one call and nobody is asked; an ask, or a thread Shield does not review,
+   * becomes the ordinary approval for the person. Shield's decision is
+   * journaled beside the tool rows either way. The pending call comes from the
+   * connection, never from the event: the event's text had the checkout path
+   * replaced with a placeholder, which is put back so its description reads
+   * as the runtime wrote it.
+   */
+  async #reviewProviderApproval(active: ActiveTurn, event: CodeTurnEvent): Promise<void> {
+    const shield = this.#options.shield;
+    const requestId = event.requestId;
+    if (shield === undefined || requestId === undefined || active.connection === undefined) {
+      this.#persistNormalized(active, event);
+      return;
+    }
+    const restore = (text: string | undefined) =>
+      text?.replaceAll("[CHECKOUT]", active.checkoutRoot);
+    const summary = event.text ?? "Provider approval requested.";
+    let call: ReturnType<NonNullable<ProviderConnection["approvalCall"]>>;
+    try {
+      call = active.connection.approvalCall?.({
+        sessionId: active.sessionId as never,
+        requestId,
+      });
+    } catch {
+      call = undefined;
+    }
+    let decision: ShieldDecision | undefined;
+    try {
+      decision = await shield.review({
+        threadId: String(active.thread.id),
+        call: shieldCallFromProviderRequest({
+          tool: call?.tool ?? "provider-action",
+          input: call?.input,
+          workingDirectory: call?.workingDirectory,
+          description: restore(summary) ?? summary,
+          boundRoot: active.checkoutRoot,
+        }),
+        boundRoot: active.checkoutRoot,
+        signal: active.abort.signal,
+      });
+    } catch {
+      decision = undefined;
+    }
+    if (active.state !== "running" && active.state !== "waiting") return;
+    if (decision === undefined) {
+      this.#persistNormalized(active, event);
+      return;
+    }
+    this.recordShieldReview({ threadId: String(active.thread.id), summary, decision });
+    if (decision.verdict === "ask") {
+      this.#persistNormalized(active, event);
+      return;
+    }
+    // Shield's answer covers this one call. It is not the person's, so it
+    // does not count toward the three refusals that end a turn; Shield's own
+    // brake hands the next call to the person after repeated denials.
+    try {
+      await Effect.runPromise(
+        active.connection.answerApproval({
+          sessionId: active.sessionId as never,
+          requestId,
+          approved: decision.verdict === "allow",
+          // Shield's answer covers this one call; nothing is remembered.
+          scope: "once",
+        }),
+      );
+    } catch {
+      // A provider that cannot take the answer is asked by the person instead,
+      // through the ordinary approval, which cannot widen what Shield decided.
+      this.#persistNormalized(active, event);
+    }
+  }
+
   /** Whether this thread's running turn has an approval or a question still unanswered. */
   awaitsPerson(threadId: string): boolean {
     const active = this.#active.get(threadId);
@@ -3099,6 +3300,63 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         : { status: "approved", approvalId: ToolApprovalId.make(String(receipt.approvalId)) };
     } catch {
       // Host time recovery refuses to mint approvals; the effect stays refused.
+      return { status: "unavailable" };
+    }
+  }
+
+  /**
+   * One pull-request change the thread's agent asked for, asked of the person
+   * in the thread like a device effect. An approval becomes the host's one-use
+   * approval for exactly that command, bound to the thread's delivery target,
+   * which the operation service validates before `gh` runs.
+   */
+  async #askPullRequestApproval(
+    active: ActiveTurn,
+    command: PullRequestToolCommand,
+    signal?: AbortSignal,
+  ): Promise<
+    | { readonly status: "approved"; readonly approvalId: CodeApprovalId }
+    | { readonly status: "denied" | "cancelled" | "expired" | "unavailable" | "too-large" }
+  > {
+    const store = this.#approvalStore;
+    if (store === undefined) return { status: "unavailable" };
+    const thread = this.#options.persistence.readCodeThread(command.threadId);
+    const checkout = this.#options.persistence.readCodeCheckout(command.checkoutId);
+    if (
+      thread === undefined ||
+      checkout === undefined ||
+      String(thread.id) !== String(active.thread.id) ||
+      thread.checkoutId !== checkout.id ||
+      thread.lifecycle !== "active" ||
+      checkout.availability !== "available" ||
+      !(await this.#options.windowAccess.canAccessProject(active.windowId, thread.projectId))
+    ) {
+      return { status: "unavailable" };
+    }
+    const context = await approvalContext(this.#options, command, thread, checkout);
+    if (context === undefined) return { status: "unavailable" };
+    const effect: CodeOperationApprovalRequest["effect"] = { kind: "operation", command };
+    const prompt = approvalPrompt(effect, thread, checkout, context.pullRequestTarget);
+    const shown = `${prompt.message}\n${prompt.detail}`;
+    const summary = boundProviderSummary(shown);
+    if (summary === undefined) return { status: "unavailable" };
+    // The approval authorizes the full title and body, so the person must be
+    // able to read all of it; a prompt cut at the summary bound would have
+    // them allow text they never saw.
+    if (summary !== shown.trim()) return { status: "too-large" };
+    const outcome = await this.#askToolApproval(active, summary, undefined, signal);
+    if (outcome !== "approved") return { status: outcome };
+    try {
+      const receipt = store.issue({
+        windowId: active.windowId,
+        effect,
+        contextDigest: approvalContextDigest(context),
+      });
+      return receipt === undefined
+        ? { status: "unavailable" }
+        : { status: "approved", approvalId: receipt.approvalId };
+    } catch {
+      // Host time recovery refuses to mint approvals; the change stays refused.
       return { status: "unavailable" };
     }
   }
@@ -3455,6 +3713,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           deviceApproval: {
             request: (effect, signal) => this.#askDeviceApproval(active, effect, signal),
           },
+          pullRequestApproval: {
+            request: (command, signal) => this.#askPullRequestApproval(active, command, signal),
+          },
           browserApproval: {
             isApproved: (contextId) => {
               const key = this.#browserApprovalKey(active, contextId);
@@ -3525,6 +3786,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         this.#options.nativeHarnessTools?.({
           thread: active.thread,
           checkoutRoot: active.checkoutRoot,
+          ...(active.extraFolders.length === 0 ? {} : { extraFolders: active.extraFolders }),
           windowId: active.windowId,
           secrets: active.secrets,
         }),
@@ -3615,7 +3877,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           : undefined,
       canvasOffered: offersCanvasTool(appManagedTools?.definitions),
     });
+    const extraFolderInstructions = projectExtraFoldersInstructions(active.extraFolders);
     const hostGuidance = [
+      ...(extraFolderInstructions === undefined
+        ? []
+        : [{ kind: "instructions" as const, text: extraFolderInstructions }]),
       ...appToolHostLines(appManagedTools?.definitions).map((text) => ({
         kind: "instructions" as const,
         text,
@@ -3640,6 +3906,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const sentNow = (blocks: ReadonlyArray<ProviderContextBlock>) =>
       blocks.filter((block) => !heldKeys.has(`${block.kind}\u0000${block.text}`));
     const harnessAutoReviewEnabled = this.#resolveHarnessAutoReview(active.thread);
+    const nativeSetup = this.#options.resolveProviderNativeSetup?.(active.thread);
     const contextAccount: CodeTurnContextAccount = {
       carried: active.carriedSentContext,
       turn: estimateSentContextParts({
@@ -3727,6 +3994,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               }),
             }),
           checkoutRoot: active.checkoutRoot,
+          extraFolders: active.extraFolders,
           prompt,
           ...(delivery.context.length === 0 ? {} : { context: delivery.context }),
           contextAccount,
@@ -3777,11 +4045,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               }),
           ...(attachments === undefined ? {} : { attachments }),
           ...(harnessAutoReviewEnabled ? { harnessAutoReviewEnabled: true } : {}),
+          ...(nativeSetup === undefined ? {} : { nativeSetup }),
           signal: active.abort.signal,
           provider: {
             acquire: (acquireInput) => {
               if (
                 acquireInput.projectRoot !== active.checkoutRoot ||
+                JSON.stringify(acquireInput.extraFolders ?? []) !==
+                  JSON.stringify(active.extraFolders) ||
                 acquireInput.permissionPersistence !== active.thread.permissionPersistence
               )
                 return Effect.fail({
@@ -3835,7 +4106,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               event.category === "failure"
                 ? this.#recordChangedFiles(active)
                 : Promise.resolve(),
-            ).pipe(Effect.andThen(Effect.sync(() => this.#persistNormalized(active, event)))),
+            ).pipe(
+              Effect.andThen(
+                event.category === "approval" && this.#options.shield !== undefined
+                  ? Effect.promise(() => this.#reviewProviderApproval(active, event))
+                  : Effect.sync(() => this.#persistNormalized(active, event)),
+              ),
+            ),
           persistOutcome: (outcome, failure) =>
             // What changed is journaled before the terminal state, so a client
             // following the turn has it by the time the turn reads as settled.
@@ -3929,10 +4206,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
    * Computes whether the harness's native reviewer may answer approval prompts
    * for the next turn on this thread. Clamps to `false` when the thread has
    * ingested untrusted content, when the provider does not advertise the
-   * capability, or when the posture produces no prompts (0104).
+   * capability, or when the posture produces no prompts.
    */
   #resolveHarnessAutoReview(thread: CodeThread): boolean {
     if (thread.autoApprove !== true) return false;
+    if (this.#options.chosenAutoReviewer?.(thread) === "octant-shield") return false;
     const capabilities = this.#options.resolveProviderCapabilities?.(thread);
     if (capabilities === undefined) return false;
     const taint = this.#options.readThreadExternalContentTaint?.(thread.id);
@@ -3997,7 +4275,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
 
   /**
    * Journal what differs in the checkout between the capture this turn started
-   * from and the checkout as it stands (0141).
+   * from and the checkout as it stands.
    *
    * The starting capture is read back from the journal rather than carried in
    * memory, so a turn recovered after a restart settles against the same point
@@ -4282,6 +4560,9 @@ function normalizedOperationEvent(
               ? "started"
               : "running",
       ...(summary === undefined ? {} : { summary }),
+      ...(event.status === "completed" && event.outsideContent !== undefined
+        ? { outsideContent: event.outsideContent }
+        : {}),
     };
   }
   if (
@@ -4453,11 +4734,12 @@ function turnState(
 function createPullRequestPort(options: CodeOperationRuntimeOptions): CodeOperationPullRequestPort {
   const unavailable: CodeOperationPullRequestPort = {
     ensure: async () => ({ status: "unavailable" as const }),
+    update: async () => ({ status: "unavailable" as const }),
     observeReview: async () => ({ status: "unavailable" as const }),
   };
   if (options.ghExecutable === undefined) return unavailable;
   try {
-    return new GhPullRequestPort({
+    return createGhPullRequestPort({
       command: createGhCommandPort({ ghPath: options.ghExecutable }),
       resolveTarget: options.resolvePullRequestTarget,
       ...(options.inheritedEnvironment === undefined
@@ -4497,8 +4779,15 @@ function baseCheckoutResolver(
 
 function codeOperationGitPort(git: GitService): CodeOperationGitPort {
   return {
-    observe: async ({ checkoutRoot, maxDiffBytes }) =>
-      mapGitObservation(await git.observe(checkoutRoot), maxDiffBytes),
+    observe: async ({ checkoutRoot, maxDiffBytes, ignoreWhitespace }) =>
+      mapGitObservation(
+        await git.observe(
+          checkoutRoot,
+          undefined,
+          ignoreWhitespace === true ? { ignoreWhitespace: true } : undefined,
+        ),
+        maxDiffBytes,
+      ),
     observeRemotes: async ({ checkoutRoot }) => {
       const remotes = await git.observeRemotes(checkoutRoot);
       return remotes?.map((remote) => ({
@@ -4534,6 +4823,7 @@ function codeOperationGitPort(git: GitService): CodeOperationGitPort {
       const result = await git.readDiff({
         checkoutRoot: input.checkoutRoot,
         scope: { kind: "branch", baseRef: input.baseRef },
+        ...(input.ignoreWhitespace === true ? { ignoreWhitespace: true } : {}),
       });
       return result.status === "ready"
         ? {

@@ -42,7 +42,6 @@ import {
   type CodeBootstrap,
   type CodeNavigation,
   type CodeNavigationRuntime,
-  type CodeApprovalEffect,
   type CodeCheckoutId,
   type CodeCheckoutHead,
   type CodeCheckoutIdentity,
@@ -81,6 +80,7 @@ import {
   type EventEnvelope,
   type PermissionPersistence,
   type ProjectId,
+  type TerminalSessionImportRequest,
   type ProviderExecutionPolicy,
   type ProviderModelId,
   type ProviderModelOptionValues,
@@ -112,6 +112,7 @@ import {
   decideCompleteThread,
   decideSnoozeThread,
 } from "@octant/domain/thread-completion-policy";
+import { THREAD_MOVE_REFUSALS, decideThreadMove } from "@octant/domain/thread-project-move-policy";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
 import {
@@ -177,10 +178,7 @@ import type { CodeSearchService } from "./codeSearchService";
 import { liveCodeTestSourcePort, type CodeTestSourcePort } from "./codeDirectoryPort";
 import { readConfinedCodeFile, type CodeConfinedFileRead } from "./codeConfinedFileRead";
 import type { FileIdentity } from "./fileOperationPort";
-import {
-  approvalContextDigest,
-  type CodeApprovalValidationPort,
-} from "./codeOperationApprovalStore";
+import {} from "./codeOperationApprovalStore";
 import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
 import { isRoutineHostScope } from "../routineHostScope";
 import {
@@ -189,6 +187,10 @@ import {
   type InheritedExternalContentMark,
   type RecordExternalContentIngestion,
 } from "../context/inheritedExternalContentMark";
+import type {
+  PreparedTerminalSession,
+  TerminalSessionImportPort,
+} from "../terminalSessions/terminalSessionImports";
 
 const THREAD_ID_IN_USE_MESSAGE = "That thread ID is already in use.";
 const decodeEventId = Schema.decodeUnknownSync(EventId);
@@ -331,20 +333,6 @@ export function codeNavigationCheckoutChip(
   }
   const label = checkout.head.kind === "branch" ? checkout.head.name : "Detached HEAD";
   return { checkoutKind: checkout.kind, label };
-}
-
-function currentCheckoutDigest(
-  checkout: CodeCheckoutIdentity | undefined,
-  thread: CodeThread,
-): string | undefined {
-  if (checkout === undefined || checkout.availability !== "available") return undefined;
-  return approvalContextDigest({
-    projectId: thread.projectId,
-    threadId: thread.id,
-    checkoutId: checkout.id,
-    repositoryId: checkout.repositoryId,
-    checkoutHead: checkout.head,
-  });
 }
 
 /** The broader of two postures, by the authority each one carries. */
@@ -644,7 +632,6 @@ export interface CodeServiceOptions {
   readonly attachments?: CodeAttachmentStore;
   readonly uuid: () => string;
   readonly clock: () => string;
-  readonly approvals?: CodeApprovalValidationPort;
   readonly sessionAuthority?: CodeSessionAuthorityStore;
   readonly worktreeSourcePreview?: CodeWorktreeSourcePreviewPort;
   readonly worktreeRefs?: CodeWorktreeRefsPort;
@@ -698,6 +685,7 @@ export interface CodeServiceOptions {
   readonly waitForThreadChange?: (signal: AbortSignal) => Promise<void>;
   readonly issueContext?: GithubIssueContextPort;
   readonly linearIssueContext?: LinearIssueContextPort;
+  readonly terminalSessions?: TerminalSessionImportPort;
   /**
    * The cached pull-request snapshot the sidebar joins linked pull requests
    * from. Optional for the same reason as `files.list`: a host that wired no
@@ -765,6 +753,12 @@ function withoutRest<T extends Pick<CodeThread, "completedAt" | "snooze">>(
   const { completedAt: _completedAt, snooze: _snooze, ...rest } = thread;
   return rest;
 }
+
+const CODE_MOVE_REFUSALS = {
+  "checkout-unreadable": "That Project's repository folder cannot be read right now.",
+  "checkout-would-not-stay-valid":
+    "This thread's checkout would not stay valid in that Project. A Code thread can only move to a Project bound to the same repository folder.",
+} as const;
 
 const COMPLETE_REFUSALS = {
   archived: "An archived thread cannot be put away.",
@@ -850,7 +844,6 @@ export class CodeService {
   readonly #attachments: CodeServiceOptions["attachments"];
   readonly #uuid: () => string;
   readonly #clock: () => string;
-  readonly #approvals: CodeApprovalValidationPort | undefined;
   readonly #sessionAuthority: CodeSessionAuthorityStore;
   readonly #worktreeSourcePreview: CodeWorktreeSourcePreviewPort | undefined;
   readonly #worktreeRefs: CodeWorktreeRefsPort | undefined;
@@ -868,6 +861,7 @@ export class CodeService {
   readonly #liveTurns: LiveTurnRegistry | undefined;
   readonly #awaitsHarnessApproval: ((threadId: string) => boolean) | undefined;
   readonly #issueContext?: GithubIssueContextPort;
+  readonly #terminalSessions: TerminalSessionImportPort | undefined;
   readonly #linearIssueContext?: LinearIssueContextPort;
   /**
    * Content staged by `openFile` for the editor, keyed by the staged content
@@ -901,7 +895,6 @@ export class CodeService {
     this.#attachments = options.attachments;
     this.#uuid = options.uuid;
     this.#clock = options.clock;
-    this.#approvals = options.approvals;
     this.#sessionAuthority = options.sessionAuthority ?? new CodeSessionAuthorityStore();
     this.#worktreeSourcePreview = options.worktreeSourcePreview;
     this.#worktreeRefs = options.worktreeRefs;
@@ -921,6 +914,7 @@ export class CodeService {
     if (options.issueContext !== undefined) {
       this.#issueContext = options.issueContext;
     }
+    this.#terminalSessions = options.terminalSessions;
     if (options.linearIssueContext !== undefined) {
       this.#linearIssueContext = options.linearIssueContext;
     }
@@ -1249,9 +1243,12 @@ export class CodeService {
           );
         }
         const preparedIssueContexts = await this.#requireCreateIssueContexts(command);
-        // The profile narrows the posture before any gate reads it, so a
-        // profile that pulls the thread below Full access also removes the
-        // confirmation Full access would have demanded.
+        const terminalSession = await this.#requireTerminalSession(
+          command.terminalSession,
+          command.projectId,
+          inheritedMark,
+        );
+        // The profile narrows the posture before any gate reads it.
         const managedAuthority = this.#profiledAuthority({
           profileId: command.profileId,
           projectId: command.projectId,
@@ -1261,7 +1258,6 @@ export class CodeService {
           requestedPermissionPersistence: command.permissionPersistence,
         });
         // Authorization that is decidable before any mutation runs first.
-        const project = this.#persistence.readProject?.(command.projectId);
         if (
           this.#isProviderModelAllowed?.({
             projectId: command.projectId,
@@ -1272,16 +1268,6 @@ export class CodeService {
           throw this.#failure(
             "unauthorized",
             "This provider or model is not allowed by this Code Project's provider policy.",
-          );
-        }
-        if (
-          managedAuthority.executionPolicy === "full-access" &&
-          managedAuthority.permissionPersistence === "project-default" &&
-          (project?.type !== "code" || project.codeAccessPersistence !== "project-default")
-        ) {
-          throw this.#failure(
-            "unauthorized",
-            "Project-default Full access must be enabled for this Code Project first.",
           );
         }
         const creationInput = {
@@ -1311,88 +1297,33 @@ export class CodeService {
           oid: preparation.resolvedHead,
         });
         const timestamp = decodeTimestamp(this.#clock());
-        const thread = decodeCodeThread({
-          id: command.threadId,
-          projectId: command.projectId,
-          bindingRevisionId: command.bindingRevisionId,
-          repositoryId: preparation.repositoryId,
-          checkoutId: preparation.checkoutId,
-          title: command.title,
-          lifecycle: "active",
-          providerInstanceId: command.providerInstanceId,
-          modelId: command.modelId,
-          ...(command.modelOptionValues === undefined
-            ? {}
-            : { modelOptionValues: command.modelOptionValues }),
-          executionPolicy: managedAuthority.executionPolicy,
-          permissionPersistence: managedAuthority.permissionPersistence,
-          deliveryTarget: command.deliveryTarget,
-          ...(command.forkedFrom === undefined ? {} : { forkedFrom: command.forkedFrom }),
-          ...(command.profileId === undefined ? {} : { profileId: command.profileId }),
-          ...profileToolSnapshot(managedAuthority),
-          ...profileContextSnapshot(managedAuthority),
-          version: 1,
-          createdAt: timestamp,
-          updatedAt: timestamp,
-        });
-        // Native Full-access approval is validated before mutation, bound to the
-        // resolved checkout context.
-        //
-        // The confirmation was asked for the thread as requested, and the store
-        // matches the effect exactly. A profile only narrows, so validating the
-        // requested thread checks the very effect the person saw and consented
-        // to; hashing the narrowed one would refuse a confirmation that was
-        // granted for strictly more than the thread ends up with.
-        const approvedThread =
-          managedAuthority.permissionPersistence === command.permissionPersistence
-            ? thread
-            : decodeCodeThread({
-                ...thread,
-                permissionPersistence: command.permissionPersistence,
-              });
-        const { approvalId: _approvalId, ...commandWithoutApproval } = command;
-        const managedApprovalEffect: CodeApprovalEffect = {
-          kind: "create-managed-code-thread-full-access",
-          command: commandWithoutApproval,
-          source: {
+        const thread = this.#withGuardrailStamp(
+          decodeCodeThread({
+            id: command.threadId,
+            projectId: command.projectId,
             bindingRevisionId: command.bindingRevisionId,
             repositoryId: preparation.repositoryId,
             checkoutId: preparation.checkoutId,
-            checkoutHead,
-          },
-        };
-        const approvalContextDigestValue = approvalContextDigest({
-          projectId: command.projectId,
-          threadId: thread.id,
-          checkoutId: preparation.checkoutId,
-          repositoryId: preparation.repositoryId,
-          checkoutHead,
-        });
-        const approvalValidated =
-          thread.executionPolicy !== "full-access" ||
-          this.#projectRemembersFullAccess(
-            command.projectId,
-            managedAuthority.executionPolicy,
-            managedAuthority.permissionPersistence,
-          )
-            ? true
-            : this.#approvals !== undefined &&
-              command.approvalId !== undefined &&
-              ((await this.#approvals.validate({
-                windowId: authenticatedWindowId,
-                effect: managedApprovalEffect,
-                contextDigest: approvalContextDigestValue,
-                approvalId: command.approvalId,
-              })) ||
-                (await this.#approvals.validate({
-                  windowId: authenticatedWindowId,
-                  effect: { kind: "create-thread-full-access", thread: approvedThread },
-                  contextDigest: approvalContextDigestValue,
-                  approvalId: command.approvalId,
-                })));
-        if (!approvalValidated) {
-          throw this.#failure("unauthorized", "Full access requires native confirmation.");
-        }
+            title: command.title,
+            lifecycle: "active",
+            providerInstanceId: command.providerInstanceId,
+            modelId: command.modelId,
+            ...(command.modelOptionValues === undefined
+              ? {}
+              : { modelOptionValues: command.modelOptionValues }),
+            executionPolicy: managedAuthority.executionPolicy,
+            permissionPersistence: managedAuthority.permissionPersistence,
+            ...(command.autoApprove === true ? { autoApprove: true } : {}),
+            deliveryTarget: command.deliveryTarget,
+            ...(command.forkedFrom === undefined ? {} : { forkedFrom: command.forkedFrom }),
+            ...(command.profileId === undefined ? {} : { profileId: command.profileId }),
+            ...profileToolSnapshot(managedAuthority),
+            ...profileContextSnapshot(managedAuthority),
+            version: 1,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          }),
+        );
         // Commit creates the worktree (the only mutation) and confirms the HEAD.
         const committed = await this.#managedThreadCreation.commit(
           creationInput,
@@ -1439,11 +1370,6 @@ export class CodeService {
           ...(preparation.remoteName === undefined ? {} : { remoteName: preparation.remoteName }),
           ...(preparation.fetchedAt === undefined ? {} : { fetchedAt: preparation.fetchedAt }),
         });
-        const durableThread =
-          thread.executionPolicy === "full-access" &&
-          thread.permissionPersistence === "current-session"
-            ? decodeCodeThread({ ...thread, executionPolicy: "approval-gated" })
-            : thread;
         // Journal the binding: if the thread append fails after the checkout
         // append succeeds, append a compensating checkout-removed so replay
         // never exposes an orphan available checkout, then roll back the
@@ -1462,16 +1388,19 @@ export class CodeService {
             { kind: "checkout-observed", checkout },
           );
           checkoutJournaled = true;
-          this.#journalNewThread(thread.id, inheritedMark, () =>
+          this.#journalNewThread(thread.id, inheritedMark ?? terminalSession?.mark, () => {
             this.#append(
               "code-thread",
               thread.id,
               0,
               "code.thread-created@1",
-              { kind: "thread-created", thread: durableThread },
+              { kind: "thread-created", thread },
               isRoutineHostScope(authenticatedWindowId) ? "system" : "local-user",
-            ),
-          );
+            );
+            if (terminalSession !== undefined) {
+              this.#terminalSessions?.journalImported(String(thread.id), terminalSession);
+            }
+          });
         } catch (bindingError) {
           if (checkoutJournaled) {
             // Compensate the orphan checkout so replay/projections stay clean.
@@ -1515,12 +1444,6 @@ export class CodeService {
             "interrupted",
             "Managed Code worktree creation was rolled back after a binding failure.",
           );
-        }
-        if (
-          thread.executionPolicy === "full-access" &&
-          thread.permissionPersistence === "current-session"
-        ) {
-          this.#sessionAuthority.grantFullAccess(authenticatedWindowId, thread.id);
         }
         this.#bindCreateIssueContexts(String(thread.id), preparedIssueContexts, command);
         return {
@@ -1629,6 +1552,19 @@ export class CodeService {
                 bundledLanguageServer:
                   command.bundledLanguageServer ?? current.bundledLanguageServer,
               }),
+          // A change that leaves these out keeps what the person chose before.
+          ...((command.defaultAutoApprove ?? current.defaultAutoApprove) === true
+            ? { defaultAutoApprove: true }
+            : {}),
+          ...((command.autoReviewer ?? current.autoReviewer) === undefined
+            ? {}
+            : { autoReviewer: command.autoReviewer ?? current.autoReviewer }),
+          // Null returns Shield to each thread's own provider.
+          ...(command.shieldModel === null
+            ? {}
+            : (command.shieldModel ?? current.shieldModel) === undefined
+              ? {}
+              : { shieldModel: command.shieldModel ?? current.shieldModel }),
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
@@ -1670,6 +1606,11 @@ export class CodeService {
           );
         }
         const preparedIssueContexts = await this.#requireCreateIssueContexts(command);
+        const terminalSession = await this.#requireTerminalSession(
+          command.terminalSession,
+          command.thread.projectId,
+          inheritedMark,
+        );
         let prepared;
         try {
           prepared = await this.#checkouts.observe(authenticatedWindowId, command.thread.projectId);
@@ -1703,8 +1644,9 @@ export class CodeService {
           requestedExecutionPolicy: command.thread.executionPolicy,
           requestedPermissionPersistence: command.thread.permissionPersistence,
         });
-        const thread = this.#threadWithProfiledAuthority(command.thread, profiled);
-        const project = this.#persistence.readProject?.(thread.projectId);
+        const thread = this.#withGuardrailStamp(
+          this.#threadWithProfiledAuthority(command.thread, profiled),
+        );
         if (
           this.#isProviderModelAllowed?.({
             projectId: thread.projectId,
@@ -1717,61 +1659,15 @@ export class CodeService {
             "This provider or model is not allowed by this Code Project's provider policy.",
           );
         }
-        if (
-          thread.executionPolicy === "full-access" &&
-          thread.permissionPersistence === "project-default" &&
-          (project?.type !== "code" || project.codeAccessPersistence !== "project-default")
-        ) {
-          throw this.#failure(
-            "unauthorized",
-            "Project-default Full access must be enabled for this Code Project first.",
-          );
-        }
-        if (
-          thread.executionPolicy === "full-access" &&
-          !this.#projectRemembersFullAccess(
-            command.thread.projectId,
-            command.thread.executionPolicy,
-            command.thread.permissionPersistence,
-          ) &&
-          checkout !== undefined &&
-          !(await this.#approvals?.validate({
-            windowId: authenticatedWindowId,
-            // As in managed creation: the confirmation was granted for the
-            // thread as requested, and a profile only narrows what it does.
-            effect: {
-              kind: "create-thread-full-access",
-              thread: command.thread,
-            } as CodeApprovalEffect,
-            contextDigest: approvalContextDigest({
-              projectId: command.thread.projectId,
-              threadId: command.thread.id,
-              checkoutId: checkout.id,
-              repositoryId: checkout.repositoryId,
-              checkoutHead: checkout.head,
-            }),
-            ...(command.approvalId === undefined ? {} : { approvalId: command.approvalId }),
-          }))
-        ) {
-          throw this.#failure("unauthorized", "Full access requires native confirmation.");
-        }
-        const durableThread =
-          thread.executionPolicy === "full-access" &&
-          thread.permissionPersistence === "current-session"
-            ? decodeCodeThread({ ...thread, executionPolicy: "approval-gated" })
-            : thread;
-        this.#journalNewThread(thread.id, inheritedMark, () =>
+        this.#journalNewThread(thread.id, inheritedMark ?? terminalSession?.mark, () => {
           this.#append("code-thread", thread.id, 0, "code.thread-created@1", {
             kind: "thread-created",
-            thread: durableThread,
-          }),
-        );
-        if (
-          thread.executionPolicy === "full-access" &&
-          thread.permissionPersistence === "current-session"
-        ) {
-          this.#sessionAuthority.grantFullAccess(authenticatedWindowId, thread.id);
-        }
+            thread,
+          });
+          if (terminalSession !== undefined) {
+            this.#terminalSessions?.journalImported(String(thread.id), terminalSession);
+          }
+        });
         this.#bindCreateIssueContexts(String(thread.id), preparedIssueContexts, command);
         return { kind: "thread-created", thread };
       }
@@ -1782,10 +1678,9 @@ export class CodeService {
       if (current.version !== command.expectedVersion) {
         throw this.#failure("stale", "Code state changed; reload and retry.");
       }
-      const effectiveCurrent = this.#sessionAuthority.effectiveThread(
-        authenticatedWindowId,
-        current,
-      );
+      if (command.kind === "move-code-thread") {
+        return await this.#moveThread(authenticatedWindowId, current, command);
+      }
       const updatedAt = decodeTimestamp(this.#clock());
       if (command.kind === "schedule-code-usage-resume") {
         if (current.lifecycle !== "active") {
@@ -1861,7 +1756,7 @@ export class CodeService {
         // Recovery from a superseded checkout. The thread's id was derived from
         // the binding revision it was created against, so once the Project is
         // rebound the recovery loop can only ever call it unavailable. This is
-        // the way back out, and 0032 requires one to exist: explicit, journaled,
+        // the way back out, and one must always exist: explicit, journaled,
         // and never inferred from a filesystem root that happens to match.
         const bound = this.#persistence.readCodeCheckout(current.checkoutId);
         if (bound?.kind === "managed-worktree") {
@@ -1905,7 +1800,7 @@ export class CodeService {
           kind: "thread-updated",
           thread: rebound,
         });
-        // 0032: recovery discards, never revalidates. A session grant of Full
+        // Recovery discards, never revalidates. A session grant of Full
         // access was minted against the checkout the thread just left, so it
         // does not carry onto the new one; the thread returns to its persisted
         // posture and the user re-grants if they still want it. Discard the
@@ -1922,11 +1817,6 @@ export class CodeService {
           },
         };
       }
-      const currentContextDigest = currentCheckoutDigest(
-        this.#persistence.readCodeCheckout(current.checkoutId),
-        current,
-      );
-      const project = this.#persistence.readProject?.(current.projectId);
       if (command.kind === "change-code-thread-working-directory") {
         const checkout = this.#persistence.readCodeCheckout(current.checkoutId);
         if (
@@ -1950,42 +1840,6 @@ export class CodeService {
         if (resolved === undefined) {
           throw this.#failure("invalid", "Code working directory is unavailable.");
         }
-      }
-      if (
-        command.kind === "change-code-thread-access" &&
-        command.executionPolicy === "full-access" &&
-        command.permissionPersistence === "project-default" &&
-        (project?.type !== "code" || project.codeAccessPersistence !== "project-default")
-      ) {
-        throw this.#failure(
-          "unauthorized",
-          "Project-default Full access must be enabled for this Code Project first.",
-        );
-      }
-      if (
-        command.kind === "change-code-thread-access" &&
-        command.executionPolicy === "full-access" &&
-        (effectiveCurrent.executionPolicy !== "full-access" ||
-          effectiveCurrent.permissionPersistence !== "project-default") &&
-        !this.#projectRemembersFullAccess(
-          current.projectId,
-          command.executionPolicy,
-          command.permissionPersistence,
-        ) &&
-        (currentContextDigest === undefined ||
-          !(await this.#approvals?.validate({
-            windowId: authenticatedWindowId,
-            effect: {
-              kind: "change-thread-full-access",
-              threadId: command.threadId,
-              expectedVersion: command.expectedVersion,
-              permissionPersistence: command.permissionPersistence,
-            } as CodeApprovalEffect,
-            contextDigest: currentContextDigest,
-            ...(command.approvalId === undefined ? {} : { approvalId: command.approvalId }),
-          })))
-      ) {
-        throw this.#failure("unauthorized", "Full access requires native confirmation.");
       }
       if (command.kind === "change-code-thread-provider") {
         await this.#requireProviderModel(
@@ -2218,10 +2072,8 @@ export class CodeService {
                                 },
       );
       const next =
-        command.kind === "change-code-thread-access" &&
-        command.executionPolicy === "full-access" &&
-        command.permissionPersistence === "current-session"
-          ? decodeCodeThread({ ...requestedNext, executionPolicy: "approval-gated" })
+        command.kind === "change-code-thread-access"
+          ? this.#withGuardrailStamp(requestedNext)
           : requestedNext;
       this.#append("code-thread", current.id, command.expectedVersion, "code.thread-updated@1", {
         kind: "thread-updated",
@@ -2235,14 +2087,9 @@ export class CodeService {
         }).catch(() => undefined);
       }
       if (command.kind === "change-code-thread-access") {
-        if (
-          command.executionPolicy === "full-access" &&
-          command.permissionPersistence === "current-session"
-        ) {
-          this.#sessionAuthority.grantFullAccess(authenticatedWindowId, current.id);
-        } else {
-          this.#sessionAuthority.revokeThread(authenticatedWindowId, current.id);
-        }
+        // A session grant from before Full access was journaled must not
+        // outlive the thread's new mode.
+        this.#sessionAuthority.revokeThread(authenticatedWindowId, current.id);
       } else if (
         command.kind === "change-code-thread-lifecycle" &&
         command.lifecycle !== "active"
@@ -2559,7 +2406,18 @@ export class CodeService {
     );
     if (root === undefined || this.#gitHistory === undefined)
       return { status: "unavailable", message: "Git history is unavailable for this checkout." };
-    const result = await this.#gitHistory.read(root.rootPath, query, signal);
+    const target = authorized.effectiveThread.deliveryTarget;
+    const result = await this.#gitHistory.read(
+      root.rootPath,
+      query,
+      signal,
+      query.kind === "local-commits"
+        ? [
+            `refs/remotes/${target.remoteName}/${target.proposedBaseBranch}`,
+            `refs/heads/${target.proposedBaseBranch}`,
+          ]
+        : [],
+    );
     // A read may outlive a checkout rebind or Project revocation. Recheck before releasing repository data.
     const current = await this.#authorizeCheckoutRead(
       windowId,
@@ -3113,6 +2971,119 @@ export class CodeService {
     };
   }
 
+  /**
+   * Files a Code thread into another Code Project. The thread keeps its kind,
+   * history and guardrail level and is moved only when its checkout stays valid
+   * under the new Project: the same repository, at the same folder. A Project
+   * whose folder merely contains the thread's is refused, because the thread's
+   * checkout would then belong to a repository it never worked in.
+   */
+  async #moveThread(
+    authenticatedWindowId: WindowId,
+    current: CodeThread,
+    command: Extract<CodeCommand, { readonly kind: "move-code-thread" }>,
+  ): Promise<CodeCommandResult> {
+    // A routine acts as the host, never as the person; filing a thread is the person's call.
+    if (isRoutineHostScope(authenticatedWindowId)) {
+      throw this.#failure("unauthorized", "Only a person can move a thread to another Project.");
+    }
+    const source = this.#persistence.readProject?.(current.projectId);
+    const destination = (await this.#access.canAccessProject(
+      authenticatedWindowId,
+      command.projectId,
+    ))
+      ? this.#persistence.readProject?.(command.projectId)
+      : undefined;
+    if (source?.type !== "code" || destination === undefined) {
+      throw this.#failure("invalid", THREAD_MOVE_REFUSALS["destination-unavailable"]);
+    }
+    const signals = boardRuntimeActivityFromWorks(
+      this.#persistence.readCodeRuntimeWorks(current.id),
+    );
+    const decision = decideThreadMove({
+      thread: { lifecycle: current.lifecycle, ...signals },
+      source: { id: String(source.id), mode: "code", folder: source.binding.canonicalRoot },
+      destination: {
+        id: String(destination.id),
+        mode: destination.type,
+        lifecycle: destination.lifecycle,
+        folder: destination.type === "chat" ? "" : destination.binding.canonicalRoot,
+      },
+    });
+    if (decision.status === "refused") {
+      throw this.#failure("invalid", THREAD_MOVE_REFUSALS[decision.reason]);
+    }
+    if (destination.type !== "code") {
+      throw this.#failure("invalid", THREAD_MOVE_REFUSALS["different-mode"]);
+    }
+    if (
+      this.#isProviderModelAllowed?.({
+        projectId: destination.id,
+        providerInstanceId: current.providerInstanceId,
+        modelId: current.modelId,
+      }) === false
+    ) {
+      throw this.#failure(
+        "unauthorized",
+        "This provider or model is not allowed by that Code Project's provider policy.",
+      );
+    }
+    const held = this.#persistence.readCodeCheckout(current.checkoutId);
+    if (held === undefined || held.availability !== "available" || held.kind === "remote-root") {
+      throw this.#failure("unavailable", "Code thread checkout is unavailable.");
+    }
+    let prepared;
+    try {
+      prepared = await this.#checkouts.observe(authenticatedWindowId, destination.id);
+    } catch {
+      throw this.#failure("unavailable", CODE_MOVE_REFUSALS["checkout-unreadable"]);
+    }
+    if (
+      prepared.checkout.availability !== "available" ||
+      String(prepared.checkout.repositoryId) !== String(current.repositoryId) ||
+      destination.binding.canonicalRoot !== source.binding.canonicalRoot
+    ) {
+      throw this.#failure("invalid", CODE_MOVE_REFUSALS["checkout-would-not-stay-valid"]);
+    }
+    // A managed worktree is the thread's own tree and keeps its identity; a
+    // checkout of the Project's folder is derived from the Project, so the
+    // thread takes up the one the destination binds, in the same folder.
+    const landed = held.kind === "managed-worktree" ? held : prepared.checkout;
+    const updatedAt = decodeTimestamp(this.#clock());
+    if (
+      landed === prepared.checkout &&
+      !repeatsJournaledCheckout(this.#persistence.readCodeCheckout(landed.id), landed)
+    ) {
+      this.#append(
+        "code-checkout",
+        landed.id,
+        this.#persistence.readCodeCheckoutAggregateVersion(landed.id),
+        "code.checkout-observed@1",
+        { kind: "checkout-observed", checkout: landed },
+      );
+    }
+    const moved = decodeCodeThread({
+      ...current,
+      projectId: destination.id,
+      bindingRevisionId: prepared.bindingRevisionId,
+      repositoryId: landed.repositoryId,
+      checkoutId: landed.id,
+      version: command.expectedVersion + 1,
+      updatedAt,
+    });
+    this.#append("code-thread", current.id, command.expectedVersion, "code.thread-updated@1", {
+      kind: "thread-updated",
+      thread: moved,
+    });
+    // A session grant of Full access was minted under the Project the thread
+    // just left; authority is discarded on a move, never carried over.
+    this.#sessionAuthority.revokeThreadEverywhere(current.id);
+    return {
+      kind: "thread-updated",
+      thread: this.#sessionAuthority.effectiveThread(authenticatedWindowId, moved),
+    };
+  }
+
   #rebindRefused(
     threadId: CodeThreadId,
     reason: CodeThreadCheckoutRebindRefusal,
@@ -3388,24 +3359,22 @@ export class CodeService {
    * prompt would re-ask it, and off-desktop hosts have no prompt to ask.
    * Session-only Full access still needs a per-thread receipt.
    */
-  #projectRemembersFullAccess(
-    projectId: ProjectId,
-    executionPolicy: ProviderExecutionPolicy,
-    permissionPersistence: PermissionPersistence,
-  ): boolean {
-    if (executionPolicy !== "full-access" || permissionPersistence !== "project-default") {
-      return false;
+  /**
+   * The host's half of a thread's level. Full access is always journaled on
+   * the thread (session-only Full access is gone) and drops the reviewer,
+   * which has nothing left to answer.
+   */
+  #withGuardrailStamp(thread: CodeThread): CodeThread {
+    const { autoApprove, ...rest } = thread;
+    if (rest.executionPolicy !== "full-access") {
+      return decodeCodeThread({ ...rest, ...(autoApprove === true ? { autoApprove } : {}) });
     }
-    const project = this.#persistence.readProject?.(projectId);
-    return project?.type === "code" && project.codeAccessPersistence === "project-default";
+    return decodeCodeThread({ ...rest, permissionPersistence: "project-default" });
   }
 
   /**
    * Narrow a starting thread to the profile it was started under. Runs before
-   * every authority gate so a profile that pulls the thread below Full access
-   * also removes the native confirmation it would otherwise demand, and returns
-   * the permission duration too — a profile written to hold Full access for one
-   * session must not produce a thread the Project remembers.
+   * every authority gate, and returns the permission duration too.
    */
   #profiledAuthority(input: {
     readonly profileId: AgentProfileId | undefined;
@@ -3492,12 +3461,24 @@ export class CodeService {
   async #requireCreateIssueContexts(command: {
     readonly issueContext?: GithubIssueContextRequest | undefined;
     readonly linearIssueContext?: LinearIssueContextRequest | undefined;
+    readonly terminalSession?: TerminalSessionImportRequest | undefined;
   }): Promise<{
     readonly github: GithubIssueContextResult | { readonly status: "absent" };
     readonly linear: LinearIssueContextResult | { readonly status: "absent" };
   }> {
     if (command.issueContext !== undefined && command.linearIssueContext !== undefined) {
       throw this.#failure("invalid", "Choose either a GitHub issue or a Linear issue, not both.");
+    }
+    // The first turn carries one outside source, so a second one would be
+    // shown as imported and never reach the model.
+    if (
+      command.terminalSession !== undefined &&
+      (command.issueContext !== undefined || command.linearIssueContext !== undefined)
+    ) {
+      throw this.#failure(
+        "invalid",
+        "Choose either an issue or a terminal session to start from, not both.",
+      );
     }
     const github = await prepareOptionalIssueContext(
       this.#issueContext,
@@ -3516,6 +3497,32 @@ export class CodeService {
       throw this.#failure(linearIssueContextFailureCategory(linear.reason), linear.message);
     }
     return { github, linear };
+  }
+
+  /**
+   * Reads the terminal session a new thread starts from, refusing one from
+   * another folder than the Project's. A fork or follow-up already starts
+   * from another thread's history, so it cannot also start from a session.
+   */
+  async #requireTerminalSession(
+    request: TerminalSessionImportRequest | undefined,
+    projectId: ProjectId,
+    inheritedMark: InheritedExternalContentMark | undefined,
+  ): Promise<PreparedTerminalSession | undefined> {
+    if (request === undefined) return undefined;
+    if (inheritedMark !== undefined) {
+      throw this.#failure(
+        "invalid",
+        "A thread made from another thread cannot also start from a terminal session.",
+      );
+    }
+    const project = this.#persistence.readProject?.(projectId);
+    if (this.#terminalSessions === undefined || project?.type !== "code") {
+      throw this.#failure("unavailable", "Terminal sessions are unavailable for this Project.");
+    }
+    const prepared = await this.#terminalSessions.prepare(request, project.binding.canonicalRoot);
+    if (prepared.status === "refused") throw this.#failure("invalid", prepared.message);
+    return prepared.prepared;
   }
 
   #bindCreateIssueContexts(

@@ -10,6 +10,7 @@ import {
   type WorkBoardView,
   type WorkThreadBootstrap,
   type WorkThreadNavigation,
+  type WorkThreadCommand,
   type WorkThreadCommandResult,
   type WorkThreadFailure,
   type WindowId,
@@ -19,8 +20,12 @@ import {
   refusesThreadDocumentDelivery,
 } from "./threadDocumentDeliveryAuthority";
 import { Schema } from "effect";
-import { authenticateRouteWindowId } from "./principalRouteContext";
+import { authenticateRouteWindowId, readPrincipalRouteContext } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
+import {
+  refusesTerminalSessionImport,
+  TERMINAL_SESSION_LOCAL_ONLY,
+} from "./terminalSessions/terminalSessionAuthority";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 import type { WorkThreadExecutionContext } from "./work/workThreadService";
 
@@ -183,6 +188,23 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
           origin,
         );
       }
+      if (command.kind === "create-work-thread" && refusesTerminalSessionImport(request, command)) {
+        return failureResponse(
+          { category: "unauthorized", message: TERMINAL_SESSION_LOCAL_ONLY },
+          403,
+          origin,
+        );
+      }
+      // A paired device may lower a thread; raising one, or the default new
+      // threads start at, to Full access is chosen at a window on this host,
+      // as it is for Code.
+      if (raisesWorkToFullAccess(command) && refusesFullAccessRaise(request)) {
+        return failureResponse(
+          { category: "unauthorized", message: WORK_FULL_ACCESS_LOCAL_ONLY },
+          403,
+          origin,
+        );
+      }
       return jsonResponse(
         decodeWorkThreadCommandResult(
           await dependencies.service.execute(authenticatedWindowId, command),
@@ -336,4 +358,24 @@ class WorkThreadRouteRejected extends Error {
   ) {
     super(message);
   }
+}
+
+const WORK_FULL_ACCESS_LOCAL_ONLY = "Full access is chosen in the Octant window on this host.";
+
+/** Whether a command would put a Work thread, or new Work threads, at Full access. */
+function raisesWorkToFullAccess(command: WorkThreadCommand): boolean {
+  switch (command.kind) {
+    case "change-work-thread-access":
+      return command.access === "full-access";
+    case "update-work-settings":
+      return command.defaultAccess === "full-access";
+    default:
+      return false;
+  }
+}
+
+/** A request whose principal is anything but a window on this host. */
+function refusesFullAccessRaise(request: Request): boolean {
+  const principal = readPrincipalRouteContext(request)?.principal;
+  return principal !== undefined && principal.kind !== "local-window";
 }

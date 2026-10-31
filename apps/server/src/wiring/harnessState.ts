@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { decodeChatThreadId, decodeCodeThreadId, decodeWorkThreadId } from "@octant/contracts";
 import { createAgentRunInteractions } from "../agentRun/agentRunInteractions";
-import { readApprovalOutsideContent } from "../context/externalContentTaintProjection";
+import {
+  readApprovalOutsideContent,
+  readShieldWatcherLabels,
+  readThreadExternalContentTaint,
+} from "../context/externalContentTaintProjection";
+import type { ShieldReviewPort } from "../shield/octantShield";
 import { awaitsLeadQuestion } from "../harness/leadApprovalAttention";
 import { NativeHarnessApprovalStore } from "../harness/nativeHarnessApprovals";
 import {
@@ -76,8 +81,16 @@ export function wireHarnessState(deps: HarnessStateDependencies) {
     clock: () => new Date().toISOString(),
     outsideContent: (threadId) => readApprovalOutsideContent(persistence.connection, threadId),
   });
+  // Octant Shield is built with the harness, after these stores; a child
+  // asks through it once it exists.
+  const shieldHolder: { port?: ShieldReviewPort } = {};
   const agentRunInteractions = createAgentRunInteractions({
     getById: (id) => agentRunPersistence.getById(id),
+    shield: () => shieldHolder.port,
+    childTainted: (run) =>
+      readThreadExternalContentTaint(persistence.connection, String(run.id))
+        .externalContentIngested,
+    childWatcherLabels: (run) => readShieldWatcherLabels(persistence.connection, String(run.id)),
     approvals: nativeHarnessApprovals,
     questions: nativeHarnessQuestions,
     providerName: (id) => persistence.readProviderInstance(id)?.displayName,
@@ -111,6 +124,7 @@ export function wireHarnessState(deps: HarnessStateDependencies) {
 
   return {
     agentRunInteractions,
+    shieldHolder,
     nativeHarnessApprovals,
     nativeHarnessQuestions,
     nativeHarnessSessions,

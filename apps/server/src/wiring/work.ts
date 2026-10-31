@@ -64,6 +64,8 @@ import {
   enabledModes,
   isAgentRunActiveStatus,
   THREAD_MENTION_UNREADABLE_CONTEXT,
+  WORK_GOAL_LOOP_CEILING,
+  workThreadAccessOf,
 } from "@octant/domain";
 import {
   boardRuntimeActivityFromTurnsAndSignals,
@@ -119,6 +121,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "githubIssueContextService"
     | "linearIssueContextService"
     | "peekCreateFromIssueFramed"
+    | "terminalSessionImports"
     | "threadOutsideContentMarks"
   > &
   Pick<ComputerUseWiring, "computerToolsFor" | "computerUseTools"> &
@@ -208,6 +211,7 @@ export function wireWork(deps: WorkDependencies) {
     linearIssueContextService,
     liveTurns,
     managedWorktreeReceipts,
+    terminalSessionImports,
     nativeHarnessComposition,
     nativeHarnessHooks,
     nativeHarnessSessions,
@@ -311,6 +315,7 @@ export function wireWork(deps: WorkDependencies) {
           ?.models.find((model) => String(model.id) === String(modelId)),
       issueContext: githubIssueContextService,
       linearIssueContext: linearIssueContextService,
+      terminalSessions: terminalSessionImports,
     });
     // Hosts composed after Work (delegation to another spoke) learn that a
     // person stopped a thread's turn through this, not through the service.
@@ -529,7 +534,7 @@ export function wireWork(deps: WorkDependencies) {
                 rootIdentity: rooted.rootIdentity,
               };
             }
-            // ADR 0017: a Code Project may bind a non-Git folder. Mention
+            // A Code Project may bind a non-Git folder. Mention
             // confinement follows the authorized checkout directory rather
             // than requiring a Git observation.
             const project = persistence.readProject(view.thread.projectId);
@@ -777,31 +782,19 @@ export function wireWork(deps: WorkDependencies) {
     // turn goes through, so it adds no place work happens and no authority the
     // thread did not already have; everything it may or may not do is decided
     // by the domain and journaled here.
-    // What a Work turn is fixed at, stated once. Work has no shell, Git, or
-    // reach outside the Project: every provider driver withholds them from a
-    // Work session rather than asking. File writes inside the Project are
-    // approval-gated unless the thread's access auto-accepts edits (see
-    // workTurnPosture). This is a fact about the mode and not a grant anyone
-    // can change.
-    const WORK_TURN_POSTURE = {
-      filesystem: true,
-      shell: false,
-      git: false,
-      network: false,
-      tools: true,
-      subagents: false,
-      executionPolicy: "approval-gated",
-      permissionPersistence: "current-session",
-    } as const;
+    // What a Work turn holds, stated once and shared with the client's loop
+    // ceiling. Work and Code share one capability set at the thread's level:
+    // a Work session has the shell and Git a Code session at that level has,
+    // and the level decides who approves each command and write (see
+    // workTurnPosture). Reach outside the Project stays refused below Full
+    // access.
+    const WORK_TURN_POSTURE = WORK_GOAL_LOOP_CEILING;
     const workTurnPosture = (threadId: string) => {
       const thread = workThreadProjection.read(threadId as never);
       if (thread === undefined || thread.lifecycle !== "active") return undefined;
       return {
         ...WORK_TURN_POSTURE,
-        executionPolicy:
-          thread.access === "auto-accept-edits"
-            ? ("auto-accept-edits" as const)
-            : ("approval-gated" as const),
+        executionPolicy: workThreadAccessOf(thread.access).executionPolicy,
       };
     };
     // A goal-loop round runs as the host, so no window stands in for the
@@ -862,7 +855,7 @@ export function wireWork(deps: WorkDependencies) {
       // Between rounds a Work thread has nothing pending. Its approvals are
       // asked inside a running turn, and a turn's open requests are
       // interrupted when its provider session ends, so each round's requests
-      // end with that round. Shell and Git never ask in Work.
+      // end with that round, shell and Git requests included.
       pendingApproval: () => undefined,
       // A Work folder has no checkpoint to mark. Checkpoints anchor a Chat turn
       // or a Code operation; a Work turn records which paths changed, never

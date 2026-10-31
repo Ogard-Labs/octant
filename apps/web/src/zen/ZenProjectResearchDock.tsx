@@ -1,5 +1,9 @@
 import type { ProjectBrowserClient } from "@octant/client-runtime/project-browser-client";
-import type { ProjectBrowserResult, ProjectBrowserView } from "@octant/contracts/project-browser";
+import type {
+  BrowserProfileChoice,
+  ProjectBrowserResult,
+  ProjectBrowserView,
+} from "@octant/contracts/project-browser";
 import type { ZenProjectResearchDock as ZenProjectResearchDockBinding } from "@octant/contracts/zen";
 import { ArrowLeft, ArrowRight, ChevronRight, RotateCw, ShieldCheck, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -9,6 +13,12 @@ import type { OctantHostBridge } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { BrowserProfileControl } from "../browser/BrowserProfileControl";
+import { BrowserExtensionsButton } from "../browser/BrowserExtensionsButton";
+import {
+  readRememberedProfileChoice,
+  writeRememberedProfileChoice,
+} from "../browser/browserProfileCopy";
 
 /** How often a headless page's picture is refreshed while the dock is open. */
 const PICTURE_INTERVAL_MS = 1_500;
@@ -40,6 +50,11 @@ export function ZenProjectResearchDock(props: ZenProjectResearchDockProps) {
   const [message, setMessage] = useState<string>();
   const [opening, setOpening] = useState(false);
   const [nativeSupported, setNativeSupported] = useState<boolean>();
+  // Where the next page keeps its site data; remembered per Project in this
+  // renderer, and applied only to pages the person opens.
+  const [profileChoice, setProfileChoice] = useState<BrowserProfileChoice>(() =>
+    readRememberedProfileChoice(String(projectId)),
+  );
   const context = view?.context;
   const active = context?.state === "active";
   const native = active && context?.presentation === "native-live";
@@ -105,11 +120,59 @@ export function ZenProjectResearchDock(props: ZenProjectResearchDockProps) {
     try {
       const target = normalizeBrowserUrl(address);
       setAddress(target);
-      adopt(await client.execute({ kind: "open", projectId, url: target }));
+      adopt(await openIn(target, profileChoice));
     } catch {
       setMessage("This address could not be opened.");
     } finally {
       setOpening(false);
+    }
+  }
+
+  function openIn(target: string, choice: BrowserProfileChoice): Promise<ProjectBrowserResult> {
+    return client.execute({
+      kind: "open",
+      projectId,
+      url: target,
+      ...(choice === "private" ? {} : { profile: choice }),
+    });
+  }
+
+  /**
+   * Choosing a profile opens the same address again as a new browsing context in
+   * that profile; the old context closes and nothing it held carries over.
+   */
+  async function chooseProfile(choice: BrowserProfileChoice): Promise<void> {
+    writeRememberedProfileChoice(String(projectId), choice);
+    setProfileChoice(choice);
+    const current = page?.url;
+    if (!active || current === undefined || opening) return;
+    setOpening(true);
+    try {
+      adopt(await openIn(current, choice));
+    } catch {
+      setMessage("This address could not be opened.");
+    } finally {
+      setOpening(false);
+    }
+  }
+
+  async function signOut(): Promise<void> {
+    const shown = context?.profile;
+    const manage = client.manageProfiles;
+    if (manage === undefined || shown === undefined || shown === "private") return;
+    try {
+      const result = await manage.call(client, {
+        kind: "clear",
+        profile: shown === "personal" ? { kind: "personal" } : { kind: "project", projectId },
+        scope: "all",
+      });
+      setMessage(
+        result.kind === "browser-profiles-refused"
+          ? result.message
+          : "Signed out. Every page in this profile closed.",
+      );
+    } catch {
+      setMessage("The profile could not be cleared.");
     }
   }
 
@@ -143,6 +206,7 @@ export function ZenProjectResearchDock(props: ZenProjectResearchDockProps) {
     );
   }
 
+  const page = view?.page;
   const addressBar = (
     <form
       className="zen-research__chrome"
@@ -185,6 +249,25 @@ export function ZenProjectResearchDock(props: ZenProjectResearchDockProps) {
           </OctantButton>
         </>
       ) : null}
+      <BrowserProfileControl
+        disabled={opening}
+        onChange={(choice) => void chooseProfile(choice)}
+        profile={active ? (context?.profile ?? "private") : profileChoice}
+        projectProfileAvailable
+        signedInPagesAvailable={nativeSupported === true}
+        {...(client.manageProfiles === undefined ? {} : { onSignOut: () => signOut() })}
+      />
+      {native && active && context?.profile !== undefined && context.profile !== "private" ? (
+        <BrowserExtensionsButton
+          agentDriving={false}
+          client={client}
+          hostBridge={props.hostBridge}
+          profile={
+            context.profile === "personal" ? { kind: "personal" } : { kind: "project", projectId }
+          }
+          refreshKey={String(context.contextId)}
+        />
+      ) : null}
       <OctantInput
         aria-label="Project browser address"
         className="zen-research__address-input"
@@ -199,7 +282,6 @@ export function ZenProjectResearchDock(props: ZenProjectResearchDockProps) {
     </form>
   );
 
-  const page = view?.page;
   return (
     <aside
       aria-label="Project browser"

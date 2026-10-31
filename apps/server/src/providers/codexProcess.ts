@@ -60,6 +60,8 @@ export type CodexLaunchAuthority =
   | {
       readonly kind: "thread";
       readonly root: string;
+      /** The Project's extra folders, granted what the root is granted. */
+      readonly extraFolders?: ReadonlyArray<string>;
       readonly mode: "chat" | "work" | "code";
       readonly executionPolicy: ProviderExecutionPolicy;
     };
@@ -653,7 +655,7 @@ function existingRealPaths(paths: ReadonlyArray<string | undefined>): ReadonlyAr
 
 /**
  * Builds the app-server launch for one lease. Full access keeps the runtime
- * unwrapped, as 0009 defines it. Every other posture, and the catalog lease,
+ * unwrapped, as the sandbox rules define it. Every other posture, and the catalog lease,
  * runs under Octant's deny-default profile: the thread's root (writable only
  * where the posture writes), the account home, a private temporary directory,
  * and the program itself. The rest of `HOME` is denied, which is what Codex's
@@ -693,6 +695,10 @@ export function prepareCodexLaunch(input: {
     chmodSync(temporaryDirectory, 0o700);
     const root = authority.kind === "thread" ? realpathSync(authority.root) : temporaryDirectory;
     if (!statSync(root).isDirectory()) throw new Error("Codex root is not a directory.");
+    // A folder removed from disk since it was added is left out rather than
+    // failing the launch; the main folder above must still exist.
+    const extraFolders =
+      authority.kind === "thread" ? existingRealPaths(authority.extraFolders ?? []) : [];
     const mode = authority.kind === "thread" ? authority.mode : "chat";
     const executionPolicy = authority.kind === "thread" ? authority.executionPolicy : "plan";
     const home = input.environment.HOME ?? homedir();
@@ -716,12 +722,19 @@ export function prepareCodexLaunch(input: {
       executable: input.binaryPath,
       args: input.args,
       boundRoot: root,
+      extraBoundRoots: extraFolders,
       temporaryDirectory,
       networkEgress,
       writeBoundRoot: !(executionPolicy === "plan" || mode === "chat"),
       additionalWriteRoots: accountRoots,
       readRoots: [...accountRoots, ...programPaths],
-      privateHomeAllowPaths: [root, temporaryDirectory, ...accountRoots, ...programPaths],
+      privateHomeAllowPaths: [
+        root,
+        ...extraFolders,
+        temporaryDirectory,
+        ...accountRoots,
+        ...programPaths,
+      ],
       allowFileReadStar: true,
       ...(input.environment.PATH === undefined
         ? {}

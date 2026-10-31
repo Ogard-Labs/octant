@@ -594,9 +594,7 @@ describe("DraftThreadWorkspace", () => {
     expect(screen.getByText("my-repo")).toBeVisible();
     // The branch context now lives on the branch selector trigger.
     expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("feature/test");
-    expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent(
-      "Ask for approvals",
-    );
+    expect(screen.getByRole("button", { name: "Mode" })).toHaveTextContent("Ask first");
   });
 
   it("forwards the access posture the code composer submitted with", async () => {
@@ -613,7 +611,7 @@ describe("DraftThreadWorkspace", () => {
     );
 
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Plan this change");
-    await user.click(screen.getByRole("button", { name: "Access policy" }));
+    await user.click(screen.getByRole("button", { name: "Mode" }));
     await user.click(await screen.findByRole("menuitemradio", { name: /Plan/ }));
     await user.click(screen.getByRole("button", { name: "Create thread" }));
 
@@ -622,72 +620,6 @@ describe("DraftThreadWorkspace", () => {
     expect(forwarded?.[0]).toBe("Plan this change");
     expect(forwarded?.[9]).toBe("plan");
     expect(forwarded?.[10]).toBe("current-session");
-  });
-
-  it("keeps Plan while a remembered access choice resets for a new Project", async () => {
-    const user = userEvent.setup();
-    const onExecutionPolicyChange = vi.fn();
-    const secondCodeProjectId = "00000000-0000-4000-8000-000000000113" as ProjectId;
-    const projectsWithSecondCode = [
-      ...projects,
-      {
-        id: secondCodeProjectId,
-        type: "code",
-        name: "Second Code Project",
-        lifecycle: "active",
-        pinned: false,
-        rank: "2/2",
-        version: 1,
-        createdAt: "2026-07-28T12:00:00.000Z",
-        updatedAt: "2026-07-28T12:00:00.000Z",
-        binding: { canonicalRoot: "/Users/example/Dev/Repos/second" },
-        codeAccessPersistence: "current-session",
-      },
-    ] as unknown as ReadonlyArray<ProjectSummary>;
-    let persistence: "current-session" | "project-default" = "current-session";
-    const { unmount } = render(
-      <DraftThreadWorkspace
-        {...baseProps}
-        mode="code"
-        projectId={codeProjectId}
-        projects={projectsWithSecondCode}
-        defaultExecutionPolicy="approval-gated"
-        defaultPermissionPersistence={persistence}
-        onExecutionPolicyChange={(policy, nextPersistence) => {
-          onExecutionPolicyChange(policy, nextPersistence);
-          persistence = nextPersistence;
-        }}
-        onSelectProject={() => {
-          persistence = "current-session";
-        }}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Access policy" }));
-    await user.click(await screen.findByRole("menuitemradio", { name: /Plan/ }));
-    await user.click(screen.getByRole("button", { name: "Access policy" }));
-    await user.click(
-      await screen.findByRole("menuitemcheckbox", { name: "Remember for this Project" }),
-    );
-    expect(onExecutionPolicyChange).toHaveBeenLastCalledWith("plan", "project-default");
-
-    await user.keyboard("{Escape}");
-    await user.click(screen.getByRole("button", { name: "Project: Octant" }));
-    await user.click(screen.getByRole("option", { name: /Second Code Project/ }));
-    expect(persistence).toBe("current-session");
-    unmount();
-
-    render(
-      <DraftThreadWorkspace
-        {...baseProps}
-        mode="code"
-        projectId={secondCodeProjectId}
-        projects={projectsWithSecondCode}
-        defaultExecutionPolicy="plan"
-        defaultPermissionPersistence={persistence}
-      />,
-    );
-    expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent("Plan");
   });
 
   it.each(["chat", "code", "work"] as const)(
@@ -1137,8 +1069,9 @@ describe("DraftThreadWorkspace", () => {
 
     const prompt = screen.getByRole("textbox", { name: "First message" });
     await user.type(prompt, "Keep this exact prompt");
-    await user.click(screen.getByRole("button", { name: "Access policy" }));
+    await user.click(screen.getByRole("button", { name: "Mode" }));
     await user.click(await screen.findByRole("menuitemradio", { name: /Full access/ }));
+    await user.click(await screen.findByRole("button", { name: "Use Full access" }));
 
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     await user.click(screen.getByRole("option", { name: "New Project from folder…" }));
@@ -1148,7 +1081,7 @@ describe("DraftThreadWorkspace", () => {
     expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(
       "Keep this exact prompt",
     );
-    expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent("Full access");
+    expect(screen.getByRole("button", { name: "Mode" })).toHaveTextContent("Full access");
     expect(screen.getByRole("button", { name: "Project: new-repository" })).toBeVisible();
   });
 
@@ -1459,6 +1392,66 @@ describe("DraftThreadWorkspace", () => {
       undefined,
       { id: "11111111-1111-4111-8111-111111111111" },
     );
+  });
+
+  it("starts a Work thread from a terminal session picked from Create from", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn();
+    const fetch = vi.fn(async () =>
+      Response.json({
+        sessions: [
+          {
+            provider: "codex",
+            sessionId: "019f6f43-f063-7df2-8216-515b7f7bfe9a",
+            title: "Changelog for the release",
+            updatedAt: new Date(Date.now() - 2 * 3_600_000).toISOString(),
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetch);
+    try {
+      render(
+        <DraftThreadWorkspace
+          {...baseProps}
+          mode="work"
+          onCreateThread={onCreateThread}
+          projectId={workProjectId}
+          projects={projects}
+          serverUrl="http://127.0.0.1:4000"
+          windowCapability="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        />,
+      );
+      await user.click(await screen.findByRole("button", { name: "Create from…" }));
+      await user.click(await screen.findByRole("tab", { name: "Terminal" }));
+      await user.click(
+        await screen.findByRole("button", { name: /Changelog for the release.*Codex · 2h ago/ }),
+      );
+      expect(screen.getByText("Codex: Changelog for the release")).toBeVisible();
+      await user.click(screen.getByRole("button", { name: "Create thread" }));
+
+      expect(fetch).toHaveBeenCalledWith(
+        new URL("http://127.0.0.1:4000/api/terminal-sessions/list"),
+        expect.objectContaining({ body: JSON.stringify({ projectId: workProjectId }) }),
+      );
+      expect(onCreateThread).toHaveBeenCalledWith(
+        "Continue where this session left off.",
+        workProjectId,
+        undefined,
+        [],
+        [],
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { provider: "codex", sessionId: "019f6f43-f063-7df2-8216-515b7f7bfe9a" },
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("prefills the prompt when a Linear issue is picked from Create from", async () => {

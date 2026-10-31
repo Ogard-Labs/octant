@@ -1,4 +1,5 @@
 import type { CodeClient, CodeFileOpenResult } from "@octant/client-runtime/code-client";
+import type { AutoReview } from "./autoReview";
 import type { WorkspaceTab } from "@octant/contracts/shell";
 import type { CodeOperationResult } from "@octant/contracts/code-operations";
 import type { CodeRelativePath, CodeThread } from "@octant/contracts/code";
@@ -31,7 +32,6 @@ export default function CodeWorkspaceTab(props: {
   readonly appleToolchainClient?: AppleToolchainClient;
   readonly extensionClient?: ExtensionClient;
   readonly automationClient?: AutomationClient;
-  readonly projectRemembersFullAccess?: boolean;
   readonly tab: CodeWorkspaceTab;
   readonly hostBridge?: OctantHostBridge;
   readonly onOpenBrowser?: () => void;
@@ -45,6 +45,8 @@ export default function CodeWorkspaceTab(props: {
   ) => void;
   readonly providerGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
   readonly harnessAutoReviewSupported?: boolean;
+  /** Who answers the thread's prompts at Auto, or why nobody can. */
+  readonly autoReview?: AutoReview;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
   readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
@@ -147,7 +149,6 @@ export default function CodeWorkspaceTab(props: {
           ? {}
           : { automationClient: props.automationClient })}
         {...(approvals === undefined ? {} : { approvals })}
-        {...(props.projectRemembersFullAccess !== true ? {} : { projectRemembersFullAccess: true })}
         client={props.controller.client}
         controller={props.controller}
         {...(props.holdAccessNotice === undefined
@@ -162,6 +163,7 @@ export default function CodeWorkspaceTab(props: {
         {...(props.harnessAutoReviewSupported === undefined
           ? {}
           : { harnessAutoReviewSupported: props.harnessAutoReviewSupported })}
+        {...(props.autoReview === undefined ? {} : { autoReview: props.autoReview })}
         {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
         {...(props.imageGenerationClient === undefined
           ? {}

@@ -440,6 +440,16 @@ CREATE INDEX spend_ceiling_scope_idx
   ON spend_ceiling_projection (scope_kind, scope_key);
 `;
 
+const HOST_MEMORY_LIMITS_PROJECTION_SQL = `
+CREATE TABLE host_memory_limits_projection (
+  singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+  limits_json TEXT NOT NULL CHECK(json_valid(limits_json)),
+  changed_at TEXT NOT NULL,
+  aggregate_version INTEGER NOT NULL CHECK(aggregate_version > 0),
+  last_sequence INTEGER NOT NULL CHECK(last_sequence > 0)
+) STRICT;
+`;
+
 const THREAD_RETENTION_PROJECTION_SQL = `
 CREATE TABLE thread_retention_projection (
   scope_kind TEXT NOT NULL CHECK(scope_kind IN ('host', 'project', 'thread')),
@@ -1140,7 +1150,7 @@ WHERE json_type(thread_json, '$.initialTurn.requestId') = 'text'
 `;
 
 /*
- * Rootless threads were retired by decision 0037. The tables the two
+ * Rootless threads were retired. The tables the two
  * migrations above created are dropped rather than left behind: no projector
  * writes them and no read path queries them, so a stale copy could only ever
  * be mistaken for live state. The journal keeps the events themselves.
@@ -2396,6 +2406,11 @@ CREATE INDEX validation_evidence_authority_idx
       DROP TABLE ssh_remote_project_projection;
       DROP TABLE ssh_target_projection;
     `,
+  },
+  {
+    version: 91,
+    name: "create_host_memory_limits_projection",
+    sql: HOST_MEMORY_LIMITS_PROJECTION_SQL,
   },
 ];
 

@@ -1,4 +1,5 @@
 import type {
+  ProviderApprovalCall,
   ContextCompactionRefusalReason,
   ProviderDriverKind,
   ProviderExecutionPolicy,
@@ -8,6 +9,7 @@ import type {
   ProviderAuthenticationAttempt,
   ProviderModelId,
   ProviderModelOptionValues,
+  ProviderNativeSetup,
   ProviderProbeResult,
   ProviderResumeCursor,
   ProviderRuntimeEvent,
@@ -38,6 +40,13 @@ export interface ProviderAcquireInput {
    * The folder the runtime works in, a folder on this host.
    */
   readonly projectRoot: string;
+  /**
+   * The Project's extra folders: absolute canonical paths outside
+   * `projectRoot` that the runtime gets exactly the access `projectRoot` gets
+   * at this session's level, in its own sandbox and in any profile the host
+   * wraps it in. Commands still start in `projectRoot`. Absent means none.
+   */
+  readonly extraFolders?: ReadonlyArray<string>;
   readonly mode?: "chat" | "work" | "code";
   /** Context used by the server-owned Work request projection subscriber. */
   readonly workRequest?: {
@@ -81,6 +90,14 @@ export interface ProviderSessionStart {
    * would name the tool for; absent never offers it.
    */
   readonly nativeArtifacts?: boolean;
+  /**
+   * What the runtime may load of its own in this session, as the host
+   * resolved it from the thread's level and mode, the account's switch, and
+   * the Project's trust. A driver turns on only the fields it reports
+   * supported in its `nativeSetup` capability and keeps every other one off;
+   * absent keeps all of them off.
+   */
+  readonly nativeSetup?: ProviderNativeSetup;
 }
 
 export interface ProviderSessionHandle {
@@ -110,6 +127,8 @@ export interface ProviderSessionResume {
    * would name the tool for; absent never offers it.
    */
   readonly nativeArtifacts?: boolean;
+  /** As on {@link ProviderSessionStart}; a resume states it again for the session it resumes. */
+  readonly nativeSetup?: ProviderNativeSetup;
 }
 
 export interface ProviderSessionCompactionRequest {
@@ -147,6 +166,15 @@ export interface ProviderApprovalAnswer {
   readonly sessionId: ProviderSessionId;
   readonly requestId: string;
   readonly approved: boolean;
+  /**
+   * `once`: the answer covers this one call. A driver neither remembers it for
+   * the session or the Project nor asks the runtime to, whatever the person's
+   * persistence setting says. Every automatic reviewer's answer (Octant
+   * Shield) and every answer on a child run's behalf carries it, so one
+   * automatic allow never authorizes a later call that nobody reviewed.
+   * Absent, the driver applies the person's persistence setting as before.
+   */
+  readonly scope?: "once";
 }
 
 export interface ProviderUserInputAnswer {
@@ -263,7 +291,27 @@ export interface ProviderConnection {
   ) => Effect.Effect<ProviderSessionCompaction, ProviderFailure>;
   readonly interrupt: (sessionId: ProviderSessionId) => Effect.Effect<void, ProviderFailure>;
   readonly stop: (sessionId: ProviderSessionId) => Effect.Effect<void, ProviderFailure>;
+  /**
+   * Kills the runtime process this one session runs in, without asking it to
+   * stop first, for a turn that ignored `interrupt`. Present only on a
+   * connection whose sessions each own a process, so killing it cannot end
+   * another thread's turn; a connection that shares a process across sessions
+   * omits it and a host fails closed.
+   */
+  readonly forceStop?: (sessionId: ProviderSessionId) => Effect.Effect<void, ProviderFailure>;
   readonly answerApproval: (input: ProviderApprovalAnswer) => Effect.Effect<void, ProviderFailure>;
+  /**
+   * The pending call behind an approval request this connection raised and
+   * has not had answered, for an automatic reviewer on the host: its tool, the
+   * argument fields a reviewer judges with credentials redacted, and where it
+   * runs. Never put on an event, journaled, or shown. Absent, or answering
+   * nothing, when the runtime cannot say; the reviewer then judges by the
+   * request's description alone.
+   */
+  readonly approvalCall?: (input: {
+    readonly sessionId: ProviderSessionId;
+    readonly requestId: string;
+  }) => ProviderApprovalCall | undefined;
   readonly answerUserInput: (
     input: ProviderUserInputAnswer,
   ) => Effect.Effect<void, ProviderFailure>;

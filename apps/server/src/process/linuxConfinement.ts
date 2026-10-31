@@ -247,6 +247,13 @@ export function buildBubblewrapLaunch(
       "Linux confinement bound root must be absolute.",
     );
   }
+  if ((input.extraBoundRoots ?? []).some((root) => !isAbsolute(root))) {
+    throw new ProcessConfinementError(
+      "invalid-configuration",
+      "Linux confinement extra bound roots must be absolute.",
+    );
+  }
+  const boundRoots = [input.boundRoot, ...(input.extraBoundRoots ?? [])];
   if (!isAbsolute(input.temporaryDirectory)) {
     throw new ProcessConfinementError(
       "invalid-configuration",
@@ -400,10 +407,14 @@ export function buildBubblewrapLaunch(
     tryBindReadOnly(path);
   }
 
-  if (input.writeBoundRoot !== false) {
-    tryBindWritable(input.boundRoot);
-  } else {
-    tryBindReadOnly(input.boundRoot);
+  // The Project's extra folders are bound exactly as the root is: writable
+  // when the root is, read-only when it is not.
+  for (const root of boundRoots) {
+    if (input.writeBoundRoot !== false) {
+      tryBindWritable(root);
+    } else {
+      tryBindReadOnly(root);
+    }
   }
   // Shared host temp roots stay private tmpfs. Binding /tmp (or /var/tmp)
   // would let confined code read and write every other process's files there.
@@ -449,7 +460,7 @@ export function buildBubblewrapLaunch(
   // Bubblewrap applies seccomp before execve of the command, so a filter that
   // blocked execve would prevent the launch itself. Overlay host executable
   // search paths, re-bind this launch's binary, then load a process-deny
-  // seccomp program that blocks fork/clone (and execveat) after start. See 0068.
+  // seccomp program that blocks fork/clone (and execveat) after start.
   const denyProcessFork = input.allowProcessFork === false;
   const denyProcessExec = input.allowProcessExec === false;
   if (denyProcessFork || denyProcessExec) {
@@ -487,7 +498,7 @@ export function buildBubblewrapLaunch(
   }
 
   const writeTargets = [
-    ...(input.writeBoundRoot !== false ? [input.boundRoot] : []),
+    ...(input.writeBoundRoot !== false ? boundRoots : []),
     ...(isSharedHostTemporaryRoot(input.temporaryDirectory) ? [] : [input.temporaryDirectory]),
     ...(input.additionalWriteRoots ?? []),
     "/tmp",

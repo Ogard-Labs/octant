@@ -39,6 +39,50 @@ function disclosure(name: string): HTMLDetailsElement {
   return details;
 }
 
+describe("Octant Shield decisions among the tool rows", () => {
+  const review = (verdict: "allow" | "ask" | "deny") => ({
+    kind: "review" as const,
+    id: `review-${verdict}`,
+    summary: "bash: git push origin HEAD",
+    decision: {
+      reviewer: "octant-shield" as const,
+      verdict,
+      stage: verdict === "allow" ? ("fast-allow" as const) : ("model" as const),
+      ...(verdict === "allow" ? { rule: "read-only-git" } : {}),
+      reason: `Shield's reason to ${verdict}.`,
+      ...(verdict === "allow"
+        ? {}
+        : { model: { providerInstanceId: "p" as never, modelId: "small-model" as never } }),
+      latencyMs: 42,
+      decidedAt: "2026-10-31T00:00:00.000Z" as never,
+    },
+  });
+
+  it("names Shield, the verdict, the call, the reason, and who decided", () => {
+    render(
+      <TurnActivityRows
+        activity={{ reasoning: "", rows: [review("allow"), review("deny"), review("ask")] }}
+        running
+      />,
+    );
+    const notes = screen.getAllByRole("note");
+    expect(notes.map((note) => note.getAttribute("data-verdict"))).toEqual([
+      "allow",
+      "deny",
+      "ask",
+    ]);
+    expect(notes[0]).toHaveTextContent("Octant Shield allowed");
+    expect(notes[0]).toHaveTextContent("read-only-git · 42 ms");
+    expect(notes[1]).toHaveTextContent("Octant Shield denied");
+    expect(notes[1]).toHaveTextContent("small-model · 42 ms");
+    expect(notes[2]).toHaveAccessibleName(
+      "Octant Shield asked you: bash: git push origin HEAD. Shield's reason to ask.",
+    );
+    // Shield's decisions are not counted as tool calls or folded as running work.
+    expect(screen.queryByRole("button", { name: /bash/ })).toBeNull();
+  });
+});
+
 describe("TurnActivityRows", () => {
   it("reveals reasoning-only history with one disclosure instead of nested Thinking rows", async () => {
     render(
@@ -440,5 +484,69 @@ describe("a page a tool published", () => {
     expect(document.querySelector("iframe")).toBeNull();
     await userEvent.click(link);
     expect(opened).toEqual(["https://claude.ai/artifact/abc123"]);
+  });
+});
+
+describe("a tool row that read outside content", () => {
+  const rows = (outsideContent: {
+    readonly labels: ReadonlyArray<"agent-instructions" | "fake-authority">;
+    readonly recordedOnly?: true;
+  }): TurnActivity => ({
+    reasoning: "",
+    rows: [
+      {
+        kind: "tool",
+        id: "fetch-1",
+        toolName: "web-fetch",
+        state: "completed",
+        outsideContent,
+      },
+      { kind: "tool", id: "read-1", toolName: "read", state: "completed" },
+    ],
+  });
+
+  it("names what Octant Shield found, in the warning role, and reads it aloud", () => {
+    render(
+      <TurnActivityRows
+        activity={rows({ labels: ["agent-instructions", "fake-authority"] })}
+        running
+      />,
+    );
+    const row = screen.getByRole("button", { name: /^web-fetch/ });
+    expect(row).toHaveAccessibleName(
+      "web-fetch, done, Outside content · instructions aimed at the agent, a false claim of authority",
+    );
+    const tag = within(row).getByText(/^Outside content ·/).parentElement;
+    expect(tag).toHaveAttribute("data-quiet", "false");
+    // A row that read nothing from outside carries no tag.
+    expect(
+      within(screen.getByRole("button", { name: /^read/ })).queryByText(/Outside content/),
+    ).toBeNull();
+  });
+
+  it("stays a quiet tag at Full access, where outside content is recorded only", () => {
+    render(
+      <TurnActivityRows
+        activity={rows({ labels: ["agent-instructions"], recordedOnly: true })}
+        running
+      />,
+    );
+    const tag = within(screen.getByRole("button", { name: /^web-fetch/ })).getByText(
+      "Outside content · instructions aimed at the agent",
+    ).parentElement;
+    expect(tag).toHaveAttribute("data-quiet", "true");
+    expect(tag).toHaveAttribute(
+      "title",
+      "Outside content · instructions aimed at the agent. Recorded only at Full access.",
+    );
+  });
+
+  it("marks a plain outside read quietly with no finding", () => {
+    render(<TurnActivityRows activity={rows({ labels: [] })} running />);
+    const tag = within(screen.getByRole("button", { name: /^web-fetch/ })).getByText(
+      "Outside content",
+    ).parentElement;
+    expect(tag).toHaveAttribute("data-quiet", "true");
+    expect(tag).toHaveAttribute("data-found", "false");
   });
 });

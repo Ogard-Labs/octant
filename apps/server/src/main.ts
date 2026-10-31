@@ -169,6 +169,7 @@ try {
           hostControl: {
             servicePolicy: new ServicePolicyStore({ path: paths.servicePolicyPath }),
             requestOwnerStop: stop,
+            readServiceLog: async () => (await hostLogs.read({ limit: 200 })).entries,
           },
           serve,
         });

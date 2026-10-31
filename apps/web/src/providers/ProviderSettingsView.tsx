@@ -249,6 +249,11 @@ export interface ProviderSettingsViewProps {
     instanceId: ProviderInstanceId,
     enabled: boolean,
   ) => Promise<boolean>;
+  /** Lets one key provider account run as itself, or turns that off. */
+  readonly onSetProviderNativeSetup?: (
+    instanceId: ProviderInstanceId,
+    enabled: boolean,
+  ) => Promise<boolean>;
   readonly onDataTagsChange: (
     instanceId: ProviderInstanceId,
     dataTags: ProviderDataTags,
@@ -494,6 +499,9 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         {...(props.onSetClaudeArtifactDelivery === undefined
           ? {}
           : { onSetClaudeArtifactDelivery: props.onSetClaudeArtifactDelivery })}
+        {...(props.onSetProviderNativeSetup === undefined
+          ? {}
+          : { onSetProviderNativeSetup: props.onSetProviderNativeSetup })}
         onDataTagsChange={props.onDataTagsChange}
         onModelDataTagsChange={props.onModelDataTagsChange}
         {...(props.onModelContextWindowChange === undefined

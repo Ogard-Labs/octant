@@ -141,6 +141,32 @@ tools as unsupported, and its text and native-tool support do not imply an
 app-browser bridge. Changing the thread to Full access does not remove the
 isolation requirement.
 
+### Let a provider run as itself
+
+Claude Code, Codex, OpenCode, and Mistral Vibe can run in Octant the way they
+run on their own: their own subagents, web search and fetch, skills, and the
+MCP servers, plugins, settings, and hooks you set up for them. Octant still
+shows each subagent it can see and marks a thread that read the web.
+
+- **For an account:** in Settings › Providers, open the account and turn on
+  **Run … as itself**. Its threads then load its own setup in Chat, Work, and
+  Code.
+- **For a Project:** on a Work or Code Project's page, check the provider
+  under **Trusted providers**. That also lets the provider load the
+  Project's own settings, hooks, MCP servers, and plugins, code that no
+  Octant review step sees. A provider you do not trust there never loads a
+  Project's code, even at Full access.
+- **Full access** turns a provider's own setup on by itself, as in the
+  provider's own app.
+
+Only a window on the computer running Octant can change either switch; a
+paired phone or browser cannot. Plan mode stays read-only, so it never runs
+hooks, tool servers, or a Project's code. Chat never gets a folder or a
+shell, so it never runs hooks or a Project's code; your own tool servers do
+run in Chat when the switch is on. A provider's own memory, usage telemetry,
+and self-update stay off either way. The account's Settings card lists any
+part a provider cannot load in Octant yet.
+
 ### What each provider can do
 
 Claude Code and Codex are the two providers Octant is built around, and they
@@ -533,8 +559,15 @@ an Azure AI Foundry provider offers only its configured deployments.
 
 Each endpoint is one row that says whether it works: **Ready**, **Sign in to
 use**, **Sign in again**, **Signed out**, **Checking…**, **Can't connect**, **Needs key**,
-**Key refused**, **No access**, **Sign-in doesn't match**, **Not working**, **No
-models yet**, or **Off**. A row that needs you says why
+**Key refused**, **Request denied**, **Can't read key**, **No access**, **Sign-in doesn't match**, **Not working**, **No
+models yet**, or **Off**. **Key refused** means the service answered that it
+turned the key down. **Request denied** means it took the key but denied the
+request, as a key limited to some calls does. **Can't read key** means Octant
+could not read the saved key back from the credential store; a check that never
+reached the service never reads as a refused key. When the credential store
+will not keep a new key, the message names why (a locked keyring, no keyring
+running, `secret-tool` missing, access denied, no answer) and what to do next.
+A keyring started after Octant works on the next key with no restart. A row that needs you says why
 in one sentence and offers one fix, such as **Try again**, **Replace key**,
 **Edit address**, or **Add model IDs**. Opening a row shows the endpoint's own
 page: its sign-in or key, its models (search them, show or hide each one, and
@@ -631,6 +664,17 @@ active key runs out.
 - Anthropic-compatible, OpenAI-compatible, Azure AI Foundry, and image endpoints
   switch keys within a turn. A command-line runtime, such as Claude Code or
   Codex, uses the first key for now and does not switch.
+
+#### A key from a secret store
+
+Instead of storing a key, a provider can point at an item in a password manager
+you linked in **Settings → Secret stores** (the 1Password command line tool
+today). Open the provider and use **Key from a secret store**: enter the item's
+address and choose **Use this item**. Octant keeps the address, fetches the key
+from the manager each time it is used, and never stores, logs, or shows it. A
+locked store or a missing item fails the request like a missing key, with a
+message naming the cause. See [Use API keys from a secret
+store](../guide/secret-stores.md).
 
 ### Claude artifacts
 

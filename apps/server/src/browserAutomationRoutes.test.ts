@@ -626,4 +626,158 @@ describe("browser automation routes", () => {
     const without = await handler(post(command));
     expect(without?.status).toBe(503);
   });
+
+  describe("Browser profiles", () => {
+    const profileContext = {
+      contextId,
+      threadId,
+      actionId: "70000000-0000-4000-8000-000000000001",
+      correlationId: "80000000-0000-4000-8000-000000000001",
+      authority,
+      policy: {
+        profileMode: "isolated",
+        profile: { kind: "personal" },
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 1,
+        sessionTimeoutMs: 300_000,
+      },
+      state: "active",
+      createdAt: "2026-10-31T12:00:00.000Z",
+    };
+    const signedInSnapshot = {
+      status: "running",
+      threadId,
+      context: profileContext,
+      observation: {
+        contextId,
+        actionId: profileContext.actionId,
+        correlationId: profileContext.correlationId,
+        authority,
+        url: "https://example.com/account",
+        title: "Your account",
+        extractedText: "Signed in as the person",
+        screenshotDataUrl: "data:image/png;base64,AAAA",
+        observedAt: "2026-10-31T12:00:00.000Z",
+        stale: false,
+      },
+      evidence: [],
+    } as unknown as BrowserAutomationSnapshot;
+    const post = (path: string, value: unknown, paired = false) => {
+      const request = new Request(`http://127.0.0.1/api/browser/${path}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": capability,
+        },
+        body: JSON.stringify(value),
+      });
+      if (paired) {
+        bindPrincipalRouteContext(request, {
+          principal: createRemoteDevicePrincipal({
+            hostId: "local" as never,
+            deviceId: "90000000-0000-4000-8000-000000000001" as never,
+            credentialGeneration: 1,
+            origin: "https://octant.example",
+            protocolVersion: 1,
+            capabilityDigest: "a".repeat(64),
+            sessionId: "a1000000-0000-4000-8000-000000000001" as never,
+          }),
+          scopeId: windowId,
+        });
+      }
+      return request;
+    };
+
+    it("carries a profile command with the caller the host proved", async () => {
+      const profiles = {
+        execute: vi.fn(async () => ({ kind: "browser-profiles" as const, profiles: [] })),
+      };
+      const withProfiles = createBrowserAutomationRouteHandler({
+        service: service as any,
+        authority: { canAccessWindow: () => true, resolve: () => authority },
+        profiles,
+        windowAuthorityStore: store,
+        maxRequestBodySize: 64_000,
+      });
+      const clear = { kind: "clear", profile: { kind: "personal" }, scope: "all" };
+
+      expect((await withProfiles(post("profiles", clear)))?.status).toBe(200);
+      expect(profiles.execute).toHaveBeenLastCalledWith("local-window", clear);
+      await withProfiles(post("profiles", clear, true));
+      expect(profiles.execute).toHaveBeenLastCalledWith("remote-device", clear);
+      // A profile cannot be named by a caller that decides its own scope or store path.
+      expect(
+        (await withProfiles(post("profiles", { ...clear, partition: "persist:other" })))?.status,
+      ).toBe(400);
+      expect((await handler(post("profiles", clear)))?.status).toBe(503);
+    });
+
+    it("carries an extensions command with the window and the caller the host proved", async () => {
+      const extensions = {
+        execute: vi.fn(async () => ({ kind: "browser-extensions" as const, extensions: [] })),
+      };
+      const withExtensions = createBrowserAutomationRouteHandler({
+        service: service as any,
+        authority: { canAccessWindow: () => true, resolve: () => authority },
+        extensions,
+        windowAuthorityStore: store,
+        maxRequestBodySize: 64_000,
+      });
+      const list = { kind: "list" };
+
+      expect((await withExtensions(post("extensions", list)))?.status).toBe(200);
+      expect(extensions.execute).toHaveBeenLastCalledWith(windowId, "local-window", list);
+      await withExtensions(post("extensions", list, true));
+      expect(extensions.execute).toHaveBeenLastCalledWith(windowId, "remote-device", list);
+      // A folder path is never accepted from the caller; only a picker receipt is.
+      expect(
+        (await withExtensions(post("extensions", { kind: "install", path: "/Users/x/ext" })))
+          ?.status,
+      ).toBe(400);
+      expect((await handler(post("extensions", list)))?.status).toBe(503);
+    });
+
+    it("withholds a signed-in page from a paired device and shows it to the local window", async () => {
+      service.inspectThread.mockReturnValue(signedInSnapshot);
+      const current = { threadId };
+
+      const local = await handler(post("contexts/current", current));
+      const paired = await handler(post("contexts/current", current, true));
+
+      expect(await local?.json()).toMatchObject({
+        observation: { title: "Your account", extractedText: "Signed in as the person" },
+      });
+      const withheld = await paired?.json();
+      expect(withheld).toMatchObject({
+        failure: { reason: "profile-not-local", message: "Signed-in page — open it on this Mac." },
+      });
+      expect(JSON.stringify(withheld)).not.toContain("Your account");
+      expect(JSON.stringify(withheld)).not.toContain("Signed in as the person");
+      expect(JSON.stringify(withheld)).not.toContain("data:image");
+    });
+
+    it("refuses a paired device's tap on a signed-in page without reaching the service", async () => {
+      const action = {
+        actionId: profileContext.actionId,
+        contextId,
+        correlationId: profileContext.correlationId,
+        authority,
+        kind: "click",
+        point: { x: 0.5, y: 0.5 },
+      };
+      const withProfileOf = createBrowserAutomationRouteHandler({
+        service: { ...service, profileOf: () => ({ kind: "personal" }) } as any,
+        authority: { canAccessWindow: () => true, resolve: () => authority },
+        windowAuthorityStore: store,
+        maxRequestBodySize: 64_000,
+      });
+
+      const refused = await withProfileOf(post("actions", action, true));
+
+      expect(refused?.status).toBe(403);
+      expect(await refused?.json()).toMatchObject({ reason: "profile-not-local" });
+      expect(service.act).not.toHaveBeenCalled();
+    });
+  });
 });

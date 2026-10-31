@@ -494,6 +494,20 @@ export const AGENT_RUN_TURN_REQUEST_SHAPE = "agent-run-turn";
  */
 export const AGENT_RUN_USAGE_AGGREGATE_TYPE = "agent-run-usage";
 
+/**
+ * One Octant Shield review's model call. Like a child turn it has no context
+ * plan, so it reconciles against nothing.
+ */
+export const SHIELD_REVIEW_REQUEST_SHAPE = "shield-review";
+
+/**
+ * The per-thread aggregate a Code thread's Shield reviews are journaled on,
+ * apart from the thread's own versions. The usage ledger records each under
+ * the reviewed thread, so the thread's and its Project's spend ceilings count
+ * it.
+ */
+export const SHIELD_REVIEW_USAGE_AGGREGATE_TYPE = "shield-review-usage";
+
 export const UsageReconciliation = Schema.Struct({
   id: UsageReconciliationId,
   planId: Schema.optional(ContextPlanId),
@@ -530,7 +544,10 @@ export const UsageReconciliation = Schema.Struct({
       }
       const imageGeneration = reconciliation.requestShape === "image-generation";
       if (imageGeneration) return reconciliation.imageUnits !== undefined;
-      if (reconciliation.requestShape === AGENT_RUN_TURN_REQUEST_SHAPE) {
+      if (
+        reconciliation.requestShape === AGENT_RUN_TURN_REQUEST_SHAPE ||
+        reconciliation.requestShape === SHIELD_REVIEW_REQUEST_SHAPE
+      ) {
         return reconciliation.planId === undefined && reconciliation.imageUnits === undefined;
       }
       return reconciliation.planId !== undefined && reconciliation.imageUnits === undefined;

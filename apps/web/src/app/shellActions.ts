@@ -1,6 +1,7 @@
 import type { EnvironmentSelection } from "@octant/client-runtime/environment-selection";
 import type {
   CodeProjectPullRequestDetailObserved,
+  CodeTerminalId,
   CodeProjectPullRequestDetailQuery,
   CodeProjectPullRequestMergeMethod,
   CodeProjectPullRequestMergeOutcome,
@@ -17,7 +18,7 @@ import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId, ProjectSummary } from "@octant/contracts/projects";
 import type {
   PermissionPersistence,
-  ProviderExecutionPolicy,
+  PermissionMode,
   ProviderInstanceId,
   ProviderModelId,
   ProviderModelOptionValues,
@@ -65,7 +66,7 @@ export type ShellActions = {
   readonly activatePane: ShellController["activatePane"];
   readonly addDockTab: (surface: RightUtilityDockSurfaceId) => void;
   readonly addZenBrowser: (sourceContext: ZenSourceContext) => void;
-  readonly addZenProjectTerminal: (projectId: ProjectId) => Promise<void>;
+  readonly addZenProjectTerminal: (projectId: ProjectId) => Promise<CodeTerminalId | undefined>;
   readonly addZenTerminal: (sourceContext: ZenSourceContext) => Promise<void>;
   readonly archiveCodeThread: CodeController["archiveThread"];
   readonly clearFocus: ShellController["clearFocus"];
@@ -114,6 +115,7 @@ export type ShellActions = {
     method: CodeProjectPullRequestMergeMethod,
     headSha: string,
   ) => Promise<CodeProjectPullRequestMergeOutcome>;
+  readonly moveCodeThread: CodeController["moveThread"];
   readonly moveProject: ProjectController["move"];
   readonly noteCanvasReferences: NonNullable<WorkspaceViewProps["onCanvasReferencesObserved"]>;
   readonly noteHandedOffDocument: (mode: OctantMode, threadId: string, canvasId: string) => void;
@@ -195,6 +197,8 @@ export type ShellActions = {
     readonly projectHostId?: HostId;
     readonly onRefuse: (reason: string) => void;
   }) => HostId | undefined;
+  readonly addProjectExtraFolder: ProjectController["addExtraFolder"];
+  readonly removeProjectExtraFolder: ProjectController["removeExtraFolder"];
   readonly relinkProject: ProjectController["relink"];
   readonly renameCodeThread: (threadId: string, title: string) => void;
   readonly renameProject: ProjectController["rename"];
@@ -232,7 +236,7 @@ export type ShellActions = {
   >;
   readonly setDockStatesByThread: ThreadUtilityPresentation["setDockStatesByThread"];
   readonly setDraftError: Dispatch<SetStateAction<string | undefined>>;
-  readonly setDraftExecutionPolicy: Dispatch<SetStateAction<ProviderExecutionPolicy | undefined>>;
+  readonly setDraftPermissionMode: Dispatch<SetStateAction<PermissionMode | undefined>>;
   readonly setDraftModelId: Dispatch<SetStateAction<ProviderModelId | undefined>>;
   readonly setDraftPendingMessage: Dispatch<SetStateAction<string | undefined>>;
   readonly setDraftPermissionPersistence: Dispatch<
@@ -257,8 +261,12 @@ export type ShellActions = {
   readonly setProjectArchived: ProjectController["setArchived"];
   readonly setProjectColor: ProjectController["setColor"];
   readonly setProjectProviderPolicy: ProjectController["setProviderPolicy"];
+  readonly setProjectNativeProviders: ProjectController["setNativeProviders"];
+  readonly setProjectPermissionMode: ProjectController["setCodePermissionMode"];
+  readonly setProjectAutoReviewer: ProjectController["setCodeAutoReviewer"];
   readonly setProjectBrandKit: ProjectController["setBrandKit"];
   readonly setProjectDesktopRecipe: ProjectController["setDesktopRecipe"];
+  readonly setProjectActions: ProjectController["setActions"];
   readonly setProjectWorkStatusFile: ProjectController["setWorkStatusFile"];
   readonly setProjectsListOpen: Dispatch<SetStateAction<boolean>>;
   readonly setRailPlaceholder: Dispatch<

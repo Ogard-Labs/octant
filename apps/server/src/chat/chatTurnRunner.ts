@@ -21,6 +21,7 @@ import {
   type ContextSubjectRef,
   type ProviderFailure,
   type ProviderInstanceId,
+  type ProviderNativeSetup,
   type ProviderContextBlock,
   type ProviderResumeCursor,
   type ProviderRuntimeEvent,
@@ -256,6 +257,8 @@ export interface ChatTurnRunnerInput {
   readonly estimatedTokens: number;
   readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
   readonly researchEnabled: boolean;
+  /** What the session may load of the provider's own setup; absent keeps it all off. */
+  readonly nativeSetup?: ProviderNativeSetup;
   readonly researchRoute: ResearchRouteDecision;
   readonly appManagedTools?: AppManagedToolSet;
   readonly mode?: "send" | "resume";
@@ -319,6 +322,8 @@ export class ChatTurnRunner {
   readonly #timeoutMs: number;
   readonly #spendCeiling: ChatTurnRunnerOptions["spendCeiling"];
   readonly #openQuestions = new Map<string, OpenChatQuestion>();
+  /** Kills one live attempt's own runtime process; present only for a connection that offers it. */
+  readonly #forceStops = new Map<string, () => Promise<boolean>>();
 
   constructor(options: ChatTurnRunnerOptions) {
     this.#capacityScheduler = options.capacityScheduler;
@@ -345,6 +350,21 @@ export class ChatTurnRunner {
     return await question.answered;
   }
 
+  /** Whether this host runs the attempt on a runtime process that can be killed on its own. */
+  canForceStop(attemptId: string): boolean {
+    return this.#forceStops.has(attemptId);
+  }
+
+  /**
+   * Kills the attempt's own runtime process. `false` when this host is not
+   * running the attempt on a killable process or the kill failed; the turn
+   * then settles through the ordinary stop path and nothing else is touched.
+   */
+  async forceStop(attemptId: string): Promise<boolean> {
+    const kill = this.#forceStops.get(attemptId);
+    return kill === undefined ? false : await kill();
+  }
+
   run(input: ChatTurnRunnerInput): Effect.Effect<void, ChatFailure, Scope.Scope> {
     const clock = input.clock ?? (() => new Date().toISOString());
     const ambiguousRecovery = input.ambiguousRecovery ?? "interrupted";
@@ -354,6 +374,7 @@ export class ChatTurnRunner {
     const timeoutMs = this.#timeoutMs;
     const spendCeiling = this.#spendCeiling;
     const openQuestions = this.#openQuestions;
+    const forceStops = this.#forceStops;
 
     return Effect.gen(function* () {
       yield* Effect.addFinalizer(() =>
@@ -596,6 +617,17 @@ export class ChatTurnRunner {
           Effect.catchAll(persistProviderFailure),
         );
       const cleanup = { released: false };
+      const killSession = connection.forceStop;
+      if (killSession !== undefined) {
+        forceStops.set(String(input.attempt.id), () =>
+          Effect.runPromise(
+            killSession(input.attempt.providerSessionId).pipe(
+              Effect.as(true),
+              Effect.catchAll(() => Effect.succeed(false)),
+            ),
+          ),
+        );
+      }
 
       const cancelOwnedSession = () =>
         Effect.gen(function* () {
@@ -721,6 +753,7 @@ export class ChatTurnRunner {
           // and an answerer already parked on the promise must be let go.
           const unanswered = openQuestions.get(String(input.attempt.id));
           openQuestions.delete(String(input.attempt.id));
+          forceStops.delete(String(input.attempt.id));
           unanswered?.abandon("Chat turn ended before the answer was delivered.");
           const stopped = yield* connection.stop(input.attempt.providerSessionId).pipe(
             Effect.as(true),
@@ -816,6 +849,7 @@ export class ChatTurnRunner {
         Object.keys(input.thread.modelOptionValues).length > 0
           ? { modelOptionValues: input.thread.modelOptionValues }
           : {};
+      const nativeSetup = input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup };
       const startHandle = yield* (
         input.resumeCursor !== undefined
           ? connection.resume({
@@ -828,6 +862,7 @@ export class ChatTurnRunner {
                 ...(input.appManagedTools?.definitions ?? []),
               ],
               ...modelOptionValues,
+              ...nativeSetup,
             })
           : connection.start({
               sessionId: input.attempt.providerSessionId,
@@ -838,6 +873,7 @@ export class ChatTurnRunner {
                 ...(input.appManagedTools?.definitions ?? []),
               ],
               ...modelOptionValues,
+              ...nativeSetup,
             })
       ).pipe(Effect.catchAll(persistProviderFailure));
 

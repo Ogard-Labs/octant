@@ -13,6 +13,7 @@ import { MAX_PRODUCT_FEEDBACK_CROP_CHARACTERS } from "@octant/contracts/product-
 import { chromium } from "playwright-core";
 import {
   BrowserNavigationBlockedError,
+  BrowserProfileUnavailableError,
   type BrowserPointObservation,
   type BrowserRuntimeObservation,
   type BrowserRuntimePort,
@@ -197,6 +198,11 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     throwIfAborted(signal);
     if (policy.profileMode !== "isolated") {
       throw new Error("Only host-owned isolated browser contexts are supported.");
+    }
+    // A second, headless copy of a stored profile would hold different cookies
+    // from the desktop app's copy, so a headless page is always Private.
+    if (policy.profile !== undefined && policy.profile.kind !== "private") {
+      throw new BrowserProfileUnavailableError();
     }
     if (this.#contexts.has(contextId)) throw new Error("Browser context already exists.");
     const browser = await this.#ensureBrowser();

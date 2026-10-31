@@ -119,8 +119,7 @@ Start from the [current design index](docs/design/README.md). Architecture owns
 system boundaries, Workspace owns navigation and interaction, and DESIGN.md
 owns presentation. Update the owning specification in place alongside an
 approved implementation change, and reconcile any conflicting summaries.
-Historical ADRs explain earlier rationale; the archive is closed, so no change
-adds or supersedes one. A clear maintainer request to change the design authorizes
+A clear maintainer request to change the design authorizes
 the corresponding specification update. Ask about unresolved consequential scope,
 not merely because an old document says something different.
 
@@ -167,8 +166,7 @@ native/provider/human checks, and keep unrelated discoveries in separate issues.
 
 Two rings, both built by GitHub Actions. Apple Silicon (`darwin-arm64`) is
 Developer ID signed and notarized; Linux x64 ships an unsigned AppImage dogfood
-artifact on the same matrix. Feed documents use the rings layout from
-[decision 0034](docs/decisions/0034-signed-updates.md):
+artifact on the same matrix. Feed documents use the rings layout
 `<base>/<ring>/<platform>-<arch>.json`. A dogfood AppImage is not code-signed.
 In-app update still requires that signed feed, and refuses a package, an
 archive, or a location it cannot write.

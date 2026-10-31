@@ -50,8 +50,15 @@ export class ProcessConfinementError extends Error {
 }
 
 export interface SeatbeltProfileInput {
-  /** Exactly one bound filesystem root the process may write (unless writeBoundRoot is false). */
+  /** The bound filesystem root the process starts in and may write (unless writeBoundRoot is false). */
   readonly boundRoot: string;
+  /**
+   * A Project's extra folders. Each gets exactly the bound root's grant: read,
+   * write when `writeBoundRoot` allows it, and the same trailing write denial
+   * when it does not, so a Plan or Chat launch cannot write one through an
+   * ancestor grant either.
+   */
+  readonly extraBoundRoots?: ReadonlyArray<string>;
   /** Private temporary directory the process may write. */
   readonly temporaryDirectory: string;
   /** Extra write roots (provider managed homes). Bound root + temp remain the tool baseline. */
@@ -111,7 +118,7 @@ export interface SeatbeltProfileInput {
    * an ancestor: a project bound to the data directory's parent re-allows
    * the whole subtree through its `cwd` read root, so a grant-level
    * omission is not enough. Only a directory this launch carries as an
-   * `additionalWriteRoots` entry is re-allowed after the denial (0160).
+   * `additionalWriteRoots` entry is re-allowed after the denial.
    */
   readonly isolatedRoots?: ReadonlyArray<string>;
   readonly privateHomeAllowPaths?: ReadonlyArray<string>;
@@ -136,6 +143,8 @@ export interface ProcessConfinementPrepareInput {
   readonly executable: string;
   readonly args: ReadonlyArray<string>;
   readonly boundRoot: string;
+  /** See {@link SeatbeltProfileInput.extraBoundRoots}; Bubblewrap binds them as it binds the root. */
+  readonly extraBoundRoots?: ReadonlyArray<string>;
   readonly temporaryDirectory: string;
   readonly networkEgress: OsNetworkEgress;
   readonly additionalWriteRoots?: ReadonlyArray<string>;
@@ -621,6 +630,11 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
   for (const path of additionalWriteRoots) assertAbsolute(path, "additional write root");
   const readRoots = input.readRoots ?? [];
   for (const path of readRoots) assertAbsolute(path, "read root");
+  const extraBoundRoots = input.extraBoundRoots ?? [];
+  for (const path of extraBoundRoots) assertAbsolute(path, "extra bound root");
+  // The bound root and the Project's extra folders, which every grant and
+  // denial below treats alike.
+  const boundRoots = [input.boundRoot, ...extraBoundRoots];
   // Seatbelt is last-match-wins and the launch-root allow rules below are
   // emitted after the DEFAULT_DENY_READ_PATHS deny rules. A root equal to or
   // an ancestor of a denied path (e.g. /Library, /private, or /) would win
@@ -630,7 +644,7 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
   // /private/var) are unaffected and stay allowed.
   for (const path of [
     ...readRoots,
-    input.boundRoot,
+    ...boundRoots,
     input.temporaryDirectory,
     ...additionalWriteRoots,
   ]) {
@@ -652,11 +666,14 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
   for (const path of additionalDenyWritePaths) assertAbsolute(path, "additional deny write path");
   const isolatedRoots = input.isolatedRoots ?? [];
   for (const path of isolatedRoots) assertAbsolute(path, "isolated root");
-  const privateAllowPaths = input.privateHomeAllowPaths ?? [
-    input.boundRoot,
-    input.temporaryDirectory,
-    ...additionalWriteRoots,
-    ...readRoots,
+  const privateAllowPaths = [
+    ...(input.privateHomeAllowPaths ?? [
+      input.boundRoot,
+      input.temporaryDirectory,
+      ...additionalWriteRoots,
+      ...readRoots,
+    ]),
+    ...extraBoundRoots,
   ];
 
   const privateRules =
@@ -759,17 +776,17 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     // broad-read escape hatch that exists for Git and provider CLIs took away
     // the one directory those runtimes always need.
     ...uniqueAbsolutePaths(
-      [...readRoots, input.boundRoot, input.temporaryDirectory, ...additionalWriteRoots].flatMap(
+      [...readRoots, ...boundRoots, input.temporaryDirectory, ...additionalWriteRoots].flatMap(
         (path) => resolvedRootForms(path),
       ),
     ).map((path) => seatbeltAllowRule("file-read*", path)),
     ...launchRootAncestorMetadataRules([
       ...readRoots,
-      input.boundRoot,
+      ...boundRoots,
       input.temporaryDirectory,
       ...additionalWriteRoots,
     ]),
-    ...(writeBoundRoot ? resolvedRootForms(input.boundRoot) : []).map((path) =>
+    ...(writeBoundRoot ? boundRoots.flatMap((root) => resolvedRootForms(root)) : []).map((path) =>
       seatbeltAllowRule("file-write*", path),
     ),
     ...resolvedRootForms(input.temporaryDirectory).map((path) =>
@@ -788,7 +805,7 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     // launch bound to an ancestor re-allowed the whole subtree through its
     // `cwd` read root, so leaving it merely ungranted kept it reachable — a
     // project bound to the data directory's parent could read another
-    // thread's raw screen capture for the capture's lifetime (0160). The one
+    // thread's raw screen capture for the capture's lifetime. The one
     // launch that carries the same directory in `additionalWriteRoots` is
     // re-allowed just below and stays the only writer.
     ...uniqueAbsolutePaths(isolatedRoots.flatMap((path) => resolvedRootForms(path))).flatMap(
@@ -813,13 +830,15 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     // included; emitted before them it was overwritten by the ancestor's allow.
     ...(writeBoundRoot
       ? []
-      : resolvedRootForms(input.boundRoot).map((path) => seatbeltDenyRule("file-write*", path))),
+      : boundRoots
+          .flatMap((root) => resolvedRootForms(root))
+          .map((path) => seatbeltDenyRule("file-write*", path))),
     // A grant that is the bound root or lies beneath it was asked for by name,
     // and stays writable: Chat binds a provider's managed home as its root and
     // lists the same directory as a write root. Denying last would have taken
     // that away, so these are allowed again after the denial.
-    ...writeGrantsBeneathBoundRoot(input, additionalWriteRoots, writeBoundRoot).map((path) =>
-      seatbeltAllowRule("file-write*", path),
+    ...writeGrantsBeneathBoundRoot(input, boundRoots, additionalWriteRoots, writeBoundRoot).map(
+      (path) => seatbeltAllowRule("file-write*", path),
     ),
     '(allow file-write-data (literal "/dev/null"))',
     ...(input.extraRules ?? []),
@@ -921,6 +940,9 @@ function prepareSeatbeltLaunch(
   ]);
   const profile = buildDenyDefaultSeatbeltProfile({
     boundRoot: input.boundRoot,
+    ...(input.extraBoundRoots === undefined || input.extraBoundRoots.length === 0
+      ? {}
+      : { extraBoundRoots: input.extraBoundRoots }),
     temporaryDirectory: input.temporaryDirectory,
     networkEgress: input.networkEgress,
     ...(input.additionalWriteRoots === undefined
@@ -974,11 +996,12 @@ function prepareSeatbeltLaunch(
  */
 function writeGrantsBeneathBoundRoot(
   input: SeatbeltProfileInput,
+  boundRoots: ReadonlyArray<string>,
   additionalWriteRoots: ReadonlyArray<string>,
   writeBoundRoot: boolean,
 ): ReadonlyArray<string> {
   if (writeBoundRoot) return [];
-  const boundForms = resolvedRootForms(input.boundRoot);
+  const boundForms = boundRoots.flatMap((root) => resolvedRootForms(root));
   const beneath = (path: string) =>
     boundForms.some((bound) => path === bound || path.startsWith(`${bound}${sep}`));
   return uniqueAbsolutePaths(

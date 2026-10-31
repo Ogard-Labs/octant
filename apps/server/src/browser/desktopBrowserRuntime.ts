@@ -1,11 +1,15 @@
+import { storedBrowserProfile } from "@octant/domain";
+import type { StoredBrowserProfile } from "@octant/contracts/browser-profiles";
 import type {
   BrowserContextId,
   BrowserContextPolicy,
   BrowserThreadId,
 } from "@octant/contracts/browser-automation";
 import type { WindowId } from "@octant/contracts/shell";
+import { decodeStoredBrowserProfile } from "@octant/contracts/browser-profiles";
 import {
   BrowserNavigationBlockedError,
+  type BrowserProfileStorePort,
   type BrowserRuntimeObservation,
   type BrowserRuntimePort,
   type BrowserRuntimeAction,
@@ -19,6 +23,16 @@ export interface DesktopBrowserRuntimeOptions {
   readonly token: string;
   readonly fetch?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
   readonly eventPollIntervalMs?: number;
+  /**
+   * The extensions enabled in a stored profile. Electron keeps a loaded extension
+   * for the life of the app only, so a page opening in a profile first makes the
+   * session's extensions match this list.
+   */
+  readonly extensionsFor?: (profile: StoredBrowserProfile) => ReadonlyArray<{
+    readonly id: string;
+    readonly path: string;
+    readonly contentHash: string;
+  }>;
 }
 
 export class DesktopBrowserOwnerUnavailable extends Error {
@@ -33,6 +47,7 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
   readonly #token: string;
   readonly #fetch: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
   readonly #eventPollIntervalMs: number;
+  readonly #extensionsFor: DesktopBrowserRuntimeOptions["extensionsFor"];
   readonly #exitListeners = new Set<(contextIds?: ReadonlyArray<BrowserContextId>) => void>();
   #eventPoll: ReturnType<typeof setInterval> | undefined;
 
@@ -48,6 +63,7 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
     this.#token = options.token;
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#eventPollIntervalMs = options.eventPollIntervalMs ?? 250;
+    this.#extensionsFor = options.extensionsFor;
   }
 
   async available(): Promise<boolean> {
@@ -59,12 +75,71 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
     }
   }
 
+  nativeAvailable(): Promise<boolean> {
+    return this.available();
+  }
+
+  readonly profiles: BrowserProfileStorePort = {
+    list: async () => {
+      const payload = await this.#request<unknown>("/v1/profiles/list", {});
+      if (
+        typeof payload !== "object" ||
+        payload === null ||
+        !("profiles" in payload) ||
+        !Array.isArray(payload.profiles)
+      ) {
+        throw new Error("Octant desktop Browser broker rejected the request.");
+      }
+      return payload.profiles.flatMap((entry: unknown) => {
+        try {
+          const row = entry as { profile: unknown; sizeBytes: unknown };
+          const profile = decodeStoredBrowserProfile(row.profile);
+          return typeof row.sizeBytes === "number" && Number.isInteger(row.sizeBytes)
+            ? [{ profile, sizeBytes: Math.max(0, row.sizeBytes) }]
+            : [];
+        } catch {
+          return [];
+        }
+      });
+    },
+    clear: async (profile, scope) => {
+      await this.#request("/v1/profiles/clear", { profile, scope });
+    },
+    syncExtensions: async (profile, extensions) => {
+      await this.#request("/v1/extensions/sync", { profile, extensions });
+    },
+    importCookies: async (profile, cookies) => {
+      const answer = await this.#request<unknown>("/v1/profiles/import-cookies", {
+        profile,
+        cookies,
+      });
+      const row = answer as { imported?: unknown; skipped?: unknown };
+      if (
+        typeof row.imported !== "number" ||
+        typeof row.skipped !== "number" ||
+        !Number.isInteger(row.imported) ||
+        !Number.isInteger(row.skipped)
+      ) {
+        throw new Error("Octant desktop Browser broker rejected the request.");
+      }
+      return { imported: Math.max(0, row.imported), skipped: Math.max(0, row.skipped) };
+    },
+  };
+
   async createContext(
     contextId: BrowserContextId,
     policy: BrowserContextPolicy,
     signal: AbortSignal,
     owner: { readonly windowId: WindowId; readonly threadId: BrowserThreadId },
   ): Promise<"native-live"> {
+    const stored = storedBrowserProfile(policy.profile);
+    if (stored !== undefined && this.#extensionsFor !== undefined) {
+      // A page that cannot get its extensions still opens: the journal says what
+      // is enabled, and the next sync makes the session match.
+      await this.profiles
+        .syncExtensions(stored, this.#extensionsFor(stored))
+        .catch(() => undefined);
+    }
     await this.#request("/v1/contexts/create", { contextId, policy, owner }, signal);
     return "native-live";
   }
@@ -166,11 +241,12 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
 
 export function createDesktopBrowserRuntimeFromEnvironment(
   env: NodeJS.ProcessEnv,
+  extra: Pick<DesktopBrowserRuntimeOptions, "extensionsFor"> = {},
 ): DesktopBrowserRuntime | undefined {
   const brokerUrl = env.OCTANT_BROWSER_BROKER_URL;
   const token = env.OCTANT_BROWSER_BROKER_TOKEN;
   if (brokerUrl === undefined || token === undefined) return undefined;
-  return new DesktopBrowserRuntime({ brokerUrl, token });
+  return new DesktopBrowserRuntime({ brokerUrl, token, ...extra });
 }
 
 async function navigationBlockedUrl(response: Response): Promise<string | undefined> {

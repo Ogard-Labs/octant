@@ -193,6 +193,7 @@ describe("Journal", () => {
         imageGeneration: { customSources: [] },
         standaloneSkillActivations: {},
         rememberedBrowserOrigins: [],
+        rememberedBrowserProfileSites: [],
         computerUse: { enabled: false, automaticUpdates: false },
         projectViewSwitcherPresentation: "dropdown",
         transcriptTextSize: "medium",

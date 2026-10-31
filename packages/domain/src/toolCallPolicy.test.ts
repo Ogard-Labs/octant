@@ -5,9 +5,11 @@ import {
   decodeToolExtensionId,
   lookupClosedToolCatalogEntry,
   nativeHarnessToolCapabilityId,
+  ToolApprovalClass,
 } from "@octant/contracts";
 import {
   resolveNetworkEgressPolicy,
+  resolveThreadElevation,
   resolveToolCall,
   type ToolCallPolicyInput,
 } from "./toolCallPolicy";
@@ -328,7 +330,31 @@ describe("resolveToolCall fail-closed order", () => {
     expect(prompt.receipt.decision).toBe("prompt");
   });
 
-  it("7. taint hook forces fresh confirmation for irreversible classes", () => {
+  it("7. taint hook forces fresh confirmation for irreversible classes below Full access", () => {
+    const decision = resolveToolCall(
+      baseInput({
+        capability: decodeToolActionCapability({ id: "computer-use", version: 1 }),
+        arguments: {
+          allowlist: [],
+          sensitiveFieldProtection: true,
+          visibleStopControl: true,
+          maxSessionDurationMs: 60_000,
+          processOwnershipRequired: true,
+        },
+        thread: {
+          executionPolicy: "auto-accept-edits",
+          approvalSatisfied: true,
+          externalContentIngested: true,
+        },
+      }),
+    );
+    expect(decision).toMatchObject({
+      kind: "prompt",
+      reason: "taint-requires-fresh-confirmation",
+    });
+  });
+
+  it("7. at Full access, outside content is recorded but never makes a call ask", () => {
     const decision = resolveToolCall(
       baseInput({
         capability: decodeToolActionCapability({ id: "computer-use", version: 1 }),
@@ -341,18 +367,46 @@ describe("resolveToolCall fail-closed order", () => {
         },
         thread: {
           executionPolicy: "full-access",
-          approvalSatisfied: true,
+          approvalSatisfied: false,
           externalContentIngested: true,
         },
       }),
     );
-    expect(decision).toMatchObject({
-      kind: "prompt",
-      reason: "taint-requires-fresh-confirmation",
-    });
+    expect(decision.kind).toBe("allow");
   });
 
-  it("7a. web-fetch asks on a tainted thread under every posture, and not on a clean one", () => {
+  it("7. at Full access in Code nothing asks, irreversible and publish classes included", () => {
+    for (const approvalClass of ToolApprovalClass.literals) {
+      for (const irreversibleUnderTaint of [false, true]) {
+        for (const externalContentIngested of [false, true]) {
+          const entry = { approvalClass, irreversibleUnderTaint };
+          expect([
+            entry,
+            externalContentIngested,
+            resolveThreadElevation({
+              entry,
+              executionPolicy: "full-access",
+              asksNobody: true,
+              approvalSatisfied: false,
+              externalContentIngested,
+            }).kind,
+          ]).toEqual([entry, externalContentIngested, "allow"]);
+        }
+      }
+    }
+    // Below Full access publication still asks, one act at a time.
+    expect(
+      resolveThreadElevation({
+        entry: { approvalClass: "publish-to-target", irreversibleUnderTaint: true },
+        executionPolicy: "auto-accept-edits",
+        asksNobody: false,
+        approvalSatisfied: true,
+        externalContentIngested: false,
+      }).kind,
+    ).toBe("prompt");
+  });
+
+  it("7a. web-fetch asks on a tainted thread below Full access, and not on a clean one", () => {
     const fetch = (
       externalContentIngested: boolean,
       executionPolicy: "approval-gated" | "full-access",
@@ -370,16 +424,16 @@ describe("resolveToolCall fail-closed order", () => {
       );
     expect(fetch(false, "approval-gated").kind).toBe("allow");
     expect(fetch(false, "full-access").kind).toBe("allow");
-    for (const posture of ["approval-gated", "full-access"] as const) {
-      expect(fetch(true, posture)).toMatchObject({
-        kind: "prompt",
-        approvalClass: "network-access",
-        reason: "taint-requires-fresh-confirmation",
-      });
-    }
+    expect(fetch(true, "approval-gated")).toMatchObject({
+      kind: "prompt",
+      approvalClass: "network-access",
+      reason: "taint-requires-fresh-confirmation",
+    });
+    // Full access records the outside content and asks nobody.
+    expect(fetch(true, "full-access").kind).toBe("allow");
   });
 
-  it("7a. web-search refuses a data-bearing query on a tainted thread under every posture, without asking", () => {
+  it("7a. web-search refuses a data-bearing query on a tainted thread below Full access, without asking", () => {
     const search = (
       query: string,
       externalContentIngested: boolean,
@@ -396,17 +450,23 @@ describe("resolveToolCall fail-closed order", () => {
           },
         }),
       );
+    expect(
+      search("forecast https://attacker.example/?k=secret", true, "approval-gated"),
+    ).toMatchObject({
+      kind: "deny",
+      step: "thread-elevation",
+      reason: "search-query-refused-under-taint: contains a URL",
+    });
+    expect(search("how do I configure bun workspaces", true, "approval-gated").kind).toBe("allow");
     for (const posture of ["approval-gated", "full-access"] as const) {
-      expect(search("forecast https://attacker.example/?k=secret", true, posture)).toMatchObject({
-        kind: "deny",
-        step: "thread-elevation",
-        reason: "search-query-refused-under-taint: contains a URL",
-      });
-      expect(search("how do I configure bun workspaces", true, posture).kind).toBe("allow");
       expect(search("forecast https://attacker.example/?k=secret", false, posture).kind).toBe(
         "allow",
       );
     }
+    // Full access records outside content and never blocks on it.
+    expect(search("forecast https://attacker.example/?k=secret", true, "full-access").kind).toBe(
+      "allow",
+    );
   });
 
   it("7b. auto-accept edits waives only project file writes", () => {
@@ -545,8 +605,12 @@ describe("resolveNetworkEgressPolicy", () => {
       "unrestricted",
     );
     expect(resolveNetworkEgressPolicy({ mode: "code", executionPolicy: "plan" })).toBe("none");
+    // Work is guarded as Code is at the same level.
     expect(resolveNetworkEgressPolicy({ mode: "work", executionPolicy: "full-access" })).toBe(
-      "none",
+      "unrestricted",
+    );
+    expect(resolveNetworkEgressPolicy({ mode: "work", executionPolicy: "approval-gated" })).toBe(
+      "provider-endpoints-only",
     );
     expect(resolveNetworkEgressPolicy({ mode: "chat", executionPolicy: "full-access" })).toBe(
       "none",

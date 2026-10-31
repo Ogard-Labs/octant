@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   automationFollowUpTurnPrompt,
   type AutomationRun,
+  type WorkAccess,
   type WorkThreadId,
   type UtcTimestamp,
   type WindowId,
@@ -36,7 +37,7 @@ export interface AutomationWorkTurnService {
   readonly startFirstTurn: (
     scopeId: WindowId,
     command: unknown,
-    options?: { readonly holdAskFirst?: boolean },
+    options?: { readonly accessCeiling?: WorkAccess },
   ) => Promise<{
     readonly kind: string;
     readonly turn?: { readonly requestId: string; readonly status?: string };
@@ -185,11 +186,14 @@ async function startOrRecover(
 
   try {
     // A routine thread takes its access from the host's Work default, which a
-    // person may have set to auto-accept-edits. Nobody is present for this
-    // turn, so it runs ask-first unless the routine's captured authority
-    // itself is auto-accept-edits; the hold can only narrow the thread.
+    // person may have set above Ask first. Nobody is present for this turn,
+    // so it runs ask-first unless the routine's captured authority itself is
+    // auto-accept-edits; the ceiling can only narrow the thread.
     const result = await options.turns.startFirstTurn(input.scopeId, command, {
-      holdAskFirst: input.run.authoritySnapshot.effective.executionPolicy !== "auto-accept-edits",
+      accessCeiling:
+        input.run.authoritySnapshot.effective.executionPolicy === "auto-accept-edits"
+          ? "auto-accept-edits"
+          : "ask-first",
     });
     if (result.kind === "accepted") {
       return {

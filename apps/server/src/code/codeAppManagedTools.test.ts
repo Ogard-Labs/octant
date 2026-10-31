@@ -11,6 +11,7 @@ import {
   CODE_BOARD_TOOL_NAME,
   CODE_BROWSER_TOOL_NAME,
   CODE_PROPOSE_THREAD_TOOL_NAME,
+  CODE_PULL_REQUEST_TOOL_NAME,
   CODE_TERMINAL_TOOL_NAME,
   createCodeAppManagedTools,
 } from "./codeAppManagedTools";
@@ -2372,6 +2373,264 @@ describe("Code tool families", () => {
       inputJson: '{"operation":"help"}',
     });
     expect(outcome.isError).toBe(true);
+  });
+});
+
+describe("the pull request as an agent tool", () => {
+  const approvalId = "d0000000-0000-4000-8000-000000000001";
+
+  function pullRequestTools(
+    threadOverrides: Partial<CodeThread> = {},
+    answer: "approved" | "denied" = "approved",
+  ) {
+    const request = vi.fn(async () =>
+      answer === "approved"
+        ? ({ status: "approved", approvalId } as never)
+        : ({ status: "denied" } as const),
+    );
+    const executeOperation = vi.fn(
+      async (_windowId: WindowId, command: CodeOperationCommand): Promise<CodeOperationResult> =>
+        ({
+          kind: "pull-request-state",
+          operationId: command.operationId,
+          state: command.kind === "create-pull-request" ? "created" : "existing",
+          number: 42,
+          url: "https://github.com/octant/octant/pull/42",
+          headRepository: "octant",
+          headBranch: "feature/tools",
+          baseRepository: "octant/octant",
+          baseBranch:
+            command.kind === "create-pull-request"
+              ? (command.baseBranch ?? "development")
+              : "development",
+          ...("draft" in command && command.draft !== undefined ? { draft: command.draft } : {}),
+        }) as never,
+    );
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: thread(threadOverrides),
+      readThread: () => thread(threadOverrides),
+      uuid: uuidFactory(),
+      executeOperation,
+      terminal: { read: async () => ({}) as never },
+      pullRequestApproval: { request },
+    });
+    return { tools, request, executeOperation };
+  }
+
+  it("opens a stacked draft in a Full-access thread without asking", async () => {
+    const { tools, request, executeOperation } = pullRequestTools();
+
+    const result = await tools.execute({
+      name: CODE_PULL_REQUEST_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "create",
+        title: "Add the parser",
+        body: "Second layer.",
+        draft: true,
+        base: "feature/lexer",
+      }),
+    });
+
+    expect(request).not.toHaveBeenCalled();
+    expect(executeOperation).toHaveBeenCalledWith(
+      windowId,
+      expect.objectContaining({
+        kind: "create-pull-request",
+        threadId,
+        checkoutId,
+        title: "Add the parser",
+        body: "Second layer.",
+        draft: true,
+        baseBranch: "feature/lexer",
+        authorization: { kind: "full-access" },
+      }),
+    );
+    expect(result).toEqual({
+      result: {
+        status: "created",
+        number: 42,
+        url: "https://github.com/octant/octant/pull/42",
+        baseBranch: "feature/lexer",
+        headBranch: "feature/tools",
+        draft: true,
+      },
+      isError: false,
+    });
+  });
+
+  it("asks the person in an approval-gated thread and sends their one-use approval", async () => {
+    const { tools, request, executeOperation } = pullRequestTools({
+      executionPolicy: "approval-gated",
+    });
+
+    const result = await tools.execute({
+      name: CODE_PULL_REQUEST_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "update", draft: false }),
+    });
+
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "update-pull-request", draft: false }),
+      undefined,
+    );
+    expect(executeOperation).toHaveBeenCalledWith(
+      windowId,
+      expect.objectContaining({
+        kind: "update-pull-request",
+        draft: false,
+        authorization: { kind: "approved", approvalId },
+      }),
+    );
+    expect(result).toMatchObject({ result: { status: "updated", draft: false }, isError: false });
+  });
+
+  it("asks for each comment and each merge even in a Full-access thread, but not for a label", async () => {
+    const { tools, request, executeOperation } = pullRequestTools();
+
+    await tools.execute({
+      name: CODE_PULL_REQUEST_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "update", addLabels: ["bug"] }),
+    });
+    expect(request).not.toHaveBeenCalled();
+    expect(executeOperation).toHaveBeenLastCalledWith(
+      windowId,
+      expect.objectContaining({
+        kind: "update-pull-request",
+        addLabels: ["bug"],
+        authorization: { kind: "full-access" },
+      }),
+    );
+
+    const commented = await tools.execute({
+      name: CODE_PULL_REQUEST_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "comment", body: "Fixed.", reviewThreadId: "PRRT_1" }),
+    });
+    expect(request).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: "comment-pull-request", body: "Fixed." }),
+      undefined,
+    );
+    expect(executeOperation).toHaveBeenLastCalledWith(
+      windowId,
+      expect.objectContaining({
+        kind: "comment-pull-request",
+        reviewThreadId: "PRRT_1",
+        authorization: { kind: "approved", approvalId },
+      }),
+    );
+    expect(commented).toMatchObject({ result: { status: "commented" }, isError: false });
+
+    const merged = await tools.execute({
+      name: CODE_PULL_REQUEST_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "merge", method: "squash", headSha: "a".repeat(40) }),
+    });
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(executeOperation).toHaveBeenLastCalledWith(
+      windowId,
+      expect.objectContaining({
+        kind: "merge-pull-request",
+        method: "squash",
+        authorization: { kind: "approved", approvalId },
+      }),
+    );
+    expect(merged).toMatchObject({ result: { status: "merged" }, isError: false });
+  });
+
+  it("sends nothing to GitHub when the person declines a merge or a comment", async () => {
+    const { tools, executeOperation } = pullRequestTools({}, "denied");
+    for (const input of [
+      { operation: "comment", body: "Hello." },
+      { operation: "merge", method: "merge", headSha: "a".repeat(40) },
+    ]) {
+      const result = await tools.execute({
+        name: CODE_PULL_REQUEST_TOOL_NAME,
+        inputJson: JSON.stringify(input),
+      });
+      expect(result).toMatchObject({
+        result: { error: "pull-request-approval-denied" },
+        isError: true,
+      });
+    }
+    expect(executeOperation).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed label, close, comment, and merge input before anything runs", async () => {
+    const { tools, request, executeOperation } = pullRequestTools();
+    for (const input of [
+      { operation: "update", state: "closed", title: "also rename" },
+      { operation: "update", state: "deleted" },
+      { operation: "update", addLabels: [3] },
+      { operation: "update", addLabels: [] },
+      { operation: "comment" },
+      { operation: "comment", body: "   " },
+      { operation: "merge", method: "fast-forward", headSha: "a" },
+      { operation: "merge", method: "merge" },
+      { operation: "create", title: "x", addLabels: ["bug"] },
+    ]) {
+      const result = await tools.execute({
+        name: CODE_PULL_REQUEST_TOOL_NAME,
+        inputJson: JSON.stringify(input),
+      });
+      expect(result).toMatchObject({ isError: true });
+    }
+    expect(request).not.toHaveBeenCalled();
+    expect(executeOperation).not.toHaveBeenCalled();
+  });
+
+  it("refuses a comment or merge in Plan mode", async () => {
+    const { tools, request, executeOperation } = pullRequestTools({ executionPolicy: "plan" });
+    const result = await tools.execute({
+      name: CODE_PULL_REQUEST_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "comment", body: "Hello." }),
+    });
+    expect(result).toMatchObject({ result: { error: "plan-mode-read-only" }, isError: true });
+    expect(request).not.toHaveBeenCalled();
+    expect(executeOperation).not.toHaveBeenCalled();
+  });
+
+  it("reaches GitHub with nothing when the person declines", async () => {
+    const { tools, executeOperation } = pullRequestTools(
+      { executionPolicy: "approval-gated" },
+      "denied",
+    );
+
+    const result = await tools.execute({
+      name: CODE_PULL_REQUEST_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "create", title: "Add the parser" }),
+    });
+
+    expect(executeOperation).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      result: { error: "pull-request-approval-denied" },
+      isError: true,
+    });
+  });
+
+  it("refuses in Plan mode without asking", async () => {
+    const { tools, request, executeOperation } = pullRequestTools({ executionPolicy: "plan" });
+
+    const result = await tools.execute({
+      name: CODE_PULL_REQUEST_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "create", title: "Add the parser" }),
+    });
+
+    expect(request).not.toHaveBeenCalled();
+    expect(executeOperation).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ result: { error: "plan-mode-read-only" }, isError: true });
+  });
+
+  it("refuses to name a head, so only the thread's own branch can get a pull request", async () => {
+    const { tools, executeOperation } = pullRequestTools();
+
+    const result = await tools.execute({
+      name: CODE_PULL_REQUEST_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "create", title: "Other", head: "someone-else" }),
+    });
+
+    expect(executeOperation).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      result: { error: "invalid-pull-request-input" },
+      isError: true,
+    });
   });
 });
 

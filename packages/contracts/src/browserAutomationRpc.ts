@@ -10,6 +10,7 @@ import {
   BrowserThreadId,
   MAX_BROWSER_THREAD_CONTEXTS,
 } from "./browserAutomation";
+import { StoredBrowserProfile } from "./browserProfiles";
 import {
   ToolActionAuthority,
   ToolActionCancellation,
@@ -50,6 +51,17 @@ export const BrowserToolApproval = Schema.Struct({
   threadId: BrowserThreadId,
   mode: Schema.Literal("chat", "work", "code"),
   origin: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
+  /**
+   * The Project or Personal profile the page lives in, when it is in one. A
+   * signed-in page acts as the person's account, so the prompt names the profile
+   * and a grant covers that (origin, profile) pair and nothing wider.
+   */
+  profile: Schema.optional(StoredBrowserProfile),
+  /**
+   * How many browser extensions are on in that profile, when any are. They can
+   * read and change what the agent reads there, so the prompt says so.
+   */
+  extensionCount: Schema.optional(Schema.Int.pipe(Schema.between(1, 64))),
   requestedAt: UtcTimestamp,
 }).annotations({ ...strict, ...personDecides });
 export type BrowserToolApproval = typeof BrowserToolApproval.Type;

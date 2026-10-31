@@ -3,8 +3,8 @@
 # Fires on a `vMAJOR.MINOR.PATCH` tag and publishes signed feeds at
 # `<base>/stable/<platform>-<arch>.json` for the release matrix (darwin-arm64
 # plus linux-x64 AppImage dogfood). The same one-deliverable rule as the
-# preview ring applies (`docs/decisions/0034`): a live feed is signed or not
-# published at all.
+# preview ring applies (`docs/architecture.md`, "Current Release Boundary"): a
+# live feed is signed or not published at all.
 #
 # The `stable` environment carries a required reviewer, so pushing a tag
 # proposes a release and a person approves it. Everything before the approval is

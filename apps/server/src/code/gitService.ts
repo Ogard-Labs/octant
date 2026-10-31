@@ -2,6 +2,7 @@ import type { ProviderExecutionPolicy } from "@octant/contracts";
 import type { GitMutationPort, GitMutationResult, GitTreeSnapshot } from "./gitMutationPort";
 import type {
   GitBranchComparisonResult,
+  GitDiffOptions,
   GitObservation,
   GitObservationPort,
   GitObservationResult,
@@ -11,7 +12,11 @@ import type {
 } from "./gitObservationPort";
 
 interface ObservationPort {
-  observe(root: string, signal?: AbortSignal): Promise<GitObservationResult>;
+  observe(
+    root: string,
+    signal?: AbortSignal,
+    options?: GitDiffOptions,
+  ): Promise<GitObservationResult>;
   observeRemotes?(
     root: string,
     signal?: AbortSignal,
@@ -121,8 +126,12 @@ export class GitService {
     this.#mutation = mutation;
   }
 
-  observe(root: string, signal?: AbortSignal): Promise<GitObservationResult> {
-    return this.#observation.observe(root, signal);
+  observe(
+    root: string,
+    signal?: AbortSignal,
+    options?: GitDiffOptions,
+  ): Promise<GitObservationResult> {
+    return this.#observation.observe(root, signal, options);
   }
 
   observeRemotes(
@@ -519,6 +528,7 @@ export class GitService {
       };
       readonly expectedHeadOid: string;
       readonly expectedStateToken: string;
+      readonly force?: Parameters<GitMutationPort["push"]>[0]["force"];
       readonly authority: "plan" | "approval-gated" | "approved" | "full-access";
       readonly executionPolicy?: ProviderExecutionPolicy;
     },
@@ -548,6 +558,7 @@ export class GitService {
           localRef: input.localRef,
           remoteRef: input.remoteRef,
           confirmation: input.confirmation,
+          ...(input.force === undefined ? {} : { force: input.force }),
           ...mutationPolicy(input.executionPolicy),
         },
         signal,

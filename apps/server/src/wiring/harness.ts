@@ -3,6 +3,9 @@ import { mkdirSync } from "node:fs";
 import { realpath, stat as statFromDisk } from "node:fs/promises";
 import { join } from "node:path";
 import { queueSteeringWhereDelivered, withSteerable } from "../harness/nativeHarnessSteerability";
+import { createHostShield, shieldRoutesApprovals } from "../shield/hostShield";
+import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
+import { recordShieldReviewUsage } from "../shield/shieldUsageLedger";
 import {
   AggregateId,
   decodeCodeThreadId,
@@ -20,7 +23,10 @@ import { codeTurnExecutionPolicyReader } from "../code/codeTurnExecutionPolicy";
 import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
 import { nativeHarnessRecoveryBlockers } from "../harness/nativeHarnessRecovery";
 import { newestChatAttemptSession } from "../harness/nativeHarnessJournalLookup";
-import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
+import {
+  readShieldWatcherLabels,
+  readThreadExternalContentTaint,
+} from "../context/externalContentTaintProjection";
 import { createNativeHarnessAuthority } from "../harness/nativeHarnessAuthority";
 import {
   createNativeHarnessComposition,
@@ -52,7 +58,7 @@ import { parseFollowUpSuggestions } from "../followUps/followUpSuggestionParsing
 import { fetchPublicUrl, PublicFetchRefused } from "../harness/nativeHarnessWebFetch";
 import { searxngHarnessWebSearch } from "../harness/nativeHarnessWebSearch";
 import { deriveToolHostId } from "../browser/browserAuthorityResolver";
-import { isNativeHarnessDriverKind } from "@octant/domain";
+import { isNativeHarnessDriverKind, workThreadAccessOf } from "@octant/domain";
 import { type AgentRunsWiring, authorizeAgentRunParentThread } from "./agentRuns";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
 import type { ServerStart } from "./serverShape";
@@ -99,12 +105,21 @@ export type HarnessDependencies = Pick<ServerStart, "persistence"> &
   Pick<
     HarnessStateWiring,
     | "agentRunInteractions"
+    | "shieldHolder"
     | "nativeHarnessApprovals"
     | "nativeHarnessQuestions"
     | "nativeHarnessSessions"
   > &
   Pick<WorkRequestStateWiring, "runningWorkTurnAccess"> &
-  Pick<FoundationsWiring, "codeBoardEventStore" | "workThreadProjection" | "workTurnProjection"> &
+  Pick<
+    FoundationsWiring,
+    | "codeBoardEventStore"
+    | "codeEvidence"
+    | "providerRuntimeRegistry"
+    | "workThreadProjection"
+    | "workTurnProjection"
+  > &
+  Pick<AgentRunsWiring, "spendCeiling"> &
   Pick<WorkspaceWiring, "projectService">;
 
 export function wireHarness(deps: HarnessDependencies) {
@@ -115,6 +130,7 @@ export function wireHarness(deps: HarnessDependencies) {
     agentRunOrchestration,
     agentRunPersistence,
     codeBoardEventStore,
+    codeEvidence,
     codeParentActiveTurn,
     codeSessionAuthority,
     configuredDriverOptions,
@@ -123,6 +139,9 @@ export function wireHarness(deps: HarnessDependencies) {
     externalContentIngestionStore,
     goalService,
     nativeHarnessApprovals,
+    providerRuntimeRegistry,
+    shieldHolder,
+    spendCeiling,
     nativeHarnessLeadFallback,
     nativeHarnessQuestions,
     nativeHarnessRouter,
@@ -184,6 +203,15 @@ export function wireHarness(deps: HarnessDependencies) {
     temporaryDirectory: harnessOfflineWorkDirectory,
     networkEgress: "none",
     harnessShellScriptDirectory: harnessScriptDirectory,
+  });
+  // Full access runs a command the way the providers' own apps do: outside
+  // Octant's OS sandbox, network open. The owned process group, receipts and
+  // output capture stay, so the command is still journaled and stoppable.
+  const harnessFullAccessProcessPort = new RepositoryTestProcessPort({
+    receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
+    temporaryDirectory: harnessWorkDirectory,
+    harnessShellScriptDirectory: harnessScriptDirectory,
+    confinement: { prepare: ({ executable, args }) => ({ command: executable, args }) },
   });
   // Approval-gated and auto-accept-edits Code commands run on `proxied`
   // network: each command gets its own egress proxy listener, on loopback
@@ -481,10 +509,71 @@ export function wireHarness(deps: HarnessDependencies) {
       await nativeHarnessObserver.turnCompleted(input);
     },
   };
+  const resolveConfiguredDriver = (providerInstanceId: ProviderInstanceId) => {
+    const instance = persistence.readProviderInstance(providerInstanceId);
+    if (instance === undefined || !instance.enabled) return undefined;
+    try {
+      return makeConfiguredProviderDriver(instance, configuredDriverOptions);
+    } catch {
+      return undefined;
+    }
+  };
+  const readTurnExecutionPolicy = codeTurnExecutionPolicyReader({
+    readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+    codeSessionAuthority,
+    codeOperationRuntime: { threadWithActiveTurnPosture: codeParentActiveTurn },
+  });
+  const hostShield = createHostShield({
+    readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+    chosenReviewer: (thread) => {
+      const project = persistence.readProject(thread.projectId);
+      return chosenAutoReviewer({
+        project: project?.type === "code" ? project : undefined,
+        settings: persistence.readCodeSettings()?.settings,
+      });
+    },
+    chosenModel: () => persistence.readCodeSettings()?.settings.shieldModel,
+    readTurnExecutionPolicy: (threadId) => readTurnExecutionPolicy(threadId),
+    providerCapabilities: (providerInstanceId) =>
+      providerRuntimeRegistry.observedState(providerInstanceId)?.capabilities,
+    routesApprovals: (providerInstanceId) => {
+      const instance = persistence.readProviderInstance(providerInstanceId);
+      return instance !== undefined && shieldRoutesApprovals(instance.driverKind);
+    },
+    catalog: (providerInstanceId) => persistence.readProviderCatalog?.(providerInstanceId)?.models,
+    resolveDriver: resolveConfiguredDriver,
+    tainted: (threadId) =>
+      readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
+    watcherLabels: (threadId) => readShieldWatcherLabels(persistence.connection, threadId),
+    personMessages: (threadId, limit) =>
+      codeBoardEventStore.personPromptsForThread(threadId, limit).flatMap((prompt) => {
+        const text = codeEvidence.read(prompt);
+        return text === undefined ? [] : [text];
+      }),
+    spendCeiling,
+    recordUsage: ({ threadId, model, usage }) =>
+      recordShieldReviewUsage(
+        {
+          connection: persistence.connection,
+          journal: persistence.journal,
+          clock: () => new Date().toISOString(),
+          uuid: randomUUID,
+        },
+        {
+          threadId,
+          providerInstanceId: model.providerInstanceId,
+          modelId: model.modelId,
+          usage,
+        },
+      ),
+    scratchRoot: harnessWorkDirectory,
+  });
+  shieldHolder.port = hostShield;
   const nativeHarnessComposition = createNativeHarnessComposition({
     goals: goalService,
     questions: nativeHarnessQuestions,
     approvals: nativeHarnessApprovals,
+    shield: hostShield,
     childInteractions: (run) => agentRunInteractions.toolsFor(run) ?? {},
     isChildAuthorityCurrent: (run) => agentRunInteractions.isCurrent(run) === true,
     activity: nativeHarnessSessions,
@@ -545,6 +634,10 @@ export function wireHarness(deps: HarnessDependencies) {
       process: harnessOfflineProcessPort,
       scriptDirectory: harnessScriptDirectory,
     }),
+    fullAccessShell: createNativeHarnessShell({
+      process: harnessFullAccessProcessPort,
+      scriptDirectory: harnessScriptDirectory,
+    }),
     ...(harnessProxiedShell === undefined
       ? {}
       : {
@@ -554,6 +647,10 @@ export function wireHarness(deps: HarnessDependencies) {
     // The posture a command's network follows is the one its turn may use:
     // the window's session grant, clamped to the running turn's posture, so
     // a thread widened mid-turn keeps that turn's commands on `proxied`.
+    readWorkExecutionPolicy: (threadId) => {
+      const access = runningWorkTurnAccess(threadId);
+      return access === undefined ? undefined : workThreadAccessOf(access).executionPolicy;
+    },
     readCodeExecutionPolicy: codeTurnExecutionPolicyReader({
       readCodeThread: (threadId) => persistence.readCodeThread(threadId),
       codeSessionAuthority,
@@ -611,6 +708,7 @@ export function wireHarness(deps: HarnessDependencies) {
     researchRouter,
     sideTaskFirstMessage,
     sideTaskRoutes,
+    hostShield,
     threadWork,
   };
 }

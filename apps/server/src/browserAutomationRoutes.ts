@@ -13,6 +13,7 @@ import {
   type BrowserToolApproval,
   type BrowserToolApprovalDecision,
 } from "@octant/contracts/browser-automation-rpc";
+import type { BrowserAutomationSnapshot } from "@octant/contracts/browser-automation-rpc";
 import {
   decodeBrowserAutomationFailure,
   type BrowserAutomationFailure,
@@ -36,6 +37,17 @@ import {
   decodeProjectBrowserResult,
 } from "@octant/contracts/project-browser";
 import type { ProjectBrowserService } from "./browser/projectBrowserService";
+import type { BrowserProfileService } from "./browser/browserProfileService";
+import type { BrowserExtensionService } from "./browser/browserExtensionService";
+import {
+  decodeBrowserExtensionsCommand,
+  decodeBrowserExtensionsResult,
+} from "@octant/contracts/browser-extensions";
+import {
+  decodeBrowserProfilesCommand,
+  decodeBrowserProfilesResult,
+} from "@octant/contracts/browser-profiles";
+import { storedBrowserProfile } from "@octant/domain";
 import { authenticateRoutePrincipal, readPrincipalRouteContext } from "./principalRouteContext";
 import { isAllowedRendererOrigin } from "./shellRoutes";
 import type { WindowId } from "@octant/contracts/shell";
@@ -51,7 +63,7 @@ export interface BrowserAutomationRouteDependencies {
     BrowserAutomationService,
     "create" | "act" | "cancel" | "stop" | "inspect" | "inspectThread" | "releaseThread"
   > &
-    Partial<Pick<BrowserAutomationService, "peekThread">>;
+    Partial<Pick<BrowserAutomationService, "peekThread" | "profileOf">>;
   /** The thread's kept screenshots; absent on a host that keeps none. */
   readonly captures?: Pick<BrowserCaptureService, "list" | "read">;
   /**
@@ -71,6 +83,10 @@ export interface BrowserAutomationRouteDependencies {
   };
   /** Browsers a Work or Code Project owns without a thread; absent on a host without them. */
   readonly projectBrowsers?: Pick<ProjectBrowserService, "execute">;
+  /** Browser extensions, installed and enabled by the person; absent on a host without them. */
+  readonly extensions?: Pick<BrowserExtensionService, "execute">;
+  /** The stored Browser profiles (Project and Personal); absent on a host without them. */
+  readonly profiles?: Pick<BrowserProfileService, "execute">;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly maxRequestBodySize: number;
 }
@@ -161,6 +177,9 @@ export function createBrowserAutomationRouteHandler(
       );
     }
 
+    // A paired device sees that a signed-in page exists and nothing it shows.
+    const shown = (snapshot: BrowserAutomationSnapshot): BrowserAutomationSnapshot =>
+      callerKind === "remote-device" ? withheldFromRemote(snapshot) : snapshot;
     try {
       if (url.pathname === "/api/browser/project-contexts") {
         if (dependencies.projectBrowsers === undefined) {
@@ -174,6 +193,45 @@ export function createBrowserAutomationRouteHandler(
         return success(
           decodeProjectBrowserResult(
             await dependencies.projectBrowsers.execute(windowId, callerKind, command),
+          ),
+          origin,
+        );
+      }
+      if (url.pathname === "/api/browser/extensions") {
+        if (dependencies.extensions === undefined) {
+          return failure(
+            { category: "unavailable", message: "Browser extensions are unavailable." },
+            503,
+            origin,
+          );
+        }
+        const command = decodeBrowserExtensionsCommand(decoded.value);
+        return success(
+          decodeBrowserExtensionsResult(
+            await dependencies.extensions.execute(
+              windowId,
+              callerKind === "local-window" ? "local-window" : "remote-device",
+              command,
+            ),
+          ),
+          origin,
+        );
+      }
+      if (url.pathname === "/api/browser/profiles") {
+        if (dependencies.profiles === undefined) {
+          return failure(
+            { category: "unavailable", message: "Browser profiles are unavailable." },
+            503,
+            origin,
+          );
+        }
+        const command = decodeBrowserProfilesCommand(decoded.value);
+        return success(
+          decodeBrowserProfilesResult(
+            await dependencies.profiles.execute(
+              callerKind === "local-window" ? "local-window" : "remote-device",
+              command,
+            ),
           ),
           origin,
         );
@@ -241,7 +299,15 @@ export function createBrowserAutomationRouteHandler(
         }
         return success(
           decodeBrowserAutomationSnapshot(
-            await dependencies.service.create({ windowId, ...input }),
+            await dependencies.service.create({
+              windowId,
+              ...input,
+              // A signed-in page opens only for the person at this Mac; the
+              // service refuses a paired device before any runtime is asked.
+              ...(callerKind === "remote-device"
+                ? { profileCaller: "remote-device" as const }
+                : {}),
+            }),
           ),
           origin,
         );
@@ -249,8 +315,10 @@ export function createBrowserAutomationRouteHandler(
       if (url.pathname === "/api/browser/contexts/inspect") {
         const input = decodeBrowserContextInspectCommand(decoded.value);
         return success(
-          decodeBrowserAutomationSnapshot(
-            dependencies.service.inspect(windowId, input.threadId, input.contextId),
+          shown(
+            decodeBrowserAutomationSnapshot(
+              dependencies.service.inspect(windowId, input.threadId, input.contextId),
+            ),
           ),
           origin,
         );
@@ -274,7 +342,7 @@ export function createBrowserAutomationRouteHandler(
           dependencies.service.peekThread === undefined || input.freshPicture === false
             ? dependencies.service.inspectThread(windowId, input.threadId)
             : await dependencies.service.peekThread(windowId, input.threadId, request.signal);
-        return success(decodeBrowserAutomationSnapshot(snapshot), origin);
+        return success(shown(decodeBrowserAutomationSnapshot(snapshot)), origin);
       }
       if (url.pathname === "/api/browser/captures") {
         const input = decodeBrowserCapturesCommand(decoded.value);
@@ -360,10 +428,27 @@ export function createBrowserAutomationRouteHandler(
           if (reach.kind === "denied") {
             return failure({ category: "unauthorized", message: reach.reason }, 403, origin);
           }
+          // A tap on a signed-in page would act as the person's account from a
+          // device that cannot even see the page.
+          if (
+            storedBrowserProfile(dependencies.service.profileOf?.(input.contextId)) !== undefined
+          ) {
+            return failure(
+              {
+                category: "policy-denied",
+                reason: "profile-not-local",
+                message: "Signed-in page — open it on this Mac.",
+              },
+              403,
+              origin,
+            );
+          }
         }
         return success(
-          decodeBrowserAutomationSnapshot(
-            await dependencies.service.act({ windowId, request: input }),
+          shown(
+            decodeBrowserAutomationSnapshot(
+              await dependencies.service.act({ windowId, request: input }),
+            ),
           ),
           origin,
         );
@@ -408,6 +493,25 @@ export function createBrowserAutomationRouteHandler(
         origin,
       );
     }
+  };
+}
+
+/**
+ * What a paired device may see of a page in a signed-in profile: that it exists,
+ * and nothing it shows. The picture, the text, the address, and the title all
+ * carry the account, so none of them leaves this Mac.
+ */
+export function withheldFromRemote(snapshot: BrowserAutomationSnapshot): BrowserAutomationSnapshot {
+  if (storedBrowserProfile(snapshot.context?.policy.profile) === undefined) return snapshot;
+  const { observation: _observation, contexts: _contexts, ...rest } = snapshot;
+  return {
+    ...rest,
+    evidence: [],
+    failure: {
+      category: "policy-denied",
+      reason: "profile-not-local",
+      message: "Signed-in page — open it on this Mac.",
+    },
   };
 }
 

@@ -1,4 +1,9 @@
 import type {
+  BrowserProfileClearScope,
+  ImportedCookie,
+  StoredBrowserProfile,
+} from "@octant/contracts/browser-profiles";
+import type {
   BrowserActionRequest,
   BrowserContextId,
   BrowserContextPolicy,
@@ -76,6 +81,48 @@ export class BrowserNavigationBlockedError extends Error {
 }
 
 /**
+ * A page asked for a stored Browser profile and this runtime cannot hold one.
+ * Only the desktop app's own Browser keeps a profile's store, so a runtime
+ * without it refuses instead of opening a headless copy that would disagree
+ * about who is signed in.
+ */
+export class BrowserProfileUnavailableError extends Error {
+  constructor() {
+    super("Signed-in pages open only in the Octant app's own Browser.");
+    this.name = "BrowserProfileUnavailableError";
+  }
+}
+
+/** The stores behind the Project and Personal profiles, kept by the desktop app. */
+export interface BrowserProfileStorePort {
+  readonly list: () => Promise<
+    ReadonlyArray<{ readonly profile: StoredBrowserProfile; readonly sizeBytes: number }>
+  >;
+  readonly clear: (profile: StoredBrowserProfile, scope: BrowserProfileClearScope) => Promise<void>;
+  /**
+   * Makes the extensions loaded in a profile's session exactly these: loads the
+   * ones that are missing or changed and removes the rest. A Private page has no
+   * session of this kind and never runs an extension.
+   */
+  readonly syncExtensions: (
+    profile: StoredBrowserProfile,
+    extensions: ReadonlyArray<{
+      readonly id: string;
+      readonly path: string;
+      readonly contentHash: string;
+    }>,
+  ) => Promise<void>;
+  /**
+   * Puts cookies into a profile's store, one bounded batch at a time, and says
+   * how many it kept. The cookies pass through and are retained nowhere.
+   */
+  readonly importCookies: (
+    profile: StoredBrowserProfile,
+    cookies: ReadonlyArray<ImportedCookie>,
+  ) => Promise<{ readonly imported: number; readonly skipped: number }>;
+}
+
+/**
  * What a runtime is told to do to a page. It carries no authority: whoever
  * owns the context has already decided the action may run, and a runtime only
  * ever needed the action itself.
@@ -85,6 +132,13 @@ export type BrowserRuntimeAction = Pick<BrowserActionRequest, "kind"> &
 
 export interface BrowserRuntimePort {
   readonly available: () => Promise<boolean>;
+  /**
+   * Whether the desktop app's own Browser can hold a page right now. Absent on a
+   * runtime that is headless only. A stored profile opens only where this is true.
+   */
+  readonly nativeAvailable?: () => Promise<boolean>;
+  /** The stored profiles' stores; absent where no desktop app keeps them. */
+  readonly profiles?: BrowserProfileStorePort | undefined;
   readonly createContext: (
     contextId: BrowserContextId,
     policy: BrowserContextPolicy,

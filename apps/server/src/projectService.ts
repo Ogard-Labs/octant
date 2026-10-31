@@ -35,13 +35,19 @@ import {
 import {
   ProjectPolicyRejected,
   MemoryPolicyRejected,
+  addProjectExtraFolder,
+  removeProjectExtraFolder,
   changeProjectLifecycle,
   changeCodeProjectAccess,
+  changeCodeProjectActions,
+  changeCodeProjectPermissionMode,
+  changeCodeProjectAutoReviewer,
   changeCodeProjectDesktopRecipe,
   changeCodeProjectNewThreadWorkspace,
   changeCodeProjectPullRequestBackgroundRefresh,
   changeProjectColor,
   changeProjectProviderPolicy,
+  changeProjectNativeProviders,
   changeProjectBrandKit,
   changeWorkProjectStatusFile,
   createMemoryEntry,
@@ -58,7 +64,9 @@ import {
   workProjectKeepsStatusFile,
 } from "@octant/domain";
 import { Schema } from "effect";
+import { realpathSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
+import { homedir } from "node:os";
 import { BindingReceiptError, type BindingReceiptStorePort } from "./bindingReceiptStore";
 import { defaultFolderProjectRoot, effectiveDefaultFolder } from "./defaultFolder";
 import { isWorkStatusDate } from "@octant/domain/work-project-status-policy";
@@ -140,6 +148,8 @@ export interface ProjectServiceOptions {
    * entered key is refused and nothing is journaled.
    */
   readonly desktopRecipeKeys?: Pick<DesktopRecipeKeys, "save" | "discard" | "retire">;
+  /** The host user's home folder, canonical; an extra folder is judged against it. */
+  readonly homeDirectory?: () => string;
 }
 
 /** What the host names the Project it provisions under the default folder. */
@@ -179,6 +189,7 @@ export class ProjectService implements ProjectServiceApi {
   readonly #seedWorkProjectStatusFile: ProjectServiceOptions["seedWorkProjectStatusFile"];
   readonly #offeredDesktopProviders: () => ReadonlyArray<LeasableDesktopProvider>;
   readonly #desktopRecipeKeys: ProjectServiceOptions["desktopRecipeKeys"];
+  readonly #homeDirectory: () => string;
   readonly #archiveListeners = new Set<
     (project: Extract<Project, { readonly type: "work" }>) => void
   >();
@@ -209,6 +220,7 @@ export class ProjectService implements ProjectServiceApi {
     this.#seedWorkProjectStatusFile = options.seedWorkProjectStatusFile;
     this.#offeredDesktopProviders = options.offeredDesktopProviders ?? (() => []);
     this.#desktopRecipeKeys = options.desktopRecipeKeys;
+    this.#homeDirectory = options.homeDirectory ?? (() => realpathSync(homedir()));
   }
 
   hasActiveProject(projectId: ProjectId, requiredType: ProjectType): boolean {
@@ -517,6 +529,8 @@ export class ProjectService implements ProjectServiceApi {
       let enteredKey: DesktopCredentialRef | undefined;
       let journaled = false;
       let retiredKey: DesktopCredentialRef | undefined;
+      // Events whose payload says more than the Project after the change.
+      let eventFacts: Readonly<Record<string, unknown>> = {};
 
       if (command.kind === "ensure-default-project") {
         const type = command.projectType;
@@ -698,6 +712,14 @@ export class ProjectService implements ProjectServiceApi {
           project = changeCodeProjectAccess(current, command.codeAccessPersistence, timestamp);
           kind = "code-project-access-changed";
           eventName = "project.code-access-changed@1";
+        } else if (command.kind === "change-code-project-permission-mode") {
+          project = changeCodeProjectPermissionMode(current, command.permissionMode, timestamp);
+          kind = "code-project-access-changed";
+          eventName = "project.code-permission-mode-changed@1";
+        } else if (command.kind === "change-code-project-auto-reviewer") {
+          project = changeCodeProjectAutoReviewer(current, command.autoReviewer, timestamp);
+          kind = "code-project-access-changed";
+          eventName = "project.code-auto-reviewer-changed@1";
         } else if (command.kind === "change-code-project-new-thread-workspace") {
           // The habit lives on the Project record, not in a local named
           // view, so every window sees the same default after this event.
@@ -719,10 +741,52 @@ export class ProjectService implements ProjectServiceApi {
           );
           kind = "code-project-pull-request-background-refresh-changed";
           eventName = "project.code-pull-request-background-refresh-changed@1";
+        } else if (command.kind === "change-code-project-actions") {
+          project = changeCodeProjectActions(current, command.actions, timestamp);
+          kind = "code-project-actions-changed";
+          eventName = "project.code-actions-changed@1";
+        } else if (command.kind === "add-project-extra-folder") {
+          if (current.type === "chat") {
+            throw new ProjectServiceError({
+              category: "invalid",
+              message: "Chat Projects have no folders.",
+            });
+          }
+          // The picker resolved the folder's real path when it issued the
+          // receipt, so the policy compares canonical paths only.
+          const picked = this.#receipts.consume({
+            receiptId: command.receiptId,
+            authenticatedWindowId,
+            projectType: current.type,
+            now: this.#now(),
+          });
+          const added = addProjectExtraFolder(current, {
+            canonicalRoot: picked.canonicalRoot,
+            actor,
+            addedAt: timestamp,
+            homeDirectory: this.#homeDirectory(),
+          });
+          project = added.project;
+          eventFacts = { folder: added.folder };
+          kind = "project-extra-folder-added";
+          eventName = "project.extra-folder-added@1";
+        } else if (command.kind === "remove-project-extra-folder") {
+          project = removeProjectExtraFolder(current, command.canonicalRoot, timestamp);
+          eventFacts = {
+            canonicalRoot: command.canonicalRoot,
+            removedBy: actor,
+            removedAt: timestamp,
+          };
+          kind = "project-extra-folder-removed";
+          eventName = "project.extra-folder-removed@1";
         } else if (command.kind === "change-project-provider-policy") {
           project = changeProjectProviderPolicy(current, command.policy, timestamp);
           kind = "project-provider-policy-changed";
           eventName = "project.provider-policy-changed@1";
+        } else if (command.kind === "change-project-native-providers") {
+          project = changeProjectNativeProviders(current, command.providers, timestamp);
+          kind = "project-native-providers-changed";
+          eventName = "project.native-providers-changed@1";
         } else if (command.kind === "change-work-project-status-file") {
           project = changeWorkProjectStatusFile(current, command.statusFile, timestamp);
           kind = "work-project-status-file-changed";
@@ -799,7 +863,7 @@ export class ProjectService implements ProjectServiceApi {
         this.#persistence.journal.append({
           aggregate: { aggregateType: "project", aggregateId: project.id },
           expectedVersion: command.expectedVersion,
-          events: [this.#pendingEvent(eventName, { project })],
+          events: [this.#pendingEvent(eventName, { project, ...eventFacts })],
         });
         journaled = true;
       } finally {

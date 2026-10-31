@@ -3,6 +3,7 @@ import { AggregateVersion, UtcTimestamp } from "./events";
 import { ThreadRestFields } from "./threadRest";
 import { ThreadLiveTurnFields } from "./threadLiveTurn";
 import { GithubIssueContextRequest } from "./githubIssueContext";
+import { TerminalSessionImportRequest } from "./terminalSessions";
 import { LinearIssueContextRequest } from "./linearIssueContext";
 import { HostId } from "./host";
 import { ThreadWorkingDirectory } from "./workingDirectory";
@@ -36,14 +37,17 @@ export const WorkThreadCompletionEvidence = Schema.Struct({
 export type WorkThreadCompletionEvidence = typeof WorkThreadCompletionEvidence.Type;
 
 /**
- * What an agent in a Work thread may do to files inside the Project folder
- * without asking. `ask-first` raises every edit for approval, which is what
- * Work always did. `auto-accept-edits` lets edits inside the confined folder
- * land without a prompt; reaching outside the folder stays refused, and the
- * rest of the turn's posture is unchanged. Providers without an auto-accept
- * path keep asking.
+ * The guardrail level a Work thread runs at, in the words a Code thread's
+ * mode picker uses: Work and Code share one capability set (shell, Git, file
+ * writes, local tools) and differ only in what they show. `ask-first` asks
+ * the person for every command and edit, `auto-accept-edits` lets edits
+ * inside the Project folder land without a prompt while commands still ask,
+ * `auto` lets the provider's own reviewer answer (a provider without one asks
+ * first), and `full-access` runs with no sandbox and no prompts. Work has no
+ * Plan overlay. The first two are what Work threads recorded before the
+ * levels were shared, so older journals replay unchanged.
  */
-export const WorkAccess = Schema.Literal("ask-first", "auto-accept-edits");
+export const WorkAccess = Schema.Literal("ask-first", "auto-accept-edits", "auto", "full-access");
 export type WorkAccess = typeof WorkAccess.Type;
 
 /** The access a Work thread starts with when nothing else is set. */
@@ -63,9 +67,9 @@ export const WorkThread = Schema.Struct({
   bindingRevisionId: Schema.optional(BindingRevisionId),
   workingDirectory: Schema.optional(ThreadWorkingDirectory),
   /**
-   * The access this thread started with, taken from Work settings when it was
-   * created. A thread journaled before access existed decodes as ask-first,
-   * which is what it had.
+   * The level this thread runs at: taken from Work settings when it was
+   * created, and changed from its composer since. A thread journaled before
+   * access existed decodes as ask-first, which is what it had.
    */
   access: Schema.optionalWith(WorkAccess, { default: () => DEFAULT_WORK_ACCESS }),
   /**
@@ -109,6 +113,8 @@ export const CreateWorkThreadCommand = Schema.Struct({
   workingDirectory: Schema.optional(ThreadWorkingDirectory),
   issueContext: Schema.optional(GithubIssueContextRequest),
   linearIssueContext: Schema.optional(LinearIssueContextRequest),
+  /** A terminal session in the Project's folder the thread starts from. */
+  terminalSession: Schema.optional(TerminalSessionImportRequest),
 }).annotations(strict);
 export type CreateWorkThreadCommand = typeof CreateWorkThreadCommand.Type;
 
@@ -191,6 +197,18 @@ export const ChangeWorkThreadWorkingDirectoryCommand = Schema.Struct({
 export type ChangeWorkThreadWorkingDirectoryCommand =
   typeof ChangeWorkThreadWorkingDirectoryCommand.Type;
 
+/**
+ * Files a Work thread into another Work Project whose folder is the thread's
+ * folder or contains it. The thread keeps its kind, history and access; the
+ * host refuses any other Project and a thread with a turn in flight.
+ */
+export const MoveWorkThreadCommand = Schema.Struct({
+  kind: Schema.Literal("move-work-thread"),
+  ...WorkThreadCommandFields,
+  projectId: ProjectId,
+}).annotations(strict);
+export type MoveWorkThreadCommand = typeof MoveWorkThreadCommand.Type;
+
 export const ChangeWorkThreadProviderCommand = Schema.Struct({
   kind: Schema.Literal("change-work-thread-provider"),
   ...WorkThreadCommandFields,
@@ -213,6 +231,19 @@ export const ChangeWorkThreadDocumentDeliveryCommand = Schema.Struct({
 }).annotations(strict);
 export type ChangeWorkThreadDocumentDeliveryCommand =
   typeof ChangeWorkThreadDocumentDeliveryCommand.Type;
+
+/**
+ * Moves a Work thread to another guardrail level from its composer, as a Code
+ * thread switches mode. The next turn runs at the new level; a running turn
+ * keeps the one it started with. Raising a thread to Full access is chosen at
+ * a window on this host; a paired device may lower one.
+ */
+export const ChangeWorkThreadAccessCommand = Schema.Struct({
+  kind: Schema.Literal("change-work-thread-access"),
+  ...WorkThreadCommandFields,
+  access: WorkAccess,
+}).annotations(strict);
+export type ChangeWorkThreadAccessCommand = typeof ChangeWorkThreadAccessCommand.Type;
 
 /**
  * Opts this thread into resuming a usage-limited turn when the provider's
@@ -288,8 +319,10 @@ export const WorkThreadCommand = Schema.Union(
   WakeWorkThreadCommand,
   ConfirmWorkThreadCompletionCommand,
   ChangeWorkThreadWorkingDirectoryCommand,
+  MoveWorkThreadCommand,
   ChangeWorkThreadProviderCommand,
   ChangeWorkThreadDocumentDeliveryCommand,
+  ChangeWorkThreadAccessCommand,
   ScheduleWorkUsageResumeCommand,
   CancelWorkUsageResumeCommand,
   UpdateWorkSettingsCommand,
@@ -369,7 +402,7 @@ export const WorkThreadNavigationRuntime = Schema.Struct({
   /**
    * A dated line in the Project's `STATUS.md` that has passed or is near,
    * carried on the Project's newest open thread so the inbox can surface the
-   * reminder (decision 0119). Optional so an older host's payload still
+   * reminder. Optional so an older host's payload still
    * decodes; absent reads as nothing due.
    */
   followUpDue: Schema.optional(WorkStatusDatedItem),

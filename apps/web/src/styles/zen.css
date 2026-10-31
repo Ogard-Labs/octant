@@ -346,7 +346,7 @@
 }
 
 /* ─── panels ───────────────────────────────────────────────────────────
-   Panels ride the OctantCard adapter (see docs/decisions/0046); a panel
+   Panels ride the OctantCard adapter; a panel
    scrolls itself rather than the surface behind it. */
 .zen-panel {
   min-width: 0;
@@ -956,6 +956,16 @@ img.zen-appearance__thumb {
   gap: var(--oct-space-1);
   padding: var(--oct-space-1) var(--oct-space-2);
   border-bottom: 1px solid var(--oct-border-soft);
+}
+
+/* The dock is narrow, so the profile control shows its icon alone here; the
+   icon changes with the profile and the control's label names it. */
+.zen-research__chrome .browser-profile-control {
+  padding: 0 var(--oct-space-2);
+}
+
+.zen-research__chrome .browser-profile-control span {
+  display: none;
 }
 
 .zen-research__address {

@@ -26,11 +26,22 @@ import {
   ChatTurnRouteDecided,
   CodeProjectAccessChanged,
   CodeProjectNewThreadWorkspaceChanged,
+  CodeProjectPermissionModeChanged,
+  CodeProjectAutoReviewerChanged,
   CodeProjectPullRequestBackgroundRefreshChanged,
+  CODE_PROJECT_PULL_REQUEST_ACTION_RECORDED,
   CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED,
+  CodeProjectPullRequestActionRecorded,
   CodeProjectPullRequestMergeRecorded,
+  CODE_PROJECT_PULL_REQUEST_MERGE_WHEN_READY_RECORDED,
+  CodeProjectPullRequestMergeWhenReadyRecorded,
+  CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED,
+  CodeProjectPullRequestAutoFixRecorded,
   WorkProjectStatusFileChanged,
   ProjectBrandKitChanged,
+  CodeProjectActionsChanged,
+  ProjectExtraFolderAdded,
+  ProjectExtraFolderRemoved,
   CodeProjectDesktopRecipeChanged,
   CodeCheckoutObserved,
   CodeCheckoutRemoved,
@@ -78,6 +89,7 @@ import {
   ProjectLifecycleChanged,
   ProjectOrderChanged,
   ProjectProviderPolicyChanged,
+  ProjectNativeProvidersChanged,
   ProjectColorChanged,
   ProjectRenamed,
   ProviderDefaultsUpdated,
@@ -88,6 +100,7 @@ import {
   ProviderInstanceDriverRebound,
   ProviderInstanceCreated,
   ProviderInstanceDataTagsChanged,
+  ProviderInstanceNativeSetupChanged,
   ProviderInstanceEnabledChanged,
   ProviderInstanceRemoved,
   ProviderInstanceRenamed,
@@ -122,6 +135,8 @@ import {
   CanvasRefreshReceiptRecorded,
   CanvasVersionAppended,
   DiagnosticsExportReceiptRecorded,
+  SUPPORT_BUNDLE_EXPORTED_EVENT,
+  SupportBundleExported,
   DiagnosticsFailureIncidentRecorded,
   DiagnosticsFailureIncidentRecordedV1,
   ExtensionLifecycleEvent,
@@ -149,6 +164,15 @@ import {
   RemotePushRegistrationRecordedV1,
   RemoteServerGrantClosedPayload,
   RemoteServerGrantOpenedPayload,
+  BROWSER_EXTENSION_EVENT_NAMES,
+  BROWSER_PROFILE_EVENT_NAMES,
+  BrowserExtensionDisabled,
+  BrowserExtensionEnabled,
+  BrowserExtensionInstalled,
+  BrowserExtensionRemoved,
+  BrowserExtensionUpdated,
+  BrowserCookiesImported,
+  BrowserProfileCleared,
   TERMINAL_BROWSER_GRANT_EVENT_NAMES,
   TerminalBrowserGrantIssued,
   TerminalBrowserGrantRevoked,
@@ -163,6 +187,8 @@ import {
   ImageJobStatusChanged,
   BROWSER_CAPTURE_KEPT,
   BrowserCaptureKept,
+  HOST_MEMORY_LIMITS_EVENT_NAME,
+  HostMemoryLimitsChanged,
   THREAD_RETENTION_EVENT_NAMES,
   ThreadRetentionThreadPurged,
   ThreadRetentionWindowSet,
@@ -198,6 +224,7 @@ import {
 } from "@octant/contracts/code-debug";
 import { HostOAuthJournalRecord } from "@octant/contracts/host-oauth";
 import { ProviderKeyJournalRecord } from "@octant/contracts/provider-key-journal";
+import { SecretStoreJournalRecord } from "@octant/contracts/secret-stores";
 import {
   REMOTE_ACCESS_EVENT_NAMES,
   DeviceKeyRotatedV1,
@@ -243,6 +270,7 @@ import {
 } from "./productFeedbackProjection";
 import { ProjectTerminalProjection } from "./projectTerminalProjection";
 import { RemoteServerGrantProjection } from "./remoteServerGrantProjection";
+import { HostMemoryLimitsProjection } from "./hostMemoryLimitsProjection";
 import { ThreadRetentionProjection } from "./threadRetentionProjection";
 import { SpendCeilingProjection } from "./spendCeilingProjection";
 import { UsageResumeProjection } from "./usageResumeProjection";
@@ -279,6 +307,7 @@ import {
 import { registerArtifactMirrorEvents } from "../canvas/artifactMirrorEventStore";
 import { registerGoalLoopEvents } from "../goal/goalLoopEventStore";
 import { registerFollowUpSuggestionEvents } from "../followUps/threadFollowUpSuggestionStore";
+import { registerTerminalSessionEvents } from "../terminalSessions/terminalSessionImports";
 import { registerNativeHarnessEvents } from "../harness/nativeHarnessEvents";
 import { registerTurnMetricsEvents } from "../metrics/turnMetricsStore";
 import { registerSideTaskEvents } from "../sideTasks/sideTaskStore";
@@ -342,6 +371,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("project.lifecycle-changed@1", 1, ProjectLifecycleChanged)
     .register("project.binding-relinked@1", 1, ProjectBindingRelinked)
     .register("project.code-access-changed@1", 1, CodeProjectAccessChanged)
+    .register("project.code-permission-mode-changed@1", 1, CodeProjectPermissionModeChanged)
+    .register("project.code-auto-reviewer-changed@1", 1, CodeProjectAutoReviewerChanged)
     .register(
       "project.code-new-thread-workspace-changed@1",
       1,
@@ -353,9 +384,20 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       CodeProjectPullRequestBackgroundRefreshChanged,
     )
     .register(CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED, 1, CodeProjectPullRequestMergeRecorded)
+    .register(CODE_PROJECT_PULL_REQUEST_ACTION_RECORDED, 1, CodeProjectPullRequestActionRecorded)
+    .register(
+      CODE_PROJECT_PULL_REQUEST_MERGE_WHEN_READY_RECORDED,
+      1,
+      CodeProjectPullRequestMergeWhenReadyRecorded,
+    )
+    .register(CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED, 1, CodeProjectPullRequestAutoFixRecorded)
     .register("project.provider-policy-changed@1", 1, ProjectProviderPolicyChanged)
+    .register("project.native-providers-changed@1", 1, ProjectNativeProvidersChanged)
     .register("project.work-status-file-changed@1", 1, WorkProjectStatusFileChanged)
     .register("project.brand-kit-changed@1", 1, ProjectBrandKitChanged)
+    .register("project.code-actions-changed@1", 1, CodeProjectActionsChanged)
+    .register("project.extra-folder-added@1", 1, ProjectExtraFolderAdded)
+    .register("project.extra-folder-removed@1", 1, ProjectExtraFolderRemoved)
     .register("project.code-desktop-recipe-changed@1", 1, CodeProjectDesktopRecipeChanged)
     .register("memory.entry-created@1", 1, MemoryEntryCreated)
     .register("memory.entry-superseded@1", 1, MemoryEntrySuperseded)
@@ -369,11 +411,13 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("provider.instance-driver-quarantined@1", 1, ProviderInstanceDriverQuarantined)
     .register("provider.instance-data-tags-changed@1", 1, ProviderInstanceDataTagsChanged)
     .register("provider.instance-enabled-changed@1", 1, ProviderInstanceEnabledChanged)
+    .register("provider.instance-native-setup-changed@1", 1, ProviderInstanceNativeSetupChanged)
     .register("provider.instance-removed@1", 1, ProviderInstanceRemoved)
     .register("provider.defaults-updated@1", 1, ProviderDefaultsUpdated)
     .register("provider.catalog-updated@1", 1, ProviderCatalogUpdated)
     .register("host-oauth.recorded@1", 1, HostOAuthJournalRecord)
     .register("provider-key.recorded@1", 1, ProviderKeyJournalRecord)
+    .register("secret-store.recorded@1", 1, SecretStoreJournalRecord)
     .register("ollama.history-recorded@1", 1, OllamaHistoryRecorded)
     .register("claude.resume-identity-recorded@1", 1, ClaudeResumeIdentityRecorded)
     .register("context.manifest-created@1", 1, ContextManifestCreated)
@@ -479,6 +523,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(DIAGNOSTICS_FAILURE_INCIDENT_RECORDED_V1, 1, DiagnosticsFailureIncidentRecordedV1)
     .register(DIAGNOSTICS_FAILURE_INCIDENT_RECORDED, 1, DiagnosticsFailureIncidentRecorded)
     .register(DIAGNOSTICS_EXPORT_RECEIPT_RECORDED, 1, DiagnosticsExportReceiptRecorded)
+    .register(SUPPORT_BUNDLE_EXPORTED_EVENT, 1, SupportBundleExported)
     .register("work.thread-created@1", 1, WorkThreadCreated)
     .register("work.thread-updated@1", 1, WorkThreadUpdated)
     .register("work.thread-completion-confirmed@1", 1, WorkThreadCompletionConfirmed)
@@ -521,6 +566,13 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(PRODUCT_FEEDBACK_DELIVERED, 1, ProductFeedbackDelivered)
     .register(PROJECT_TERMINAL_EVENT_NAMES.started, 1, ProjectTerminalStarted)
     .register(PROJECT_TERMINAL_EVENT_NAMES.ended, 1, ProjectTerminalEnded)
+    .register(BROWSER_PROFILE_EVENT_NAMES.cleared, 1, BrowserProfileCleared)
+    .register(BROWSER_EXTENSION_EVENT_NAMES.installed, 1, BrowserExtensionInstalled)
+    .register(BROWSER_EXTENSION_EVENT_NAMES.updated, 1, BrowserExtensionUpdated)
+    .register(BROWSER_EXTENSION_EVENT_NAMES.removed, 1, BrowserExtensionRemoved)
+    .register(BROWSER_EXTENSION_EVENT_NAMES.enabled, 1, BrowserExtensionEnabled)
+    .register(BROWSER_EXTENSION_EVENT_NAMES.disabled, 1, BrowserExtensionDisabled)
+    .register(BROWSER_PROFILE_EVENT_NAMES.cookiesImported, 1, BrowserCookiesImported)
     .register(TERMINAL_BROWSER_GRANT_EVENT_NAMES.issued, 1, TerminalBrowserGrantIssued)
     .register(TERMINAL_BROWSER_GRANT_EVENT_NAMES.revoked, 1, TerminalBrowserGrantRevoked)
     .register(HUB_MEMBERSHIP_CHANGED, 1, HubMembershipChangedPayload)
@@ -535,6 +587,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(IMAGE_JOB_QUEUED, 1, ImageJobQueued)
     .register(IMAGE_JOB_STATUS_CHANGED, 1, ImageJobStatusChanged)
     .register(BROWSER_CAPTURE_KEPT, 1, BrowserCaptureKept)
+    .register(HOST_MEMORY_LIMITS_EVENT_NAME, 1, HostMemoryLimitsChanged)
     .register(THREAD_RETENTION_EVENT_NAMES.windowSet, 1, ThreadRetentionWindowSet)
     .register(THREAD_RETENTION_EVENT_NAMES.threadPurged, 1, ThreadRetentionThreadPurged)
     .register(THREAD_EXTERNAL_CONTENT_EVENT_NAMES.ingested, 1, ContentIngestedPayload)
@@ -561,6 +614,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerNativeHarnessEvents(events);
   registerTurnMetricsEvents(events);
   registerFollowUpSuggestionEvents(events);
+  registerTerminalSessionEvents(events);
   registerSideTaskEvents(events);
   registerShipEvents(events);
   registerThreadMessageQueueEvents(events);
@@ -619,6 +673,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(new ProjectTerminalProjection())
       .register(new RemoteServerGrantProjection())
       .register(new ThreadRetentionProjection())
+      .register(new HostMemoryLimitsProjection())
       .register(new ExternalContentTaintProjection())
       .register(new UsageResumeProjection())
       .register(new SpendCeilingProjection())

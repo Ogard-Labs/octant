@@ -32,6 +32,7 @@ import type {
   RateLimitSnapshot,
 } from "./codexProtocol";
 import {
+  approvalRequestIsProjectConfined,
   codexExecutionSettings,
   codexTurnExecutionSettings,
   makeCodexClient,
@@ -290,11 +291,17 @@ function fixture(
 async function acquireConnection(
   driver: ReturnType<typeof makeCodexDriver>,
   mode?: "chat" | "work" | "code",
+  extraFolders?: ReadonlyArray<string>,
 ) {
   const scope = await Effect.runPromise(Scope.make());
   const connection = await Effect.runPromise(
     driver
-      .acquire({ instanceId, projectRoot, ...(mode === undefined ? {} : { mode }) })
+      .acquire({
+        instanceId,
+        projectRoot,
+        ...(mode === undefined ? {} : { mode }),
+        ...(extraFolders === undefined ? {} : { extraFolders }),
+      })
       .pipe(Effect.provideService(Scope.Scope, scope)),
   );
   return { connection, close: () => Effect.runPromise(Scope.close(scope, Exit.void)) };
@@ -1491,10 +1498,8 @@ describe("Codex thread and turn lifecycle", () => {
     await acquired.close();
   });
 
-  it("switches Codex's shell and the Project's agent brief off for a Work thread on start and again on every resume", async () => {
+  it("keeps Codex's shell on and the Project's agent brief off for a Work thread on start and again on every resume", async () => {
     const workOff = {
-      "features.shell_tool": false,
-      "features.unified_exec": false,
       project_doc_max_bytes: 0,
       skills: { config: [] },
     };
@@ -1515,6 +1520,11 @@ describe("Codex thread and turn lifecycle", () => {
       threadId: "thread-existing",
       config: workOff,
     });
+    // Work shares Code's shell at the thread's level, so nothing switches it off.
+    expect(f.calls.find(({ method }) => method === "thread/start")?.input).not.toHaveProperty([
+      "config",
+      "features.shell_tool",
+    ]);
     await work.close();
 
     const code = fixture();
@@ -1925,6 +1935,52 @@ describe("Codex thread and turn lifecycle", () => {
     expect(f.closeCount()).toBe(1);
     expect(f.startCount()).toBe(2);
     await gatedTurn.close();
+  });
+
+  it("resumes a thread after the Project's extra folders changed by closing the idle process that still holds it", async () => {
+    // Adding or removing a folder changes the lease's folder set, so the
+    // process the thread last ran in is idle under the old set.
+    let oldFoldersAlive = () => false;
+    const f = fixture({
+      threadResume: async () => {
+        if (oldFoldersAlive()) {
+          throw new CodexRpcClientFailure("remote", "Codex request failed.", {
+            remoteCode: -32600,
+            remoteMessage: "thread t already has an active writer",
+          });
+        }
+        return {
+          thread: { id: "thread-moved" },
+          model: "gpt-5.4",
+          modelProvider: "openai",
+          serviceTier: null,
+          cwd: projectRoot,
+        };
+      },
+    });
+    const driver = makeCodexDriver(f.options());
+    const resume = (connection: Awaited<ReturnType<typeof acquireConnection>>["connection"]) =>
+      Effect.runPromise(
+        Effect.exit(
+          connection.resume({
+            sessionId,
+            resumeCursor: { driverKind: "codex", value: "thread-moved" },
+            executionPolicy: "approval-gated",
+          }),
+        ),
+      );
+
+    const before = await acquireConnection(driver, "code");
+    expect(Exit.isSuccess(await resume(before.connection))).toBe(true);
+    await before.close();
+    oldFoldersAlive = () => f.closeCount() === 0;
+
+    const after = await acquireConnection(driver, "code", ["/tmp/octant-codex-notes"]);
+    const resumed = await resume(after.connection);
+    expect(Exit.isSuccess(resumed)).toBe(true);
+    expect(f.closeCount()).toBe(1);
+    expect(f.startCount()).toBe(2);
+    await after.close();
   });
 
   it("resume reports another Codex process using the thread when the writer conflict persists", async () => {
@@ -2422,6 +2478,27 @@ describe("Codex thread and turn lifecycle", () => {
 });
 
 describe("Codex execution authority and approvals", () => {
+  it("lets an approval inside a Project's extra folder reach a person and declines one beside it", () => {
+    const root = "/work/main";
+    const extra = ["/work/notes"];
+    const fileChange = (grantRoot: string) => ({ kind: "file-change" as const, grantRoot });
+    expect(approvalRequestIsProjectConfined(fileChange("/work/notes/drafts"), root, extra)).toBe(
+      true,
+    );
+    expect(approvalRequestIsProjectConfined(fileChange("/work/notes"), root, extra)).toBe(true);
+    expect(approvalRequestIsProjectConfined(fileChange("/work/notes-old"), root, extra)).toBe(
+      false,
+    );
+    expect(approvalRequestIsProjectConfined(fileChange("/work/notes/drafts"), root)).toBe(false);
+    const command = (requestedCwd: string) => ({
+      kind: "command" as const,
+      requestedCwd,
+      networkApprovalContext: null,
+    });
+    expect(approvalRequestIsProjectConfined(command("/work/notes"), root, extra)).toBe(true);
+    expect(approvalRequestIsProjectConfined(command("/work"), root, extra)).toBe(false);
+  });
+
   it("maps all execution policies to exact stable Codex settings", () => {
     expect(codexExecutionSettings("full-access")).toEqual({
       approvalPolicy: "never",
@@ -2519,15 +2596,11 @@ describe("Codex execution authority and approvals", () => {
     );
   });
 
-  it("never delegates the edit waiver to the harness reviewer", () => {
-    // `untrusted` turns every patch edit into a prompt. Codex's reviewer is
-    // thread-wide and risk-based, so delegating it on a posture that already
-    // waives project file writes would let the reviewer deny an edit 0018 says
-    // proceeds. Approval-gated has no waiver, so it may delegate.
+  it("lets the reviewer answer on both prompting postures when the thread asks for Auto", () => {
     expect(codexExecutionSettings("auto-accept-edits", true)).toEqual({
       approvalPolicy: "untrusted",
       sandbox: "read-only",
-      approvalsReviewer: "user",
+      approvalsReviewer: "auto_review",
     });
     expect(codexExecutionSettings("approval-gated", true)).toEqual({
       approvalPolicy: "untrusted",
@@ -2596,6 +2669,36 @@ describe("Codex execution authority and approvals", () => {
           result: { decision },
         },
       });
+      await acquired.close();
+    },
+  );
+
+  it.each([
+    ["command", commandApproval],
+    ["file change", fileApproval],
+  ] as const)(
+    "accepts a one-call %s answer for that call only, even under current-session persistence",
+    async (_name, makeRequest) => {
+      const f = fixture();
+      const acquired = await acquireConnection(
+        makeCodexDriver(f.options({ permissionPersistence: () => "current-session" })),
+      );
+      await startSession(acquired.connection);
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "approval", attachments: [], tools: [] }),
+      );
+      const event = takeEvents(acquired.connection, 1);
+      f.emit(makeRequest());
+      await event;
+      await Effect.runPromise(
+        acquired.connection.answerApproval({
+          sessionId,
+          requestId: "request-1",
+          approved: true,
+          scope: "once",
+        }),
+      );
+      expect(f.calls.at(-1)?.input).toMatchObject({ result: { decision: "accept" } });
       await acquired.close();
     },
   );
@@ -2697,9 +2800,18 @@ describe("Codex execution authority and approvals", () => {
       expect(JSON.stringify(approvalEvents)).not.toMatch(
         /octant-codex-project|curl|private\.example/,
       );
+      // The command reaches an automatic reviewer through the connection
+      // alone, with its working directory and without the runtime's reason.
+      const call = acquired.connection.approvalCall?.({ sessionId, requestId: "request-1" });
+      expect(call).toMatchObject({ tool: "command", workingDirectory: cwd });
+      expect(call?.input).toContain("curl private.example/secret");
+      expect(call?.input).not.toContain("must-not-cross");
       await Effect.runPromise(
         acquired.connection.answerApproval({ sessionId, requestId: "request-1", approved: false }),
       );
+      expect(
+        acquired.connection.approvalCall?.({ sessionId, requestId: "request-1" }),
+      ).toBeUndefined();
       expect(f.calls.at(-1)?.input).toMatchObject({ result: { decision: "decline" } });
       await acquired.close();
     },
@@ -2774,29 +2886,26 @@ describe("Codex execution authority and approvals", () => {
   );
 
   it.each([
-    ["command", commandApproval(), { decision: "decline" }],
-    ["permissions", permissionsApproval(), { permissions: {}, scope: "turn" }],
+    ["command", commandApproval()],
+    ["permissions", permissionsApproval()],
   ] as const)(
-    "declines a %s approval in a Work session without asking anyone",
-    async (_kind, requestMessage, result) => {
-      const f = fixture();
-      const acquired = await acquireConnection(makeCodexDriver(f.options()), "work");
-      await startSession(acquired.connection);
-      await Effect.runPromise(
-        acquired.connection.send({ sessionId, prompt: "work", attachments: [], tools: [] }),
-      );
-      f.emit(requestMessage);
-      await vi.waitFor(() =>
-        expect(f.calls.filter(({ method }) => method === "approval/respond")).toHaveLength(1),
-      );
-      expect(f.calls.at(-1)?.input).toMatchObject({ result });
-      const answer = await Effect.runPromise(
-        Effect.exit(
-          acquired.connection.answerApproval({ sessionId, requestId: "request-1", approved: true }),
-        ),
-      );
-      expect(String(answer)).toContain("protocol");
-      await acquired.close();
+    "asks a person about a Project-confined %s approval in a Work session, as in Code",
+    async (_kind, requestMessage) => {
+      for (const mode of ["work", "code"] as const) {
+        const f = fixture();
+        const acquired = await acquireConnection(makeCodexDriver(f.options()), mode);
+        await startSession(acquired.connection);
+        await Effect.runPromise(
+          acquired.connection.send({ sessionId, prompt: mode, attachments: [], tools: [] }),
+        );
+        const event = takeEvents(acquired.connection, 1);
+        f.emit(requestMessage);
+        await expect(event).resolves.toMatchObject([
+          { kind: "approval-request", requestId: "request-1" },
+        ]);
+        expect(f.calls.some(({ method }) => method === "approval/respond")).toBe(false);
+        await acquired.close();
+      }
     },
   );
 

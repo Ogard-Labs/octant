@@ -217,6 +217,33 @@ describe("Code aggregate contracts", () => {
     ).toThrow();
   });
 
+  it("replays both retired forms of Full access, sandboxed and with the sandbox off, as Full access", () => {
+    for (const sandboxOff of [true, false]) {
+      const decoded = decodeCodeThread({ ...thread, executionPolicy: "full-access", sandboxOff });
+      expect(decoded.executionPolicy).toBe("full-access");
+      expect(decoded).not.toHaveProperty("sandboxOff");
+      const stored = decodeCodeSettings({
+        defaultPermissionPersistence: "current-session",
+        version: 1,
+        updatedAt: now,
+        defaultExecutionPolicy: "full-access",
+        fullAccessSandboxOff: sandboxOff,
+      });
+      expect(stored.defaultExecutionPolicy).toBe("full-access");
+      expect(stored).not.toHaveProperty("fullAccessSandboxOff");
+    }
+    // A window can no longer ask for the switch.
+    expect(() =>
+      decodeCodeCommand({
+        kind: "update-code-settings",
+        expectedVersion: 1,
+        defaultExecutionPolicy: "full-access",
+        defaultPermissionPersistence: "current-session",
+        fullAccessSandboxOff: true,
+      }),
+    ).toThrow();
+  });
+
   it("decodes strict Code commands and bounded replay frames", () => {
     expect(
       decodeCodeCommand({
@@ -269,6 +296,22 @@ describe("Code aggregate contracts", () => {
         workingDirectory: "packages/app",
       }).kind,
     ).toBe("change-code-thread-working-directory");
+    expect(
+      decodeCodeCommand({
+        kind: "move-code-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        projectId: ids.project,
+      }),
+    ).toEqual({
+      kind: "move-code-thread",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      projectId: ids.project,
+    });
+    expect(() =>
+      decodeCodeCommand({ kind: "move-code-thread", threadId: ids.thread, expectedVersion: 1 }),
+    ).toThrow();
     for (const kind of [
       "complete-code-thread",
       "reopen-code-thread",

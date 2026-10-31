@@ -624,6 +624,7 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
    under the pointer or keyboard focus, so nothing sits over the page at rest. */
 .browser-pip__caption,
 .browser-pip__count,
+.browser-pip__profile,
 .browser-pip__close {
   background: var(--octant-glass-bg);
   backdrop-filter: blur(var(--octant-glass-blur)) saturate(var(--octant-glass-saturate));
@@ -646,6 +647,19 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
 .browser-pip__open:hover .browser-pip__caption,
 .browser-pip__open:focus-visible .browser-pip__caption {
   opacity: 1;
+}
+
+/* A signed-in page names its profile at rest, because it acts as the person's
+   account; the page's own title still waits for the pointer. */
+.browser-pip__profile {
+  position: absolute;
+  bottom: 6px;
+  left: 6px;
+  padding: 0 var(--oct-space-1);
+  color: var(--octant-text-secondary);
+  border-radius: var(--oct-radius-pill);
+  font-size: var(--oct-text-xs);
+  line-height: 1.4;
 }
 
 .browser-pip__count {
@@ -5218,7 +5232,8 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 }
 
 .composer-model-picker__rail-status--unavailable,
-.composer-model-picker__rail-status--incompatible {
+.composer-model-picker__rail-status--incompatible,
+.composer-model-picker__rail-status--limited {
   background: var(--octant-destructive);
 }
 
@@ -5786,7 +5801,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   height: 100%;
 }
 
-/* The model picker is an open hairline list (0072): a provider header in the
+/* The model picker is an open hairline list: a provider header in the
    section-label role with its status as text, then one row per model. A row
    is selected by a fill, not a border, and nothing in it is blue. */
 .model-picker {
@@ -6025,7 +6040,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   margin-left: 0;
 }
 
-/* A disclosure row in the open section (0072): label, count, chevron over
+/* A disclosure row in the open section: label, count, chevron over
    a hairline, not a bordered box. */
 .agent-eligible-models {
   display: grid;

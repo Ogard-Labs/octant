@@ -6,6 +6,33 @@ import { localHostDisplayName } from "./localHostDisplayName";
 const dataDirectory = "/Users/ada/Library/Application Support/Octant";
 
 describe("composeHostDataMap", () => {
+  it("lists where the desktop app keeps Browser profile sign-ins, and only when it has them", () => {
+    const withProfiles = composeHostDataMap({
+      hostId: "host-under-test",
+      serviceMode: "desktop",
+      platform: "darwin",
+      dataDirectory,
+      browserProfilesDirectory: "/Users/ada/Library/Application Support/Octant/Partitions",
+    });
+    expect(decodeHostDataMap(withProfiles).host.caches).toContainEqual({
+      name: "Browser profiles (sign-ins)",
+      location: {
+        kind: "known",
+        path: "/Users/ada/Library/Application Support/Octant/Partitions",
+      },
+    });
+
+    const without = composeHostDataMap({
+      hostId: "host-under-test",
+      serviceMode: "service",
+      platform: "linux",
+      dataDirectory,
+    });
+    expect(decodeHostDataMap(without).host.caches.map((cache) => cache.name)).not.toContain(
+      "Browser profiles (sign-ins)",
+    );
+  });
+
   it("reports verified host and Project locations without secret material", () => {
     const report = composeHostDataMap({
       hostId: "host-under-test",

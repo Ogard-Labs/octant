@@ -26,6 +26,11 @@ import {
   decodeProjectRank,
   decodeProjectRenamed,
   decodeProjectSummary,
+  decodeProjectAction,
+  decodeProjectActions,
+  decodeProjectFolderPath,
+  decodeProjectExtraFolderAdded,
+  decodeProjectExtraFolderRemoved,
 } from "./projects";
 
 const ids = {
@@ -516,12 +521,18 @@ describe("Project and memory event payload contracts", () => {
       "project.lifecycle-changed@1",
       "project.binding-relinked@1",
       "project.code-access-changed@1",
+      "project.code-permission-mode-changed@1",
+      "project.code-auto-reviewer-changed@1",
       "project.code-new-thread-workspace-changed@1",
       "project.code-pull-request-background-refresh-changed@1",
       "project.provider-policy-changed@1",
+      "project.native-providers-changed@1",
       "project.work-status-file-changed@1",
       "project.brand-kit-changed@1",
       "project.code-desktop-recipe-changed@1",
+      "project.code-actions-changed@1",
+      "project.extra-folder-added@1",
+      "project.extra-folder-removed@1",
       "memory.entry-created@1",
       "memory.entry-superseded@1",
       "memory.entry-retracted@1",
@@ -578,5 +589,122 @@ describe("Project and memory event payload contracts", () => {
       entry: transferredMemory,
     });
     expect(() => decodeMemoryEntryTransferred({ entry: userMemory })).toThrow();
+  });
+});
+
+describe("Project actions", () => {
+  const action = (overrides: Record<string, unknown> = {}) => ({
+    id: "81000000-0000-4000-8000-000000000001",
+    name: "Dev",
+    command: "bun run dev",
+    directory: "apps/web",
+    ...overrides,
+  });
+
+  it("keeps a folder inside the Project root and a command on one line", () => {
+    expect(decodeProjectAction(action())).toMatchObject({ directory: "apps/web" });
+    for (const directory of ["../outside", "/etc", "a/../b", "a\\b", "a/"]) {
+      expect(() => decodeProjectAction(action({ directory }))).toThrow();
+    }
+    expect(() => decodeProjectAction(action({ command: "echo a\nrm -rf b" }))).toThrow();
+  });
+
+  it("refuses duplicate names, however they are cased, and lists past the limit", () => {
+    const second = action({ id: "81000000-0000-4000-8000-000000000002", name: "dev" });
+    expect(() => decodeProjectActions([action(), second])).toThrow();
+    const many = Array.from({ length: 13 }, (_, index) =>
+      action({
+        id: `81000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+        name: `Action ${index}`,
+      }),
+    );
+    expect(() => decodeProjectActions(many)).toThrow();
+  });
+});
+
+describe("Project extra folders", () => {
+  const folder = (canonicalRoot: string) => ({ canonicalRoot, addedBy: actor, addedAt: updatedAt });
+
+  it("reads a Project made before extra folders existed as having none", () => {
+    const decoded = decodeProject(workProject);
+    expect(decoded.type === "work" ? decoded.extraFolders : "wrong type").toBeUndefined();
+  });
+
+  it("keeps who added each folder and when on the Project and its summary", () => {
+    const project = { ...codeProject, extraFolders: [folder("/Users/person/Notes")] };
+    expect(decodeProject(project)).toMatchObject({
+      extraFolders: [{ canonicalRoot: "/Users/person/Notes", addedBy: actor, addedAt: updatedAt }],
+    });
+    const { bindingHistory: _history, ...summary } = project;
+    expect(decodeProjectSummary({ ...summary, bindingRevisionId: ids.revision })).toMatchObject({
+      extraFolders: [{ canonicalRoot: "/Users/person/Notes" }],
+    });
+  });
+
+  it("refuses a relative, non-canonical or root path", () => {
+    for (const path of ["notes", "/", "/a/", "/a//b", "/a/./b", "/a/../b", "/a\0b"]) {
+      expect(() => decodeProjectFolderPath(path)).toThrow();
+    }
+    expect(decodeProjectFolderPath("/Volumes/Shared Drive/Specs")).toBe(
+      "/Volumes/Shared Drive/Specs",
+    );
+  });
+
+  it("refuses a folder listed twice, one inside another, and lists past the limit", () => {
+    const decode = (folders: ReadonlyArray<unknown>) =>
+      decodeProject({ ...workProject, extraFolders: folders });
+    expect(() => decode([folder("/a/notes"), folder("/a/notes")])).toThrow();
+    expect(() => decode([folder("/a/notes"), folder("/a/notes/drafts")])).toThrow();
+    expect(() => decode([folder("/a/notes/drafts"), folder("/a/notes")])).toThrow();
+    expect(decode([folder("/a/notes"), folder("/a/notes-old")])).toMatchObject({
+      extraFolders: [{ canonicalRoot: "/a/notes" }, { canonicalRoot: "/a/notes-old" }],
+    });
+    const many = Array.from({ length: 17 }, (_, index) => folder(`/a/folder-${index}`));
+    expect(() => decode(many)).toThrow();
+  });
+
+  it("adds a folder only through a picker receipt and removes one by its path", () => {
+    expect(
+      decodeProjectCommand({
+        kind: "add-project-extra-folder",
+        projectId: ids.project,
+        expectedVersion: 1,
+        receiptId: ids.receipt,
+      }),
+    ).toMatchObject({ kind: "add-project-extra-folder" });
+    expect(() =>
+      decodeProjectCommand({
+        kind: "add-project-extra-folder",
+        projectId: ids.project,
+        expectedVersion: 1,
+        canonicalRoot: "/a/notes",
+      }),
+    ).toThrow();
+    expect(
+      decodeProjectCommand({
+        kind: "remove-project-extra-folder",
+        projectId: ids.project,
+        expectedVersion: 1,
+        canonicalRoot: "/a/notes",
+      }),
+    ).toMatchObject({ canonicalRoot: "/a/notes" });
+  });
+
+  it("journals who added or removed a folder and when, on a bound Project only", () => {
+    const project = { ...workProject, extraFolders: [folder("/a/notes")] };
+    expect(decodeProjectExtraFolderAdded({ project, folder: folder("/a/notes") })).toMatchObject({
+      folder: { canonicalRoot: "/a/notes", addedBy: actor },
+    });
+    expect(
+      decodeProjectExtraFolderRemoved({
+        project: workProject,
+        canonicalRoot: "/a/notes",
+        removedBy: actor,
+        removedAt: updatedAt,
+      }),
+    ).toMatchObject({ removedBy: actor, removedAt: updatedAt });
+    expect(() =>
+      decodeProjectExtraFolderAdded({ project: chatProject, folder: folder("/a/notes") }),
+    ).toThrow();
   });
 });

@@ -16,6 +16,7 @@ import {
   type ProviderSessionId,
   type ProviderToolAnswer,
   type ProviderToolDefinition,
+  type ProviderApprovalCall,
 } from "@octant/contracts";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import { outputStopReason } from "./outputStopReason";
@@ -132,6 +133,8 @@ interface PendingApproval {
   readonly providerRequestId: string | number;
   readonly allowOptionId: string;
   readonly rejectOptionId: string;
+  /** The pending call, for an automatic reviewer; never published. */
+  readonly call?: ProviderApprovalCall;
 }
 
 interface PendingQuestion {
@@ -744,7 +747,7 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
         return observed;
       });
     },
-    acquire: ({ instanceId, projectRoot, mode }) => {
+    acquire: ({ instanceId, projectRoot, mode, extraFolders = [] }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
           failure("invalid-configuration", "Provider instance does not match driver."),
@@ -755,7 +758,9 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
           failure("invalid-configuration", `${name} requires an explicit product mode.`),
         );
       }
-      if (!isAbsolute(projectRoot) || resolve(projectRoot) !== projectRoot) {
+      if (
+        [projectRoot, ...extraFolders].some((root) => !isAbsolute(root) || resolve(root) !== root)
+      ) {
         return Effect.fail(
           failure(
             "invalid-configuration",
@@ -763,7 +768,14 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
           ),
         );
       }
-      return makeConnection(options, projectRoot, mode, resumeIdentities, factories);
+      return makeConnection(
+        options,
+        projectRoot,
+        mode === "chat" ? [] : extraFolders,
+        mode,
+        resumeIdentities,
+        factories,
+      );
     },
   };
 }
@@ -771,6 +783,7 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
 function makeConnection(
   options: AcpDriverOptions,
   projectRoot: string,
+  extraFolders: ReadonlyArray<string>,
   mode: AcpSessionMode,
   resumeIdentities: Map<string, ResumeIdentity>,
   factories: Factories,
@@ -984,15 +997,10 @@ function makeConnection(
         void state.client.respondPermission(requestMessage.id).catch(() => undefined);
         return;
       }
-      // Work has no shell or Git authority, so a command is refused at the
-      // agent instead of asked about. The agent's declared kind is all Octant
-      // sees: `execute` is the ACP kind for running a command, while `other`
-      // also covers Octant's own managed MCP tools and cannot be refused
-      // wholesale without breaking them.
-      if (
-        mapped.kind === "approval" &&
-        (state.executionPolicy === "plan" || (mode === "work" && mapped.toolKind === "execute"))
-      ) {
+      // Plan is read-only, so nothing it asks for is anyone's to approve. Work
+      // and Code share the shell at the thread's level, so an `execute`
+      // request reaches the person in Work as it does in Code.
+      if (mapped.kind === "approval" && state.executionPolicy === "plan") {
         void state.client
           .respondPermission(mapped.providerRequestId, mapped.rejectOptionId)
           .catch(() => undefined);
@@ -1121,6 +1129,7 @@ function makeConnection(
               profile,
               binaryPath: options.binaryPath,
               root: runtimeRoot,
+              ...(extraFolders.length === 0 ? {} : { extraFolders }),
               managedHome: options.managedHome,
               mode,
               executionPolicy,
@@ -1211,6 +1220,7 @@ function makeConnection(
             options.binaryPath,
             options.managedHome,
             projectRoot,
+            extraFolders,
             mode,
             input.modelId,
             input.modelOptionValues ?? {},
@@ -1754,6 +1764,10 @@ function makeConnection(
             }),
           ),
         ),
+      approvalCall: ({ sessionId, requestId }) => {
+        const pending = sessions.get(sessionId)?.approvals.get(requestId);
+        return pending?.kind === "approval" ? pending.call : undefined;
+      },
       answerApproval: (input) =>
         stateFor(input.sessionId).pipe(
           Effect.flatMap((state) => {
@@ -1829,6 +1843,7 @@ function rememberPermission(state: SessionState, mapped: AcpMappedPermission): v
       providerRequestId: mapped.providerRequestId,
       allowOptionId: mapped.allowOptionId,
       rejectOptionId: mapped.rejectOptionId,
+      ...(mapped.call === undefined ? {} : { call: mapped.call }),
     });
   } else if (mapped.kind === "question") {
     state.questions.set(mapped.requestId, {

@@ -532,6 +532,43 @@ export class CodeOperationEventStore {
     }
   }
 
+  /**
+   * The prompts of the thread's latest turns, oldest first, at most `limit`:
+   * what the person wrote, never what the agent read. A turn the host started
+   * to deliver a subagent's result is not the person's message and is left
+   * out. Empty when the journal cannot be read.
+   */
+  personPromptsForThread(
+    threadId: CodeThreadId,
+    limit: number,
+  ): ReadonlyArray<
+    Extract<CodeOperationEvent, { readonly kind: "conversation-turn-started" }>["prompt"]
+  > {
+    try {
+      return this.#journal
+        .latestThreadEvents({
+          aggregateType: "code-operation",
+          threadId: String(threadId),
+          kind: "conversation-turn-started",
+          limit: limit * 2,
+        })
+        .flatMap((envelope) => {
+          if (envelope.eventName !== CODE_OPERATION_EVENT_RECORDED || envelope.eventVersion !== 1)
+            return [];
+          const frame = decodeCodeOperationEventFrame(envelope.payload);
+          if (String(frame.threadId) !== String(threadId)) return [];
+          const event = frame.event;
+          return event.kind === "conversation-turn-started" && event.delivery === undefined
+            ? [event.prompt]
+            : [];
+        })
+        .slice(0, limit)
+        .reverse();
+    } catch {
+      return [];
+    }
+  }
+
   providerSessionForThread(
     threadId: CodeThreadId,
     operationId: CodeOperationId,
@@ -1236,9 +1273,18 @@ function foldTurnFrame(
       state: frame.event.state,
       ...(frame.event.summary === undefined ? {} : { summary: frame.event.summary }),
       ...(frame.event.published === undefined ? {} : { published: frame.event.published }),
+      ...(frame.event.outsideContent === undefined
+        ? {}
+        : { outsideContent: frame.event.outsideContent }),
     };
     if (existing === -1) appendStep(builder, step);
     else builder.steps[existing] = step;
+  } else if (frame.event.kind === "approval-reviewed") {
+    appendStep(builder, {
+      kind: "review",
+      summary: frame.event.summary,
+      decision: frame.event.decision,
+    });
   } else if (frame.event.kind === "usage") {
     // A provider may report usage more than once in a turn; the last
     // report is the turn's own figure, not a running sum to add to.

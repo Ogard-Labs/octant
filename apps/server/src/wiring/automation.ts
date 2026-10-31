@@ -411,7 +411,7 @@ export function wireAutomation(deps: AutomationDependencies) {
   });
   if (automationHistoryAvailable) automationScheduler.start();
   // The host's own timer for completed threads, fed by every mode's service
-  // that can archive on the host's behalf (decision 0088).
+  // that can archive on the host's behalf.
   const completedThreadArchiveSweep = new CompletedThreadArchiveSweep({
     sources: [
       codeCompletedThreadSource,

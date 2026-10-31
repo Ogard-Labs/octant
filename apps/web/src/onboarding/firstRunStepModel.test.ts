@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildFirstRunSteps, nextFirstRunStep, previousFirstRunStep } from "./firstRunStepModel";
 
 describe("first-run steps", () => {
-  it("asks for a provider, then a Project, then a model, and nothing else", () => {
+  it("asks for a provider, then a Project, then a model, then a mode, and nothing else", () => {
     const steps = buildFirstRunSteps({
       current: "providers",
       providersReady: false,
@@ -10,10 +10,11 @@ describe("first-run steps", () => {
       modelChosen: false,
     });
 
-    expect(steps.map((step) => step.id)).toEqual(["providers", "project", "model"]);
+    expect(steps.map((step) => step.id)).toEqual(["providers", "project", "model", "mode"]);
     expect(steps.filter((step) => step.current).map((step) => step.id)).toEqual(["providers"]);
     expect(steps.every((step) => !step.configured)).toBe(true);
-    expect(nextFirstRunStep("model")).toBeUndefined();
+    expect(nextFirstRunStep("model")).toBe("mode");
+    expect(nextFirstRunStep("mode")).toBeUndefined();
     expect(previousFirstRunStep("providers")).toBeUndefined();
   });
 
@@ -29,6 +30,7 @@ describe("first-run steps", () => {
       ["providers", true],
       ["project", false],
       ["model", true],
+      ["mode", false],
     ]);
   });
 

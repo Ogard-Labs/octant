@@ -123,6 +123,8 @@ export interface ChatComposerProps {
   /** Returns true only when the caller's authoritative send operation succeeded. */
   readonly onSend: (draft: string) => Promise<boolean> | boolean;
   readonly onStop?: () => void;
+  /** Set once a Stop did not end the response and the provider can kill it alone. */
+  readonly onForceStop?: () => void;
   /**
    * True while a message the user already sent is waiting for the response in
    * flight to finish. The composer only says so; it never asks the user to
@@ -951,6 +953,8 @@ export function ChatComposer(props: ChatComposerProps) {
             ariaLabel: "Stop response",
             disabledReason: stopDisabledReason,
             onStop: () => props.onStop?.(),
+            forceStop:
+              props.onForceStop === undefined ? undefined : { onForceStop: props.onForceStop },
           },
         },
       }}

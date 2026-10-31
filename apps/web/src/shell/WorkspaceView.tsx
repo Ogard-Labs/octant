@@ -1,4 +1,6 @@
 import type { WorkspaceContentTabs } from "./workspaceContentTabs";
+import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
+import { autoReviewFor, type AutoReview } from "../code/autoReview";
 import {
   discardNewTaskDraftForOverview,
   discardNewTaskDraftForPane,
@@ -35,6 +37,7 @@ import type {
   ThreadBoardPullRequestIdentity,
 } from "@octant/contracts";
 import type {
+  ProjectAction,
   ProjectAvailability,
   ProjectId,
   ProjectColor,
@@ -42,6 +45,7 @@ import type {
   ProjectSummary,
 } from "@octant/contracts/projects";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
+import type { KeyProviderDriverKinds } from "@octant/contracts/providers";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { DesktopRecipe, DesktopRecipeKeyChange } from "@octant/contracts/desktop-lease";
 import type { PreviewClient } from "@octant/client-runtime/preview-client";
@@ -59,6 +63,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { ComposerContextMeterGate } from "../context/composerContextMeterScope";
 import { SplitWorkspace, type PaneFacts } from "./SplitWorkspace";
 import { ProjectOverview } from "../projects/ProjectOverview";
+import type { ProjectChange } from "../projects/useProjectController";
 import { providerGroupsForProject } from "../projects/ProjectProviderPolicySection";
 import { pickerHasReadyInstance } from "../providers/ComposerModelPicker";
 import type { OctantHostBridge } from "./hostBridge";
@@ -412,6 +417,14 @@ export interface WorkspaceViewProps {
   readonly availabilityByProject: ReadonlyMap<ProjectId, ProjectAvailability>;
   readonly onArchiveProject: (projectId: ProjectId) => void;
   readonly onRelinkProject: (projectId: ProjectId, receiptId: string) => Promise<boolean>;
+  readonly onAddProjectExtraFolder?: (
+    projectId: ProjectId,
+    receiptId: string,
+  ) => Promise<ProjectChange>;
+  readonly onRemoveProjectExtraFolder?: (
+    projectId: ProjectId,
+    canonicalRoot: string,
+  ) => Promise<ProjectChange>;
   readonly onRenameProject: (projectId: ProjectId, name: string) => Promise<boolean>;
   readonly onProjectColorChange?: (
     projectId: ProjectId,
@@ -421,11 +434,27 @@ export interface WorkspaceViewProps {
     projectId: ProjectId,
     policy: ProjectProviderPolicy,
   ) => Promise<boolean>;
+  readonly onNativeProvidersChange?: (
+    projectId: ProjectId,
+    providers: KeyProviderDriverKinds,
+  ) => Promise<boolean>;
+  readonly onProjectPermissionModeChange?: (
+    projectId: ProjectId,
+    permissionMode: import("@octant/contracts/providers").PermissionMode | undefined,
+  ) => Promise<boolean>;
+  readonly onProjectAutoReviewerChange?: (
+    projectId: ProjectId,
+    autoReviewer: import("@octant/contracts/shield").AutoReviewer | undefined,
+  ) => Promise<boolean>;
   readonly onBrandKitChange?: (
     projectId: ProjectId,
     brandKit: CanvasDesignBrand,
   ) => Promise<boolean>;
   readonly onWorkStatusFileChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
+  readonly onActionsChange?: (
+    projectId: ProjectId,
+    actions: ReadonlyArray<ProjectAction>,
+  ) => Promise<boolean>;
   readonly onDesktopRecipeChange?: (
     projectId: ProjectId,
     recipe: DesktopRecipe | null,
@@ -475,15 +504,14 @@ export interface WorkspaceViewProps {
   readonly draftApprovalLabel?: string;
   readonly draftSelectedProviderInstanceId?: import("@octant/contracts/providers").ProviderInstanceId;
   readonly draftSelectedModelId?: import("@octant/contracts/providers").ProviderModelId;
-  readonly draftDefaultExecutionPolicy?: import("@octant/contracts/providers").ProviderExecutionPolicy;
+  readonly draftDefaultPermissionMode?: import("@octant/contracts/providers").PermissionMode;
   readonly draftDefaultPermissionPersistence?: import("@octant/contracts/providers").PermissionPersistence;
   readonly onDraftSelectProvider?: (selection: {
     readonly providerInstanceId: import("@octant/contracts/providers").ProviderInstanceId;
     readonly modelId: import("@octant/contracts/providers").ProviderModelId;
   }) => void;
-  readonly onDraftExecutionPolicyChange?: (
-    policy: import("@octant/contracts/providers").ProviderExecutionPolicy,
-    persistence: import("@octant/contracts/providers").PermissionPersistence,
+  readonly onDraftPermissionModeChange?: (
+    mode: import("@octant/contracts/providers").PermissionMode,
   ) => void;
   readonly onDraftCreateThread?: (
     mode: string,
@@ -500,6 +528,7 @@ export interface WorkspaceViewProps {
     permissionPersistence?: import("@octant/contracts/providers").PermissionPersistence,
     modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
     initiatingPaneId?: PaneId,
+    terminalSession?: import("@octant/contracts").TerminalSessionImportRequest,
   ) => boolean | void | Promise<boolean | void>;
   readonly githubPluginEnabled?: boolean;
   readonly linearClient?: import("@octant/client-runtime/integration-client").IntegrationClient;
@@ -1147,13 +1176,17 @@ function renderCodeTab(
             (checkout) => String(checkout.id) === String(activeThread.checkoutId),
           )?.availability;
   const providerInstanceId = activeThread?.providerInstanceId;
-  const harnessAutoReviewSupported =
-    providerInstanceId === undefined
-      ? undefined
-      : props.providerController.observedByInstance.get(providerInstanceId)?.capabilities
-            .harnessAutoReview === "supported"
-        ? true
-        : undefined;
+  const autoReview = autoReviewFor({
+    providerInstanceId,
+    instances: props.providerController.instances,
+    observedByInstance: props.providerController.observedByInstance,
+    chosen: chosenAutoReviewer({
+      project: project?.type === "code" ? project : undefined,
+      settings: codeController.bootstrap?.settings,
+    }),
+    shieldModel: codeController.bootstrap?.settings.shieldModel,
+  });
+  const harnessAutoReviewSupported = autoReview?.status === "reviewer" ? true : undefined;
   const content = (
     <Suspense
       fallback={
@@ -1206,14 +1239,12 @@ function renderCodeTab(
                 }),
             })}
         tab={tab}
-        {...(project?.type === "code" && project.codeAccessPersistence === "project-default"
-          ? { projectRemembersFullAccess: true }
-          : {})}
         {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
         {...(props.codeProviderGroups === undefined && props.draftProviderGroups === undefined
           ? {}
           : { providerGroups: props.codeProviderGroups ?? props.draftProviderGroups })}
         {...(harnessAutoReviewSupported === undefined ? {} : { harnessAutoReviewSupported })}
+        {...(autoReview === undefined ? {} : { autoReview })}
         {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
         {...(props.imageGenerationClient === undefined
           ? {}
@@ -1570,15 +1601,16 @@ function renderNonCodeTab(
           {...(props.draftSelectedModelId === undefined
             ? {}
             : { selectedModelId: props.draftSelectedModelId })}
-          {...(props.draftDefaultExecutionPolicy === undefined
+          {...(props.draftDefaultPermissionMode === undefined
             ? {}
-            : { defaultExecutionPolicy: props.draftDefaultExecutionPolicy })}
+            : { defaultPermissionMode: props.draftDefaultPermissionMode })}
           {...(props.draftDefaultPermissionPersistence === undefined
             ? {}
             : { defaultPermissionPersistence: props.draftDefaultPermissionPersistence })}
-          {...(props.onDraftExecutionPolicyChange === undefined
+          {...(props.onDraftPermissionModeChange === undefined
             ? {}
-            : { onExecutionPolicyChange: props.onDraftExecutionPolicyChange })}
+            : { onPermissionModeChange: props.onDraftPermissionModeChange })}
+          {...draftAutoReview(props)}
           onSelectProvider={props.onDraftSelectProvider ?? (() => {})}
           {...(props.draftCodeExecute === undefined ? {} : { codeExecute: props.draftCodeExecute })}
           {...(props.onDraftCreateCodeThread === undefined
@@ -1601,6 +1633,7 @@ function renderNonCodeTab(
             executionPolicy,
             permissionPersistence,
             modelOptionValues,
+            terminalSession,
           ) => {
             // Returning quietly here made a wired-up composer look dead: the user
             // pressed Create thread and nothing happened anywhere. A missing
@@ -1623,6 +1656,7 @@ function renderNonCodeTab(
               permissionPersistence,
               modelOptionValues,
               paneId,
+              terminalSession,
             );
           }}
           {...(props.onCreateProject === undefined
@@ -1661,6 +1695,7 @@ function renderNonCodeTab(
   if (tab.kind === "chat-thread") {
     return (
       <ChatThreadWorkspace
+        {...(props.onCreateProject === undefined ? {} : { onCreateProject: props.onCreateProject })}
         chatClient={props.chatClient}
         chatReadCursorStore={props.chatReadCursorStore}
         {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
@@ -1939,6 +1974,9 @@ function renderNonCodeTab(
           ? {}
           : { windowCapability: props.projectWindowCapability })}
         {...(props.onDockResearch === undefined ? {} : { onDockResearch: props.onDockResearch })}
+        {...(props.onOpenSettings === undefined
+          ? {}
+          : { onManageExtensions: props.onOpenSettings })}
         tab={tab}
       />
     );
@@ -2219,6 +2257,15 @@ function renderNonCodeTab(
         {...(props.onProviderPolicyChange === undefined
           ? {}
           : { onProviderPolicyChange: props.onProviderPolicyChange })}
+        {...(props.onNativeProvidersChange === undefined
+          ? {}
+          : { onNativeProvidersChange: props.onNativeProvidersChange })}
+        {...(props.onProjectPermissionModeChange === undefined
+          ? {}
+          : { onPermissionModeChange: props.onProjectPermissionModeChange })}
+        {...(props.onProjectAutoReviewerChange === undefined
+          ? {}
+          : { onAutoReviewerChange: props.onProjectAutoReviewerChange })}
         {...(props.onBrandKitChange === undefined
           ? {}
           : { onBrandKitChange: props.onBrandKitChange })}
@@ -2228,11 +2275,18 @@ function renderNonCodeTab(
         {...(props.onDesktopRecipeChange === undefined
           ? {}
           : { onDesktopRecipeChange: props.onDesktopRecipeChange })}
+        {...(props.onActionsChange === undefined ? {} : { onActionsChange: props.onActionsChange })}
         {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
         {...(props.projectWindowCapability === undefined
           ? {}
           : { windowCapability: props.projectWindowCapability })}
         providerInstances={props.providerController.instances ?? []}
+        {...(props.onAddProjectExtraFolder === undefined
+          ? {}
+          : { onAddExtraFolder: props.onAddProjectExtraFolder })}
+        {...(props.onRemoveProjectExtraFolder === undefined
+          ? {}
+          : { onRemoveExtraFolder: props.onRemoveProjectExtraFolder })}
         onRelink={props.onRelinkProject}
         onRename={props.onRenameProject}
         {...(props.onProjectColorChange === undefined
@@ -2468,6 +2522,7 @@ function ChatThreadWorkspace(props: {
   /** Opens the Side Chat tab for a sidecar the host has already resolved. */
   readonly onOpenSideChat?: (sidecar: SideChatSidecar) => void;
   readonly projects: ReadonlyArray<ProjectSummary>;
+  readonly onCreateProject?: (mode: "chat", name: string) => Promise<ProjectId | undefined>;
   readonly providerController: ProviderController;
   readonly tab: Extract<WorkspaceTab, { kind: "chat-thread" }>;
   readonly threadId: Extract<WorkspaceTab, { kind: "chat-thread" }>["threadId"];
@@ -2488,6 +2543,7 @@ function ChatThreadWorkspace(props: {
     client: props.chatClient,
     readCursorStore: props.chatReadCursorStore,
   });
+  const createProject = props.onCreateProject;
   const providerOrder = props.providerController.defaults?.providerOrder ?? [];
   const providerGroups = useMemo(
     () =>
@@ -2571,6 +2627,16 @@ function ChatThreadWorkspace(props: {
                 props.onOpenThread?.(thread.id, thread.title, thread.projectId),
             })}
         {...(props.onOpenSideChat === undefined ? {} : { onOpenSideChat: props.onOpenSideChat })}
+        moveToProject={{
+          projects: props.projects.flatMap((project) =>
+            project.type === "chat" && project.lifecycle === "active"
+              ? [{ id: project.id, name: project.name }]
+              : [],
+          ),
+          ...(createProject === undefined
+            ? {}
+            : { onCreateProject: (name: string) => createProject("chat", name) }),
+        }}
       />
     </ChatThreadEnvironment>
   );
@@ -2804,4 +2870,24 @@ function WorkProjectOverviewSlot(props: {
       />
     </NewTaskDraftScopeContext.Provider>
   );
+}
+
+/**
+ * Who would answer a new thread's prompts at Auto on the chosen provider, by
+ * the account's choice; the Project's own choice applies once the thread is
+ * created.
+ */
+function draftAutoReview(props: WorkspaceViewProps): {
+  readonly autoSupported?: true;
+  readonly autoReview?: AutoReview;
+} {
+  const autoReview = autoReviewFor({
+    providerInstanceId: props.draftSelectedProviderInstanceId,
+    instances: props.providerController.instances,
+    observedByInstance: props.providerController.observedByInstance,
+    chosen: props.codeController.bootstrap?.settings.autoReviewer,
+    shieldModel: props.codeController.bootstrap?.settings.shieldModel,
+  });
+  if (autoReview === undefined) return {};
+  return autoReview.status === "reviewer" ? { autoSupported: true, autoReview } : { autoReview };
 }

@@ -62,6 +62,9 @@ import {
   type ProviderCredentialResolver,
 } from "../providers/credentialBrokerClient";
 import { makeProviderApiKeyPool } from "../providers/providerApiKeyPool";
+import { makeConnectorLinkedSecrets } from "../secretStores/connectorLinkedSecrets";
+import { makeSecretStoreBrokerClient } from "../secretStores/secretStoreBrokerClient";
+import { secretStoresJournal } from "../secretStores/secretStoresJournal";
 import { createHostOAuthService, extAgentHostIdFor } from "../providers/oauth/hostOAuthService";
 import { makeHostOAuthBrokerClient } from "../providers/oauth/hostOAuthBrokerClient";
 import { hostOAuthEventJournal } from "../providers/oauth/hostOAuthEventJournal";
@@ -157,6 +160,8 @@ import { ShellSettingsStandaloneSkillActivationStore } from "../extensions/stand
 import { createCompositeSkillMarketplace } from "../extensions/compositeSkillMarketplace";
 import { CodexPluginPackageResolver } from "../extensions/codexPluginResolver";
 import { NpmAgentPluginMarketplace } from "../extensions/npmAgentPluginMarketplace";
+import { NpmPackageSource } from "../extensions/npmPackageSource";
+import { readUserNpmConfig } from "../extensions/npmRegistryConfig";
 import { createDefaultCodexPluginPackageSources } from "../extensions/curatedBuildIosAppsCatalog";
 import { AgentPluginMcpSessionManager } from "../extensions/agentPluginMcpSessionManager";
 import { LocalPluginFolderRegistry } from "../extensions/localPluginFolderRegistry";
@@ -729,6 +734,20 @@ export function wireProviders(deps: ProvidersDependencies) {
               url: options.credentialBrokerUrl,
               token: options.credentialBrokerToken,
             }),
+            // A server's secret may name an item in a linked secret store
+            // instead of holding a value.
+            linkedSecrets: makeConnectorLinkedSecrets({
+              broker: makeSecretStoreBrokerClient({
+                url: options.credentialBrokerUrl,
+                token: options.credentialBrokerToken,
+              }),
+              journal: secretStoresJournal({
+                journal: persistence.journal,
+                connection: persistence.connection,
+                uuid: randomUUID,
+                now: () => new Date().toISOString(),
+              }),
+            }),
           }),
     });
     // The address a user-added server's package names, read from the
@@ -873,6 +892,18 @@ export function wireProviders(deps: ProvidersDependencies) {
       lifecycle: extensionLifecycleService,
       resolver: extensionPackageResolver,
       skills: standaloneSkillService,
+      // Packages from the npm registry the person's own npm settings name.
+      // The registry address is read from those settings at each lookup;
+      // nothing else in them is read.
+      npmSource: new NpmPackageSource({
+        appVersion: version,
+        platform: process.platform,
+        isMarketplaceFetchAllowed,
+        readRegistryConfig: async () => ({
+          env: process.env,
+          ...(await readUserNpmConfig(homedir(), process.env)),
+        }),
+      }),
       activation: {
         resolve: (snapshot, query) =>
           agentPluginMcpSessionManager.projectEffectiveState(
@@ -944,6 +975,9 @@ export function wireProviders(deps: ProvidersDependencies) {
       },
     });
     githubExtensionSnapshot.read = () => extensionApiService.snapshot();
+    // One store for the host: the folder picker issues a receipt through the
+    // extension routes, and installing a Browser extension consumes it.
+    const localPluginImportReceipts = new LocalPluginImportReceiptStore();
     const extensionRoutes = createExtensionRouteHandler({
       service: extensionApiService,
       windowAuthorityStore,
@@ -952,7 +986,7 @@ export function wireProviders(deps: ProvidersDependencies) {
         ? {}
         : { desktopBridgeSecret: options.desktopBridgeSecret }),
       localPluginFolderRegistry,
-      localPluginImportReceipts: new LocalPluginImportReceiptStore(),
+      localPluginImportReceipts,
       userAddedMcpServers,
       agentToolingDiscovery,
       extensionProjectPins: {
@@ -1740,6 +1774,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       extensionRoutes,
       generatedImageStore,
       imageJobService,
+      localPluginImportReceipts,
       localUsageHistoryRoutes,
       managedCodeThreadCreation,
       managedWorktreeRefsList,

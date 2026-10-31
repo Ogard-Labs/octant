@@ -36,6 +36,10 @@ logged in wire responses or diagnostics. Linux uses owner-private XDG roots and
 an authenticated Unix-domain control socket; unsafe ownership, permissions,
 relative paths, and symlink components fail closed before persistence opens.
 
+Octant sends no diagnostics. If you want help, you can save a redacted file
+about your host and send it yourself; see
+[Saving diagnostics to ask for help](/advanced/recovery#saving-diagnostics-to-ask-for-help).
+
 The durable event journal is an SQLite-backed append-only store. Everything
 Octant does that matters is journaled as versioned events, and every
 projection can be rebuilt from the journal. A confirmed thread purge is the
@@ -202,7 +206,12 @@ that hosts the thread, not from a paired phone or browser.
 - Extensions stay quarantined until explicitly reviewed and trusted.
   Installation never implies trust, activation, enablement, or authority.
 - Browser automation uses per-thread incognito contexts with an origin
-  allowlist and credential-field protection.
+  allowlist and credential-field protection. A page is Private unless you put it
+  in a Project or Personal profile, which keeps its sign-in on this Mac until you
+  sign out; you can import cookies from another browser on this Mac into one of
+  them, by picking it yourself, through macOS's own Keychain prompt. The agent
+  asks you before it uses a signed-in site; a routine, a subagent, a terminal
+  CLI, and a paired device cannot open one.
 
 ### What the Claude runtime does on its own
 

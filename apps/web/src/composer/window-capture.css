@@ -1,0 +1,22 @@
+/* The picker lists window titles as plain rows; the dialog around it is the
+   system's confirmation recipe. Rows scroll inside the dialog so a desktop
+   with many windows never pushes the buttons off screen. */
+.window-capture__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-1);
+  max-height: min(320px, 50vh);
+  margin: 0 0 var(--oct-space-3);
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.window-capture__window.window-capture__window {
+  width: 100%;
+  justify-content: flex-start;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

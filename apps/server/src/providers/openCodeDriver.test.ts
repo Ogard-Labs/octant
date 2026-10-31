@@ -25,6 +25,7 @@ import {
   makeOpenCodeDriver,
   normalizeOpenCodeProbe,
   openCodePromptParts,
+  permissionRules,
   type OpenCodeClientPort,
 } from "./openCodeDriver";
 import type { OpenCodeEvent } from "./openCodeEventMapper";
@@ -790,25 +791,32 @@ describe("OpenCode driver", () => {
     },
   );
 
-  it("refuses shell and task delegation outright in a Work session while edits still ask", async () => {
-    const fixture = driverFixture();
-    await Effect.runPromise(
-      Effect.scoped(
-        fixture.driver
-          .acquire({ instanceId, projectRoot: "/tmp/project", mode: "work" })
-          .pipe(
-            Effect.flatMap((connection) =>
-              connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
-            ),
+  it.each(["approval-gated", "auto-accept-edits", "full-access"] as const)(
+    "gives a Work session at %s the shell and task rules a Code session at that level gets",
+    async (executionPolicy) => {
+      const rulesFor = async (mode: "work" | "code") => {
+        const fixture = driverFixture();
+        await Effect.runPromise(
+          Effect.scoped(
+            fixture.driver
+              .acquire({ instanceId, projectRoot: "/tmp/project", mode })
+              .pipe(
+                Effect.flatMap((connection) =>
+                  connection.start({ sessionId, modelId, executionPolicy }),
+                ),
+              ),
           ),
-      ),
-    );
-    const rules = fixture.createdPermissions[0]!;
-    expect(evaluatePermission(rules, "bash")).toBe("deny");
-    expect(evaluatePermission(rules, "task")).toBe("deny");
-    expect(evaluatePermission(rules, "edit")).toBe("ask");
-    expect(evaluatePermission(rules, "external_directory")).toBe("deny");
-  });
+        );
+        return fixture.createdPermissions[0]!;
+      };
+      const work = await rulesFor("work");
+      expect(work).toEqual(await rulesFor("code"));
+      const shell = executionPolicy === "full-access" ? "allow" : "ask";
+      expect(evaluatePermission(work, "bash")).toBe(shell);
+      expect(evaluatePermission(work, "task")).toBe(shell);
+      expect(evaluatePermission(work, "external_directory")).toBe("deny");
+    },
+  );
 
   it("isolates MCP tools to the session-owned bridge", async () => {
     const fixture = driverFixture();
@@ -914,6 +922,33 @@ describe("OpenCode driver", () => {
     );
     expect(String(exit)).toContain("unauthorized");
     expect(fixture.calls.some((call) => call.startsWith("permission.reply"))).toBe(false);
+  });
+
+  it("answers a one-call approval once, even when the person remembers approvals for the Project", async () => {
+    const fixture = driverFixture({
+      permissionPersistence: "project-default",
+      events: [permissionEvent("provider-session", "one")],
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project" }).pipe(
+          Effect.flatMap((connection) =>
+            connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }).pipe(
+              Effect.tap(() =>
+                connection.answerApproval({
+                  sessionId,
+                  requestId: "one",
+                  approved: true,
+                  scope: "once",
+                }),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(fixture.calls).toContain("permission.reply:once");
+    expect(fixture.calls).not.toContain("permission.reply:always");
   });
 
   it("maps remembered approval to always and denial to reject", async () => {
@@ -2429,13 +2464,44 @@ describe("OpenCode driver", () => {
     expect(evaluateV2Permission(rules, action)).toBe(effect);
   });
 
-  it("denies the shell and child agents in 2.x Work mode agent permission rules", () => {
+  it("lets a session reach a Project's extra folder and still denies every other outside folder", () => {
+    for (const policy of ["plan", "approval-gated", "auto-accept-edits"] as const) {
+      const beta = betaAgentPermissionRules(policy, "code", ["/work/notes"]);
+      const allowed = beta.filter(
+        (rule) => rule.action === "external_directory" && rule.effect === "allow",
+      );
+      expect(allowed.map((rule) => rule.resource)).toEqual(["/work/notes", "/work/notes/*"]);
+      // The outside-folder deny for every other path stays, and comes first,
+      // so only the folder is reopened; the posture's edit rule is unchanged.
+      const denyIndex = beta.findIndex(
+        (rule) =>
+          rule.action === "external_directory" && rule.resource === "*" && rule.effect === "deny",
+      );
+      expect(denyIndex).toBeGreaterThanOrEqual(0);
+      expect(denyIndex).toBeLessThan(beta.indexOf(allowed[0]!));
+      expect(evaluateV2Permission(beta, "edit")).toBe(
+        evaluateV2Permission(betaAgentPermissionRules(policy, "code"), "edit"),
+      );
+      const legacy = permissionRules(policy, "code", undefined, ["/work/notes"]);
+      expect(
+        legacy.filter((rule) => rule.permission === "external_directory").map((rule) => rule),
+      ).toEqual([
+        { permission: "external_directory", pattern: "*", action: "deny" },
+        { permission: "external_directory", pattern: "/work/notes", action: "allow" },
+        { permission: "external_directory", pattern: "/work/notes/*", action: "allow" },
+      ]);
+    }
+  });
+
+  it("gives 2.x Work mode the shell and child-agent rules Code mode gets at each level", () => {
+    for (const policy of ["approval-gated", "auto-accept-edits", "full-access"] as const) {
+      expect(betaAgentPermissionRules(policy, "work")).toEqual(
+        betaAgentPermissionRules(policy, "code"),
+      );
+    }
     const rules = betaAgentPermissionRules("approval-gated", "work");
-    expect(evaluateV2Permission(rules, "bash")).toBe("deny");
-    expect(evaluateV2Permission(rules, "shell")).toBe("deny");
-    expect(evaluateV2Permission(rules, "task")).toBe("deny");
-    expect(evaluateV2Permission(rules, "subagent")).toBe("deny");
-    expect(evaluateV2Permission(rules, "edit")).toBe("ask");
+    expect(evaluateV2Permission(rules, "bash")).toBe("ask");
+    expect(evaluateV2Permission(rules, "subagent")).toBe("ask");
   });
 
   it("launches a 2.x Code session with its posture and only its own app tool bridge allowed", async () => {

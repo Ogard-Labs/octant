@@ -58,6 +58,11 @@ import { SettingsNavigation, type SettingsNavigationItem } from "./SettingsNavig
 import { useSettingsSaved, type SettingsWriteResult } from "./useSettingsSaved";
 import { SidebarDestinationSettings } from "./SidebarDestinationSettings";
 import { PluginSettingsSection } from "./PluginSettingsSection";
+import { BrowserProfilesSection } from "../browser/BrowserProfilesSection";
+import { BrowserExtensionsSection } from "../browser/BrowserExtensionsSection";
+import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
+import type { RememberedBrowserProfileSite } from "@octant/contracts/shell";
+import { browserProfileKey } from "@octant/domain";
 import { ChatSettingsView } from "../chat/ChatSettingsView";
 import type { ChatController } from "../chat/useChatController";
 import type { CodeController } from "../code/useCodeController";
@@ -69,6 +74,7 @@ import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { UsageClient } from "@octant/client-runtime/usage-client";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import { DiagnosticsExportControl } from "../support/DiagnosticsExportControl";
+import { SupportBundleControl } from "../support/SupportBundleControl";
 import { JournalGrowthTable } from "../support/JournalGrowthTable";
 import type { DiagnosticsExportClient } from "@octant/client-runtime/diagnostics-export-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
@@ -85,10 +91,13 @@ import { RememberedToolApprovalsPanel } from "../extensions/RememberedToolApprov
 import { BrowserHubSection } from "../host/BrowserHubSection";
 import { RemoteAccessSettingsSection } from "../host/RemoteAccessSettingsSection";
 import { PublicLinkSettings } from "../settings/PublicLinkSettings";
+import { SecretStoresClientContext } from "../settings/SecretStoresClientContext";
+import { SecretStoresSettingsSection } from "../settings/SecretStoresSettingsSection";
 import { SyncSettingsSection } from "../settings/SyncSettingsSection";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ReplicaMembershipClient } from "@octant/client-runtime/replica-membership-client";
 import type { ReplicaStoreSettingsClient } from "@octant/client-runtime/replica-store-settings-client";
+import type { SecretStoresClient } from "@octant/client-runtime/secret-stores-client";
 import type { ReplicaSyncStatusClient } from "@octant/client-runtime/replica-sync-status-client";
 import { AutomationNotificationSettings } from "../host/AutomationNotificationSettings";
 import { PhoneNotificationSettings } from "../host/PhoneNotificationSettings";
@@ -201,12 +210,19 @@ export interface SettingsViewProps {
   readonly localUsageHistoryClient?: LocalUsageHistoryClient;
   readonly diagnosticsExportClient?: DiagnosticsExportClient;
   readonly hostControlClient?: HostControlClient;
+  /** Settings › Data & privacy › Browser profiles; absent where the host keeps none. */
+  readonly browserAutomationClient?: Pick<
+    BrowserAutomationClient,
+    "manageExtensions" | "manageProfiles"
+  >;
   /** Settings › Data & privacy › Public links; absent where the host has no such surface. */
   readonly canvasClient?: Pick<CanvasClient, "publicLinkSettings" | "setPublicLinkSettings">;
   /** Settings › Computer use › the monthly cap for desktops that bill; absent where the host has no route to it. */
   readonly desktopPaneClient?: Pick<DesktopPaneClient, "request">;
   /** Settings › Sync on this host; absent off it, where store setup is not offered. */
   readonly replicaStoreSettingsClient?: ReplicaStoreSettingsClient;
+  /** Absent off the host: linking a secret store and pointing a key at it are host authority. */
+  readonly secretStoresClient?: SecretStoresClient;
   /** Creating, joining, and revoking on this host; absent off it. */
   readonly replicaMembershipClient?: ReplicaMembershipClient;
   /** Read-only sync status, used when this client is not on the host. */
@@ -273,6 +289,8 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   host: "The host process: its status, startup, notifications, and maintenance.",
   permissions: "What you have already allowed: websites, extension tools, and public links.",
   data: "What this host stores, how long it keeps threads, and how to back it up.",
+  "secret-stores":
+    "Keep API keys in a password manager you already use. Octant keeps a reference and fetches the key when it is used.",
   sync: "Where artifact versions go when sync is on, in a store you own.",
   usage: "Activity and usage across providers.",
 };
@@ -708,17 +726,19 @@ export function SettingsView(props: SettingsViewProps) {
             ) : (
               <SettingsOutlineRegistration.Provider value={registerSection}>
                 <SettingsPageScope.Provider value={activeSectionScope}>
-                  <ActiveSectionContent
-                    activeSection={route.activeSection}
-                    capabilities={capabilities}
-                    focusedSetting={route.focusedSetting}
-                    onApplyDeepLink={route.applyDeepLink}
-                    onHarnessEndpointChange={setHarnessEndpoint}
-                    onCatalogEntryChange={setCatalogEntry}
-                    harnessEndpointOpen={subPage !== undefined}
-                    pluginSettingsEntryPoints={pluginSettingsEntryPoints}
-                    props={savingProps}
-                  />
+                  <SecretStoresClientContext.Provider value={props.secretStoresClient}>
+                    <ActiveSectionContent
+                      activeSection={route.activeSection}
+                      capabilities={capabilities}
+                      focusedSetting={route.focusedSetting}
+                      onApplyDeepLink={route.applyDeepLink}
+                      onHarnessEndpointChange={setHarnessEndpoint}
+                      onCatalogEntryChange={setCatalogEntry}
+                      harnessEndpointOpen={subPage !== undefined}
+                      pluginSettingsEntryPoints={pluginSettingsEntryPoints}
+                      props={savingProps}
+                    />
+                  </SecretStoresClientContext.Provider>
                 </SettingsPageScope.Provider>
               </SettingsOutlineRegistration.Provider>
             )}
@@ -945,6 +965,7 @@ function ActiveSectionContent({
             <CodeSettingsView
               focusedSetting={focusedSetting}
               onUpdate={props.codeController.updateSettings}
+              providerSnapshot={props.providerController?.snapshot}
               settings={props.codeController.bootstrap.settings}
             />
           )}
@@ -1215,6 +1236,13 @@ function ActiveSectionContent({
         </section>
       );
     }
+    case "secret-stores":
+      return (
+        <SecretStoresSettingsSection
+          client={props.secretStoresClient}
+          focusedSetting={focusedSetting}
+        />
+      );
     case "sync":
       return (
         <SyncSettingsSection
@@ -1247,11 +1275,22 @@ function ActiveSectionContent({
         <div className="settings-section-stack" id="settings-permissions">
           <RememberedBrowserOriginsPanel
             origins={props.settings.rememberedBrowserOrigins}
+            profileSites={props.settings.rememberedBrowserProfileSites}
+            projectNames={props.projectNames ?? NO_PROJECT_NAMES}
             {...(focusedSetting === undefined ? {} : { focusedSetting })}
             onForget={(origin) =>
               props.onSettingsChange({
                 rememberedBrowserOrigins: props.settings.rememberedBrowserOrigins.filter(
                   (entry) => entry !== origin,
+                ),
+              })
+            }
+            onForgetProfileSite={(site) =>
+              props.onSettingsChange({
+                rememberedBrowserProfileSites: props.settings.rememberedBrowserProfileSites.filter(
+                  (entry) =>
+                    entry.origin !== site.origin ||
+                    browserProfileKey(entry.profile) !== browserProfileKey(site.profile),
                 ),
               })
             }
@@ -1288,6 +1327,21 @@ function ActiveSectionContent({
               </p>
             </section>
           )}
+          {props.browserAutomationClient === undefined ? null : (
+            <BrowserExtensionsSection
+              client={props.browserAutomationClient}
+              {...(props.pickLocalPluginFolder === undefined
+                ? {}
+                : { pickExtensionFolder: props.pickLocalPluginFolder })}
+              {...(focusedSetting === undefined ? {} : { focusedSetting })}
+            />
+          )}
+          {props.browserAutomationClient === undefined ? null : (
+            <BrowserProfilesSection
+              client={props.browserAutomationClient}
+              {...(focusedSetting === undefined ? {} : { focusedSetting })}
+            />
+          )}
         </div>
       );
     case "skills":
@@ -1320,7 +1374,13 @@ function ActiveSectionContent({
  */
 function RememberedBrowserOriginsPanel(props: {
   readonly origins: ReadonlyArray<string>;
+  /** Sites remembered for one signed-in profile; the profile is shown beside each. */
+  readonly profileSites: ReadonlyArray<RememberedBrowserProfileSite>;
+  readonly projectNames: ReadonlyMap<string, string>;
   readonly onForget: (origin: string) => Promise<boolean> | boolean | void;
+  readonly onForgetProfileSite: (
+    site: RememberedBrowserProfileSite,
+  ) => Promise<boolean> | boolean | void;
   readonly focusedSetting?: string | undefined;
 }) {
   const [forgetting, setForgetting] = useState<string>();
@@ -1332,15 +1392,50 @@ function RememberedBrowserOriginsPanel(props: {
       setForgetting(undefined);
     }
   };
+  const forgetProfileSite = async (site: RememberedBrowserProfileSite) => {
+    const key = `${browserProfileKey(site.profile)}\0${site.origin}`;
+    setForgetting(key);
+    try {
+      await props.onForgetProfileSite(site);
+    } finally {
+      setForgetting(undefined);
+    }
+  };
   return (
     <SettingsSection
       description="Granted with “Always allow” on a thread’s Browser approval; forgetting one makes the next open ask again."
       title="Remembered websites"
     >
-      {props.origins.length === 0 ? (
+      {props.origins.length === 0 && props.profileSites.length === 0 ? (
         <SettingsState kind="empty">No remembered websites.</SettingsState>
       ) : (
         <div className="setgroup">
+          {props.profileSites.map((site) => {
+            const key = `${browserProfileKey(site.profile)}\0${site.origin}`;
+            const profileName =
+              site.profile.kind === "personal"
+                ? "Personal profile"
+                : `${props.projectNames.get(String(site.profile.projectId)) ?? "Project"} profile`;
+            return (
+              <SettingRow
+                description={`Browser acts as you on this site in the ${profileName}, without asking.`}
+                key={key}
+                label={`${site.origin} · ${profileName}`}
+                scope="host"
+                settingId="browser-site-approvals"
+              >
+                <OctantButton
+                  disabled={forgetting === key}
+                  onClick={() => void forgetProfileSite(site)}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  Forget
+                </OctantButton>
+              </SettingRow>
+            );
+          })}
           {props.origins.map((origin, index) => (
             <SettingRow
               description="Browser opens this site without asking."
@@ -1639,6 +1734,7 @@ function providerSettingsViewProps(
     onRetry: controller.retry,
     onSetEnabled: controller.setEnabled,
     onSetClaudeArtifactDelivery: controller.setClaudeArtifactDelivery,
+    onSetProviderNativeSetup: controller.setProviderNativeSetup,
     onDataTagsChange: controller.setDataTags,
     onModelDataTagsChange: controller.setModelDataTags,
     onModelContextWindowChange: controller.setModelContextWindow,
@@ -2426,9 +2522,25 @@ function MaintenanceSection({
         ) : null}
         {diagnosticsExportClient !== undefined ? (
           <SettingRow
-            description="Creates a local support bundle from the selected host. Review it before sharing."
+            description="Saves a file about this host for you to read and send yourself. It lists versions, provider status, recent log lines, and activity names, never messages or keys. Nothing is uploaded."
+            focused={focusedSetting === settingId("save-diagnostics")}
+            label="Save diagnostics"
+            scope="host"
+            settingId="save-diagnostics"
+          >
+            <SupportBundleControl
+              client={diagnosticsExportClient}
+              {...(props.hostBridge?.saveSupportBundle === undefined
+                ? {}
+                : { saveNatively: props.hostBridge.saveSupportBundle })}
+            />
+          </SettingRow>
+        ) : null}
+        {diagnosticsExportClient !== undefined ? (
+          <SettingRow
+            description="Exports a redacted report about one failed operation, found by its correlation ID. Review it before sharing."
             focused={focusedSetting === settingId("export-diagnostics")}
-            label="Export diagnostics"
+            label="Failure report"
             scope="host"
             settingId="export-diagnostics"
           >

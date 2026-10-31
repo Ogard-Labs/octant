@@ -78,6 +78,10 @@ Type `#` in the composer to pick a thread you can already open. Octant inserts a
 
 A chip you can no longer open is marked unavailable and contributes no content. Cross-mode mentions are read-only context, not mixed execution — mentioning a Work or Code thread from Chat does not grant that thread's filesystem or shell.
 
+## Attaching a window capture
+
+In the macOS desktop app, the composer's paperclip opens a menu: **Choose file…** or **Capture window…**. Capture window lists your open windows by title and attaches a picture of the one you choose, as an image like any other, so the model's image support and the per-turn image limits apply. The first time, Octant explains why macOS needs Screen Recording permission and asks only when you press **Continue**; if you turned it off, Octant opens System Settings instead. Octant reads a window only after you choose it. The web app and the phone app do not offer it.
+
 ## Side Chat
 
 Side Chat is a separate Chat conversation about one source thread. Open the right sidebar and choose **Side Chat** while that thread is focused. It never replaces the source thread. Switching between visible threads restores each thread's own tools and Side Chat conversation.
@@ -160,6 +164,24 @@ and is asked to change only that part. The comment shows **Sent to agent**, then
 **Addressed in vN** once a new version from the agent arrives. The button is
 missing when the thread cannot be reached or when you are viewing an older
 version of the Canvas. The turn follows the thread's own permissions.
+
+## Stop, and Force stop
+
+**Stop** asks the response to end. If it has not ended ten seconds later, a
+**Force stop** button appears beside it. Force stop kills the process behind that
+one response and nothing else: the conversation stays usable, and you can send
+another message to carry on. It is offered for providers that run each
+conversation in its own process (Claude). Codex and OpenCode share one process
+across conversations, so they show only Stop.
+
+## Move to a Project
+
+A Chat that is not in a Project can be filed into one: open **Thread actions**
+and choose **Move to Project…**, then pick a Chat Project or name a new one. The
+conversation stays a Chat with its history. It gains no folder access; the
+Project's memory applies to the messages you send next. A Chat already in a
+Project has no move item. Work and Code threads move from their row menu; see
+[Work](./work.md#move-to-a-project) and [Code](./code.md#move-to-a-project).
 
 ## Export
 

@@ -360,7 +360,7 @@ async function scanDescriptor(
     // Auth readiness probe. This one reads the provider's own credential state
     // out of the user's home, so the confinement above would answer
     // "unauthenticated" for every installed provider. Giving it a home it can
-    // read is a readiness-probe question under 0122, not a version read.
+    // read is a readiness-probe question, not a version read.
     let readiness: DiscoveryCandidate["readiness"] = "unknown";
     if (descriptor.authProbeArgs !== undefined) {
       try {

@@ -1,6 +1,10 @@
 import {
   decodeCodeProjectPullRequestDetailView,
+  decodeCodeProjectPullRequestSwitchesView,
+  decodeCodeThreadId,
   decodeUtcTimestamp,
+  type CodeProjectPullRequestMergeOutcome,
+  type CodeProjectPullRequestSwitchOutcome,
   type CodeProjectPullRequestDetailQuery,
   type CodeProjectPullRequestDetailRefreshCommand,
 } from "@octant/contracts";
@@ -153,6 +157,30 @@ describe("DockProjectPullRequestReviewTool", () => {
       await screen.findByText("Merged pull request #12. Refreshing its review state."),
     ).toBeVisible();
   });
+  it("says plainly why the host refused a merge whose required checks have not passed", async () => {
+    const user = userEvent.setup();
+    const onMerge = vi.fn(
+      async (): Promise<CodeProjectPullRequestMergeOutcome> => ({
+        status: "refused",
+        reason: "checks-not-passing",
+      }),
+    );
+    render(
+      <DockProjectPullRequestReviewTool
+        load={async () => detailView("Ready to merge.", "mergeable")}
+        onMerge={onMerge}
+        query={query}
+        refresh={async () => detailView("Ready to merge.", "mergeable")}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Merge" }));
+    await user.click(screen.getByRole("button", { name: "Confirm merge" }));
+
+    expect(
+      await screen.findByText("Merge refused: the required checks have not all passed."),
+    ).toBeVisible();
+  });
+
   it("restores Merge after cancelling a failed inline attempt", async () => {
     const user = userEvent.setup();
     const onMerge = vi.fn(async () => {
@@ -173,5 +201,94 @@ describe("DockProjectPullRequestReviewTool", () => {
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(opener).toHaveFocus();
     expect(onMerge).toHaveBeenCalledOnce();
+  });
+
+  it("turns Merge when ready and Auto-fix on with a click and says why a repository refuses", async () => {
+    const user = userEvent.setup();
+    const threadId = decodeCodeThreadId("20000000-0000-4000-8000-000000000001");
+    const linked = decodeCodeProjectPullRequestDetailView({
+      ...detailView("Body", "mergeable"),
+      linkedThreads: [{ threadId, title: "Fix refresh" }],
+    });
+    const off = decodeCodeProjectPullRequestSwitchesView({
+      version: 1,
+      target: query,
+      mergeWhenReady: { status: "off" },
+      autoFix: { status: "off" },
+      generatedAt: "2026-08-22T08:00:00.000Z",
+    });
+    const autoFixOn = decodeCodeProjectPullRequestSwitchesView({
+      ...off,
+      autoFix: { status: "on", threadId, enabledAt: "2026-08-22T08:01:00.000Z" },
+    });
+    const setMergeWhenReady = vi.fn(
+      async (): Promise<CodeProjectPullRequestSwitchOutcome> => ({
+        status: "unsupported",
+        reason: "auto-merge-not-allowed",
+      }),
+    );
+    const setAutoFix = vi.fn(
+      async (): Promise<CodeProjectPullRequestSwitchOutcome> => ({
+        status: "applied",
+        view: autoFixOn,
+      }),
+    );
+    render(
+      <DockProjectPullRequestReviewTool
+        load={async () => linked}
+        loadSwitches={async () => off}
+        query={query}
+        refresh={async () => linked}
+        setAutoFix={setAutoFix}
+        setMergeWhenReady={setMergeWhenReady}
+      />,
+    );
+
+    const mergeWhenReady = await screen.findByRole("switch", { name: "Merge when ready" });
+    expect(mergeWhenReady).not.toBeChecked();
+    await user.click(mergeWhenReady);
+    expect(setMergeWhenReady).toHaveBeenCalledWith({
+      kind: "enable",
+      target: query,
+      headSha: "9".repeat(40),
+      method: "squash",
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Merge when ready is unsupported: this repository does not allow auto-merge.",
+    );
+    expect(mergeWhenReady).not.toBeChecked();
+
+    const autoFix = screen.getByRole("switch", { name: "Auto-fix" });
+    expect(screen.getByText(/let “Fix refresh” fix failed checks/)).toBeVisible();
+    await user.click(autoFix);
+    expect(setAutoFix).toHaveBeenCalledWith({ kind: "enable", target: query, threadId });
+    await waitFor(() => expect(autoFix).toBeChecked());
+    expect(screen.getByText(/On\. Watching for failed checks/)).toBeVisible();
+  });
+
+  it("keeps Auto-fix off and says why when no Code thread is linked", async () => {
+    const off = decodeCodeProjectPullRequestSwitchesView({
+      version: 1,
+      target: query,
+      mergeWhenReady: { status: "off" },
+      autoFix: { status: "off" },
+      generatedAt: "2026-08-22T08:00:00.000Z",
+    });
+    render(
+      <DockProjectPullRequestReviewTool
+        load={async () => detailView()}
+        loadSwitches={async () => off}
+        query={query}
+        refresh={async () => detailView()}
+        setAutoFix={vi.fn()}
+        setMergeWhenReady={vi.fn()}
+      />,
+    );
+    const autoFix = await screen.findByRole("switch", { name: "Auto-fix" });
+    expect(autoFix).toHaveAttribute("aria-disabled", "true");
+    expect(autoFix).toHaveAttribute(
+      "title",
+      "Link a Code thread to this pull request to use Auto-fix.",
+    );
   });
 });

@@ -44,10 +44,11 @@ off) has every tool call refused, and the model is told why so it can say so.
 A read never needs an approval; an edit, a write, or a command follows the
 thread's access posture. Once a thread has taken in outside content — a
 fetched page, search results, or a helper's reply — it asks before every
-edit, write, command, and page fetch, even under Full access. Reading,
+edit, write, command, and page fetch, unless the thread is at Full access,
+where outside content is only tagged. Reading,
 searching, and running commands in your own folder do not count as outside
 content. A web search on such a thread does not ask, because it only reaches
-the search endpoint you set; instead Octant refuses a query that looks like it
+the search endpoint you set; instead, below Full access, Octant refuses a query that looks like it
 carries data — a link, an email address, a key or other long random-looking
 token, an encoded or hex string, or more than 200 characters — and tells the
 model why, so it can ask a plain question instead. A short query can still
@@ -357,7 +358,28 @@ child is answered once as well: the terminal prompt, the terminal UI, the
 harness card, and the phone panel offer no session-wide choice for it, and the
 card and the phone panel name that child, its provider, and its model.
 **Deny** tells the lead not to retry. Every approval and decision is
-journaled with the session. When you answer on another surface first, the
+journaled with the session.
+
+On a Code thread in **Auto**, Octant Shield answers these approvals before
+anyone is asked. It allows reads and edits inside the thread's folder, your
+Project's own test and build commands, and Git commands that only read,
+without a model call; it refuses or hands you the calls that look harmful
+(a download piped into a shell, an encoded command, reading keys and sending
+them out, persistence, mass deletion, force-pushing); and it asks a small
+model about the rest. That model sees only your own messages in the thread
+and the pending call, never what the agent read. When Shield is unsure, its
+model does not answer, or the thread has read outside content and the call
+would reach out or could not be undone, the approval comes to you with
+Shield's reason. Octant Shield also reads each tool result before the model
+does and labels text that looks like an injection: instructions aimed at the
+agent, hidden or encoded text, a request to send secrets out, or a false claim
+of authority. A labelled result marks the thread, its tool row says "Outside
+content" and what was found, and Shield's model is told the kinds it found,
+never the text. After three denials in a row, or twenty in one thread, the
+next call comes to you. Each decision shows in the transcript as an Octant
+Shield line beside the tool rows. A class you allowed for the session goes
+through on your word without asking Shield, and a subagent's calls are
+answered the same way. When you answer on another surface first, the
 line-mode prompt closes with an "answered elsewhere" note instead of waiting
 for input (with `--json`, an `approval-settled` line).
 

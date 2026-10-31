@@ -22,6 +22,7 @@ import { parseUnifiedDiff, type ParsedDiffFile } from "./unifiedDiff";
 import { UnifiedDiffList } from "./UnifiedDiffList";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { readCodeDiffLayout, writeCodeDiffLayout } from "./codeDiffLayoutPreference";
@@ -74,6 +75,14 @@ export interface CodeDiffPaneProps {
    * thread. Toggling writes the thread's own choice and leaves the default.
    */
   readonly defaultLayout?: CodeDiffLayout;
+  /**
+   * Whether the shown diff was read with whitespace ignored, and how to change
+   * that. The owner rereads the diff from Git; the toggle is absent without it.
+   */
+  readonly ignoreWhitespace?: {
+    readonly value: boolean;
+    readonly onChange: (value: boolean) => void;
+  };
 }
 
 type ContentState =
@@ -274,6 +283,15 @@ function AvailableDiff(
           <OctantToggleGroupItem value="unified">Unified</OctantToggleGroupItem>
           <OctantToggleGroupItem value="side-by-side">Side by side</OctantToggleGroupItem>
         </OctantToggleGroup>
+        {props.ignoreWhitespace === undefined ? null : (
+          <label className="check">
+            <OctantCheckbox
+              checked={props.ignoreWhitespace.value}
+              onChange={(event) => props.ignoreWhitespace?.onChange(event.target.checked)}
+            />
+            <span>Ignore whitespace</span>
+          </label>
+        )}
       </header>
 
       {props.staleNotice === undefined ? null : (

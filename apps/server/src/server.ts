@@ -168,6 +168,7 @@ export function startOctantServer(
       browserAuthority,
       codeBoardEventStore,
       codeEvidence,
+      hostMemoryGuard,
       isProjectPolicyTargetAllowed,
       providerRuntimeRegistry,
       selectCodeConversation,
@@ -205,6 +206,7 @@ export function startOctantServer(
     });
     const {
       agentRunInteractions,
+      shieldHolder,
       nativeHarnessApprovals,
       nativeHarnessQuestions,
       nativeHarnessSessions,
@@ -282,6 +284,8 @@ export function startOctantServer(
       onGithubPullRequestsUnreadable,
       peekCreateFromIssueFramed,
       siblingThreadsService,
+      terminalSessionImports,
+      terminalSessionRoutes,
       threadOutsideContentMarks,
       toolEgressRules,
     } = yield* wireIntegrations({
@@ -403,6 +407,7 @@ export function startOctantServer(
       nativeHarnessLeadFallback,
       nativeHarnessTranscripts,
       probeProviderForThreads,
+      localPluginImportReceipts,
       providerDataDirectory,
       providerOAuthRoutes,
       providerRoutes,
@@ -450,10 +455,15 @@ export function startOctantServer(
       researchRouter,
       sideTaskFirstMessage,
       sideTaskRoutes,
+      hostShield,
       threadWork,
     } = wireHarness({
       projectService,
       agentRunInteractions,
+      shieldHolder,
+      codeEvidence,
+      providerRuntimeRegistry,
+      spendCeiling,
       nativeHarnessApprovals,
       nativeHarnessQuestions,
       nativeHarnessSessions,
@@ -500,6 +510,7 @@ export function startOctantServer(
       folderBrowseService,
       isCodeProviderModelAllowed,
       onPullRequestSnapshotRefreshed,
+      projectPullRequestActionService,
       projectPullRequestCadence,
       projectPullRequestService,
       projectRoutes,
@@ -520,13 +531,13 @@ export function startOctantServer(
       threadAwaitsHarnessApproval,
       bindingReceiptStore,
       cacheStats,
-      codeApprovalStore,
       codeSessionAuthority,
       externalContentIngestionStore,
       gitEnvironmentPort,
       githubIssueContextService,
       gitObservationPort,
       linearIssueContextService,
+      terminalSessionImports,
       liveTurns,
       machineChangeFeed,
       managedWorktreeReceipts,
@@ -578,6 +589,8 @@ export function startOctantServer(
     });
     const {
       browserAutomationService,
+      browserExtensionService,
+      browserProfileService,
       browserToolApprovalService,
       liveProjectBrowsers,
       productFeedbackRoutes,
@@ -594,6 +607,7 @@ export function startOctantServer(
       options,
       persistence,
       projectService,
+      localPluginImportReceipts,
       providerDataDirectory,
       shellService,
       windowAuthorityStore,
@@ -625,6 +639,7 @@ export function startOctantServer(
       routeCodeService,
       terminalProcessPort,
     } = yield* wireCodeRuntime({
+      hostShield,
       onHarnessQuestionAsked,
       onHarnessQuestionSettled,
       onHarnessRecoveryLifted,
@@ -678,6 +693,7 @@ export function startOctantServer(
       persistence,
       probeProviderForThreads,
       productFeedbackService,
+      projectPullRequestActionService,
       projectPullRequestCadence,
       projectPullRequestService,
       projectService,
@@ -698,6 +714,9 @@ export function startOctantServer(
       threadMentionService: (): ThreadMentionService => threadMentionService,
       threadOutsideContentMarks,
     });
+    // Octant Shield's decisions show on the Code transcript beside the tool
+    // rows; the runtime that owns the transcript is built after Shield.
+    hostShield.showDecisionsWith((input) => codeOperationRuntime?.recordShieldReview?.(input));
     const {
       codeCheckoutOpenRoutes,
       codeExternalEditorRoutes,
@@ -847,6 +866,7 @@ export function startOctantServer(
       goalService,
       imageJobService,
       linearIssueContextService,
+      terminalSessionImports,
       liveTurns,
       managedWorktreeReceipts,
       nativeHarnessComposition,
@@ -917,6 +937,8 @@ export function startOctantServer(
         browserAuthority,
         browserAutomationService,
         browserCaptures,
+        browserExtensionService,
+        browserProfileService,
         canAccessCodeProject,
         capacityScheduler,
         chatService,
@@ -1095,6 +1117,7 @@ export function startOctantServer(
       localServerRoutes,
       localUsageHistoryRoutes,
       machineChangeRoutes,
+      terminalSessionRoutes,
       nativeHarnessEgressRoutes,
       nativeHarnessRoutingRoutes,
       nativeHarnessSessionRoutes,
@@ -1147,6 +1170,7 @@ export function startOctantServer(
       composeHostDiagnostics,
       externalContentRoutes,
       hostControlRoutes,
+      supportBundleRoutes,
       delegationAdministrationRoutes,
       hubAdministrationRoutes,
       localDeviceAdministrationRoutes,
@@ -1154,8 +1178,11 @@ export function startOctantServer(
       privateListenerController,
       privateListenerSetting,
       providerCredentialRoutes,
+      secretStoresRoutes,
       remoteHost,
     } = wireRemote({
+      browserExtensionService,
+      browserProfileService,
       canvasPublicShareService,
       threadExportService,
       agentMessageService,
@@ -1176,6 +1203,7 @@ export function startOctantServer(
       generatedImageStore,
       debugConfigurationApprovals,
       debugService,
+      hostMemoryGuard,
       languageServerApprovals,
       nativeHarnessSessions,
       onWorkTurnCancelled,
@@ -1275,8 +1303,10 @@ export function startOctantServer(
                 (await hubAdministrationRoutes(request)) ??
                 (await delegationAdministrationRoutes(request)) ??
                 (await providerCredentialRoutes(request)) ??
+                (await secretStoresRoutes(request)) ??
                 (await localDeviceAdministrationRoutes(request)) ??
                 (await hostControlRoutes(request)) ??
+                (await supportBundleRoutes(request)) ??
                 (await externalContentRoutes(request)) ??
                 (await replicaStoreSettingsRoutes(request)) ??
                 (await replicaMembershipRoutes(request)) ??
@@ -1317,6 +1347,9 @@ export function startOctantServer(
           // so a host that fails to bind never archives anything on its own,
           // and the stop below is registered before the first pass runs.
           completedThreadArchiveSweep.start();
+          // The memory guard reads the last run's state before it overwrites
+          // it, so the next-start notice survives a crash.
+          await hostMemoryGuard.start();
           // Artifact sync pulls and drains its queue now and on an interval,
           // only once the host is serving; with sync off each pass returns
           // before any store call.
@@ -1397,6 +1430,11 @@ export function startOctantServer(
             shutdownFailure ??= error;
           }
           completedThreadArchiveSweep.stop();
+          try {
+            await hostMemoryGuard.stop();
+          } catch (error) {
+            shutdownFailure ??= error;
+          }
           stopArtifactSync();
           stopPublicShareSweep();
           providerUsageLimitsService.stop();

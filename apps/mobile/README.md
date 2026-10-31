@@ -7,7 +7,46 @@ Expo iOS/Android remote-control client (`@octant/mobile`).
 The remote-control vertical slice, Distilled shell, Chat create,
 host-advertised models, deep-link navigation, inbox honesty, and Work create
 are on `main`. Internal TestFlight distribution is the active device-build
-track. Voice, push, and a public App Store listing stay deferred.
+track. Voice and push notifications are built and wait on the maintainer's
+device passes; a public App Store listing stays deferred.
+
+## Push notifications
+
+A paired computer can notify this phone when a thread finishes, fails, waits, or
+needs an approval. The spec is
+[Mobile maturity](../../docs/design/mobile-maturity.md#phase-c-host-originated-push);
+this is what lives here.
+
+- `modules/octant-push` is the native port: the system's permission, the Apple
+  or Firebase token, and one X25519 notification key per computer. On iOS the
+  keys sit in Keychain items shared with the notification service extension
+  (`modules/octant-push/notification-service`), which opens each sealed
+  notification before the system draws it. On Android the keys are encrypted
+  under a Keystore key and the Firebase messaging service opens the data-only
+  message and posts the notification. Both read the same rules from
+  `SealedNotification.swift` and `SealedNotification.kt`.
+- `src/notifications/` is the JavaScript side: `enablePhoneNotifications.ts`
+  (turn on, rotate a changed token, forget a computer), `pushRegistrationBook.ts`
+  (a digest of the token each computer was registered under), and
+  `octantPushModule.ts` (the native port, failing closed).
+- Push is unavailable, and the Settings panel says so, on the iOS Simulator, on
+  iOS earlier than 17, in an iOS build made without push, in an Android build with
+  no Firebase project, in Expo Go, and on the web.
+- A build carries the iOS extension and entitlements only when made with
+  `OCTANT_MOBILE_PUSH=1`, which needs the push capability and Keychain sharing on
+  the app's App ID and the extension's (`app.octant.mobile.notification-service`).
+  Android takes its Firebase project file from the `GOOGLE_SERVICES_JSON` build
+  variable, never from the repository.
+- To compile the iOS side without signing: `OCTANT_MOBILE_PUSH=1 bunx expo
+prebuild --platform ios --no-install`, `pod install` in `ios/`, then
+  `xcodebuild build -workspace Octant.xcworkspace -scheme OctantPush -sdk
+iphonesimulator -destination 'generic/platform=iOS Simulator'
+CODE_SIGNING_ALLOWED=NO` and, for the extension, `xcodebuild build -project
+Octant.xcodeproj -target OctantNotificationService -sdk iphonesimulator
+CODE_SIGNING_ALLOWED=NO`. The `Mobile (iOS native modules)` workflow does this.
+- The server test `apps/server/src/remote/pushNotificationSealing.phone.test.ts`
+  opens what the host seals with the Swift (on a Mac) and the Kotlin (where
+  `kotlinc` and `java` exist) the phone runs.
 
 ## Threads and storage
 
@@ -130,6 +169,6 @@ log. See [`docs/mobile-android-internal.md`](../../docs/mobile-android-internal.
 
 ## Design
 
-- Decision record: `docs/decisions/0013-remote-access-and-mobile.md`
-- Distribution decision: `docs/decisions/0147-internal-testflight-carries-the-existing-remote-client.md`
+- Design: `docs/architecture.md`, "Security and authority" (remote clients)
+- Distribution: `docs/mobile-testflight.md`
 - Threat model: `docs/security/mobile-remote-control-threat-model.md`

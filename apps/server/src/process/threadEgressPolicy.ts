@@ -11,12 +11,12 @@ import type { ProviderExecutionPolicy } from "@octant/contracts";
  * (docs/architecture.md § Harness tool egress rules).
  *
  * Defaults:
- * - Work / Plan / Chat → `none`
- * - Code approval-gated / auto-accept-edits → `provider-endpoints-only`
+ * - Plan / Chat → `none`
+ * - Work or Code approval-gated / auto-accept-edits → `provider-endpoints-only`
  * - Full access / explicit network approval → `unrestricted`
  *
  * Provider-owned runtimes that make their own API call are a scoped
- * exception (0132, extended by 0145): every posture but Full access resolves
+ * exception: every posture but Full access resolves
  * `provider-endpoints-only` through `resolveProviderRuntimeEgressPolicy`.
  * Tools keep these defaults, Plan included.
  */
@@ -71,11 +71,12 @@ export function resolveDefaultThreadEgressPolicy(
   }
   if (input.executionPolicy === "plan") return "none";
   if (
-    input.mode === "code" &&
+    input.mode !== "chat" &&
     (input.executionPolicy === "approval-gated" || input.executionPolicy === "auto-accept-edits")
   ) {
     // Auto-accepting edits inside the checkout says nothing about the network,
-    // so it keeps exactly the egress approval-gated Code already has.
+    // so it keeps exactly the egress approval-gated Code already has. Work is
+    // guarded as Code is, so its commands follow the same rules.
     return "provider-endpoints-only";
   }
   return "none";
@@ -124,8 +125,8 @@ export function resolveProbeEgressPolicy(): ThreadEgressPolicy {
  * The egress a provider runtime may have when it carries a turn.
  *
  * ACP, Pi, OpenCode, and Claude call their own control plane. The thread
- * defaults in 0009 would launch those agents with OS `none`, so the turn never
- * starts. This named policy is the scoped exception (0132, extended by 0145):
+ * defaults would launch those agents with OS `none`, so the turn never
+ * starts. This named policy is the scoped exception:
  * the runtime reaches provider endpoints on every posture including Plan, and
  * tools still follow the thread defaults, Plan included.
  *

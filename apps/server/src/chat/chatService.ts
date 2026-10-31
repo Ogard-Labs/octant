@@ -6,6 +6,7 @@ import {
   offersCanvasTool,
 } from "../canvas/canvasDeliveryInstructions";
 import { appToolHostLines } from "../providers/appToolHostLines";
+import { nativeSetupOption, sessionNativeSetup } from "../providers/providerNativeSetup";
 import { createHash } from "node:crypto";
 import {
   ActorId,
@@ -1558,6 +1559,8 @@ export class ChatService {
           return await this.#resumeTurn(command, executionContext);
         case "interrupt-chat-turn":
           return await this.#interruptTurn(command);
+        case "force-stop-chat-turn":
+          return await this.#forceStopTurn(command);
         case "answer-chat-turn-question":
           return await this.#withThreadAdmission(command.threadId, () =>
             this.#answerTurnQuestion(command),
@@ -3780,6 +3783,13 @@ export class ChatService {
     }
     const controller = this.#activeAttempts.get(String(command.attemptId));
     controller?.abort();
+    // A runtime that can be force-stopped keeps the attempt streaming until it
+    // really ends, so the person can see a Stop that did not take and reach for
+    // Force stop. A runtime that cannot be killed alone settles at once, as it
+    // always has, so a stuck turn never strands the thread.
+    if (controller !== undefined && this.#turnRunner.canForceStop(String(command.attemptId))) {
+      return { kind: "attempt-updated", attempt };
+    }
     const timestamp = decodeTimestamp(this.#clock());
     const cancelled = transitionChatAttempt(attempt, {
       outcome: "cancelled",
@@ -3794,6 +3804,74 @@ export class ChatService {
       ],
     });
     return { kind: "attempt-updated", attempt: cancelled };
+  }
+
+  async #forceStopTurn(
+    command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "force-stop-chat-turn" }>,
+  ): Promise<ChatCommandResult> {
+    const thread = this.#requireActiveThread(command.threadId);
+    const view = this.#requireThreadView(command.threadId);
+    const turn = view.turns.find((candidate) => String(candidate.id) === String(command.turnId));
+    const attempt = turn?.attempts.find(
+      (candidate) => String(candidate.id) === String(command.attemptId),
+    );
+    if (attempt === undefined) {
+      throw new ChatServiceError({ category: "invalid", message: "Chat attempt was not found." });
+    }
+    if (attempt.outcome !== "queued" && attempt.outcome !== "streaming") {
+      throw new ChatServiceError({
+        category: "invalid",
+        message: "Only a running Chat turn can be force-stopped.",
+      });
+    }
+    const attemptId = String(command.attemptId);
+    if (!this.#activeAttempts.has(attemptId)) {
+      throw new ChatServiceError({
+        category: "unavailable",
+        message: "This host is not running that turn.",
+      });
+    }
+    if (!this.#turnRunner.canForceStop(attemptId)) {
+      throw new ChatServiceError({
+        category: "unsupported",
+        message: "This provider shares one process across threads, so one turn cannot be killed.",
+      });
+    }
+    // Stop the runner's own wait first so it does not report the kill as a failure.
+    this.#activeAttempts.get(attemptId)?.abort();
+    const killed = await this.#turnRunner.forceStop(attemptId);
+    if (!killed) {
+      throw new ChatServiceError({
+        category: "unavailable",
+        message: "The runtime process could not be killed.",
+      });
+    }
+    const current = this.#persistence
+      .readChatThreadView(thread.id)
+      ?.turns.flatMap((candidate) => candidate.attempts)
+      .find((candidate) => String(candidate.id) === attemptId);
+    if (
+      current !== undefined &&
+      (current.outcome === "queued" || current.outcome === "streaming")
+    ) {
+      const cancelled = transitionChatAttempt(current, {
+        outcome: "cancelled",
+        updatedAt: decodeTimestamp(this.#clock()),
+      });
+      this.#persistence.journal.append({
+        aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
+        expectedVersion: readAggregateVersion(
+          this.#persistence.connection,
+          "chat-thread",
+          thread.id,
+        ),
+        events: [
+          this.#pending("chat.attempt-updated@1", { kind: "attempt-updated", attempt: cancelled }),
+        ],
+      });
+      return { kind: "attempt-updated", attempt: cancelled };
+    }
+    return { kind: "attempt-updated", attempt: current ?? attempt };
   }
 
   /**
@@ -5833,6 +5911,13 @@ export class ChatService {
               estimatedTokens: input.prepared.context.snapshot.next.plan.plannedInputTokens,
               attachments: input.prepared.attachments,
               researchEnabled: input.thread.researchEnabled,
+              ...nativeSetupOption(
+                sessionNativeSetup(this.#persistence, {
+                  providerInstanceId,
+                  mode: "chat",
+                  executionPolicy: "approval-gated",
+                }),
+              ),
               researchRoute: input.prepared.researchRoute,
               ...(input.prepared.appManagedTools === undefined
                 ? {}

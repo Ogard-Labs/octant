@@ -247,7 +247,13 @@ function normalizeEffect(effect: CodeApprovalEffect): unknown {
     return { ...effect, request };
   }
   if (effect.kind !== "operation") return effect;
-  if (effect.command.kind !== "push-git" && effect.command.kind !== "create-pull-request") {
+  if (
+    effect.command.kind !== "push-git" &&
+    effect.command.kind !== "create-pull-request" &&
+    effect.command.kind !== "update-pull-request" &&
+    effect.command.kind !== "comment-pull-request" &&
+    effect.command.kind !== "merge-pull-request"
+  ) {
     return effect;
   }
   const { authorization: _authorization, ...command } = effect.command;

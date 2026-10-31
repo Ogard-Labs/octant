@@ -1,9 +1,12 @@
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
+import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
   decodeCodeEvidenceContentId,
   decodeCodeFailure,
+  decodeCodeOperationId,
+  decodeProviderSessionId,
   decodeCodeRelativePath,
   decodeCodeThreadId,
   decodeContextSubjectRef,
@@ -23,6 +26,10 @@ import {
 } from "../code/codeOperationRuntime";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { CodePlannerService } from "../code/codePlannerService";
+import { CodeProjectPullRequestSwitchService } from "../code/codeProjectPullRequestSwitchService";
+import { createGhCommandPort } from "../code/ghPullRequestPort";
+import { GhPullRequestSwitchPort } from "../code/ghPullRequestSwitchPort";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { INHERITED_MARK_REFUSAL } from "../context/inheritedExternalContentMark";
 import {
   createCodeProfileSkillResolver,
@@ -56,11 +63,14 @@ import { fileMentionContextBlocks, FileMentionService } from "../fileMentionServ
 import { createAgentMessageTools } from "../agentMessage/agentMessageTools";
 import { codeSiblingThreadSource } from "../siblingThreads/codeSiblingThreadSource";
 import { createSiblingThreadTools } from "../siblingThreads/siblingThreadTools";
-import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
+import {
+  readShieldWatcherLabels,
+  readThreadExternalContentTaint,
+} from "../context/externalContentTaintProjection";
 import { CodeTurnDecisions } from "../turnDecisions/codeTurnDecisions";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
 import { isReplayedAndroidEvidence } from "../android/androidToolchainService";
-import { isNativeHarnessDriverKind } from "@octant/domain";
+import { isNativeHarnessDriverKind, projectExtraFolderRoots } from "@octant/domain";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { type CodeWiring, stableCodeFileId } from "./code";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
@@ -77,6 +87,7 @@ import type { HarnessStateWiring } from "./harnessState";
 import type { DevicesWiring } from "./devices";
 import type { BrowserWiring } from "./browser";
 import type { CanvasWiring } from "./canvas";
+import { sessionNativeSetup } from "../providers/providerNativeSetup";
 
 function withCodeOperationRuntime(
   service: CodeRouteService,
@@ -261,6 +272,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "codeTestDiscovery"
     | "isCodeProviderModelAllowed"
     | "onPullRequestSnapshotRefreshed"
+    | "projectPullRequestActionService"
     | "projectPullRequestCadence"
     | "projectPullRequestService"
     | "roots"
@@ -284,7 +296,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   Pick<CanvasWiring, "canvasAgentToolPort"> &
   Pick<
     HarnessWiring,
-    "nativeHarnessComposition" | "nativeHarnessHooks" | "onHarnessRecoveryLifted"
+    "hostShield" | "nativeHarnessComposition" | "nativeHarnessHooks" | "onHarnessRecoveryLifted"
   > & {
     /** Wired by wireChat; read only after startup. */
     readonly codeThreadMentionDirectory: () => ReturnType<typeof createCodeThreadMentionDirectory>;
@@ -343,6 +355,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     isCodeProviderModelAllowed,
     liveTurns,
     machineChangeFeed,
+    hostShield,
     nativeHarnessComposition,
     nativeHarnessHooks,
     onHarnessQuestionAsked,
@@ -356,6 +369,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     persistence,
     probeProviderForThreads,
     productFeedbackService,
+    projectPullRequestActionService,
     projectPullRequestCadence,
     projectPullRequestService,
     projectService,
@@ -502,6 +516,14 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         }),
       );
       codeOperationRuntime = createCodeOperationRuntime({
+        shield: hostShield,
+        chosenAutoReviewer: (thread) => {
+          const project = persistence.readProject(thread.projectId);
+          return chosenAutoReviewer({
+            project: project?.type === "code" ? project : undefined,
+            settings: persistence.readCodeSettings()?.settings,
+          });
+        },
         liveTurns,
         activeTurns: codeActiveTurns,
         terminalBrowserGrants: grants,
@@ -607,6 +629,12 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             projectId: input.thread.projectId,
           }),
         nativeHarnessTools: (input) => nativeHarnessComposition.forCode(input),
+        readProjectExtraFolders: (projectId) => {
+          const project = persistence.readProject(projectId);
+          return project === undefined || project.type === "chat"
+            ? []
+            : projectExtraFolderRoots(project);
+        },
         nativeHarness: nativeHarnessHooks,
         onProviderTurnRequested: (threadId) => {
           if (codeService instanceof CodeService) codeService.noteProviderTurnRequested(threadId);
@@ -990,6 +1018,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           readThreadExternalContentTaint(persistence.connection, String(threadId)),
         resolveProviderCapabilities: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities,
+        resolveProviderNativeSetup: (thread) =>
+          sessionNativeSetup(persistence, {
+            providerInstanceId: thread.providerInstanceId,
+            projectId: thread.projectId,
+            mode: "code",
+            executionPolicy: thread.executionPolicy,
+          }),
         // Planner tools resolve their designation on every call through the
         // services declared after this runtime; the closures run only once a
         // turn is live, well after startup finishes wiring them.
@@ -1215,10 +1250,138 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             snapshot: () => projectPullRequestService.boardSnapshot(windowId),
           },
           planProgress: codeBoardPlanProgressSource,
+          outsideContent: {
+            read: (threadId) => {
+              if (
+                !readThreadExternalContentTaint(persistence.connection, String(threadId))
+                  .externalContentIngested
+              ) {
+                return undefined;
+              }
+              return readShieldWatcherLabels(persistence.connection, String(threadId)).length > 0
+                ? "flagged"
+                : "read";
+            },
+          },
           clock: () => new Date().toISOString(),
         });
         return board.query(query);
       },
+    );
+    // Merge when ready and Auto-fix. The forge calls run through the host's
+    // own `gh`; with none installed every switch answers unavailable.
+    const pullRequestSwitchForge = (() => {
+      if (options.ghExecutable === undefined) return undefined;
+      try {
+        return new GhPullRequestSwitchPort({
+          command: createGhCommandPort({ ghPath: options.ghExecutable }),
+        });
+      } catch {
+        return undefined;
+      }
+    })();
+    const pullRequestSwitchService = new CodeProjectPullRequestSwitchService({
+      authority: projectPullRequestService,
+      forge: pullRequestSwitchForge ?? {
+        readAutoMergeSettings: async () => ({ status: "unavailable", reason: "unavailable" }),
+        enableAutoMerge: async () => ({ status: "unavailable", reason: "unavailable" }),
+        disableAutoMerge: async () => ({ status: "unavailable", reason: "unavailable" }),
+        observe: async () => ({ status: "unavailable" }),
+      },
+      threads: {
+        inspect: (threadId) => {
+          const thread = persistence.readCodeThread(threadId);
+          if (
+            thread === undefined ||
+            thread.lifecycle !== "active" ||
+            thread.completedAt !== undefined
+          ) {
+            return { status: "gone" };
+          }
+          const compacting = contextHarness.compactionRunning(
+            decodeContextSubjectRef({ aggregateType: "code-thread", aggregateId: threadId }),
+          );
+          return {
+            status: "available",
+            turnActive:
+              compacting ||
+              persistence
+                .readCodeRuntimeWorks(threadId)
+                .some(
+                  ({ work }) =>
+                    work.kind === "provider-turn" &&
+                    (work.state === "running" ||
+                      work.state === "waiting" ||
+                      work.state === "ambiguous"),
+                ),
+          };
+        },
+        markOutsideContent: (threadId, contentReference) => {
+          const marked = externalContentIngestionStore.record({
+            threadId,
+            provenance: { origin: "external-content", sourceLabel: "pull-request-auto-fix" },
+            contentReference,
+            correlationId: randomUUID(),
+            authorized: true,
+          });
+          return marked.kind === "recorded" || marked.kind === "already-recorded";
+        },
+        // The same host path a routine's follow-up and a child's result take:
+        // the thread's own access level and approvals apply to the turn.
+        startTurn: async (threadId, text) => {
+          const thread = persistence.readCodeThread(threadId);
+          const stage = boardRouteCodeService.stageEvidence;
+          const execute = boardRouteCodeService.executeOperation;
+          if (thread === undefined || stage === undefined || execute === undefined) return false;
+          const prompt = await stage(ROUTINE_HOST_SCOPE_ID, threadId, text);
+          const result = await execute(ROUTINE_HOST_SCOPE_ID, {
+            kind: "start-provider-turn",
+            operationId: decodeCodeOperationId(randomUUID()),
+            threadId,
+            checkoutId: thread.checkoutId,
+            sessionId: decodeProviderSessionId(randomUUID()),
+            prompt,
+          });
+          return (
+            result.kind === "provider-turn-state" &&
+            (result.state === "running" ||
+              result.state === "waiting" ||
+              result.state === "completed")
+          );
+        },
+        notifyPerson: async (threadId, reason) => {
+          const view = codeFollowUpService.read(threadId);
+          await codeFollowUpService.observeTrigger({
+            threadId,
+            sourceEventId: randomUUID(),
+            sourceSequence:
+              Math.max(
+                view.followUp?.triggerSequence ?? 0,
+                view.followUp?.acknowledgedThroughSequence ?? 0,
+              ) + 1,
+            reason,
+            origin: "automatic",
+            triggeredAt: new Date().toISOString(),
+          });
+        },
+      },
+      journal: persistence.journal,
+      uuid: randomUUID,
+    });
+    // Host-local and idle-free: the forge is read only while a switch is on.
+    const pullRequestSwitchAbort = new AbortController();
+    const pullRequestSwitchTimer = setInterval(() => {
+      if (!pullRequestSwitchService.watching) return;
+      pullRequestSwitchService
+        .tick(pullRequestSwitchAbort.signal)
+        .catch((error: unknown) => console.error("[pull-request-switches] pass failed", error));
+    }, 60_000);
+    pullRequestSwitchTimer.unref?.();
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        clearInterval(pullRequestSwitchTimer);
+        pullRequestSwitchAbort.abort();
+      }),
     );
     const routeCodeService: CodeRouteService = {
       ...boardRouteCodeService,
@@ -1252,15 +1415,28 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           command,
           signal ?? new AbortController().signal,
         ),
-      mergeProjectPullRequest: (windowId, command, signal, initiator) => {
-        if (initiator !== "user")
-          return Promise.resolve({ status: "refused", reason: "not-authorized" });
-        return projectPullRequestService.merge(
+      // A paired phone or web client merges under the same head and
+      // required-check rules as the desktop window; it must also carry the
+      // person's confirmation, which the service enforces.
+      mergeProjectPullRequest: (windowId, command, signal, caller) =>
+        projectPullRequestService.merge(
           windowId,
           command,
           signal ?? new AbortController().signal,
-        );
-      },
+          caller,
+        ),
+      mergeProjectPullRequestStack: (windowId, command, signal, caller) =>
+        projectPullRequestActionService.mergeStack(windowId, command, signal, caller),
+      actOnProjectPullRequest: (windowId, command, signal, caller) =>
+        projectPullRequestActionService.act(windowId, command, signal, caller),
+      queryProjectPullRequestSwitches: (windowId, target) =>
+        pullRequestSwitchService.query(windowId, target),
+      setProjectPullRequestMergeWhenReady: (windowId, command, signal, initiator) =>
+        pullRequestSwitchService.setMergeWhenReady(windowId, command, initiator, signal),
+      setProjectPullRequestAutoFix: (windowId, command, initiator) =>
+        pullRequestSwitchService.setAutoFix(windowId, command, initiator),
+      noteComposerActivity: (_windowId, activity) =>
+        pullRequestSwitchService.noteComposerActivity(activity.threadId),
     };
     return {
       androidToolchainRoutes,

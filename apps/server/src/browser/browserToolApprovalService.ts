@@ -3,7 +3,12 @@ import {
   type BrowserToolApproval,
   type BrowserToolApprovalDecision,
 } from "@octant/contracts/browser-automation-rpc";
-import { decodeToolApprovalId, type ToolActionAuthority, type WindowId } from "@octant/contracts";
+import {
+  decodeToolApprovalId,
+  type StoredBrowserProfile,
+  type ToolActionAuthority,
+  type WindowId,
+} from "@octant/contracts";
 
 const DEFAULT_TTL_MS = 5 * 60_000;
 const MAX_PENDING_APPROVALS = 32;
@@ -22,17 +27,32 @@ interface BrowserToolApprovalServiceOptions {
    * the journaled shell settings at composition; absent, "always allow"
    * decisions approve once and remember nothing.
    */
-  readonly rememberOrigin?: (origin: string, windowId: WindowId) => void;
+  readonly rememberOrigin?: (
+    origin: string,
+    windowId: WindowId,
+    profile: StoredBrowserProfile | undefined,
+  ) => void;
   /**
    * Whether the origin already holds a remembered grant. Read live: a grant
    * forgotten in Settings stops satisfying this at once.
    */
-  readonly isOriginRemembered?: (origin: string) => boolean;
+  readonly isOriginRemembered?: (
+    origin: string,
+    profile: StoredBrowserProfile | undefined,
+  ) => boolean;
   /**
    * Whether a requesting scope is the host acting for a routine. Nobody sits at
    * that scope, so its approvals go to the windows that can see the thread.
    */
   readonly isHostScope?: (windowId: WindowId) => boolean;
+  /**
+   * Whether a scope is a window of this computer. A scope that is neither a local
+   * window nor the host acting alone is a paired device. Absent, no scope is
+   * treated as a paired device.
+   */
+  readonly isLocalWindow?: (windowId: WindowId) => boolean;
+  /** How many extensions are enabled in a profile, to name in its prompt. */
+  readonly extensionsEnabledIn?: (profile: StoredBrowserProfile) => number;
   /**
    * The waiting set changed: a prompt became listable or left the list for
    * a decision, a cancel, an expiry, a close, or a revocation. Wired only at
@@ -73,16 +93,24 @@ export class BrowserToolApprovalService {
     readonly threadId: string;
     readonly authority: ToolActionAuthority;
     readonly origin: string;
+    /** The Project or Personal profile the page lives in, when it is in one. */
+    readonly profile?: StoredBrowserProfile;
     readonly signal?: AbortSignal;
   }): Promise<"approved" | "denied" | "cancelled" | "expired"> {
     if (input.signal?.aborted) return Promise.resolve("cancelled");
     if (this.#pending.size >= MAX_PENDING_APPROVALS) return Promise.resolve("denied");
     const approvalId = decodeToolApprovalId(this.#options.uuid());
+    const extensionCount =
+      input.profile === undefined
+        ? 0
+        : Math.min(64, this.#options.extensionsEnabledIn?.(input.profile) ?? 0);
     const view = decodeBrowserToolApproval({
       approvalId,
       threadId: input.threadId,
       mode: input.authority.mode,
       origin: input.origin,
+      ...(input.profile === undefined ? {} : { profile: input.profile }),
+      ...(extensionCount > 0 ? { extensionCount } : {}),
       requestedAt: new Date(this.#options.now()).toISOString(),
     });
     return new Promise((resolve) => {
@@ -138,7 +166,7 @@ export class BrowserToolApprovalService {
     if (decision.decision === "approved" && decision.remember === true) {
       // The answering window journals the grant: for a routine it is the
       // person who saw the prompt, not the host scope that raised it.
-      this.#options.rememberOrigin?.(pending.view.origin, windowId);
+      this.#options.rememberOrigin?.(pending.view.origin, windowId, pending.view.profile);
     }
     return true;
   }
@@ -150,20 +178,40 @@ export class BrowserToolApprovalService {
    * host scope.
    */
   #answerableBy(pending: PendingApproval, windowId: WindowId): boolean {
+    // A signed-in page acts as the person's account, so a paired device neither
+    // sees nor answers its approval, and an approval a paired device's turn raised
+    // waits for a window of this computer, like a routine's.
+    const signedIn = pending.view.profile !== undefined;
+    if (signedIn && this.#isPairedDevice(windowId)) return false;
     if (pending.windowId === windowId) return true;
     const isHostScope = this.#options.isHostScope;
-    if (isHostScope === undefined || !isHostScope(pending.windowId) || isHostScope(windowId)) {
+    const waitsForPerson =
+      (isHostScope?.(pending.windowId) ?? false) ||
+      (signedIn && this.#isPairedDevice(pending.windowId));
+    if (!waitsForPerson || isHostScope?.(windowId) === true || this.#isPairedDevice(windowId)) {
       return false;
     }
     return this.#options.authorityIsCurrent(pending.threadId, pending.authority, windowId);
+  }
+
+  #isPairedDevice(windowId: WindowId): boolean {
+    const { isLocalWindow, isHostScope } = this.#options;
+    return (
+      isLocalWindow !== undefined && !isLocalWindow(windowId) && isHostScope?.(windowId) !== true
+    );
   }
 
   /**
    * Whether a request for this origin settles approved without a prompt — a
    * grant remembered from an earlier "always allow" decision.
    */
-  isRemembered(origin: string): boolean {
-    return this.#options.isOriginRemembered?.(origin) === true;
+  isRemembered(origin: string, profile?: StoredBrowserProfile): boolean {
+    return this.#options.isOriginRemembered?.(origin, profile) === true;
+  }
+
+  /** Whether a scope is the host acting alone, with no person to answer a prompt. */
+  isUnattendedScope(windowId: WindowId): boolean {
+    return this.#options.isHostScope?.(windowId) === true;
   }
 
   revokeWindow(windowId: WindowId): void {

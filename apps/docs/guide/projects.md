@@ -46,7 +46,19 @@ Projects support the following operations:
   or Escape to close it. **Settings ›
   Sidebar › Thread filter** can keep the field always shown.
 - **Relink**: when a bound root becomes unavailable (moved or removed), the Project shows `Relink required`. Use audited relink to point to the new location. Root availability is observed at bootstrap and is not journaled, so relinking does not rewrite durable history.
-- **Remember Full access** (Code Projects): `octant project access <name> full-access` on the host lets new Code threads that choose Remember for this Project start with Full access without a per-thread confirmation, or raise an existing thread to it — a Code thread `octant agent` starts in that Project follows the same choice; `octant project access <name> approval-gated` returns to the default.
+- **Default mode** (Code Projects): under **Access and limits** in the Project overview, choose the mode this Project's new threads start in, or **Same as Settings**. `octant project access <name> full-access` on the host still sets Full access for the Project (and `approval-gated` returns it to Settings); a Code thread `octant agent` starts in that Project follows the same choice.
+
+## Several folders
+
+A Work or Code Project has one main folder and can have extra folders beside it, for example a notes folder next to a repository. Open the Project overview and select **Add folder…** on the folders card; on the desktop app this opens the folder picker. **Remove** next to a folder takes it out of the Project and leaves the folder itself untouched.
+
+- An extra folder gets the same access as the main folder at each thread's level: at Ask first, writes there ask as they do in the main folder; in Plan it is read-only; at Full access nothing is confined.
+- Commands, checkouts and Git start in the main folder. An extra folder is a plain folder: Octant manages no checkout or worktree in it.
+- Agents are told the extra folders' paths at the start of each turn. A folder added or removed applies from the next turn.
+- The `@file` picker and the Files and overview listings still show only the main folder.
+- Octant refuses your home folder itself, any folder above it, system folders, and folders that hold keys or credentials (such as `~/.ssh` or `~/.aws`), as well as a folder inside or around the main folder or another extra folder. A Project can have up to 16 extra folders.
+
+Only you add or remove folders; an agent cannot. Each change is recorded with who made it and when.
 
 ## Brand kit
 

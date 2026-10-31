@@ -60,8 +60,7 @@ function boundedDisplayName(name: string): string {
 /**
  * Enabled Settings-configured custom image sources, as profile views. Only a
  * `"ready"` resolution is offered here — an `"unavailable"` custom source is
- * Settings' job to surface with its reason, not the picker's
- * (`docs/decisions/0085`).
+ * Settings' job to surface with its reason, not the picker's.
  *
  * `instanceId` is the real routing key a caller passes straight back to
  * `enqueue` — it cannot be a synthetic per-source identity. Two sources on

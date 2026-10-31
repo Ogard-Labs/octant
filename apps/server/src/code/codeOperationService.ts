@@ -70,6 +70,18 @@ import {
   THREAD_MENTION_UNREADABLE_CONTEXT,
 } from "@octant/domain";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import {
+  decidePushBranch,
+  decideRemotePullRequestMerge,
+  type PushBranchRefusal,
+  type RequiredChecksState,
+} from "@octant/domain/code-pull-request-action-policy";
+import type {
+  GhPullRequestActionResult,
+  GhPullRequestIdentityRequest,
+  GhPullRequestSummaryResult,
+} from "./ghPullRequestActionPort";
+import type { GhPullRequestMergeResult } from "./ghPullRequestPort";
 import { LINUX_BUBBLEWRAP_MISSING_NOTICE } from "../process/linuxConfinement";
 import { ProcessConfinementError } from "../process/seatbeltProfile";
 import type { TerminalBrowserGrantService } from "./terminalBrowserGrantService";
@@ -409,6 +421,7 @@ export interface CodeOperationGitPort {
   readonly observe: (input: {
     readonly checkoutRoot: string;
     readonly maxDiffBytes: number;
+    readonly ignoreWhitespace?: boolean;
   }) => Promise<{
     readonly status: "ready" | "unavailable" | "failed";
     readonly head?: {
@@ -495,6 +508,7 @@ export interface CodeOperationGitPort {
     readonly confirmation: { readonly remote: string; readonly refspec: string };
     readonly expectedHeadOid: string;
     readonly expectedStateToken: string;
+    readonly force?: Extract<CodeOperationCommand, { readonly kind: "push-git" }>["force"];
     readonly authority: "approved" | "full-access";
     readonly executionPolicy: CodeThread["executionPolicy"];
   }) => Promise<GitMutationOutcome>;
@@ -522,6 +536,7 @@ export interface CodeOperationGitPort {
   readonly readBranchDiff?: (input: {
     readonly checkoutRoot: string;
     readonly baseRef: string;
+    readonly ignoreWhitespace?: boolean;
   }) => Promise<
     | {
         readonly status: "ready";
@@ -592,28 +607,108 @@ type GitMutationOutcome =
   | { readonly status: "unavailable" }
   | { readonly status: "failed"; readonly detail?: string };
 
+interface CodeOperationPullRequestIdentity {
+  readonly number: number;
+  readonly url: string;
+  readonly baseRepository: string;
+  readonly baseBranch: string;
+  readonly headOwner: string;
+  readonly headBranch: string;
+}
+
 export interface CodeOperationPullRequestPort {
   readonly ensure: (
-    input: { readonly threadId: CodeThread["id"]; readonly title: string; readonly body: string },
+    input: {
+      readonly threadId: CodeThread["id"];
+      readonly title: string;
+      readonly body: string;
+      readonly draft?: boolean;
+      readonly baseBranch?: string;
+    },
     signal: AbortSignal,
   ) => Promise<
     | {
         readonly status: "created" | "existing";
-        readonly pullRequest: {
-          readonly number: number;
-          readonly url: string;
-          readonly baseRepository: string;
-          readonly baseBranch: string;
-          readonly headOwner: string;
-          readonly headBranch: string;
-        };
+        readonly pullRequest: CodeOperationPullRequestIdentity;
+        readonly draft?: boolean;
       }
+    | { readonly status: "unavailable"; readonly code?: string }
+  >;
+  /** Absent on a host that cannot change pull requests; the update is then unavailable. */
+  readonly update?: (
+    input: {
+      readonly threadId: CodeThread["id"];
+      readonly title?: string;
+      readonly body?: string;
+      readonly draft?: boolean;
+    },
+    signal: AbortSignal,
+  ) => Promise<
+    | {
+        readonly status: "updated";
+        readonly pullRequest: CodeOperationPullRequestIdentity;
+        readonly draft?: boolean;
+      }
+    | { readonly status: "none" }
+    | { readonly status: "unavailable"; readonly code?: string }
+  >;
+  /** The thread's own pull request in a state, found by its head. Absent: labels, close, and reopen are unavailable. */
+  readonly locate?: (
+    threadId: CodeThread["id"],
+    state: "open" | "closed",
+    signal: AbortSignal,
+  ) => Promise<
+    | { readonly status: "found"; readonly pullRequest: CodeOperationPullRequestIdentity }
+    | { readonly status: "none" }
     | { readonly status: "unavailable" }
   >;
+  /** The forge calls behind labels, comments, close, reopen, and merge. */
+  readonly actions?: CodeOperationPullRequestActions;
   readonly observeReview: (
     input: { readonly threadId: CodeThread["id"]; readonly maxDiffBytes: number },
     signal: AbortSignal,
   ) => Promise<CodeOperationPullRequestReview>;
+}
+
+export interface CodeOperationPullRequestActions {
+  readonly editLabels: (
+    input: GhPullRequestIdentityRequest & {
+      readonly add: ReadonlyArray<string>;
+      readonly remove: ReadonlyArray<string>;
+    },
+    signal: AbortSignal,
+  ) => Promise<GhPullRequestActionResult>;
+  readonly comment: (
+    input: GhPullRequestIdentityRequest & { readonly body: string },
+    signal: AbortSignal,
+  ) => Promise<GhPullRequestActionResult>;
+  readonly replyToReviewThread: (
+    input: GhPullRequestIdentityRequest & { readonly threadNodeId: string; readonly body: string },
+    signal: AbortSignal,
+  ) => Promise<GhPullRequestActionResult>;
+  readonly retarget: (
+    input: GhPullRequestIdentityRequest & { readonly baseBranch: string },
+    signal: AbortSignal,
+  ) => Promise<GhPullRequestActionResult>;
+  readonly setState: (
+    input: GhPullRequestIdentityRequest & { readonly state: "closed" | "open" },
+    signal: AbortSignal,
+  ) => Promise<GhPullRequestActionResult>;
+  readonly summary: (
+    input: GhPullRequestIdentityRequest,
+    signal: AbortSignal,
+  ) => Promise<GhPullRequestSummaryResult>;
+  readonly requiredChecks: (
+    input: GhPullRequestIdentityRequest,
+    signal: AbortSignal,
+  ) => Promise<RequiredChecksState>;
+  readonly merge: (
+    input: GhPullRequestIdentityRequest & {
+      readonly method: "merge" | "squash" | "rebase";
+      readonly headSha: string;
+    },
+    signal: AbortSignal,
+  ) => Promise<GhPullRequestMergeResult>;
 }
 
 export type CodeOperationPullRequestReview =
@@ -2724,7 +2819,24 @@ export class CodeOperationService {
             executionPolicy: thread.executionPolicy,
           }),
         );
-      case "push-git":
+      case "push-git": {
+        const remoteBranch = command.remoteRef.replace(/^refs\/heads\//, "");
+        const decision = decidePushBranch({
+          remoteBranch,
+          ownBranch: thread.deliveryTarget.branchIntent,
+          baseBranch: thread.deliveryTarget.proposedBaseBranch,
+          ...(command.force === undefined ? {} : { force: command.force }),
+          // The person's own click is their request; an agent's push needs an
+          // approval for this act, which a standing Full access grant is not.
+          approvedForThisAct: command.authorization.kind === "approved" || initiator === "user",
+        });
+        if (decision.decision === "refuse") {
+          return this.#failed(
+            command.operationId,
+            "unauthorized",
+            pushRefusalText(decision.reason),
+          );
+        }
         return this.#gitMutation(
           command.operationId,
           command.gitOperationId,
@@ -2738,10 +2850,12 @@ export class CodeOperationService {
             confirmation: command.confirmation,
             expectedHeadOid: command.expectedHeadOid,
             expectedStateToken: command.expectedStateToken,
+            ...(command.force === undefined ? {} : { force: command.force }),
             authority: command.authorization.kind === "approved" ? "approved" : "full-access",
             executionPolicy: thread.executionPolicy,
           }),
         );
+      }
       case "restore-git-checkpoint": {
         const restore = this.#options.git.restoreCheckpoint;
         if (restore === undefined)
@@ -2792,6 +2906,12 @@ export class CodeOperationService {
       }
       case "create-pull-request":
         return this.#pullRequest(command, root.checkoutRoot);
+      case "update-pull-request":
+        return this.#updatePullRequest(command, root.checkoutRoot);
+      case "comment-pull-request":
+        return this.#commentPullRequest(command, root.checkoutRoot);
+      case "merge-pull-request":
+        return this.#mergePullRequest(command, root.checkoutRoot);
       case "observe-pull-request":
         return this.#pullRequestReview(command, root.checkoutRoot);
       case "create-review-finding": {
@@ -3165,7 +3285,11 @@ export class CodeOperationService {
     ]) {
       const comparison = await compare({ checkoutRoot, baseRef, headRef: "HEAD" });
       if (comparison.status !== "ready") continue;
-      const diff = await readDiff({ checkoutRoot, baseRef });
+      const diff = await readDiff({
+        checkoutRoot,
+        baseRef,
+        ...(command.ignoreWhitespace === true ? { ignoreWhitespace: true } : {}),
+      });
       if (diff.status !== "ready") continue;
       return decodeCodeOperationResult({
         kind: "run-reviewed",
@@ -3277,6 +3401,7 @@ export class CodeOperationService {
     const result = await this.#options.git.observe({
       checkoutRoot,
       maxDiffBytes: command.maxDiffBytes,
+      ...(command.ignoreWhitespace === true ? { ignoreWhitespace: true } : {}),
     });
     if (
       result.status !== "ready" ||
@@ -3464,7 +3589,13 @@ export class CodeOperationService {
         failureCode: "no-remote",
       });
     const result = await this.#options.pullRequests.ensure(
-      { threadId: command.threadId, title: command.title, body: command.body },
+      {
+        threadId: command.threadId,
+        title: command.title,
+        body: command.body,
+        ...(command.draft === undefined ? {} : { draft: command.draft }),
+        ...(command.baseBranch === undefined ? {} : { baseBranch: command.baseBranch }),
+      },
       new AbortController().signal,
     );
     if (result.status === "unavailable")
@@ -3472,19 +3603,264 @@ export class CodeOperationService {
         kind: "pull-request-state",
         operationId: command.operationId,
         state: "unavailable",
+        ...(result.code === "invalid-base" ? { failureCode: "invalid-base" } : {}),
       });
-    const pr = result.pullRequest;
+    return pullRequestState(command.operationId, result.status, result.pullRequest, result.draft);
+  }
+
+  async #updatePullRequest(
+    command: Extract<CodeOperationCommand, { readonly kind: "update-pull-request" }>,
+    checkoutRoot: string,
+  ): Promise<CodeOperationResult> {
+    const pullRequests = this.#options.pullRequests;
+    const changesText =
+      command.title !== undefined || command.body !== undefined || command.draft !== undefined;
+    const changesLabels =
+      (command.addLabels?.length ?? 0) > 0 || (command.removeLabels?.length ?? 0) > 0;
+    const unavailable = (failureCode?: string) =>
+      decodeCodeOperationResult({
+        kind: "pull-request-state",
+        operationId: command.operationId,
+        state: "unavailable",
+        ...(failureCode === undefined ? {} : { failureCode }),
+      });
+    if ((await this.#hasGitHubRemote(checkoutRoot)) === false) return unavailable("no-remote");
+    if (command.state !== undefined) {
+      // Closing finds the open pull request, reopening finds the closed one;
+      // either way it is the thread's own, found by its head.
+      const located = await this.#locatePullRequest(
+        command.threadId,
+        command.state === "closed" ? "open" : "closed",
+      );
+      if (located.status !== "found") return located.result(command.operationId);
+      const done = await pullRequests.actions?.setState(
+        { ...located.target, state: command.state },
+        new AbortController().signal,
+      );
+      if (done === undefined) return unavailable();
+      return this.#actionResult(command.operationId, done, located.pullRequest, undefined);
+    }
+    let draft: boolean | undefined;
+    let identity: CodeOperationPullRequestIdentity | undefined;
+    if (changesText) {
+      // Call it on the port: a class-backed port reads private state through `this`.
+      if (pullRequests.update === undefined) return unavailable("no-remote");
+      const result = await pullRequests.update(
+        {
+          threadId: command.threadId,
+          ...(command.title === undefined ? {} : { title: command.title }),
+          ...(command.body === undefined ? {} : { body: command.body }),
+          ...(command.draft === undefined ? {} : { draft: command.draft }),
+        },
+        new AbortController().signal,
+      );
+      if (result.status !== "updated")
+        return unavailable(result.status === "none" ? "not-found" : undefined);
+      draft = result.draft;
+      identity = result.pullRequest;
+    }
+    if (changesLabels) {
+      const located = await this.#locatePullRequest(command.threadId, "open");
+      if (located.status !== "found") return located.result(command.operationId);
+      const done = await pullRequests.actions?.editLabels(
+        {
+          ...located.target,
+          add: command.addLabels ?? [],
+          remove: command.removeLabels ?? [],
+        },
+        new AbortController().signal,
+      );
+      if (done === undefined) return unavailable();
+      return this.#actionResult(command.operationId, done, identity ?? located.pullRequest, draft);
+    }
+    // An edited pull request is still the existing one; the journaled state
+    // says what GitHub holds, not which change made it so.
+    return identity === undefined
+      ? unavailable("not-found")
+      : pullRequestState(command.operationId, "existing", identity, draft);
+  }
+
+  async #commentPullRequest(
+    command: Extract<CodeOperationCommand, { readonly kind: "comment-pull-request" }>,
+    checkoutRoot: string,
+  ): Promise<CodeOperationResult> {
+    // A comment posts under the person's name, so only an approval for this
+    // act reaches GitHub; a standing Full access grant does not.
+    if (command.authorization.kind !== "approved") {
+      return this.#failed(
+        command.operationId,
+        "unauthorized",
+        "A comment posts under the person's name and needs their approval for this act.",
+      );
+    }
+    if ((await this.#hasGitHubRemote(checkoutRoot)) === false)
+      return this.#pullRequestUnavailable(command.operationId, "no-remote");
+    const located = await this.#locatePullRequest(command.threadId, "open");
+    if (located.status !== "found") return located.result(command.operationId);
+    const signal = new AbortController().signal;
+    const done =
+      command.reviewThreadId === undefined
+        ? await this.#options.pullRequests.actions?.comment(
+            { ...located.target, body: command.body },
+            signal,
+          )
+        : await this.#options.pullRequests.actions?.replyToReviewThread(
+            { ...located.target, threadNodeId: command.reviewThreadId, body: command.body },
+            signal,
+          );
+    if (done === undefined) return this.#pullRequestUnavailable(command.operationId);
+    return this.#actionResult(command.operationId, done, located.pullRequest, undefined);
+  }
+
+  async #mergePullRequest(
+    command: Extract<CodeOperationCommand, { readonly kind: "merge-pull-request" }>,
+    checkoutRoot: string,
+  ): Promise<CodeOperationResult> {
+    // A merge cannot be taken back. It happens on the person's say for this
+    // act: the approval names the head they saw and the method.
+    if (command.authorization.kind !== "approved") {
+      return this.#failed(
+        command.operationId,
+        "unauthorized",
+        "Merging needs the person's approval for this act, at every access level.",
+      );
+    }
+    if ((await this.#hasGitHubRemote(checkoutRoot)) === false)
+      return this.#pullRequestUnavailable(command.operationId, "no-remote");
+    const actions = this.#options.pullRequests.actions;
+    const located = await this.#locatePullRequest(command.threadId, "open");
+    if (located.status !== "found") return located.result(command.operationId);
+    if (actions === undefined) return this.#pullRequestUnavailable(command.operationId);
+    const signal = new AbortController().signal;
+    const summary = await actions.summary(located.target, signal);
+    if (summary.status !== "read") return this.#pullRequestUnavailable(command.operationId);
+    if (summary.state === "merged")
+      return this.#pullRequestUnavailable(command.operationId, "already-merged");
+    if (summary.state !== "open")
+      return this.#pullRequestUnavailable(command.operationId, "not-open");
+    if (summary.headSha !== command.headSha)
+      return this.#pullRequestUnavailable(command.operationId, "sha-mismatch");
+    const decision = decideRemotePullRequestMerge({
+      caller: "agent-on-request",
+      confirmed: true,
+      requiredChecks: await actions.requiredChecks(located.target, signal),
+    });
+    if (decision.decision === "refuse")
+      return this.#pullRequestUnavailable(
+        command.operationId,
+        decision.reason === "checks-unknown" ? "checks-unknown" : "checks-not-passing",
+      );
+    const merged = await actions.merge(
+      { ...located.target, method: command.method, headSha: command.headSha },
+      signal,
+    );
+    if (merged.status === "merged") {
+      return decodeCodeOperationResult({
+        kind: "pull-request-state",
+        operationId: command.operationId,
+        state: "merged",
+        number: located.pullRequest.number,
+        url: located.pullRequest.url,
+        headRepository: located.pullRequest.headOwner,
+        headBranch: located.pullRequest.headBranch,
+        baseRepository: located.pullRequest.baseRepository,
+        baseBranch: located.pullRequest.baseBranch,
+      });
+    }
+    if (merged.status === "unavailable")
+      return this.#pullRequestUnavailable(
+        command.operationId,
+        merged.reason === "unauthenticated" ? "auth" : undefined,
+      );
+    return this.#pullRequestUnavailable(
+      command.operationId,
+      (
+        {
+          "not-open": "not-open",
+          "not-mergeable": "not-mergeable",
+          stale: "sha-mismatch",
+          conflict: "conflict",
+          failed: undefined,
+        } as const
+      )[merged.reason],
+    );
+  }
+
+  #pullRequestUnavailable(
+    operationId: CodeOperationCommand["operationId"],
+    failureCode?: string,
+  ): CodeOperationResult {
     return decodeCodeOperationResult({
       kind: "pull-request-state",
-      operationId: command.operationId,
-      state: result.status,
-      number: pr.number,
-      url: pr.url,
-      headRepository: pr.headOwner,
-      headBranch: pr.headBranch,
-      baseRepository: pr.baseRepository,
-      baseBranch: pr.baseBranch,
+      operationId,
+      state: "unavailable",
+      ...(failureCode === undefined ? {} : { failureCode }),
     });
+  }
+
+  async #locatePullRequest(
+    threadId: CodeThread["id"],
+    state: "open" | "closed",
+  ): Promise<
+    | {
+        readonly status: "found";
+        readonly pullRequest: CodeOperationPullRequestIdentity;
+        readonly target: GhPullRequestIdentityRequest;
+      }
+    | {
+        readonly status: "missing";
+        readonly result: (operationId: CodeOperationCommand["operationId"]) => CodeOperationResult;
+      }
+  > {
+    const pullRequests = this.#options.pullRequests;
+    const located = await pullRequests.locate?.(threadId, state, new AbortController().signal);
+    if (located?.status === "found") {
+      const [owner, name] = located.pullRequest.baseRepository.split("/");
+      if (owner !== undefined && name !== undefined) {
+        return {
+          status: "found",
+          pullRequest: located.pullRequest,
+          target: { owner, name, number: located.pullRequest.number },
+        };
+      }
+    }
+    return {
+      status: "missing",
+      result: (operationId) =>
+        this.#pullRequestUnavailable(
+          operationId,
+          located?.status === "none" ? "not-found" : undefined,
+        ),
+    };
+  }
+
+  #actionResult(
+    operationId: CodeOperationCommand["operationId"],
+    done: GhPullRequestActionResult,
+    pullRequest: CodeOperationPullRequestIdentity,
+    draft: boolean | undefined,
+  ): CodeOperationResult {
+    if (done.status === "done")
+      return pullRequestState(operationId, "existing", pullRequest, draft);
+    if (done.status === "unavailable") {
+      return this.#pullRequestUnavailable(
+        operationId,
+        done.reason === "unauthenticated" ? "auth" : undefined,
+      );
+    }
+    return this.#pullRequestUnavailable(
+      operationId,
+      (
+        {
+          invalid: "invalid",
+          "not-open": "not-open",
+          "not-closed": "not-closed",
+          merged: "already-merged",
+          "label-not-found": "label-not-found",
+          failed: undefined,
+        } as const
+      )[done.reason],
+    );
   }
 
   async #pullRequestReview(
@@ -4282,11 +4658,46 @@ function operationFor(kind: CodeOperationCommand["kind"]): CodeOperation {
       return "push";
     case "create-pull-request":
       return "create-pr";
+    case "update-pull-request":
+    case "comment-pull-request":
+    case "merge-pull-request":
+      return "update-pr";
     default:
       return "edit";
   }
 }
 
+function pushRefusalText(reason: PushBranchRefusal): string {
+  switch (reason) {
+    case "not-own-branch":
+      return "A thread pushes only its own branch. This branch is not this thread's, so nothing was pushed.";
+    case "needs-the-persons-request":
+      return "A plain force-push, or a push to the default branch, needs the person's approval for this one act. A standing grant does not cover it, so nothing was pushed.";
+    case "lease-missing":
+      return "A force-with-lease must name the remote head it replaces, so nothing was pushed.";
+  }
+}
+
 function operationApprovalEffect(command: CodeOperationCommand): CodeApprovalEffect {
   return { kind: "operation", command } as CodeApprovalEffect;
+}
+
+function pullRequestState(
+  operationId: CodeOperationCommand["operationId"],
+  state: "created" | "existing",
+  pr: CodeOperationPullRequestIdentity,
+  draft: boolean | undefined,
+): CodeOperationResult {
+  return decodeCodeOperationResult({
+    kind: "pull-request-state",
+    operationId,
+    state,
+    number: pr.number,
+    url: pr.url,
+    headRepository: pr.headOwner,
+    headBranch: pr.headBranch,
+    baseRepository: pr.baseRepository,
+    baseBranch: pr.baseBranch,
+    ...(draft === undefined ? {} : { draft }),
+  });
 }

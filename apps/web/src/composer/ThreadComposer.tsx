@@ -7,7 +7,9 @@ import { ArrowUp, Square } from "lucide-react";
 import { ComposerContextMeter } from "../context/ComposerContextMeter";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
 import { ThreadPlanWindows, ThreadStats } from "../threadStats/ThreadStats";
+import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
 import { ComposerPlanUsage } from "../usage/ComposerPlanUsage";
+import { ComposerUsageWarning } from "../usage/ComposerUsageWarning";
 import "./composer-plan-usage.css";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
@@ -35,6 +37,11 @@ export interface ThreadComposerStop {
   readonly ariaLabel: string;
   readonly disabledReason?: string | undefined;
   readonly onStop: () => void;
+  /**
+   * Offered beside Stop once a Stop did not end the turn. It kills the turn's
+   * runtime process, which a normal Stop never does.
+   */
+  readonly forceStop?: { readonly onForceStop: () => void } | undefined;
 }
 
 /**
@@ -112,7 +119,19 @@ export interface ThreadComposerProps {
    * at the right of the start context's row. A thread's own composer never
    * takes it: its windows stand in the thread's strip above the box.
    */
-  readonly planUsage?: { readonly providerInstanceId: string | undefined };
+  readonly planUsage?: {
+    readonly providerInstanceId: string | undefined;
+    /**
+     * The accounts a new thread could use instead. With them, a chosen
+     * account at its limit shows a warning with a button for each account
+     * that has room; without them, the meters stand alone.
+     */
+    readonly alternatives?: {
+      readonly groups: ReadonlyArray<PickerGroup>;
+      readonly selectedModelId?: string | undefined;
+      readonly onSelect: (selection: ModelPickerSelection) => void | Promise<void>;
+    };
+  };
   readonly queue?: ReactNode;
   /**
    * A turn is running or messages are queued on the thread around this
@@ -160,6 +179,14 @@ export function ThreadComposer(props: ThreadComposerProps) {
         props.startContext
       ) : (
         <div className="composer-start">
+          {props.planUsage.alternatives === undefined ? null : (
+            <ComposerUsageWarning
+              groups={props.planUsage.alternatives.groups}
+              onSelect={props.planUsage.alternatives.onSelect}
+              selectedModelId={props.planUsage.alternatives.selectedModelId}
+              selectedProviderInstanceId={props.planUsage.providerInstanceId}
+            />
+          )}
           {props.startContext}
           <ComposerPlanUsage providerInstanceId={props.planUsage.providerInstanceId} />
         </div>
@@ -312,6 +339,17 @@ function ThreadComposerTrailing(props: {
     <div className={cellClassName}>
       {meter}
       {props.controls}
+      {sending && stop.forceStop !== undefined ? (
+        <OctantButton
+          onClick={stop.forceStop.onForceStop}
+          size="sm"
+          title="Kill this response's process. Use it when Stop did not end the response."
+          type="button"
+          variant="secondary"
+        >
+          Force stop
+        </OctantButton>
+      ) : null}
       {sending ? (
         <OctantButton
           aria-label={stop.ariaLabel}

@@ -1,4 +1,5 @@
 import type { ApprovalOutsideContent, ThreadExternalContentSource } from "@octant/contracts";
+import { SHIELD_WATCHER_LABEL_WORDS, shieldWatcherLabelOfSource } from "./shieldWatcherPolicy";
 
 /** What a source shows as when the host records a label nobody has named yet. */
 export const UNNAMED_OUTSIDE_SOURCE = "Other outside content";
@@ -48,6 +49,7 @@ const SOURCE_WORDS: Readonly<Record<string, string>> = {
   octant_offer_side_task: "A side task offer",
   octant_propose_routine: "A proposed routine",
   octant_propose_thread: "A proposed thread",
+  octant_pull_request: "This thread's pull request",
   octant_side_chat_list_files: "Files listed for a side chat",
   octant_side_chat_read_file: "A file read for a side chat",
   octant_side_chat_search_files: "A file search for a side chat",
@@ -82,6 +84,8 @@ const SYNCED_PREFIX = "Synced from ";
 export function describeSource(label: string): string {
   const named = Object.hasOwn(SOURCE_WORDS, label) ? SOURCE_WORDS[label] : undefined;
   if (named !== undefined) return named;
+  const watched = shieldWatcherLabelOfSource(label);
+  if (watched !== undefined) return `Octant Shield found ${SHIELD_WATCHER_LABEL_WORDS[watched]}`;
   if (label.startsWith(ZEN_PREFIX)) return "Results from the Zen assistant";
   if (label.startsWith(SYNCED_PREFIX))
     return `An artifact synced from ${label.slice(SYNCED_PREFIX.length)}`;

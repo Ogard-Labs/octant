@@ -467,6 +467,21 @@ export class ProviderRuntimeRegistry {
     return "closed";
   }
 
+  /**
+   * Closes every leased runtime of this instance that nothing holds and whose
+   * lease the caller's test picks. A lease a connection still holds is left
+   * running, as in {@link closeIdleLease}.
+   */
+  async closeIdleLeasesWhere(
+    instanceId: ProviderInstanceId,
+    picks: (lease: string) => boolean,
+  ): Promise<void> {
+    const idle = this.#entriesOf(instanceId).filter(
+      (entry) => entry.lease !== undefined && entry.refs === 0 && picks(entry.lease),
+    );
+    await Promise.all(idle.map((entry) => this.#closeEntry(entry)));
+  }
+
   hasRuntime(instanceId: ProviderInstanceId): boolean {
     return this.#entriesOf(instanceId).length > 0;
   }
@@ -502,6 +517,29 @@ export class ProviderRuntimeRegistry {
       this.clearCompatibleProtocol(instanceId);
       for (const listener of this.#invalidationListeners.get(instanceId) ?? []) listener();
     }
+  }
+
+  /**
+   * Stops what is only waiting: runtimes whose last lease ended and which sit
+   * on their idle timer, and sessions parked for reuse. A runtime a turn still
+   * holds is never touched. The next turn starts a stopped one again, so the
+   * cost of relief is a slower first reply, never a lost one.
+   */
+  async releaseIdle(): Promise<{
+    readonly idleRuntimesStopped: number;
+    readonly idleSessionsReleased: number;
+  }> {
+    const idle = [...this.#runtimes.values()].filter(
+      (entry) => entry.refs === 0 && entry.closing === undefined,
+    );
+    const [closed, idleSessionsReleased] = await Promise.all([
+      Promise.allSettled(idle.map((entry) => this.#closeEntry(entry))),
+      this.#idleNativeSessions.releaseAll(),
+    ]);
+    return {
+      idleRuntimesStopped: closed.filter((result) => result.status === "fulfilled").length,
+      idleSessionsReleased,
+    };
   }
 
   async closeAll(): Promise<void> {

@@ -36,6 +36,7 @@ import type { CodeAttachmentReference } from "@octant/contracts";
 import { CodeCheckoutProvider } from "./CodeCheckoutContext";
 import { EnvironmentGitGroup } from "./EnvironmentGitGroup";
 import { EnvironmentCard, EnvironmentGroup } from "./EnvironmentGroup";
+import { EnvironmentExtraFolders } from "./EnvironmentExtraFolders";
 import { EnvironmentPullRequests } from "./EnvironmentPullRequests";
 import { countGroupedLocalServerListenersByScope } from "./localServerGroups";
 import { LocalServersGroup } from "./LocalServersGroup";
@@ -385,7 +386,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                 summary={deliveryOutcomeLabel(props.deliveryOutcome)}
                 title="Delivers"
               >
-                {/* Decision 0003 makes the outcome the reader's to confirm, and the
+                {/* The outcome is the reader's to confirm, and the
                 host has accepted a confirmation all along — nothing ever sent
                 one, so a thread carried whatever its first prompt read as. */}
                 <CodeDeliveryOutcomeSelector
@@ -433,6 +434,9 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                 />
               </EnvironmentGroup>
             )}
+            <EnvironmentExtraFolders
+              folders={props.project?.type === "code" ? props.project.extraFolders : undefined}
+            />
             {props.usageDashboardClient === undefined &&
             props.spendCeilingClient === undefined ? null : (
               <ThreadUsagePanel

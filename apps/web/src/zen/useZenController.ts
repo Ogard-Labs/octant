@@ -913,13 +913,16 @@ export function useZenController(options: UseZenControllerOptions) {
       readonly terminalId: CodeTerminalId;
       readonly title?: string;
     }): Promise<boolean> => {
-      if (client === undefined || space === null) return false;
+      // The space as last loaded, which can be newer than this callback's
+      // render: a caller that has just entered Zen pins before React re-renders.
+      const current = presentationSpace.current ?? space;
+      if (client === undefined || current === null) return false;
       setPanelBusy(true);
       try {
         const result = await client.pinProjectTerminal({
           projectId: request.projectId,
           terminalId: request.terminalId,
-          expectedVersion: space.version,
+          expectedVersion: current.version,
           ...(request.title === undefined ? {} : { title: request.title }),
         });
         if (mounted.current) {
@@ -1476,7 +1479,7 @@ export function useZenController(options: UseZenControllerOptions) {
   // Switching between the wall and a hand-made arrangement is a presentation
   // change like collapsing the bar, not a change to any card: the geometry a
   // card stores is left exactly as it was, so leaving the wall finds the
-  // arrangement again (0106).
+  // arrangement again.
   const setLayout = useCallback(
     (next: ZenSpaceLayout) => {
       if (presentationSpace.current === null) return;

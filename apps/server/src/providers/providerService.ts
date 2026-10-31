@@ -82,6 +82,8 @@ import {
   removeProvider,
   renameProvider,
   setClaudeArtifactDelivery,
+  setProviderNativeSetup,
+  isKeyProviderDriverKind,
   setProviderEnabled,
   setProviderDataTags,
   setProviderModelDataTags,
@@ -1141,6 +1143,18 @@ export class ProviderService implements ProviderServiceApi {
             // publish at once and the next turn launches with every guard.
             keepsRuntime = true;
             eventName = "provider.instance-configuration-changed@1";
+          } else if (command.kind === "set-provider-native-setup") {
+            if (!isKeyProviderDriverKind(current.driverKind)) {
+              throw this.#unsupported(
+                "Only a Claude Code, Codex, OpenCode, or Mistral Vibe account runs as itself.",
+              );
+            }
+            instance = setProviderNativeSetup(current, { enabled: command.enabled, updatedAt });
+            // The host resolves the switch again for every session it starts
+            // or resumes, so a running process, its sign-in, and its models
+            // stay as they are; the next turn starts with the new setup.
+            keepsRuntime = true;
+            eventName = "provider.instance-native-setup-changed@1";
           } else if (command.kind === "rename-provider") {
             instance = renameProvider(current, {
               displayName: command.displayName,

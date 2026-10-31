@@ -411,6 +411,78 @@ describe("code client", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
+  it("sends a stack merge and the person's pull-request actions, and rejects malformed ones locally", async () => {
+    const target = {
+      projectId: decodeProjectId("10000000-0000-4000-8000-000000000001"),
+      repositoryOwner: "octant",
+      repositoryName: "octant",
+    } as const;
+    const stack = {
+      ...target,
+      method: "squash",
+      confirmed: true,
+      items: [
+        { number: 1, headSha: "a".repeat(40) },
+        { number: 2, headSha: "b".repeat(40) },
+      ],
+    } as const;
+    const stackOutcome = { status: "merged", merged: [1, 2] } as const;
+    const action = { kind: "close", ...target, number: 12 } as const;
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json(stackOutcome))
+      .mockResolvedValueOnce(Response.json({ status: "done" }));
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+
+    await expect(client.mergeProjectPullRequestStack?.(stack)).resolves.toEqual(stackOutcome);
+    await expect(client.actOnProjectPullRequest?.(action)).resolves.toEqual({ status: "done" });
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      `${baseUrl}/api/code/project-pull-requests/merge-stack`,
+      expect.objectContaining({ method: "POST", body: JSON.stringify(stack) }),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      `${baseUrl}/api/code/project-pull-requests/actions`,
+      expect.objectContaining({ method: "POST", body: JSON.stringify(action) }),
+    );
+    await expect(
+      client.mergeProjectPullRequestStack?.({ ...stack, items: [] } as never),
+    ).rejects.toMatchObject({ category: "invalid" });
+    await expect(
+      client.mergeProjectPullRequestStack?.({ ...stack, confirmed: false } as never),
+    ).rejects.toMatchObject({ category: "invalid" });
+    await expect(
+      client.actOnProjectPullRequest?.({ ...action, kind: "approve" } as never),
+    ).rejects.toMatchObject({ category: "invalid" });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("sends the pull-request switch commands and an unsupported forge comes back as a value", async () => {
+    const target = {
+      projectId: decodeProjectId("10000000-0000-4000-8000-000000000001"),
+      repositoryOwner: "octant",
+      repositoryName: "octant",
+      number: 12,
+    } as const;
+    const unsupported = { status: "unsupported", reason: "auto-merge-not-allowed" } as const;
+    const fetch = vi.fn().mockResolvedValue(Response.json(unsupported));
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+    const command = { kind: "enable", target, headSha: "a1" } as const;
+
+    await expect(client.setProjectPullRequestMergeWhenReady?.(command)).resolves.toEqual(
+      unsupported,
+    );
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/api/code/project-pull-requests/merge-when-ready`,
+      expect.objectContaining({ method: "POST", body: JSON.stringify(command) }),
+    );
+    await expect(
+      client.setProjectPullRequestAutoFix?.({ kind: "enable", target } as never),
+    ).rejects.toMatchObject({ category: "invalid" });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it("reads a Code thread follow-up view over the authenticated endpoint", async () => {
     const view = {
       threadId: ids.thread,

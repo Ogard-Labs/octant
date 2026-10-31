@@ -8,9 +8,10 @@
 # `release-preview-bridge.yml` publishes for installs predating that key. A manual run does the same for whatever ref it was started on and
 # publishes to `<base>/candidate/…` instead, so a test install can follow the
 # candidate ring without the live preview feed being disturbed.
-# Per `docs/decisions/0034` an updater fed by unsigned builds is an
-# unauthenticated code-delivery channel, so a ring either publishes a signed
-# feed or refuses — never an unsigned document at the live path.
+# An updater fed by unsigned builds is an unauthenticated code-delivery
+# channel (`docs/architecture.md`, "Current Release Boundary"), so a ring either
+# publishes a signed feed or refuses — never an unsigned document at the live
+# path.
 #
 # Nightly rather than per-merge on purpose. Ten merges in a day are one useful
 # preview, and each build costs a notarization and a download for everyone

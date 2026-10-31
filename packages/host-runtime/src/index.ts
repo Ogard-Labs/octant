@@ -66,6 +66,26 @@ export { CONFIGURATION_FAILURE_EXIT_CODE, startupFailureExitCode } from "./start
 export { redactHostRuntimeValue } from "./redaction";
 export { startCredentialBroker, type CredentialBroker } from "./credentialBroker";
 export {
+  decodeLinkedSecretPointer,
+  encodeLinkedSecretPointer,
+  isLinkedSecretMaterial,
+  isLinkedSecretStoreKind,
+  LINKED_SECRET_STORE_KINDS,
+  linkedSecretStoresStatePath,
+  makeLinkedSecretStores,
+  makeOnePasswordAdapter,
+  MAX_LINKED_SECRET_REFERENCE_LENGTH,
+  type LinkedSecretCheck,
+  type LinkedSecretPointer,
+  type LinkedSecretRead,
+  type LinkedSecretStoreAdapter,
+  type LinkedSecretStoreKind,
+  type LinkedSecretStoreStatus,
+  type LinkedSecretStores,
+  type LinkedSecretToolState,
+  type LinkSecretStoreResult,
+} from "./linkedSecretStores";
+export {
   createHostOAuthRuntime,
   isHostOAuthGrantMaterial,
   type HostOAuthBeginResult,
@@ -79,6 +99,7 @@ export {
   CredentialPurgeFailure,
   CredentialStoreFailure,
   type CredentialStoreFailureCause,
+  credentialStoreFailureCauseOf,
   type CredentialPurgeFailureCategory,
   type CredentialPurgeInput,
   type CredentialPurgeResult,

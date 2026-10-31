@@ -78,8 +78,9 @@ export interface ClaudeSandboxSettings {
   readonly allowUnsandboxedCommands: false;
   readonly filesystem: {
     readonly denyRead: readonly ["/"];
-    readonly allowRead: readonly [string];
-    readonly allowWrite: readonly [string];
+    /** The Project root, then its extra folders. */
+    readonly allowRead: readonly [string, ...string[]];
+    readonly allowWrite: readonly [string, ...string[]];
   };
 }
 
@@ -93,6 +94,8 @@ export function isClaudeEffortLevel(value: string): value is ClaudeEffortLevel {
 export interface ClaudeOpenQueryInput {
   readonly binaryPath: string;
   readonly projectRoot: string;
+  /** The Project's extra folders, granted what `projectRoot` is granted. */
+  readonly additionalDirectories?: ReadonlyArray<string>;
   readonly authEnvironment: Readonly<Record<string, string | undefined>>;
   readonly model: string;
   /** Agent SDK `effort` for the session; absent means the SDK default. */
@@ -406,6 +409,11 @@ export interface ClaudeQueryPort {
    */
   readonly requestCompaction: () => Effect.Effect<void, ProviderFailure>;
   readonly interrupt: () => Effect.Effect<void, ProviderFailure>;
+  /**
+   * Kills this query's runtime process tree outright, without asking it to
+   * stop first. Only this query's own process is signalled.
+   */
+  readonly forceKill: () => Effect.Effect<void, ProviderFailure>;
   readonly setPermissionMode: (mode: ClaudePermissionMode) => Effect.Effect<void, ProviderFailure>;
   readonly supportedModels: () => Effect.Effect<readonly ClaudeModelInfo[], ProviderFailure>;
   readonly accountInfo: () => Effect.Effect<ClaudeAccountState, ProviderFailure>;
@@ -477,7 +485,7 @@ interface ClaudeAgentSdkInvocationOptions {
   readonly skills: readonly [];
   readonly mcpServers: Readonly<Record<string, never>>;
   readonly strictMcpConfig: true;
-  readonly additionalDirectories: readonly [];
+  readonly additionalDirectories: readonly string[];
   readonly tools: readonly string[];
   readonly agents: Readonly<Record<string, never>>;
   readonly plugins: readonly [];
@@ -800,6 +808,17 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               void managedServer?.close().catch(() => undefined);
             },
           );
+          const bindSpawn = options.spawnClaudeCodeProcess({
+            projectRoot: input.projectRoot,
+            ...(input.additionalDirectories === undefined
+              ? {}
+              : { extraFolders: input.additionalDirectories }),
+            executionPolicy: input.executionPolicy,
+            runsCommands: input.tools.includes("Bash"),
+          });
+          // The runtime process this query's launch produced, kept so a stuck
+          // turn can be killed without the graceful close that waits on it.
+          let spawned: ReturnType<typeof bindSpawn> | undefined;
           try {
             const canUseTool: ClaudeAgentSdkInvocationOptions["canUseTool"] = async (
               toolName,
@@ -956,7 +975,9 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               skills: [],
               mcpServers: {},
               strictMcpConfig: true,
-              additionalDirectories: [],
+              // The Project's extra folders, which Claude Code then counts as
+              // its workspace beside `cwd`; its sandbox lists them too.
+              additionalDirectories: [...(input.additionalDirectories ?? [])],
               tools: [...input.tools],
               agents: {},
               plugins: [],
@@ -975,12 +996,11 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   }),
               // The SDK composes the launch and its `SpawnOptions` carry no
               // bound root or posture, so this query's own are bound to the
-              // callback here (0143, 0145).
-              spawnClaudeCodeProcess: options.spawnClaudeCodeProcess({
-                projectRoot: input.projectRoot,
-                executionPolicy: input.executionPolicy,
-                runsCommands: input.tools.includes("Bash"),
-              }),
+              // callback here.
+              spawnClaudeCodeProcess: (spawnOptions) => {
+                spawned = bindSpawn(spawnOptions);
+                return spawned;
+              },
               canUseTool,
               hooks: { PreToolUse: [{ hooks: [preToolUse] }] },
             };
@@ -1250,6 +1270,10 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                     session_id: initializedSessionId ?? announcedSessionId ?? "",
                   });
                 }, "compaction request"),
+              forceKill: () =>
+                Effect.sync(() => {
+                  spawned?.kill("SIGKILL");
+                }),
               interrupt: () =>
                 request(async () => {
                   for (const message of prompt.clear()) issuedMessageIds.delete(message.uuid);

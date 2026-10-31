@@ -2,9 +2,10 @@ import {
   decodeMentionableThreadId,
   type GithubIssueContextRequest,
   type LinearIssueContextRequest,
+  type TerminalSessionImportRequest,
 } from "@octant/contracts";
 import type { CodeNewThreadWorkspace } from "@octant/contracts/projects";
-import type { PermissionPersistence, ProviderExecutionPolicy } from "@octant/contracts/providers";
+import type { PermissionMode, PermissionPersistence } from "@octant/contracts/providers";
 import { createContext, useCallback, useContext, useState, useSyncExternalStore } from "react";
 import type { ComposerExtensionSelection } from "./composerExtensionSelection";
 
@@ -18,6 +19,11 @@ export type NewTaskCreateFromSelection =
       readonly kind: "linear";
       readonly request: LinearIssueContextRequest;
       readonly label: string;
+    }
+  | {
+      readonly kind: "terminal";
+      readonly request: TerminalSessionImportRequest;
+      readonly label: string;
     };
 
 export interface NewTaskCodeCheckoutDraft {
@@ -26,7 +32,7 @@ export interface NewTaskCodeCheckoutDraft {
   readonly workspaceOverride?: CodeNewThreadWorkspace;
   readonly worktreeRemote?: string;
   readonly startFromOriginOverride?: boolean;
-  readonly executionPolicy?: ProviderExecutionPolicy;
+  readonly permissionMode?: PermissionMode;
   readonly permissionPersistence?: PermissionPersistence;
 }
 

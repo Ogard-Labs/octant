@@ -40,6 +40,88 @@ page. Lifecycle and stop controls remain visible when a session needs them.
 The renderer requests lifecycle through authenticated routes; a denial creates
 no observation or evidence.
 
+### Browser profiles
+
+A Browser page is **Private** by default: its cookies and site data live in
+memory and are forgotten when the page closes. To stay signed in to a site,
+choose a profile from the control at the left of the address bar:
+
+| Profile      | Kept                            | Shared by                                         |
+| ------------ | ------------------------------- | ------------------------------------------------- |
+| **Private**  | Until the page closes           | That page and the tabs it opens                   |
+| **Project**  | On this Mac, until you sign out | Every page of this Work or Code Project           |
+| **Personal** | On this Mac, until you sign out | Every page, in any Project, that chooses Personal |
+
+- Sign in by typing into the page yourself. Octant saves no passwords and fills
+  none. Choosing another profile opens the same address again as a new page in
+  that profile; the old page closes and nothing it held carries over.
+- The control remembers your last choice for each Project, for pages you open.
+  It never changes a page the agent opened.
+- Project and Personal pages open only in the Octant app's own Browser. On a
+  host without the app they are refused with a message, never opened in a copy
+  that would disagree about who is signed in. Chat has no Browser, so it has no
+  profile.
+- **Sign out of this profile…** in the control's menu, or **Settings → Data &
+  privacy → Browser profiles**, closes every page of the profile and removes its
+  cookies, site storage, and cache after you confirm. The Settings list shows
+  each profile's size. Profiles are never in an export, a Canvas share, sync, a
+  backup, or diagnostics.
+- Purging a Project removes its profile with the Project's other data. Archiving
+  a Project closes its profile's pages and keeps the profile.
+
+**Import cookies from another browser.** In **Settings → Data & storage →
+Browser profiles**, **Import cookies…** on a Project or Personal profile copies the
+cookies of one profile of a browser installed on this Mac (Chrome, Chromium, Brave,
+Edge, Vivaldi, Arc, or Firefox) so you stay signed in. Nothing is read until you
+pick a browser and profile and press **Import**. For a Chromium-family browser
+macOS then asks whether Octant may read that browser's cookie key from your
+Keychain; if you decline, nothing is imported and Octant says so. The cookies go
+only into that profile, on this Mac: they are not uploaded, logged, exported, or
+shown to an agent, and Octant records only the browser, its profile, and how many
+cookies arrived. Expired and malformed cookies are left behind and counted.
+**Clear cookies…** removes a profile's cookies and keeps its other data.
+
+**What the agent may do on a signed-in page.** A Project or Personal page is
+treated as signed in, because Octant cannot tell. The agent can ask for one by
+passing `profile` (`project` or `personal`) when it opens a page. Octant asks
+you first, naming the site and the profile: "Let the agent use github.com in
+the Personal profile?" Choosing **Always allow** remembers that site for that
+profile only, under **Settings → Permissions → Remembered websites**. A site you
+allowed Private does not cover a signed-in page, and one profile's grant does
+not cover another. A routine, a subagent, or a CLI typed into a thread terminal
+cannot open a signed-in page, and neither can a paired phone or browser, which
+sees only "Signed-in page — open it on this Mac." If a turn you started from
+your phone needs such a site, its question waits for a window on this Mac. While
+the agent drives a signed-in page, the Browser's status label and the floating
+preview name the profile. Plan mode refuses the Browser as it always did, and
+password and one-time-code fields stay protected.
+
+### Browser extensions
+
+Extensions add features to pages, such as a reading tool or an ad blocker. They
+work in the Octant app on this Mac, in a Project or Personal profile, and never
+in a Private page. They are off until you turn them on, and an extension can
+read and change the pages it runs on, including what the agent reads there.
+
+- **Install** from **Settings → Data & privacy → Browser extensions → Install
+  extension…**, then choose an unpacked Manifest V3 extension folder. Octant
+  copies the folder, so later edits to it change nothing; choose the folder again
+  to update. There is no web store, and extensions that need native messaging
+  (most password managers) or a store sign-in do not work.
+- **Enable** an extension for one profile at a time. Octant lists in plain words
+  the sites it can read and change and the permissions it asks for, and enables
+  it only when you confirm. An update that asks for more than the version you
+  allowed turns off everywhere and asks again, showing only what is new.
+- **Use** an extension from the puzzle-piece button in the Browser toolbar,
+  which appears when one is on in the page's profile. Choose an extension to open
+  its popup or options page. While the agent drives the page, the button shows
+  how many extensions are on, and the agent's site question says so.
+- **Remove** turns an extension off in every profile and deletes its copy.
+- Only you, at a window on this Mac, install or enable extensions. The agent,
+  plugins, skills, and a paired phone cannot; a phone can see the list.
+- Extensions that call parts of the browser Octant does not provide fail inside
+  the extension. Popups that need `chrome.tabs` do not work yet.
+
 ### Browser captures
 
 When the agent takes a screenshot with its Browser, or you press **Screenshot**
@@ -67,6 +149,7 @@ address and time. The strip is absent until the thread has a capture.
   Browser pane says so when you pressed Screenshot, and nothing is added to the
   strip. The Browser gives no picture of a page it treats as sensitive, for
   example one with a password field.
+- A capture of a page in a Project or Personal profile names the profile, because the picture can show an account.
 - An archived thread still shows the captures it kept.
 
 Links inside a Work or Code conversation open in the app: following one
@@ -188,7 +271,9 @@ and Screen Recording permissions, and check the installed CuaDriver version.
 if access is still missing. macOS may not show another permission prompt. Enable
 Octant there; if it is absent, use **+** to add the installed Octant app. Relaunch
 Octant after changing permissions, then choose **Recheck**. Recheck reads the
-current state without requesting access. Each task asks before accessing an
+current state without requesting access. Settings shows **Allowed** only when
+the computer-use driver Octant starts holds the permission too; an unsigned
+Octant build can be allowed while its driver is refused. Each task asks before accessing an
 application; **Allow app for 5 minutes** grants that
 task temporary access. Plan mode, remote clients, unavailable permissions,
 and unsupported provider transports refuse control.
@@ -203,8 +288,8 @@ operate. Use **Stop computer use** or disable the plugin to revoke access.
 Octant bundles its own CuaDriver, including the native SDK, and does not require
 a separate installation. **Automatic updates** is off by default. When you turn
 it on, Octant checks upstream daily, verifies the publisher, checksum, architecture, and
-driver compatibility, then upgrades after computer-use tasks finish. If the
-replacement cannot start, Octant retains the previous verified driver. You
+that its protocol is compatible with this Octant, then upgrades after computer-use tasks finish. If the
+replacement is incompatible or cannot start, Octant keeps the previous verified driver. You
 can use **Check for updates** in Settings at any time.
 Checks send no task content or identifiers.
 
@@ -294,9 +379,17 @@ Project has one, the pane says so instead of offering **Start desktop**. To
 set one, open the Code Project, then **Disposable desktop** → **Manage** in its
 settings:
 
-- **Provider** lists only the desktop providers this host has ready. On Linux
-  that is this host itself, offered once Bubblewrap, Xvfb, xdotool, and
-  ImageMagick are installed and Octant has restarted.
+- **Provider** lists the desktop providers this host offers. On Linux that
+  includes this host itself, once Bubblewrap, Xvfb, xdotool, and ImageMagick
+  are installed and Octant has restarted, and Cua Spaces; E2B is listed on
+  every host. A line under the list says where the provider runs, whose
+  account it uses, and whether it bills you. A provider that isn't set up
+  here shows **(needs setup)** and can't be chosen, and what it needs is
+  listed under the selector: E2B needs this computer
+  to have a credential store for your API key, and Cua Spaces needs its app
+  running and signed in on this computer. Nothing starts on a provider until
+  you save a recipe that names it, and a desktop that bills you still asks
+  you first.
 - **Runs on** appears for a provider that names where its desktops run, and
   picks where this Project's desktops run.
 - **Computer** appears when they run on one of your other computers, and
@@ -329,8 +422,7 @@ network access. **Remove recipe** asks first: removing it, or changing its
 provider, where it runs, its computer, or its key, ends the Project's running desktops. Only a window on the host
 itself can set or remove a recipe or enter its key, so **Disposable desktop**
 appears only there: a paired phone or browser doesn't show a Project's
-settings, and the host refuses a recipe change from either. This
-version offers no cloud provider yet, so the key field doesn't appear.
+settings, and the host refuses a recipe change from either.
 
 ## Picture in Picture
 

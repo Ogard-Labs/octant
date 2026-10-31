@@ -254,7 +254,8 @@ export class OutsideDriverAdmission {
           displayName: (packageState.displayName ?? packageState.slug ?? component.displayName)
             .trim()
             .slice(0, 128),
-          source: "local-folder",
+          source: packageState.npm === undefined ? "local-folder" : "npm",
+          ...(packageState.npm === undefined ? {} : { npm: packageState.npm }),
           installed: activation.installed,
           trusted: activation.trusted,
           ...(packageState.publisher?.selected === undefined

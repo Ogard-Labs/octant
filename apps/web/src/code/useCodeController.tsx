@@ -1,4 +1,6 @@
 import type { ExtensionSelection } from "@octant/contracts/extensions";
+import type { ProjectId } from "@octant/contracts/projects";
+import type { AutoReviewer, ShieldModelChoice } from "@octant/contracts/shield";
 import {
   CodeClientFailure,
   CodeClientSnapshotRequiredError,
@@ -104,6 +106,7 @@ import {
 import {
   archiveCodeThread,
   completeCodeThread,
+  moveCodeThread,
   findCodeThread,
   pinCodeThread,
   renameCodeThread,
@@ -2454,6 +2457,11 @@ export function useCodeController(options: CodeControllerOptions) {
     (threadId: CodeThreadId) => restCommand(threadId, wakeCodeThread),
     [restCommand],
   );
+  const moveThread = useCallback(
+    (threadId: CodeThreadId, projectId: ProjectId) =>
+      restCommand(threadId, (thread) => moveCodeThread(thread, projectId)),
+    [restCommand],
+  );
 
   /**
    * Hand a finished thread one more turn without opening it. The host starts
@@ -2558,6 +2566,9 @@ export function useCodeController(options: CodeControllerOptions) {
       readonly requireGitRepository?: boolean;
       readonly defaultDiffLayout?: CodeBootstrap["settings"]["defaultDiffLayout"];
       readonly bundledLanguageServer?: boolean;
+      readonly defaultAutoApprove?: boolean;
+      readonly autoReviewer?: AutoReviewer;
+      readonly shieldModel?: ShieldModelChoice | null;
     }): Promise<boolean> => {
       if (bootstrap === undefined) return false;
       const result = await execute({
@@ -3064,6 +3075,7 @@ export function useCodeController(options: CodeControllerOptions) {
     reopenThread,
     snoozeThread,
     wakeThread,
+    moveThread,
     sendBackTurn,
     bootstrap,
     client,

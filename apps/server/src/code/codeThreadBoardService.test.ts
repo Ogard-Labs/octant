@@ -27,6 +27,7 @@ import {
 import {
   boardRuntimeActivityFromWorks,
   CodeThreadBoardService,
+  type CodeBoardOutsideContentSource,
   type CodeBoardPlanProgressSource,
   type CodeBoardRuntimeActivity,
   type CodeBoardThread,
@@ -194,6 +195,7 @@ function service(options: {
   readonly runtime?: (threadId: unknown) => CodeBoardRuntimeActivity;
   readonly pullRequests?: ThreadBoardPullRequestSnapshot;
   readonly planProgress?: CodeBoardPlanProgressSource;
+  readonly outsideContent?: CodeBoardOutsideContentSource;
 }) {
   return new CodeThreadBoardService({
     threads: { list: () => [...options.threads] },
@@ -201,6 +203,7 @@ function service(options: {
     runtime: runtimeSource(options.runtime),
     pullRequests: { snapshot: () => options.pullRequests ?? emptyPullRequestSnapshot() },
     ...(options.planProgress === undefined ? {} : { planProgress: options.planProgress }),
+    ...(options.outsideContent === undefined ? {} : { outsideContent: options.outsideContent }),
     clock: () => now,
   });
 }
@@ -683,6 +686,25 @@ describe("CodeThreadBoardService derivation", () => {
       done: 3,
       total: 7,
     });
+  });
+
+  it("marks the card of a thread that read outside content, and says when Shield flagged it", async () => {
+    const board = service({
+      threads: [
+        boardThread({ thread: thread({ id: ids.ready }) }),
+        boardThread({ thread: thread({ id: ids.done }) }),
+        boardThread({ thread: thread({ id: ids.waiting }) }),
+      ],
+      outsideContent: {
+        read: (threadId) =>
+          threadId === ids.ready ? "flagged" : threadId === ids.done ? "read" : undefined,
+      },
+    });
+
+    const view = await board.query(decodeCodeBoardQuery({ version: 1 }));
+    expect(cardFor(view.cards, ids.ready).outsideContent).toBe("flagged");
+    expect(cardFor(view.cards, ids.done).outsideContent).toBe("read");
+    expect(cardFor(view.cards, ids.waiting)).not.toHaveProperty("outsideContent");
   });
 
   it("reports no plan progress when no source is configured", async () => {

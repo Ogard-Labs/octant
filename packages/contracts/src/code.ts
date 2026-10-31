@@ -4,8 +4,10 @@ import { AggregateVersion, GlobalSequence, UtcTimestamp } from "./events";
 import { ThreadRestFields } from "./threadRest";
 import { ThreadLiveTurnFields } from "./threadLiveTurn";
 import { GithubIssueContextRequest } from "./githubIssueContext";
+import { TerminalSessionImportRequest } from "./terminalSessions";
 import { LinearIssueContextRequest } from "./linearIssueContext";
 import { BindingRevisionId, ProjectId } from "./projects";
+import { AutoReviewer, ShieldModelChoice } from "./shield";
 import { ThreadWorkingDirectory } from "./workingDirectory";
 import {
   PermissionPersistence,
@@ -261,6 +263,18 @@ export const CodeThreadForkOrigin = Schema.Struct({
 }).annotations(strict);
 export type CodeThreadForkOrigin = typeof CodeThreadForkOrigin.Type;
 
+/**
+ * Retired: Full access once had a sandboxed form (Trusted) and an unsandboxed
+ * one (Off), told apart by a thread `sandboxOff` stamp and a Settings switch.
+ * They are one level now, Full access with no sandbox and no prompts, so a
+ * journal or store that carries either value still decodes and the value is
+ * dropped: both old forms replay as Full access.
+ */
+const RetiredSandboxOffSwitch = Schema.optionalToOptional(Schema.Boolean, Schema.Never, {
+  decode: () => Option.none(),
+  encode: () => Option.none(),
+});
+
 export const CodeThread = Schema.Struct({
   id: CodeThreadId,
   projectId: ProjectId,
@@ -353,6 +367,7 @@ export const CodeThread = Schema.Struct({
    * and `full-access` (no prompts exist). Clamped by taint and capability.
    */
   autoApprove: Schema.optional(Schema.Boolean),
+  sandboxOff: RetiredSandboxOffSwitch,
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
@@ -425,6 +440,25 @@ export const CodeSettings = Schema.Struct({
    * ones running, and answers the editor's language reads `turned-off`.
    */
   bundledLanguageServer: Schema.optional(Schema.Boolean),
+  /**
+   * Whether new threads start in Auto: the default posture with the
+   * provider's own reviewer answering. First run asks; absent reads as off,
+   * which is what a store persisted before the question existed did.
+   */
+  defaultAutoApprove: Schema.optional(Schema.Boolean),
+  /**
+   * Who answers prompts at Auto, as an account default a Code Project may
+   * override. Absent means the provider's own reviewer where it has one and
+   * Octant Shield everywhere else, which is also what "provider" means on a
+   * provider without one.
+   */
+  autoReviewer: Schema.optional(AutoReviewer),
+  /**
+   * The model Octant Shield judges with. Absent means each thread's own
+   * provider account with that provider's smallest model.
+   */
+  shieldModel: Schema.optional(ShieldModelChoice),
+  fullAccessSandboxOff: RetiredSandboxOffSwitch,
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
 }).annotations(strict);
@@ -517,6 +551,8 @@ export const CreateManagedCodeThreadCommand = Schema.Struct({
   modelOptionValues: Schema.optional(ProviderModelOptionValues),
   executionPolicy: ProviderExecutionPolicy,
   permissionPersistence: PermissionPersistence,
+  /** Start in Auto: see `CodeThread.autoApprove`. */
+  autoApprove: Schema.optional(Schema.Boolean),
   deliveryTarget: CodeDeliveryTarget,
   sourceBranch: WorktreeSourceBranch,
   startFromOrigin: Schema.Boolean,
@@ -545,6 +581,8 @@ export const CreateManagedCodeThreadCommand = Schema.Struct({
   approvalId: Schema.optional(CodeApprovalId),
   issueContext: Schema.optional(GithubIssueContextRequest),
   linearIssueContext: Schema.optional(LinearIssueContextRequest),
+  /** A terminal session in the Project's folder the thread starts from. */
+  terminalSession: Schema.optional(TerminalSessionImportRequest),
 })
   .annotations(strict)
   .pipe(
@@ -562,6 +600,8 @@ export const CreateCodeThreadCommand = Schema.Struct({
   approvalId: Schema.optional(CodeApprovalId),
   issueContext: Schema.optional(GithubIssueContextRequest),
   linearIssueContext: Schema.optional(LinearIssueContextRequest),
+  /** A terminal session in the Project's folder the thread starts from. */
+  terminalSession: Schema.optional(TerminalSessionImportRequest),
 }).annotations(strict);
 export type CreateCodeThreadCommand = typeof CreateCodeThreadCommand.Type;
 
@@ -633,6 +673,11 @@ export const CodeCommand = Schema.Union(
     allowDefaultFolderThreads: RetiredDefaultFolderThreadsSwitch,
     defaultDiffLayout: Schema.optional(CodeDiffLayout),
     bundledLanguageServer: Schema.optional(Schema.Boolean),
+    defaultAutoApprove: Schema.optional(Schema.Boolean),
+    /** Absent keeps the stored choice. */
+    autoReviewer: Schema.optional(AutoReviewer),
+    /** Absent keeps the stored choice; null returns to each thread's own provider. */
+    shieldModel: Schema.optional(Schema.NullOr(ShieldModelChoice)),
   }).annotations(strict),
   CreateCodeThreadCommand,
   Schema.Struct({
@@ -693,7 +738,7 @@ export const CodeCommand = Schema.Union(
    * A thread's checkout id is derived from the binding revision it was created
    * against, so rebinding the Project supersedes it and no later observation
    * can produce the thread's own id again. Without this the thread is
-   * fail-closed for good, which 0032 refuses as a resting state. The act is
+   * fail-closed for good, which is never an acceptable resting state. The act is
    * the user's, never inferred from a matching filesystem root: what authority
    * a thread holds only changes because someone asked.
    */
@@ -726,6 +771,17 @@ export const CodeCommand = Schema.Union(
     kind: Schema.Literal("change-code-thread-document-delivery"),
     ...CodeThreadCommandFields,
     documentDelivery: ThreadDocumentDelivery,
+  }).annotations(strict),
+  /**
+   * Files a Code thread into another Code Project bound to the same folder
+   * (or one that contains it, when the thread's checkout stays valid there).
+   * The thread keeps its history, guardrail level and checkout; the host
+   * refuses any Project under which the checkout would not stay valid.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("move-code-thread"),
+    ...CodeThreadCommandFields,
+    projectId: ProjectId,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-code-thread-working-directory"),

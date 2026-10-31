@@ -11,6 +11,7 @@ import {
   type ProviderModelOptionValues,
   type ThreadDocumentDelivery,
   type UsageResumeThreadState,
+  type WorkAccess,
   type WorkAttachmentId,
   type WorkRequest,
   type WorkThread,
@@ -23,6 +24,9 @@ import {
 } from "@octant/contracts";
 import type { ProjectSummary, ProjectId } from "@octant/contracts/projects";
 import type { BrowserToolApproval } from "@octant/contracts/browser-automation-rpc";
+import { WORK_PERMISSION_MODES, workAccessOfMode, workModeOf } from "./workPermissionModes";
+import { PermissionModePicker } from "../code/PermissionModePicker";
+import { browserApprovalDetail, browserApprovalSummary } from "../browser/browserProfileCopy";
 import {
   prependEarlierTurns,
   refreshNewestTurns,
@@ -124,6 +128,7 @@ import {
 } from "../polling/documentVisibility";
 import { SelectionThreadScope } from "../transcript/SelectionThread";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
+import { ImportedTerminalHistory } from "../terminalSessions/ImportedTerminalHistory";
 import {
   LoadEarlierMessages,
   type LoadEarlierMessagesState,
@@ -760,6 +765,39 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     thread !== undefined &&
     thread.lifecycle === "active" &&
     threadMayChooseArtifacts(props.providerGroups ?? [], thread.providerInstanceId, "work");
+  const [accessChanging, setAccessChanging] = useState(false);
+  // Work and Code share one set of levels; the composer moves this thread to
+  // another one, and its next turn runs at it.
+  const changeAccess = async (access: WorkAccess) => {
+    if (thread === undefined || accessChanging || access === thread.access) return;
+    setAccessChanging(true);
+    setErrorMessage(undefined);
+    try {
+      const result = await props.threadClient.execute({
+        kind: "change-work-thread-access",
+        threadId: thread.id,
+        expectedVersion: thread.version,
+        access,
+      });
+      if (!("kind" in result) || result.kind !== "thread-updated") {
+        setErrorMessage("This task’s mode could not be saved.");
+        return;
+      }
+      setThread(result.thread);
+      props.onThreadUpdated?.(result.thread);
+    } catch {
+      setErrorMessage("This task’s mode could not be saved.");
+    } finally {
+      setAccessChanging(false);
+    }
+  };
+  const autoSupported =
+    thread !== undefined &&
+    (props.providerGroups ?? []).some(
+      (group) =>
+        String(group.instance.id) === String(thread.providerInstanceId) &&
+        group.harnessAutoReview === "supported",
+    );
   const changeDocumentDelivery = async (documentDelivery: ThreadDocumentDelivery) => {
     if (thread === undefined || deliveryChanging) return;
     setDeliveryChanging(true);
@@ -1842,11 +1880,20 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           itemAt={workRowHappenedAt}
           itemKey={(row) => row.key}
           items={transcriptRows}
-          {...(earlierRow === undefined
-            ? {}
-            : {
-                lead: <LoadEarlierMessages onLoad={() => void loadEarlier()} state={earlierRow} />,
-              })}
+          lead={
+            <>
+              <ImportedTerminalHistory
+                threadId={String(props.threadId)}
+                {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+                {...(props.windowCapability === undefined
+                  ? {}
+                  : { windowCapability: props.windowCapability })}
+              />
+              {earlierRow === undefined ? null : (
+                <LoadEarlierMessages onLoad={() => void loadEarlier()} state={earlierRow} />
+              )}
+            </>
+          }
           listClassName="thread-column"
           {...(canvasClient === undefined
             ? {}
@@ -1995,9 +2042,9 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                 >
                   <h3 className="oct-section-label">
                     {/* A watcher that failed reports no paths and marks itself
-                        truncated. Counting that as zero told the person nothing
-                        changed, which is not what the host observed. An empty
-                        list that is not truncated really is nothing. */}
+                      truncated. Counting that as zero told the person nothing
+                      changed, which is not what the host observed. An empty
+                      list that is not truncated really is nothing. */}
                     {row.wrote.paths.length === 0 && row.wrote.truncated
                       ? "Changed files could not be observed while this ran"
                       : row.wrote.paths.length === 1
@@ -2015,7 +2062,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                   {row.wrote.truncated ? (
                     <p className="oct-row-detail" role="status">
                       {/* "More changed" claims a file changed. A watcher that
-                          failed establishes no such thing. */}
+                        failed establishes no such thing. */}
                       {row.wrote.paths.length === 0
                         ? "Octant could not watch the folder while this ran. Open Files for the folder itself."
                         : "More changed than Octant could record. Open Files for the folder itself."}
@@ -2182,10 +2229,10 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
             </>
           }
           className="thread-column"
-          detail="Shell and file access stay unchanged"
+          detail={browserApprovalDetail(pendingBrowserApproval)}
           error={browserApprovalMessage}
           label="Browser origin approval"
-          summary={`Allow Browser to open ${pendingBrowserApproval.origin}?`}
+          summary={browserApprovalSummary(pendingBrowserApproval)}
         />
       )}
       <ThreadComposer
@@ -2404,11 +2451,24 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
             </>
           ),
           // Two groups: what the person adds sits left, how the task runs
-          // (0073) sits right beside send. The model used to hug the attach
+          // sits right beside send. The model used to hug the attach
           // button, so it jumped sides between a new task and the thread it
           // became.
           trailing: (
             <>
+              {thread === undefined ? null : (
+                <PermissionModePicker
+                  autoSupported={autoSupported}
+                  disabled={accessChanging || creating || completionLocked}
+                  modes={WORK_PERMISSION_MODES}
+                  onChange={(mode) => {
+                    const access = workAccessOfMode(mode);
+                    if (access !== undefined) void changeAccess(access);
+                  }}
+                  value={workModeOf(thread.access)}
+                  warningScope={{ projectId: String(thread.projectId) }}
+                />
+              )}
               {thread === undefined ? null : (
                 <span
                   aria-label="Bound provider and model"

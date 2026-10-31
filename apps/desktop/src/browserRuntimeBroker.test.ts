@@ -134,8 +134,8 @@ describe("BrowserRuntimeBroker", () => {
   });
 });
 
-function request(url: string, token: string, body: unknown): Request {
-  return new Request(new URL("v1/contexts/act", url), {
+function request(url: string, token: string, body: unknown, path = "v1/contexts/act"): Request {
+  return new Request(new URL(path, url), {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -144,3 +144,220 @@ function request(url: string, token: string, body: unknown): Request {
     body: JSON.stringify(body),
   });
 }
+
+describe("BrowserRuntimeBroker profiles", () => {
+  const projectId = "40000000-0000-4000-8000-000000000001";
+  function store() {
+    return {
+      list: vi.fn(async () => [{ profile: { kind: "personal" as const }, sizeBytes: 12 }]),
+      clear: vi.fn(async () => undefined),
+      syncExtensions: vi.fn(async () => undefined),
+      extensionPage: vi.fn(() => undefined),
+      importCookies: vi.fn(async (_profile: unknown, cookies: ReadonlyArray<unknown>) => ({
+        imported: cookies.length,
+        skipped: 0,
+      })),
+    };
+  }
+  const post = (broker: { url: string; token: string }, path: string, body: unknown) =>
+    request(broker.url, broker.token, body, path);
+
+  it("lists and clears stored profiles for the authenticated server only", async () => {
+    const profiles = store();
+    const broker = await startBrowserRuntimeBroker(host() as never, profiles);
+    try {
+      const listed = await broker.fetchForTest(post(broker, "v1/profiles/list", {}));
+      expect(await listed.json()).toEqual({
+        profiles: [{ profile: { kind: "personal" }, sizeBytes: 12 }],
+      });
+
+      const cleared = await broker.fetchForTest(
+        post(broker, "v1/profiles/clear", {
+          profile: { kind: "project", projectId },
+          scope: "cookies",
+        }),
+      );
+      expect(cleared.status).toBe(200);
+      expect(profiles.clear).toHaveBeenCalledWith({ kind: "project", projectId }, "cookies");
+
+      const wrongToken = await broker.fetchForTest(
+        request(
+          broker.url,
+          "wrong",
+          { profile: { kind: "personal" }, scope: "all" },
+          "v1/profiles/clear",
+        ),
+      );
+      expect(wrongToken.status).toBe(401);
+      expect(profiles.clear).toHaveBeenCalledOnce();
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("refuses a profile it cannot name or a scope it does not know, clearing nothing", async () => {
+    const profiles = store();
+    const broker = await startBrowserRuntimeBroker(host() as never, profiles);
+    try {
+      for (const body of [
+        { profile: { kind: "private" }, scope: "all" },
+        { profile: { kind: "project", projectId: "../../etc" }, scope: "all" },
+        { profile: { kind: "personal" }, scope: "everything" },
+        { profile: { kind: "personal", partition: "persist:other" }, scope: "all" },
+      ]) {
+        const response = await broker.fetchForTest(post(broker, "v1/profiles/clear", body));
+        expect(response.status).toBe(400);
+      }
+      expect(profiles.clear).not.toHaveBeenCalled();
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("loads the extensions the server names into a stored profile, and refuses anything else", async () => {
+    const profiles = store();
+    const broker = await startBrowserRuntimeBroker(host() as never, profiles);
+    try {
+      const entry = {
+        id: "a".repeat(32),
+        path: "/data/browser-extensions/x",
+        contentHash: "b".repeat(64),
+      };
+      const ok = await broker.fetchForTest(
+        post(broker, "v1/extensions/sync", { profile: { kind: "personal" }, extensions: [entry] }),
+      );
+      expect(ok.status).toBe(200);
+      expect(profiles.syncExtensions).toHaveBeenCalledWith({ kind: "personal" }, [entry]);
+
+      for (const body of [
+        { profile: { kind: "private" }, extensions: [] },
+        { profile: { kind: "personal" }, extensions: [{ ...entry, path: "relative/folder" }] },
+        { profile: { kind: "personal" }, extensions: [{ ...entry, id: "../../x" }] },
+        { profile: { kind: "personal" }, extensions: [{ ...entry, contentHash: "short" }] },
+        { profile: { kind: "personal" }, extensions: "all" },
+      ]) {
+        const response = await broker.fetchForTest(post(broker, "v1/extensions/sync", body));
+        expect(response.status).toBe(400);
+      }
+      expect(profiles.syncExtensions).toHaveBeenCalledOnce();
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("says plainly that profiles are unavailable when the app keeps none", async () => {
+    const broker = await startBrowserRuntimeBroker(host() as never);
+    try {
+      const response = await broker.fetchForTest(post(broker, "v1/profiles/list", {}));
+      expect(response.status).toBe(409);
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("accepts a stored profile in a context's policy and refuses a malformed one", async () => {
+    const surface = host();
+    const broker = await startBrowserRuntimeBroker(surface as never, store());
+    try {
+      const policy = (profile: unknown) => ({
+        profileMode: "isolated",
+        profile,
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 2,
+        sessionTimeoutMs: 300_000,
+      });
+      const create = (profile: unknown) =>
+        broker.fetchForTest(
+          post(broker, "v1/contexts/create", {
+            contextId,
+            owner: { windowId: "window-a", threadId: contextId },
+            policy: policy(profile),
+          }),
+        );
+
+      expect((await create({ kind: "personal" })).status).toBe(200);
+      expect((await create({ kind: "personal", partition: "x" })).status).toBe(400);
+      expect((await create({ kind: "everyone" })).status).toBe(400);
+      expect(surface.createContext).toHaveBeenCalledOnce();
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("imports a bounded batch of well-formed cookies and refuses anything else", async () => {
+    const profiles = store();
+    const broker = await startBrowserRuntimeBroker(host() as never, profiles);
+    const cookie = {
+      domain: ".example.com",
+      hostOnly: false,
+      name: "sid",
+      value: "v",
+      path: "/",
+      secure: true,
+      httpOnly: true,
+      sameSite: "lax",
+    };
+    try {
+      const ok = await broker.fetchForTest(
+        post(broker, "v1/profiles/import-cookies", {
+          profile: { kind: "personal" },
+          cookies: [cookie],
+        }),
+      );
+      expect(await ok.json()).toEqual({ imported: 1, skipped: 0 });
+      expect(profiles.importCookies).toHaveBeenCalledWith({ kind: "personal" }, [cookie]);
+
+      for (const body of [
+        { profile: { kind: "private" }, cookies: [cookie] },
+        { profile: { kind: "personal" }, cookies: [{ ...cookie, sameSite: "whatever" }] },
+        { profile: { kind: "personal" }, cookies: [{ ...cookie, extra: true }] },
+        { profile: { kind: "personal" }, cookies: Array.from({ length: 201 }, () => cookie) },
+        { profile: { kind: "personal" } },
+      ]) {
+        const refused = await broker.fetchForTest(post(broker, "v1/profiles/import-cookies", body));
+        expect(refused.status).toBe(400);
+      }
+      expect(profiles.importCookies).toHaveBeenCalledOnce();
+
+      const unauthorized = await broker.fetchForTest(
+        request(
+          broker.url,
+          "wrong",
+          { profile: { kind: "personal" }, cookies: [cookie] },
+          "v1/profiles/import-cookies",
+        ),
+      );
+      expect(unauthorized.status).toBe(401);
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("takes a larger body for a cookie batch than for any other route", async () => {
+    const profiles = store();
+    const broker = await startBrowserRuntimeBroker(host() as never, profiles);
+    try {
+      const big = {
+        profile: { kind: "personal" },
+        cookies: Array.from({ length: 100 }, (_, index) => ({
+          domain: ".example.com",
+          hostOnly: false,
+          name: `c${String(index)}`,
+          value: "v".repeat(2_000),
+          path: "/",
+          secure: true,
+          httpOnly: true,
+          sameSite: "lax",
+        })),
+      };
+      expect(JSON.stringify(big).length).toBeGreaterThan(96 * 1024);
+
+      const response = await broker.fetchForTest(post(broker, "v1/profiles/import-cookies", big));
+
+      expect(response.status).toBe(200);
+    } finally {
+      await broker.close();
+    }
+  });
+});

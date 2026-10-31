@@ -1,5 +1,6 @@
 import type { AgentRunAuthority, ThreadGoal } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
+import { WORK_GOAL_LOOP_CEILING } from "@octant/domain";
 import { GoalLoopService, type GoalLoopDependencies } from "./goalLoopService";
 
 const threadId = "22222222-0000-4000-8000-000000000001";
@@ -178,6 +179,27 @@ describe("starting a goal loop", () => {
 
     expect(result).toMatchObject({ kind: "goal-loop-refused" });
     expect(h.service.read(threadId).loop).toBeNull();
+  });
+
+  it("starts a Work loop under the ceiling the client sends, which keeps the shell and Git a Work turn holds", async () => {
+    const h = harness({ modePosture: WORK_GOAL_LOOP_CEILING });
+    const start = (loopCeiling: AgentRunAuthority) =>
+      h.service.execute({
+        kind: "start-goal-loop",
+        threadId,
+        expectedVersion: 0,
+        loopId,
+        goalId,
+        ceiling: loopCeiling,
+        trigger: { kind: "continuous" },
+      });
+
+    // The ceiling the panel sent before Work had a shell can no longer hold.
+    expect(await start({ ...WORK_GOAL_LOOP_CEILING, shell: false, git: false })).toMatchObject({
+      reason: "ceiling-unenforceable",
+    });
+    expect(await start(WORK_GOAL_LOOP_CEILING)).not.toMatchObject({ kind: "goal-loop-refused" });
+    expect(h.service.read(threadId).loop).toMatchObject({ status: "running" });
   });
 
   it("refuses a ceiling the mode cannot impose rather than pretending it holds", async () => {

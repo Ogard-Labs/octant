@@ -49,6 +49,8 @@ export interface AcpConfinementInput {
   readonly profile: AcpProviderProfile;
   readonly binaryPath: string;
   readonly root: string;
+  /** The Project's extra folders, granted what `root` is granted. */
+  readonly extraFolders?: ReadonlyArray<string>;
   readonly managedHome: string;
   readonly mode: AcpSessionMode;
   readonly executionPolicy: ProviderExecutionPolicy;
@@ -81,6 +83,8 @@ export interface AcpProcessStartInput {
   readonly profile: AcpProviderProfile;
   readonly binaryPath: string;
   readonly root: string;
+  /** The Project's extra folders, granted what `root` is granted. */
+  readonly extraFolders?: ReadonlyArray<string>;
   readonly managedHome: string;
   readonly mode: AcpSessionMode;
   readonly executionPolicy: ProviderExecutionPolicy;
@@ -391,7 +395,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
             root,
           ),
         ];
-        // Full access is unrestricted except for 0006's static MCP/skills/hooks
+        // Full access is unrestricted except for the static MCP/skills/hooks
         // denials. Darwin uses allow-default plus trailing denies. Linux binds
         // the host root and overlays the same paths.
         if (input.executionPolicy === "full-access") {
@@ -503,20 +507,25 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
               executable: input.binaryPath,
               args,
               boundRoot: root,
+              // Chat runs in the managed home and has no Project folders.
+              ...(input.mode === "chat" || input.extraFolders === undefined
+                ? {}
+                : { extraBoundRoots: input.extraFolders }),
               temporaryDirectory,
               networkEgress,
               writeBoundRoot: !(input.executionPolicy === "plan" || input.mode === "chat"),
-              // Work declares shell "denied": ACP terminal/* refusals only
+              // Chat and Plan have no shell: ACP terminal/* refusals only
               // cover providers that route shell through the protocol, so an
               // in-process shell would otherwise still exec inside the jail.
-              allowProcessExec: !(input.executionPolicy === "plan" || input.mode !== "code"),
+              // Work launches exactly as Code does at the same level.
+              allowProcessExec: !(input.executionPolicy === "plan" || input.mode === "chat"),
               // A profile whose entrypoint spawns its own stdio server keeps
               // fork: the child re-execs the provider's own binary, which the
               // exec literals and binds already permit, and fork without a
               // second exec target cannot reach a shell. Chat and Plan never
               // get here — such profiles are refused above.
               allowProcessFork:
-                !(input.executionPolicy === "plan" || input.mode !== "code") ||
+                !(input.executionPolicy === "plan" || input.mode === "chat") ||
                 profile.process.requiresChildServer === true,
               additionalWriteRoots: [managedHome, ...hostAuthentication.writePaths],
               additionalDenyReadPaths: confinedDenyPaths,
@@ -1181,6 +1190,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           profile,
           binaryPath: input.binaryPath,
           root: input.root,
+          ...(input.extraFolders === undefined ? {} : { extraFolders: input.extraFolders }),
           managedHome: input.managedHome,
           mode: input.mode,
           executionPolicy: input.executionPolicy,

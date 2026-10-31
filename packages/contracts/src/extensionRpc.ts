@@ -30,6 +30,7 @@ import {
 import { ExtensionToolGrantId, ExtensionToolGrantRecorded } from "./extensionEvents";
 import { ToolExtensionId } from "./toolActions";
 import { ProjectId } from "./projects";
+import { SecretStoreItemReference, SecretStoreKind } from "./secretStores";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const boundedText = (maximumLength: number) =>
@@ -129,6 +130,16 @@ const userAddedSecretValue = Schema.Struct({
   name: boundedText(128).pipe(Schema.pattern(/^[A-Za-z_][A-Za-z0-9_-]*$/)),
   value: Schema.String.pipe(Schema.maxLength(8192)),
   secret: Schema.Boolean,
+  /**
+   * A secret that comes from a linked secret store: the host keeps this item
+   * reference instead of a value and fetches the value when the server is
+   * launched. `value` is empty and `secret` is true.
+   */
+  linked: Schema.optional(
+    Schema.Struct({ store: SecretStoreKind, reference: SecretStoreItemReference }).annotations(
+      strict,
+    ),
+  ),
 }).annotations(strict);
 export const UserAddedMcpServerRequest = Schema.Struct({
   name: boundedText(64),
@@ -329,6 +340,28 @@ export const ExtensionCommand = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("preview-package"), source: ExtensionSource }).annotations(
     strict,
   ),
+  /**
+   * Looks a package up on the npm registry the person's npm configuration
+   * names, downloads and checks it, and answers with the review a person reads
+   * before installing. `range` is an exact version, a range, or a dist-tag;
+   * without it the `latest` tag is used. Nothing is installed.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("resolve-npm-package"),
+    packageName: boundedText(214),
+    range: Schema.optional(boundedText(128)),
+    /**
+     * The installed package this lookup is an update of. The host then asks
+     * the registry that package was installed from, whatever the npm settings
+     * name now, and refuses a result that is not the same package.
+     */
+    updateOf: Schema.optional(ToolExtensionId),
+  }).annotations(strict),
+  /** Asks the registry an installed npm package came from whether a newer version exists. Installs nothing. */
+  Schema.Struct({
+    kind: Schema.Literal("check-npm-update"),
+    extensionId: ToolExtensionId,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("inspect-package"),
     source: ExtensionSource,
@@ -589,6 +622,13 @@ export const ExtensionCommandResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("package-inspected"),
     preview: ExtensionPackagePreview,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("npm-update-checked"),
+    extensionId: ToolExtensionId,
+    installedVersion: ExtensionPackageVersion,
+    /** The newest version the registry offers, when it is newer than the installed one. */
+    available: Schema.optional(ExtensionPackageVersion),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("extension-state-updated"),

@@ -23,7 +23,7 @@ const CORE = [
 
 const MODE: Readonly<Record<OctantMode, string>> = {
   chat: "This is a Chat thread. It has no filesystem and no shell. Your tool definitions and the list of Octant tools in this session are exactly what you can call; check them before saying a tool is unavailable.",
-  work: "This is a Work thread bound to one folder: read, search, and edit files inside it. There is no shell. Document changes in files the user can open.",
+  work: "This is a Work thread bound to one folder: read, search, and edit files inside it, and run commands in it with bash at the thread's level, which may ask the user first. Document changes in files the user can open.",
   code: "This is a Code thread on one checkout: read, search, edit, and run commands in the sandboxed checkout. Prefer edit over write. Run the repository's own checks before saying work is done.",
 };
 
@@ -57,6 +57,8 @@ const OCTANT_TOOL_PURPOSE: Readonly<Record<string, string>> = {
   octant_offer_side_task: "offer the user a separate task for work outside this request",
   octant_propose_routine: "propose a scheduled routine; the user confirms it before it exists",
   octant_propose_thread: "propose a new thread on the Project board",
+  octant_pull_request:
+    "open or change this thread's own pull request (draft, stacked, ready) when the user asks",
   octant_terminal: "run long-lived processes such as dev servers and read their output",
   octant_threads: "see this Project's other threads: list them, read one, or wait for one to stop",
   octant_thread_message: "ask a mentioned thread something and wait for its reply",

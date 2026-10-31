@@ -40,6 +40,7 @@ import { ScaffoldDirectoryName, ScaffoldId, ScaffoldRun, ScaffoldRunId } from ".
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { UsageCost } from "./context";
 import { ProjectId } from "./projects";
+import { ShieldDecision, ToolOutsideContentMark } from "./shield";
 import { MAX_THREAD_TASKS_PER_TURN } from "./threadTasks";
 import { TerminalBrowserGrantOutcome } from "./terminalBrowserGrants";
 import {
@@ -407,6 +408,8 @@ const ObserveGit = Schema.Struct({
   ...OperationScope,
   gitOperationId: CodeGitOperationId,
   maxDiffBytes: Schema.Int.pipe(Schema.between(1, 1024 * 1024)),
+  /** Read the diff with Git's `-w`; only the diff text changes, never the checkout state. */
+  ignoreWhitespace: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 const StageGit = Schema.Struct({
   kind: Schema.Literal("stage-git"),
@@ -489,6 +492,22 @@ const PushGit = Schema.Struct({
   expectedHeadOid: GitObjectId,
   expectedStateToken: GitStateToken,
   confirmation: GitPushConfirmation,
+  /**
+   * Replace the remote branch's history instead of adding to it. `with-lease`
+   * names the remote head it expects to replace, so a branch that moved since
+   * is refused by Git; `plain` overwrites whatever is there. The host accepts
+   * `with-lease` on the thread's own branch only, and `plain` only with an
+   * approval for this one act, never on a standing grant.
+   */
+  force: Schema.optional(
+    Schema.Union(
+      Schema.Struct({
+        mode: Schema.Literal("with-lease"),
+        expectedRemoteOid: GitObjectId,
+      }).annotations(strict),
+      Schema.Struct({ mode: Schema.Literal("plain") }).annotations(strict),
+    ),
+  ),
   authorization: GitAuthorization,
 })
   .annotations(strict)
@@ -613,6 +632,7 @@ const ReviewRun = Schema.Struct({
   ...OperationScope,
   gitOperationId: CodeGitOperationId,
   maxDiffBytes: Schema.Int.pipe(Schema.between(1, 1024 * 1024)),
+  ignoreWhitespace: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 
 /**
@@ -636,12 +656,97 @@ const MergeRun = Schema.Struct({
   authorization: GitAuthorization,
 }).annotations(strict);
 
+/**
+ * Open the pull request for the thread's own delivery branch. The head is
+ * always the host's resolved delivery branch; a caller chooses only the text,
+ * whether it opens as a draft, and, for a stacked pull request, a base other
+ * than the delivery target's — which the host accepts only when that branch
+ * has an open pull request of its own in the same repository.
+ */
 const CreatePullRequest = Schema.Struct({
   kind: Schema.Literal("create-pull-request"),
   ...OperationScope,
   title: boundedNonEmptyText(512),
   body: boundedText(MAX_CODE_OPERATION_TEXT_BYTES),
+  draft: Schema.optional(Schema.Boolean),
+  baseBranch: Schema.optional(GitBranchName),
   idempotencyKey: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9._:-]{1,255}$/)),
+  authorization: GitAuthorization,
+}).annotations(strict);
+/**
+ * Change the open pull request of the thread's own delivery branch: its
+ * title, its body, or whether it is a draft (`draft: false` marks it ready
+ * for review). Merging, closing, and every other pull-request change stay
+ * out of reach.
+ */
+const PullRequestLabelName = Schema.String.pipe(
+  Schema.filter(
+    (value) =>
+      value.length >= 1 &&
+      value.length <= 50 &&
+      !value.includes("\0") &&
+      !/[\n\r,]/.test(value) &&
+      value.trim() === value,
+  ),
+);
+const UpdatePullRequest = Schema.Struct({
+  kind: Schema.Literal("update-pull-request"),
+  ...OperationScope,
+  title: Schema.optional(boundedNonEmptyText(512)),
+  body: Schema.optional(boundedText(MAX_CODE_OPERATION_TEXT_BYTES)),
+  draft: Schema.optional(Schema.Boolean),
+  /** Existing repository labels only; a label the repository lacks is refused. */
+  addLabels: Schema.optional(Schema.Array(PullRequestLabelName).pipe(Schema.maxItems(20))),
+  removeLabels: Schema.optional(Schema.Array(PullRequestLabelName).pipe(Schema.maxItems(20))),
+  /** `closed` closes the open pull request; `open` reopens a closed one. The branch is kept. */
+  state: Schema.optional(Schema.Literal("closed", "open")),
+  authorization: GitAuthorization,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (command) =>
+        command.title !== undefined ||
+        command.body !== undefined ||
+        command.draft !== undefined ||
+        (command.addLabels?.length ?? 0) > 0 ||
+        (command.removeLabels?.length ?? 0) > 0 ||
+        command.state !== undefined,
+    ),
+    // Closing or reopening is a change of its own, not a side effect of an edit.
+    Schema.filter(
+      (command) =>
+        command.state === undefined ||
+        (command.title === undefined &&
+          command.body === undefined &&
+          command.draft === undefined &&
+          (command.addLabels?.length ?? 0) === 0 &&
+          (command.removeLabels?.length ?? 0) === 0),
+    ),
+  );
+/**
+ * Post a comment on the thread's own pull request, or reply in one of its
+ * review threads. It posts under the person's name, so it is always approved
+ * for this one act, and the approval shows the whole text.
+ */
+const CommentPullRequest = Schema.Struct({
+  kind: Schema.Literal("comment-pull-request"),
+  ...OperationScope,
+  body: boundedNonEmptyText(MAX_CODE_OPERATION_TEXT_BYTES),
+  reviewThreadId: Schema.optional(Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_=-]{1,128}$/))),
+  authorization: GitAuthorization,
+}).annotations(strict);
+/**
+ * Merge the thread's own open pull request on the person's say. The merge names
+ * the head the person saw and the method; the host refuses it unless that head
+ * is still current and the required checks pass, and an approval for this one
+ * act is required at every guardrail level.
+ */
+const MergePullRequest = Schema.Struct({
+  kind: Schema.Literal("merge-pull-request"),
+  ...OperationScope,
+  method: Schema.Literal("merge", "squash", "rebase"),
+  headSha: GitObjectId,
   authorization: GitAuthorization,
 }).annotations(strict);
 const ObservePullRequest = Schema.Struct({
@@ -754,6 +859,9 @@ export const CODE_OPERATION_COMMAND_KINDS = [
   "commit-git",
   "push-git",
   "create-pull-request",
+  "update-pull-request",
+  "comment-pull-request",
+  "merge-pull-request",
   "observe-pull-request",
   "create-review-finding",
   "update-review-finding",
@@ -784,6 +892,9 @@ export const CodeOperationCommand = Schema.Union(
   DraftGitText,
   RestoreGitCheckpoint,
   CreatePullRequest,
+  UpdatePullRequest,
+  CommentPullRequest,
+  MergePullRequest,
   ObservePullRequest,
   CreateReviewFinding,
   UpdateReviewFinding,
@@ -986,6 +1097,8 @@ const PullRequestResult = Schema.Union(
     headBranch: GitBranchName,
     baseRepository: boundedNonEmptyText(512),
     baseBranch: GitBranchName,
+    /** Whether GitHub holds it as a draft, when the host knows. */
+    draft: Schema.optional(Schema.Boolean),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("pull-request-state"),
@@ -1001,6 +1114,14 @@ const PullRequestResult = Schema.Union(
         "dirty",
         "not-mergeable",
         "no-remote",
+        "invalid-base",
+        "invalid",
+        "label-not-found",
+        "not-open",
+        "not-closed",
+        "already-merged",
+        "checks-not-passing",
+        "checks-unknown",
       ),
     ),
   }).annotations(strict),
@@ -1267,6 +1388,8 @@ const ToolEvent = Schema.Struct({
   summary: Schema.optional(boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES)),
   /** A page the call published outside this host; the transcript links to it. */
   published: Schema.optional(ThreadPublishedPage),
+  /** The call's result brought outside content into the thread; the row carries the mark. */
+  outsideContent: Schema.optional(ToolOutsideContentMark),
 }).annotations(strict);
 /**
  * The bounds a Code approval or question is journaled under. Exported so a
@@ -1300,6 +1423,17 @@ const ApprovalEvent = Schema.Struct({
    */
   localPersonOnly: Schema.optional(Schema.Literal(true)),
 }).annotations({ ...strict, ...personDecides });
+/**
+ * Octant Shield answered one approval prompt: what the call was and its
+ * decision. An allow or deny settles the call without asking anyone; an ask is
+ * followed by the ordinary `approval-requested` for the person. Journaled as
+ * Shield's, never as the provider's or the person's.
+ */
+const ApprovalReviewedEvent = Schema.Struct({
+  kind: Schema.Literal("approval-reviewed"),
+  summary: CodeApprovalSummaryText,
+  decision: ShieldDecision,
+}).annotations(strict);
 const QuestionEvent = Schema.Struct({
   kind: Schema.Literal("input-requested"),
   requestId: ProviderRequestId,
@@ -1614,6 +1748,7 @@ export const CodeOperationEvent = Schema.Union(
   TerminalStateChangedEvent,
   ToolEvent,
   ApprovalEvent,
+  ApprovalReviewedEvent,
   QuestionEvent,
   FileChangeEvent,
   DiffEvent,
@@ -1674,10 +1809,17 @@ export const CodeConversationStep = Schema.Union(
     state: Schema.Literal("started", "running", "completed", "failed"),
     summary: Schema.optional(boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES)),
     published: Schema.optional(ThreadPublishedPage),
+    outsideContent: Schema.optional(ToolOutsideContentMark),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("reasoning"),
     content: CodeEvidenceReference,
+  }).annotations(strict),
+  /** An approval Octant Shield answered, shown in the turn beside its tool rows. */
+  Schema.Struct({
+    kind: Schema.Literal("review"),
+    summary: CodeApprovalSummaryText,
+    decision: ShieldDecision,
   }).annotations(strict),
 );
 export type CodeConversationStep = typeof CodeConversationStep.Type;
@@ -2027,11 +2169,11 @@ export const CodeThreadMetadataRecoveryReason = Schema.Literal(
 export type CodeThreadMetadataRecoveryReason = typeof CodeThreadMetadataRecoveryReason.Type;
 
 /**
- * A board card's plan-completion count (0051): how many of the thread's live
+ * A board card's plan-completion count: how many of the thread's live
  * plan's steps are done, out of how many the plan carries. `none` covers a
- * thread with no live plan (0027 keeps at most one). Only the count crosses
+ * thread with no live plan (a thread keeps at most one). Only the count crosses
  * onto the board; step titles, rationale, and per-step status stay in the
- * thread's own Plan dock (0044).
+ * thread's own Plan dock.
  */
 export const CodeBoardPlanProgress = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("none") }).annotations(strict),
@@ -2311,6 +2453,13 @@ export const CodeBoardCard = Schema.Struct({
   blockingReason: Schema.optional(boundedNonEmptyText(MAX_CODE_BOARD_CARD_BLOCKING_REASON_BYTES)),
   followUp: Schema.Boolean,
   lastMeaningfulActivityAt: Schema.NullOr(UtcTimestamp),
+  /**
+   * The thread has read outside content since its mark was last cleared:
+   * `flagged` when Octant Shield's Watcher found injection-shaped content in
+   * it. Absent on an unmarked thread. The card carries a small mark; it never
+   * asks or blocks.
+   */
+  outsideContent: Schema.optional(Schema.Literal("read", "flagged")),
 }).annotations(strict);
 export type CodeBoardCard = typeof CodeBoardCard.Type;
 
@@ -2355,6 +2504,9 @@ const APPROVAL_GATED_OPERATION_KINDS = new Set([
   "commit-git",
   "push-git",
   "create-pull-request",
+  "update-pull-request",
+  "comment-pull-request",
+  "merge-pull-request",
   "create-review-finding",
   "update-review-finding",
 ]);

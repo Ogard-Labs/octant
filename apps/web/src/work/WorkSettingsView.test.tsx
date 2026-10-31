@@ -19,12 +19,12 @@ function controller(overrides: Partial<WorkSettingsController> = {}): WorkSettin
 }
 
 describe("WorkSettingsView", () => {
-  it("saves Auto-accept edits as the default access and says what it allows", () => {
+  it("saves Accept edits as the default access and says what it allows", () => {
     const work = controller();
     const { rerender } = render(<WorkSettingsView controller={work} />);
 
-    expect(screen.getByText(/asks before it changes any file/)).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Auto-accept edits" }));
+    expect(screen.getByText(/asks before it runs a command or changes a file/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Accept edits" }));
     expect(work.update).toHaveBeenCalledWith({ defaultAccess: "auto-accept-edits" });
 
     rerender(
@@ -39,6 +39,20 @@ describe("WorkSettingsView", () => {
       />,
     );
     expect(screen.getByText(/Anything outside the folder is still refused/)).toBeVisible();
+  });
+
+  it("offers Auto and Full access as the Work default, warning once before Full access", () => {
+    localStorage.removeItem("octant.full-access-warned.machine");
+    const work = controller();
+    render(<WorkSettingsView controller={work} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Auto" }));
+    expect(work.update).toHaveBeenCalledWith({ defaultAccess: "auto" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Full access" }));
+    expect(work.update).not.toHaveBeenCalledWith({ defaultAccess: "full-access" });
+    fireEvent.click(screen.getByRole("button", { name: "Use Full access" }));
+    expect(work.update).toHaveBeenCalledWith({ defaultAccess: "full-access" });
   });
 
   it("says so while the host has not answered, instead of showing controls that cannot save", () => {
