@@ -1,6 +1,8 @@
 import {
   AGENT_RUN_TURN_REQUEST_SHAPE,
   AGENT_RUN_USAGE_AGGREGATE_TYPE,
+  SHIELD_REVIEW_REQUEST_SHAPE,
+  SHIELD_REVIEW_USAGE_AGGREGATE_TYPE,
   decodeCodeOperationEventFrame,
   decodeContextUsageReconciled,
   decodeUsageRecord,
@@ -52,7 +54,8 @@ export class UsageProjection implements Projection {
     if (
       event.aggregateType !== "context-ledger" &&
       event.aggregateType !== "image-job" &&
-      event.aggregateType !== AGENT_RUN_USAGE_AGGREGATE_TYPE
+      event.aggregateType !== AGENT_RUN_USAGE_AGGREGATE_TYPE &&
+      event.aggregateType !== SHIELD_REVIEW_USAGE_AGGREGATE_TYPE
     )
       return;
     this.#applyUsageReconciled(connection, event);
@@ -75,9 +78,14 @@ export class UsageProjection implements Projection {
 
     // A child run's usage is journaled beside the run, not on it, but it is
     // the run's spend: its subject is the run itself.
+    // A Shield review is the reviewed Code thread's spend.
     const subject = manifest?.subject ?? {
       aggregateType:
-        event.aggregateType === AGENT_RUN_USAGE_AGGREGATE_TYPE ? "agent-run" : event.aggregateType,
+        event.aggregateType === AGENT_RUN_USAGE_AGGREGATE_TYPE
+          ? "agent-run"
+          : event.aggregateType === SHIELD_REVIEW_USAGE_AGGREGATE_TYPE
+            ? "code-thread"
+            : event.aggregateType,
       aggregateId: event.aggregateId,
     };
     // A reconciled request whose subject thread (or child run) was purged keeps
@@ -192,7 +200,10 @@ export class UsageProjection implements Projection {
         String(event.hostId),
         // A child run has no Octant planning estimate, so it has no variance
         // either; the request-detail table says so instead of showing zero.
-        reconciliation.requestShape === AGENT_RUN_TURN_REQUEST_SHAPE ? 0 : 1,
+        reconciliation.requestShape === AGENT_RUN_TURN_REQUEST_SHAPE ||
+          reconciliation.requestShape === SHIELD_REVIEW_REQUEST_SHAPE
+          ? 0
+          : 1,
       );
   }
 }

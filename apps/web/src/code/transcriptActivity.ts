@@ -118,6 +118,20 @@ export function applyActivityEvent(
       rows: upsert(activity.rows, foldToolEvent(previousTool(activity.rows, id), event)),
     };
   }
+  if (event.kind === "approval-reviewed") {
+    return {
+      ...activity,
+      rows: [
+        ...activity.rows,
+        {
+          kind: "review",
+          id: `${event.decision.decidedAt}:${String(activity.rows.length)}`,
+          summary: event.summary,
+          decision: event.decision,
+        },
+      ],
+    };
+  }
   if (event.kind === "task-progress") {
     return {
       ...activity,
