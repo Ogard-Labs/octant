@@ -124,7 +124,7 @@ function sshInCommandPosition(text: string): boolean {
   for (const piece of text.split(/[;&|(`\n]/)) {
     for (const word of piece.trim().split(/\s+/)) {
       const bare = word.replace(/^['"]|['"]$/g, "");
-      if (bare === "ssh") return true;
+      if (bare === "ssh" || bare.endsWith("/ssh")) return true;
       if (!COMMAND_PREFIXES.has(bare) && bare !== "$") break;
     }
   }
@@ -143,7 +143,8 @@ export function parseSshInvocation(command: string): SshInvocation {
   const trimmed = command.trim();
   if (!sshInCommandPosition(trimmed)) return { kind: "not-ssh" };
   const words = localWords(trimmed);
-  if (words === undefined || words[0] !== "ssh") {
+  // `/usr/bin/ssh` is ssh; an ssh anywhere else is whatever that file is.
+  if (words === undefined || !/^(?:\/(?:usr\/)?(?:local\/)?bin\/)?ssh$/.test(words[0] ?? "")) {
     return { kind: "unreadable", host: guessHost(trimmed) };
   }
   let user: string | undefined;
@@ -249,14 +250,21 @@ function localWords(text: string): ReadonlyArray<string> | undefined {
 
 /** The first word after `ssh` that is not an option: the host the record names. */
 function guessHost(text: string): string | undefined {
-  const match =
-    /(?:^|[\s;&|(`$'"])ssh['"]?\s+((?:-[A-Za-z0-9]+(?:\s+[^\s-][^\s]*)?\s+)*)([^\s;&|)'"`]+)/.exec(
-      text,
-    );
-  const target = match?.[2];
-  if (target === undefined) return undefined;
-  const host = target.slice(target.lastIndexOf("@") + 1);
-  return /^[A-Za-z0-9_][A-Za-z0-9._-]*$/.test(host) ? host : undefined;
+  const words = text.split(/[\s;&|()`]+/).map((word) => word.replace(/^['"]+|['"]+$/g, ""));
+  const at = words.findIndex((word) => word === "ssh" || word.endsWith("/ssh"));
+  if (at === -1) return undefined;
+  for (let index = at + 1; index < words.length; index += 1) {
+    const word = words[index] ?? "";
+    if (word.length === 0) continue;
+    if (word.startsWith("-")) {
+      // A value flag standing alone takes the next word as its value.
+      if (word.length === 2 && VALUE_FLAGS.has(word.charAt(1))) index += 1;
+      continue;
+    }
+    const host = word.slice(word.lastIndexOf("@") + 1);
+    return /^[A-Za-z0-9_][A-Za-z0-9._-]*$/.test(host) ? host : undefined;
+  }
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -677,8 +685,13 @@ function segmentTier(
   if (program.includes("/") && !/^\/(?:usr\/)?(?:local\/)?s?bin$/.test(folder)) return "unknown";
   const command = program.slice(program.lastIndexOf("/") + 1);
   const text = stripped.join(" ");
-  const tier = baseTier(command, args, text, deployCommands);
-  if (tier !== "read" && tier !== "lockout" && LOCKOUT_PATHS.test(text)) return "lockout";
+  const tier = baseTier(command, args, text);
+  if (tier === "lockout") return tier;
+  if (tier !== "read" && LOCKOUT_PATHS.test(text)) return "lockout";
+  // A deploy the person described is Operate only once nothing in it is a
+  // lock-out or destructive action.
+  if (deployCommands.some((deploy) => collapse(deploy) === collapse(segment.words.join(" "))))
+    return "operate";
   return tier;
 }
 
@@ -686,9 +699,7 @@ function baseTier(
   command: string,
   args: ReadonlyArray<string>,
   text: string,
-  deployCommands: ReadonlyArray<string>,
 ): ShieldRemoteCommandTier {
-  if (deployCommands.some((deploy) => collapse(deploy) === collapse(text))) return "operate";
   if (LOCKOUT_COMMANDS.has(command) || command.startsWith("mkfs")) return "lockout";
   if ((command === "init" || command === "telinit") && /^[016sS]$/.test(args[0] ?? ""))
     return "lockout";
@@ -742,7 +753,7 @@ function baseTier(
   if (command === "service") {
     const [unit = "", verb = ""] = args;
     if (unit === "--status-all" || verb === "status") return "read";
-    if (/^(?:stop)$/.test(verb) && SSH_UNITS.test(unit)) return "lockout";
+    if (SSH_UNITS.test(unit)) return "lockout";
     if (/^(?:restart|reload|start|stop|try-restart|force-reload)$/.test(verb)) return "operate";
     return "unknown";
   }

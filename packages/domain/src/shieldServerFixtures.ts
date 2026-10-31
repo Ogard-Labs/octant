@@ -121,6 +121,8 @@ export const SHIELD_REMOTE_COMMAND_FIXTURES: ReadonlyArray<ShieldRemoteCommandFi
   { command: "sed -n p /etc/hosts", tier: "unknown" },
   { command: "systemctl start reboot.target", tier: "lockout" },
   { command: "systemctl restart networking", tier: "lockout" },
+  { command: "sudo service ssh restart", tier: "lockout" },
+  { command: "service networking reload", tier: "lockout" },
   { command: "chmod -R 000 /etc/ssh", tier: "lockout" },
   { command: "chmod -R 000 /", tier: "lockout" },
   { command: "mv /etc/ssh /etc/ssh.bak", tier: "lockout" },

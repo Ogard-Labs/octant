@@ -87,6 +87,11 @@ describe("remote command tiers", () => {
   it("still sends a described deploy that deletes data to the person", () => {
     const deploy = "rm -rf /srv/app/current && ./release.sh";
     expect(classifyRemoteCommand(deploy, [deploy]).tier).toBe("lockout");
+    const single = "rm -rf /srv/app/current";
+    expect(classifyRemoteCommand(single, [single]).tier).toBe("lockout");
+    expect(
+      judge(`ssh web1 '${single}'`, [{ ...web, profile: "operate", deployCommands: [single] }]),
+    ).toMatchObject({ verdict: "ask", rule: "server-lockout" });
   });
 
   it("reads a command hidden in a substitution as the command it runs", () => {
@@ -119,6 +124,11 @@ describe("reading an ssh command", () => {
   it("takes only ssh in command position as an ssh call", () => {
     expect(parseSshInvocation('git commit -m "fix ssh bug"').kind).toBe("not-ssh");
     expect(parseSshInvocation("grep ssh /var/log/auth.log").kind).toBe("not-ssh");
+    expect(parseSshInvocation("/usr/bin/ssh web1 uptime")).toMatchObject({
+      kind: "ssh",
+      host: "web1",
+    });
+    expect(parseSshInvocation("/tmp/ssh web1 uptime")).toMatchObject({ kind: "unreadable" });
     expect(parseSshInvocation("'ssh' web1 uptime")).toMatchObject({ kind: "ssh", host: "web1" });
     expect(parseSshInvocation('ssh "$H" uptime')).toMatchObject({ kind: "unreadable" });
     expect(parseSshInvocation("echo hi | ssh web1 uptime")).toMatchObject({
