@@ -49,6 +49,9 @@ import {
 import {
   CredentialStoreFailure,
   deriveHostRuntimeHostId,
+  isLinkedSecretMaterial,
+  linkedSecretStoresStatePath,
+  makeLinkedSecretStores,
   prepareHostRuntimePaths,
   readHostInfoReceipt,
   resolveHostRuntimePaths,
@@ -746,6 +749,11 @@ export function installProviderCredentialIpcHandlers(options: {
   options.handle(IPC_CHANNELS.setProviderCredential, async (event, instanceId, credential) => {
     authorize(event);
     const validated = validateProviderCredentialRequest(instanceId, credential);
+    // A pointer changes only through the journaled secret-store routes, so a
+    // pasted key never silently replaces one.
+    if (await holdsLinkedReference(options.store, validated.providerInstanceId)) {
+      throw new Error(LINKED_REFERENCE_MESSAGE);
+    }
     try {
       await options.store.set(validated.providerInstanceId, validated.credential);
     } catch {
@@ -764,6 +772,9 @@ export function installProviderCredentialIpcHandlers(options: {
   options.handle(IPC_CHANNELS.clearProviderCredential, async (event, instanceId) => {
     authorize(event);
     const providerInstanceId = validateProviderInstanceId(instanceId);
+    if (await holdsLinkedReference(options.store, providerInstanceId)) {
+      throw new Error(LINKED_REFERENCE_MESSAGE);
+    }
     try {
       await options.store.delete(providerInstanceId);
     } catch {
@@ -777,7 +788,8 @@ export function installProviderCredentialIpcHandlers(options: {
     const providerInstanceId = validateProviderInstanceId(instanceId);
     return queueApiKeyOperation(async () => {
       const stored = await readStoredApiKeys(options.store, providerInstanceId);
-      return stored === undefined ? [] : listApiKeys(stored);
+      // A linked reference is not a list of keys; Settings shows it apart.
+      return stored === undefined || isLinkedSecretMaterial(stored) ? [] : listApiKeys(stored);
     });
   });
   options.handle(IPC_CHANNELS.addProviderApiKey, async (event, instanceId, credential, label) => {
@@ -786,6 +798,9 @@ export function installProviderCredentialIpcHandlers(options: {
     const requestedLabel = label === undefined ? undefined : validateApiKeyLabel(label);
     return queueApiKeyOperation(async () => {
       const stored = await readStoredApiKeys(options.store, validated.providerInstanceId);
+      if (stored !== undefined && isLinkedSecretMaterial(stored)) {
+        throw new ApiKeyPoolError("linked-secret");
+      }
       const added = addApiKey(stored, { secret: validated.credential, label: requestedLabel });
       await options.store.set(validated.providerInstanceId, added.stored);
       return added.key;
@@ -870,12 +885,28 @@ async function readStoredApiKeys(
   return store.resolve(providerInstanceId);
 }
 
+const LINKED_REFERENCE_MESSAGE =
+  "This provider's key comes from a linked secret store. Remove the link in Settings first.";
+
+async function holdsLinkedReference(
+  store: CredentialStore,
+  providerInstanceId: string,
+): Promise<boolean> {
+  try {
+    const stored = await readStoredApiKeys(store, providerInstanceId);
+    return stored !== undefined && isLinkedSecretMaterial(stored);
+  } catch {
+    return false;
+  }
+}
+
 async function requireStoredApiKeys(
   store: CredentialStore,
   providerInstanceId: string,
 ): Promise<string> {
   const stored = await readStoredApiKeys(store, providerInstanceId);
   if (stored === undefined) throw new ApiKeyPoolError("unknown-key");
+  if (isLinkedSecretMaterial(stored)) throw new ApiKeyPoolError("linked-secret");
   return stored;
 }
 
@@ -1680,6 +1711,7 @@ async function startDesktopCredentialBroker(): Promise<CredentialBroker | undefi
     backend.mcpServerCredentials,
     backend.desktopProviderCredentials,
     backend.pushPlatformCredentials,
+    makeLinkedSecretStores({ statePath: linkedSecretStoresStatePath(desktopDataDirectory) }),
   );
 }
 

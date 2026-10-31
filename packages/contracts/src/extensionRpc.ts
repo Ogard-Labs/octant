@@ -30,6 +30,7 @@ import {
 import { ExtensionToolGrantId, ExtensionToolGrantRecorded } from "./extensionEvents";
 import { ToolExtensionId } from "./toolActions";
 import { ProjectId } from "./projects";
+import { SecretStoreItemReference, SecretStoreKind } from "./secretStores";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const boundedText = (maximumLength: number) =>
@@ -129,6 +130,16 @@ const userAddedSecretValue = Schema.Struct({
   name: boundedText(128).pipe(Schema.pattern(/^[A-Za-z_][A-Za-z0-9_-]*$/)),
   value: Schema.String.pipe(Schema.maxLength(8192)),
   secret: Schema.Boolean,
+  /**
+   * A secret that comes from a linked secret store: the host keeps this item
+   * reference instead of a value and fetches the value when the server is
+   * launched. `value` is empty and `secret` is true.
+   */
+  linked: Schema.optional(
+    Schema.Struct({ store: SecretStoreKind, reference: SecretStoreItemReference }).annotations(
+      strict,
+    ),
+  ),
 }).annotations(strict);
 export const UserAddedMcpServerRequest = Schema.Struct({
   name: boundedText(64),

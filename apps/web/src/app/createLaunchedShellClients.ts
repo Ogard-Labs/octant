@@ -49,6 +49,10 @@ import {
 } from "@octant/client-runtime/extension-client";
 import { createFolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import {
+  createSecretStoresClient,
+  type SecretStoresClient,
+} from "@octant/client-runtime/secret-stores-client";
+import {
   createReplicaStoreSettingsClient,
   type ReplicaStoreSettingsClient,
 } from "@octant/client-runtime/replica-store-settings-client";
@@ -178,6 +182,8 @@ export interface LaunchedShellClients {
     | undefined;
   /** Absent off a local host: choosing a sync store is host authority. */
   readonly replicaStoreSettingsClient: ReplicaStoreSettingsClient | undefined;
+  /** Absent off a local host: linking a secret store is host authority. */
+  readonly secretStoresClient: SecretStoresClient | undefined;
   /** Absent off a local host: creating, joining, and revoking are host authority. */
   readonly replicaMembershipClient: ReplicaMembershipClient | undefined;
   /** Read-only sync status, for a client that is not on the host. */
@@ -257,6 +263,15 @@ export function createLaunchedShellClients(
     replicaStoreSettingsClient = undefined;
   }
 
+  let secretStoresClient: SecretStoresClient | undefined;
+  try {
+    secretStoresClient = createSecretStoresClient(port);
+  } catch {
+    // Linking a secret store is host authority; a client on any other host
+    // leaves Settings › Secret stores saying so.
+    secretStoresClient = undefined;
+  }
+
   let replicaMembershipClient: ReplicaMembershipClient | undefined;
   try {
     replicaMembershipClient = createReplicaMembershipClient(port);
@@ -311,6 +326,7 @@ export function createLaunchedShellClients(
     previewClient: createPreviewClient(port),
     providerUsageLimitsClient,
     replicaStoreSettingsClient,
+    secretStoresClient,
     replicaMembershipClient,
     replicaSyncStatusClient: createReplicaSyncStatusClient(port),
     shipClient: options.shipClient ?? createShipClient(port),

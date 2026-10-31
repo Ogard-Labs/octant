@@ -1,11 +1,16 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import { homedir, tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   CONFIGURATION_FAILURE_EXIT_CODE,
+  linkedSecretStoresStatePath,
+  makeLinkedSecretStores,
   makeSecretServiceCredentialStore,
   nextRestartBackoff,
+  resolveHostRuntimePaths,
   startCredentialBroker,
   type CredentialBroker,
+  type LinkedSecretStores,
 } from "@octant/host-runtime";
 import {
   installedArtifactServerStartCommand,
@@ -145,7 +150,27 @@ export async function defaultCredentialBrokerFactory(
   platform: NodeJS.Platform = process.platform,
 ): Promise<CredentialBroker | undefined> {
   if (platform !== "linux") return undefined;
-  return startSecretServiceCredentialBroker();
+  return startSecretServiceCredentialBroker(
+    makeSecretServiceCredentialStore,
+    linkedSecretStoresForThisHost(),
+  );
+}
+
+/** The record of linked secret stores sits in the host's data directory. */
+function linkedSecretStoresForThisHost(): LinkedSecretStores | undefined {
+  try {
+    const paths = resolveHostRuntimePaths({
+      env: process.env,
+      platform: process.platform,
+      home: homedir(),
+      temporaryDirectory: tmpdir(),
+      uid: process.getuid?.() ?? 0,
+    });
+    return makeLinkedSecretStores({ statePath: linkedSecretStoresStatePath(paths.dataDirectory) });
+  } catch {
+    // A data directory that fails validation stops the server anyway.
+    return undefined;
+  }
 }
 
 /**
@@ -155,6 +180,7 @@ export async function defaultCredentialBrokerFactory(
  */
 export function startSecretServiceCredentialBroker(
   makeStore: typeof makeSecretServiceCredentialStore = makeSecretServiceCredentialStore,
+  linkedSecretStores?: LinkedSecretStores,
 ): Promise<CredentialBroker> {
   return startCredentialBroker(
     makeStore(),
@@ -165,6 +191,8 @@ export function startSecretServiceCredentialBroker(
     makeStore({ namespace: "canvas-public-share-secret" }),
     makeStore({ namespace: "mcp-server-credential" }),
     makeStore({ namespace: "desktop-provider-credential" }),
+    undefined,
+    linkedSecretStores,
   );
 }
 
