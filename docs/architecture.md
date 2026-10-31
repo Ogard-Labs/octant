@@ -10146,8 +10146,18 @@ sandbox, no prompts". Built.
   (the Octant Harness's read, write, edit, and grep; the ACP client's file
   read and write) and Claude Code's file tools, through Octant's tool gate,
   answer a protected path at every level with the group, the path, and the
-  channel to use instead (`protectedFileRefusal`). A search across a folder
-  skips protected files without opening them. A command's refusal is the
+  channel to use instead (`protectedFileRefusal`). The Octant Harness's
+  search across a folder skips protected files without opening them.
+  Claude Code's Grep, Glob, and LS take no exclusion and, at the postures
+  where the runtime runs outside Octant's profile (approval-gated and
+  auto-accept-edits), run in its unwrapped process, so a search rooted at or
+  above an existing protected file, or inside a protected folder, is refused
+  whole (`secretGuardSearchRefusal`); its own sandbox cannot carry the list,
+  because its `allowRead` takes precedence over `denyRead`. Protected entries
+  are matched in their lexical and resolved forms, so a linked folder's target
+  is refused too. In the Seatbelt profiles each exception follows only its own
+  rule's denial, and the person's added paths are denied last, after a
+  launch's extra rules. A command's refusal is the
   operating system's `Operation not permitted`; Octant does not rewrite
   command output.
 - **Secret redaction everywhere.** Known key formats (private key blocks,

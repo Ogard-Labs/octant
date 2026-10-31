@@ -267,8 +267,9 @@ What to know:
   not covered until the next start.
 - Claude Code's own commands below Full access run in Claude Code's sandbox,
   which keeps them to the Project folder. If the Project folder contains your
-  home folder, Octant refuses Claude's file tools on a protected file; its
-  commands are held only by your approval or its reviewer.
+  home folder, Octant refuses Claude's file tools on a protected file, and a
+  search whose folder holds one; its commands are held only by your approval
+  or its reviewer.
 
 ### What the Claude runtime does on its own
 
