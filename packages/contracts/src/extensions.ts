@@ -9,6 +9,7 @@ import {
   ExtensionContentDigest,
   ExtensionPackageId,
   ExtensionPackageVersion,
+  ExtensionNpmSource,
   ExtensionPublisherKeyFingerprint,
   extensionSemverPattern,
 } from "./extensionIdentity";
@@ -16,6 +17,8 @@ import {
 export {
   ExtensionComponentId,
   ExtensionContentDigest,
+  ExtensionNpmPackageName,
+  ExtensionNpmSource,
   ExtensionPackageId,
   ExtensionPackageVersion,
   ExtensionPublisherKeyFingerprint,
@@ -159,6 +162,8 @@ export type ExtensionPublisherHoldReason = typeof ExtensionPublisherHoldReason.T
 
 export const ExtensionProvenance = Schema.Struct({
   canonicalUrl: Schema.optional(canonicalHttpUrl),
+  /** Set by the host only, for a package it fetched from an npm registry. */
+  npm: Schema.optional(ExtensionNpmSource),
   publisher: Schema.optional(boundedText(256)),
   /** The key whose signature the host verified, set by the host only. */
   publisherKey: Schema.optional(ExtensionPublisherKeyFingerprint),
@@ -910,6 +915,12 @@ export const ExtensionPackageState = Schema.Struct({
   addedInSettings: Schema.optional(Schema.Literal(true)),
   compatibility: ExtensionCompatibility,
   activation: ExtensionActivationState,
+  /**
+   * Where the host fetched this package from when it came from an npm
+   * registry: the package, the exact version, the registry, and the integrity
+   * of the tarball the host checked.
+   */
+  npm: Schema.optional(ExtensionNpmSource),
   /**
    * An outside provider driver's publisher keys: the one pinned for its
    * package name and source, the one that signed the selected version, and

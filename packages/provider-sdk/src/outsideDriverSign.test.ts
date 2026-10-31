@@ -95,6 +95,31 @@ describe("the outside driver signing tool", () => {
     },
   );
 
+  it("signs under the npm package name when --name gives one", async () => {
+    const root = await driverFolder();
+    const key = throwawayKey();
+
+    const run = spawnSync(
+      process.execPath,
+      [tool, root, "--key-stdin", "--name", "@example/loopback-chat"],
+      { input: key.pem, encoding: "utf8" },
+    );
+
+    expect(run.status).toBe(0);
+    const written = JSON.parse(await readFile(join(root, "octant-signature.json"), "utf8"));
+    expect(written.name).toBe("@example/loopback-chat");
+  });
+
+  it("refuses a flag it does not know", async () => {
+    const root = await driverFolder();
+    const run = spawnSync(process.execPath, [tool, root, "--key-stdin", "--registry", "x"], {
+      input: throwawayKey().pem,
+      encoding: "utf8",
+    });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("Usage:");
+  });
+
   it("refuses a key that is not Ed25519 without repeating it", async () => {
     const root = await driverFolder();
     const rsa = generateKeyPairSync("rsa", { modulusLength: 2048 })
