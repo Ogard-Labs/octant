@@ -75,11 +75,10 @@ but they do not own a second palette or visual language.
   that already is. Weights follow the one ladder in [Scale](#scale).
 - **Sentence case everywhere**: titles, labels, buttons, tabs, menu items.
   Product nouns keep their capital (Project, Chat, Work, Code, Environment).
-- **Say what happens.** A posture name never promises more than the runtime
-  does. Where a session-only Full access leaves Octant Harness asking, the
-  access control and the dock's Access fact read "Full access · asks first",
-  and the control's tooltip says "Full access this session. Octant Harness
-  still asks before writes and commands."
+- **Say what happens.** A mode name never promises more than the runtime
+  does. Where a thread's provider has no reviewer, a thread set to Auto reads
+  "Ask first" and says why; Full access with the sandbox off reads "Full
+  access · no sandbox".
 - **One sentence of help.** A subtitle or row description is one sentence
   that says what the thing does. Longer explanations move to the docs.
 - **Numbers read in English.** Counts, sizes, and token figures use the
@@ -102,7 +101,8 @@ but they do not own a second palette or visual language.
   a host fact (see "Host platform in copy" under
   [Security and authority](docs/architecture.md#security-and-authority)).
 - **Vocabulary.** `Project`, `thread`, `checkout`, `worktree`, `base branch`,
-  `Environment`, `access` (Plan / Approval / Auto-accept edits / Full access),
+  `Environment`, `mode` (Auto / Ask first / Accept edits / Plan / Full access;
+  Off is a Settings switch, never a mode),
   `delivery` (Investigation / Local implementation / Pull request / Merged).
   The word "target" does not appear in the interface.
 
@@ -1281,8 +1281,11 @@ All six composers use `ComposerAttachButton` for their file chooser. The visible
 button is the only tab stop; an unsupported model keeps the button reachable
 and explains the refusal in the surface's status line. It never opens the file
 chooser or uploads while refused. Model, access, and destination controls keep
-one type scale. Access labels read "Plan · read-only"
-and "Ask for approvals" in both new and existing threads.
+one type scale. The mode picker reads the same in new and existing threads:
+Auto (with "Recommended" where the provider has a reviewer, otherwise
+listed disabled with the reason), Ask first, Accept edits, Plan, and Full
+access, each with a one-line description; a thread at Off reads "Full access ·
+no sandbox". Choosing a mode is one click and changes the thread.
 The Code start screen's agent home (suggested prompts, Up next, Start something
 new, and Continue) is laid out in
 [Start screen: Code agent home](docs/design/start-screen.md#code-agent-home). The start screen has no image-generation control: a job needs a thread to

@@ -575,15 +575,16 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("code-default-access"),
-          label: "Default Code access",
+          label: "Default mode",
           scope: "app",
-          keywords: "access authority approval approvals full access ask read only new code thread",
+          keywords:
+            "access mode auto ask first accept edits plan full access approval approvals reviewer new thread guardrail",
         },
         {
-          id: settingId("code-approval-persistence"),
-          label: "Default approval persistence",
+          id: settingId("code-full-access-sandbox-off"),
+          label: "Turn off the sandbox in Full access",
           scope: "app",
-          keywords: "approval approvals persistence remember session project",
+          keywords: "off sandbox no sandbox full access bypass unconfined guardrail",
         },
         {
           id: settingId("code-editor-executable"),

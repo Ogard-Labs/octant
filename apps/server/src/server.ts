@@ -520,7 +520,6 @@ export function startOctantServer(
       threadAwaitsHarnessApproval,
       bindingReceiptStore,
       cacheStats,
-      codeApprovalStore,
       codeSessionAuthority,
       externalContentIngestionStore,
       gitEnvironmentPort,

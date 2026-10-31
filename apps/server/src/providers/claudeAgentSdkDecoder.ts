@@ -2,7 +2,6 @@ import type {
   ProviderContextBreakdown,
   ProviderContextPart,
   ProviderDeferredContextPart,
-  ProviderExecutionPolicy,
   ProviderFailure,
 } from "@octant/contracts";
 
@@ -865,14 +864,32 @@ export function decodeContextBreakdown(value: unknown): ProviderContextBreakdown
   return { parts, ...(deferred.length === 0 ? {} : { deferred }) };
 }
 
+/**
+ * Claude's own mode for each level: Ask first and Accept edits run `default`
+ * (Octant's gate decides each call), Auto runs `auto` (its classifier
+ * reviews each call), Full access runs `acceptEdits` with its sandbox
+ * auto-allowing sandboxed commands, and Off runs `bypassPermissions`. Mode
+ * names are the Agent SDK's `PermissionMode` (0.3.211).
+ */
 export function permissionMode(
-  policy: ProviderExecutionPolicy,
-  autoApprove?: boolean,
+  input: Pick<ClaudeOpenQueryInput, "executionPolicy" | "autoApprove" | "sandboxOff">,
 ): ClaudePermissionMode {
-  if (policy === "full-access") return "bypassPermissions";
-  if (policy === "plan") return "plan";
-  if (autoApprove === true) return "auto";
+  if (input.executionPolicy === "full-access") {
+    return input.sandboxOff === true ? "bypassPermissions" : "acceptEdits";
+  }
+  if (input.executionPolicy === "plan") return "plan";
+  if (input.autoApprove === true) return "auto";
   return "default";
+}
+
+function isClaudePermissionMode(mode: unknown): mode is ClaudePermissionMode {
+  return (
+    mode === "default" ||
+    mode === "acceptEdits" ||
+    mode === "bypassPermissions" ||
+    mode === "plan" ||
+    mode === "auto"
+  );
 }
 
 // Authority only widens when the runtime holds a tool Octant did not ask
@@ -891,7 +908,7 @@ function decodeInitializedMessage(
   const mcpServers = Array.isArray(message.mcp_servers) ? message.mcp_servers : undefined;
   const tools = stringArray(message.tools);
   const capabilities = message.capabilities === undefined ? [] : stringArray(message.capabilities);
-  const expectedPermissionMode = permissionMode(input.executionPolicy, input.autoApprove);
+  const expectedPermissionMode = permissionMode(input);
   if (
     mcpServers === undefined ||
     tools === undefined ||
@@ -1131,9 +1148,7 @@ function decodeStatus(
     (message.status !== null &&
       message.status !== "compacting" &&
       message.status !== "requesting") ||
-    (mode !== undefined &&
-      ((mode !== "default" && mode !== "bypassPermissions" && mode !== "plan" && mode !== "auto") ||
-        mode !== permissionMode(input.executionPolicy, input.autoApprove))) ||
+    (mode !== undefined && (!isClaudePermissionMode(mode) || mode !== permissionMode(input))) ||
     (message.compact_result !== undefined &&
       message.compact_result !== "success" &&
       message.compact_result !== "failed") ||
@@ -1144,9 +1159,7 @@ function decodeStatus(
     kind: "status",
     sessionId: message.session_id,
     status: message.status,
-    ...(mode === "default" || mode === "bypassPermissions" || mode === "plan" || mode === "auto"
-      ? { permissionMode: mode }
-      : {}),
+    ...(isClaudePermissionMode(mode) ? { permissionMode: mode } : {}),
     ...(message.compact_result === "success" || message.compact_result === "failed"
       ? { compactResult: message.compact_result }
       : {}),

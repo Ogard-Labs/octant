@@ -352,6 +352,28 @@ describe("resolveToolCall fail-closed order", () => {
     });
   });
 
+  it("7. at Off, outside content is recorded but no longer makes an irreversible call ask", () => {
+    const decision = resolveToolCall(
+      baseInput({
+        capability: decodeToolActionCapability({ id: "computer-use", version: 1 }),
+        arguments: {
+          allowlist: [],
+          sensitiveFieldProtection: true,
+          visibleStopControl: true,
+          maxSessionDurationMs: 60_000,
+          processOwnershipRequired: true,
+        },
+        thread: {
+          executionPolicy: "full-access",
+          sandboxOff: true,
+          approvalSatisfied: true,
+          externalContentIngested: true,
+        },
+      }),
+    );
+    expect(decision.kind).toBe("allow");
+  });
+
   it("7a. web-fetch asks on a tainted thread under every posture, and not on a clean one", () => {
     const fetch = (
       externalContentIngested: boolean,

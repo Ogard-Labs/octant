@@ -77,6 +77,7 @@ export function createNativeHarnessAuthority(
         executionPolicy,
         approvalSatisfied: executionPolicy === "full-access",
         externalContentIngested: options.readThreadTaint(threadId).externalContentIngested,
+        ...(code?.sandboxOff === true ? { sandboxOff: true } : {}),
         ...(code?.toolConstraints === undefined ? {} : { toolConstraints: code.toolConstraints }),
         ...(code?.profileDisplayName === undefined
           ? {}

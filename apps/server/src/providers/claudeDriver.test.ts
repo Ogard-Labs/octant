@@ -450,11 +450,19 @@ describe("Claude execution policy", () => {
   });
 
   it("maps every Octant policy to the exact Claude permission options", () => {
+    // Full access is accept-edits inside Claude's sandbox; only Off bypasses.
     expect(claudeExecutionOptions("full-access")).toEqual({
+      permissionMode: "acceptEdits",
+      allowDangerouslySkipPermissions: false,
+      tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "AskUserQuestion", "TodoWrite"],
+    });
+    expect(claudeExecutionOptions("full-access", false, "code", "darwin", true)).toEqual({
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
       tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "AskUserQuestion", "TodoWrite"],
     });
+    expect(claudeExecutionOptions("approval-gated", true).permissionMode).toBe("auto");
+    expect(claudeExecutionOptions("auto-accept-edits", true).permissionMode).toBe("auto");
     expect(claudeExecutionOptions("approval-gated")).toEqual({
       permissionMode: "default",
       allowDangerouslySkipPermissions: false,
@@ -543,19 +551,29 @@ describe("Claude execution policy", () => {
     await acquired.close();
   });
 
-  it("configures the strict exact-root sandbox only for approval-gated sessions", async () => {
-    for (const executionPolicy of ["full-access", "approval-gated", "plan"] as const) {
+  it("keeps Claude's exact-root sandbox at every level but Off, auto-allowing sandboxed commands only at Full access", async () => {
+    const cases = [
+      { executionPolicy: "approval-gated" },
+      { executionPolicy: "full-access" },
+      { executionPolicy: "full-access", sandboxOff: true },
+      { executionPolicy: "plan" },
+    ] as const;
+    for (const level of cases) {
       const f = harness();
       const acquired = await acquire(f.driver);
-      await Effect.runPromise(acquired.connection.start({ sessionId, modelId, executionPolicy }));
+      await Effect.runPromise(acquired.connection.start({ sessionId, modelId, ...level }));
+      const sandboxed =
+        level.executionPolicy === "approval-gated" ||
+        (level.executionPolicy === "full-access" && !("sandboxOff" in level));
 
-      expect(f.opens[0]?.sandbox).toEqual(
-        executionPolicy === "approval-gated"
+      expect([level, f.opens[0]?.sandbox]).toEqual([
+        level,
+        sandboxed
           ? {
               enabled: true,
               failIfUnavailable: true,
               allowUnsandboxedCommands: false,
-              autoAllowBashIfSandboxed: false,
+              autoAllowBashIfSandboxed: level.executionPolicy === "full-access",
               filesystem: {
                 denyRead: ["/"],
                 allowRead: [projectRoot],
@@ -563,10 +581,32 @@ describe("Claude execution policy", () => {
               },
             }
           : undefined,
-      );
+      ]);
 
       await acquired.close();
     }
+  });
+
+  it("refuses a Full access edit outside the Project without asking, and allows one inside", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver);
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "full-access" }),
+    );
+    const open = f.opens[0]!;
+    const edit = (filePath: string, toolUseId: string) =>
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Write",
+        input: { file_path: filePath, content: "x" },
+        toolUseId,
+        signal: new AbortController().signal,
+      });
+    await expect(edit(`${projectRoot}/notes.md`, "inside")).resolves.toEqual({ behavior: "allow" });
+    await expect(edit("/etc/hosts", "outside")).resolves.toMatchObject({ behavior: "deny" });
+
+    await acquired.close();
   });
 
   it("runs the pre-tool gate before Full-access callbacks without fabricating approvals", async () => {

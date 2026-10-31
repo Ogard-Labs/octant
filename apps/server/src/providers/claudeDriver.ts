@@ -145,8 +145,9 @@ export function claudeExecutionOptions(
   autoApprove?: boolean,
   mode?: ProviderAcquireInput["mode"],
   platform: NodeJS.Platform = process.platform,
+  sandboxOff?: boolean,
 ): ClaudeExecutionOptions {
-  const options = claudePolicyOptions(policy, autoApprove);
+  const options = claudePolicyOptions(policy, autoApprove, sandboxOff);
   // Work has no shell or Git authority, so Claude is never offered Bash there
   // rather than offered it and asked about each call: a person approving a
   // command would hand a Work thread authority its mode does not have.
@@ -245,14 +246,24 @@ function isPlanShellCommand(
 function claudePolicyOptions(
   policy: ProviderExecutionPolicy,
   autoApprove?: boolean,
+  sandboxOff?: boolean,
 ): ClaudeExecutionOptions {
   switch (policy) {
     case "full-access":
-      return {
-        permissionMode: "bypassPermissions",
-        allowDangerouslySkipPermissions: true,
-        tools: [...CLAUDE_TOOLS],
-      };
+      // Full access is Claude's accept-edits mode inside its own sandbox,
+      // which runs sandboxed commands without asking; only Off (the
+      // person's Settings switch) bypasses permissions with no sandbox.
+      return sandboxOff === true
+        ? {
+            permissionMode: "bypassPermissions",
+            allowDangerouslySkipPermissions: true,
+            tools: [...CLAUDE_TOOLS],
+          }
+        : {
+            permissionMode: "acceptEdits",
+            allowDangerouslySkipPermissions: false,
+            tools: [...CLAUDE_TOOLS],
+          };
     case "auto-accept-edits":
     case "approval-gated":
       // Both postures run Claude in its ordinary permission mode: Octant's own
@@ -278,12 +289,16 @@ function claudePolicyOptions(
 function claudeSandboxSettings(
   policy: ProviderExecutionPolicy,
   projectRoot: string,
+  sandboxOff?: boolean,
 ): ClaudeSandboxSettings | undefined {
-  if (policy !== "approval-gated" && policy !== "auto-accept-edits") return undefined;
+  const trusted = policy === "full-access" && sandboxOff !== true;
+  if (policy !== "approval-gated" && policy !== "auto-accept-edits" && !trusted) {
+    return undefined;
+  }
   return {
     enabled: true,
     failIfUnavailable: true,
-    autoAllowBashIfSandboxed: false,
+    autoAllowBashIfSandboxed: trusted,
     allowUnsandboxedCommands: false,
     filesystem: {
       denyRead: ["/"],
@@ -1532,6 +1547,7 @@ function makeConnection(
         readonly modelId: ProviderModelId;
         readonly executionPolicy: ProviderExecutionPolicy;
         readonly autoApprove?: boolean;
+        readonly sandboxOff?: boolean;
         readonly modelOptionValues?: ProviderModelOptionValues;
         readonly singleUse?: boolean;
         readonly nativeArtifacts?: boolean;
@@ -1648,6 +1664,8 @@ function makeConnection(
           input.executionPolicy,
           input.autoApprove,
           mode,
+          process.platform,
+          input.sandboxOff,
         );
         // Read at each launch: one launch per turn means the next turn after
         // the person turns the setting or the thread's choice off launches
@@ -1675,7 +1693,7 @@ function makeConnection(
             projectRoot,
             isProjectConfinedPath: options.isProjectConfinedPath,
           });
-        const sandbox = claudeSandboxSettings(input.executionPolicy, projectRoot);
+        const sandbox = claudeSandboxSettings(input.executionPolicy, projectRoot, input.sandboxOff);
         let callbackState: SessionState | undefined;
         const canUseTool: ClaudeOpenQueryInput["canUseTool"] = async (request) => {
           const activeState = callbackState;
@@ -1960,7 +1978,13 @@ function makeConnection(
             isPlanShellCommand(input.executionPolicy, request.toolName, executionOptions.tools)
               ? settledUnasked()
               : askThroughGrant();
-          if (input.executionPolicy === "full-access") {
+          // Off asks nothing. Full access asks nothing inside the folder, so
+          // an edit still has to name a path inside it; Claude's sandbox
+          // already holds commands there.
+          if (
+            input.executionPolicy === "full-access" &&
+            (input.sandboxOff === true || !CLAUDE_EDIT_TOOLS.has(request.toolName))
+          ) {
             return decide();
           }
           // A shell call carries no cwd of its own: Claude Code runs it in the
@@ -2017,6 +2041,7 @@ function makeConnection(
               ...(effort === undefined ? {} : { effort }),
               executionPolicy: input.executionPolicy,
               ...(input.autoApprove === undefined ? {} : { autoApprove: input.autoApprove }),
+              ...(input.sandboxOff === true ? { sandboxOff: true } : {}),
               ...(resumeSessionId === undefined ? {} : { resumeSessionId }),
               ...(assignedSessionId === undefined ? {} : { sessionId: assignedSessionId }),
               // Nothing resumes a single-use session, so the runtime's own
@@ -2262,6 +2287,7 @@ function makeConnection(
               modelId: input.modelId ?? identity.modelId,
               executionPolicy: input.executionPolicy,
               ...(input.autoApprove === undefined ? {} : { autoApprove: input.autoApprove }),
+              ...(input.sandboxOff === true ? { sandboxOff: true } : {}),
               ...(input.modelOptionValues === undefined
                 ? {}
                 : { modelOptionValues: input.modelOptionValues }),

@@ -609,6 +609,21 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               origin,
             );
           }
+          // Full access no longer asks for a native confirmation, so the
+          // confirmation no longer keeps a paired device from reaching it.
+          // A device may lower a thread; raising one to Full access, or
+          // turning the sandbox off, is chosen at a window on this host.
+          if (
+            command !== undefined &&
+            callerKind === "remote-device" &&
+            raisesToFullAccess(command)
+          ) {
+            return failureResponse(
+              { category: "unauthorized", message: FULL_ACCESS_LOCAL_ONLY },
+              403,
+              origin,
+            );
+          }
           if (command !== undefined) {
             return jsonResponse(
               await dependencies.service.execute(authenticatedWindowId, command, request.signal),
@@ -2563,5 +2578,23 @@ class CodeRouteRejected extends Error {
     readonly status: number,
   ) {
     super(message);
+  }
+}
+
+const FULL_ACCESS_LOCAL_ONLY = "Full access is chosen in the Octant window on this host.";
+
+function raisesToFullAccess(command: CodeCommand): boolean {
+  switch (command.kind) {
+    case "change-code-thread-access":
+    case "create-managed-code-thread":
+      return command.executionPolicy === "full-access";
+    case "create-code-thread":
+      return command.thread.executionPolicy === "full-access";
+    case "update-code-settings":
+      return (
+        command.defaultExecutionPolicy === "full-access" || command.fullAccessSandboxOff === true
+      );
+    default:
+      return false;
   }
 }

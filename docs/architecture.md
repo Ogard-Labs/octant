@@ -113,8 +113,9 @@ The design rests on a small set of invariants that every package obeys:
 - **Authority follows what a mode binds to.** Chat Projects are virtual,
   memory-scoped containers with no implicit filesystem or shell authority. Work
   binds one project root and Code binds one directory, each meant to be
-  OS-confined; Code starts approval-gated unless Full access was explicitly
-  remembered, and Plan mode is always read-only. Below Full access, Octant's own
+  OS-confined; Code starts in the mode first run or Settings chose (Auto where
+  the provider has a reviewer, else Ask first), and Plan mode is always
+  read-only. Below Full access, Octant's own
   tool launches are OS-confined; some provider runtimes are not yet (Codex in
   every posture, Claude outside Plan) and rely on the runtime's own sandbox, per
   the confinement matrix in [Security and authority](#security-and-authority).
@@ -857,11 +858,11 @@ reaches its own kind's commands, and nothing in the renderer can turn a Chat
 into Work or a Work thread into Chat. Settings' Chat and Work switches still
 gate their domains: with one off, the composer offers only the other kind.
 
-| Mode     | Binds to                                                                                                                            | Authority                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Chat** | A virtual, memory-scoped Project, or no Project at all                                                                              | No filesystem or shell authority. Optional safe research tools; scratch space is isolated per thread.                                                                                                                                                                                                                                                                                                                                                                             |
-| **Work** | Exactly one OS-confined project root                                                                                                | Confined reads and bounded writes inside that root, approval-gated unless the thread's access is auto-accept-edits; no shell and no Git; document adapters (docx, pptx, pdf, image); research with citations; server-authoritative board.                                                                                                                                                                                                                                         |
-| **Code** | Exactly one directory, ideally a repository root; Code threads select a checkout (current checkout or a managed worktree) inside it | Starts approval-gated; Full access only when explicitly remembered for that Project. Plan mode is always read-only. Git, terminals, tests, PR observation, and managed subagents run inside the bound root. Creating a Code Project may explicitly initialize Git in that folder (`docs/decisions/0079`) so a Code thread can prepare a checkout immediately; if that initialization fails, creation is refused and no Project is journaled. Binding without Git remains allowed. |
+| Mode     | Binds to                                                                                                                            | Authority                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Chat** | A virtual, memory-scoped Project, or no Project at all                                                                              | No filesystem or shell authority. Optional safe research tools; scratch space is isolated per thread.                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| **Work** | Exactly one OS-confined project root                                                                                                | Confined reads and bounded writes inside that root, approval-gated unless the thread's access is auto-accept-edits; no shell and no Git; document adapters (docx, pptx, pdf, image); research with citations; server-authoritative board.                                                                                                                                                                                                                                                                             |
+| **Code** | Exactly one directory, ideally a repository root; Code threads select a checkout (current checkout or a managed worktree) inside it | Starts in the default mode (Settings › Code › Access, or the Project's own); any thread switches mode from its composer. Plan mode is always read-only. Git, terminals, tests, PR observation, and managed subagents run inside the bound root. Creating a Code Project may explicitly initialize Git in that folder (`docs/decisions/0079`) so a Code thread can prepare a checkout immediately; if that initialization fails, creation is refused and no Project is journaled. Binding without Git remains allowed. |
 
 Work's missing shell and Git are withheld, not approval-gated: a person is
 never asked to approve a command in Work, because approving one would give the
@@ -6922,70 +6923,79 @@ mechanisms are:
   Nothing else about a Work turn widens:
   it stays confined to the Project root, and providers without an auto-accept
   path keep asking;
-  Full access is a remembered, per-Project decision. The host records that
-  decision with `octant project access <name> full-access` (journaled
-  `project.code-access-changed@1`); a thread that asks for Full access for
-  the Project's default then starts without a per-thread native
-  confirmation, and an existing thread can be raised to it the same way,
-  while session-only Full access still needs one. `octant agent` sends that
-  same request for a Code thread exactly when the Project's bootstrap says it
-  remembers Full access, and approval-gated otherwise; the host's check is
-  the only grant, so it refuses the request once the Project stops
-  remembering, and the terminal has no way to ask for more. A composer
-  turn may
-  request a narrower posture; the server clamps it to the thread's grant
-  and records the posture the turn ran under. A Code thread's `autoApprove`
-  flag lets a compatible harness's own reviewer answer the prompts Octant
-  would otherwise surface. It says who answers, not what is permitted:
-  categories, the sandbox, egress, and credential reach stay Octant's. It is
-  effective only on approval-gated or auto-accept-edits, only when the
-  provider reports `harnessAutoReview: "supported"`, and only while the thread
-  has not ingested untrusted content (unknown taint counts as ingested); it is
-  set with the posture through `change-code-thread-access` and clamped and
-  inherited with it. Claude runs `permissionMode: "auto"` with Octant's
-  callbacks still registered. Codex sends `approvalsReviewer: "auto_review"`
-  on approval-gated only (`codexExecutionSettings`): both prompting postures
-  run Codex `read-only`, so an in-root patch edit escalates, and Codex's
-  reviewer is thread-wide and keeps those requests from the host, so on
-  auto-accept-edits it would answer — and could deny — the edit the posture
-  waives. The waiver outranks the delegation, so a Codex auto-accept-edits
-  thread with `autoApprove` still asks the person about commands and network.
-  Octant never classifies a command as in-root-only from its text instead:
-  Codex reports `commandActions` as `unknown` for a plain `> file` redirect.
+  Code threads run in one of five modes, picked in one click from the
+  composer of any thread and in the same words as the native apps: Auto,
+  Ask first, Accept edits, Plan, and Full access. Each mode is a thread
+  posture the host stores (`executionPolicy`, `autoApprove`, and the host's
+  `sandboxOff` stamp), and the guardrail level is derived from that posture
+  by `resolveGuardrail` in `packages/domain/src/guardrailPolicy.ts`, never
+  stored beside it, so journals from before the levels replay onto them
+  unchanged:
+
+  | Mode         | Stored posture                   | Level              | Claude Code                                                      | Codex                                                          |
+  | ------------ | -------------------------------- | ------------------ | ---------------------------------------------------------------- | -------------------------------------------------------------- |
+  | Auto         | `approval-gated` + `autoApprove` | Provider review    | `permissionMode: "auto"`, its sandbox                            | `read-only` + `on-request`, `approvalsReviewer: "auto_review"` |
+  | Ask first    | `approval-gated`                 | Guarded            | `default`, its sandbox; Octant's gate decides each call          | `read-only` + `on-request`, reviewer `user`                    |
+  | Accept edits | `auto-accept-edits`              | Guarded            | `default`, its sandbox; in-root edits waived                     | `read-only` + `on-request`, in-root patch edits accepted       |
+  | Plan         | `plan`                           | Guarded, read-only | `plan`                                                           | `read-only` + `never`                                          |
+  | Full access  | `full-access`                    | Trusted            | `acceptEdits`, its sandbox with `autoAllowBashIfSandboxed: true` | `workspace-write` + `on-request`                               |
+  | (Off)        | `full-access` + `sandboxOff`     | Off                | `bypassPermissions`, no sandbox                                  | `danger-full-access` + `never`                                 |
+
+  Option names were read from the installed Agent SDK (0.3.211
+  `PermissionMode`) and the Codex app-server schema (codex-cli 0.164.0
+  `SandboxMode`, `AskForApproval`, `ApprovalsReviewer`). Auto is offered
+  only where the provider reports `harnessAutoReview: "supported"`; elsewhere
+  the picker lists it disabled with the reason and a thread set to Auto runs
+  as Ask first, because Octant never emulates a reviewer. Both prompting
+  postures delegate to the reviewer when `autoApprove` is set (maintainer
+  decision, 2026-10-31, ending the earlier approval-gated-only exception for
+  Codex): Codex's reviewer is thread-wide, so on auto-accept-edits it also
+  answers, and may deny, an in-root patch edit the posture would waive.
+  Delegation is clamped off by taint and by capability (`harnessAutoReviewEffective`).
+  At Full access nobody is asked inside the folder: Claude's edits outside
+  the Project are refused by the pre-tool gate rather than asked, its
+  commands stay in its own sandbox, and a Codex escalation that is proven
+  project-confined is accepted by the host while any other is declined. Off
+  is not a mode: it is the Settings › Code › Access switch "Turn off the
+  sandbox in Full access", shown with a one-time warning when turned on.
+  The host stamps `sandboxOff` from that switch when a thread reaches Full
+  access and clears it at every other posture; a client cannot send it. At
+  Off, outside content is still recorded on the thread but no longer makes
+  an irreversible call ask again (`resolveToolCall`); publishing still asks
+  every time at every level.
+
+  The default mode for new threads is first run's question (Auto
+  pre-selected and marked Recommended where the chosen provider has a
+  reviewer, else Ask first; Full access is never pre-selected), stored as
+  `CodeSettings.defaultExecutionPolicy` with `defaultAutoApprove`. Settings ›
+  Code › Access changes it (`code.settings-updated@1`); a Code Project may
+  override it (`change-code-project-permission-mode`, journaled
+  `project.code-permission-mode-changed@1`, which keeps the older
+  `codeAccessPersistence` in step so the Project terminal and `octant project
+access` agree); a thread's own change is journaled as
+  `code.thread-updated@1`. A Project that remembered Full access before
+  Project modes existed starts its threads in Full access, as it did. Full
+  access needs no native confirmation and is always journaled on the thread:
+  session-only Full access is gone, and a session grant left from before is
+  revoked on the thread's next mode change. A paired device may lower a
+  thread but cannot raise one to Full access, start one at Full access, or
+  turn the sandbox off; the host refuses those at the route with "Full
+  access is chosen in the Octant window on this host." `octant agent` keeps
+  sending Full access exactly when the Project remembers it. Work keeps its
+  own Settings › Work access (ask-first or auto-accept-edits) for now; the
+  shared levels in Work are a later change.
   One provider-owned exception is accepted: on OpenCode 2.x, approval-gated
   honours permission grants the person saved in OpenCode itself for the same
   repository, so such an action runs without an Octant prompt. Octant's
   denies still win, and Octant never writes such a grant; the
   [OpenCode runtime specification](design/provider-runtimes.md#opencode) states the details.
-  The access picker also offers "Lower thread" to durably return a thread to
-  approval-gated and revoke a session-only Full-access grant for that window
-  without confirmation.
-  A session-only grant of Full access is honoured by provider runtimes and not
-  by Octant Harness. The grant lives in the window's memory and the journaled
-  thread stays approval-gated; a provider turn receives the window's grant, but
-  the harness decides each tool call from the journaled thread
-  (`createNativeHarnessAuthority`), so it still asks before a write or a
-  command. Decision of 2026-10-17: the harness is not loosened, and the
-  access surfaces say so instead: for a thread on a native harness
-  driver whose Full access is session-only (`harnessAsksUnderSessionFullAccess`
-  in `packages/domain/src/codePolicy.ts`), the access picker and the
-  dock's Access fact read "Full access · asks first", and the picker's tooltip
-  says "Full access this session. Octant Harness still asks before writes and
-  commands." A remembered Full access is journaled and honoured, and reads as
-  plain Full access. The tool-call taint rule is unchanged.
-  On a host with no native confirmation surface — a headless Linux station
-  has none — session-only Full access cannot be raised from any client: the
-  access picker refuses the raise and names the remembered route, so Full
-  access arrives only through the host's recorded
-  `octant project access <name> full-access` decision. The desktop-owned
-  challenge invariant is preserved by not offering the grant the challenge
-  cannot guard.
   The native harness may swap a configured reviewer onto eligible shell
   and network prompts when a host setting is on
   (`docs/decisions/0110`); that planned path does not yet run.
   Three provider tool requests denied in one Code turn end it as
   interrupted, with the reason journaled, so a provider cannot loop a
   person's refusals.
+
 - **Pending requests across modes.** `GET /api/pending-requests` returns every
   approval, question, and turn decision (next item) the calling window can
   answer, oldest waiting first,

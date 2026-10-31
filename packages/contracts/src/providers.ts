@@ -249,6 +249,32 @@ export const ProviderExecutionPolicy = Schema.Literal(
   "plan",
 );
 export type ProviderExecutionPolicy = typeof ProviderExecutionPolicy.Type;
+
+/**
+ * How much a thread's tool calls are guarded, from most to least. Guarded asks
+ * the person; Provider review lets the provider's own reviewer answer; Trusted
+ * asks nobody inside the folder and keeps a sandbox; Off removes the sandbox
+ * too. A thread's level is derived from its stored posture (see
+ * `guardrailPolicy` in the domain), so journals written before levels existed
+ * replay onto them unchanged.
+ */
+export const GuardrailLevel = Schema.Literal("guarded", "provider-review", "trusted", "off");
+export type GuardrailLevel = typeof GuardrailLevel.Type;
+
+/**
+ * The words a person picks a thread's mode by, in picker order. Auto is
+ * Provider review, Ask first and Accept edits are Guarded, Plan is the
+ * read-only overlay, and Full access is Trusted (Off when the person turned
+ * the sandbox off in Settings). Off is never a picker choice.
+ */
+export const PermissionMode = Schema.Literal(
+  "auto",
+  "ask-first",
+  "accept-edits",
+  "plan",
+  "full-access",
+);
+export type PermissionMode = typeof PermissionMode.Type;
 export const PermissionPersistence = Schema.Literal("current-session", "project-default");
 export type PermissionPersistence = typeof PermissionPersistence.Type;
 export const ProviderReadiness = Schema.Literal(

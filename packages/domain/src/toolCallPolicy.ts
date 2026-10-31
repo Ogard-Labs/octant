@@ -16,6 +16,7 @@ import {
   nativeHarnessToolNameForCapability,
 } from "@octant/contracts";
 import { decideProfileToolConstraint } from "./agentProfilePolicy";
+import { resolveGuardrail } from "./guardrailPolicy";
 import { authorizePrincipalAction, type PrincipalKind } from "./remoteAccessPolicy";
 import { searchQueryRefusalUnderTaint } from "./untrustedContentPolicy";
 
@@ -95,6 +96,11 @@ export type ToolCallPolicyInput = {
      * even if standing full-access / session grants would otherwise allow.
      */
     readonly externalContentIngested: boolean;
+    /**
+     * The Off level: Full access with the sandbox off, where outside content
+     * is recorded but no longer gates a call. Absent is Trusted.
+     */
+    readonly sandboxOff?: boolean;
     /**
      * Snapshotted profile tool allowlist. Empty or absent means no constraint.
      * Reloading the live profile here would let an edit change a running thread.
@@ -219,11 +225,23 @@ export function resolveToolCall(input: ToolCallPolicyInput): ToolCallPolicyDecis
       return deny("thread-elevation", `${refusal.reason}: ${refusal.detail}`);
     }
   }
+  const guardrail = resolveGuardrail({
+    access: {
+      executionPolicy: input.thread.executionPolicy,
+      sandboxOff: input.thread.sandboxOff,
+    },
+    capabilities: { providerReview: true, providerSandbox: false },
+    mode: input.mode,
+  });
   const elevation = resolveThreadElevation({
     entry: catalogEntry,
     executionPolicy: input.thread.executionPolicy,
     approvalSatisfied: input.thread.approvalSatisfied,
-    externalContentIngested: input.thread.externalContentIngested,
+    // At Off the person removed the gate: outside content is still recorded
+    // on the thread, it just no longer makes an irreversible call ask.
+    externalContentIngested:
+      input.thread.externalContentIngested &&
+      (guardrail.status === "supported" ? guardrail.injectionGate : "on") === "on",
   });
   if (elevation.kind === "deny") {
     return deny("thread-elevation", elevation.reason);
@@ -262,23 +280,21 @@ export function resolveToolCall(input: ToolCallPolicyInput): ToolCallPolicyDecis
 }
 
 /**
- * Approved egress defaults (2026-08-12): Work/Plan → none; Code approval-gated
- * and auto-accept-edits → provider-endpoints-only; Code full-access →
- * unrestricted. Seatbelt materialization is owned by the shared Seatbelt
- * builder; this resolution is the policy choke-point export.
+ * The egress a tool call runs under, as the thread's guardrail level decides
+ * it (see `resolveGuardrail`). This is the policy choke-point export the
+ * Seatbelt builder materializes.
  */
 export function resolveNetworkEgressPolicy(input: {
   readonly mode: ToolActionAuthority["mode"];
   readonly executionPolicy: ProviderExecutionPolicy;
 }): ToolNetworkEgressPolicy {
-  if (input.mode !== "code") return "none";
-  if (input.executionPolicy === "plan") return "none";
-  // Auto-accepting edits says nothing about the network, so it keeps exactly
-  // the egress approval-gated Code already has.
-  if (input.executionPolicy === "approval-gated" || input.executionPolicy === "auto-accept-edits") {
-    return "provider-endpoints-only";
-  }
-  return "unrestricted";
+  const guardrail = resolveGuardrail({
+    access: { executionPolicy: input.executionPolicy },
+    // Egress does not depend on what the provider can do for itself.
+    capabilities: { providerReview: true, providerSandbox: false },
+    mode: input.mode,
+  });
+  return guardrail.status === "supported" ? guardrail.egress : guardrail.fallback.egress;
 }
 
 /**

@@ -393,6 +393,7 @@ interface SessionState {
   readonly modelId: string;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly autoApprove: boolean | undefined;
+  readonly sandboxOff: boolean | undefined;
   readonly threadId: string;
   readonly correlationId: CorrelationId;
   readonly turnOverrides?: Pick<CodexTurnStartInput, "model" | "effort">;
@@ -542,9 +543,16 @@ function request<A>(operation: () => Promise<A>): Effect.Effect<A, ProviderFailu
 export function codexExecutionSettings(
   policy: ProviderExecutionPolicy,
   autoApprove?: boolean,
+  sandboxOff?: boolean,
 ): Pick<CodexThreadStartInput, "approvalPolicy" | "sandbox" | "approvalsReviewer"> {
   if (policy === "full-access") {
-    return { approvalPolicy: "never", sandbox: "danger-full-access", approvalsReviewer: "user" };
+    // Off is the old Full access: no sandbox and nobody asked. Full access
+    // keeps Codex's own workspace sandbox, inside which an in-root write or
+    // command just runs (measured against codex-cli 0.154.0); what would
+    // leave it escalates, and the approval handler answers that.
+    return sandboxOff === true
+      ? { approvalPolicy: "never", sandbox: "danger-full-access", approvalsReviewer: "user" }
+      : { approvalPolicy: "on-request", sandbox: "workspace-write", approvalsReviewer: "user" };
   }
   if (policy === "approval-gated" || policy === "auto-accept-edits") {
     // `on-request` lets the model decide when to escalate, so the sandbox — not
@@ -562,22 +570,18 @@ export function codexExecutionSettings(
     // `commandActions` as `unknown` for a plain `> file` redirect, so "this
     // command only writes in-root" is not something either side can prove.
     //
-    // The reviewer is offered to `approval-gated` only (0138). Codex's reviewer
-    // is thread-wide, so under `read-only` it would answer the escalation an
-    // in-root patch edit now raises — a write 0018 waives — and may deny it,
-    // turning the posture the user chose into a per-write verdict. 0138 is the
-    // scoped exception to 0104's rule that delegation reaches both prompting
-    // postures, and it records what that costs: this posture no longer
-    // delegates its command prompts either, because the reviewer cannot be
-    // scoped to a class. `user` is sent rather than nothing whenever delegation
-    // is off: omitting the field leaves a thread that once delegated still
-    // routing to the reviewer after taint, after the user turns it off, or on a
-    // resume under this posture.
+    // The reviewer answers both prompting postures (maintainer decision,
+    // 2026-10-31, ending the approval-gated-only exception). Codex's reviewer
+    // is thread-wide, so on auto-accept-edits it also answers the escalation
+    // an in-root patch edit raises, and may deny one: the person asked for
+    // its review there. `user` is sent rather than nothing whenever
+    // delegation is off: omitting the field leaves a thread that once
+    // delegated still routing to the reviewer after taint, after the user
+    // turns it off, or on a resume under this posture.
     return {
       approvalPolicy: "on-request",
       sandbox: "read-only",
-      approvalsReviewer:
-        autoApprove === true && policy === "approval-gated" ? "auto_review" : "user",
+      approvalsReviewer: autoApprove === true ? "auto_review" : "user",
     };
   }
   return { approvalPolicy: "never", sandbox: "read-only", approvalsReviewer: "user" };
@@ -596,8 +600,9 @@ export function codexExecutionSettings(
 export function codexTurnExecutionSettings(
   policy: ProviderExecutionPolicy,
   autoApprove?: boolean,
+  sandboxOff?: boolean,
 ): Pick<CodexTurnStartInput, "approvalPolicy" | "sandboxPolicy" | "approvalsReviewer"> {
-  const { sandbox, ...rest } = codexExecutionSettings(policy, autoApprove);
+  const { sandbox, ...rest } = codexExecutionSettings(policy, autoApprove, sandboxOff);
   const sandboxPolicy =
     sandbox === "danger-full-access"
       ? ({ type: "dangerFullAccess" } as const)
@@ -1267,7 +1272,7 @@ function makeConnection(
         }
         if (item.kind === "approval") {
           state.outputAccepted = true;
-          if (state.executionPolicy === "full-access") {
+          if (state.executionPolicy === "full-access" && state.sandboxOff === true) {
             terminalEvent(state, {
               kind: "failed",
               failure: failure(
@@ -1307,11 +1312,14 @@ function makeConnection(
             continue;
           }
           if (
-            state.executionPolicy === "auto-accept-edits" &&
-            item.approval.kind === "file-change"
+            (state.executionPolicy === "auto-accept-edits" &&
+              item.approval.kind === "file-change") ||
+            state.executionPolicy === "full-access"
           ) {
             // Auto-accept edits waives exactly the project-confined file writes
-            // proven above; commands and permission grants still ask.
+            // proven above; commands and permission grants still ask. Full
+            // access asks nobody inside the folder, so every escalation proven
+            // project-confined above is accepted, and the rest was declined.
             Effect.runFork(
               request(() =>
                 client.respondApproval({
@@ -1436,6 +1444,7 @@ function makeConnection(
         readonly sessionId: ProviderSessionId;
         readonly executionPolicy: ProviderExecutionPolicy;
         readonly autoApprove?: boolean;
+        readonly sandboxOff?: boolean;
       },
       thread: CodexThreadResult,
       modelId: string,
@@ -1455,6 +1464,7 @@ function makeConnection(
         modelId,
         executionPolicy: input.executionPolicy,
         autoApprove: input.autoApprove,
+        sandboxOff: input.sandboxOff,
         threadId: thread.thread.id,
         ...(turnOverrides === undefined ? {} : { turnOverrides }),
         correlationId: factories.makeCorrelation() as CorrelationId,
@@ -1480,7 +1490,11 @@ function makeConnection(
         withPendingLifecycle(() =>
           Effect.gen(function* () {
             ensureSubscribed();
-            const settings = codexExecutionSettings(input.executionPolicy, input.autoApprove);
+            const settings = codexExecutionSettings(
+              input.executionPolicy,
+              input.autoApprove,
+              input.sandboxOff,
+            );
             const requestedOptions = input.modelOptionValues;
             let optionSettings: Pick<CodexThreadStartInput, "serviceTier" | "config"> = {};
             if (requestedOptions !== undefined && Object.keys(requestedOptions).length > 0) {
@@ -1673,7 +1687,11 @@ function makeConnection(
                     const turn = await client.turnStart({
                       threadId: state.threadId,
                       input: codexTurnInput(input),
-                      ...codexTurnExecutionSettings(state.executionPolicy, state.autoApprove),
+                      ...codexTurnExecutionSettings(
+                        state.executionPolicy,
+                        state.autoApprove,
+                        state.sandboxOff,
+                      ),
                       ...state.turnOverrides,
                       ...(mode === "chat" ? { environments: [] as const } : {}),
                     });

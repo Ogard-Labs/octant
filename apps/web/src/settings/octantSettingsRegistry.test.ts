@@ -170,7 +170,7 @@ describe("octantSettingsRegistry", () => {
       "code-language-services",
       "project-view-switcher",
       "code-default-access",
-      "code-approval-persistence",
+      "code-full-access-sandbox-off",
       "code-editor-executable",
       "code-editor-arguments",
       "open-in-applications",

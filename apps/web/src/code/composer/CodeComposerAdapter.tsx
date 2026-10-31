@@ -24,6 +24,7 @@ import {
   type ProjectId,
 } from "@octant/contracts/projects";
 import type {
+  PermissionMode,
   ProviderExecutionPolicy,
   ProviderInstanceId,
   ProviderModelId,
@@ -68,7 +69,8 @@ import { HostSelector } from "../../shell/HostSelector";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantTextarea } from "../../ui/base/OctantTextarea";
 import { CodeBranchSelector } from "./CodeBranchSelector";
-import { CodeComposerAccessMenu } from "./CodeComposerAccessMenu";
+import { threadAccessOf } from "@octant/domain/guardrail-policy";
+import { PermissionModePicker } from "../PermissionModePicker";
 import { CodeWorkspaceSelector } from "./CodeWorkspaceSelector";
 import { CodeWorktreeSourceControl } from "./CodeWorktreeSourceControl";
 import { useCodeWorktreeSourcePreview } from "./useCodeWorktreeSourcePreview";
@@ -120,12 +122,12 @@ export interface CodeComposerAdapterProps {
   readonly remoteName?: string;
   readonly baseRepository?: string;
   readonly baseBranch?: string;
-  readonly defaultExecutionPolicy: ProviderExecutionPolicy;
+  /** The mode the new thread starts in: the Project's, else Settings'. */
+  readonly defaultPermissionMode: PermissionMode;
   readonly defaultPermissionPersistence: PermissionPersistence;
-  readonly onExecutionPolicyChange?: (
-    policy: ProviderExecutionPolicy,
-    persistence: PermissionPersistence,
-  ) => void;
+  readonly onPermissionModeChange?: (mode: PermissionMode) => void;
+  /** Whether the selected provider has a reviewer of its own, so Auto applies. */
+  readonly autoSupported?: boolean;
   readonly providerGroups: ReadonlyArray<PickerGroup>;
   readonly selectedProviderInstanceId?: ProviderInstanceId;
   readonly selectedModelId?: ProviderModelId;
@@ -198,6 +200,8 @@ export interface CodeComposerSubmitInput {
   readonly prompt: string;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly permissionPersistence: PermissionPersistence;
+  /** Start in Auto: the provider's reviewer answers the thread's prompts. */
+  readonly autoApprove?: boolean;
   readonly deliveryTarget: {
     readonly branchIntent: string;
     readonly remoteName: string;
@@ -341,12 +345,13 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     onDraftChange: (next) => setPrompt(next),
     attachDroppedThread: threadMentions.attachDroppedThread,
   });
-  const [executionPolicy, setExecutionPolicy] = useState(
-    storedCheckout?.executionPolicy ?? props.defaultExecutionPolicy,
+  const [permissionMode, setPermissionMode] = useState(
+    storedCheckout?.permissionMode ?? props.defaultPermissionMode,
   );
-  const [permissionPersistence, setPermissionPersistence] = useState(
+  const [permissionPersistence] = useState(
     storedCheckout?.permissionPersistence ?? props.defaultPermissionPersistence,
   );
+  const { executionPolicy, autoApprove } = threadAccessOf(permissionMode);
   // F2: the default delivery branch must never collide with the base branch
   // (e.g. `development`), which normally exists. Derive a unique
   // `octant/<short-id>` default once from a stable short id.
@@ -497,7 +502,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     drafts.writeCodeCheckout(draftScope, {
       baseBranch,
       baseBranchChosen: baseBranchChosen.current,
-      executionPolicy,
+      permissionMode,
       permissionPersistence,
       ...(workspaceOverride === undefined ? {} : { workspaceOverride }),
       ...(worktreeRemote === undefined ? {} : { worktreeRemote }),
@@ -507,7 +512,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     baseBranch,
     drafts,
     draftScope,
-    executionPolicy,
+    permissionMode,
     permissionPersistence,
     startFromOriginOverride,
     worktreeRemote,
@@ -604,6 +609,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           ...(extensionSelections.length === 0 ? {} : { extensionSelections }),
           executionPolicy,
           permissionPersistence,
+          ...(autoApprove ? { autoApprove: true } : {}),
           deliveryTarget: {
             branchIntent: defaultDeliveryBranchIntent(submittedBaseBranch, shortId),
             remoteName: resolvedWorktreeRemote,
@@ -632,6 +638,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     trimmed,
     modelOptionValues,
     executionPolicy,
+    autoApprove,
     permissionPersistence,
     workspace,
     baseRepository,
@@ -857,17 +864,13 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                     onRefused={images.refuse}
                     onFileSelected={(file) => images.attach([file])}
                   />
-                  <CodeComposerAccessMenu
-                    onChange={(nextPolicy) => {
-                      setExecutionPolicy(nextPolicy);
-                      props.onExecutionPolicyChange?.(nextPolicy, permissionPersistence);
+                  <PermissionModePicker
+                    autoSupported={props.autoSupported === true}
+                    onChange={(next) => {
+                      setPermissionMode(next);
+                      props.onPermissionModeChange?.(next);
                     }}
-                    onPersistenceChange={(nextPersistence) => {
-                      setPermissionPersistence(nextPersistence);
-                      props.onExecutionPolicyChange?.(executionPolicy, nextPersistence);
-                    }}
-                    persistence={permissionPersistence}
-                    value={executionPolicy}
+                    value={permissionMode}
                     {...(props.creating === true ? { disabled: true } : {})}
                   />
                 </>

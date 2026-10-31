@@ -353,6 +353,13 @@ export const CodeThread = Schema.Struct({
    * and `full-access` (no prompts exist). Clamped by taint and capability.
    */
   autoApprove: Schema.optional(Schema.Boolean),
+  /**
+   * Full access with the sandbox off: the Off level. The host stamps it from
+   * the person's Settings switch when the thread reaches Full access and
+   * clears it at every other posture, so a client cannot send it. Optional so
+   * a journal written before the level existed replays as Trusted.
+   */
+  sandboxOff: Schema.optional(Schema.Boolean),
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
@@ -425,6 +432,17 @@ export const CodeSettings = Schema.Struct({
    * ones running, and answers the editor's language reads `turned-off`.
    */
   bundledLanguageServer: Schema.optional(Schema.Boolean),
+  /**
+   * Whether new threads start in Auto: the default posture with the
+   * provider's own reviewer answering. First run asks; absent reads as off,
+   * which is what a store persisted before the question existed did.
+   */
+  defaultAutoApprove: Schema.optional(Schema.Boolean),
+  /**
+   * The Off switch under Full access: a thread raised to Full access while it
+   * is on runs with no sandbox. Absent reads as off.
+   */
+  fullAccessSandboxOff: Schema.optional(Schema.Boolean),
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
 }).annotations(strict);
@@ -517,6 +535,8 @@ export const CreateManagedCodeThreadCommand = Schema.Struct({
   modelOptionValues: Schema.optional(ProviderModelOptionValues),
   executionPolicy: ProviderExecutionPolicy,
   permissionPersistence: PermissionPersistence,
+  /** Start in Auto: see `CodeThread.autoApprove`. */
+  autoApprove: Schema.optional(Schema.Boolean),
   deliveryTarget: CodeDeliveryTarget,
   sourceBranch: WorktreeSourceBranch,
   startFromOrigin: Schema.Boolean,
@@ -633,6 +653,8 @@ export const CodeCommand = Schema.Union(
     allowDefaultFolderThreads: RetiredDefaultFolderThreadsSwitch,
     defaultDiffLayout: Schema.optional(CodeDiffLayout),
     bundledLanguageServer: Schema.optional(Schema.Boolean),
+    defaultAutoApprove: Schema.optional(Schema.Boolean),
+    fullAccessSandboxOff: Schema.optional(Schema.Boolean),
   }).annotations(strict),
   CreateCodeThreadCommand,
   Schema.Struct({

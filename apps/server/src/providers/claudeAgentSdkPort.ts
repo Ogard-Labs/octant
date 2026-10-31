@@ -36,7 +36,12 @@ import {
 import { BoundedAsyncInput, makeClaudeCloseCoordinator } from "./claudeAgentSdkLifecycle";
 import type { ClaudeProcessPort, SpawnClaudeCodeProcess } from "./claudeProcess";
 
-export type ClaudePermissionMode = "default" | "bypassPermissions" | "plan" | "auto";
+export type ClaudePermissionMode =
+  | "default"
+  | "acceptEdits"
+  | "bypassPermissions"
+  | "plan"
+  | "auto";
 
 export type ClaudeToolDecision =
   | { readonly behavior: "allow"; readonly updatedInput?: Readonly<Record<string, unknown>> }
@@ -74,7 +79,8 @@ export interface ClaudePreToolRequest {
 export interface ClaudeSandboxSettings {
   readonly enabled: true;
   readonly failIfUnavailable: true;
-  readonly autoAllowBashIfSandboxed: false;
+  /** True only at Full access, where nobody is asked inside the folder. */
+  readonly autoAllowBashIfSandboxed: boolean;
   readonly allowUnsandboxedCommands: false;
   readonly filesystem: {
     readonly denyRead: readonly ["/"];
@@ -105,6 +111,8 @@ export interface ClaudeOpenQueryInput {
    * regardless, so Octant's authority check runs if the SDK calls it.
    */
   readonly autoApprove?: boolean;
+  /** Full access with the sandbox off: `bypassPermissions` and no sandbox. */
+  readonly sandboxOff?: boolean;
   readonly resumeSessionId?: string;
   /**
    * The id a new session is opened under. The runtime initializes lazily, so
@@ -657,9 +665,11 @@ function isExactPathTuple(value: unknown, expected: string): boolean {
 
 function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
   try {
+    const trusted = input.executionPolicy === "full-access" && input.sandboxOff !== true;
     if (
       input.executionPolicy !== "approval-gated" &&
-      input.executionPolicy !== "auto-accept-edits"
+      input.executionPolicy !== "auto-accept-edits" &&
+      !trusted
     ) {
       return input.sandbox === undefined;
     }
@@ -667,7 +677,7 @@ function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
     if (
       input.sandbox.enabled !== true ||
       input.sandbox.failIfUnavailable !== true ||
-      input.sandbox.autoAllowBashIfSandboxed !== false ||
+      input.sandbox.autoAllowBashIfSandboxed !== trusted ||
       input.sandbox.allowUnsandboxedCommands !== false ||
       !hasExactKeys(input.sandbox.filesystem, SANDBOX_FILESYSTEM_KEYS)
     ) {
@@ -773,7 +783,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
           failure("invalid-configuration", "Claude sandbox configuration is invalid."),
         );
       }
-      const expectedMode = permissionMode(input.executionPolicy, input.autoApprove);
+      const expectedMode = permissionMode(input);
       const acquire = Effect.tryPromise({
         try: async () => {
           const prompt = new BoundedAsyncInput<ClaudeAgentSdkInputMessage>(inputCapacity);
@@ -949,7 +959,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                 : {}),
               ...(input.persistSession === false ? { persistSession: false as const } : {}),
               permissionMode: expectedMode,
-              ...(input.executionPolicy === "full-access"
+              ...(expectedMode === "bypassPermissions"
                 ? { allowDangerouslySkipPermissions: true }
                 : {}),
               settingSources: [],

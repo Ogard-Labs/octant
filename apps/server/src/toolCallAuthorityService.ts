@@ -33,6 +33,8 @@ export type ToolCallLiveFacts = {
    * Thread-lifetime taint rebuilt from `thread.external-content-ingested@1`.
    */
   readonly externalContentIngested: boolean;
+  /** The live Code thread runs at Off: Full access with the sandbox off. */
+  readonly sandboxOff?: boolean;
   /**
    * Snapshotted profile tool allowlist from the live Code thread. Empty or
    * absent means no constraint.
@@ -178,6 +180,7 @@ export class ToolCallAuthorityService {
           input.request.approval.kind !== "pending" &&
           input.request.approval.kind !== "denied",
         externalContentIngested: live.externalContentIngested,
+        ...(live.sandboxOff === true ? { sandboxOff: true } : {}),
         ...(live.toolConstraints === undefined ? {} : { toolConstraints: live.toolConstraints }),
         ...(live.profileDisplayName === undefined
           ? {}

@@ -29,32 +29,53 @@ describe("CodeSettingsView", () => {
     expect(screen.getByRole("textbox", { name: "External editor executable" })).toBe(field);
     expect(field).toHaveValue("/unfinished");
     expect(field).toHaveFocus();
-    expect(screen.getByRole("combobox", { name: "Default Code access" })).toHaveTextContent("Plan");
+    expect(screen.getByRole("combobox", { name: "Default mode" })).toHaveTextContent("Plan");
   });
 
-  it("keeps a chosen default the moment it is chosen, with no Save step", async () => {
+  it("keeps a chosen default mode the moment it is chosen, with no Save step", async () => {
     const update = vi.fn(async () => true);
     render(<CodeSettingsView onUpdate={update} settings={settings as never} />);
 
-    expect(screen.getByText(/Access defaults apply only to new Code threads/i)).toBeVisible();
-    expect(screen.getByRole("combobox", { name: "Default Code access" })).toHaveTextContent(
-      "Ask for approvals",
-    );
-    expect(screen.getByRole("button", { name: "Session" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("combobox", { name: "Default mode" })).toHaveTextContent("Ask first");
     expect(screen.queryByRole("button", { name: /Save/i })).toBeNull();
 
     const user = userEvent.setup();
     await chooseSelectFieldOption(
       user,
-      screen.getByRole("combobox", { name: "Default Code access" }),
-      "Plan · read-only",
+      screen.getByRole("combobox", { name: "Default mode" }),
+      "Auto · Recommended",
     );
 
     expect(update).toHaveBeenCalledWith({
-      defaultExecutionPolicy: "plan",
+      defaultExecutionPolicy: "approval-gated",
       defaultPermissionPersistence: "current-session",
+      defaultAutoApprove: true,
       defaultDiffLayout: "unified",
     });
+  });
+
+  it("turns the sandbox off in Full access only after a warning, and back on without one", async () => {
+    const update = vi.fn(async () => true);
+    const user = userEvent.setup();
+    render(<CodeSettingsView onUpdate={update} settings={settings as never} />);
+
+    const off = screen.getByRole("switch", { name: "Turn off the sandbox in Full access" });
+    await user.click(off);
+    expect(update).not.toHaveBeenCalled();
+    const warning = await screen.findByRole("dialog", {
+      name: "Run Full access with no sandbox?",
+    });
+    expect(warning).toHaveTextContent(/SSH and cloud keys/);
+    await user.click(screen.getByRole("button", { name: "Turn off the sandbox" }));
+    expect(update).toHaveBeenLastCalledWith(
+      expect.objectContaining({ fullAccessSandboxOff: true }),
+    );
+    expect(off).toBeChecked();
+
+    await user.click(off);
+    expect(update).toHaveBeenLastCalledWith(
+      expect.objectContaining({ fullAccessSandboxOff: false }),
+    );
   });
 
   it("lets one Git requirement switch decide plain folders and threads without a Project", async () => {
@@ -114,17 +135,16 @@ describe("CodeSettingsView", () => {
       <CodeSettingsView onUpdate={async () => true} settings={settings as never} />,
     );
 
+    expect(screen.getByRole("heading", { name: "Access" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Thread defaults" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Editor" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "External editor" })).toBeVisible();
     expect(container.querySelector(".code-settings [data-slot='card']")).toBeNull();
     expect(container.querySelectorAll(".code-settings .settings-card-section--open")).toHaveLength(
-      3,
+      4,
     );
-    // The four-way access choice is a select like the Agents posture; only
-    // the two-way persistence choice stays segmented.
-    expect(screen.getByRole("combobox", { name: "Default Code access" })).toBeVisible();
-    expect(screen.getByRole("group", { name: "Default approval persistence" })).toBeVisible();
+    // The five-way mode choice is a select like the Agents posture.
+    expect(screen.getByRole("combobox", { name: "Default mode" })).toBeVisible();
     expect(screen.getByRole("group", { name: "Default diff layout" })).toBeVisible();
     expect(
       screen.getByRole("textbox", { name: "External editor executable" }).closest(".setrow"),

@@ -61,16 +61,50 @@ typed text persist; staged attachments and extra selections do not, and the
 composer says so if they were dropped. Deleting or purging the thread removes
 its draft.
 
-## Authority modes
+## Modes
 
-Code threads run in one of four server-enforced authority modes:
+Each Code thread runs in one of five server-enforced modes. The mode picker
+in the composer changes it in one click, for new and existing threads alike:
 
-- **Plan**: strictly read-only. No write-approval path exists. Plan mode remains read-only even when Full access is remembered for the Project. On macOS, Claude in Plan can run read-only commands such as `git log`, `git diff`, `rg`, `ls`, and `cat` without asking: the sandbox lets it start only a short list of reading tools, refuses every write they try outside a scratch folder of its own, and gives them no network.
-- **Approval-gated**: confines work to the bound Project root. Octant's sandbox does this for most runtimes; Codex, and Claude outside Plan, rely on their own sandbox instead. Each mutation or command surfaces an approval request. Where it can be derived safely, the request names the file (relative to the checkout) or the command it is for; otherwise it names only the tool. This is the default for new Code threads.
-- **Auto-accept edits**: the same confinement as approval-gated (and the same split between Octant's sandbox and the runtime's own), except file writes inside the bound root proceed without a prompt. Shell commands, network access, destructive actions, credential access, and anything outside the root still ask.
-- **Full access**: unsandboxed execution within the Project root. Starts only when explicitly selected. Use the permission-persistence control to apply to the current session or remember for the Project.
+- **Auto**: the provider's own reviewer approves each action (Claude's auto
+  mode, Codex's approval reviewer), inside the same sandbox as Ask first.
+  What the reviewer escalates, and everything after the thread reads outside
+  content, comes back to you. Providers without a reviewer show Auto
+  unavailable with the reason, and a thread set to Auto asks first there.
+- **Ask first**: confines work to the bound Project root. Octant's sandbox
+  does this for most runtimes; Codex, and Claude outside Plan, rely on their
+  own sandbox instead. Each mutation or command surfaces an approval request.
+  Where it can be derived safely, the request names the file (relative to the
+  checkout) or the command it is for; otherwise it names only the tool.
+- **Accept edits**: the same confinement as Ask first, except file writes
+  inside the bound root proceed without a prompt. Shell commands, network
+  access, destructive actions, credential access, and anything outside the
+  root still ask.
+- **Plan**: strictly read-only. No write-approval path exists. On macOS,
+  Claude in Plan can run read-only commands such as `git log`, `git diff`,
+  `rg`, `ls`, and `cat` without asking: the sandbox lets it start only a
+  short list of reading tools, refuses every write they try outside a
+  scratch folder of its own, and gives them no network.
+- **Full access**: no prompts inside the folder, and the provider's own
+  sandbox still applies: Claude runs in its accept-edits mode with sandboxed
+  commands allowed, and Codex in its workspace-write sandbox. Edits or
+  commands that would leave the folder are refused. Publishing still asks
+  every time.
 
-Code starts approval-gated unless the user explicitly remembers Full access. A Work-to-Code promotion always starts approval-gated, never inheriting Work authority. The composer shows the posture the next turn will run under, defaulting to the thread's. A turn may only narrow what the thread already grants; Plan mode stays read-only and cannot be overridden from the composer. The transcript records the posture each turn actually ran under. Raising a thread to Full access still needs the native confirmation. The picker also offers **Lower thread** to durably return a thread to approval-gated access; this revokes a session-only Full-access grant for the current window without confirmation, while other windows keep their own grants. The confirmation leads with the action, thread title, and branch or checkout state. Project, thread, repository, and checkout identifiers remain in **Show authority details**, alongside the authority digests.
+**Off** is not a mode. It is the **Turn off the sandbox in Full access**
+switch in **Settings → Code → Access**, which shows a warning when you turn
+it on. With it on, threads you raise to Full access run with no sandbox and
+no prompts, and can read your whole home folder; the picker then reads
+**Full access · no sandbox**. Turning it off applies the next time a thread
+is set to Full access.
+
+New threads start in the default mode from first run or **Settings → Code →
+Access**; a Project can choose its own under **Access and limits** in its
+overview. Full access needs no confirmation from a window on this computer
+and is remembered on the thread. A paired phone or browser can lower a
+thread's mode but cannot raise one to Full access. A Work-to-Code promotion
+always starts in Ask first, never inheriting Work authority. The transcript
+records the mode each turn ran under.
 
 ## Long threads
 

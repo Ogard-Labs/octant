@@ -299,9 +299,15 @@ async function startSession(
   connection: Awaited<ReturnType<typeof acquireConnection>>["connection"],
   id = sessionId,
   executionPolicy: ProviderExecutionPolicy = "approval-gated",
+  sandboxOff?: true,
 ) {
   return Effect.runPromise(
-    connection.start({ sessionId: id, modelId: "gpt-5.4" as never, executionPolicy }),
+    connection.start({
+      sessionId: id,
+      modelId: "gpt-5.4" as never,
+      executionPolicy,
+      ...(sandboxOff === undefined ? {} : { sandboxOff }),
+    }),
   );
 }
 
@@ -2293,7 +2299,14 @@ describe("Codex thread and turn lifecycle", () => {
 
 describe("Codex execution authority and approvals", () => {
   it("maps all execution policies to exact stable Codex settings", () => {
+    // Full access keeps Codex's workspace sandbox; Off is the old no-sandbox
+    // Full access.
     expect(codexExecutionSettings("full-access")).toEqual({
+      approvalPolicy: "on-request",
+      sandbox: "workspace-write",
+      approvalsReviewer: "user",
+    });
+    expect(codexExecutionSettings("full-access", false, true)).toEqual({
       approvalPolicy: "never",
       sandbox: "danger-full-access",
       approvalsReviewer: "user",
@@ -2357,17 +2370,21 @@ describe("Codex execution authority and approvals", () => {
   });
 
   it.each([
-    ["full-access", "never", "dangerFullAccess"],
-    ["approval-gated", "on-request", "readOnly"],
-    ["auto-accept-edits", "on-request", "readOnly"],
-    ["plan", "never", "readOnly"],
-  ] as const)("re-asserts %s authority on every turn", (policy, approvalPolicy, sandboxType) => {
-    expect(codexTurnExecutionSettings(policy)).toEqual({
-      approvalPolicy,
-      sandboxPolicy: { type: sandboxType },
-      approvalsReviewer: "user",
-    });
-  });
+    ["full-access", false, "on-request", "workspaceWrite"],
+    ["full-access", true, "never", "dangerFullAccess"],
+    ["approval-gated", false, "on-request", "readOnly"],
+    ["auto-accept-edits", false, "on-request", "readOnly"],
+    ["plan", false, "never", "readOnly"],
+  ] as const)(
+    "re-asserts %s (sandbox off: %s) authority on every turn",
+    (policy, sandboxOff, approvalPolicy, sandboxType) => {
+      expect(codexTurnExecutionSettings(policy, false, sandboxOff)).toEqual({
+        approvalPolicy,
+        sandboxPolicy: { type: sandboxType },
+        approvalsReviewer: "user",
+      });
+    },
+  );
 
   it("routes approvals back to the user rather than leaving the reviewer set", () => {
     // Codex documents `approvalsReviewer` as an override for "this thread and
@@ -2387,15 +2404,11 @@ describe("Codex execution authority and approvals", () => {
     );
   });
 
-  it("never delegates the edit waiver to the harness reviewer", () => {
-    // `read-only` turns an in-root patch edit into an escalation. Codex's
-    // reviewer is thread-wide and risk-based, so delegating it on a posture that
-    // already waives project file writes would let the reviewer deny an edit
-    // 0018 says proceeds. Approval-gated has no waiver, so it may delegate.
+  it("lets the reviewer answer on both prompting postures when the thread asks for Auto", () => {
     expect(codexExecutionSettings("auto-accept-edits", true)).toEqual({
       approvalPolicy: "on-request",
       sandbox: "read-only",
-      approvalsReviewer: "user",
+      approvalsReviewer: "auto_review",
     });
     expect(codexExecutionSettings("approval-gated", true)).toEqual({
       approvalPolicy: "on-request",
@@ -2405,16 +2418,17 @@ describe("Codex execution authority and approvals", () => {
   });
 
   it.each([
-    ["full-access", "never", "danger-full-access"],
-    ["approval-gated", "on-request", "read-only"],
-    ["auto-accept-edits", "on-request", "read-only"],
-    ["plan", "never", "read-only"],
+    ["full-access", undefined, "on-request", "workspace-write"],
+    ["full-access", true, "never", "danger-full-access"],
+    ["approval-gated", undefined, "on-request", "read-only"],
+    ["auto-accept-edits", undefined, "on-request", "read-only"],
+    ["plan", undefined, "never", "read-only"],
   ] as const)(
-    "starts %s with only the Project root and exact authority",
-    async (policy, approvalPolicy, sandbox) => {
+    "starts %s (sandbox off: %s) with only the Project root and exact authority",
+    async (policy, sandboxOff, approvalPolicy, sandbox) => {
       const f = fixture();
       const acquired = await acquireConnection(makeCodexDriver(f.options()));
-      await startSession(acquired.connection, sessionId, policy);
+      await startSession(acquired.connection, sessionId, policy, sandboxOff);
       expect(f.calls.find(({ method }) => method === "thread/start")?.input).toEqual({
         cwd: projectRoot,
         model: "gpt-5.4",
@@ -2761,10 +2775,34 @@ describe("Codex execution authority and approvals", () => {
     await acquired.close();
   });
 
-  it("treats a provider approval in Full access as a protocol failure", async () => {
+  it("accepts an in-folder escalation at Full access without asking anyone, and declines one that leaves the folder", async () => {
     const f = fixture();
     const acquired = await acquireConnection(makeCodexDriver(f.options()));
     await startSession(acquired.connection, sessionId, "full-access");
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "trusted", attachments: [], tools: [] }),
+    );
+    f.emit(commandApproval({ id: "cmd-in" }));
+    await vi.waitFor(() =>
+      expect(f.calls.filter(({ method }) => method === "approval/respond")).toHaveLength(1),
+    );
+    expect(f.calls.find(({ method }) => method === "approval/respond")?.input).toMatchObject({
+      result: { decision: "accept" },
+    });
+    f.emit(fileApproval({ id: "file-out", grantRoot: "/outside" }));
+    await vi.waitFor(() =>
+      expect(f.calls.filter(({ method }) => method === "approval/respond")).toHaveLength(2),
+    );
+    expect(f.calls.filter(({ method }) => method === "approval/respond")[1]?.input).toMatchObject({
+      result: { decision: "decline" },
+    });
+    await acquired.close();
+  });
+
+  it("treats a provider approval at Off as a protocol failure", async () => {
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()));
+    await startSession(acquired.connection, sessionId, "full-access", true);
     await Effect.runPromise(
       acquired.connection.send({ sessionId, prompt: "full", attachments: [], tools: [] }),
     );
