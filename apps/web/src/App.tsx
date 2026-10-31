@@ -4420,7 +4420,9 @@ function LaunchedShell(
     if (selected === undefined || merge === undefined || headSha === "") {
       return Promise.resolve({ status: "unavailable", reason: "unavailable" });
     }
-    return merge({ ...selected, method, headSha });
+    // The Confirm merge click is the person's confirmation of this head and of
+    // the required checks; the host verifies both before it merges.
+    return merge({ ...selected, method, headSha, confirmed: true });
   }
 
   const rootLinkActions = useMemo(

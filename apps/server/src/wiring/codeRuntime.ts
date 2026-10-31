@@ -267,6 +267,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "codeTestDiscovery"
     | "isCodeProviderModelAllowed"
     | "onPullRequestSnapshotRefreshed"
+    | "projectPullRequestActionService"
     | "projectPullRequestCadence"
     | "projectPullRequestService"
     | "roots"
@@ -362,6 +363,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     persistence,
     probeProviderForThreads,
     productFeedbackService,
+    projectPullRequestActionService,
     projectPullRequestCadence,
     projectPullRequestService,
     projectService,
@@ -1373,15 +1375,20 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           command,
           signal ?? new AbortController().signal,
         ),
-      mergeProjectPullRequest: (windowId, command, signal, initiator) => {
-        if (initiator !== "user")
-          return Promise.resolve({ status: "refused", reason: "not-authorized" });
-        return projectPullRequestService.merge(
+      // A paired phone or web client merges under the same head and
+      // required-check rules as the desktop window; it must also carry the
+      // person's confirmation, which the service enforces.
+      mergeProjectPullRequest: (windowId, command, signal, caller) =>
+        projectPullRequestService.merge(
           windowId,
           command,
           signal ?? new AbortController().signal,
-        );
-      },
+          caller,
+        ),
+      mergeProjectPullRequestStack: (windowId, command, signal, caller) =>
+        projectPullRequestActionService.mergeStack(windowId, command, signal, caller),
+      actOnProjectPullRequest: (windowId, command, signal, caller) =>
+        projectPullRequestActionService.act(windowId, command, signal, caller),
       queryProjectPullRequestSwitches: (windowId, target) =>
         pullRequestSwitchService.query(windowId, target),
       setProjectPullRequestMergeWhenReady: (windowId, command, signal, initiator) =>

@@ -189,6 +189,12 @@ export const CodeProjectPullRequestMergeCommand = Schema.Struct({
    * merge a revision that was never on screen.
    */
   headSha: boundedNonEmptyText(64),
+  /**
+   * The person's confirmation of the head they reviewed and of the checks
+   * the repository requires. A paired phone or web client must send it; the
+   * local window's own confirmation step stands in for it there.
+   */
+  confirmed: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type CodeProjectPullRequestMergeCommand = typeof CodeProjectPullRequestMergeCommand.Type;
 
@@ -199,6 +205,9 @@ const CodeProjectPullRequestMergeRefusal = Schema.Literal(
   "stale",
   "conflict",
   "failed",
+  "not-confirmed",
+  "checks-not-passing",
+  "checks-unknown",
 );
 export type CodeProjectPullRequestMergeRefusal = typeof CodeProjectPullRequestMergeRefusal.Type;
 
@@ -245,6 +254,8 @@ export const CodeProjectPullRequestMergeRecorded = Schema.Struct({
   number: Schema.Int.pipe(Schema.positive()),
   method: CodeProjectPullRequestMergeMethod,
   headSha: boundedNonEmptyText(64),
+  /** Set for a merge confirmed on a paired phone or web client; absent for the local window. */
+  caller: Schema.optional(Schema.Literal("local-window", "remote-device")),
   result: Schema.Union(
     Schema.Struct({ status: Schema.Literal("merged") }).annotations(strict),
     Schema.Struct({
@@ -270,6 +281,181 @@ export type CodeProjectPullRequestMergeRecorded = typeof CodeProjectPullRequestM
 export const decodeCodeProjectPullRequestMergeRecorded = Schema.decodeUnknownSync(
   CodeProjectPullRequestMergeRecorded,
 );
+
+export const MAX_CODE_PROJECT_PULL_REQUEST_STACK_MERGE = 10;
+
+/**
+ * Merge a whole stack in one step, from the bottom. The server reads every
+ * pull request first and refuses the stack whole unless each one's base is the
+ * head branch of the one before it; it then merges one at a time and stops at
+ * the first that does not merge.
+ */
+export const CodeProjectPullRequestStackMergeCommand = Schema.Struct({
+  projectId: ProjectId,
+  repositoryOwner: GithubRepositoryOwner,
+  repositoryName: GithubRepositoryName,
+  method: CodeProjectPullRequestMergeMethod,
+  confirmed: Schema.Literal(true),
+  items: Schema.Array(
+    Schema.Struct({
+      number: Schema.Int.pipe(Schema.positive()),
+      headSha: boundedNonEmptyText(64),
+    }).annotations(strict),
+  ).pipe(Schema.minItems(1), Schema.maxItems(MAX_CODE_PROJECT_PULL_REQUEST_STACK_MERGE)),
+}).annotations(strict);
+export type CodeProjectPullRequestStackMergeCommand =
+  typeof CodeProjectPullRequestStackMergeCommand.Type;
+
+export const CodeProjectPullRequestStackMergeOutcome = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("merged"),
+    merged: Schema.Array(Schema.Int.pipe(Schema.positive())),
+  }).annotations(strict),
+  /** The stack was not one stack, so nothing merged. */
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    reason: Schema.Literal(
+      "not-authorized",
+      "not-confirmed",
+      "empty",
+      "too-long",
+      "duplicate",
+      "not-a-chain",
+      "unreadable",
+    ),
+  }).annotations(strict),
+  /** Some merged, then one did not: `merged` is what landed before it. */
+  Schema.Struct({
+    status: Schema.Literal("stopped"),
+    merged: Schema.Array(Schema.Int.pipe(Schema.positive())),
+    stoppedAt: Schema.Int.pipe(Schema.positive()),
+    outcome: Schema.Union(
+      Schema.Struct({
+        status: Schema.Literal("refused"),
+        reason: CodeProjectPullRequestMergeRefusal,
+      }).annotations(strict),
+      Schema.Struct({
+        status: Schema.Literal("unavailable"),
+        reason: CodeProjectPullRequestMergeUnavailable,
+      }).annotations(strict),
+    ),
+  }).annotations(strict),
+);
+export type CodeProjectPullRequestStackMergeOutcome =
+  typeof CodeProjectPullRequestStackMergeOutcome.Type;
+
+const CodeProjectPullRequestActionTarget = {
+  projectId: ProjectId,
+  repositoryOwner: GithubRepositoryOwner,
+  repositoryName: GithubRepositoryName,
+  number: Schema.Int.pipe(Schema.positive()),
+} as const;
+
+const CodeProjectPullRequestLabel = Schema.String.pipe(
+  Schema.filter(
+    (value) =>
+      value.length >= 1 &&
+      value.length <= 50 &&
+      !value.includes("\0") &&
+      !/[\n\r,]/.test(value) &&
+      value.trim() === value,
+  ),
+);
+
+/**
+ * The person's own pull-request actions: labels, a comment, a reply in one
+ * review thread, close, and reopen. The person's click is the approval; the
+ * text of a comment or reply is posted under their name and is never journaled.
+ */
+export const CodeProjectPullRequestActionCommand = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("labels"),
+    ...CodeProjectPullRequestActionTarget,
+    add: Schema.Array(CodeProjectPullRequestLabel).pipe(Schema.maxItems(20)),
+    remove: Schema.Array(CodeProjectPullRequestLabel).pipe(Schema.maxItems(20)),
+  })
+    .annotations(strict)
+    .pipe(Schema.filter((command) => command.add.length + command.remove.length > 0)),
+  Schema.Struct({
+    kind: Schema.Literal("comment"),
+    ...CodeProjectPullRequestActionTarget,
+    body: boundedNonEmptyText(65_536),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("reply"),
+    ...CodeProjectPullRequestActionTarget,
+    reviewThreadId: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_=-]{1,128}$/)),
+    body: boundedNonEmptyText(65_536),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("close"),
+    ...CodeProjectPullRequestActionTarget,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("reopen"),
+    ...CodeProjectPullRequestActionTarget,
+  }).annotations(strict),
+);
+export type CodeProjectPullRequestActionCommand = typeof CodeProjectPullRequestActionCommand.Type;
+export type CodeProjectPullRequestActionKind = CodeProjectPullRequestActionCommand["kind"];
+
+const CodeProjectPullRequestActionRefusal = Schema.Literal(
+  "not-authorized",
+  "invalid",
+  "not-open",
+  "not-closed",
+  "merged",
+  "label-not-found",
+  "failed",
+);
+
+export const CodeProjectPullRequestActionOutcome = Schema.Union(
+  Schema.Struct({ status: Schema.Literal("done") }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    reason: CodeProjectPullRequestActionRefusal,
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("unavailable"),
+    reason: CodeProjectPullRequestMergeUnavailable,
+  }).annotations(strict),
+);
+export type CodeProjectPullRequestActionOutcome = typeof CodeProjectPullRequestActionOutcome.Type;
+
+export const CODE_PROJECT_PULL_REQUEST_ACTION_RECORDED =
+  "code.project-pull-request-action-recorded@1";
+
+/**
+ * Journal record of one pull-request action that reached the server. The
+ * envelope's actor is the local user. A comment or reply keeps only its length,
+ * never its text, and no record carries a credential.
+ */
+export const CodeProjectPullRequestActionRecorded = Schema.Struct({
+  projectId: ProjectId,
+  repositoryOwner: GithubRepositoryOwner,
+  repositoryName: GithubRepositoryName,
+  number: Schema.Int.pipe(Schema.positive()),
+  action: Schema.Literal("labels", "comment", "reply", "close", "reopen"),
+  labels: Schema.optional(
+    Schema.Struct({
+      add: Schema.Array(CodeProjectPullRequestLabel),
+      remove: Schema.Array(CodeProjectPullRequestLabel),
+    }).annotations(strict),
+  ),
+  bodyBytes: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  result: Schema.Union(
+    Schema.Struct({ status: Schema.Literal("done") }).annotations(strict),
+    Schema.Struct({
+      status: Schema.Literal("refused"),
+      reason: CodeProjectPullRequestActionRefusal,
+    }).annotations(strict),
+    Schema.Struct({
+      status: Schema.Literal("unavailable"),
+      reason: CodeProjectPullRequestMergeUnavailable,
+    }).annotations(strict),
+  ),
+}).annotations(strict);
+export type CodeProjectPullRequestActionRecorded = typeof CodeProjectPullRequestActionRecorded.Type;
 
 export const CodeProjectPullRequestLinkedThread = Schema.Struct({
   threadId: CodeThreadId,
@@ -486,4 +672,16 @@ export const decodeCodeProjectPullRequestDetailRefreshCommand = Schema.decodeUnk
 );
 export const decodeCodeProjectPullRequestDetailView = Schema.decodeUnknownSync(
   CodeProjectPullRequestDetailView,
+);
+export const decodeCodeProjectPullRequestStackMergeCommand = Schema.decodeUnknownSync(
+  CodeProjectPullRequestStackMergeCommand,
+);
+export const decodeCodeProjectPullRequestStackMergeOutcome = Schema.decodeUnknownSync(
+  CodeProjectPullRequestStackMergeOutcome,
+);
+export const decodeCodeProjectPullRequestActionCommand = Schema.decodeUnknownSync(
+  CodeProjectPullRequestActionCommand,
+);
+export const decodeCodeProjectPullRequestActionOutcome = Schema.decodeUnknownSync(
+  CodeProjectPullRequestActionOutcome,
 );

@@ -2045,7 +2045,7 @@ describe("Code project pull-request detail routes", () => {
       windowId,
       { ...detailQuery, method: "squash", headSha: mergeHeadSha },
       expect.any(AbortSignal),
-      "user",
+      "local-window",
     );
   });
 
@@ -2064,14 +2064,12 @@ describe("Code project pull-request detail routes", () => {
     expect(mergeProjectPullRequest).not.toHaveBeenCalled();
   });
 
-  it("refuses a merge from a paired remote device before invoking the merge service", async () => {
-    const mergeProjectPullRequest = vi.fn();
-    const route = routeFixture({ mergeProjectPullRequest });
+  function remoteDeviceRequest(path: string, body: unknown) {
     const remoteDeviceId = "00000000-0000-4000-8000-000000000917";
-    const remoteRequest = request("/api/code/project-pull-requests/merge", {
+    const remoteRequest = request(path, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...detailQuery, method: "squash", headSha: mergeHeadSha }),
+      body: JSON.stringify(body),
     });
     bindPrincipalRouteContext(remoteRequest, {
       principal: createRemoteDevicePrincipal({
@@ -2085,11 +2083,147 @@ describe("Code project pull-request detail routes", () => {
       }),
       scopeId: remoteDeviceId as never,
     });
+    return remoteRequest;
+  }
 
-    const response = await route(remoteRequest);
+  it("hands a paired remote device's merge to the service as a remote caller, with its confirmation", async () => {
+    const outcome = { status: "refused" as const, reason: "not-confirmed" as const };
+    const mergeProjectPullRequest = vi.fn(() => outcome);
+    const route = routeFixture({ mergeProjectPullRequest });
 
-    expect(response?.status).toBe(403);
-    expect(mergeProjectPullRequest).not.toHaveBeenCalled();
+    const response = await route(
+      remoteDeviceRequest("/api/code/project-pull-requests/merge", {
+        ...detailQuery,
+        method: "squash",
+        headSha: mergeHeadSha,
+        confirmed: true,
+      }),
+    );
+
+    expect(response?.status).toBe(200);
+    // A paired device acts under its own scope, never a desktop window's.
+    expect(mergeProjectPullRequest).toHaveBeenCalledWith(
+      "00000000-0000-4000-8000-000000000917",
+      { ...detailQuery, method: "squash", headSha: mergeHeadSha, confirmed: true },
+      expect.any(AbortSignal),
+      "remote-device",
+    );
+  });
+
+  it("merges a stack for the local user and for a paired device, answering what landed", async () => {
+    const outcome = { status: "merged" as const, merged: [1, 2] };
+    const mergeProjectPullRequestStack = vi.fn(
+      async (..._arguments: ReadonlyArray<unknown>) => outcome,
+    );
+    const route = routeFixture({ mergeProjectPullRequestStack });
+    const body = {
+      projectId: detailQuery.projectId,
+      repositoryOwner: detailQuery.repositoryOwner,
+      repositoryName: detailQuery.repositoryName,
+      method: "squash",
+      confirmed: true,
+      items: [
+        { number: 1, headSha: mergeHeadSha },
+        { number: 2, headSha: mergeHeadSha },
+      ],
+    };
+
+    const local = await route(
+      request("/api/code/project-pull-requests/merge-stack", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    );
+    const remote = await route(
+      remoteDeviceRequest("/api/code/project-pull-requests/merge-stack", body),
+    );
+
+    expect(await local!.json()).toEqual(outcome);
+    expect(remote?.status).toBe(200);
+    expect(mergeProjectPullRequestStack.mock.calls.map((call) => call[3])).toEqual([
+      "local-window",
+      "remote-device",
+    ]);
+  });
+
+  it("refuses an unconfirmed, empty, over-long, or identity-forging stack merge before the service", async () => {
+    const mergeProjectPullRequestStack = vi.fn();
+    const route = routeFixture({ mergeProjectPullRequestStack });
+    const base = {
+      projectId: detailQuery.projectId,
+      repositoryOwner: detailQuery.repositoryOwner,
+      repositoryName: detailQuery.repositoryName,
+      method: "squash",
+      confirmed: true,
+    };
+    const item = (number: number) => ({ number, headSha: mergeHeadSha });
+    for (const body of [
+      { ...base, confirmed: undefined, items: [item(1)] },
+      { ...base, items: [] },
+      { ...base, items: Array.from({ length: 11 }, (_, index) => item(index + 1)) },
+      { ...base, items: [item(1)], windowId: "forged" },
+    ]) {
+      const response = await route(
+        request("/api/code/project-pull-requests/merge-stack", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      );
+      expect(response?.status).toBe(400);
+    }
+    expect(mergeProjectPullRequestStack).not.toHaveBeenCalled();
+  });
+
+  it("serves the person's pull-request actions to the local user only", async () => {
+    const actOnProjectPullRequest = vi.fn(async () => ({ status: "done" as const }));
+    const route = routeFixture({ actOnProjectPullRequest });
+    const comment = { kind: "comment", ...detailQuery, body: "Thanks." };
+
+    const local = await route(
+      request("/api/code/project-pull-requests/actions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(comment),
+      }),
+    );
+    const remote = await route(
+      remoteDeviceRequest("/api/code/project-pull-requests/actions", comment),
+    );
+
+    expect(await local!.json()).toEqual({ status: "done" });
+    expect(remote?.status).toBe(403);
+    expect(actOnProjectPullRequest).toHaveBeenCalledTimes(1);
+    expect(actOnProjectPullRequest).toHaveBeenCalledWith(
+      windowId,
+      comment,
+      expect.any(AbortSignal),
+      "local-window",
+    );
+  });
+
+  it("rejects an invalid pull-request action before the service", async () => {
+    const actOnProjectPullRequest = vi.fn();
+    const route = routeFixture({ actOnProjectPullRequest });
+    for (const body of [
+      { kind: "labels", ...detailQuery, add: [], remove: [] },
+      { kind: "labels", ...detailQuery, add: ["a,b"], remove: [] },
+      { kind: "comment", ...detailQuery, body: "" },
+      { kind: "reply", ...detailQuery, reviewThreadId: "not valid!", body: "x" },
+      { kind: "approve", ...detailQuery },
+      { kind: "close", ...detailQuery, deleteBranch: true },
+    ]) {
+      const response = await route(
+        request("/api/code/project-pull-requests/actions", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      );
+      expect(response?.status).toBe(400);
+    }
+    expect(actOnProjectPullRequest).not.toHaveBeenCalled();
   });
 
   it("turns Merge when ready and Auto-fix on only for the local user, never for a paired device", async () => {

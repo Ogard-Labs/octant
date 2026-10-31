@@ -51,6 +51,12 @@ import {
 } from "../code/codeProjectPullRequestService";
 import { CodeProjectPullRequestCadence } from "../code/codeProjectPullRequestCadence";
 import { CodeProjectPullRequestSnapshotStore } from "../code/codeProjectPullRequestSnapshotStore";
+import {
+  CodeProjectPullRequestActionService,
+  journalPullRequestAction,
+  type CodeProjectPullRequestActionForge,
+} from "../code/codeProjectPullRequestActionService";
+import { GhPullRequestActionPort } from "../code/ghPullRequestActionPort";
 import { createGhCommandPort, GhPullRequestPort } from "../code/ghPullRequestPort";
 import { createFileHelperProcessTransport } from "../code/fileHelperProcessTransport";
 import { FileOperationPort } from "../code/fileOperationPort";
@@ -433,10 +439,22 @@ export function stableCodeFileId(threadId: string, checkoutId: string, relativeP
   return decodeCodeFileId(uuid);
 }
 
+const unavailableActionForge = {
+  editLabels: async () => ({ status: "unavailable", reason: "unavailable" }) as const,
+  comment: async () => ({ status: "unavailable", reason: "unavailable" }) as const,
+  replyToReviewThread: async () => ({ status: "unavailable", reason: "unavailable" }) as const,
+  setState: async () => ({ status: "unavailable", reason: "unavailable" }) as const,
+  summary: async () => ({ status: "unavailable" }) as const,
+  requiredChecks: async () => "unknown" as const,
+};
+
 function createProjectPullRequestPorts(ghExecutable: string | undefined): {
   readonly list: CodeProjectPullRequestListPort;
   readonly detail: CodeProjectPullRequestDetailPort;
   readonly merge: CodeProjectPullRequestMergePort;
+  readonly actions: CodeProjectPullRequestActionForge & {
+    requiredChecks: GhPullRequestActionPort["requiredChecks"];
+  };
   /**
    * False when `gh` is missing or refused validation. The background refresh
    * cadence fails closed on this instead of polling ports that can only
@@ -449,14 +467,14 @@ function createProjectPullRequestPorts(ghExecutable: string | undefined): {
       list: { listActive: async () => ({ status: "disconnected" }) },
       detail: { observeReviewByIdentity: async () => ({ status: "unavailable" }) },
       merge: { mergeByIdentity: async () => ({ status: "unavailable", reason: "unavailable" }) },
+      actions: unavailableActionForge,
       ghAvailable: false,
     };
   }
   try {
-    const port = new GhPullRequestPort({
-      command: createGhCommandPort({ ghPath: ghExecutable }),
-      resolveTarget: async () => undefined,
-    });
+    const command = createGhCommandPort({ ghPath: ghExecutable });
+    const port = new GhPullRequestPort({ command, resolveTarget: async () => undefined });
+    const actions = new GhPullRequestActionPort({ command });
     return {
       list: {
         listActive: (request, signal) => port.listActive(request, signal),
@@ -467,6 +485,14 @@ function createProjectPullRequestPorts(ghExecutable: string | undefined): {
       merge: {
         mergeByIdentity: (request, signal) => port.mergeByIdentity(request, signal),
       },
+      actions: {
+        editLabels: (request, signal) => actions.editLabels(request, signal),
+        comment: (request, signal) => actions.comment(request, signal),
+        replyToReviewThread: (request, signal) => actions.replyToReviewThread(request, signal),
+        setState: (request, signal) => actions.setState(request, signal),
+        summary: (request, signal) => actions.summary(request, signal),
+        requiredChecks: (request, signal) => actions.requiredChecks(request, signal),
+      },
       ghAvailable: true,
     };
   } catch {
@@ -474,6 +500,7 @@ function createProjectPullRequestPorts(ghExecutable: string | undefined): {
       list: { listActive: async () => ({ status: "disconnected" }) },
       detail: { observeReviewByIdentity: async () => ({ status: "unavailable" }) },
       merge: { mergeByIdentity: async () => ({ status: "unavailable", reason: "unavailable" }) },
+      actions: unavailableActionForge,
       ghAvailable: false,
     };
   }
@@ -844,6 +871,8 @@ export function wireCode(deps: CodeDependencies) {
       list: projectPullRequestPorts.list,
       detail: projectPullRequestPorts.detail,
       merge: projectPullRequestPorts.merge,
+      requiredChecks: (request, signal) =>
+        projectPullRequestPorts.actions.requiredChecks(request, signal),
       recordMerge: (record) =>
         journalPullRequestMerge(persistence.journal, record, {
           uuid: randomUUID,
@@ -859,6 +888,17 @@ export function wireCode(deps: CodeDependencies) {
       threads: {
         list: () => listProjectPullRequestThreadFacts(),
       },
+    });
+    const projectPullRequestActionService = new CodeProjectPullRequestActionService({
+      authority: projectPullRequestService,
+      forge: projectPullRequestPorts.actions,
+      merge: (windowId, command, signal, caller) =>
+        projectPullRequestService.merge(windowId, command, signal, caller),
+      record: (record) =>
+        journalPullRequestAction(persistence.journal, record, {
+          uuid: randomUUID,
+          clock: () => new Date().toISOString(),
+        }),
     });
     onGithubPullRequestsUnreadable(() => projectPullRequestService.revokeGithub());
     // The cadence acts as the host, not as any renderer window. The window
@@ -910,6 +950,7 @@ export function wireCode(deps: CodeDependencies) {
       folderBrowseService,
       isCodeProviderModelAllowed,
       onPullRequestSnapshotRefreshed,
+      projectPullRequestActionService,
       projectPullRequestCadence,
       projectPullRequestService,
       projectRoutes,

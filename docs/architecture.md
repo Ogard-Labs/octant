@@ -1777,9 +1777,24 @@ hold for every action in it:
   the branch of the thread or linked thread it stacks on.
 - **Refusals.** Plan mode refuses every action, and so does revoked forge
   access.
-- **Force-push.** Rewriting the thread's own branch uses force-with-lease by
-  default. A plain force-push, or a force-push to the default branch, happens
-  only when the person asks for it in that turn, and is journaled.
+- **Force-push.** Rewriting the thread's own branch uses force-with-lease
+  (`push-git` with `force`), which names the remote head it replaces, so a
+  branch someone else moved is refused by Git. The host accepts a force only on
+  the thread's own delivery branch. A plain force-push, or any push to the
+  default branch, happens only with the person's approval for that one act,
+  which a standing Full access grant does not stand in for; the person's own
+  click in a window is that approval. Both are journaled with the thread's
+  other Git work.
+- **Labels, close, and reopen.** `update-pull-request` also adds and removes
+  labels the repository already has (a label it lacks is refused, never
+  created) and closes or reopens the thread's own pull request. `state` stands
+  alone, and reopening a merged pull request is refused. The branch is never
+  deleted.
+- **Comments and review replies.** `comment-pull-request` posts a comment, or a
+  reply in one review thread, under the person's name. The agent drafts it by
+  asking: the approval shows the whole text, and the host posts only with an
+  approval for that act, at every level, because it cannot tell at Full access
+  whether the person asked.
 - **Record.** Each action journals the actor, the repository, the number, and
   the head SHA, as Octant's own record beside the forge's history.
 - **Credential.** Octant stores no forge token, as under the merge rules
@@ -1797,24 +1812,29 @@ hold for every action in it:
   through a routine the person created with merging allowed
   ([Routines](#modes-chat-work-and-code)). The merge must match the reviewed
   head SHA and the repository's required checks, and is journaled with who
-  allowed it. Agents do not approve or request changes on a pull request; the
-  forge does not let a pull request's author approve their own.
+  allowed it. Built: an agent merges on the request in the turn, and only
+  after the person approves that one merge in the thread, at every guardrail
+  level (`merge-pull-request`). The approval names the method and the head;
+  the host refuses unless the head is still that one and the required checks
+  pass. The Project setting and the routine are allowed, not built yet.
+  Agents do not approve or request changes on a pull request; the forge does
+  not let a pull request's author approve their own.
 
-| Action                                     | Who                                                                                          | Approval                                                                                                                          | Still refused                                               | Built                                                                                                                     |
-| ------------------------------------------ | -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Fast-forward push to its own branch        | Agent or person                                                                              | Approval-gated asks for each act; remembered Full access does not ask                                                             | A branch the thread does not own; any force option          | Yes (`push-git`)                                                                                                          |
-| Open a pull request                        | Agent or person                                                                              | As for push                                                                                                                       | A repository outside the binding; a base outside it         | Yes, ready or draft (`create-pull-request`)                                                                               |
-| Open a draft pull request                  | Agent or person                                                                              | As for push                                                                                                                       | As for opening                                              | Yes (`create-pull-request` with `draft`)                                                                                  |
-| Mark ready for review                      | Agent or person                                                                              | As for push                                                                                                                       | A pull request the thread does not own                      | Yes (`update-pull-request`, `draft: false`)                                                                               |
-| Stacked pull request on its parent         | Agent or person                                                                              | As for push                                                                                                                       | A parent branch no thread or linked thread of this one owns | Yes (`create-pull-request` with `base`; the parent branch needs an open pull request)                                     |
-| Amend and push with force-with-lease       | Agent or person, own branch only                                                             | As for push                                                                                                                       | A protected or a shared branch                              | Allowed; not built yet                                                                                                    |
-| Plain force-push, or to the default branch | Agent or person, when the person asks in that turn                                           | The person's request in that turn                                                                                                 | Without that request; another thread's branch               | Allowed; not built yet                                                                                                    |
-| Edit title or body                         | Agent or person                                                                              | As for push                                                                                                                       | A pull request the thread did not open and is not linked to | Yes (`update-pull-request`)                                                                                               |
-| Add or remove labels                       | Agent or person                                                                              | As for push                                                                                                                       | Creating repository-wide labels                             | Allowed; not built yet                                                                                                    |
-| Review replies and comments                | Agent drafts; person sends                                                                   | The person approves each post below Full access, because it posts under their name; at Full access it posts when the person asked | Approving or requesting changes                             | Allowed; not built yet                                                                                                    |
-| Approve or request changes                 | Person                                                                                       | —                                                                                                                                 | The pull request's own author, by the forge's rule          | Allowed for a person; not built yet                                                                                       |
-| Close or reopen                            | Person, or agent with approval                                                               | Asks below Full access; at Full access, done when the person asked                                                                | Deleting the branch                                         | Allowed; not built yet                                                                                                    |
-| Merge, auto-merge, or merge a stack        | Person on any of their windows, phone, or web client; Code thread when the person allowed it | The person's confirmation, request, Project setting, or routine; reviewed head SHA and required checks                            | An agent on its own initiative; hub or peer hosts           | Person merging one pull request, or turning on Merge when ready, from a local window yes; the rest allowed, not built yet |
+| Action                                     | Who                                                                                          | Approval                                                                                                                          | Still refused                                               | Built                                                                                                                                                                                                                                                                                   |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Fast-forward push to its own branch        | Agent or person                                                                              | Approval-gated asks for each act; remembered Full access does not ask                                                             | A branch the thread does not own; any force option          | Yes (`push-git`)                                                                                                                                                                                                                                                                        |
+| Open a pull request                        | Agent or person                                                                              | As for push                                                                                                                       | A repository outside the binding; a base outside it         | Yes, ready or draft (`create-pull-request`)                                                                                                                                                                                                                                             |
+| Open a draft pull request                  | Agent or person                                                                              | As for push                                                                                                                       | As for opening                                              | Yes (`create-pull-request` with `draft`)                                                                                                                                                                                                                                                |
+| Mark ready for review                      | Agent or person                                                                              | As for push                                                                                                                       | A pull request the thread does not own                      | Yes (`update-pull-request`, `draft: false`)                                                                                                                                                                                                                                             |
+| Stacked pull request on its parent         | Agent or person                                                                              | As for push                                                                                                                       | A parent branch no thread or linked thread of this one owns | Yes (`create-pull-request` with `base`; the parent branch needs an open pull request)                                                                                                                                                                                                   |
+| Amend and push with force-with-lease       | Agent or person, own branch only                                                             | As for push                                                                                                                       | A protected or a shared branch; any other thread's branch   | Yes (`push-git` with `force: with-lease`)                                                                                                                                                                                                                                               |
+| Plain force-push, or to the default branch | Agent or person, when the person asks in that turn                                           | The person's approval for this one act, at every level                                                                            | Without that approval; another thread's branch              | Yes (`push-git`; a standing Full access grant does not cover it)                                                                                                                                                                                                                        |
+| Edit title or body                         | Agent or person                                                                              | As for push                                                                                                                       | A pull request the thread did not open and is not linked to | Yes (`update-pull-request`)                                                                                                                                                                                                                                                             |
+| Add or remove labels                       | Agent or person                                                                              | As for push                                                                                                                       | Creating repository-wide labels                             | Yes (`update-pull-request` with labels; the person's `actions` route)                                                                                                                                                                                                                   |
+| Review replies and comments                | Agent drafts; person sends                                                                   | The person approves each post at every level, Full access included, because it posts under their name and the text is shown whole | Approving or requesting changes                             | Yes (`comment-pull-request`; the person's `actions` route)                                                                                                                                                                                                                              |
+| Approve or request changes                 | Person                                                                                       | —                                                                                                                                 | The pull request's own author, by the forge's rule          | Allowed for a person; not built yet                                                                                                                                                                                                                                                     |
+| Close or reopen                            | Person, or agent with approval                                                               | Asks below Full access; at Full access, done when the person asked                                                                | Deleting the branch; reopening a merged pull request        | Yes (`update-pull-request` with `state`; the person's `actions` route)                                                                                                                                                                                                                  |
+| Merge, auto-merge, or merge a stack        | Person on any of their windows, phone, or web client; Code thread when the person allowed it | The person's confirmation, request, Project setting, or routine; reviewed head SHA and required checks                            | An agent on its own initiative; hub or peer hosts           | Yes: a person merging one pull request or a stack from a window, phone, or web client; an agent's merge on request (`merge-pull-request`, asks each time). Merge when ready from a paired device, and a Project setting or routine that allows an agent's merge: allowed, not built yet |
 
 Which path reaches the forge depends on the thread's
 [guardrail level](#security-and-authority):
@@ -1851,18 +1871,27 @@ on **Merge when ready** and **Auto-fix** for a Code thread's pull request
 
 - **Who.** A person, from any of their windows, phone, or web client, one
   pull request or a whole stack in one step; or a Code thread when the person
-  allowed it, as above. Built today: a `local-window` principal merging one
-  pull request; the route answers 403 to a paired remote device before
-  decoding the command, and the server service refuses any initiator other
-  than `user` as `not-authorized`, so no provider, agent tool, plugin,
-  routine, hub or peer host, or Code posture (Full access included) reaches
-  it yet. Allowed; not built yet: merging from a paired device or web client
-  under the same confirmation and head checks (a host that honors owner
-  devices asks that device for a fresh unlock first,
-  [Hub and spokes: owner devices](design/hub-and-spokes.md#owner-devices)),
-  merging a stack in one step, auto-merge, and an agent's merge on the
-  person's request, Project setting, or routine. Hub and peer hosts never
-  merge on a person's behalf.
+  allowed it, as above. Built: a `local-window` principal or a paired phone
+  or web client merging one pull request
+  (`POST /api/code/project-pull-requests/merge`), a whole stack in one step
+  (`/merge-stack`), and an agent's merge on the person's request through the
+  pull-request tool. A paired client must send `confirmed: true` for the head
+  it reviewed, and the server then reads the repository's required checks and
+  refuses unless they pass (`checks-not-passing`, or `checks-unknown` when
+  they cannot be read). The local window's Confirm merge sends the same
+  confirmation. No provider, plugin, routine, hub or peer host reaches the
+  routes. Allowed; not built yet: asking a paired owner device for a fresh
+  unlock first
+  ([Hub and spokes: owner devices](design/hub-and-spokes.md#owner-devices)),
+  Merge when ready from a paired device, and an agent's merge on a Project
+  setting or routine. Hub and peer hosts never merge on a person's behalf.
+- **Stack.** The command lists one to ten pull requests bottom first, each
+  with the head the person reviewed. The server reads every one first and
+  refuses the stack whole unless each is open and each base is the head
+  branch of the one before it (`not-a-chain`, `duplicate`, `too-long`,
+  `unreadable`). It then merges one at a time through the same path as a
+  single merge, and stops at the first that does not merge, answering what
+  landed and why it stopped.
 - **Confirmation.** The review enables Merge only for a fresh, unambiguous,
   open, mergeable observation. Merge opens an inline confirmation that names the reviewed head
   and focuses Cancel; nothing merges until the person chooses Confirm merge.
@@ -1889,6 +1918,22 @@ on **Merge when ready** and **Auto-fix** for a Code thread's pull request
   observes Merged. The outcome also drops the cached detail and list rows. A
   thread linked to the pull request reaches Done only through the ordinary
   observed-state rule, never from this record.
+
+**The person's pull-request actions.** `POST /api/code/project-pull-requests/actions`
+takes one of: add or remove labels, a comment, a reply in one review thread,
+close, or reopen, for a pull request in the repository a Project binds. The
+person's click is the approval. It answers 403 to a paired device, the
+service refuses any caller but a local window as `not-authorized`, and it
+refuses unless the Project is connected on this window and resolves to
+exactly that github.com repository, and while GitHub access is revoked. A
+label the repository lacks is `label-not-found`, never created; reopening a
+merged pull request is refused as `merged`; the branch is never deleted;
+approving and requesting changes are not offered. Every attempt that reaches
+the server appends `code.project-pull-request-action-recorded@1` as its own
+aggregate before the answer returns: the local user, the Project, the
+repository, the number, the action, the label names, the length of a comment
+(never its text), and the result. Approving or requesting changes as a
+person, and a renderer surface for these actions, are allowed; not built yet.
 
 **Merge when ready and Auto-fix.** A Code thread's pull request review carries
 two switches (`POST /api/code/project-pull-requests/merge-when-ready` and

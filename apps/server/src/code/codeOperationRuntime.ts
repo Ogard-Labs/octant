@@ -66,7 +66,8 @@ import type {
   ProviderSessionResume,
 } from "@octant/provider-sdk/driver";
 import type { Journal } from "../persistence/journal";
-import { GhPullRequestPort, createGhCommandPort, type GhDeliveryTarget } from "./ghPullRequestPort";
+import { createGhPullRequestPort } from "./ghPullRequestActionPort";
+import { createGhCommandPort, type GhDeliveryTarget } from "./ghPullRequestPort";
 import { GitMutationPort } from "./gitMutationPort";
 import {
   GitObservationPort,
@@ -1725,7 +1726,10 @@ async function approvalContext(
   checkout: CodeCheckoutIdentity,
 ): Promise<ApprovalContext | undefined> {
   const changesPullRequest =
-    command?.kind === "create-pull-request" || command?.kind === "update-pull-request";
+    command?.kind === "create-pull-request" ||
+    command?.kind === "update-pull-request" ||
+    command?.kind === "comment-pull-request" ||
+    command?.kind === "merge-pull-request";
   const pullRequestTarget = changesPullRequest
     ? await options.resolvePullRequestTarget(thread.id)
     : undefined;
@@ -1927,7 +1931,17 @@ function approvalPrompt(
         break;
       case "push-git":
         message = "Allow Code push operation?";
-        effectDetail = `${command.remote}: ${command.localRef} → ${command.remoteRef}\nHEAD ${command.expectedHeadOid}`;
+        effectDetail = [
+          `${command.remote}: ${command.localRef} → ${command.remoteRef}`,
+          ...(command.force === undefined
+            ? []
+            : [
+                command.force.mode === "with-lease"
+                  ? `Replaces the remote branch only if it is still ${command.force.expectedRemoteOid}`
+                  : "Overwrites the remote branch, whatever is there",
+              ]),
+          `HEAD ${command.expectedHeadOid}`,
+        ].join("\n");
         break;
       case "create-pull-request":
         message =
@@ -1952,8 +1966,33 @@ function approvalPrompt(
           ...(command.draft === undefined
             ? []
             : [command.draft ? "Turn it back into a draft" : "Mark it ready for review"]),
+          ...(command.state === undefined
+            ? []
+            : [command.state === "closed" ? "Close it (the branch stays)" : "Reopen it"]),
+          ...((command.addLabels?.length ?? 0) === 0
+            ? []
+            : [`Add labels: ${command.addLabels?.join(", ")}`]),
+          ...((command.removeLabels?.length ?? 0) === 0
+            ? []
+            : [`Remove labels: ${command.removeLabels?.join(", ")}`]),
           ...(command.title === undefined ? [] : [`Title: ${command.title}`]),
           ...(command.body === undefined ? [] : ["Body:", command.body]),
+        ].join("\n");
+        break;
+      case "comment-pull-request":
+        message = "Post this under your name?";
+        effectDetail = [
+          `Pull request of ${pullRequestTarget?.head} in ${pullRequestTarget?.baseRepository}`,
+          command.reviewThreadId === undefined ? "Comment:" : "Reply in one review thread:",
+          command.body,
+        ].join("\n");
+        break;
+      case "merge-pull-request":
+        message = "Allow merging this pull request?";
+        effectDetail = [
+          `Pull request of ${pullRequestTarget?.head} in ${pullRequestTarget?.baseRepository}`,
+          `Method: ${command.method}`,
+          `Only if its head is still ${command.headSha} and its required checks pass`,
         ].join("\n");
         break;
       case "create-review-finding":
@@ -4572,7 +4611,7 @@ function createPullRequestPort(options: CodeOperationRuntimeOptions): CodeOperat
   };
   if (options.ghExecutable === undefined) return unavailable;
   try {
-    return new GhPullRequestPort({
+    return createGhPullRequestPort({
       command: createGhCommandPort({ ghPath: options.ghExecutable }),
       resolveTarget: options.resolvePullRequestTarget,
       ...(options.inheritedEnvironment === undefined

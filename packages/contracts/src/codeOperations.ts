@@ -492,6 +492,22 @@ const PushGit = Schema.Struct({
   expectedHeadOid: GitObjectId,
   expectedStateToken: GitStateToken,
   confirmation: GitPushConfirmation,
+  /**
+   * Replace the remote branch's history instead of adding to it. `with-lease`
+   * names the remote head it expects to replace, so a branch that moved since
+   * is refused by Git; `plain` overwrites whatever is there. The host accepts
+   * `with-lease` on the thread's own branch only, and `plain` only with an
+   * approval for this one act, never on a standing grant.
+   */
+  force: Schema.optional(
+    Schema.Union(
+      Schema.Struct({
+        mode: Schema.Literal("with-lease"),
+        expectedRemoteOid: GitObjectId,
+      }).annotations(strict),
+      Schema.Struct({ mode: Schema.Literal("plain") }).annotations(strict),
+    ),
+  ),
   authorization: GitAuthorization,
 })
   .annotations(strict)
@@ -663,21 +679,76 @@ const CreatePullRequest = Schema.Struct({
  * for review). Merging, closing, and every other pull-request change stay
  * out of reach.
  */
+const PullRequestLabelName = Schema.String.pipe(
+  Schema.filter(
+    (value) =>
+      value.length >= 1 &&
+      value.length <= 50 &&
+      !value.includes("\0") &&
+      !/[\n\r,]/.test(value) &&
+      value.trim() === value,
+  ),
+);
 const UpdatePullRequest = Schema.Struct({
   kind: Schema.Literal("update-pull-request"),
   ...OperationScope,
   title: Schema.optional(boundedNonEmptyText(512)),
   body: Schema.optional(boundedText(MAX_CODE_OPERATION_TEXT_BYTES)),
   draft: Schema.optional(Schema.Boolean),
+  /** Existing repository labels only; a label the repository lacks is refused. */
+  addLabels: Schema.optional(Schema.Array(PullRequestLabelName).pipe(Schema.maxItems(20))),
+  removeLabels: Schema.optional(Schema.Array(PullRequestLabelName).pipe(Schema.maxItems(20))),
+  /** `closed` closes the open pull request; `open` reopens a closed one. The branch is kept. */
+  state: Schema.optional(Schema.Literal("closed", "open")),
   authorization: GitAuthorization,
 })
   .annotations(strict)
   .pipe(
     Schema.filter(
       (command) =>
-        command.title !== undefined || command.body !== undefined || command.draft !== undefined,
+        command.title !== undefined ||
+        command.body !== undefined ||
+        command.draft !== undefined ||
+        (command.addLabels?.length ?? 0) > 0 ||
+        (command.removeLabels?.length ?? 0) > 0 ||
+        command.state !== undefined,
+    ),
+    // Closing or reopening is a change of its own, not a side effect of an edit.
+    Schema.filter(
+      (command) =>
+        command.state === undefined ||
+        (command.title === undefined &&
+          command.body === undefined &&
+          command.draft === undefined &&
+          (command.addLabels?.length ?? 0) === 0 &&
+          (command.removeLabels?.length ?? 0) === 0),
     ),
   );
+/**
+ * Post a comment on the thread's own pull request, or reply in one of its
+ * review threads. It posts under the person's name, so it is always approved
+ * for this one act, and the approval shows the whole text.
+ */
+const CommentPullRequest = Schema.Struct({
+  kind: Schema.Literal("comment-pull-request"),
+  ...OperationScope,
+  body: boundedNonEmptyText(MAX_CODE_OPERATION_TEXT_BYTES),
+  reviewThreadId: Schema.optional(Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_=-]{1,128}$/))),
+  authorization: GitAuthorization,
+}).annotations(strict);
+/**
+ * Merge the thread's own open pull request on the person's say. The merge names
+ * the head the person saw and the method; the host refuses it unless that head
+ * is still current and the required checks pass, and an approval for this one
+ * act is required at every guardrail level.
+ */
+const MergePullRequest = Schema.Struct({
+  kind: Schema.Literal("merge-pull-request"),
+  ...OperationScope,
+  method: Schema.Literal("merge", "squash", "rebase"),
+  headSha: GitObjectId,
+  authorization: GitAuthorization,
+}).annotations(strict);
 const ObservePullRequest = Schema.Struct({
   kind: Schema.Literal("observe-pull-request"),
   ...OperationScope,
@@ -789,6 +860,8 @@ export const CODE_OPERATION_COMMAND_KINDS = [
   "push-git",
   "create-pull-request",
   "update-pull-request",
+  "comment-pull-request",
+  "merge-pull-request",
   "observe-pull-request",
   "create-review-finding",
   "update-review-finding",
@@ -820,6 +893,8 @@ export const CodeOperationCommand = Schema.Union(
   RestoreGitCheckpoint,
   CreatePullRequest,
   UpdatePullRequest,
+  CommentPullRequest,
+  MergePullRequest,
   ObservePullRequest,
   CreateReviewFinding,
   UpdateReviewFinding,
@@ -1040,6 +1115,13 @@ const PullRequestResult = Schema.Union(
         "not-mergeable",
         "no-remote",
         "invalid-base",
+        "invalid",
+        "label-not-found",
+        "not-open",
+        "not-closed",
+        "already-merged",
+        "checks-not-passing",
+        "checks-unknown",
       ),
     ),
   }).annotations(strict),
@@ -2413,6 +2495,8 @@ const APPROVAL_GATED_OPERATION_KINDS = new Set([
   "push-git",
   "create-pull-request",
   "update-pull-request",
+  "comment-pull-request",
+  "merge-pull-request",
   "create-review-finding",
   "update-review-finding",
 ]);
