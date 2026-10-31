@@ -293,7 +293,7 @@ export class ProjectTerminalService {
    * not list it. Compared as the exact string the Project record holds, so a
    * caller cannot reach a folder by describing it another way.
    */
-  #folderRoot(project: CodeProject, mainRoot: string, folder: string | undefined) {
+  #folderRoot(project: BoundProject, mainRoot: string, folder: string | undefined) {
     if (folder === undefined || folder === mainRoot) return mainRoot;
     return projectExtraFolderRoots(project).includes(folder) && isDirectory(folder)
       ? folder
