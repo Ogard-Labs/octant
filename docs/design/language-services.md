@@ -13,7 +13,7 @@ start gates this design answers are in
 **Scope and delivery state.** The maintainer authorized this scope as
 post-preview work on 2026-10-26, when parked backlog work was unlocked. That
 authorizes the design and the slices below; the release-boundary statement in
-`AGENTS.md` and the architecture is updated separately. The maintainer
+the architecture is updated separately. The maintainer
 accepted this design and its [decisions](#maintainer-decisions) on 2026-10-26.
 **Slices 1 (seam and policy), 2 (companion and the bundled TypeScript
 server), and 3 (editor wiring) are built: the Code editor shows the host's
@@ -1706,7 +1706,7 @@ Each sub-slice is its own pull request with this addendum updated in place.
   Installing never implies trust or enablement, and disabled components
   contribute nothing ([activation ladder](../architecture.md#extensions-and-skills)).
 - New capabilities reach the host through published seams. A seam is widened
-  in its own change ([AGENTS.md](../../AGENTS.md#product-invariants)).
+  in its own change ([architecture principles](../architecture.md#overview-and-principles)).
 - Plan is read-only, Code starts approval-gated, and approvals are categorized
   and journaled ([security and authority](../architecture.md#security-and-authority)).
 - Remote clients never exceed host authority, and running commands on the host

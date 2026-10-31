@@ -1,7 +1,7 @@
 # Octant architecture
 
-Octant is a local-first desktop workspace for Chat, Work, and Code across many AI
-providers. The first shipping surface is Apple Silicon macOS; Linux and Windows
+Octant is an original, local-first desktop workspace for Chat, Work, and Code
+across many AI providers. The first shipping surface is Apple Silicon macOS; Linux and Windows
 desktop are the same product, sequenced in the
 [Current Release Boundary](#current-release-boundary).
 This is the current architecture specification. Read the relevant section for
@@ -92,7 +92,65 @@ The design rests on a small set of invariants that every package obeys:
   never widened for one vendor.
 - **Install ≠ trust ≠ enable.** Extensions contribute nothing until each of
   those steps has been taken explicitly, and even then only within the mode,
-  Project, thread, and provider policy that applies.
+  Project, thread, and provider policy that applies. Extension installation
+  never implies trust, activation, enablement, or authority. Disabled
+  components contribute no context; executable components remain quarantined
+  and subject to ordinary sandbox and approval policy. Structured extension or
+  plugin references cannot install, trust, enable, elevate, or bypass policy.
+  Skills are discovered only from valid `.agents/skills/` and
+  `.claude/skills/` packages in the permitted repository ancestry (the closed
+  `PROJECT_SKILL_ROOTS` allow-list), from the user-global `~/.agents/skills/`
+  directory, and from extra skill folders a person adds in Settings (allowed;
+  not built yet), all under the same activation ladder, never from the home
+  folder's own `.claude` ([Extensions and skills](#extensions-and-skills)).
+- **Modes are server-enforced.** Chat, Work, and Code are server-enforced
+  domain modes, not renderer flags. Code is always available; disabling Chat or
+  Work never deletes their data. The shell presents Chat and Work as one
+  visible Work mode beside Code: its new-thread composer chooses Chat (no
+  folder) or Work in a folder, and the server keeps both domains and their
+  authority unchanged. A thread keeps the kind it was created with; the choice
+  never converts or widens a thread
+  ([Modes](#modes-chat-work-and-code)).
+- **Authority follows what a mode binds to.** Chat Projects are virtual,
+  memory-scoped containers with no implicit filesystem or shell authority. Work
+  binds one project root and Code binds one directory, each meant to be
+  OS-confined; Code starts approval-gated unless Full access was explicitly
+  remembered, and Plan mode is always read-only. Below Full access, Octant's own
+  tool launches are OS-confined; some provider runtimes are not yet (Codex in
+  every posture, Claude outside Plan) and rely on the runtime's own sandbox, per
+  the confinement matrix in [Security and authority](#security-and-authority).
+  Work never silently becomes Code. Coding work promotes to a linked Code thread
+  only with explicit user approval.
+- **Core capabilities are app-managed.** Browser/computer use, tests, Apple
+  validation, approvals, memory, and subagents are app-managed,
+  provider-neutral capabilities. Core Apple development cannot depend on an
+  optional extension.
+- **New providers, tools, and capabilities are plugin-shaped.** They reach the
+  system through the published seams (`@octant/provider-sdk`,
+  `@octant/plugin-api`, `@octant/plugin-host`) and take no shortcut a
+  third-party plugin could not take. Shipping in-tree is allowed; wiring a
+  provider or tool directly into server internals, or widening a seam for one
+  vendor, is not. A capability that cannot be expressed through a seam is a
+  reason to extend the seam in its own change, not to bypass it.
+- **Threads, boards, and Done.** Use the unified real-thread hierarchy and
+  server-authoritative Work/Code boards. Chat has no board. A Code thread is
+  Done only when its user-confirmed delivery target is objectively satisfied. A
+  Work thread is Done when a person marks it Done. An agent cannot mark any
+  thread Done.
+- **Remote clients never exceed what the host granted.** Remote clients never
+  exceed host, mode, provider, Project, or thread authority. A hub or peer host
+  acting on another host is a remote client there, held to the grant that
+  host's person chose. A person's own owner device may use a local window's
+  powers on a host only after a fresh unlock on that device; agents, routines,
+  and peer hosts never do
+  ([Hub and spokes: owner devices](design/hub-and-spokes.md#owner-devices)).
+- **Privacy is about third parties.** Preserve local-first and
+  privacy-preserving defaults. Add telemetry, external calls, credential
+  exposure, or cloud dependencies only when the request authorizes them and the
+  current specification documents the boundary. Traffic among a person's own
+  devices over their private network is not an external call and may be
+  generous, but it is always authenticated, encrypted, and held to the owning
+  specification's rules.
 
 Packaged macOS hosts use a restricted executable search path containing system
 utilities and standard package-manager locations. `/usr/sbin` is included so
@@ -1442,16 +1500,72 @@ Work artifacts belong to the Project, not the thread, so the mark does not
 lock them; changes from the thread happen in turns, which it refuses. A turn
 already running when the mark lands finishes normally.
 
-**Pull-request merge.** The person at a local desktop window may merge one
-open pull request from its review (`POST /api/code/project-pull-requests/merge`).
-That is the only pull-request mutation Octant performs; approving, commenting,
-requesting changes, editing, closing, reopening, and force-pushing stay absent.
-The rules:
+**Git and pull requests.** A Code thread may push its own branch and open,
+update, and stack pull requests from it; a person merges. The line sits at
+merging, approving, and other people's branches, because those are where an
+agent could land unreviewed work or destroy someone else's. Every forge change
+goes through one journaled Octant pull-request tool, and these rules hold for
+every action in it:
 
-- **Who.** Only a `local-window` principal. The route answers 403 to a paired
-  remote device before decoding the command, and the server service refuses
-  any initiator other than `user` as `not-authorized`. No provider, agent tool,
-  plugin, routine, or Code posture (Full access included) can reach it.
+- **Where.** Only the repository the thread's Project binds, and only a base
+  inside that repository.
+- **Whose branch.** A thread owns the branch its checkout works on, the head
+  of its delivery target. It never acts on the default branch, a protected
+  branch, or another thread's branch; a stacked pull request may only target
+  the branch of the thread or linked thread it stacks on.
+- **Refusals.** Plan mode refuses every action, and so does revoked forge
+  access. A plain force-push is never offered; rewriting the thread's own
+  branch uses force-with-lease.
+- **Record.** Each action journals the actor, the repository, the number, and
+  the head SHA, as Octant's own record beside the forge's history.
+- **Credential.** Octant stores no forge token, as under the merge rules
+  below.
+- **People approve and merge.** Agents and routines never merge, approve, or
+  request changes. A thread a routine started is approval-gated
+  ([Routines](#modes-chat-work-and-code)), so its prompts wait for a person,
+  and it never marks a pull request ready, closes it, or merges it without
+  one.
+
+| Action                               | Who                                        | Approval                                                                               | Still refused                                                  | Built                                                  |
+| ------------------------------------ | ------------------------------------------ | -------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------ |
+| Fast-forward push to its own branch  | Agent or person                            | Approval-gated asks for each act; remembered Full access does not ask                  | A branch the thread does not own; any force option             | Yes (`push-git`)                                       |
+| Open a pull request                  | Agent or person                            | As for push                                                                            | A repository outside the binding; a base outside it            | Yes, as ready for review (`create-pull-request`)       |
+| Open a draft pull request            | Agent or person                            | As for push                                                                            | As for opening                                                 | Allowed; not built yet                                 |
+| Mark ready for review                | Agent or person                            | As for push                                                                            | A pull request the thread does not own                         | Allowed; not built yet                                 |
+| Stacked pull request on its parent   | Agent or person                            | As for push                                                                            | A parent branch no thread or linked thread of this one owns    | Allowed; not built yet                                 |
+| Amend and push with force-with-lease | Agent or person, own branch only           | Asks every time unless Full access is remembered; the lease is mandatory               | Plain force-push; the default, a protected, or a shared branch | Allowed; not built yet                                 |
+| Edit title or body                   | Agent or person                            | As for push                                                                            | A pull request the thread did not open and is not linked to    | Allowed; not built yet                                 |
+| Add or remove labels                 | Agent or person                            | As for push                                                                            | Creating repository-wide labels                                | Allowed; not built yet                                 |
+| Review replies and comments          | Agent drafts; person sends                 | The person approves each post, Full access included, because it posts under their name | Approving or requesting changes                                | Allowed; not built yet                                 |
+| Approve or request changes           | Person only                                | —                                                                                      | Agents and routines                                            | Allowed for a person; not built yet                    |
+| Close or reopen                      | Person, or agent with approval             | Asks every time                                                                        | Deleting the branch                                            | Allowed; not built yet                                 |
+| Merge                                | Person only, local window or paired device | Inline confirmation of the reviewed head SHA                                           | Agents, routines, hub or peer hosts, any Code posture          | Local window yes; paired device allowed, not built yet |
+
+The pull-request tool is the only sanctioned path to the forge, and a known
+gap remains: a Code agent's shell can reach forge credentials today. Under
+remembered Full access no runtime is confined by Octant, so a command can use
+the host's forge command-line login and Git credential helper. Under Codex's
+prompting postures, a shell command the person approves escalates out of
+Codex's `read-only` sandbox with the same reach. Claude's prompting postures
+run inside the runtime's own sandbox, which denies reads outside the project
+root (so `~/.config/gh` and `~/.ssh` are out of reach); whether a
+Keychain-backed credential helper is reachable there has not been measured.
+A push or pull-request change made through that gap is journaled only as a
+shell command, so none of the rules above applies to it. Closing the gap is a
+known follow-up.
+
+**Pull-request merge.** A person merges one open pull request from its review
+(`POST /api/code/project-pull-requests/merge`). The rules:
+
+- **Who.** A person only. Today that is a `local-window` principal: the route
+  answers 403 to a paired remote device before decoding the command. A person
+  on a paired device may merge under the same confirmation and head checks
+  (allowed; not built yet); a host that honors owner devices asks that device
+  for a fresh unlock first
+  ([Hub and spokes: owner devices](design/hub-and-spokes.md#owner-devices)).
+  The server service refuses any initiator other than `user` as
+  `not-authorized`. No provider, agent tool, plugin, routine, hub or peer
+  host, or Code posture (Full access included) can reach it.
 - **Confirmation.** The review enables Merge only for a fresh, unambiguous,
   open, mergeable observation. Merge opens an inline confirmation that names the reviewed head
   and focuses Cancel; nothing merges until the person chooses Confirm merge.
@@ -1527,7 +1641,9 @@ rules below:
 **Routines (Automation Center).** A routine is a host-owned, Project-bound
 definition that starts an ordinary Work or Code thread with a fixed task prompt
 on a trigger: once, every N minutes (15 minutes to 30 days), or weekly at a
-local time in an IANA time zone. Chat has no routines. Each occurrence creates
+local time in an IANA time zone. Chat routines are allowed, since a Chat
+thread has no file, shell, or Git authority for a routine to widen, but not
+built yet: today a routine targets a Work or Code Project. Each occurrence creates
 at most one new thread (target policy `new-thread`) and runs its first turn
 through the ordinary thread and turn services; a routine cannot do anything the
 thread it creates could not do.
@@ -3011,6 +3127,9 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
 - **Credentials.** API keys live in the host credential store — macOS Keychain
   on macOS, freedesktop Secret Service on Linux — and are reached only
   through the host's loopback credential broker by opaque UUID reference.
+  A person may also link an external secret store: the broker resolves a
+  linked value at use, by opaque reference, and the value never enters the
+  journal, logs, diagnostics, or the renderer (allowed; not built yet).
   The desktop saves a key from its own renderer; a host without the desktop
   app takes it only from the host-local `octant provider key` command, as
   [security and authority](#security-and-authority) states.
@@ -5976,9 +6095,13 @@ same. This holds in Chat, Work, and Code.
 - Skills are discovered only from valid `.agents/skills/` and `.claude/skills/`
   packages between the working directory and the Project or repository root
   (the closed `PROJECT_SKILL_ROOTS` allow-list), plus the user-global
-  `~/.agents/skills/`. The home folder's own `.claude` is never read, even when
-  the host's Project-less fallback root is the home folder. A symlinked skills
-  folder, or one that resolves outside the bound root, is ignored. Every root
+  `~/.agents/skills/`, plus extra skill folders a person adds in Settings
+  (allowed; not built yet: a folder the person names is its own root, wherever
+  it is, and Octant never discovers one). The home folder's own `.claude` is
+  never read, even when
+  the host's Project-less fallback root is the home folder. A discovered
+  skills folder that is a symlink, or resolves outside the bound root, is
+  ignored. Every root
   enters the same activation ladder (indexed disabled, then reviewed, then
   enabled; a discovered skill is never trusted or active because of where it
   was found) with its own `sourceRef`, so same-named skills across roots are
@@ -8990,11 +9113,71 @@ nothing first-party.
 
 ## Current Release Boundary
 
-The [Current Release Boundary in `AGENTS.md`](../AGENTS.md#current-release-boundary)
-is the one statement of what the first release includes and defers. This
-section owns the architectural rules behind it. On macOS, Squirrel.Mac refuses
-a replacement that does not satisfy the running app's designated requirement,
-so signing, notarization, and update ship as one deliverable.
+This section is the one statement of what the first release includes and
+defers, and it owns the architectural rules behind it.
+
+The first release is the Apple Silicon technical preview with the
+provider-neutral plugin/skill marketplace. It is signed with a Developer ID,
+notarized, and updates itself — those three are one deliverable, because an
+updater on an unsigned app is an unauthenticated code-delivery channel and
+macOS refuses the replacement anyway. On macOS, Squirrel.Mac refuses a
+replacement that does not satisfy the running app's designated requirement, so
+signing, notarization, and update ship as one deliverable. A local package
+built without maintainer signing credentials is unsigned.
+
+Cross-platform desktop (macOS, Linux, Windows) remains authorized: Linux
+desktop shell next, Windows Work/Code only after an explicitly approved Windows
+confinement design is documented. These tracks are authorized as post-preview
+work (maintainer decision, 2026-10-26) and are not part of the technical
+preview: mobile maturity (Android internal builds, redacted push, capture and
+voice, public store distribution), a ciphertext-only hosted relay, a full LSP /
+extension host / debugger companion, enterprise directory OAuth and cloud-IAM
+provider identity, disposable Linux desktops for headless hosts, third-party
+provider-driver plugins, and the EU/GDPR compliance package (pending legal
+review). Public store distribution, the Windows sequence below, and the full
+LSP / extension host / debugger companion are release-scope choices the
+maintainer schedules, not safety rules; none of them protects an invariant by
+itself. Remote SSH development environments are out of scope (maintainer
+decision, 2026-10-29): an agent that needs another machine uses its own
+provider tools, and Octant on the person's other computers joins a hub. A
+hub-and-spoke topology on a person's own devices, where one Octant server
+(running without the desktop app and serving the web app over a private network
+such as Tailscale) enrolls the person's other computers and phones, introduces
+them to each other, fails over to a standby, and runs their wake and push
+services, is authorized the same way (maintainer decision, 2026-10-28) under
+[Hub and spokes](design/hub-and-spokes.md). Each is design-first: build it only
+once its owning specification documents its authority, privacy, and release
+boundaries. The authorization covers design and implementation; creating an
+account, spending money, submitting to a store, deploying a hosted service, or
+weakening any invariant each still needs a separate explicit maintainer action.
+Apple physical devices and App Store Connect upload, submission, and release
+are out of scope (maintainer decision, 2026-10-29): Octant drives the iOS
+Simulator only, and an agent that needs a device or the store uses its own
+provider tools.
+
+Connectors (MCP servers added by hand, imported from other tools on this Mac,
+signed in to, or chosen from the bundled catalog) are in scope under the
+[connector rules](#extensions-and-skills): user-added packages through the
+published seams and the credential broker, never a hosted service. A Code
+thread's own Git and pull-request work (push, draft, ready, stacked, and
+force-with-lease on its own branch, title, body, labels, drafted replies a
+person sends, and close or reopen with approval), a person's confirmed merge
+from a local window or a paired device, and host-local routines (Automation
+Center), Chat routines included, are in scope under the rules in
+[Modes](#modes-chat-work-and-code). Of the pull-request actions, only a
+fast-forward push, opening a ready pull request, and merging from a local
+window are built; the rest, Chat routines, extra skill folders added in
+Settings, and linked external secret stores are allowed and not built yet.
+Agent-initiated merge, review approval by an agent, plain force-push, and
+cloud scheduling are not in scope. A self-hosted wake service
+that runs in the Octant server on a person's hub and wakes their own spokes is
+in scope under [Hub and spokes](design/hub-and-spokes.md#wake-service); an
+Octant-operated hosted service, deploying anything, creating an account, or
+spending money still needs a separate explicit maintainer action. The public
+Canvas share service is in scope under
+[Canvas public links](design/canvas-public-links.md); its code lives in the
+`octant-webapp` repository. Existing scoped exceptions remain documented in
+this architecture.
 
 Desktop is one product on macOS, Linux, and Windows; platform differences are
 fail-closed posture, never a second app. The desktop process owns its local
@@ -9003,7 +9186,8 @@ AppImage with its signed feed, then Windows. Windows comes after the macOS
 technical preview has shipped and a Linux self-update from the signed feed
 has been seen on a real image; until both exist, no Windows packaging,
 installer, feed, packaging CI, or confinement work starts (maintainer
-decision, 2026-10-16). The reason is sequencing, not a technical
+decision, 2026-10-16). This is a release-scope choice the maintainer may
+change, not a safety rule. The reason is sequencing, not a technical
 dependency: the one maintainer is also the only acceptance tester, the
 macOS preview has waited on acceptance since September, and a third
 platform's packaging and confinement questions would compete for the same
@@ -9099,25 +9283,15 @@ Public links on and approves a publish, and a self-hosted service URL is a
 Settings choice. Deploying it, its DNS and TLS, and its operator contact are
 release steps of their own.
 
-The maintainer authorized the previously held post-preview tracks on
-2026-10-26: mobile maturity (Android internal builds, redacted push, capture
-and voice, public store distribution), a ciphertext-only hosted relay, a full
-LSP / extension host / debugger companion, enterprise directory OAuth and
-cloud-IAM provider identity, disposable Linux desktops for headless hosts, third-party
-provider-driver plugins, and the EU/GDPR compliance package (pending legal
-review). On 2026-10-28 the maintainer added a hub-and-spoke topology under the
-same terms ([Hub and spokes](design/hub-and-spokes.md)), including a
-self-hosted wake service that runs in the Octant server on the person's own
-hub; an Octant-operated wake service is not in scope. None of them is part of
-the technical preview, whose ship boundary
-above is unchanged. Each is design-first: implementation starts only once its
-owning specification documents its authority, privacy, and release
-boundaries. The authorization covers design and implementation; creating an
-account, spending money, submitting to a store, deploying a hosted service, or
-weakening an invariant in this document each still needs a separate explicit
-maintainer action. Apple physical devices and App Store distribution are out of
-scope (2026-10-29). The earlier holds and their start gates
-remain as rationale in [release-boundary holds](release-boundary-holds.md).
+The post-preview tracks listed above were previously held and were authorized
+by the maintainer on 2026-10-26. On 2026-10-28 the maintainer added the
+hub-and-spoke topology under the same terms
+([Hub and spokes](design/hub-and-spokes.md)), including a self-hosted wake
+service that runs in the Octant server on the person's own hub; an
+Octant-operated wake service is not in scope. None of them is part of the
+technical preview, whose ship boundary above is unchanged. The earlier holds and
+their start gates remain as rationale in
+[release-boundary holds](release-boundary-holds.md).
 The connector / OAuth marketplace hold was lifted on 2026-10-20 under the
 [Connectors and user-added MCP servers](#extensions-and-skills) rules: a
 bundled first-party catalog, sign-in through the MCP authorization flow, and

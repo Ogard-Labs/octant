@@ -37,7 +37,7 @@ maintainer authorized this scope as post-preview work and accepted the
 authorizes design, planning, and implementation of the slices below that need
 no new account, spend, hosted service, store submission, or widened authority;
 the account, deployment, and sign-off gates the decisions name stay maintainer
-actions. The release-boundary statement in `AGENTS.md` and architecture is
+actions. The release-boundary statement in the architecture is
 updated by a separate change; until it lands, public store work (Phase E) does
 not start. Nothing below is implemented unless
 [Exists today](#exists-today) says so.

@@ -9,7 +9,7 @@ tracker; this document records direction.
 ## Now — technical preview
 
 What the first release includes and defers is stated once, in the
-[Current Release Boundary](../AGENTS.md#current-release-boundary). Everything
+[Current Release Boundary](architecture.md#current-release-boundary). Everything
 here is merged or being hardened for it.
 
 - **Chat, Work, and Code as server-enforced modes** — virtual Chat Projects, one
@@ -134,7 +134,7 @@ Hardening in progress for the preview:
 Outside the technical preview. Except for Windows, which stays sequenced
 behind the preview, these are post-preview tracks the maintainer authorized on
 2026-10-26 under the
-[Current Release Boundary](../AGENTS.md#current-release-boundary). Each is
+[Current Release Boundary](architecture.md#current-release-boundary). Each is
 design-first: work starts only once its owning specification documents its
 authority, privacy, and release boundaries.
 
@@ -179,10 +179,11 @@ Intentionally out of scope; changing this requires an approved design change.
   designated Code thread per Code Project that reads the Project's board and
   proposes work the user must explicitly confirm. It launches and redirects
   nothing.
-- **Other pull-request mutation and agent-initiated merge** — force-push,
-  review approval, comments, closing, and any merge an agent or remote client
-  starts. The person's own confirmed merge is the one exception
-  ([architecture](architecture.md#modes-chat-work-and-code)).
+- **Agent-initiated merge and review approval** — any merge an agent,
+  routine, or hub or peer host starts, an agent's approval or request for
+  changes, and plain force-push. A Code thread's own pull-request work and a
+  person's confirmed merge are allowed under
+  [Git and pull requests](architecture.md#modes-chat-work-and-code).
 - **Octant-operated cloud accounts or telemetry** — the product stays
   local-first and privacy-preserving by default.
 - **Auto-installing or auto-updating provider runtimes** — Octant detects

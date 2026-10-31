@@ -2122,7 +2122,7 @@ Cancel; Tab can leave the warning to continue reviewing. Escape within the warni
 or Cancel returns focus to Merge (or the review heading if Merge is unavailable).
 An attempted merge keeps its existing freshness and reviewed-head checks, and
 focus moves to its result when the attempt completes. It is not a trusted task
-approval surface. Only the person at a local window can merge; who may merge and
+approval surface. Only a person can merge; who may merge and
 what the host checks are owned by
 [architecture](docs/architecture.md#modes-chat-work-and-code).
 

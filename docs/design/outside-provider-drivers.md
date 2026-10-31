@@ -52,7 +52,7 @@ conformance in CI (see [Author kit rules](#author-kit-rules)); nothing is
 published to a registry ([decision 8](#maintainer-decisions)).
 The maintainer authorized this scope as
 post-preview work and accepted the [maintainer decisions](#maintainer-decisions)
-below on 2026-10-26; the release boundary in `AGENTS.md` and the architecture
+below on 2026-10-26; the release boundary in the architecture
 is updated separately. Slices and their evidence are tracked in Linear; this
 file states the rules they implement.
 
@@ -1065,10 +1065,11 @@ explicit in review copy.
 ## Already settled by existing specifications
 
 - Installation never implies trust, activation, enablement, or authority;
-  structured references cannot install, trust, enable, or elevate (`AGENTS.md`
-  product invariants).
+  structured references cannot install, trust, enable, or elevate ([architecture
+  principles](../architecture.md#overview-and-principles)).
 - New providers reach the host only through the published seams, and a seam is
-  extended in its own change rather than bypassed (`AGENTS.md`).
+  extended in its own change rather than bypassed
+  ([architecture principles](../architecture.md#overview-and-principles)).
 - The activation ladder and its block reasons, executable quarantine, and
   supervised processes ([Architecture: extensions and skills](../architecture.md#extensions-and-skills)).
 - Honest capability, closed probe reasons, and verified-models tool reach for

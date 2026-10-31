@@ -1,7 +1,7 @@
 # Release-boundary holds and the post-preview unlock
 
 This note keeps the start gates for two deferrals once named by the
-[Current Release Boundary in `AGENTS.md`](../AGENTS.md#current-release-boundary),
+[Current Release Boundary in the architecture](architecture.md#current-release-boundary),
 which is the one statement of release scope. Both holds are lifted; the gates
 stay as the record of what each track must satisfy.
 
