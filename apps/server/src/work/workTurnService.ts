@@ -93,6 +93,8 @@ import {
   FILE_MENTION_UNREADABLE_CONTEXT,
   THREAD_MENTION_UNREADABLE_CONTEXT,
   workProjectKeepsStatusFile,
+  projectExtraFolderRoots,
+  projectExtraFoldersInstructions,
   type ThreadToolSteps,
 } from "@octant/domain";
 import {
@@ -303,6 +305,8 @@ export interface WorkTurnServiceDependencies {
   readonly resolveAppManagedTools?: (input: {
     readonly thread: WorkThread;
     readonly projectRoot: string;
+    /** The Project's extra folders, which file tools treat as the root. */
+    readonly extraFolders?: ReadonlyArray<string>;
     readonly windowId: WindowId;
   }) => AppManagedToolSet | undefined;
   /** The harness around a turn: stable instructions in front, the reply observed after. */
@@ -987,6 +991,7 @@ export class WorkTurnService {
             block,
           }),
         ),
+        ...extraFolderContributions(project),
         ...(await this.#projectBriefContributions(project, command.threadId)),
         ...priorTranscript,
         ...(handoff === undefined
@@ -1154,6 +1159,7 @@ export class WorkTurnService {
       ...(resumeCursor === undefined ? {} : { resumeCursor }),
       projectRoot,
       projectCanonicalRoot: project.binding.canonicalRoot,
+      extraFolders: projectExtraFolderRoots(project),
       driver,
       attachments: attachmentInputs,
       contextPlan: planned,
@@ -1408,6 +1414,8 @@ export class WorkTurnService {
     readonly projectRoot: string;
     /** The Project's bound root, where `STATUS.md` lives; the turn may run in a subfolder. */
     readonly projectCanonicalRoot: string;
+    /** The Project's extra folders, granted what the bound root is granted. */
+    readonly extraFolders: ReadonlyArray<string>;
     readonly driver: ProviderDriver;
     readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
     readonly contextPlan: Extract<WorkTurnContextPlan, { readonly kind: "ok" }>;
@@ -1440,6 +1448,7 @@ export class WorkTurnService {
         : this.#resolveAppManagedTools?.({
             thread: input.thread,
             projectRoot: input.projectRoot,
+            ...(input.extraFolders.length === 0 ? {} : { extraFolders: input.extraFolders }),
             windowId: input.windowId,
           });
     const appManagedTools =
@@ -1586,6 +1595,7 @@ export class WorkTurnService {
               },
             }),
         projectRoot: input.projectRoot,
+        ...(input.extraFolders.length === 0 ? {} : { extraFolders: input.extraFolders }),
         driver: input.driver,
         signal: input.signal,
         ...(input.thread?.modelOptionValues === undefined
@@ -2506,6 +2516,24 @@ function workTurnThreadFacts(
  * window, and held in the feed's frames, once per later tool event of the
  * turn (sixty later events held about 15 MB for one snapshot).
  */
+/** Tells the agent about the Project's extra folders, which its runtime cannot see. */
+function extraFolderContributions(
+  project: Parameters<typeof projectExtraFolderRoots>[0],
+): ReadonlyArray<WorkTurnContextContribution> {
+  const text = projectExtraFoldersInstructions(projectExtraFolderRoots(project));
+  if (text === undefined) return [];
+  return [
+    {
+      text,
+      sourceKind: "instruction",
+      referenceId: "octant-project-extra-folders",
+      category: "octant-policy",
+      posture: "required",
+      block: { kind: "instructions", text },
+    },
+  ];
+}
+
 function withoutPublishedSnapshots(toolSteps: ThreadToolSteps): ThreadToolSteps {
   if (!toolSteps.steps.some((step) => step.published?.snapshot !== undefined)) return toolSteps;
   return {

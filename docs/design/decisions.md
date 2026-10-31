@@ -32,14 +32,14 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | Area                                                                                  | Decisions | Built   | Partly built | Designed, not built |
 | ------------------------------------------------------------------------------------- | --------- | ------- | ------------ | ------------------- |
 | [Principles and hard lines](#principles-and-hard-lines)                               | 5         | 4       | 1            | 0                   |
-| [Guardrails and review](#guardrails-and-review)                                       | 7         | 0       | 4            | 3                   |
+| [Guardrails and review](#guardrails-and-review)                                       | 7         | 0       | 5            | 2                   |
 | [Key providers](#key-providers)                                                       | 1         | 0       | 0            | 1                   |
 | [Release scope](#release-scope)                                                       | 4         | 1       | 3            | 0                   |
 | [Process topology and local trust](#process-topology-and-local-trust)                 | 6         | 6       | 0            | 0                   |
 | [App-managed tools](#app-managed-tools)                                               | 2         | 2       | 0            | 0                   |
 | [Canvas authority](#canvas-authority)                                                 | 2         | 2       | 0            | 0                   |
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
-| [Modes, Projects and authority](#modes-projects-and-authority)                        | 12        | 10      | 2            | 0                   |
+| [Modes, Projects and authority](#modes-projects-and-authority)                        | 13        | 10      | 3            | 0                   |
 | [Agents and delegation](#agents-and-delegation)                                       | 4         | 4       | 0            | 0                   |
 | [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 2       | 3            | 1                   |
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 3       | 0            | 1                   |
@@ -68,8 +68,8 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Hubs, relay and Nightly](#hubs-relay-and-nightly)                                    | 5         | 3       | 1            | 1                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
-| [Decided, pending a specification update](#decided-pending-a-specification-update)    | 5         | 0       | 0            | 5                   |
-| **All areas**                                                                         | **222**   | **173** | **34**       | **15**              |
+| [Decided, pending a specification update](#decided-pending-a-specification-update)    | 4         | 0       | 0            | 4                   |
+| **All areas**                                                                         | **222**   | **173** | **36**       | **13**              |
 
 ## Principles and hard lines
 
@@ -149,7 +149,7 @@ One setting says how much a thread's tool calls are guarded, with four levels: A
 - Plan is an overlay on any level and always read-only; subagents start at their parent's level and never exceed it; a routine runs at the level its creator picked.
 - Older recorded "Trusted" or "Off" levels replay as Full access.
 - Built in Code: Ask first, Accept edits, Auto with the key CLI providers' own reviewers, Plan, and Full access with no sandbox and no prompts for every runtime, with a first-run default, a Settings › Code › Access default, a Project override, and the one-time warning.
-- Not built yet: the shared levels in Work, Octant Shield, an ACP agent's own reviewer, and the thread header indicator. The guardrail-level list in the architecture still names some of the Code pieces as not built; its later Code access rules describe them as built.
+- Not built yet: the shared levels in Work, Octant Shield's picker and Settings, an ACP agent's own reviewer, and the thread header indicator. The guardrail-level list in the architecture still names some of the Code pieces as not built; its later Code access rules describe them as built.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Security and authority, Guardrail levels](../architecture.md#security-and-authority).
 
@@ -201,8 +201,10 @@ Octant Shield is Octant's own automatic approval reviewer for every runtime that
 - Shield uses the thread's own provider account and its smallest model by default, or another configured endpoint, sends no telemetry, counts against spend ceilings, and journals every decision.
 - A release with Shield requires measuring its false-allow rate on a fixture set of known-safe and known-unsafe calls.
 - Build order: the native harness, every runtime's approval path, the picker and Settings, the Watcher, safe networks, then the server registry and SSH.
+- Built: the Judge (rules, fast allow rules that read a command exactly as written, the model stage, fail-closed, brakes, per-call grants, taint limits, spend reservations with the review's usage recorded under the thread), answering the approvals of the Octant Harness, Claude Code, Codex, OpenCode, ACP agents and Pi on a Code thread in Auto where Shield is the reviewer, and their subagents', each decision journaled and shown on the transcript; the fixture set with a test of the rule stages and a false-allow measurement script.
+- Not built yet: the picker and Settings (so Claude Code and Codex keep their own reviewer), the Watcher (so the Judge has no labels yet), safe networks, and the server registry; the false-allow rate of a real model is unmeasured.
 
-Status: Designed, not built. Since: 2026-10-31. Detail: [Architecture: Octant Shield](../architecture.md#octant-shield).
+Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Octant Shield](../architecture.md#octant-shield).
 
 ### Safe networks
 
@@ -577,6 +579,19 @@ A project scaffold is a curated catalog entry with a pinned generator, run as an
 - Plan refuses a scaffold. It runs confined with network egress allowed and caches redirected to a private directory, installs no dependencies, and a run that does not exit cleanly is never reported as a created project. _Here only._
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
+
+### Projects with several folders
+
+A Work or Code Project has one main folder plus extra folders the person adds; each extra folder gets the main folder's access at the thread's level, and commands, checkouts and Git start in the main folder.
+
+- Only a person adds or removes an extra folder, through a folder-picker receipt; each change is journaled with who and when and replays, and a Project made before the field existed has none.
+- An extra folder is never the home folder or above it, a system or credential folder, the main folder, or inside or around the main folder or another extra folder; a Project has at most 16.
+- The OS profiles, the provider sandboxes and approval scopes, the Octant Harness file tools and Octant Shield's fast read and edit rules grant an extra folder exactly what they grant the main folder; Plan reads it without writing, and Full access stays unwrapped.
+- Each Work and Code turn names the extra folders to the agent.
+- Worktrees, checkouts, Git, terminals and Project actions stay in the main folder; an extra folder is a plain folder.
+- Not built yet: the `@file` picker, the Work Files and overview listings, Work artifact paths and Code search still address only the main folder.
+
+Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Projects with several folders](../architecture.md#projects-with-several-folders).
 
 ## Agents and delegation
 
@@ -1939,6 +1954,7 @@ Status: Built. Since: —. Detail: [Workspace: Boards and integrations](workspac
 A thread or Project can start from a forge issue, a tracker issue or a cloned repository, without write-back.
 
 - Creating from an issue attaches only its identity. The server reauthorizes, frames redacted text as external content and journals the ingestion. There is no write-back.
+- A local window may start a Work or Code thread from a Claude Code or Codex terminal session of the Project's own folder. Creating attaches only the provider and session id; the server rereads the session, refuses another folder, keeps only the person's and the assistant's words within a fixed bound, marks the thread with outside content before it exists, and journals the history with the thread so purging erases it. The first admitted turn hands the history to the model once, framed as outside data. A paired device cannot start one, and a thread starts from an issue or a session, never both. The provider's session is not resumed, nothing is uploaded, and nothing is written back.
 - Cloning verifies identity and origin before materializing, promotes atomically without overwriting, and issues a one-time binding receipt.
 
 Status: Built. Since: —. Detail: [Workspace: Boards and integrations](workspace.md#boards-and-integrations).
@@ -2608,14 +2624,6 @@ Browser pages can keep sign-ins in named profiles, and a person may import cooki
 - The current Browser profiles design says Octant never imports another browser's profile; this decision replaces that sentence when the specification is updated.
 
 Status: Designed, not built. Since: 2026-10-31. Detail: pending spec update (owner to be [Browser profiles and extensions](browser-profiles.md#profiles)).
-
-### Projects with several folders
-
-A Work or Code Project may bind several folders instead of exactly one.
-
-- Today a Work Project binds one root and a Code Project one directory; the specification change defines how confinement, checkouts and Git apply to several.
-
-Status: Designed, not built. Since: 2026-10-31. Detail: pending spec update (owner to be [Architecture: Modes](../architecture.md#modes-chat-work-and-code)).
 
 ### Local diagnostics export
 

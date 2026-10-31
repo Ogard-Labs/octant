@@ -21,6 +21,7 @@ import {
   type ProviderToolDefinition,
   type ProviderTurnInput,
   type UtcTimestamp,
+  type ProviderApprovalCall,
 } from "@octant/contracts";
 import type {
   ProviderAcquireInput,
@@ -43,6 +44,7 @@ import {
   type CodexEventContext,
   type CodexPendingApproval,
 } from "./codexEventMapper";
+import { providerApprovalCall } from "./providerApprovalCall";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import {
   isAtLeastRelease,
@@ -888,13 +890,15 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             options.runtimeRegistry.setObservedState(result);
             return result;
           }),
-    acquire: ({ instanceId, projectRoot, mode }) => {
+    acquire: ({ instanceId, projectRoot, mode, extraFolders = [] }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
           failure("invalid-configuration", "Provider instance does not match driver."),
         );
       }
-      if (!isAbsolute(projectRoot) || resolve(projectRoot) !== projectRoot) {
+      if (
+        [projectRoot, ...extraFolders].some((root) => !isAbsolute(root) || resolve(root) !== root)
+      ) {
         return Effect.fail(
           failure(
             "invalid-configuration",
@@ -907,13 +911,14 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
       // one lease is one root under one mode and posture and Octant's profile
       // can be exact for it.
       // A lease that runs Codex's own subagents is its own process: the flag
-      // rides on the command line and cannot change on a running process.
+      // rides on the command line and cannot change on a running process, so
+      // it is part of the posture the key names.
       const leaseKey = (executionPolicy: ProviderExecutionPolicy, ownSubagents = false) =>
         JSON.stringify([
           projectRoot,
+          extraFolders,
           threadMode,
-          executionPolicy,
-          ...(ownSubagents ? ["own-subagents"] : []),
+          ownSubagents ? `${executionPolicy}+own-subagents` : executionPolicy,
         ]);
       const leaseFor = (executionPolicy: ProviderExecutionPolicy, ownSubagents: boolean) =>
         Effect.gen(function* () {
@@ -923,6 +928,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             {
               kind: "thread",
               root: projectRoot,
+              ...(extraFolders.length === 0 ? {} : { extraFolders }),
               mode: threadMode,
               executionPolicy,
               ...(ownSubagents ? { ownSubagents: true as const } : {}),
@@ -946,36 +952,41 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
       // app-server that last ran it, `thread/unsubscribe` does not unload it,
       // and another app-server's resume is refused ("already has an active
       // writer") until that process ends. A thread whose posture changed
-      // between turns last ran under another lease of this root and mode, idle
-      // for up to its delay, so the idle ones close now. One a connection still
-      // holds keeps running and the resume reports the conflict.
-      const closeIdleOtherPostures = (
+      // between turns, whose own subagents were turned on or off, or whose
+      // Project gained or lost an extra folder, last ran under another lease
+      // of this root and mode, idle for up to its delay, so every idle lease of
+      // this root and mode other than the one this resume uses closes now. The
+      // folder set is matched loosely on purpose: the old set is gone from the
+      // Project by the time the thread resumes. One a connection still holds
+      // keeps running and the resume reports the conflict.
+      const closeIdleOtherLeases = (
         executionPolicy: ProviderExecutionPolicy,
         ownSubagents: boolean,
       ) =>
         Effect.promise(() =>
-          Promise.all(
-            ProviderExecutionPolicy.literals.flatMap((other) =>
-              [false, true]
-                .filter((variant) => other !== executionPolicy || variant !== ownSubagents)
-                .map((variant) =>
-                  options.runtimeRegistry.closeIdleLease(
-                    options.instanceId,
-                    leaseKey(other, variant),
-                  ),
-                ),
-            ),
-          ),
-        ).pipe(Effect.asVoid);
+          options.runtimeRegistry.closeIdleLeasesWhere(options.instanceId, (lease) => {
+            if (lease === leaseKey(executionPolicy, ownSubagents)) return false;
+            const parsed = codexThreadLease(lease);
+            return parsed?.root === projectRoot && parsed.mode === threadMode;
+          }),
+        );
       return Effect.gen(function* () {
-        return yield* makeConnection(options, leaseFor, closeIdleOtherPostures, projectRoot, mode, {
-          instanceId: options.instanceId,
-          clock,
-          makeCorrelation,
-          makeRequestId,
-          makeTaskId,
-          makeToolCallId,
-        });
+        return yield* makeConnection(
+          options,
+          leaseFor,
+          closeIdleOtherLeases,
+          projectRoot,
+          extraFolders,
+          mode,
+          {
+            instanceId: options.instanceId,
+            clock,
+            makeCorrelation,
+            makeRequestId,
+            makeTaskId,
+            makeToolCallId,
+          },
+        );
       });
     },
   };
@@ -987,6 +998,21 @@ interface CodexLeasedRuntime {
   readonly client: CodexClientPort;
   readonly version: string;
   readonly exited: Promise<void>;
+}
+
+/** The root and mode a thread lease key names, or undefined for any other lease. */
+function codexThreadLease(
+  lease: string,
+): { readonly root: string; readonly mode: string } | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(lease);
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(parsed) || parsed.length !== 4) return undefined;
+  const [root, , mode] = parsed;
+  return typeof root === "string" && typeof mode === "string" ? { root, mode } : undefined;
 }
 
 function acquireRuntime(
@@ -1260,11 +1286,12 @@ function makeConnection(
     executionPolicy: ProviderExecutionPolicy,
     ownSubagents: boolean,
   ) => Effect.Effect<CodexLeasedRuntime, ProviderFailure, Scope.Scope>,
-  closeIdleOtherPostures: (
+  closeIdleOtherLeases: (
     executionPolicy: ProviderExecutionPolicy,
     ownSubagents: boolean,
   ) => Effect.Effect<void>,
   projectRoot: string,
+  extraFolders: ReadonlyArray<string>,
   mode: ProviderAcquireInput["mode"],
   factories: ConnectionFactories,
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
@@ -1281,6 +1308,8 @@ function makeConnection(
     // Codex's own subagent threads, each with the session whose turn started it.
     const subagentThreads = new Map<string, SessionState>();
     const pendingApprovalOwners = new Map<string, ProviderSessionId>();
+    /** Each pending approval's call, for an automatic reviewer; never published. */
+    const approvalCalls = new Map<string, ProviderApprovalCall>();
     const abortedToolSignal = (() => {
       const controller = new AbortController();
       controller.abort();
@@ -1481,7 +1510,7 @@ function makeConnection(
             // Chat has no filesystem or shell authority at all, so nothing
             // Codex asks for is anyone's to approve.
             mode === "chat" ||
-            !approvalRequestIsProjectConfined(item.approval, state.projectRoot)
+            !approvalRequestIsProjectConfined(item.approval, state.projectRoot, extraFolders)
           ) {
             Effect.runFork(
               request(() =>
@@ -1530,6 +1559,10 @@ function makeConnection(
           }
           state.pendingApprovals.set(item.approval.requestId, item.approval);
           pendingApprovalOwners.set(item.approval.requestId, state.sessionId);
+          if (message.kind === "request") {
+            const call = codexApprovalCall(item.approval.event, message.params);
+            if (call !== undefined) approvalCalls.set(item.approval.requestId, call);
+          }
           offer(item.approval.event);
           continue;
         }
@@ -1844,10 +1877,7 @@ function makeConnection(
                 Effect.catchAll((error) =>
                   isActiveWriterConflict(error) && attempt < CODEX_RESUME_WRITER_CONFLICT_ATTEMPTS
                     ? (attempt === 1
-                        ? closeIdleOtherPostures(
-                            input.executionPolicy,
-                            codexRunsOwnSubagents(input),
-                          )
+                        ? closeIdleOtherLeases(input.executionPolicy, codexRunsOwnSubagents(input))
                         : Effect.void
                       ).pipe(
                         Effect.zipRight(
@@ -2083,6 +2113,10 @@ function makeConnection(
           ),
           Effect.asVoid,
         ),
+      approvalCall: ({ sessionId, requestId }) =>
+        pendingApprovalOwners.get(requestId) === sessionId
+          ? approvalCalls.get(requestId)
+          : undefined,
       answerApproval: (input) =>
         stateFor(input.sessionId).pipe(
           Effect.flatMap((state) => {
@@ -2100,6 +2134,7 @@ function makeConnection(
               return Effect.fail(failure("protocol", "Codex session is already terminal."));
             }
             const pending = state.pendingApprovals.get(input.requestId);
+            approvalCalls.delete(input.requestId);
             if (
               pending === undefined ||
               pendingApprovalOwners.get(input.requestId) !== input.sessionId ||
@@ -2116,7 +2151,12 @@ function makeConnection(
             return request(() =>
               client.respondApproval({
                 providerRequestId: pending.providerRequestId,
-                result: approvalResult(pending, input.approved, permissionPersistence(options)),
+                result: approvalResult(
+                  pending,
+                  input.approved,
+                  // A one-call answer is never accepted for the session.
+                  input.scope === "once" ? "project-default" : permissionPersistence(options),
+                ),
               }),
             ).pipe(
               Effect.catchAll((providerFailure) =>
@@ -2216,39 +2256,41 @@ function declinedApprovalResult(pending: CodexPendingApproval): unknown {
     : { decision: "decline" };
 }
 
-function approvalRequestIsProjectConfined(
-  pending: CodexPendingApproval,
+/** What an approval asks to reach, without the request bookkeeping around it. */
+type CodexApprovalScope = CodexPendingApproval extends infer Approval
+  ? Approval extends CodexPendingApproval
+    ? Omit<Approval, "requestId" | "providerRequestId" | "threadId" | "turnId" | "itemId" | "event">
+    : never
+  : never;
+
+export function approvalRequestIsProjectConfined(
+  pending: CodexApprovalScope,
   projectRoot: string,
+  extraFolders: ReadonlyArray<string> = [],
 ): boolean {
+  // An extra folder is inside the Project exactly as the main folder is.
+  const inProject = (path: string, cwd: string) =>
+    [projectRoot, ...extraFolders].some((root) => pathIsProjectConfined(path, root, cwd));
   if (pending.kind === "command") {
-    return (
-      typeof pending.requestedCwd === "string" &&
-      pathIsProjectConfined(pending.requestedCwd, projectRoot, projectRoot)
-    );
+    return typeof pending.requestedCwd === "string" && inProject(pending.requestedCwd, projectRoot);
   }
   if (pending.kind === "file-change") {
-    return (
-      pending.grantRoot == null ||
-      pathIsProjectConfined(pending.grantRoot, projectRoot, projectRoot)
-    );
+    return pending.grantRoot == null || inProject(pending.grantRoot, projectRoot);
   }
   if (pending.requestedCwd !== projectRoot) return false;
   const fileSystem = pending.permissions.fileSystem;
   if (fileSystem === null) return true;
   const legacyPaths = [...(fileSystem.read ?? []), ...(fileSystem.write ?? [])];
-  if (legacyPaths.some((path) => !pathIsProjectConfined(path, projectRoot, pending.requestedCwd))) {
+  if (legacyPaths.some((path) => !inProject(path, pending.requestedCwd))) {
     return false;
   }
   return (fileSystem.entries ?? []).every(({ path }) => {
     if (path.type === "path") {
-      return pathIsProjectConfined(path.path, projectRoot, pending.requestedCwd);
+      return inProject(path.path, pending.requestedCwd);
     }
     if (path.type === "glob_pattern") return false;
     if (path.value.kind !== "project_roots") return false;
-    return (
-      path.value.subpath === null ||
-      pathIsProjectConfined(path.value.subpath, projectRoot, projectRoot)
-    );
+    return path.value.subpath === null || inProject(path.value.subpath, projectRoot);
   });
 }
 
@@ -2323,4 +2365,22 @@ function isTerminal(event: ProviderRuntimeEvent): boolean {
 
 function defaultSleep(milliseconds: number): Promise<void> {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, milliseconds));
+}
+
+/**
+ * The call a Codex approval request is about, from its own params without the
+ * identifiers that only correlate it: a command and its working directory, a
+ * file change's grant root, or the permissions a sandbox widening asks for.
+ */
+function codexApprovalCall(
+  event: ProviderRuntimeEvent,
+  params: object,
+): ProviderApprovalCall | undefined {
+  if (event.kind !== "approval-request") return undefined;
+  const record = params as Record<string, unknown>;
+  return providerApprovalCall({
+    tool: event.action,
+    arguments: record,
+    workingDirectory: typeof record.cwd === "string" ? record.cwd : undefined,
+  });
 }

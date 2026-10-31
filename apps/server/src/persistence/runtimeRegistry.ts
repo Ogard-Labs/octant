@@ -37,6 +37,8 @@ import {
   WorkProjectStatusFileChanged,
   ProjectBrandKitChanged,
   CodeProjectActionsChanged,
+  ProjectExtraFolderAdded,
+  ProjectExtraFolderRemoved,
   CodeProjectDesktopRecipeChanged,
   CodeCheckoutObserved,
   CodeCheckoutRemoved,
@@ -295,6 +297,7 @@ import {
 import { registerArtifactMirrorEvents } from "../canvas/artifactMirrorEventStore";
 import { registerGoalLoopEvents } from "../goal/goalLoopEventStore";
 import { registerFollowUpSuggestionEvents } from "../followUps/threadFollowUpSuggestionStore";
+import { registerTerminalSessionEvents } from "../terminalSessions/terminalSessionImports";
 import { registerNativeHarnessEvents } from "../harness/nativeHarnessEvents";
 import { registerTurnMetricsEvents } from "../metrics/turnMetricsStore";
 import { registerSideTaskEvents } from "../sideTasks/sideTaskStore";
@@ -381,6 +384,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("project.work-status-file-changed@1", 1, WorkProjectStatusFileChanged)
     .register("project.brand-kit-changed@1", 1, ProjectBrandKitChanged)
     .register("project.code-actions-changed@1", 1, CodeProjectActionsChanged)
+    .register("project.extra-folder-added@1", 1, ProjectExtraFolderAdded)
+    .register("project.extra-folder-removed@1", 1, ProjectExtraFolderRemoved)
     .register("project.code-desktop-recipe-changed@1", 1, CodeProjectDesktopRecipeChanged)
     .register("memory.entry-created@1", 1, MemoryEntryCreated)
     .register("memory.entry-superseded@1", 1, MemoryEntrySuperseded)
@@ -591,6 +596,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerNativeHarnessEvents(events);
   registerTurnMetricsEvents(events);
   registerFollowUpSuggestionEvents(events);
+  registerTerminalSessionEvents(events);
   registerSideTaskEvents(events);
   registerShipEvents(events);
   registerThreadMessageQueueEvents(events);

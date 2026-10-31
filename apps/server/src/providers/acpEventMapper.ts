@@ -6,9 +6,11 @@ import type {
   ProviderRuntimeEvent,
   ProviderSessionId,
   UtcTimestamp,
+  ProviderApprovalCall,
 } from "@octant/contracts";
 import type { AcpServerNotification, AcpServerRequest } from "./acpProtocol";
 import { outsideContentTarget, outsideContentToolName } from "./outsideContentRead";
+import { providerApprovalCall } from "./providerApprovalCall";
 
 const STREAM_CHUNK_CHARACTERS = 65_536;
 const LABEL_MAX_CHARACTERS = 256;
@@ -53,6 +55,8 @@ export type AcpMappedPermission =
       readonly allowOptionId: string;
       readonly rejectOptionId: string;
       readonly event: ProviderRuntimeEvent;
+      /** The pending call, for an automatic reviewer; never on the event. */
+      readonly call?: ProviderApprovalCall;
     }
   | {
       readonly kind: "question";
@@ -440,5 +444,27 @@ export function mapAcpPermissionRequest(
       action: toolKind,
       description: title,
     }),
+    ...withCall(
+      providerApprovalCall({
+        tool: toolKind,
+        arguments: {
+          ...(typeof request.params.toolCall.rawInput === "object" &&
+          request.params.toolCall.rawInput !== null
+            ? request.params.toolCall.rawInput
+            : request.params.toolCall.rawInput === undefined
+              ? {}
+              : { input: request.params.toolCall.rawInput }),
+          ...(request.params.toolCall.locations == null
+            ? {}
+            : { locations: request.params.toolCall.locations }),
+        },
+      }),
+    ),
   };
+}
+
+function withCall(call: ProviderApprovalCall | undefined): {
+  readonly call?: ProviderApprovalCall;
+} {
+  return call === undefined ? {} : { call };
 }

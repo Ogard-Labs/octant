@@ -941,4 +941,150 @@ describe("native harness composition", () => {
       });
     });
   });
+
+  describe("Octant Shield answering a Code thread's prompts at Auto", () => {
+    const providerInstanceId = "00000000-0000-4000-8000-0000000000e5";
+    const projectId = "00000000-0000-4000-8000-0000000000b5";
+    const revisionId = "00000000-0000-4000-8000-0000000000c5";
+    const autoThread = {
+      id: "00000000-0000-4000-8000-000000000051",
+      lifecycle: "active",
+      projectId,
+      providerInstanceId,
+      modelId: "harness-model",
+      bindingRevisionId: revisionId,
+      checkoutId: "00000000-0000-4000-8000-0000000000d5",
+      executionPolicy: "approval-gated",
+      autoApprove: true,
+    } as unknown as CodeThread;
+    const decision = (verdict: "allow" | "ask" | "deny") => ({
+      reviewer: "octant-shield" as const,
+      verdict,
+      stage: "model" as const,
+      reason: `Shield said ${verdict}.`,
+      latencyMs: 3,
+      decidedAt: "2026-10-31T00:00:00.000Z" as never,
+    });
+    const setup = (input: {
+      readonly verdict?: "allow" | "ask" | "deny";
+      readonly remembered?: boolean;
+    }) => {
+      const ran: string[] = [];
+      const asked = vi.fn(async (_ask: unknown) => "approved" as const);
+      const reviewed = vi.fn();
+      const shown = vi.fn();
+      const review = vi.fn(async () =>
+        input.verdict === undefined ? undefined : decision(input.verdict),
+      );
+      const composition = createNativeHarnessComposition({
+        isChildAuthorityCurrent: () => true,
+        authority: createNativeHarnessAuthority({
+          hostId: "00000000-0000-4000-8000-0000000000aa" as never,
+          persistence: {
+            readChatThread: () => undefined,
+            readProject: () =>
+              ({ type: "code", lifecycle: "active", bindingHistory: [{ revisionId }] }) as never,
+            readCodeThread: () => autoThread as never,
+            readProviderInstance: () => ({ enabled: true }) as never,
+          },
+          workThreads: { read: () => undefined },
+          readThreadTaint: () => ({ externalContentIngested: false }) as never,
+        }),
+        isHarnessProvider: () => true,
+        shell: {
+          run: async (call) => {
+            ran.push(call.command);
+            return { status: "ran", exitCode: 0, output: "", truncated: false };
+          },
+        },
+        approvals: {
+          ask: asked,
+          recordReviewed: reviewed,
+          remembers: () => input.remembered === true,
+        },
+        shield: { review, recordOnTranscript: shown },
+        hostId: "00000000-0000-4000-8000-0000000000aa" as never,
+        readThreadTaint: () => false,
+        recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }),
+        uuid: () => "00000000-0000-4000-8000-000000000099",
+        clock: () => "2026-10-31T00:00:00.000Z",
+      });
+      const tools = composition.forCode({
+        thread: autoThread,
+        checkoutRoot: "/Users/dev/app",
+        windowId: "window-1",
+      })!;
+      const bash = (command: string) =>
+        tools.execute({
+          name: "bash",
+          inputJson: JSON.stringify({ command }),
+          signal: new AbortController().signal,
+        });
+      return { ran, asked, reviewed, shown, review, bash };
+    };
+
+    it("runs a call Shield allows without asking the person, and journals Shield's answer", async () => {
+      const harness = setup({ verdict: "allow" });
+      expect(await harness.bash("ls -la")).not.toMatchObject({ isError: true });
+      expect(harness.ran).toEqual(["ls -la"]);
+      expect(harness.asked).not.toHaveBeenCalled();
+      expect(harness.reviewed).toHaveBeenCalledWith(
+        expect.objectContaining({ toolName: "bash", approvalClass: "shell-commands" }),
+        expect.objectContaining({ reviewer: "octant-shield", verdict: "allow" }),
+      );
+      expect(harness.shown).toHaveBeenCalledWith(
+        expect.objectContaining({ threadId: String(autoThread.id), decision: decision("allow") }),
+      );
+    });
+
+    it("judges the pending call against the thread's checkout, with nothing the agent read", async () => {
+      const harness = setup({ verdict: "allow" });
+      await harness.bash("ls -la");
+      expect(harness.review).toHaveBeenCalledWith({
+        threadId: String(autoThread.id),
+        boundRoot: "/Users/dev/app",
+        call: expect.objectContaining({
+          tool: "bash",
+          kind: "command",
+          command: "ls -la",
+          workingDirectory: "/Users/dev/app",
+        }),
+        signal: expect.anything(),
+      });
+    });
+
+    it("refuses a call Shield denies, in Shield's name, without asking the person", async () => {
+      const harness = setup({ verdict: "deny" });
+      const result = await harness.bash("ls -la");
+      expect(result).toMatchObject({ isError: true, result: { error: "approval-denied" } });
+      expect(JSON.stringify(result)).toContain("Octant Shield did not allow bash");
+      expect(harness.ran).toEqual([]);
+      expect(harness.asked).not.toHaveBeenCalled();
+    });
+
+    it("hands an escalated call to the person with Shield's reason", async () => {
+      const harness = setup({ verdict: "ask" });
+      await harness.bash("ls -la");
+      expect(harness.asked).toHaveBeenCalledWith(
+        expect.objectContaining({ shield: decision("ask") }),
+      );
+      expect(harness.reviewed).not.toHaveBeenCalled();
+      expect(harness.ran).toEqual(["ls -la"]);
+    });
+
+    it("asks the person as before when Shield is not the thread's reviewer", async () => {
+      const harness = setup({});
+      await harness.bash("ls -la");
+      expect(harness.asked).toHaveBeenCalledWith(
+        expect.not.objectContaining({ shield: expect.anything() }),
+      );
+    });
+
+    it("never overrules a class the person already allowed for the session", async () => {
+      const harness = setup({ verdict: "deny", remembered: true });
+      await harness.bash("ls -la");
+      expect(harness.review).not.toHaveBeenCalled();
+      expect(harness.asked).toHaveBeenCalledOnce();
+    });
+  });
 });

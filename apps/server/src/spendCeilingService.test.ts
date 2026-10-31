@@ -11,6 +11,7 @@ import {
   type ProviderCapabilitySupport,
 } from "@octant/contracts";
 import { recordAgentRunTurnUsage } from "./agentRun/agentRunUsageLedger";
+import { recordShieldReviewUsage } from "./shield/shieldUsageLedger";
 import { Journal } from "./persistence/journal";
 import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
 import { createPhase1RuntimeRegistries } from "./persistence/runtimeRegistry";
@@ -286,6 +287,47 @@ describe("SpendCeilingService", () => {
     expect(admission.status).toBe("refused");
     if (admission.status !== "refused") return;
     expect(admission.refusal.kind).toBe("exhausted");
+  });
+
+  it("counts Octant Shield's reviews against the reviewed Code thread's ceiling", () => {
+    const { connection, journal, service } = openService();
+    const ledger = { connection, journal, clock: () => now, uuid: () => crypto.randomUUID() };
+    service.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "thread", threadType: "code-thread", threadId: ids.thread },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { tokenBudget: 1_000 },
+      window: { kind: "lifetime" },
+    });
+    for (const usage of [
+      { inputTokens: 500, outputTokens: 20 },
+      { inputTokens: 360, outputTokens: 20 },
+    ]) {
+      recordShieldReviewUsage(ledger, {
+        threadId: ids.thread,
+        providerInstanceId: ids.provider as never,
+        modelId: "small-model" as never,
+        usage,
+      });
+    }
+    expect(
+      remainingOf(
+        service.snapshot({
+          principalKind: "local-window",
+          threadId: ids.thread,
+          threadType: "code-thread",
+        }),
+        "thread",
+      ),
+    ).toMatchObject({ committedTokens: 900 });
+    const admission = service.admit({
+      reservationId: ids.reservationA,
+      threadId: ids.thread,
+      threadType: "code-thread",
+      turnUpperBoundTokens: 200,
+      countsAsTurn: false,
+    });
+    expect(admission.status).toBe("refused");
   });
 
   it("counts a child run under another thread of the same Project against the Project ceiling", () => {

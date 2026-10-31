@@ -2833,6 +2833,86 @@ describe("Claude running as itself", () => {
     expect(failed).toMatchObject({ category: "protocol" });
   });
 
+  test("reads a subagent's task lifecycle, as the runtime reports it, only when subagents are on", async () => {
+    const lifecycle = [
+      safeRuntimeInitialization,
+      {
+        type: "system",
+        subtype: "task_started",
+        task_id: "task-agent-1",
+        tool_use_id: "toolu-agent",
+        description: "Read the release notes",
+        subagent_type: "general-purpose",
+        task_type: "local_agent",
+        prompt: "private subagent prompt",
+        uuid: "00000000-0000-4000-8000-0000000000a1",
+        session_id: "session-1",
+      },
+      {
+        type: "system",
+        subtype: "task_progress",
+        task_id: "task-agent-1",
+        tool_use_id: "toolu-agent",
+        description: "Read the release notes",
+        subagent_type: "general-purpose",
+        usage: { total_tokens: 1200, tool_uses: 2, duration_ms: 900 },
+        last_tool_name: "WebFetch",
+        uuid: "00000000-0000-4000-8000-0000000000a2",
+        session_id: "session-1",
+      },
+      {
+        type: "system",
+        subtype: "task_updated",
+        task_id: "task-agent-1",
+        patch: { status: "running", is_backgrounded: false },
+        uuid: "00000000-0000-4000-8000-0000000000a3",
+        session_id: "session-1",
+      },
+      {
+        type: "system",
+        subtype: "task_notification",
+        task_id: "task-agent-1",
+        tool_use_id: "toolu-agent",
+        status: "completed",
+        output_file: "/tmp/agent-output",
+        summary: "Found the notes.",
+        usage: { total_tokens: 2400, tool_uses: 3, duration_ms: 1800 },
+        skip_transcript: false,
+        uuid: "00000000-0000-4000-8000-0000000000a4",
+        session_id: "session-1",
+      },
+    ];
+    const messages = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* makeHarness(lifecycle).port.openQuery({
+            ...openInput,
+            tools: [...openInput.tools, "Agent"],
+            nativeSetup: ownSetup,
+          });
+          return Chunk.toReadonlyArray(yield* Stream.runCollect(query.messages));
+        }),
+      ),
+    );
+    expect(messages.slice(1).map((message) => message.kind === "task" && message.subtype)).toEqual([
+      "task_started",
+      "task_progress",
+      "task_updated",
+      "task_notification",
+    ]);
+    expect(JSON.stringify(messages)).not.toContain("private subagent prompt");
+
+    const refused = await failureOf(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* makeHarness(lifecycle).port.openQuery(openInput);
+          return yield* Stream.runDrain(query.messages);
+        }),
+      ),
+    );
+    expect(refused).toMatchObject({ category: "protocol" });
+  });
+
   test("holds a person's or a trusted Project's MCP servers only in a session that loads the Project's code", async () => {
     const withServer = {
       ...safeRuntimeInitialization,

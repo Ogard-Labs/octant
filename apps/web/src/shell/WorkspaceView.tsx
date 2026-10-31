@@ -61,6 +61,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { ComposerContextMeterGate } from "../context/composerContextMeterScope";
 import { SplitWorkspace, type PaneFacts } from "./SplitWorkspace";
 import { ProjectOverview } from "../projects/ProjectOverview";
+import type { ProjectChange } from "../projects/useProjectController";
 import { providerGroupsForProject } from "../projects/ProjectProviderPolicySection";
 import { pickerHasReadyInstance } from "../providers/ComposerModelPicker";
 import type { OctantHostBridge } from "./hostBridge";
@@ -414,6 +415,14 @@ export interface WorkspaceViewProps {
   readonly availabilityByProject: ReadonlyMap<ProjectId, ProjectAvailability>;
   readonly onArchiveProject: (projectId: ProjectId) => void;
   readonly onRelinkProject: (projectId: ProjectId, receiptId: string) => Promise<boolean>;
+  readonly onAddProjectExtraFolder?: (
+    projectId: ProjectId,
+    receiptId: string,
+  ) => Promise<ProjectChange>;
+  readonly onRemoveProjectExtraFolder?: (
+    projectId: ProjectId,
+    canonicalRoot: string,
+  ) => Promise<ProjectChange>;
   readonly onRenameProject: (projectId: ProjectId, name: string) => Promise<boolean>;
   readonly onProjectColorChange?: (
     projectId: ProjectId,
@@ -513,6 +522,7 @@ export interface WorkspaceViewProps {
     permissionPersistence?: import("@octant/contracts/providers").PermissionPersistence,
     modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
     initiatingPaneId?: PaneId,
+    terminalSession?: import("@octant/contracts").TerminalSessionImportRequest,
   ) => boolean | void | Promise<boolean | void>;
   readonly githubPluginEnabled?: boolean;
   readonly linearClient?: import("@octant/client-runtime/integration-client").IntegrationClient;
@@ -1616,6 +1626,7 @@ function renderNonCodeTab(
             executionPolicy,
             permissionPersistence,
             modelOptionValues,
+            terminalSession,
           ) => {
             // Returning quietly here made a wired-up composer look dead: the user
             // pressed Create thread and nothing happened anywhere. A missing
@@ -1638,6 +1649,7 @@ function renderNonCodeTab(
               permissionPersistence,
               modelOptionValues,
               paneId,
+              terminalSession,
             );
           }}
           {...(props.onCreateProject === undefined
@@ -2256,6 +2268,12 @@ function renderNonCodeTab(
           ? {}
           : { windowCapability: props.projectWindowCapability })}
         providerInstances={props.providerController.instances ?? []}
+        {...(props.onAddProjectExtraFolder === undefined
+          ? {}
+          : { onAddExtraFolder: props.onAddProjectExtraFolder })}
+        {...(props.onRemoveProjectExtraFolder === undefined
+          ? {}
+          : { onRemoveExtraFolder: props.onRemoveProjectExtraFolder })}
         onRelink={props.onRelinkProject}
         onRename={props.onRenameProject}
         {...(props.onProjectColorChange === undefined
