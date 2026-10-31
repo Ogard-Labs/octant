@@ -1,7 +1,7 @@
 # Claude inside Anthropic's terms
 
 Remediation for the proposed Claude-inside-Anthropic's-terms rule in
-[architecture](../architecture.md#security-and-authority). The decision
+[architecture](../../architecture.md#security-and-authority). The decision
 archive closed at 0164, so that rule lives in the owning specification
 rather than a numbered record. This plan is product work, not legal
 advice. It does not authorize merging.
@@ -379,7 +379,7 @@ added), `DISABLE_TELEMETRY` and `DISABLE_ERROR_REPORTING` stay on every
 launch for now, and a host's own disable-only umbrella value passes
 through. The channels with no switch of their own are argued acceptable
 in
-[Architecture: security and authority](../architecture.md#security-and-authority)
+[Architecture: security and authority](../../architecture.md#security-and-authority)
 rather than kept behind the umbrella. The runtime's `Artifact` tool
 played no part: measured the same day on Claude Code 2.1.211 and
 2.1.304, the runtime offers it only when launched by Anthropic's own

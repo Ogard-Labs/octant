@@ -32,27 +32,30 @@ with the implementation in the same PR. Proceed without asking again merely
 because the previous design differs. Ask only when a consequential choice is
 unresolved or an action exceeds the authorized scope; continue independent work.
 
-Historical ADRs explain earlier choices. Their status and supersession chains do
-not independently constrain implementation or override a current specification.
-When current documents disagree, use the topic owner identified by the design
-index and reconcile stale summaries in the same change. When a specification
-omits a consequential rule, inspect the relevant implementation, tests, and
-history, preserve existing authority and data-integrity boundaries, and record
-the resolved rule. Routine implementation choices need no new design approval.
+[Decisions and requirements](docs/design/decisions.md) lists every current
+decision with its requirements, status, and owning specification. The former
+ADR archive lives in `docs/legacy/` as history only: it has no authority, and
+current documents do not cite it. When current documents disagree, use the
+topic owner identified by the design index and reconcile stale summaries in the
+same change. When a specification omits a consequential rule, inspect the
+relevant implementation, tests, and history, preserve existing authority and
+data-integrity boundaries, and record the resolved rule in its owner and in
+Decisions and requirements. Routine implementation choices need no new design
+approval.
 
 ## Start With The Smallest Relevant Context
 
 - Before editing, inspect the repository root, branch, worktree, status, and
   whether the branch already has a pull request.
 - Read the relevant current specification from the table below before editing.
-  Read the architecture overview for cross-package or authority changes; follow
-  historical references only when their rationale or missing detail is needed.
+  Read the architecture overview for cross-package or authority changes.
 - Planning and implementation progress live in Linear. Keep tracker identifiers
   and state out of code, comments, test titles, and design specifications.
 
 | Change area                                                      | Current source                                                                                                                                                                                                      |
 | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Finding or changing a design rule                                | [Design index and maintenance](docs/design/README.md)                                                                                                                                                               |
+| Every current decision, its requirements, and its build status   | [Decisions and requirements](docs/design/decisions.md)                                                                                                                                                              |
 | Navigation, Projects, panes, content tabs, dock, workspace tools | [Workspace](docs/design/workspace.md)                                                                                                                                                                               |
 | Visual language, typography, Settings, controls, accessibility   | [Design system](DESIGN.md)                                                                                                                                                                                          |
 | Start-screen tiles, tabs, and cards                              | [Workspace rules](docs/design/workspace.md#start-screen-cards) and [Start screen](docs/design/start-screen.md)                                                                                                      |
@@ -67,10 +70,12 @@ the resolved rule. Routine implementation choices need no new design approval.
 | Sandbox, approvals, remote access, credentials                   | [Architecture: security and authority](docs/architecture.md#security-and-authority)                                                                                                                                 |
 | Packaging, updates, platform scope, release boundary             | [Architecture: Current Release Boundary](docs/architecture.md#current-release-boundary)                                                                                                                             |
 
-Edit the owning specification in place when approved behavior changes. Do not add
-ADRs: the decision archive is closed. When a consequential tradeoff needs its
-reasons, rejected alternatives, or measurements preserved, write them as a short
-rationale beside the rule in the owning specification.
+Edit the owning specification in place when approved behavior changes, and
+update the decision's entry in Decisions and requirements in the same PR. Do not
+write decision records: the archive in `docs/legacy/decisions/` is closed and
+`bun run decisions:check` refuses a new one. When a consequential tradeoff needs
+its reasons, rejected alternatives, or measurements preserved, write them as a
+short rationale beside the rule in the owning specification.
 
 ## Implementation Discipline
 
@@ -315,8 +320,9 @@ satisfy it. Ordinary issues do not acquire a blanket human-signoff gate.
 - Update the owning current specification and affected user documentation in the
   same PR as a change to design, architecture, setup, workflow, security,
   deployment, or user-visible behavior. Reconcile conflicting summaries; link to
-  the owner rather than duplicating its rules. Leave historical ADRs unchanged;
-  a specification change never needs a new or superseding record.
+  the owner rather than duplicating its rules, and update the decision's entry
+  in Decisions and requirements. Leave `docs/legacy/` unchanged; a
+  specification change never needs a new or superseding record.
 - Ready for review requires: acceptance criteria mapped to evidence, relevant
   checks run, current documentation, a pushed named branch, a non-draft standalone
   or bottom PR to `main` (or a child PR with its parent stack link), and no

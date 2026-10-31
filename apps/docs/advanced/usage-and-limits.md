@@ -123,6 +123,19 @@ They read the same last observation as the rings at the foot of the sidebar,
 so a provider that reports no plan window (an API key, or a runtime that does
 not report) shows no meters rather than an empty bar.
 
+### A warning before you start on a full account
+
+If the account you are about to start a thread on has used up a plan window, or
+is close to it, a warning appears above the composer. It names the account, says
+when the limit resets, and offers a **Use** button for each other signed-in
+account that has room. Octant never switches for you: the button only makes the
+same choice the model menu would. You can still send on the account you
+picked, since the provider decides whether a message goes through.
+
+In the model menu, accounts with room are listed first, and an account at its
+limit is last and marked. An account that reports no plan window is neither
+marked nor offered as having room.
+
 **Settings › Appearance › Reading › Usage bars** chooses how the bar is drawn:
 **Smooth** (the default) is a thin line, and **Pixelated** is a row of small
 square cells whose fill thins out into a stipple at its leading edge. Both use

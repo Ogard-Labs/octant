@@ -1019,7 +1019,7 @@ function prepareOpenCodeLaunch(
         // The agent is a loopback HTTP server: the confinement has to let it
         // listen on the port this launch reserved, not only reach the bridge.
         // Without the bind it exits before readiness in Plan, whose runtime
-        // egress stays none; Chat and Work now materialize as allow (0132).
+        // egress stays none; Chat and Work now materialize as allow.
         // These spellings are Seatbelt-only: on Linux loopback rides the
         // launch's network-egress choice (bwrap shares the host net when it
         // allows, and cannot express per-port rules), and the discovery reads

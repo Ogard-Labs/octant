@@ -36,7 +36,7 @@ export interface BflImageAdapterOptions {
 }
 
 /**
- * Black Forest Labs FLUX adapter (`docs/decisions/0086`). Submit is a POST to
+ * Black Forest Labs FLUX adapter. Submit is a POST to
  * a model-named path, not a body field; the result arrives only after polling
  * a `polling_url` the submit call returned. The one image byte payload is
  * never inline — it is a signed URL the adapter fetches exactly once, through

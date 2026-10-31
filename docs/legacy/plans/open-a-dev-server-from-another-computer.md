@@ -4,7 +4,7 @@
 host relays HTTP and WebSockets; slice 5 built for the Running services card
 in the desktop app, its forwarder passing WebSockets on so live reload works,
 and its rules are in the
-[architecture](../architecture.md); the user guide is written.** The parts of
+[architecture](../../architecture.md); the user guide is written.** The parts of
 slice 5 listed under it as not built are still plans. A paired browser and the
 phone keep the host's picture of the page. merging or releasing anything.
 
@@ -369,7 +369,7 @@ dark; slice 5 makes the feature reachable.
    the grant service `apps/server/src/remote/remoteServerGrantService.ts`, and
    the route lives in the private listener's authentication beside product
    sessions. The rules now in force are in the
-   [architecture](../architecture.md) under proxy sessions and server grants.
+   [architecture](../../architecture.md) under proxy sessions and server grants.
    Rules this slice resolved, which later slices must keep:
    - The proxy session lives in the host's memory, not the product session
      store, so a product route cannot find it and a host restart ends it and
@@ -422,7 +422,7 @@ dark; slice 5 makes the feature reachable.
    its checks and revocation registry live in the grant service, its header
    rules are `packages/domain/src/remoteServerProxyRelayPolicy.ts`, and the
    port re-observation is `createLiveLocalListenerHoldingProbe`. The rules now
-   in force are in the [architecture](../architecture.md) under the relay.
+   in force are in the [architecture](../../architecture.md) under the relay.
    Rules this slice resolved, which later slices must keep:
    - The forwarder reaches the host the way any proxy request does: the
      listener's own `Origin` (required on unsafe methods) and `Sec-Fetch-Site`
@@ -471,7 +471,7 @@ dark; slice 5 makes the feature reachable.
    rules `relayWebSocketRequestHeaders` in the relay policy, and the message
    framing and the hand-off from the route to the listener's transport
    `apps/server/src/webSocketRelay.ts`. The rules now in force are in the
-   [architecture](../architecture.md) under WebSockets. Rules this slice
+   [architecture](../../architecture.md) under WebSockets. Rules this slice
    resolved, which slice 5 must keep:
    - The host connects to the dev server before it answers the page, so the
      page's connection switches only once the dev server accepted, with the

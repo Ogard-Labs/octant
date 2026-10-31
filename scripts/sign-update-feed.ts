@@ -1,7 +1,7 @@
 /**
  * Build and sign the update feed a release is published behind.
  *
- * This is the other half of `docs/decisions/0034`: the app refuses anything it
+ * This is the other half of update trust: the app refuses anything it
  * cannot verify against a compiled-in Ed25519 key, so a release that is not
  * signed here does not exist as far as any install is concerned.
  *

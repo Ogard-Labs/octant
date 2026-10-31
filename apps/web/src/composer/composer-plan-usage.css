@@ -22,3 +22,10 @@
   margin-left: auto;
   padding: var(--oct-space-3) var(--oct-composer-gutter) 0 var(--oct-space-2);
 }
+
+/* The usage warning takes the full row above the context chips, inside the
+   composer's gutter, so it reads as part of the composer and not a page banner. */
+.composer-start > .composer-usage-warning {
+  flex: 1 1 calc(100% - 2 * var(--oct-composer-gutter));
+  margin: var(--oct-space-2) var(--oct-composer-gutter) 0;
+}

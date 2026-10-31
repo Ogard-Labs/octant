@@ -1,7 +1,7 @@
 # Release-boundary holds and the post-preview unlock
 
 This note keeps the start gates for two deferrals once named by the
-[Current Release Boundary in the architecture](architecture.md#current-release-boundary),
+[Current Release Boundary in the architecture](../architecture.md#current-release-boundary),
 which is the one statement of release scope. Both holds are lifted; the gates
 stay as the record of what each track must satisfy.
 
@@ -21,13 +21,13 @@ authority, privacy, and release boundaries. The authorization covers design
 and implementation. Creating an account, spending money, submitting to a
 store, deploying a hosted service, or weakening any invariant each still needs
 a separate explicit maintainer action. The
-[architecture's release boundary](architecture.md#current-release-boundary)
+[architecture's release boundary](../architecture.md#current-release-boundary)
 owns the rule.
 
 ## Connector / OAuth marketplace
 
 **Lifted on 2026-10-20.** The maintainer authorized connectors, and the
-architecture's [Connectors and user-added MCP servers](architecture.md#extensions-and-skills)
+architecture's [Connectors and user-added MCP servers](../architecture.md#extensions-and-skills)
 rules now document the design: every connector is a user-added MCP server
 package under the activation ladder, secrets live only in the credential
 broker's own namespace, sign-in follows the MCP authorization flow with
@@ -60,7 +60,7 @@ keeps ship integrations on the same plugin seams without opening a marketplace.
 
 **Authorized post-preview on 2026-10-26; design accepted.** The maintainer
 request the third gate below asked for has been given, and the maintainer
-accepted [Language services](design/language-services.md) on 2026-10-26, which
+accepted [Language services](../design/language-services.md) on 2026-10-26, which
 documents gates 1 and 2; its slices may start. Monaco editing and explicit
 external-editor handoff remain primary for Code in the technical preview.
 

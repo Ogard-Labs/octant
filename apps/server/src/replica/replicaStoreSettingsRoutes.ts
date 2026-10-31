@@ -2,7 +2,7 @@
  * Host-only routes for Settings › Sync: read the store choice, change it, and
  * run Test connection.
  *
- * Store setup is host authority (decision 0163): a paired phone is refused
+ * Store setup is host authority: a paired phone is refused
  * even if transport policy regressed. Three layers keep it off the remote
  * listener - the route answers only a loopback host name, it is registered on
  * the loopback chain outside the shared product dispatch the remote gateway
