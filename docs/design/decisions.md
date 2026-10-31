@@ -51,12 +51,12 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Extensions](#extensions)                                                             | 8         | 7       | 1            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 5       | 2            | 0                   |
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 14        | 10      | 2            | 2                   |
-| [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 8         | 6       | 2            | 0                   |
+| [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 8         | 7       | 1            | 0                   |
 | [Remote access and pairing](#remote-access-and-pairing)                               | 8         | 5       | 3            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 4         | 4       | 0            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 4         | 4       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 9         | 9       | 0            | 0                   |
-| [Workspace](#workspace)                                                               | 14        | 13      | 1            | 0                   |
+| [Workspace](#workspace)                                                               | 14        | 14      | 0            | 0                   |
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 9         | 8       | 1            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 4       | 1            | 0                   |
@@ -176,7 +176,8 @@ Work and Code run under the same guardrail levels with the same capabilities; th
 - A thread keeps the kind it was created with; moving work between Work and Code is the person's choice.
 - Work's Developer tools switch is set per Project by a person; no agent, routine or import sets it.
 - Built: every driver starts a Work session with its shell and Git at the thread's level, Work launches get Code's confinement at the same level, Work threads reach Full access, and each Work turn records shell and Git at its level.
-- Not built yet: the Developer tools switch, and an in-process ACP shell reporting unsupported below Full access.
+- Built: the Developer tools switch, set from a window on this host and journaled with who and when; it shows a Work Project's terminal and actions.
+- Not built yet: an in-process ACP shell reporting unsupported below Full access.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Modes](../architecture.md#modes-chat-work-and-code) and [Overview and principles](../architecture.md#overview-and-principles).
 
@@ -1475,12 +1476,12 @@ Status: Built. Since: 2026-10-31. Detail: [Architecture: Security and authority,
 
 A Project terminal is the person's shell, not an agent's. No provider, tool call, agent run or thread can address it, read its output or type into it.
 
-- Only a person at a local window whose workspace holds the Code Project may start, attach to, type into, resize or stop it; a paired device is refused.
+- Only a person at a local window whose workspace holds the Work or Code Project may start, attach to, type into, resize or stop it; a paired device is refused.
 - It runs at the Project's bound root through the same confinement as a thread terminal, with no credential references; Plan never applies.
 - Its lifecycle is journaled on its own aggregate, its output is never journaled, and archiving the Project or relinking its root ends it as `authority-revoked`.
-- A Work Project shows a terminal only after its Developer tools are turned on (not built yet); Chat has none.
+- A Work Project shows a terminal only after its Developer tools are turned on; Chat has none.
 
-Status: Partly built. Since: —. Detail: [Architecture: Security and authority, Project terminals](../architecture.md#security-and-authority).
+Status: Built. Since: —. Detail: [Architecture: Security and authority, Project terminals](../architecture.md#security-and-authority).
 
 ### Terminal output paths
 
@@ -1547,13 +1548,13 @@ Status: Built. Since: —. Detail: [Architecture: Security and authority](../arc
 
 ### Project actions
 
-A Code Project keeps up to twelve named actions (such as Run, Test and Dev), each a one-line command and a folder inside the bound root, which the person runs in a Project terminal.
+A Work or Code Project keeps up to twelve named actions (such as Run, Test and Dev), each a one-line command and a folder inside the bound root, which the person runs in a Project terminal.
 
 - Only a local window saves the list; a paired device is refused, because a saved line is later typed into the person's own shell.
 - The host suggests actions from the root package scripts and build targets without running anything, and saves nothing until the person confirms.
 - Running one names the action, never its text; the host reads the line from the Project record and types it into a terminal the window owns, under that terminal's confinement and checks.
 - A lost reply is reported and never retried, because the command may not be safe to run twice.
-- A Work Project has no actions while Work's shell is withheld (not built yet).
+- A Work Project's actions appear once its Developer tools are on (2026-10-31).
 
 Status: Built. Since: —. Detail: [Architecture: Security and authority, Project actions](../architecture.md#security-and-authority).
 
@@ -1864,9 +1865,9 @@ Status: Built. Since: —. Detail: [Workspace: Navigation and Projects](workspac
 A Work Project's Developer tools switch is presentation, off by default and set only by a person. A Work thread has the same shell, Git and tools as a Code thread at the same level either way.
 
 - The switch changes what the Project shows, not what its threads may do. Code Projects have no such row.
-- The same-tools rule for a Work thread is allowed, not built yet.
+- Today it shows the Project terminal and Project actions; Work has no Git, pull request or worktree panels yet for it to show.
 
-Status: Partly built. Since: —. Detail: [Workspace: Navigation and Projects](workspace.md#navigation-and-projects).
+Status: Built. Since: —. Detail: [Workspace: Navigation and Projects](workspace.md#navigation-and-projects).
 
 ### Sidebar status and next waiting thread
 

@@ -12,10 +12,10 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantFieldError } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
 
-type CodeProjectSummary = Extract<ProjectSummary, { readonly type: "code" }>;
+type BoundProjectSummary = Extract<ProjectSummary, { readonly type: "work" | "code" }>;
 
 export interface ProjectActionsSectionProps {
-  readonly project: CodeProjectSummary;
+  readonly project: BoundProjectSummary;
   /** Asks the host what the Project's files suggest; absent when this window has no route to it. */
   readonly client?: Pick<ProjectTerminalClient, "execute">;
   readonly onChange: (actions: ReadonlyArray<ProjectAction>) => Promise<boolean>;
