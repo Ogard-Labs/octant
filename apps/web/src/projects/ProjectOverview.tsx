@@ -1,4 +1,5 @@
 import type { PermissionMode } from "@octant/contracts/providers";
+import type { AutoReviewer } from "@octant/contracts/shield";
 import { createDesktopPaneClient } from "@octant/client-runtime/desktop-pane-client";
 import { createProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
@@ -28,6 +29,7 @@ import { ProjectActionsSection } from "./ProjectActionsSection";
 import { ProjectFoldersSection } from "./ProjectFoldersSection";
 import type { ProjectChange } from "./useProjectController";
 import { ProjectDesktopRecipeSection } from "./ProjectDesktopRecipeSection";
+import { ProjectAutoReviewerSection } from "./ProjectAutoReviewerSection";
 import { ProjectPermissionModeSection } from "./ProjectPermissionModeSection";
 import { ProjectProviderPolicySection } from "./ProjectProviderPolicySection";
 import {
@@ -73,6 +75,11 @@ export interface ProjectOverviewProps {
   readonly onPermissionModeChange?: (
     projectId: ProjectId,
     permissionMode: PermissionMode | undefined,
+  ) => Promise<boolean>;
+  /** Sets who answers this Code Project's prompts at Auto; absent follows Settings. */
+  readonly onAutoReviewerChange?: (
+    projectId: ProjectId,
+    autoReviewer: AutoReviewer | undefined,
   ) => Promise<boolean>;
   /** Absent when the host cannot accept the change; the brand kit is then not shown. */
   readonly onBrandKitChange?: (
@@ -493,6 +500,21 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                   disabled={archived || connectionStale}
                   onChange={async (mode) =>
                     (await props.onPermissionModeChange?.(props.project.id, mode)) ?? false
+                  }
+                  project={props.project}
+                />
+              </ProjectOverviewInspector>
+            ) : null}
+            {props.project.type === "code" && props.onAutoReviewerChange !== undefined ? (
+              <ProjectOverviewInspector
+                key={`${String(props.project.id)}-auto-reviewer`}
+                label="Auto reviewer"
+                summary="Who approves this Project's actions at Auto"
+              >
+                <ProjectAutoReviewerSection
+                  disabled={archived || connectionStale}
+                  onChange={async (reviewer) =>
+                    (await props.onAutoReviewerChange?.(props.project.id, reviewer)) ?? false
                   }
                   project={props.project}
                 />

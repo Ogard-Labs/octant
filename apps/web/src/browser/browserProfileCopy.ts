@@ -32,10 +32,18 @@ export function browserApprovalSummary(approval: {
 
 export function browserApprovalDetail(approval: {
   readonly profile?: StoredBrowserProfile | undefined;
+  readonly extensionCount?: number | undefined;
 }): string {
-  return approval.profile === undefined
-    ? "Shell and file access stay unchanged"
-    : "This page may be signed in as you. Reading it reads your account. Shell and file access stay unchanged";
+  if (approval.profile === undefined) return "Shell and file access stay unchanged";
+  const extensions =
+    approval.extensionCount === undefined || approval.extensionCount < 1
+      ? ""
+      : `${
+          approval.extensionCount === 1
+            ? "1 extension is"
+            : `${String(approval.extensionCount)} extensions are`
+        } on in this profile and can read what the agent reads. `;
+  return `This page may be signed in as you. Reading it reads your account. ${extensions}Shell and file access stay unchanged`;
 }
 
 const STORAGE_PREFIX = "octant.browser.profile.";

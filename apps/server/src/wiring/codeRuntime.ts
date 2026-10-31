@@ -1,4 +1,5 @@
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
+import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
@@ -512,6 +513,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       );
       codeOperationRuntime = createCodeOperationRuntime({
         shield: hostShield,
+        chosenAutoReviewer: (thread) => {
+          const project = persistence.readProject(thread.projectId);
+          return chosenAutoReviewer({
+            project: project?.type === "code" ? project : undefined,
+            settings: persistence.readCodeSettings()?.settings,
+          });
+        },
         liveTurns,
         activeTurns: codeActiveTurns,
         terminalBrowserGrants: grants,

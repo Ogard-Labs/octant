@@ -82,6 +82,25 @@ export function revalidateAutomationAuthority(input: {
       "Code Project binding, checkout, or worktree no longer matches the definition.",
     );
   }
+  // Every Work turn holds the shell and Git at its level, and no turn can
+  // withhold them. A Work routine captured without them, as every Work
+  // routine was before Work shared Code's capability set, would run with
+  // authority it was never given, so it does not run until a person saves it
+  // again under a profile that grants them, which journals that choice.
+  if (
+    snapshot.mode === "work" &&
+    !(
+      snapshot.authorityProfile.effective.shell &&
+      snapshot.authorityProfile.effective.git &&
+      input.run.authoritySnapshot.effective.shell &&
+      input.run.authoritySnapshot.effective.git
+    )
+  ) {
+    return blocked(
+      "authority-mismatch",
+      "This Work routine was saved without the shell and Git every Work turn now holds. Edit it and choose a profile that grants them to run it again.",
+    );
+  }
   if (snapshot.mode === "work" && !input.facts.workBindingMatches) {
     return blocked("binding-mismatch", "Work Project binding no longer matches the definition.");
   }

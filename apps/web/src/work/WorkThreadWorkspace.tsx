@@ -11,6 +11,7 @@ import {
   type ProviderModelOptionValues,
   type ThreadDocumentDelivery,
   type UsageResumeThreadState,
+  type WorkAccess,
   type WorkAttachmentId,
   type WorkRequest,
   type WorkThread,
@@ -23,6 +24,8 @@ import {
 } from "@octant/contracts";
 import type { ProjectSummary, ProjectId } from "@octant/contracts/projects";
 import type { BrowserToolApproval } from "@octant/contracts/browser-automation-rpc";
+import { WORK_PERMISSION_MODES, workAccessOfMode, workModeOf } from "./workPermissionModes";
+import { PermissionModePicker } from "../code/PermissionModePicker";
 import { browserApprovalDetail, browserApprovalSummary } from "../browser/browserProfileCopy";
 import {
   prependEarlierTurns,
@@ -761,6 +764,39 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     thread !== undefined &&
     thread.lifecycle === "active" &&
     threadMayChooseArtifacts(props.providerGroups ?? [], thread.providerInstanceId, "work");
+  const [accessChanging, setAccessChanging] = useState(false);
+  // Work and Code share one set of levels; the composer moves this thread to
+  // another one, and its next turn runs at it.
+  const changeAccess = async (access: WorkAccess) => {
+    if (thread === undefined || accessChanging || access === thread.access) return;
+    setAccessChanging(true);
+    setErrorMessage(undefined);
+    try {
+      const result = await props.threadClient.execute({
+        kind: "change-work-thread-access",
+        threadId: thread.id,
+        expectedVersion: thread.version,
+        access,
+      });
+      if (!("kind" in result) || result.kind !== "thread-updated") {
+        setErrorMessage("This task’s mode could not be saved.");
+        return;
+      }
+      setThread(result.thread);
+      props.onThreadUpdated?.(result.thread);
+    } catch {
+      setErrorMessage("This task’s mode could not be saved.");
+    } finally {
+      setAccessChanging(false);
+    }
+  };
+  const autoSupported =
+    thread !== undefined &&
+    (props.providerGroups ?? []).some(
+      (group) =>
+        String(group.instance.id) === String(thread.providerInstanceId) &&
+        group.harnessAutoReview === "supported",
+    );
   const changeDocumentDelivery = async (documentDelivery: ThreadDocumentDelivery) => {
     if (thread === undefined || deliveryChanging) return;
     setDeliveryChanging(true);
@@ -2410,6 +2446,19 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           // became.
           trailing: (
             <>
+              {thread === undefined ? null : (
+                <PermissionModePicker
+                  autoSupported={autoSupported}
+                  disabled={accessChanging || creating || completionLocked}
+                  modes={WORK_PERMISSION_MODES}
+                  onChange={(mode) => {
+                    const access = workAccessOfMode(mode);
+                    if (access !== undefined) void changeAccess(access);
+                  }}
+                  value={workModeOf(thread.access)}
+                  warningScope={{ projectId: String(thread.projectId) }}
+                />
+              )}
               {thread === undefined ? null : (
                 <span
                   aria-label="Bound provider and model"

@@ -2552,7 +2552,7 @@ function mapAndOffer(
 
 export function permissionRules(
   policy: ProviderExecutionPolicy,
-  mode: "chat" | "work" | "code",
+  _mode: "chat" | "work" | "code",
   managedToolServerName?: string,
   extraFolders: ReadonlyArray<string> = [],
 ): PermissionRuleset {
@@ -2585,16 +2585,8 @@ export function permissionRules(
       { permission: "todowrite", pattern: "*", action: "deny" },
     ];
   }
-  // Work has no shell, Git, or provider-owned subagents: bash and task are
-  // refused outright rather than asked about, since approving either would
-  // grant the thread more than its mode holds, and a task child runs outside
-  // Octant's journal. OpenCode applies the last matching rule.
-  if (mode === "work") {
-    rules.push(
-      { permission: "bash", pattern: "*", action: "deny" },
-      { permission: "task", pattern: "*", action: "deny" },
-    );
-  }
+  // Work and Code share one capability set at the thread's level, so a Work
+  // session's bash and task follow the posture above exactly as Code's do.
   // A Project's extra folder is no outside directory: reaching it is allowed,
   // and the posture's own rules above then decide reads, edits and commands
   // there exactly as they do in the bound directory.
@@ -2639,7 +2631,7 @@ const BETA_SHELL_AND_SUBAGENT_DENY: PermissionV2Ruleset = [
  */
 export function betaAgentPermissionRules(
   policy: ProviderExecutionPolicy,
-  mode: "chat" | "work" | "code",
+  _mode: "chat" | "work" | "code",
   extraFolders: ReadonlyArray<string> = [],
 ): PermissionV2Ruleset {
   const denyExternal: PermissionV2Ruleset = [
@@ -2667,7 +2659,7 @@ export function betaAgentPermissionRules(
       { action: "websearch", resource: "*", effect: "deny" },
     ];
   }
-  if (mode === "work") rules.push(...BETA_SHELL_AND_SUBAGENT_DENY);
+  // Work follows the posture as Code does; only Plan denies the shell.
   for (const resource of extraFolderPatterns(extraFolders)) {
     rules.push({ action: "external_directory", resource, effect: "allow" });
   }

@@ -100,6 +100,19 @@ export interface BrowserProfileStorePort {
   >;
   readonly clear: (profile: StoredBrowserProfile, scope: BrowserProfileClearScope) => Promise<void>;
   /**
+   * Makes the extensions loaded in a profile's session exactly these: loads the
+   * ones that are missing or changed and removes the rest. A Private page has no
+   * session of this kind and never runs an extension.
+   */
+  readonly syncExtensions: (
+    profile: StoredBrowserProfile,
+    extensions: ReadonlyArray<{
+      readonly id: string;
+      readonly path: string;
+      readonly contentHash: string;
+    }>,
+  ) => Promise<void>;
+  /**
    * Puts cookies into a profile's store, one bounded batch at a time, and says
    * how many it kept. The cookies pass through and are retained nowhere.
    */

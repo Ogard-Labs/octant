@@ -137,6 +137,16 @@ describe("BrowserCaptureService", () => {
     expect(service.list(threadA).map((capture) => capture.captureId)).toEqual([captureId]);
   });
 
+  it("records the profile a signed-in page lived in, and none for a page outside one", async () => {
+    const { service } = open();
+    const signedIn = kept(await service.keep(request({ profile: { kind: "personal" } })));
+    const plain = kept(await service.keep(request()));
+
+    const byId = new Map(service.list(threadA).map((capture) => [capture.captureId, capture]));
+    expect(byId.get(signedIn)?.profile).toEqual({ kind: "personal" });
+    expect(byId.get(plain)?.profile).toBeUndefined();
+  });
+
   it("attributes a capture to the person when they took it in the pane", async () => {
     const { connection, service } = open();
     kept(await service.keep(request({ takenBy: "person" })));

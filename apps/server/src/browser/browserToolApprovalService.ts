@@ -46,6 +46,14 @@ interface BrowserToolApprovalServiceOptions {
    */
   readonly isHostScope?: (windowId: WindowId) => boolean;
   /**
+   * Whether a scope is a window of this computer. A scope that is neither a local
+   * window nor the host acting alone is a paired device. Absent, no scope is
+   * treated as a paired device.
+   */
+  readonly isLocalWindow?: (windowId: WindowId) => boolean;
+  /** How many extensions are enabled in a profile, to name in its prompt. */
+  readonly extensionsEnabledIn?: (profile: StoredBrowserProfile) => number;
+  /**
    * The waiting set changed: a prompt became listable or left the list for
    * a decision, a cancel, an expiry, a close, or a revocation. Wired only at
    * composition so the service stays free of the change feed.
@@ -92,12 +100,17 @@ export class BrowserToolApprovalService {
     if (input.signal?.aborted) return Promise.resolve("cancelled");
     if (this.#pending.size >= MAX_PENDING_APPROVALS) return Promise.resolve("denied");
     const approvalId = decodeToolApprovalId(this.#options.uuid());
+    const extensionCount =
+      input.profile === undefined
+        ? 0
+        : Math.min(64, this.#options.extensionsEnabledIn?.(input.profile) ?? 0);
     const view = decodeBrowserToolApproval({
       approvalId,
       threadId: input.threadId,
       mode: input.authority.mode,
       origin: input.origin,
       ...(input.profile === undefined ? {} : { profile: input.profile }),
+      ...(extensionCount > 0 ? { extensionCount } : {}),
       requestedAt: new Date(this.#options.now()).toISOString(),
     });
     return new Promise((resolve) => {
@@ -165,12 +178,27 @@ export class BrowserToolApprovalService {
    * host scope.
    */
   #answerableBy(pending: PendingApproval, windowId: WindowId): boolean {
+    // A signed-in page acts as the person's account, so a paired device neither
+    // sees nor answers its approval, and an approval a paired device's turn raised
+    // waits for a window of this computer, like a routine's.
+    const signedIn = pending.view.profile !== undefined;
+    if (signedIn && this.#isPairedDevice(windowId)) return false;
     if (pending.windowId === windowId) return true;
     const isHostScope = this.#options.isHostScope;
-    if (isHostScope === undefined || !isHostScope(pending.windowId) || isHostScope(windowId)) {
+    const waitsForPerson =
+      (isHostScope?.(pending.windowId) ?? false) ||
+      (signedIn && this.#isPairedDevice(pending.windowId));
+    if (!waitsForPerson || isHostScope?.(windowId) === true || this.#isPairedDevice(windowId)) {
       return false;
     }
     return this.#options.authorityIsCurrent(pending.threadId, pending.authority, windowId);
+  }
+
+  #isPairedDevice(windowId: WindowId): boolean {
+    const { isLocalWindow, isHostScope } = this.#options;
+    return (
+      isLocalWindow !== undefined && !isLocalWindow(windowId) && isHostScope?.(windowId) !== true
+    );
   }
 
   /**

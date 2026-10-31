@@ -11,8 +11,8 @@ import type { ProviderExecutionPolicy } from "@octant/contracts";
  * (docs/architecture.md § Harness tool egress rules).
  *
  * Defaults:
- * - Work / Plan / Chat → `none`
- * - Code approval-gated / auto-accept-edits → `provider-endpoints-only`
+ * - Plan / Chat → `none`
+ * - Work or Code approval-gated / auto-accept-edits → `provider-endpoints-only`
  * - Full access / explicit network approval → `unrestricted`
  *
  * Provider-owned runtimes that make their own API call are a scoped
@@ -71,11 +71,12 @@ export function resolveDefaultThreadEgressPolicy(
   }
   if (input.executionPolicy === "plan") return "none";
   if (
-    input.mode === "code" &&
+    input.mode !== "chat" &&
     (input.executionPolicy === "approval-gated" || input.executionPolicy === "auto-accept-edits")
   ) {
     // Auto-accepting edits inside the checkout says nothing about the network,
-    // so it keeps exactly the egress approval-gated Code already has.
+    // so it keeps exactly the egress approval-gated Code already has. Work is
+    // guarded as Code is, so its commands follow the same rules.
     return "provider-endpoints-only";
   }
   return "none";

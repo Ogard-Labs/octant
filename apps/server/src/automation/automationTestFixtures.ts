@@ -37,8 +37,8 @@ export const AUTOMATION_TEST_DUE = "2026-09-01T09:00:00.000Z";
 
 const approvalGatedWorkAuthority = {
   filesystem: true,
-  shell: false,
-  git: false,
+  shell: true,
+  git: true,
   network: false,
   tools: true,
   subagents: false,

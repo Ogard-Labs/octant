@@ -384,6 +384,23 @@ export interface OctantHostBridge
   readonly attachBrowserSurface?: (request: BrowserSurfaceRequest) => Promise<BrowserSurfaceState>;
   readonly updateBrowserSurfaceBounds?: (request: BrowserSurfaceRequest) => Promise<void>;
   readonly detachBrowserSurface?: (request: Omit<BrowserSurfaceRequest, "bounds">) => Promise<void>;
+  /** Shows an extension's popup or options page beside the Browser toolbar's extensions button. */
+  readonly openBrowserExtensionPopup?: (request: {
+    readonly profile:
+      | { readonly kind: "personal" }
+      | { readonly kind: "project"; readonly projectId: string };
+    readonly extensionId: string;
+    readonly kind: "popup" | "options";
+    /** The extensions button's rectangle; the desktop app places the popup beside it. */
+    readonly anchor: {
+      readonly x: number;
+      readonly y: number;
+      readonly width: number;
+      readonly height: number;
+    };
+    readonly size: { readonly width: number; readonly height: number };
+  }) => Promise<{ readonly opened: boolean }>;
+  readonly closeBrowserExtensionPopup?: () => Promise<void>;
   readonly commandBrowserSurface?: (
     request: Omit<BrowserSurfaceRequest, "bounds"> & {
       readonly command: "back" | "forward" | "reload" | "stop";

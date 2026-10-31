@@ -110,8 +110,10 @@ describe("createGoalLoopWorkRoundRunner", () => {
       objective: "Tidy",
       authority: { executionPolicy: "auto-accept-edits" },
     });
-    const holds = vi.mocked(h.turns.startFirstTurn).mock.calls.map((call) => call[2]?.holdAskFirst);
-    expect(holds).toEqual([true, true, false]);
+    const holds = vi
+      .mocked(h.turns.startFirstTurn)
+      .mock.calls.map((call) => call[2]?.accessCeiling);
+    expect(holds).toEqual(["ask-first", "ask-first", "auto-accept-edits"]);
   });
 
   it("reports the provider's tokens for the turn when the provider reported usage", async () => {

@@ -1,9 +1,9 @@
 // Turns a routine the hub offered into a routine on this host, through the same
 // Automation command service a window's editor uses. The offer names no
 // Project, profile, or authority, so each is chosen here on this host and only
-// from what carries the least authority: an approval-gated profile, Work
-// authority with no shell or Git, and a routine that is paused until the person
-// resumes it.
+// from what carries the least authority: an approval-gated profile, the Work
+// authority every Work turn holds (the shell and Git, asking first), and a
+// routine that is paused until the person resumes it.
 
 import { createHash } from "node:crypto";
 import {
@@ -66,8 +66,8 @@ export function createRoutineOfferAuthor(deps: RoutineOfferDependencies) {
 
       const authority: AgentRunAuthority = {
         filesystem: true,
-        shell: false,
-        git: false,
+        shell: true,
+        git: true,
         network: false,
         tools: true,
         subagents: false,

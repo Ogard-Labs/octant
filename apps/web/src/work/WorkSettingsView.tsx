@@ -6,11 +6,14 @@ import { SettingRow, SettingsSection } from "../settings/primitives";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import type { WorkSettingsController } from "./useWorkSettings";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { FULL_ACCESS_WARNING, useFullAccessWarning } from "../code/FullAccessWarning";
 
 const ACCESS_NOTES: Readonly<Record<WorkAccess, string>> = {
-  "ask-first": "The agent asks before it changes any file in the Project folder.",
+  auto: "The provider's own reviewer approves each command and file change. Providers without a reviewer ask first.",
+  "ask-first": "The agent asks before it runs a command or changes a file in the Project folder.",
   "auto-accept-edits":
-    "The agent edits files inside the Project folder without asking. Anything outside the folder is still refused, and every other action works as before. Providers without an auto-accept path keep asking.",
+    "The agent edits files inside the Project folder without asking, and asks before commands. Anything outside the folder is still refused.",
+  "full-access": FULL_ACCESS_WARNING,
 };
 
 /**
@@ -23,6 +26,7 @@ export function WorkSettingsView(props: {
   readonly focusedSetting?: string | undefined;
 }) {
   const settings = props.controller.settings;
+  const warning = useFullAccessWarning("machine");
   const groups = useMemo(
     () =>
       buildModelPickerGroups({
@@ -106,16 +110,20 @@ export function WorkSettingsView(props: {
             onValueChange={(value) => {
               const next = value[0];
               if (next !== undefined && next !== settings.defaultAccess) {
-                void props.controller.update({ defaultAccess: next });
+                warning.guard(
+                  next === "full-access" ? "full-access" : undefined,
+                  () => void props.controller.update({ defaultAccess: next }),
+                );
               }
             }}
             value={[settings.defaultAccess]}
           >
+            <OctantToggleGroupItem value="auto">Auto</OctantToggleGroupItem>
             <OctantToggleGroupItem value="ask-first">Ask first</OctantToggleGroupItem>
-            <OctantToggleGroupItem value="auto-accept-edits">
-              Auto-accept edits
-            </OctantToggleGroupItem>
+            <OctantToggleGroupItem value="auto-accept-edits">Accept edits</OctantToggleGroupItem>
+            <OctantToggleGroupItem value="full-access">Full access</OctantToggleGroupItem>
           </OctantToggleGroup>
+          {warning.dialog}
         </SettingRow>
       </div>
     </SettingsSection>

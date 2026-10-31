@@ -18,6 +18,7 @@ import {
   type Project,
   type ProjectId,
   type WindowId,
+  type WorkAccess,
   type WorkTurnState,
 } from "@octant/contracts";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
@@ -61,7 +62,7 @@ export interface WorkDelegationServices {
       scope: WindowId,
       command: unknown,
       options?: {
-        readonly holdAskFirst?: boolean;
+        readonly accessCeiling?: WorkAccess;
         readonly admissionCurrent?: () => boolean;
       },
     ) => Promise<{ readonly kind: string }>;
@@ -164,7 +165,7 @@ export function createWorkDelegationHost(services: WorkDelegationServices): Peer
           // edit whatever the host's Work default is.
           // The turn service rechecks this after it prepares and before the
           // provider runs, so a grant ended meanwhile starts no work.
-          { holdAskFirst: true, admissionCurrent: input.admissionCurrent },
+          { accessCeiling: "ask-first", admissionCurrent: input.admissionCurrent },
         );
         return started.kind === "accepted"
           ? { status: "started", threadId, turnId }

@@ -4,6 +4,7 @@ import { realpath, stat as statFromDisk } from "node:fs/promises";
 import { join } from "node:path";
 import { queueSteeringWhereDelivered, withSteerable } from "../harness/nativeHarnessSteerability";
 import { createHostShield, shieldRoutesApprovals } from "../shield/hostShield";
+import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
 import { recordShieldReviewUsage } from "../shield/shieldUsageLedger";
 import {
   AggregateId,
@@ -54,7 +55,7 @@ import { parseFollowUpSuggestions } from "../followUps/followUpSuggestionParsing
 import { fetchPublicUrl, PublicFetchRefused } from "../harness/nativeHarnessWebFetch";
 import { searxngHarnessWebSearch } from "../harness/nativeHarnessWebSearch";
 import { deriveToolHostId } from "../browser/browserAuthorityResolver";
-import { isNativeHarnessDriverKind } from "@octant/domain";
+import { isNativeHarnessDriverKind, workThreadAccessOf } from "@octant/domain";
 import { type AgentRunsWiring, authorizeAgentRunParentThread } from "./agentRuns";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
 import type { ServerStart } from "./serverShape";
@@ -521,6 +522,14 @@ export function wireHarness(deps: HarnessDependencies) {
   });
   const hostShield = createHostShield({
     readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+    chosenReviewer: (thread) => {
+      const project = persistence.readProject(thread.projectId);
+      return chosenAutoReviewer({
+        project: project?.type === "code" ? project : undefined,
+        settings: persistence.readCodeSettings()?.settings,
+      });
+    },
+    chosenModel: () => persistence.readCodeSettings()?.settings.shieldModel,
     readTurnExecutionPolicy: (threadId) => readTurnExecutionPolicy(threadId),
     providerCapabilities: (providerInstanceId) =>
       providerRuntimeRegistry.observedState(providerInstanceId)?.capabilities,
@@ -634,6 +643,10 @@ export function wireHarness(deps: HarnessDependencies) {
     // The posture a command's network follows is the one its turn may use:
     // the window's session grant, clamped to the running turn's posture, so
     // a thread widened mid-turn keeps that turn's commands on `proxied`.
+    readWorkExecutionPolicy: (threadId) => {
+      const access = runningWorkTurnAccess(threadId);
+      return access === undefined ? undefined : workThreadAccessOf(access).executionPolicy;
+    },
     readCodeExecutionPolicy: codeTurnExecutionPolicyReader({
       readCodeThread: (threadId) => persistence.readCodeThread(threadId),
       codeSessionAuthority,

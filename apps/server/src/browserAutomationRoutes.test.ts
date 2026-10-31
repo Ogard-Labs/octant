@@ -713,6 +713,31 @@ describe("browser automation routes", () => {
       expect((await handler(post("profiles", clear)))?.status).toBe(503);
     });
 
+    it("carries an extensions command with the window and the caller the host proved", async () => {
+      const extensions = {
+        execute: vi.fn(async () => ({ kind: "browser-extensions" as const, extensions: [] })),
+      };
+      const withExtensions = createBrowserAutomationRouteHandler({
+        service: service as any,
+        authority: { canAccessWindow: () => true, resolve: () => authority },
+        extensions,
+        windowAuthorityStore: store,
+        maxRequestBodySize: 64_000,
+      });
+      const list = { kind: "list" };
+
+      expect((await withExtensions(post("extensions", list)))?.status).toBe(200);
+      expect(extensions.execute).toHaveBeenLastCalledWith(windowId, "local-window", list);
+      await withExtensions(post("extensions", list, true));
+      expect(extensions.execute).toHaveBeenLastCalledWith(windowId, "remote-device", list);
+      // A folder path is never accepted from the caller; only a picker receipt is.
+      expect(
+        (await withExtensions(post("extensions", { kind: "install", path: "/Users/x/ext" })))
+          ?.status,
+      ).toBe(400);
+      expect((await handler(post("extensions", list)))?.status).toBe(503);
+    });
+
     it("withholds a signed-in page from a paired device and shows it to the local window", async () => {
       service.inspectThread.mockReturnValue(signedInSnapshot);
       const current = { threadId };

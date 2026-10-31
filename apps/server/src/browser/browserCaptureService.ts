@@ -18,6 +18,7 @@ import {
   type CorrelationId,
   type EventActor,
   type ProviderInstanceId,
+  type StoredBrowserProfile,
 } from "@octant/contracts";
 import {
   browserCapturePageOrigin,
@@ -51,6 +52,8 @@ export interface KeepBrowserCaptureInput {
   readonly url: string | undefined;
   readonly title: string | undefined;
   readonly takenBy: BrowserCaptureTaker;
+  /** The stored profile the page lived in, recorded with the capture. */
+  readonly profile?: StoredBrowserProfile | undefined;
   /** The provider instance driving the tool; the journal actor for an agent capture. */
   readonly providerInstanceId: ProviderInstanceId;
   readonly correlationId: CorrelationId;
@@ -123,6 +126,7 @@ export class BrowserCaptureService {
           size: finalized.size,
           mime: finalized.mime,
           capturedAt: this.#clock(),
+          ...(input.profile === undefined ? {} : { profile: input.profile }),
         }),
         input,
       );

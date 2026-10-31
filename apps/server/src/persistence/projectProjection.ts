@@ -9,6 +9,7 @@ import {
   decodeCodeProjectAccessChanged,
   decodeCodeProjectNewThreadWorkspaceChanged,
   decodeCodeProjectPermissionModeChanged,
+  decodeCodeProjectAutoReviewerChanged,
   decodeCodeProjectPullRequestBackgroundRefreshChanged,
   decodeProjectProviderPolicyChanged,
   decodeProjectCreated,
@@ -174,6 +175,8 @@ const projectDecoders = {
     decodeCodeProjectAccessChanged(payload).project,
   "project.code-permission-mode-changed@1": (payload: unknown) =>
     decodeCodeProjectPermissionModeChanged(payload).project,
+  "project.code-auto-reviewer-changed@1": (payload: unknown) =>
+    decodeCodeProjectAutoReviewerChanged(payload).project,
   "project.code-new-thread-workspace-changed@1": (payload: unknown) =>
     decodeCodeProjectNewThreadWorkspaceChanged(payload).project,
   "project.code-pull-request-background-refresh-changed@1": (payload: unknown) =>

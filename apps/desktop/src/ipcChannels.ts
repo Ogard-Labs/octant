@@ -24,6 +24,8 @@ export const DESKTOP_IPC_CHANNELS = {
   browserSurfaceOpenExternal: "octant:browser-surface:open-external",
   browserSurfaceState: "octant:browser-surface:state",
   browserSurfaceTab: "octant:browser-surface:tab",
+  browserExtensionPopupOpen: "octant:browser-extension-popup:open",
+  browserExtensionPopupClose: "octant:browser-extension-popup:close",
   canvasPrototypeSurface: "octant:canvas:prototype-surface:prepare",
   canvasPrototypeOpen: "octant:canvas:prototype:open",
   canvasPrototypeInput: "octant:canvas:prototype:input",

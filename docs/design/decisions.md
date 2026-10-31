@@ -60,7 +60,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 9         | 8       | 1            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 4       | 1            | 0                   |
-| [Browser](#browser)                                                                   | 4         | 3       | 0            | 1                   |
+| [Browser](#browser)                                                                   | 4         | 4       | 0            | 0                   |
 | [Provider runtimes](#provider-runtimes)                                               | 6         | 6       | 0            | 0                   |
 | [Model endpoints and organization sign-in](#model-endpoints-and-organization-sign-in) | 6         | 5       | 1            | 0                   |
 | [Outside provider drivers](#outside-provider-drivers)                                 | 3         | 3       | 0            | 0                   |
@@ -69,7 +69,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
 | [Decided, pending a specification update](#decided-pending-a-specification-update)    | 4         | 0       | 0            | 4                   |
-| **All areas**                                                                         | **222**   | **173** | **36**       | **13**              |
+| **All areas**                                                                         | **222**   | **174** | **35**       | **13**              |
 
 ## Principles and hard lines
 
@@ -149,7 +149,8 @@ One setting says how much a thread's tool calls are guarded, with four levels: A
 - Plan is an overlay on any level and always read-only; subagents start at their parent's level and never exceed it; a routine runs at the level its creator picked.
 - Older recorded "Trusted" or "Off" levels replay as Full access.
 - Built in Code: Ask first, Accept edits, Auto with the key CLI providers' own reviewers, Plan, and Full access with no sandbox and no prompts for every runtime, with a first-run default, a Settings › Code › Access default, a Project override, and the one-time warning.
-- Not built yet: the shared levels in Work, Octant Shield's picker and Settings, an ACP agent's own reviewer, and the thread header indicator. The guardrail-level list in the architecture still names some of the Code pieces as not built; its later Code access rules describe them as built.
+- Built in Work: Auto, Ask first, Accept edits and Full access, set from Settings › Work and the composer, with the one-time warning; Work has no Plan.
+- Not built yet: a Work Project override, an ACP agent's own reviewer, and the thread header indicator. The guardrail-level list in the architecture still names some of the Code pieces as not built; its later Code access rules describe them as built.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Security and authority, Guardrail levels](../architecture.md#security-and-authority).
 
@@ -161,7 +162,7 @@ The first run asks once which mode new threads start in, with Auto pre-selected 
 - Where no reviewer can run for a thread, that thread falls back to Ask first and the picker says why.
 - The answer is the default for new Work and Code threads; Settings › Access changes it, a Project may override it, and the composer switches a thread's mode in one click.
 - Built for Code: the answer is stored as the Code default, Settings › Code › Access changes it, and a Code Project may override it; a Project that remembered Full access before Project modes existed starts its threads in Full access.
-- Work keeps its own ask-first or auto-accept-edits setting until the shared levels reach Work (not built yet).
+- Work takes the same modes without Plan from Settings › Work, and its composer switches a thread's mode; the first-run answer does not yet set the Work default, and a Work Project has no override (not built yet).
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Security and authority, Guardrail levels](../architecture.md#security-and-authority).
 
@@ -174,7 +175,8 @@ Work and Code run under the same guardrail levels with the same capabilities; th
 - Code is for coding, shows checkouts and worktrees, and keeps its objective delivery target.
 - A thread keeps the kind it was created with; moving work between Work and Code is the person's choice.
 - Work's Developer tools switch is set per Project by a person; no agent, routine or import sets it.
-- Today's drivers still withhold the shell and Git from Work and keep Work below Full access (not built yet).
+- Built: every driver starts a Work session with its shell and Git at the thread's level, Work launches get Code's confinement at the same level, Work threads reach Full access, and each Work turn records shell and Git at its level.
+- Not built yet: the Developer tools switch, and an in-process ACP shell reporting unsupported below Full access.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Modes](../architecture.md#modes-chat-work-and-code) and [Overview and principles](../architecture.md#overview-and-principles).
 
@@ -182,7 +184,7 @@ Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Modes](../archit
 
 At the Reviewed level a reviewer stands in for the person's click: the provider's own reviewer where it has one, otherwise Octant Shield.
 
-- The person chooses the reviewer in Settings › Access with a Project override; the provider's own is the default where it exists.
+- The person chooses the reviewer in Settings › Access with a Project override; the provider's own is the default where it exists (built for Code in Settings › Code › Access and on a Code Project's overview).
 - A verdict the provider reports is journaled with the provider as approver and shown like a person's approval (not built yet: today the journal records the thread setting, not per-call verdicts).
 - Taint withdraws the provider's own reviewer for irreversible, publish and new-egress classes.
 - Built for the two key CLI providers in Code; one ACP agent's auto-approve mode is not built yet.
@@ -201,8 +203,8 @@ Octant Shield is Octant's own automatic approval reviewer for every runtime that
 - Shield uses the thread's own provider account and its smallest model by default, or another configured endpoint, sends no telemetry, counts against spend ceilings, and journals every decision.
 - A release with Shield requires measuring its false-allow rate on a fixture set of known-safe and known-unsafe calls.
 - Build order: the native harness, every runtime's approval path, the picker and Settings, the Watcher, safe networks, then the server registry and SSH.
-- Built: the Judge (rules, fast allow rules that read a command exactly as written, the model stage, fail-closed, brakes, per-call grants, taint limits, spend reservations with the review's usage recorded under the thread), answering the approvals of the Octant Harness, Claude Code, Codex, OpenCode, ACP agents and Pi on a Code thread in Auto where Shield is the reviewer, and their subagents', each decision journaled and shown on the transcript; the fixture set with a test of the rule stages and a false-allow measurement script.
-- Not built yet: the picker and Settings (so Claude Code and Codex keep their own reviewer), the Watcher (so the Judge has no labels yet), safe networks, and the server registry; the false-allow rate of a real model is unmeasured.
+- Built: the Judge (rules, fast allow rules that read a command exactly as written, the model stage, fail-closed, brakes, per-call grants, taint limits, spend reservations with the review's usage recorded under the thread), answering the approvals of the Octant Harness, Claude Code, Codex, OpenCode, ACP agents and Pi on a Code thread in Auto where Shield is the reviewer, and their subagents', each decision journaled and shown on the transcript; Auto offered in the picker wherever a reviewer can run; Settings › Code › Access Auto reviewer and Shield model with a Code Project override of the reviewer; the fixture set with a test of the rule stages and a false-allow measurement script.
+- Not built yet: the Watcher (so the Judge has no labels yet), safe networks, the server registry, and the shared levels in Work; the false-allow rate of a real model is unmeasured.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Octant Shield](../architecture.md#octant-shield).
 
@@ -2167,9 +2169,9 @@ Browser pages may keep sign-in in a Project or Personal profile. Private remains
 - On a profile page the agent needs a site approval for each origin and profile, for reading too. Credential fields stay protected.
 - Routines, subagents, paired devices and terminal grants are refused on profile pages.
 - An extension is installed and enabled only by a person at a local window. Install never enables, and no agent, plugin or skill can install or enable.
-- Profiles, their storage, site approvals, the refusals, and sign out are built; extension install, per-profile enablement, and popups are not built yet.
+- Profiles, their stores, site approvals, refusals, sign out, and extension install, per-profile enablement, and popups are built. Two pieces of the popup design are declared and not built: `chrome.tabs` support for popups and the `chrome.action.onClicked` event.
 
-Status: Partly built. Since: —. Detail: [Browser profiles and extensions: Profiles](browser-profiles.md#profiles) and [The agent on a signed-in page](browser-profiles.md#the-agent-on-a-signed-in-page).
+Status: Built. Since: 2026-10-31. Detail: [Browser profiles and extensions: Profiles](browser-profiles.md#profiles) and [The agent on a signed-in page](browser-profiles.md#the-agent-on-a-signed-in-page).
 
 ### Terminal Browser grant
 
