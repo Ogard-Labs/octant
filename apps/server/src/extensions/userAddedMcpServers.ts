@@ -42,7 +42,23 @@ export interface UserAddedMcpServerStoreOptions {
   readonly registry: Pick<LocalPluginFolderRegistry, "register" | "get" | "unregister">;
   /** The broker namespace for secret values; absent on a host with no broker. */
   readonly secrets?: ProviderCredentialStore;
+  /**
+   * Secrets that come from a linked secret store. `point` records the item
+   * reference under the secret id (refusing when the store is locked or the
+   * item is missing) and `forget` removes it; neither handles a value.
+   */
+  readonly linkedSecrets?: LinkedSecretPointers;
   readonly uuid?: () => string;
+}
+
+export interface LinkedSecretPointers {
+  readonly point: (
+    secretId: string,
+    linked: { readonly store: string; readonly reference: string },
+  ) => Promise<
+    { readonly status: "pointed" } | { readonly status: "refused"; readonly message: string }
+  >;
+  readonly forget: (secretId: string) => Promise<void>;
 }
 
 /**
@@ -57,12 +73,14 @@ export class UserAddedMcpServerStore {
   readonly #directory: string;
   readonly #registry: UserAddedMcpServerStoreOptions["registry"];
   readonly #secrets: ProviderCredentialStore | undefined;
+  readonly #linkedSecrets: LinkedSecretPointers | undefined;
   readonly #uuid: () => string;
 
   constructor(options: UserAddedMcpServerStoreOptions) {
     this.#directory = options.directory;
     this.#registry = options.registry;
     this.#secrets = options.secrets;
+    this.#linkedSecrets = options.linkedSecrets;
     this.#uuid = options.uuid ?? (() => crypto.randomUUID());
   }
 
@@ -79,6 +97,18 @@ export class UserAddedMcpServerStore {
       throw new UserAddedMcpServerError("conflict", "A server with this name is already added.");
     }
     const values = request.server.type === "stdio" ? request.server.env : request.server.headers;
+    if (values.some((value) => value.linked !== undefined && !value.secret)) {
+      throw new UserAddedMcpServerError(
+        "invalid",
+        "Only a value marked secret can come from a secret store.",
+      );
+    }
+    if (values.some((value) => value.linked !== undefined) && this.#linkedSecrets === undefined) {
+      throw new UserAddedMcpServerError(
+        "unavailable",
+        "This host cannot link a secret store. Link one in Settings, or enter the value instead.",
+      );
+    }
     if (values.some((value) => value.secret) && this.#secrets === undefined) {
       throw new UserAddedMcpServerError(
         "unavailable",
@@ -103,6 +133,25 @@ export class UserAddedMcpServerStore {
       for (const value of values) {
         if (!value.secret) {
           resolvedValues[value.name] = value.value;
+          continue;
+        }
+        if (value.linked !== undefined) {
+          if (value.value.length > 0) {
+            throw new UserAddedMcpServerError(
+              "invalid",
+              `${value.name} comes from a secret store, so it takes no value here.`,
+            );
+          }
+          const secretId = this.#uuid();
+          const pointed = await this.#linkedSecrets?.point(secretId, value.linked);
+          if (pointed === undefined || pointed.status !== "pointed") {
+            throw new UserAddedMcpServerError(
+              "invalid",
+              pointed?.message ?? `${value.name} could not be linked to the secret store.`,
+            );
+          }
+          storedSecretIds.push(secretId);
+          resolvedValues[value.name] = `\${OCTANT_SECRET:${secretId}}`;
           continue;
         }
         if (value.value.length === 0) {
@@ -164,6 +213,7 @@ export class UserAddedMcpServerStore {
     } catch (error) {
       await rm(folder, { recursive: true, force: true }).catch(() => undefined);
       for (const secretId of storedSecretIds) {
+        await this.#linkedSecrets?.forget(secretId).catch(() => undefined);
         await this.#secrets?.delete(secretId).catch(() => undefined);
       }
       if (error instanceof UserAddedMcpServerError) throw error;
@@ -234,6 +284,7 @@ export class UserAddedMcpServerStore {
     if (registered === undefined) return;
     const folder = registered.absolutePath;
     for (const secretId of await referencedSecretIds(folder)) {
+      await this.#linkedSecrets?.forget(secretId).catch(() => undefined);
       await this.#secrets?.delete(secretId).catch(() => undefined);
     }
     await rm(folder, { recursive: true, force: true });

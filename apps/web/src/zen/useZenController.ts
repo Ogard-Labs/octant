@@ -913,13 +913,16 @@ export function useZenController(options: UseZenControllerOptions) {
       readonly terminalId: CodeTerminalId;
       readonly title?: string;
     }): Promise<boolean> => {
-      if (client === undefined || space === null) return false;
+      // The space as last loaded, which can be newer than this callback's
+      // render: a caller that has just entered Zen pins before React re-renders.
+      const current = presentationSpace.current ?? space;
+      if (client === undefined || current === null) return false;
       setPanelBusy(true);
       try {
         const result = await client.pinProjectTerminal({
           projectId: request.projectId,
           terminalId: request.terminalId,
-          expectedVersion: space.version,
+          expectedVersion: current.version,
           ...(request.title === undefined ? {} : { title: request.title }),
         });
         if (mounted.current) {

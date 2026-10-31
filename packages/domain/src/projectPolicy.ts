@@ -16,6 +16,7 @@ import {
   type WorkProject,
   type WorkProjectStatusFile,
   type Project,
+  type ProjectAction,
   type ProjectActor,
   type ProjectColor,
   type ProjectId,
@@ -270,6 +271,35 @@ export function changeCodeProjectPermissionMode(
   };
 }
 
+/**
+ * Replace a Code Project's named terminal actions with the list the person
+ * saved. Only a Code Project has a terminal to run them in, and an archived
+ * Project is read-only. A list equal to the saved one is refused so the journal
+ * never carries an event that changed nothing; an absent list reads as empty.
+ */
+export function changeCodeProjectActions(
+  project: Project,
+  actions: ReadonlyArray<ProjectAction>,
+  updatedAt: UtcTimestamp,
+): CodeProject {
+  if (project.type !== "code") {
+    reject("binding-not-allowed", "Only Code Projects have terminal actions");
+  }
+  if (project.lifecycle === "archived") {
+    reject("invalid-lifecycle", "Archived Projects are read-only");
+  }
+  if (JSON.stringify(project.actions ?? []) === JSON.stringify(actions)) {
+    reject("invalid-lifecycle", "Code Project actions are already saved");
+  }
+  const { actions: _replaced, ...rest } = project;
+  return {
+    ...rest,
+    ...(actions.length === 0 ? {} : { actions }),
+    version: nextVersion(project),
+    updatedAt,
+  };
+}
+
 export function changeProjectProviderPolicy(
   project: Project,
   providerPolicy: ProjectProviderPolicy,
@@ -400,6 +430,15 @@ export function changeCodeProjectDesktopRecipe(
     );
     if (provider === undefined) {
       reject("invalid-desktop-recipe", "That desktop provider isn't available on this host");
+    }
+    // A provider the host lists but the person has not set up starts nothing,
+    // so a recipe may not move to it. One already on it may still be edited
+    // or removed.
+    if (
+      provider.needsSetup !== undefined &&
+      String(project.desktopRecipe?.providerId ?? "") !== String(recipe.providerId)
+    ) {
+      reject("invalid-desktop-recipe", "That desktop provider needs setup on this host first");
     }
     // A placement decides locality and billing, and so the network and key
     // rules below. A provider that offers placements is leased only on one of

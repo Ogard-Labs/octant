@@ -14,6 +14,7 @@ import {
   type CodeAccessPersistence,
   type CodeNewThreadWorkspace,
   type CodeProjectPullRequestBackgroundRefresh,
+  type ProjectAction,
   type ProjectColor,
   type ProjectProviderPolicy,
   type WorkProjectStatusFile,
@@ -358,6 +359,22 @@ export function useProjectController(options: ProjectControllerOptions) {
           : key?.action === "enter"
             ? "Desktop recipe and key saved."
             : "Desktop recipe saved.",
+    );
+  }
+
+  /**
+   * Save the whole list of a Code Project's terminal actions. The host
+   * refuses a Work or archived Project and a list that changes nothing.
+   */
+  async function setActions(
+    projectId: ProjectId,
+    actions: ReadonlyArray<ProjectAction>,
+  ): Promise<boolean> {
+    const project = projectById.get(projectId);
+    if (project?.type !== "code") return false;
+    return execute(
+      { kind: "change-code-project-actions", projectId, expectedVersion: project.version, actions },
+      "Project actions saved.",
     );
   }
 
@@ -732,6 +749,7 @@ export function useProjectController(options: ProjectControllerOptions) {
     setProviderPolicy,
     setBrandKit,
     setDesktopRecipe,
+    setActions,
     setWorkStatusFile,
     setArchived,
     status,

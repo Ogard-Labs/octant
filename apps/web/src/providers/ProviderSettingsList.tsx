@@ -57,6 +57,7 @@ import { acpAuthenticationFact } from "./configuration/AcpConfigurationForms";
 import { OutsideDriverConfigurationForm } from "./configuration/OutsideDriverConfigurationForm";
 import { credentialStatusLabel, useCredentialStatus } from "./ProviderSettingsCredentials";
 import { ProviderApiKeyEditor, acceptsApiKeyPool } from "./ProviderApiKeyEditor";
+import { ProviderLinkedKeyEditor } from "./ProviderLinkedKeyEditor";
 import {
   capabilityLabels,
   driverLabel,
@@ -992,6 +993,16 @@ function ProviderRow(props: ProviderRowProps) {
               ) : null}
               {usesCredential && acceptsApiKeyPool(props.instance) && !browserClaudeKeySetup ? (
                 <ProviderApiKeyEditor
+                  disabled={disabled}
+                  displayName={name}
+                  instanceId={props.instance.id}
+                  onChanged={(status) =>
+                    credential.finishMutation(credential.beginMutation(), true, status)
+                  }
+                />
+              ) : null}
+              {usesCredential && acceptsApiKeyPool(props.instance) && !browserClaudeKeySetup ? (
+                <ProviderLinkedKeyEditor
                   disabled={disabled}
                   displayName={name}
                   instanceId={props.instance.id}

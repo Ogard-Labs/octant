@@ -1736,21 +1736,21 @@ hold for every action in it:
   allowed it. Agents do not approve or request changes on a pull request; the
   forge does not let a pull request's author approve their own.
 
-| Action                                     | Who                                                                                          | Approval                                                                                                                          | Still refused                                               | Built                                                                                    |
-| ------------------------------------------ | -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Fast-forward push to its own branch        | Agent or person                                                                              | Approval-gated asks for each act; remembered Full access does not ask                                                             | A branch the thread does not own; any force option          | Yes (`push-git`)                                                                         |
-| Open a pull request                        | Agent or person                                                                              | As for push                                                                                                                       | A repository outside the binding; a base outside it         | Yes, as ready for review (`create-pull-request`)                                         |
-| Open a draft pull request                  | Agent or person                                                                              | As for push                                                                                                                       | As for opening                                              | Allowed; not built yet                                                                   |
-| Mark ready for review                      | Agent or person                                                                              | As for push                                                                                                                       | A pull request the thread does not own                      | Allowed; not built yet                                                                   |
-| Stacked pull request on its parent         | Agent or person                                                                              | As for push                                                                                                                       | A parent branch no thread or linked thread of this one owns | Allowed; not built yet                                                                   |
-| Amend and push with force-with-lease       | Agent or person, own branch only                                                             | As for push                                                                                                                       | A protected or a shared branch                              | Allowed; not built yet                                                                   |
-| Plain force-push, or to the default branch | Agent or person, when the person asks in that turn                                           | The person's request in that turn                                                                                                 | Without that request; another thread's branch               | Allowed; not built yet                                                                   |
-| Edit title or body                         | Agent or person                                                                              | As for push                                                                                                                       | A pull request the thread did not open and is not linked to | Allowed; not built yet                                                                   |
-| Add or remove labels                       | Agent or person                                                                              | As for push                                                                                                                       | Creating repository-wide labels                             | Allowed; not built yet                                                                   |
-| Review replies and comments                | Agent drafts; person sends                                                                   | The person approves each post below Full access, because it posts under their name; at Full access it posts when the person asked | Approving or requesting changes                             | Allowed; not built yet                                                                   |
-| Approve or request changes                 | Person                                                                                       | —                                                                                                                                 | The pull request's own author, by the forge's rule          | Allowed for a person; not built yet                                                      |
-| Close or reopen                            | Person, or agent with approval                                                               | Asks below Full access; at Full access, done when the person asked                                                                | Deleting the branch                                         | Allowed; not built yet                                                                   |
-| Merge, auto-merge, or merge a stack        | Person on any of their windows, phone, or web client; Code thread when the person allowed it | The person's confirmation, request, Project setting, or routine; reviewed head SHA and required checks                            | An agent on its own initiative; hub or peer hosts           | Person merging one pull request from a local window yes; the rest allowed, not built yet |
+| Action                                     | Who                                                                                          | Approval                                                                                                                          | Still refused                                               | Built                                                                                                                     |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Fast-forward push to its own branch        | Agent or person                                                                              | Approval-gated asks for each act; remembered Full access does not ask                                                             | A branch the thread does not own; any force option          | Yes (`push-git`)                                                                                                          |
+| Open a pull request                        | Agent or person                                                                              | As for push                                                                                                                       | A repository outside the binding; a base outside it         | Yes, as ready for review (`create-pull-request`)                                                                          |
+| Open a draft pull request                  | Agent or person                                                                              | As for push                                                                                                                       | As for opening                                              | Allowed; not built yet                                                                                                    |
+| Mark ready for review                      | Agent or person                                                                              | As for push                                                                                                                       | A pull request the thread does not own                      | Allowed; not built yet                                                                                                    |
+| Stacked pull request on its parent         | Agent or person                                                                              | As for push                                                                                                                       | A parent branch no thread or linked thread of this one owns | Allowed; not built yet                                                                                                    |
+| Amend and push with force-with-lease       | Agent or person, own branch only                                                             | As for push                                                                                                                       | A protected or a shared branch                              | Allowed; not built yet                                                                                                    |
+| Plain force-push, or to the default branch | Agent or person, when the person asks in that turn                                           | The person's request in that turn                                                                                                 | Without that request; another thread's branch               | Allowed; not built yet                                                                                                    |
+| Edit title or body                         | Agent or person                                                                              | As for push                                                                                                                       | A pull request the thread did not open and is not linked to | Allowed; not built yet                                                                                                    |
+| Add or remove labels                       | Agent or person                                                                              | As for push                                                                                                                       | Creating repository-wide labels                             | Allowed; not built yet                                                                                                    |
+| Review replies and comments                | Agent drafts; person sends                                                                   | The person approves each post below Full access, because it posts under their name; at Full access it posts when the person asked | Approving or requesting changes                             | Allowed; not built yet                                                                                                    |
+| Approve or request changes                 | Person                                                                                       | —                                                                                                                                 | The pull request's own author, by the forge's rule          | Allowed for a person; not built yet                                                                                       |
+| Close or reopen                            | Person, or agent with approval                                                               | Asks below Full access; at Full access, done when the person asked                                                                | Deleting the branch                                         | Allowed; not built yet                                                                                                    |
+| Merge, auto-merge, or merge a stack        | Person on any of their windows, phone, or web client; Code thread when the person allowed it | The person's confirmation, request, Project setting, or routine; reviewed head SHA and required checks                            | An agent on its own initiative; hub or peer hosts           | Person merging one pull request, or turning on Merge when ready, from a local window yes; the rest allowed, not built yet |
 
 Which path reaches the forge depends on the thread's
 [guardrail level](#security-and-authority):
@@ -1781,7 +1781,9 @@ shell command, so none of the rules above applies to it. Closing the gap at
 Guarded and Reviewed is a known follow-up.
 
 **Pull-request merge.** A person merges one open pull request from its review
-(`POST /api/code/project-pull-requests/merge`). The rules:
+(`POST /api/code/project-pull-requests/merge`). Beside it, the person may turn
+on **Merge when ready** and **Auto-fix** for a Code thread's pull request
+(rules after these). The merge rules:
 
 - **Who.** A person, from any of their windows, phone, or web client, one
   pull request or a whole stack in one step; or a Code thread when the person
@@ -1823,6 +1825,79 @@ Guarded and Reviewed is a known follow-up.
   observes Merged. The outcome also drops the cached detail and list rows. A
   thread linked to the pull request reaches Done only through the ordinary
   observed-state rule, never from this record.
+
+**Merge when ready and Auto-fix.** A Code thread's pull request review carries
+two switches (`POST /api/code/project-pull-requests/merge-when-ready` and
+`/auto-fix`; `POST /api/code/project-pull-requests/switches` reads them). The
+person's click is the approval; nothing else turns either on.
+
+- **Who.** The same as a merge: only a `local-window` principal. Both routes
+  answer 403 to a paired device before decoding, the service refuses any
+  initiator other than `user` as `not-authorized`, and it refuses unless the
+  Project is connected on this window and resolves to exactly that github.com
+  repository. These routes are the person's own controls: no provider,
+  agent tool, plugin, or routine can reach them. (An agent's auto-merge on the
+  person's request goes through the pull-request tool and its rules above.)
+  Reading the switches needs only that Project check.
+- **Merge when ready** turns on the forge's own auto-merge: `gh pr merge <n>
+--auto --<method> --match-head-commit <head the person saw>`. The host first
+  reads the repository's settings; when the repository does not allow
+  auto-merge it answers `unsupported` (`auto-merge-not-allowed`) and turns
+  nothing on. It never imitates auto-merge with a loop of its own. The method
+  is the one the person picked in the review, refused as
+  `method-not-allowed` when the repository forbids it, or, when none is sent,
+  the first the repository allows (squash, merge, rebase). Turning it off runs
+  `--disable-auto`. While it is on, the host observes the pull request about
+  once a minute and shows what it waits on (checks, reviews, a conflict); it
+  records `merged` when the forge merged and `turned-off-by-forge` when the
+  forge dropped auto-merge or the pull request closed.
+- **Auto-fix** binds the pull request to one Code thread linked to it (the
+  host refuses any other thread as `thread-not-linked`). While it is on, the
+  host observes the pull request about once a minute: failed required checks
+  (`gh pr checks --required`) with the tail of each failed job's log (at most
+  4 KB, four jobs), unresolved and not-outdated review threads (every page of them) with their
+  comments, and a merge conflict with the base. On a new failure it wakes the
+  thread with one provider turn, through the same host path a routine
+  follow-up takes, so the thread's own access level and approvals apply. The
+  turn states Octant's rules first (never force-push, never rewrite pushed
+  history, merge the base branch instead of rebasing; after a fix the agent
+  may reply to the review thread and resolve it with its ordinary tools) and
+  then the forge's text inside an outside-content block. Before the turn
+  starts the host records `thread.external-content-ingested@1` on the thread
+  (label `pull-request-auto-fix`), so the taint rules apply; when that mark is
+  refused, no turn is sent.
+- **Auto-fix limits.** A failure is a check name, a review thread id, or the
+  base conflict. Each started wake spends one attempt on every failure it
+  carried; at most three attempts per failure, after which Auto-fix stops
+  (`attempt-limit`) and opens the thread's follow-up marker. The same failures
+  on the same head never start a second turn; a wake that started none (the
+  thread refused it, or the outside-content mark was refused) is tried again
+  on the next pass, spends no attempt, and journals an identical refusal once.
+  A wake waits while a turn runs or is
+  ambiguous in the thread, while its session compacts, or for a minute after
+  the person last typed in its composer (`POST /api/code/composer-activity`,
+  sent by the composer at most every fifteen seconds); waiting is shown, never
+  journaled. Auto-fix stops when the pull request merges or closes, when the
+  thread is archived, completed, or gone, when the Project no longer connects
+  the pull request's repository (`authority-lost`), or when the person turns
+  it off. The host asks the Project check again before every pass, not only
+  at the click; a revoked GitHub login or a thread that no longer links to
+  the pull request holds Auto-fix quiet, and after a host restart it stays
+  quiet until a window shows the pull request again, because the connection
+  is a per-window fact. Turning it on again starts a fresh attempt count.
+- **Record.** Every switch change and every wake appends one event on the
+  `code-project-pull-request-switches` aggregate type, each its own aggregate:
+  `code.project-pull-request-merge-when-ready-recorded@1` (enabled with method
+  and head, disabled, merged, turned off by the forge) and
+  `code.project-pull-request-auto-fix-recorded@1` (enabled, disabled, woke
+  with the head, failure identities, attempt, and whether the turn started,
+  was refused, or was never sent because the mark was refused; stopped with
+  its reason). Clicks are journaled as the local user, observations as the
+  host. Payloads carry no log, comment, or credential text. The host rebuilds
+  both switches and every attempt count by replaying these events on start.
+- **Host-local.** The observation runs in the Octant server only while a
+  switch is on, through the host's `gh` login. It is not a routine and needs
+  no hosted service; a stopped host observes nothing.
 
 **Delivery (publishing to a user-owned target) is dormant.** The ship service
 and its journaled events exist, but the host wires no target source, no
@@ -2679,6 +2754,58 @@ flowchart LR
   (`debugSessions`, a version 3 packet, absent when there were none), with
   no session, thread, or Project named; the rule is in
   [Debugger session rules](design/language-services.md#debugger-session-rules).
+- **Support bundle.** The maintainer approved a diagnostics file the person
+  saves and sends themselves (2026-10-31); Octant never sends it. Host ›
+  Maintenance › Save diagnostics and `octant diagnostics export --out <folder
+or .zip>` write the same files, built by one host command
+  (`/api/diagnostics/bundle`, with a plain-list read at
+  `/api/diagnostics/bundle/preview`). Both routes sit on the loopback
+  administration chain beside host control, reject a paired device, and are
+  not in the remote forward list, so only a window or CLI session on this
+  machine reaches them. The person sees the list of sections, with how many
+  entries each holds now, and what the file never holds, before anything is
+  written; the CLI prints it first and `--list` stops there. The files are a
+  readme plus one JSON file per section: versions (Octant, wire, runtime),
+  system (operating system, release, architecture, processor count, memory),
+  providers (each enabled provider by kind and position, its readiness,
+  process state, sign-in kind, detected version, and capability support, never
+  its name, address, models, or message), host log (the newest 200 lines with
+  time, level, event, and message cut to 240 characters, without details),
+  recent activity (the newest 200 journal event names, sequences, and times
+  from the journal, with the payload column never selected), confinement and
+  guardrails (the default guardrail level and remembered-permission setting,
+  Code threads counted per execution policy, the sandbox tools the host
+  found, and whether the remote listener is on), and process (uptime, memory,
+  processor time, event-loop delay and slow-statement counters, clients,
+  active sessions, store state, and database size). A section the host cannot
+  read says so in its file; it never reads as empty. The fact types have no
+  field for a message, prompt, file content, or Project or thread name. Every
+  string is swept before it is written: the host's home folder becomes `~`,
+  the diagnostics redaction removes keys, tokens, credentialed addresses, and
+  other people's home paths, and a sentence that states a secret is withheld
+  whole. The host log is the same store `octant server logs` reads, which
+  already redacts on write; the bundle redacts it again. A hand-over is
+  journaled as `diagnostics.support-bundle-exported@1` with the time, the
+  sections, the file and byte counts, and the destination as a category
+  (`downloads`, `desktop`, `documents`, `home-folder`, `temporary-folder`,
+  `other-folder` for the CLI, `browser-download` for a browser or paired
+  client, or `chosen-by-person` for the desktop dialog), never a path or any
+  content. If the event cannot be recorded, no bundle is handed over. The desktop
+  app opens Electron's native save dialog (`dialog.showSaveDialog`, opening in
+  Downloads at `octant-diagnostics-<date>.zip`) from the main process over the
+  preload bridge's `saveSupportBundle`, and posts the chosen path with the
+  desktop secret to `/api/diagnostics/bundle/save`, a route no renderer origin
+  can call. The host stages the zip beside that path, journals the export, and
+  only then moves the file into place, so a refused record leaves no file and an
+  unwritable folder leaves no record. The renderer learns the saved file's name
+  and nothing else. A browser or paired client has no such bridge: the web app
+  builds a stored zip from the files the host hands over and saves it through
+  the browser's download, and the host records `browser-download`. Those
+  hand-overs are journaled before the caller writes the files, so a write that
+  then fails still shows as an export. The CLI writes a `.zip` or a new or empty
+  folder, refusing to overwrite. This
+  is separate from the failure report above, which exports one failed
+  operation by correlation ID.
 - **Recovery.** Sequence-based reconnect replay for local and remote clients —
   a dropped stream catches up from the authoritative snapshot before it reopens,
   keeps retrying while the host is unreachable, and a remote session whose window
@@ -3503,12 +3630,17 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
 - **Credentials.** API keys live in the host credential store — macOS Keychain
   on macOS, freedesktop Secret Service on Linux — and are reached only
   through the host's loopback credential broker by opaque UUID reference.
-  A person may also link an external secret store: the broker resolves a
-  linked value at use, by opaque reference, and the value never enters the
-  journal, logs, diagnostics, or the renderer (allowed; not built yet).
   The desktop saves a key from its own renderer; a host without the desktop
   app takes it only from the host-local `octant provider key` command, as
   [security and authority](#security-and-authority) states.
+  A person may also link an external secret store (the 1Password CLI `op`
+  today) and point a provider's API key, or a connector's secret, at an item in
+  it instead of pasting the value. The credential store then holds a pointer
+  under the same id: the store name and the item reference, which names an item
+  and is not a secret. The broker follows the pointer when the value is used,
+  hands the value to the caller that asked through the existing resolve route,
+  and keeps nothing; the value never enters the journal, logs, diagnostics, or
+  the renderer ([linked secret stores](#linked-secret-stores) states the rules).
   A provider instance holds one stored value: a plain key, or a JSON pool of
   labelled keys in list order with one active key ([`apiKeyPool.ts`](../packages/host-runtime/src/apiKeyPool.ts)).
   A request sends the active key first, then the others in list order.
@@ -6803,8 +6935,8 @@ same. This holds in Chat, Work, and Code.
   Spaces), are built; Cua Spaces, reached through the person's local Cua daemon, is
   designed (accepted on 2026-10-27), and its local-daemon port and its driver
   for a Space on this computer or on another of the person's computers that
-  the recipe names are built but
-  offered on no host until the maintainer's live smokes pass; see
+  the recipe names are built and
+  offered, with the maintainer's live smokes still owed; see
   [Disposable desktops](design/disposable-desktops.md#cua-spaces-through-the-local-daemon).
   A driver whose provider runs a daemon on this machine reaches it only
   through the host's daemon port: one Unix socket under the home of Octant's
@@ -6822,9 +6954,10 @@ same. This holds in Chat, Work, and Code.
   billed lease is estimated from the recipe's hourly cost before it starts
   and refused if it would pass the cap, and no agent can change the cap
   ([Disposable desktops: C5](design/disposable-desktops.md#expiry-and-teardown-when-the-daemons-host-may-die)).
-  No host offers a
-  cloud provider yet, so a recipe can
-  name only the host-local provider.
+  A host lists E2B, and Cua on Linux, from its first start; a recipe can
+  name either, and a provider whose setup is missing (no credential store, or
+  no Cua daemon running) is listed as needing setup and refuses every start
+  ([Disposable desktops: offering E2B and Cua](design/disposable-desktops.md#built-offering-e2b-and-cua)).
 
 **Canvas export.** A destination plugin contributes an export target through
 `@octant/plugin-api`. The contribution names the formats it accepts. The host
@@ -8589,6 +8722,33 @@ access` agree); a thread's own change is journaled as
   Project inactive or rebound ends the terminal the same way. A host restart
   ends a terminal still recorded as running as `host-restarted`, since its
   process did not survive.
+- **Project actions.** A Code Project keeps up to twelve named actions (for
+  example Run, Test, Dev) on its record: a name unique within the Project, a
+  one-line command, and a folder inside the bound root. The person saves the
+  whole list from the Project overview (`project.code-actions-changed@1`); a
+  paired device is refused, because a saved line is later typed into the
+  person's own shell. An archived Project has none, and a Work Project has none
+  while Work's shell is withheld (today's build); once Work takes the shared
+  capability set, its actions follow the thread's guardrail level like Code's.
+  The host suggests
+  actions from the root `package.json` scripts (with the package manager the
+  lockfile names, leaving out install and publish hooks) and the root
+  `Makefile` targets; it reads them without running anything, and nothing is
+  saved until the person confirms. Running an action is the Project terminal's
+  `run-action` command: the caller names the action, never its text, and the
+  host reads the line from the Project record now, then types it into a
+  terminal the window already owns, entering the action's folder from the root
+  first, grouping the whole command behind that folder change so a folder that
+  has gone away stops every statement of it, and rechecking the window's
+  authority and binding after the root resolves. It therefore runs under that terminal's confinement and posture with
+  the same authority checks as any other write, and typing into a shell that is
+  running another program reaches that program. The header buttons (the first
+  three, with the rest in a menu) and the command palette's Actions group ask
+  the window to run one; the window reuses a Project terminal it already
+  pinned, otherwise opens and pins one, and shows it in Zen, the Project
+  terminal's only surface. A refusal means nothing was typed, so the window may try
+  another terminal; a lost reply leaves the outcome unknown, so it is reported
+  and never retried, since the command may not be safe to run twice.
 - **Terminal Browser grant.** A person may start a Code thread
   terminal with a Browser grant, so a provider CLI they type there can drive
   that thread's Browser and nothing else. It is off by default, asked for per
@@ -9354,6 +9514,78 @@ access` agree); a thread's own change is journaled as
     an unreachable store leaves the request for the next start. The authority
     boundary above is unchanged: the new route sits behind the same bridge
     secret, window capability, no-`Origin`, and loopback checks.
+    <a id="linked-secret-stores"></a>
+
+- **Linked secret stores.** A person may link a secret store they already use
+  and point a credential at an item in it. Octant never holds the value: the
+  broker fetches it at use, returns it to the one caller that asked, and drops
+  it. Built for the 1Password CLI; the seam is a closed list of adapters
+  ([`linkedSecretStores.ts`](../packages/host-runtime/src/linkedSecretStores.ts)),
+  each answering `probe` and `read`, so another tool (the Bitwarden CLI, a macOS
+  Keychain item) is a new adapter and no change to the broker, the journal, or
+  Settings.
+  - **Link.** Settings › Secret stores sends `link-store` to the host-only
+    `/api/secret-stores/commands` route (a local window; `/api/secret-stores` is
+    a remote local-only prefix, so a paired device is refused). The broker's
+    `/v1/secret-stores/link` links a store only while its tool is installed and
+    the store is open, and records the store and the link time in
+    `secret-stores/linked-secret-stores.json` in the data directory (mode 0600,
+    removed by a complete-data removal). A locked store, a missing tool, or an
+    unreachable store is reported as a value (`store-locked`,
+    `tool-not-installed`, `store-unavailable`) and nothing is linked. Unlinking
+    leaves every pointer in place and makes each fail closed
+    (`linked-store-not-linked`) until the store is linked again.
+  - **Point.** `point-provider-key` names a provider instance, a store, and an
+    item reference. The host accepts it only for an instance that sends an API
+    key or bearer token, only after the broker proved the item resolves right
+    now (a locked store or missing item refuses and writes nothing), and never
+    over a key the person stored: that refuses as `key-already-stored`, so the
+    person removes it first. The pointer replaces only another pointer.
+    The host rereads the provider after the item check: a provider removed or
+    reconfigured meanwhile has already had its key cleared, so the new pointer is
+    deleted and the change refused (`provider-changed`), the same protection the
+    pasted-key route applies, so a delayed write never sends an old endpoint's
+    key to a new one.
+    A connector's secret does the same: in Add an MCP server, a secret row
+    marked "From 1Password" sends `linked: { store, reference }` with an empty
+    value, the host points the generated secret id at the item (refusing the add
+    when the store is locked or the item is missing) and journals it with a
+    `connector-secret` target, and removing the server clears and journals the
+    pointer. The id resolves through the broker's connector namespace; no other
+    namespace follows a pointer, and no route returns one as a value. A pasted value that looks like a pointer is
+    refused by the broker's `set`, and the desktop's key operations refuse to
+    replace or edit a pointer, so a reference changes only through the
+    journaled route.
+  - **Use.** The provider's existing path asks the broker to resolve the
+    instance id. The broker reads the pointer, runs the adapter (for `op`:
+    `op read --no-newline <reference>`, with the reference validated as an
+    `op://vault/item[/section]/field` address and passed as one argument, never
+    through a shell, with Octant's own `OCTANT_*` variables removed from the
+    tool's environment, a timeout, and a size bound), and returns the value in
+    that response alone. The tool's own words are read once to classify the
+    outcome and dropped. A fetch is never cached: a rotated item is used at the
+    next request.
+  - **Failure is a value and fails closed.** `locked`, `missing`, `unavailable`,
+    `not-linked`, and `invalid-reference` each answer with a typed cause and no
+    value, and the provider's turn fails with its existing unauthenticated or
+    unavailable state and a message that names the store and never an item or a
+    value. There is no fallback to a stored copy, a file, or an environment
+    variable.
+  - **Journal.** `secret-store.recorded@1` on one host-wide aggregate
+    ([`secretStoresJournal.ts`](../apps/server/src/secretStores/secretStoresJournal.ts),
+    [`secretStores.ts` contract](../packages/contracts/src/secretStores.ts))
+    records `secret-store.linked`, `secret-store.unlinked`,
+    `credential-reference.set` (store, reference, whether it replaced one) and
+    `credential-reference.cleared`, each with the local window id. A reference
+    names an item and is journaled; the value is not an input to any record, and
+    the schema rejects any other field. A change is made and then journaled; when
+    the journal refuses, a link or a new reference is undone and the answer says
+    nothing changed, and an unlink or clear that cannot be recorded says it was
+    made but not recorded. An earlier pointer is put back through the broker's
+    `restore`, which writes the pointer without reading its item (the item may be
+    gone or its store locked by then); if it cannot be put back, the new pointer
+    is removed and the answer says so, so an unjournaled pointer never stays
+    active.
 - **Organization sign-in on a host without the desktop app.** An Azure AI
   Foundry endpoint that signs in with a directory account and opted in to it
   (`deviceCodeSignIn`) signs in with a device code from
@@ -10029,10 +10261,13 @@ approval, and merge, auto-merge, or a stack merge the person allowed), a
 person's merge from any of their windows, phone, or web client, and
 host-local routines (Automation Center), Chat routines included, are in scope
 under the rules in [Modes](#modes-chat-work-and-code). Of the pull-request
-actions, only a fast-forward push, opening a ready pull request, and a
-person's merge of one pull request from a local window are built; the rest,
-Chat routines, the key providers' skill folders and extra skill folders added
-in Settings, and linked external secret stores are allowed and not built yet.
+actions, only a fast-forward push, opening a ready pull request, a person's
+merge of one pull request from a local window, and the Merge when ready and
+Auto-fix switches the person turns on there are built; the rest, Chat routines,
+and the key providers' skill folders and extra skill folders added in Settings,
+are allowed and not built yet. Linked external secret stores are built for the
+1Password CLI, under [linked secret stores](#linked-secret-stores): a pointer
+in the credential broker, the value fetched at use and never kept.
 The [guardrail levels](#security-and-authority) and the
 [key providers' native features](#providers) are in scope; of them only
 Guarded, Accept edits, Reviewed for Claude Code and Codex in Code, and

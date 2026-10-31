@@ -27,6 +27,7 @@ describe("octantSettingsRegistry", () => {
       "github",
       "linear",
       "permissions",
+      "secret-stores",
       "data",
       "sync",
       "remote-access",
@@ -55,6 +56,7 @@ describe("octantSettingsRegistry", () => {
     expect(ids("host")).toEqual([
       "reset-layout",
       "reset-window-bounds",
+      "save-diagnostics",
       "export-diagnostics",
       "journal-growth",
       "host-automatic-startup",
@@ -75,6 +77,9 @@ describe("octantSettingsRegistry", () => {
       "browser-site-approvals",
       "tool-approvals",
     ]);
+    expect(section("secret-stores")?.label).toBe("Secret stores");
+    expect(section("secret-stores")?.scope).toBe("host");
+    expect(ids("secret-stores")).toEqual(["secret-store-link", "secret-store-check"]);
     expect(section("data")?.label).toBe("Data & storage");
     expect(section("data")?.scope).toBe("host");
     expect(ids("data")).toEqual(["data-map", "thread-retention"]);
