@@ -353,7 +353,7 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
         return result;
       });
     },
-    acquire: ({ instanceId, projectRoot, mode }) => {
+    acquire: ({ instanceId, projectRoot, mode, extraFolders = [] }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
           failure("invalid-configuration", "Provider instance does not match driver."),
@@ -364,7 +364,9 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
           failure("invalid-configuration", "Pi requires an explicit product mode."),
         );
       }
-      if (!isAbsolute(projectRoot) || resolve(projectRoot) !== projectRoot) {
+      if (
+        [projectRoot, ...extraFolders].some((root) => !isAbsolute(root) || resolve(root) !== root)
+      ) {
         return Effect.fail(
           failure(
             "invalid-configuration",
@@ -372,19 +374,26 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
           ),
         );
       }
-      return makeConnection(options, projectRoot, mode, resumeIdentities, {
-        clientFactory,
-        managedToolsFactory,
-        clock,
-        makeCorrelation,
-        makeRequestId,
-        appManagedTools: {
-          get: () => appManagedToolsVerified,
-          set: (verified) => {
-            appManagedToolsVerified = verified;
+      return makeConnection(
+        options,
+        projectRoot,
+        mode === "chat" ? [] : extraFolders,
+        mode,
+        resumeIdentities,
+        {
+          clientFactory,
+          managedToolsFactory,
+          clock,
+          makeCorrelation,
+          makeRequestId,
+          appManagedTools: {
+            get: () => appManagedToolsVerified,
+            set: (verified) => {
+              appManagedToolsVerified = verified;
+            },
           },
         },
-      });
+      );
     },
   };
 }
@@ -392,6 +401,7 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
 function makeConnection(
   options: PiDriverOptions,
   projectRoot: string,
+  extraFolders: ReadonlyArray<string>,
   mode: PiSessionMode,
   resumeIdentities: Map<string, ResumeIdentity>,
   factories: {
@@ -801,6 +811,7 @@ function makeConnection(
             options.binaryPath,
             options.piHome,
             projectRoot,
+            extraFolders,
             mode,
             input.modelId,
             input.executionPolicy,
@@ -869,6 +880,7 @@ function makeConnection(
                   .start({
                     binaryPath: options.binaryPath,
                     root: mode === "chat" ? options.piHome : projectRoot,
+                    ...(extraFolders.length === 0 ? {} : { extraFolders }),
                     piHome: options.piHome,
                     sessionDirectory: join(options.piHome, "sessions"),
                     sessionId: input.sessionId,

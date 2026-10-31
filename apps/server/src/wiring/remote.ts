@@ -112,6 +112,7 @@ import {
 } from "@octant/host-runtime";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
+import type { BrowserWiring } from "./browser";
 import type { FoundationsWiring } from "./foundations";
 import { type AgentRunsWiring, authorizeAgentRunParentThread } from "./agentRuns";
 import type { HarnessStateWiring } from "./harnessState";
@@ -164,6 +165,7 @@ export type RemoteDependencies = Pick<
     | "providerService"
   > &
   Pick<WorkspaceWiring, "shellService"> &
+  Pick<BrowserWiring, "browserExtensionService" | "browserProfileService"> &
   Pick<
     CodeToolingWiring,
     | "debugConfigurationApprovals"
@@ -207,6 +209,8 @@ function deviceIsActive(
 
 export function wireRemote(deps: RemoteDependencies) {
   const {
+    browserExtensionService,
+    browserProfileService,
     agentMessageService,
     agentRunAdmission,
     authenticatedProductDispatch,
@@ -1037,6 +1041,13 @@ export function wireRemote(deps: RemoteDependencies) {
     },
     purgeCanvasFiles: (canvasIds) => removeMirrorFiles(persistence.connection, canvasIds),
     forgetProjectData: (projectId) => {
+      // The Project's Browser profile goes with its other data: its extensions
+      // turn off, then its store is cleared.
+      const profile = { kind: "project" as const, projectId: decodeProjectId(projectId) };
+      void browserExtensionService
+        .forgetProfile(profile)
+        .then(() => browserProfileService.eraseProject(decodeProjectId(projectId)))
+        .catch(() => undefined);
       toolEgressRules.forgetProject(projectId);
       languageServerApprovals.forgetProject(decodeProjectId(projectId));
       // The erase removed this Project's confirmations and session records;

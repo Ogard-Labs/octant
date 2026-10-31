@@ -2,7 +2,7 @@ import type { ManagedToolAnswer } from "./managedMcpTools";
 import { providerApprovalCall } from "./providerApprovalCall";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
 import {
@@ -13,6 +13,7 @@ import {
   type PermissionPersistence,
   type ProviderCapabilities,
   type ProviderExecutionPolicy,
+  type ProviderNativeSetup,
   type ProviderFailure,
   type ProviderInstanceId,
   type ProviderModel,
@@ -37,7 +38,7 @@ import {
   validateChatTurnInput,
 } from "@octant/provider-sdk/chat-conformance";
 import { Cause, Effect, Exit, Fiber, Option, PubSub, Scope, Stream } from "effect";
-import { isSanitizedFailure } from "./claudeAgentSdkDecoder";
+import { claudeOffersTool, isSanitizedFailure } from "./claudeAgentSdkDecoder";
 
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { claudeAuthorityInputDigest, waitForClaudeAuthorityValue } from "./claudeAuthority";
@@ -56,6 +57,7 @@ import {
 } from "./claudeAgentSdkPort";
 import {
   CLAUDE_CHECKLIST_TOOL,
+  CLAUDE_SUBAGENT_TOOL,
   mapClaudeMessage,
   mapClaudeToolRequest,
   type ClaudeEventContext,
@@ -81,8 +83,13 @@ import {
 import { claudeProcessPlanUsageLimits, decodeClaudeProcessPlanUsage } from "./claudeProcessUsage";
 import { claudeNativeArtifactsSupport } from "./claudeNativeArtifacts";
 import { readClaudePublishedSnapshot } from "./claudePublishedSnapshot";
+import { secretGuardRefusal, secretGuardSearchRefusal } from "../process/secretGuard";
 import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 import { providerResumeBinding, resumeBindingRefuses } from "./resumeBinding";
+import {
+  acquireProviderRuntimeNetwork,
+  type ProviderRuntimeNetworkPort,
+} from "../network/providerRuntimeNetwork";
 
 const CLAUDE_TOOLS = [
   "Read",
@@ -158,6 +165,76 @@ export function claudeExecutionOptions(
     return { ...options, tools: [...options.tools, "Bash"] };
   }
   return options;
+}
+
+/** Claude Code's own web tools: each reads the web for the model, so each marks the thread. */
+const CLAUDE_WEB_TOOLS = new Set<string>(["WebSearch", "WebFetch"]);
+/**
+ * Claude Code's own tools that act only inside the session: starting one of
+ * its subagents, whose every tool call then passes this gate itself, and
+ * reading a skill's text. Neither touches a file, the shell, or the network.
+ */
+const CLAUDE_NATIVE_SESSION_TOOLS = new Set<string>([CLAUDE_SUBAGENT_TOOL, "Skill"]);
+
+/**
+ * The person's own Claude setup as this driver loads it. MCP servers start
+ * only with a trusted Project's code: the runtime has no switch that starts
+ * the account's servers without the Project's `.mcp.json` too, so the
+ * account's own tool servers alone are reported unsupported and left off.
+ */
+export function claudeNativeSetup(
+  setup: ProviderNativeSetup | undefined,
+): ProviderNativeSetup | undefined {
+  if (setup === undefined) return undefined;
+  return { ...setup, toolServers: false };
+}
+
+/** The tools a session adds for the person's own Claude setup. */
+export function claudeNativeTools(setup: ProviderNativeSetup | undefined): readonly string[] {
+  if (setup === undefined) return [];
+  return [
+    ...(setup.subagents ? [CLAUDE_SUBAGENT_TOOL] : []),
+    ...(setup.webTools ? [...CLAUDE_WEB_TOOLS] : []),
+    ...(setup.skills ? ["Skill"] : []),
+  ];
+}
+
+/**
+ * How the gate answers one of the person's own Claude tools: a subagent
+ * start or a skill read goes through at every posture, as it does in Claude
+ * Code itself; a web read and a call to a person's or Project's MCP server
+ * reach the network or code Octant did not write, so they ask below Full
+ * access like any other such call. Undefined for every other tool.
+ */
+function claudeNativeToolAnswer(
+  toolName: string,
+  setup: ProviderNativeSetup | undefined,
+): "unasked" | "ask" | undefined {
+  if (setup === undefined) return undefined;
+  if (CLAUDE_NATIVE_SESSION_TOOLS.has(toolName)) {
+    return (toolName === "Skill" ? setup.skills : setup.subagents) ? "unasked" : undefined;
+  }
+  if (CLAUDE_WEB_TOOLS.has(toolName)) return setup.webTools ? "ask" : undefined;
+  if (setup.projectCode && toolName.startsWith("mcp__") && !toolName.startsWith("mcp__octant__")) {
+    return "ask";
+  }
+  return undefined;
+}
+
+/**
+ * The launch environment for a session with subagents on: Octant's guards
+ * keep the SDK's built-in subagents off, which is also what Claude Code's
+ * own general-purpose and Explore subagents are, so that one guard goes.
+ * Every channel switch (telemetry, error reports, self-update, memory)
+ * stays as it was.
+ */
+function claudeNativeLaunchEnvironment(
+  environment: NodeJS.ProcessEnv,
+  setup: ProviderNativeSetup | undefined,
+): NodeJS.ProcessEnv {
+  if (setup?.subagents !== true) return environment;
+  const { CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS: _builtinAgentsOff, ...rest } = environment;
+  return rest;
 }
 
 /**
@@ -273,11 +350,24 @@ function claudePolicyOptions(
   }
 }
 
-function claudeSandboxSettings(
+/** Whether this posture runs Claude's commands in its own sandbox. */
+function claudeRunsSandbox(policy: ProviderExecutionPolicy): boolean {
+  return policy === "approval-gated" || policy === "auto-accept-edits";
+}
+
+/**
+ * Claude's own sandbox for its commands. With `proxyPort` the sandbox's
+ * network goes to Octant's egress proxy for the session, which reaches only
+ * the Project's egress rules and the person's safe networks; without it (a
+ * host that does not route runtimes) the sandbox keeps its own network rules.
+ */
+export function claudeSandboxSettings(
   policy: ProviderExecutionPolicy,
   projectRoot: string,
+  extraFolders: ReadonlyArray<string> = [],
+  proxyPort?: number,
 ): ClaudeSandboxSettings | undefined {
-  if (policy !== "approval-gated" && policy !== "auto-accept-edits") return undefined;
+  if (!claudeRunsSandbox(policy)) return undefined;
   return {
     enabled: true,
     failIfUnavailable: true,
@@ -285,9 +375,119 @@ function claudeSandboxSettings(
     allowUnsandboxedCommands: false,
     filesystem: {
       denyRead: ["/"],
-      allowRead: [projectRoot],
-      allowWrite: [projectRoot],
+      // An extra folder is granted exactly what the root is.
+      allowRead: [projectRoot, ...extraFolders],
+      allowWrite: [projectRoot, ...extraFolders],
     },
+    ...(proxyPort === undefined ? {} : { network: { httpProxyPort: proxyPort } }),
+  };
+}
+
+/** The account's own state, which the secret guard leaves to this runtime. */
+function claudeOwnAccountPaths(environment: Readonly<Record<string, string | undefined>>) {
+  const configuration =
+    environment.CLAUDE_CONFIG_DIR !== undefined && environment.CLAUDE_CONFIG_DIR !== ""
+      ? environment.CLAUDE_CONFIG_DIR
+      : join(environment.HOME ?? homedir(), ".claude");
+  return [configuration, environment.CLAUDE_SECURESTORAGE_CONFIG_DIR].filter(
+    (path): path is string => path !== undefined && isAbsolute(path),
+  );
+}
+
+/** Claude's tools that read every file beneath a folder. */
+const CLAUDE_SEARCH_TOOLS = new Set<string>(["Grep", "Glob", "LS"]);
+
+/**
+ * Why a file tool call that touches a protected file is refused, at every
+ * posture. Claude's own file tools run in the runtime process, and below Full
+ * access that process is not wrapped: its own sandbox holds only its commands,
+ * and that sandbox cannot carry the list, because its `allowRead` (the Project
+ * root) takes precedence over any `denyRead` beneath it. So this gate is what
+ * keeps a Project that contains the home folder from handing over a key.
+ *
+ * A search reads every file beneath its root, and Claude's search tools take
+ * no exclusion, so a search rooted at or above an existing protected file is
+ * refused whole: Grep in content mode rooted at `~/.aws` read
+ * `~/.aws/credentials` while only the folder was named. A search with no path
+ * runs in the Project root and is judged there.
+ */
+export function claudeFileToolSecretRefusal(
+  toolName: string,
+  input: Readonly<Record<string, unknown>>,
+  ownAccountPaths: ReadonlyArray<string>,
+  projectRoot: string,
+  searchesRunUnguarded: boolean,
+  homeDirectory?: string,
+): string | undefined {
+  const options = {
+    ownAccountPaths,
+    ...(homeDirectory === undefined ? {} : { homeDirectory }),
+  };
+  if (CLAUDE_SEARCH_TOOLS.has(toolName)) {
+    // Under Plan the runtime runs inside Octant's profile, so
+    // a search passes over a protected file the OS refuses to open.
+    if (!searchesRunUnguarded) return undefined;
+    const pattern = typeof input.pattern === "string" ? input.pattern : "";
+    const roots = [
+      typeof input.path === "string" ? input.path : projectRoot,
+      // An absolute Glob pattern searches from its own fixed prefix.
+      ...(toolName === "Glob" && pattern.startsWith("/") ? [globFixedPrefix(pattern)] : []),
+    ];
+    for (const root of roots) {
+      const refusal = secretGuardSearchRefusal(root, options);
+      if (refusal !== undefined) return refusal;
+    }
+    return undefined;
+  }
+  if (!CLAUDE_READ_TOOLS.has(toolName) && !CLAUDE_EDIT_TOOLS.has(toolName)) return undefined;
+  for (const key of ["file_path", "notebook_path", "path"] as const) {
+    const value = input[key];
+    if (typeof value !== "string") continue;
+    const refusal = secretGuardRefusal(value, options);
+    if (refusal !== undefined) return refusal;
+  }
+  return undefined;
+}
+
+/**
+ * Whether the runtime process runs outside Octant's profile at this posture
+ * (on its own sandbox, which holds only its commands, or with none at Full
+ * access), so a search it runs in process is not held by the secret guard's
+ * OS rule and Octant's gate has to refuse it.
+ */
+export function claudeSearchesRunUnguarded(policy: ProviderExecutionPolicy): boolean {
+  return policy === "approval-gated" || policy === "auto-accept-edits" || policy === "full-access";
+}
+
+/** The folders of an absolute glob before its first wildcard. */
+function globFixedPrefix(pattern: string): string {
+  const segments: string[] = [];
+  for (const segment of pattern.split("/")) {
+    if (/[*?[{]/u.test(segment)) break;
+    segments.push(segment);
+  }
+  const prefix = segments.join("/");
+  return prefix === "" ? "/" : prefix;
+}
+
+/**
+ * The driver options a connection answers "inside the Project?" with: a path
+ * in one of the Project's extra folders counts as inside the root, for every
+ * check that asks about the root, and nothing else changes.
+ */
+function withProjectFolders(
+  options: ClaudeDriverOptions,
+  projectRoot: string,
+  extraFolders: ReadonlyArray<string>,
+): ClaudeDriverOptions {
+  if (extraFolders.length === 0) return options;
+  const inside = options.isProjectConfinedPath;
+  return {
+    ...options,
+    isProjectConfinedPath: (root, absolutePath) =>
+      inside(root, absolutePath) ||
+      (root === projectRoot &&
+        extraFolders.some((folder) => absolutePath === folder || inside(folder, absolutePath))),
   };
 }
 
@@ -336,6 +536,16 @@ const availableCapabilities: ProviderCapabilities = {
   nativeChildAgents: "unsupported",
   harnessAutoReview: "supported",
   modelSwitch: "supported",
+  nativeSetup: {
+    subagents: "supported",
+    webTools: "supported",
+    skills: "supported",
+    // No switch starts the account's MCP servers without a Project's
+    // `.mcp.json` too; they start with a trusted Project's code.
+    toolServers: "unsupported",
+    hooks: "supported",
+    projectCode: "supported",
+  },
   // Each session owns its runtime process, so one can be killed alone.
   forceStop: "supported",
   ...unsupportedChatCapabilities,
@@ -378,6 +588,8 @@ export interface ClaudeDriverOptions {
   readonly artifactDelivery?: () => boolean;
   readonly process: ClaudeProcessPort;
   readonly sdk: ClaudeAgentSdkPort;
+  /** Where the command sandbox sends its network below Full access; absent keeps the sandbox's own rules. */
+  readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly runtimeRegistry: ProviderDriverRuntimeRegistry;
   readonly resumeIdentityPort: ClaudeResumeIdentityPort;
@@ -1136,13 +1348,15 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
         : undefined,
     probe: makeProbe(options, environmentFactory, factories.clock),
     contextFacts: makeClaudeContextFacts(options, environmentFactory, factories.clock),
-    acquire: ({ instanceId, projectRoot, mode }) => {
+    acquire: ({ instanceId, projectRoot, mode, extraFolders = [] }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
           failure("invalid-configuration", "Provider instance does not match driver."),
         );
       }
-      if (!isAbsolute(projectRoot) || resolve(projectRoot) !== projectRoot) {
+      if (
+        [projectRoot, ...extraFolders].some((root) => !isAbsolute(root) || resolve(root) !== root)
+      ) {
         return Effect.fail(
           failure(
             "invalid-configuration",
@@ -1150,7 +1364,14 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
           ),
         );
       }
-      return makeConnection(options, environmentFactory, projectRoot, mode, factories);
+      return makeConnection(
+        withProjectFolders(options, projectRoot, extraFolders),
+        environmentFactory,
+        projectRoot,
+        extraFolders,
+        mode,
+        factories,
+      );
     },
   };
 }
@@ -1159,6 +1380,7 @@ function makeConnection(
   options: ClaudeDriverOptions,
   environmentFactory: ClaudeEnvironmentFactory,
   projectRoot: string,
+  extraFolders: ReadonlyArray<string>,
   mode: ProviderAcquireInput["mode"],
   factories: ConnectionFactories,
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
@@ -1537,6 +1759,7 @@ function makeConnection(
         readonly modelOptionValues?: ProviderModelOptionValues;
         readonly singleUse?: boolean;
         readonly nativeArtifacts?: boolean;
+        readonly nativeSetup?: ProviderNativeSetup;
       },
       signal: AbortSignal,
       resumeSessionId?: string,
@@ -1619,6 +1842,7 @@ function makeConnection(
           }).pipe(Effect.provideService(Scope.Scope, scope)),
           signal,
         );
+        const ownClaudeAccountPaths = claudeOwnAccountPaths(environment.environment);
         const runtimeVersion = await runSetupEffect(
           options.process.probeVersion(options.binaryPath),
           signal,
@@ -1646,11 +1870,18 @@ function makeConnection(
             );
           }
         }
-        const baseExecutionOptions = claudeExecutionOptions(
+        // The person's own Claude setup, as the host resolved it for this
+        // session; absent on every session before the person turned it on.
+        const nativeSetup = claudeNativeSetup(input.nativeSetup);
+        const policyExecutionOptions = claudeExecutionOptions(
           input.executionPolicy,
           input.autoApprove,
           mode,
         );
+        const baseExecutionOptions: ClaudeExecutionOptions = {
+          ...policyExecutionOptions,
+          tools: [...policyExecutionOptions.tools, ...claudeNativeTools(nativeSetup)],
+        };
         // Read at each launch: one launch per turn means the next turn after
         // the person turns the setting or the thread's choice off launches
         // with every guard again.
@@ -1677,7 +1908,26 @@ function makeConnection(
             projectRoot,
             isProjectConfinedPath: options.isProjectConfinedPath,
           });
-        const sandbox = claudeSandboxSettings(input.executionPolicy, projectRoot);
+        const sandboxNetwork = claudeRunsSandbox(input.executionPolicy)
+          ? await runSetupEffect(
+              acquireProviderRuntimeNetwork(options.runtimeNetwork, {
+                runtime: "claude-sandbox",
+                root: projectRoot,
+                executionPolicy: input.executionPolicy,
+                autoReview: input.autoApprove === true,
+                // The sandbox points its commands at a bare port and sends no
+                // proxy credentials.
+                authentication: "none",
+              }).pipe(Effect.provideService(Scope.Scope, scope)),
+              signal,
+            )
+          : undefined;
+        const sandbox = claudeSandboxSettings(
+          input.executionPolicy,
+          projectRoot,
+          extraFolders,
+          sandboxNetwork?.endpoint.port,
+        );
         let callbackState: SessionState | undefined;
         const canUseTool: ClaudeOpenQueryInput["canUseTool"] = async (request) => {
           const activeState = callbackState;
@@ -1888,7 +2138,13 @@ function makeConnection(
           }
           expireClaudePreToolGrants(activeState, Date.now());
           if (
-            !executionOptions.tools.includes(request.toolName) ||
+            !claudeOffersTool(
+              {
+                tools: executionOptions.tools,
+                ...(nativeSetup === undefined ? {} : { nativeSetup }),
+              },
+              request.toolName,
+            ) ||
             activeState.settledToolUseIds.has(request.toolUseId)
           ) {
             return deny("Claude tool request is outside the Project.");
@@ -1921,6 +2177,17 @@ function makeConnection(
           if (digest === undefined) {
             return deny("Claude tool request has invalid input.");
           }
+          // The secret guard answers before any posture, Full access
+          // included, and says which rule refused and which channel to use.
+          // The runtime's own account state is its own to read.
+          const secretRefusal = claudeFileToolSecretRefusal(
+            request.toolName,
+            requestInput,
+            ownClaudeAccountPaths,
+            projectRoot,
+            claudeSearchesRunUnguarded(input.executionPolicy),
+          );
+          if (secretRefusal !== undefined) return deny(secretRefusal);
           // Claude Code takes a hook "allow" as the final word and runs the
           // tool without calling `canUseTool`. Observed 2026-09-06: an
           // approval-gated thread answered "allow" here for a Project-confined
@@ -1966,6 +2233,15 @@ function makeConnection(
             isPlanShellCommand(input.executionPolicy, request.toolName, executionOptions.tools)
               ? settledUnasked()
               : askThroughGrant();
+          // The person's own Claude tools name no file to confine: a subagent
+          // start and a skill read act inside the session, and a web read or
+          // an MCP server call asks below Full access.
+          const nativeAnswer = claudeNativeToolAnswer(request.toolName, nativeSetup);
+          if (nativeAnswer !== undefined) {
+            return nativeAnswer === "unasked" || input.executionPolicy === "full-access"
+              ? settledUnasked()
+              : askThroughGrant();
+          }
           if (input.executionPolicy === "full-access") {
             return decide();
           }
@@ -2016,9 +2292,13 @@ function makeConnection(
             .openQuery({
               binaryPath: options.binaryPath,
               projectRoot,
-              authEnvironment: offersArtifacts
-                ? claudeArtifactLaunchEnvironment(environment.environment)
-                : environment.environment,
+              ...(extraFolders.length === 0 ? {} : { additionalDirectories: extraFolders }),
+              authEnvironment: claudeNativeLaunchEnvironment(
+                offersArtifacts
+                  ? claudeArtifactLaunchEnvironment(environment.environment)
+                  : environment.environment,
+                nativeSetup,
+              ),
               model: input.modelId,
               ...(effort === undefined ? {} : { effort }),
               executionPolicy: input.executionPolicy,
@@ -2030,6 +2310,7 @@ function makeConnection(
               // the account's configuration directory.
               ...(input.singleUse === true ? { persistSession: false as const } : {}),
               tools: executionOptions.tools,
+              ...(nativeSetup === undefined ? {} : { nativeSetup }),
               ...(sandbox === undefined ? {} : { sandbox }),
               canUseTool,
               preToolUse,
@@ -2272,6 +2553,7 @@ function makeConnection(
                 ? {}
                 : { modelOptionValues: input.modelOptionValues }),
               ...(input.nativeArtifacts === true ? { nativeArtifacts: true } : {}),
+              ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
             },
             signal,
             input.resumeCursor.value,

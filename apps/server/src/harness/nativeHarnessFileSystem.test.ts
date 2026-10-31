@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, realpath, symlink, utimes, writeFile } from "node:fs/pr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { secretGuardRefusal } from "../process/secretGuard";
 import { NativeHarnessFileSystem } from "./nativeHarnessFileSystem";
 
 async function fixture(): Promise<{ readonly root: string; readonly fs: NativeHarnessFileSystem }> {
@@ -15,7 +16,76 @@ async function fixture(): Promise<{ readonly root: string; readonly fs: NativeHa
   return { root, fs: new NativeHarnessFileSystem({ root }) };
 }
 
+describe("native harness file tools and the secret guard", () => {
+  // The root stands in for a home folder opened as the Project.
+  async function homeFixture() {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "octant-harness-home-")));
+    await mkdir(join(root, ".ssh"), { recursive: true });
+    await writeFile(join(root, ".ssh", "id_test"), "fake private key\n");
+    await writeFile(join(root, ".ssh", "config"), "Host example\n");
+    await writeFile(join(root, "notes.md"), "fake private key mentioned here\n");
+    await symlink(join(root, ".ssh", "id_test"), join(root, "key-link"));
+    const fs = new NativeHarnessFileSystem({
+      root,
+      protectedFileRefusal: (path) =>
+        secretGuardRefusal(path, { platform: "darwin", homeDirectory: root }),
+    });
+    return { root, fs };
+  }
+
+  it("refuses to read, write, or edit a protected file and names the rule and channel", async () => {
+    const { fs } = await homeFixture();
+    for (const outcome of [
+      await fs.read({ path: ".ssh/id_test" }),
+      await fs.read({ path: "key-link" }),
+      await fs.write({ path: ".ssh/id_new", content: "x" }),
+      await fs.edit({ path: ".ssh/id_test", oldText: "fake", newText: "x" }),
+      await fs.grep({ pattern: "fake", path: ".ssh/id_test" }),
+    ]) {
+      expect(outcome.kind).toBe("refused");
+      if (outcome.kind !== "refused") continue;
+      expect(outcome.reason).toBe("protected-file");
+      expect(outcome.message).toContain("SSH private keys");
+      expect(outcome.message).toContain("SSH agent");
+    }
+    expect((await fs.read({ path: ".ssh/config" })).kind).toBe("file");
+  });
+
+  it("searches a folder without opening the protected files inside it", async () => {
+    const { fs } = await homeFixture();
+    const outcome = await fs.grep({ pattern: "fake private key" });
+    expect(outcome.kind).toBe("matches");
+    if (outcome.kind !== "matches") return;
+    expect(outcome.matches.map((match) => match.path)).toEqual(["notes.md"]);
+  });
+});
+
 describe("native harness file system", () => {
+  it("reads and writes a Project's extra folder by absolute path and refuses the folder beside it", async () => {
+    const { root } = await fixture();
+    const notes = await realpath(await mkdtemp(join(tmpdir(), "octant-harness-notes-")));
+    const beside = await realpath(await mkdtemp(join(tmpdir(), "octant-harness-beside-")));
+    await writeFile(join(notes, "today.md"), "notes\n");
+    await writeFile(join(beside, "secret.md"), "no\n");
+    const fs = new NativeHarnessFileSystem({ root, extraRoots: [notes] });
+
+    const read = await fs.read({ path: join(notes, "today.md") });
+    expect(read.kind).toBe("file");
+    expect(await fs.write({ path: join(notes, "new.md"), content: "x" })).toMatchObject({
+      kind: "written",
+    });
+    expect(await fs.read({ path: join(beside, "secret.md") })).toEqual({
+      kind: "refused",
+      reason: "path-escapes-root",
+    });
+    expect(await fs.write({ path: join(beside, "new.md"), content: "x" })).toEqual({
+      kind: "refused",
+      reason: "path-escapes-root",
+    });
+    // Relative paths still resolve against the main folder.
+    expect((await fs.read({ path: "README.md" })).kind).toBe("file");
+  });
+
   it("refuses a symlink that points outside the root", async () => {
     const { root, fs } = await fixture();
     await symlink("/etc", join(root, "escape"));

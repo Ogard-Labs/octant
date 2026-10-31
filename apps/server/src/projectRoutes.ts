@@ -271,6 +271,24 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
           origin,
         );
       }
+      // Trusting a key provider in a Project lets that runtime load the
+      // Project's own hooks, MCP servers, and plugins, code no Octant review
+      // step saw, so only a person at a window on this host decides it.
+      const principal = readPrincipalRouteContext(request)?.principal;
+      if (
+        command.kind === "change-project-native-providers" &&
+        principal !== undefined &&
+        principal.kind !== "local-window"
+      ) {
+        return response(
+          {
+            category: "unauthorized",
+            message: "A Project's trust in a provider's own setup is set on the host.",
+          },
+          403,
+          origin,
+        );
+      }
       return response(await dependencies.service.executeProject(windowId, command), 200, origin);
     } catch (error) {
       if (error instanceof ProjectServiceError) return failureResponse(error.failure, origin);

@@ -91,11 +91,20 @@ out, and the thread is marked as holding outside content.
 Each Code thread runs in one of five server-enforced modes. The mode picker
 in the composer changes it in one click, for new and existing threads alike:
 
-- **Auto**: the provider's own reviewer approves each action (Claude's auto
-  mode, Codex's approval reviewer), inside the same sandbox as Ask first.
-  What the reviewer escalates, and everything after the thread reads outside
-  content, comes back to you. Providers without a reviewer show Auto
-  unavailable with the reason, and a thread set to Auto asks first there.
+- **Auto**: a reviewer approves each action inside the same sandbox as Ask
+  first: the provider's own (Claude's auto mode, Codex's approval reviewer),
+  or Octant Shield, Octant's own reviewer, on every other runtime and wherever
+  you choose it. Choose in Settings › Code › Access › Auto reviewer, or per
+  Project on its overview; Settings › Code › Access › Shield model picks the
+  model Shield asks (by default each thread's own provider with its smallest
+  model, or any configured endpoint, a local one included). Shield allows
+  reads and edits in the folder, your Project's test and build commands, and
+  Git commands that only read without asking a model; it refuses or hands you
+  harmful-looking calls; its model sees only your messages and the pending
+  action. What a reviewer escalates comes back to you, and each Shield
+  decision shows as an Octant Shield line beside the tool rows. Where no
+  reviewer can run, Auto is listed unavailable with the reason and a thread
+  set to Auto asks first.
 - **Ask first**: confines work to the bound Project root. Octant's sandbox
   does this for most runtimes; Codex, and Claude outside Plan, rely on their
   own sandbox instead. Each mutation or command surfaces an approval request.
@@ -111,8 +120,10 @@ in the composer changes it in one click, for new and existing threads alike:
   short list of reading tools, refuses every write they try outside a
   scratch folder of its own, and gives them no network.
 - **Full access**: no sandbox and no prompts, as in the providers' own apps.
-  Agents can change any file and run any command without asking, so they can
-  read your whole home folder, including SSH and cloud keys. Nothing asks,
+  Agents can change any file and run any command without asking.
+  [Protected files](../advanced/privacy-and-security.md#protected-files),
+  such as SSH private keys and cloud credentials, are guarded by Octant's own
+  tools and redaction only, and a shell command can read them. Nothing asks,
   pushing, merging and publishing included; the agent does those because you
   asked in the thread, and every action is recorded. Outside content the
   agent read is tagged on the tool row and the thread card, never blocked.
@@ -328,9 +339,13 @@ When you ask, the agent can open the pull request for the thread's own
 branch, as a draft or ready for review, and stack it on another branch that
 already has an open pull request. It can also change that pull request's
 title and description, or mark a draft ready (or turn it back into a draft).
-It never chooses another branch, and it cannot merge or close anything. A
-thread that asks before acting shows you the exact change first; Full access
-goes ahead; Plan refuses. The thread's pull request shows in Review and on
+It can also add or remove labels the repository already has, close the pull
+request or reopen it, post a comment or a reply in a review thread, and merge
+it. Comments, replies, and merges always ask you first, at every access level;
+the comment shows its whole text. It never chooses another branch, and it never
+approves a pull request or deletes a branch. A thread that asks before acting
+shows you the exact change first; Full access goes ahead for the rest; Plan
+refuses. The thread's pull request shows in Review and on
 its card, stacked ones included.
 The sidebar follows the pane that last received pointer or keyboard input.
 Each thread remembers its open tools and selected tool.

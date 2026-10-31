@@ -1311,9 +1311,10 @@ button is the only tab stop; an unsupported model keeps the button reachable
 and explains the refusal in the surface's status line. It never opens the file
 chooser or uploads while refused. Model, access, and destination controls keep
 one type scale. The mode picker reads the same in new and existing threads:
-Auto (with "Recommended" where the provider has a reviewer, otherwise
-listed disabled with the reason), Ask first, Accept edits, Plan, and Full
-access, each with a one-line description. Choosing a mode is one click and
+Auto (with "Recommended" wherever a reviewer can run, the provider's own or
+Octant Shield, its description naming which; otherwise listed disabled with
+the reason), Ask first, Accept edits, Plan, and Full access, each with a
+one-line description. Choosing a mode is one click and
 changes the thread; the first Full access pick on this machine or in a
 Project shows the one-time warning first.
 The Code start screen's agent home (suggested prompts, Up next, Start something
@@ -2132,17 +2133,52 @@ which governs Work and Code alike. The levels, top to bottom, are Ask first,
 Accept edits, Auto, and Full access; Full access is the lowest, and there is
 no separate switch below it. The first time a machine or a Project picks Full
 access, a one-time warning asks to confirm, in the warning role: "Agents can
-change any file and run any command without asking, with no sandbox, so they
-can read your whole home folder, including SSH and cloud keys." It offers
-Cancel (focused) and Use Full access, and is not shown again for that scope.
-At Full access a tool row that read outside content carries a quiet tag and
-the thread card a small mark; neither prompts. The section also shows, each
+change any file and run any command without asking, with no sandbox. Protected
+files, such as SSH and cloud keys, are guarded by Octant's own tools and
+redaction only, and a shell command can read them." It
+offers Cancel (focused) and Use Full access, and is not shown again for that
+scope. **Protected files** opens Settings › Permissions, above Remembered
+websites: one row per built-in group (SSH private keys, cloud credentials,
+and so on) whose description lists the paths it covers on this host and the
+channel that replaces them, with a secondary **Remove** button; a removed group
+reads "(not protected)" and offers **Protect again**. Remove opens
+`OctantConfirmDialog` in the destructive role ("Stop protecting …?", Cancel
+focused, **Remove protection**), because every agent can then read those
+files; the host journals the confirmed removal. Paths the person added follow
+as rows with Remove (no confirmation), then one "Protect another path" row with
+a text field and an **Add** button; a refused path is said in the section's
+feedback line. A paired device sees the section as set on the host machine.
+A Code tool row whose result was outside content carries an "Outside content"
+tag, followed by what Octant Shield's Watcher found in it in the warning role,
+and the thread's board card a small mark; at Full access the tag stays quiet.
+Neither prompts. The section also shows, each
 as an account default a Project
 may override: **Auto reviewer** (Provider's own / Octant Shield), **Safe
 networks** (trusted hosts, domains, address ranges, and private-network tags),
 and **Servers** (registered SSH hosts, each with a Read-only, Operate, or Admin
-profile and an optional notes file). The rules behind them are in
-[Octant Shield](docs/architecture.md#octant-shield); allowed, not built yet.
+profile and an optional notes file), and as an account setting **Shield
+model** (each thread's provider with its smallest model, or a configured
+endpoint). The rules behind them are in
+[Octant Shield](docs/architecture.md#octant-shield). Built for Code: Auto
+reviewer and Shield model in Settings › Code › Access, and the reviewer
+override as a select on a Code Project's overview; servers are allowed, not
+built yet. **Safe networks** is built as Settings › Access, in the
+Privacy & data group after Permissions: a **Network limits** panel with a
+switch that is off by default, a sentence saying plainly whether limits are on,
+and a note that a change applies to the next runtime started; then an intro
+sentence, the **Every
+Project** list, a **Project** picker that says whether the chosen Project
+follows the every-Project list or has its own (with **Use its own list** and
+**Follow every-Project list**), and **Recently refused**. A place row shows its
+kind in the meta role, its value in the code font, an optional port, and a
+quiet Remove; the add row is Kind, value, optional Port, and Add place, and
+Save sends the whole list. A refusal from the host shows inline in the alert
+role and marks the refused row; nothing decides validity in the renderer
+beyond a port's range. Each refused host row shows `host:port`, the runtime,
+its count and age, and a quiet **Trust**, which adds that host and port to
+the list being edited. While limits are off, or when the host cannot route
+runtimes through these rules, a plain note says the lists are saved but not applied
+([Provider runtime network](docs/architecture.md#provider-runtime-network)).
 A Work Project's **Developer tools** switch is presentation, not a
 permission, so it lives on that Project's overview, not here
 ([Workspace](docs/design/workspace.md); allowed, not built yet). A Browser request from a

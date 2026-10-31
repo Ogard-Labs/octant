@@ -1944,6 +1944,40 @@ export function setClaudeArtifactDelivery(
   };
 }
 
+/**
+ * Lets a key provider account run as itself, or turns that off. Only Claude
+ * Code, Codex, OpenCode, and Mistral Vibe accounts take it. It changes no
+ * process input of a running session: the host resolves it again for each
+ * session it starts or resumes.
+ */
+export function setProviderNativeSetup(
+  current: ProviderInstance,
+  input: { readonly enabled: boolean; readonly updatedAt: UtcTimestamp },
+):
+  | ClaudeProviderInstance
+  | CodexProviderInstance
+  | OpenCodeProviderInstance
+  | AcpAgentProviderInstance {
+  if (
+    current.driverKind !== "claude" &&
+    current.driverKind !== "codex" &&
+    current.driverKind !== "opencode" &&
+    current.driverKind !== "mistral-vibe"
+  ) {
+    reject(
+      "invalid-configuration",
+      "Only a Claude Code, Codex, OpenCode, or Mistral Vibe account runs as itself.",
+    );
+  }
+  const { nativeSetup: _previous, ...rest } = current;
+  return {
+    ...rest,
+    ...(input.enabled ? { nativeSetup: true as const } : {}),
+    version: nextVersion(current.version),
+    updatedAt: input.updatedAt,
+  };
+}
+
 interface SetProviderEnabledInput {
   readonly enabled: boolean;
   readonly updatedAt: UtcTimestamp;

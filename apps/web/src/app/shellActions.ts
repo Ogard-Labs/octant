@@ -197,6 +197,8 @@ export type ShellActions = {
     readonly projectHostId?: HostId;
     readonly onRefuse: (reason: string) => void;
   }) => HostId | undefined;
+  readonly addProjectExtraFolder: ProjectController["addExtraFolder"];
+  readonly removeProjectExtraFolder: ProjectController["removeExtraFolder"];
   readonly relinkProject: ProjectController["relink"];
   readonly renameCodeThread: (threadId: string, title: string) => void;
   readonly renameProject: ProjectController["rename"];
@@ -259,7 +261,9 @@ export type ShellActions = {
   readonly setProjectArchived: ProjectController["setArchived"];
   readonly setProjectColor: ProjectController["setColor"];
   readonly setProjectProviderPolicy: ProjectController["setProviderPolicy"];
+  readonly setProjectNativeProviders: ProjectController["setNativeProviders"];
   readonly setProjectPermissionMode: ProjectController["setCodePermissionMode"];
+  readonly setProjectAutoReviewer: ProjectController["setCodeAutoReviewer"];
   readonly setProjectBrandKit: ProjectController["setBrandKit"];
   readonly setProjectDesktopRecipe: ProjectController["setDesktopRecipe"];
   readonly setProjectActions: ProjectController["setActions"];

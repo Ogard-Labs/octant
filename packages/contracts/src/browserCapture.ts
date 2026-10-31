@@ -5,6 +5,7 @@ import {
   BrowserThreadId,
   MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS,
 } from "./browserAutomation";
+import { StoredBrowserProfile } from "./browserProfiles";
 import { UtcTimestamp } from "./events";
 import { ImageArtifactMediaType } from "./imageGeneration";
 
@@ -46,6 +47,12 @@ export const BrowserCapture = Schema.Struct({
   size: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(MAX_BROWSER_CAPTURE_BYTES)),
   mime: ImageArtifactMediaType,
   capturedAt: UtcTimestamp,
+  /**
+   * The Project or Personal profile the page lived in, when it was in one. A
+   * picture of a signed-in page shows an account, so the record says which. A
+   * capture kept before profiles existed, or of a Private page, has none.
+   */
+  profile: Schema.optional(StoredBrowserProfile),
 }).annotations(strict);
 export type BrowserCapture = typeof BrowserCapture.Type;
 

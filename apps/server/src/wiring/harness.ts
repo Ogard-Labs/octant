@@ -4,6 +4,7 @@ import { realpath, stat as statFromDisk } from "node:fs/promises";
 import { join } from "node:path";
 import { queueSteeringWhereDelivered, withSteerable } from "../harness/nativeHarnessSteerability";
 import { createHostShield, shieldRoutesApprovals } from "../shield/hostShield";
+import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
 import { recordShieldReviewUsage } from "../shield/shieldUsageLedger";
 import {
   AggregateId,
@@ -22,7 +23,10 @@ import { codeTurnExecutionPolicyReader } from "../code/codeTurnExecutionPolicy";
 import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
 import { nativeHarnessRecoveryBlockers } from "../harness/nativeHarnessRecovery";
 import { newestChatAttemptSession } from "../harness/nativeHarnessJournalLookup";
-import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
+import {
+  readShieldWatcherLabels,
+  readThreadExternalContentTaint,
+} from "../context/externalContentTaintProjection";
 import { createNativeHarnessAuthority } from "../harness/nativeHarnessAuthority";
 import {
   createNativeHarnessComposition,
@@ -521,6 +525,14 @@ export function wireHarness(deps: HarnessDependencies) {
   });
   const hostShield = createHostShield({
     readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+    chosenReviewer: (thread) => {
+      const project = persistence.readProject(thread.projectId);
+      return chosenAutoReviewer({
+        project: project?.type === "code" ? project : undefined,
+        settings: persistence.readCodeSettings()?.settings,
+      });
+    },
+    chosenModel: () => persistence.readCodeSettings()?.settings.shieldModel,
     readTurnExecutionPolicy: (threadId) => readTurnExecutionPolicy(threadId),
     // Work threads are reviewed at Auto as Code threads are; a Work turn's
     // level is its running turn's, else the thread's own.
@@ -544,6 +556,7 @@ export function wireHarness(deps: HarnessDependencies) {
     resolveDriver: resolveConfiguredDriver,
     tainted: (threadId) =>
       readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
+    watcherLabels: (threadId) => readShieldWatcherLabels(persistence.connection, threadId),
     personMessages: (threadId, limit) =>
       codeBoardEventStore.personPromptsForThread(threadId, limit).flatMap((prompt) => {
         const text = codeEvidence.read(prompt);

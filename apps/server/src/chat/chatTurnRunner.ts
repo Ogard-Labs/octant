@@ -21,6 +21,7 @@ import {
   type ContextSubjectRef,
   type ProviderFailure,
   type ProviderInstanceId,
+  type ProviderNativeSetup,
   type ProviderContextBlock,
   type ProviderResumeCursor,
   type ProviderRuntimeEvent,
@@ -256,6 +257,8 @@ export interface ChatTurnRunnerInput {
   readonly estimatedTokens: number;
   readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
   readonly researchEnabled: boolean;
+  /** What the session may load of the provider's own setup; absent keeps it all off. */
+  readonly nativeSetup?: ProviderNativeSetup;
   readonly researchRoute: ResearchRouteDecision;
   readonly appManagedTools?: AppManagedToolSet;
   readonly mode?: "send" | "resume";
@@ -846,6 +849,7 @@ export class ChatTurnRunner {
         Object.keys(input.thread.modelOptionValues).length > 0
           ? { modelOptionValues: input.thread.modelOptionValues }
           : {};
+      const nativeSetup = input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup };
       const startHandle = yield* (
         input.resumeCursor !== undefined
           ? connection.resume({
@@ -858,6 +862,7 @@ export class ChatTurnRunner {
                 ...(input.appManagedTools?.definitions ?? []),
               ],
               ...modelOptionValues,
+              ...nativeSetup,
             })
           : connection.start({
               sessionId: input.attempt.providerSessionId,
@@ -868,6 +873,7 @@ export class ChatTurnRunner {
                 ...(input.appManagedTools?.definitions ?? []),
               ],
               ...modelOptionValues,
+              ...nativeSetup,
             })
       ).pipe(Effect.catchAll(persistProviderFailure));
 

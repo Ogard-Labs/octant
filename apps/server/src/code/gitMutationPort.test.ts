@@ -82,6 +82,66 @@ describe("GitMutationPort", () => {
     ).toMatch(/^[a-f0-9]{40}$/);
   });
 
+  it("replaces an amended branch only when the remote head is the one the lease names", async () => {
+    const root = temporaryDirectory();
+    const repository = createRepository(root);
+    const remote = join(root, "remote.git");
+    execFileSync("git", ["init", "--bare", remote], { stdio: "ignore" });
+    git(repository, "remote", "add", "origin", remote);
+    const port = new GitMutationPort(undefined, confinedOptions());
+    const push = (force?: Parameters<GitMutationPort["push"]>[0]["force"]) =>
+      port.push({
+        checkoutRoot: repository,
+        remote: "origin",
+        localRef: "refs/heads/main",
+        remoteRef: "refs/heads/main",
+        confirmation: { remote: "origin", refspec: "refs/heads/main:refs/heads/main" },
+        ...(force === undefined ? {} : { force }),
+      });
+    const remoteHead = () =>
+      execFileSync("git", ["--git-dir", remote, "rev-parse", "refs/heads/main"], {
+        encoding: "utf8",
+      }).trim();
+
+    await expect(push()).resolves.toEqual({ status: "applied" });
+    const published = remoteHead();
+    git(repository, "commit", "--amend", "--allow-empty", "--message", "Amended");
+    const amended = gitOutput(repository, "rev-parse", "HEAD").trim();
+
+    // A plain push cannot replace history, and a lease on a head the remote
+    // does not have must not either.
+    await expect(push()).resolves.toMatchObject({ status: "failed" });
+    await expect(
+      push({ mode: "with-lease", expectedRemoteOid: "f".repeat(40) }),
+    ).resolves.toMatchObject({ status: "failed" });
+    expect(remoteHead()).toBe(published);
+
+    await expect(push({ mode: "with-lease", expectedRemoteOid: published })).resolves.toEqual({
+      status: "applied",
+    });
+    expect(remoteHead()).toBe(amended);
+
+    git(repository, "commit", "--amend", "--allow-empty", "--message", "Amended again");
+    await expect(push({ mode: "plain" })).resolves.toEqual({ status: "applied" });
+    expect(remoteHead()).toBe(gitOutput(repository, "rev-parse", "HEAD").trim());
+  });
+
+  it("refuses a lease that is not a full object id before Git runs", async () => {
+    const root = temporaryDirectory();
+    const repository = createRepository(root);
+    const port = new GitMutationPort(undefined, confinedOptions());
+    await expect(
+      port.push({
+        checkoutRoot: repository,
+        remote: "origin",
+        localRef: "refs/heads/main",
+        remoteRef: "refs/heads/main",
+        confirmation: { remote: "origin", refspec: "refs/heads/main:refs/heads/main" },
+        force: { mode: "with-lease", expectedRemoteOid: "--force" },
+      }),
+    ).resolves.toEqual({ status: "rejected", reason: "invalid-refspec" });
+  });
+
   it("rejects an active index lock and broad, ambiguous, or force-shaped inputs before mutation", async () => {
     const root = temporaryDirectory();
     const repository = createRepository(root);

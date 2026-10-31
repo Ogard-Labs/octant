@@ -36,6 +36,7 @@ import {
   effectiveClaudeAccountConfigDirectory,
   createClaudeProvider,
   setClaudeArtifactDelivery,
+  setProviderNativeSetup,
   formatClaudeAuthLoginCommand,
   createGeminiImageProvider,
   createIdeogramImageProvider,
@@ -2543,6 +2544,35 @@ describe("provider instance policy", () => {
 
     const off = setClaudeArtifactDelivery(on, { enabled: false, updatedAt });
     expect(off.configuration).not.toHaveProperty("artifactDelivery");
+  });
+
+  it("lets only a key provider account run as itself, and keeps the switch through an account edit", () => {
+    for (const account of [claudeProvider(), codexProvider(), provider(), mistralVibeProvider()]) {
+      const on = setProviderNativeSetup(account, { enabled: true, updatedAt });
+      expect(on.nativeSetup).toBe(true);
+      expect(on.version).toBe(account.version + 1);
+      expect(decodeProviderInstance(on)).toEqual(on);
+      const off = setProviderNativeSetup(on, { enabled: false, updatedAt });
+      expect(off).not.toHaveProperty("nativeSetup");
+    }
+    const claudeOn = setProviderNativeSetup(claudeProvider(), { enabled: true, updatedAt });
+    if (claudeOn.driverKind !== "claude")
+      throw new Error("A Claude account stays a Claude account.");
+    const recoloured = changeClaudeConfiguration(claudeOn, {
+      configuration: { ...claudeProvider().configuration, accent: "rose" },
+      activeSessionCount: 1,
+      updatedAt,
+    });
+    expect(recoloured.nativeSetup).toBe(true);
+
+    for (const account of [kimiCodeProvider(), piProvider(), ollamaProvider(), httpProvider()]) {
+      expect(() => setProviderNativeSetup(account, { enabled: true, updatedAt })).toThrow(
+        "Only a Claude Code, Codex, OpenCode, or Mistral Vibe account runs as itself.",
+      );
+    }
+    // The journal refuses the switch on any other ACP agent, so a hand-written
+    // row cannot slip one past the policy.
+    expect(() => decodeProviderInstance({ ...kimiCodeProvider(), nativeSetup: true })).toThrow();
   });
 
   it("rejects Claude reconfiguration before changing an instance with active sessions", () => {

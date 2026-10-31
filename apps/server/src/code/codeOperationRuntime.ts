@@ -45,12 +45,14 @@ import {
   type CodeRuntimeWorkId,
   type CodeOperationResult,
   type CodeThread,
+  type AutoReviewer,
   type ShieldDecision,
   type ComputerUseDestinationSelection,
   type CodeThreadId,
   type EventActor,
   type PendingRequest,
   type ProviderCapabilities,
+  type ProviderNativeSetup,
   type ProviderRuntimeEvent,
   type ProviderResumeCursor,
   type ProviderProbeResult,
@@ -68,7 +70,8 @@ import type {
   ProviderSessionResume,
 } from "@octant/provider-sdk/driver";
 import type { Journal } from "../persistence/journal";
-import { GhPullRequestPort, createGhCommandPort, type GhDeliveryTarget } from "./ghPullRequestPort";
+import { createGhPullRequestPort } from "./ghPullRequestActionPort";
+import { createGhCommandPort, type GhDeliveryTarget } from "./ghPullRequestPort";
 import { GitMutationPort } from "./gitMutationPort";
 import {
   GitObservationPort,
@@ -105,6 +108,7 @@ import {
   isAndroidEmulatorOpenInputKind,
   harnessAutoReviewEffective,
   mayWriteToRepository,
+  projectExtraFoldersInstructions,
   turnBlocksInPlaceRestore,
   unsupportedModelOptionValues,
 } from "@octant/domain";
@@ -288,6 +292,11 @@ export interface CodeOperationRuntimeOptions {
     ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
   }) => AppManagedToolSet | undefined;
   readonly persistence: RuntimePersistence;
+  /**
+   * The extra folders of a Code thread's Project, read at each turn start so
+   * a folder added or removed applies from the next turn. Absent reads none.
+   */
+  readonly readProjectExtraFolders?: (projectId: CodeThread["projectId"]) => ReadonlyArray<string>;
   /**
    * The paired device a lease confirmation names, as the host last saw it.
    * Absent on a host with no device layer, where no lease is ever confirmed.
@@ -509,6 +518,7 @@ export interface CodeOperationRuntimeOptions {
   readonly nativeHarnessTools?: (input: {
     readonly thread: CodeThread;
     readonly checkoutRoot: string;
+    readonly extraFolders?: ReadonlyArray<string>;
     readonly windowId: WindowId;
     /** The turn's resolved credential values, which a journal read redacts. */
     readonly secrets: ReadonlyArray<string>;
@@ -556,11 +566,23 @@ export interface CodeOperationRuntimeOptions {
    */
   readonly shield?: ShieldReviewPort;
   /**
+   * The person's Auto reviewer for a thread (its Project's, else Settings').
+   * Octant Shield chosen means the provider's own reviewer stays off, so its
+   * prompts reach Octant.
+   */
+  readonly chosenAutoReviewer?: (thread: CodeThread) => AutoReviewer | undefined;
+  /**
    * Resolves the cached provider capabilities for a thread's provider, so the
    * runtime can check `harnessAutoReview` without re-probing on every turn.
    * Absent means capabilities are unknown, so delegation is never enabled.
    */
   readonly resolveProviderCapabilities?: (thread: CodeThread) => ProviderCapabilities | undefined;
+  /**
+   * What the next session of this thread may load of the provider's own
+   * setup, from the account's switch, the Project's trust, and the thread's
+   * level. Absent keeps every native feature off.
+   */
+  readonly resolveProviderNativeSetup?: (thread: CodeThread) => ProviderNativeSetup | undefined;
   /** Reads the `#thread` mentions a turn names, on that turn's own principal. */
   readonly resolveThreadMentionContext?: CodeOperationServiceOptions["resolveThreadMentionContext"];
   /** Reads the `@file` mentions a turn names against this thread's bound root. */
@@ -1733,7 +1755,10 @@ async function approvalContext(
   checkout: CodeCheckoutIdentity,
 ): Promise<ApprovalContext | undefined> {
   const changesPullRequest =
-    command?.kind === "create-pull-request" || command?.kind === "update-pull-request";
+    command?.kind === "create-pull-request" ||
+    command?.kind === "update-pull-request" ||
+    command?.kind === "comment-pull-request" ||
+    command?.kind === "merge-pull-request";
   const pullRequestTarget = changesPullRequest
     ? await options.resolvePullRequestTarget(thread.id)
     : undefined;
@@ -1935,7 +1960,17 @@ function approvalPrompt(
         break;
       case "push-git":
         message = "Allow Code push operation?";
-        effectDetail = `${command.remote}: ${command.localRef} → ${command.remoteRef}\nHEAD ${command.expectedHeadOid}`;
+        effectDetail = [
+          `${command.remote}: ${command.localRef} → ${command.remoteRef}`,
+          ...(command.force === undefined
+            ? []
+            : [
+                command.force.mode === "with-lease"
+                  ? `Replaces the remote branch only if it is still ${command.force.expectedRemoteOid}`
+                  : "Overwrites the remote branch, whatever is there",
+              ]),
+          `HEAD ${command.expectedHeadOid}`,
+        ].join("\n");
         break;
       case "create-pull-request":
         message =
@@ -1960,8 +1995,33 @@ function approvalPrompt(
           ...(command.draft === undefined
             ? []
             : [command.draft ? "Turn it back into a draft" : "Mark it ready for review"]),
+          ...(command.state === undefined
+            ? []
+            : [command.state === "closed" ? "Close it (the branch stays)" : "Reopen it"]),
+          ...((command.addLabels?.length ?? 0) === 0
+            ? []
+            : [`Add labels: ${command.addLabels?.join(", ")}`]),
+          ...((command.removeLabels?.length ?? 0) === 0
+            ? []
+            : [`Remove labels: ${command.removeLabels?.join(", ")}`]),
           ...(command.title === undefined ? [] : [`Title: ${command.title}`]),
           ...(command.body === undefined ? [] : ["Body:", command.body]),
+        ].join("\n");
+        break;
+      case "comment-pull-request":
+        message = "Post this under your name?";
+        effectDetail = [
+          `Pull request of ${pullRequestTarget?.head} in ${pullRequestTarget?.baseRepository}`,
+          command.reviewThreadId === undefined ? "Comment:" : "Reply in one review thread:",
+          command.body,
+        ].join("\n");
+        break;
+      case "merge-pull-request":
+        message = "Allow merging this pull request?";
+        effectDetail = [
+          `Pull request of ${pullRequestTarget?.head} in ${pullRequestTarget?.baseRepository}`,
+          `Method: ${command.method}`,
+          `Only if its head is still ${command.headSha} and its required checks pass`,
         ].join("\n");
         break;
       case "create-review-finding":
@@ -2063,6 +2123,8 @@ interface ActiveTurn {
   readonly sessionId: string;
   readonly requestedSessionId: string;
   readonly checkoutRoot: string;
+  /** The Project's extra folders, granted what the checkout is granted. */
+  readonly extraFolders: ReadonlyArray<string>;
   readonly driver: ProviderDriver;
   readonly resumeCursor?: ProviderResumeCursor;
   /** What the provider session held of Octant's per-turn context before this turn. */
@@ -2589,6 +2651,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       requestedSessionId: input.sessionId,
       ...(resumeCursor === undefined ? {} : { resumeCursor }),
       checkoutRoot: input.checkoutRoot,
+      extraFolders: this.#options.readProjectExtraFolders?.(input.thread.projectId) ?? [],
       driver,
       carriedSentContext: carriedSentContext({
         freshSession: resumeCursor === undefined,
@@ -3763,6 +3826,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         this.#options.nativeHarnessTools?.({
           thread: active.thread,
           checkoutRoot: active.checkoutRoot,
+          ...(active.extraFolders.length === 0 ? {} : { extraFolders: active.extraFolders }),
           windowId: active.windowId,
           secrets: active.secrets,
         }),
@@ -3853,7 +3917,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           : undefined,
       canvasOffered: offersCanvasTool(appManagedTools?.definitions),
     });
+    const extraFolderInstructions = projectExtraFoldersInstructions(active.extraFolders);
     const hostGuidance = [
+      ...(extraFolderInstructions === undefined
+        ? []
+        : [{ kind: "instructions" as const, text: extraFolderInstructions }]),
       ...appToolHostLines(appManagedTools?.definitions).map((text) => ({
         kind: "instructions" as const,
         text,
@@ -3878,6 +3946,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const sentNow = (blocks: ReadonlyArray<ProviderContextBlock>) =>
       blocks.filter((block) => !heldKeys.has(`${block.kind}\u0000${block.text}`));
     const harnessAutoReviewEnabled = this.#resolveHarnessAutoReview(active.thread);
+    const nativeSetup = this.#options.resolveProviderNativeSetup?.(active.thread);
     const contextAccount: CodeTurnContextAccount = {
       carried: active.carriedSentContext,
       turn: estimateSentContextParts({
@@ -3965,6 +4034,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               }),
             }),
           checkoutRoot: active.checkoutRoot,
+          extraFolders: active.extraFolders,
           prompt,
           ...(delivery.context.length === 0 ? {} : { context: delivery.context }),
           contextAccount,
@@ -4015,11 +4085,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               }),
           ...(attachments === undefined ? {} : { attachments }),
           ...(harnessAutoReviewEnabled ? { harnessAutoReviewEnabled: true } : {}),
+          ...(nativeSetup === undefined ? {} : { nativeSetup }),
           signal: active.abort.signal,
           provider: {
             acquire: (acquireInput) => {
               if (
                 acquireInput.projectRoot !== active.checkoutRoot ||
+                JSON.stringify(acquireInput.extraFolders ?? []) !==
+                  JSON.stringify(active.extraFolders) ||
                 acquireInput.permissionPersistence !== active.thread.permissionPersistence
               )
                 return Effect.fail({
@@ -4177,6 +4250,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
    */
   #resolveHarnessAutoReview(thread: CodeThread): boolean {
     if (thread.autoApprove !== true) return false;
+    if (this.#options.chosenAutoReviewer?.(thread) === "octant-shield") return false;
     const capabilities = this.#options.resolveProviderCapabilities?.(thread);
     if (capabilities === undefined) return false;
     const taint = this.#options.readThreadExternalContentTaint?.(thread.id);
@@ -4526,6 +4600,9 @@ function normalizedOperationEvent(
               ? "started"
               : "running",
       ...(summary === undefined ? {} : { summary }),
+      ...(event.status === "completed" && event.outsideContent !== undefined
+        ? { outsideContent: event.outsideContent }
+        : {}),
     };
   }
   if (
@@ -4702,7 +4779,7 @@ function createPullRequestPort(options: CodeOperationRuntimeOptions): CodeOperat
   };
   if (options.ghExecutable === undefined) return unavailable;
   try {
-    return new GhPullRequestPort({
+    return createGhPullRequestPort({
       command: createGhCommandPort({ ghPath: options.ghExecutable }),
       resolveTarget: options.resolvePullRequestTarget,
       ...(options.inheritedEnvironment === undefined

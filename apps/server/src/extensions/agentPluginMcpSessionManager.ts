@@ -12,9 +12,11 @@ import {
   decodeProviderToolAnswer,
   decodeProviderToolDefinition,
   type ProviderToolDefinition,
+  type ShieldWatcherLabel,
   type WindowId,
 } from "@octant/contracts";
 import type { ExtensionToolReach } from "@octant/domain/extension-tool-grant-policy";
+import { watchedTextOf, watchOutsideContent } from "@octant/domain/shield-watcher-policy";
 import {
   connectAgentPluginMcpSession,
   type AgentPluginMcpSession,
@@ -23,6 +25,7 @@ import {
 } from "./agentPluginMcpClient";
 import { prepareAgentPluginMcpRuntime } from "./agentPluginMcpRuntime";
 import { frameExternalContentForModel } from "../context/externalContentFraming";
+import { recordShieldWatcherLabels } from "../providers/appManagedToolTaint";
 import type {
   ExternalContentIngestionResult,
   RecordExternalContentIngestionInput,
@@ -325,7 +328,11 @@ export class AgentPluginMcpSessionManager {
   #taintToolResult(
     threadId: ExtensionToolThread["id"],
     result: unknown,
-  ): { readonly result: unknown; readonly isError?: boolean } {
+  ): {
+    readonly result: unknown;
+    readonly isError?: boolean;
+    readonly outsideContent?: { readonly labels: ReadonlyArray<ShieldWatcherLabel> };
+  } {
     const record = this.#recordExternalContentIngestion;
     if (record === undefined) {
       return { result: { error: "extension-tool-unavailable" }, isError: true };
@@ -340,14 +347,22 @@ export class AgentPluginMcpSessionManager {
     } catch {
       return { result: { error: "extension-tool-unavailable" }, isError: true };
     }
+    const digest = createHash("sha256").update(body).digest("hex");
     const ingested = record({
       threadId,
       provenance: { origin: "tool-result", sourceLabel: "mcp-tool" },
-      contentReference: `mcp-${createHash("sha256").update(body).digest("hex")}`,
+      contentReference: `mcp-${digest}`,
       correlationId: this.#uuid(),
       authorized: true,
     });
     if (ingested.kind === "refused") {
+      return { result: { error: "extension-tool-unavailable" }, isError: true };
+    }
+    // Octant Shield's Watcher reads what the server returned before the model does.
+    const labels = watchOutsideContent(watchedTextOf(result));
+    if (
+      !recordShieldWatcherLabels({ record, threadId, uuid: () => this.#uuid(), labels, digest })
+    ) {
       return { result: { error: "extension-tool-unavailable" }, isError: true };
     }
     const framed = frameExternalContentForModel({
@@ -362,7 +377,7 @@ export class AgentPluginMcpSessionManager {
         isError: true,
       };
     }
-    return { result: framed.text };
+    return { result: framed.text, outsideContent: { labels } };
   }
 
   async reconcile(effective: ExtensionEffectiveSnapshot): Promise<void> {

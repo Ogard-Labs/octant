@@ -1,4 +1,5 @@
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
+import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
@@ -62,11 +63,14 @@ import { fileMentionContextBlocks, FileMentionService } from "../fileMentionServ
 import { createAgentMessageTools } from "../agentMessage/agentMessageTools";
 import { codeSiblingThreadSource } from "../siblingThreads/codeSiblingThreadSource";
 import { createSiblingThreadTools } from "../siblingThreads/siblingThreadTools";
-import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
+import {
+  readShieldWatcherLabels,
+  readThreadExternalContentTaint,
+} from "../context/externalContentTaintProjection";
 import { CodeTurnDecisions } from "../turnDecisions/codeTurnDecisions";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
 import { isReplayedAndroidEvidence } from "../android/androidToolchainService";
-import { isNativeHarnessDriverKind } from "@octant/domain";
+import { isNativeHarnessDriverKind, projectExtraFolderRoots } from "@octant/domain";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { type CodeWiring, stableCodeFileId } from "./code";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
@@ -83,6 +87,7 @@ import type { HarnessStateWiring } from "./harnessState";
 import type { DevicesWiring } from "./devices";
 import type { BrowserWiring } from "./browser";
 import type { CanvasWiring } from "./canvas";
+import { sessionNativeSetup } from "../providers/providerNativeSetup";
 
 function withCodeOperationRuntime(
   service: CodeRouteService,
@@ -267,6 +272,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "codeTestDiscovery"
     | "isCodeProviderModelAllowed"
     | "onPullRequestSnapshotRefreshed"
+    | "projectPullRequestActionService"
     | "projectPullRequestCadence"
     | "projectPullRequestService"
     | "roots"
@@ -363,6 +369,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     persistence,
     probeProviderForThreads,
     productFeedbackService,
+    projectPullRequestActionService,
     projectPullRequestCadence,
     projectPullRequestService,
     projectService,
@@ -510,6 +517,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       );
       codeOperationRuntime = createCodeOperationRuntime({
         shield: hostShield,
+        chosenAutoReviewer: (thread) => {
+          const project = persistence.readProject(thread.projectId);
+          return chosenAutoReviewer({
+            project: project?.type === "code" ? project : undefined,
+            settings: persistence.readCodeSettings()?.settings,
+          });
+        },
         liveTurns,
         activeTurns: codeActiveTurns,
         terminalBrowserGrants: grants,
@@ -615,6 +629,12 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             projectId: input.thread.projectId,
           }),
         nativeHarnessTools: (input) => nativeHarnessComposition.forCode(input),
+        readProjectExtraFolders: (projectId) => {
+          const project = persistence.readProject(projectId);
+          return project === undefined || project.type === "chat"
+            ? []
+            : projectExtraFolderRoots(project);
+        },
         nativeHarness: nativeHarnessHooks,
         onProviderTurnRequested: (threadId) => {
           if (codeService instanceof CodeService) codeService.noteProviderTurnRequested(threadId);
@@ -998,6 +1018,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           readThreadExternalContentTaint(persistence.connection, String(threadId)),
         resolveProviderCapabilities: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities,
+        resolveProviderNativeSetup: (thread) =>
+          sessionNativeSetup(persistence, {
+            providerInstanceId: thread.providerInstanceId,
+            projectId: thread.projectId,
+            mode: "code",
+            executionPolicy: thread.executionPolicy,
+          }),
         // Planner tools resolve their designation on every call through the
         // services declared after this runtime; the closures run only once a
         // turn is live, well after startup finishes wiring them.
@@ -1223,6 +1250,19 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             snapshot: () => projectPullRequestService.boardSnapshot(windowId),
           },
           planProgress: codeBoardPlanProgressSource,
+          outsideContent: {
+            read: (threadId) => {
+              if (
+                !readThreadExternalContentTaint(persistence.connection, String(threadId))
+                  .externalContentIngested
+              ) {
+                return undefined;
+              }
+              return readShieldWatcherLabels(persistence.connection, String(threadId)).length > 0
+                ? "flagged"
+                : "read";
+            },
+          },
           clock: () => new Date().toISOString(),
         });
         return board.query(query);
@@ -1375,15 +1415,20 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           command,
           signal ?? new AbortController().signal,
         ),
-      mergeProjectPullRequest: (windowId, command, signal, initiator) => {
-        if (initiator !== "user")
-          return Promise.resolve({ status: "refused", reason: "not-authorized" });
-        return projectPullRequestService.merge(
+      // A paired phone or web client merges under the same head and
+      // required-check rules as the desktop window; it must also carry the
+      // person's confirmation, which the service enforces.
+      mergeProjectPullRequest: (windowId, command, signal, caller) =>
+        projectPullRequestService.merge(
           windowId,
           command,
           signal ?? new AbortController().signal,
-        );
-      },
+          caller,
+        ),
+      mergeProjectPullRequestStack: (windowId, command, signal, caller) =>
+        projectPullRequestActionService.mergeStack(windowId, command, signal, caller),
+      actOnProjectPullRequest: (windowId, command, signal, caller) =>
+        projectPullRequestActionService.act(windowId, command, signal, caller),
       queryProjectPullRequestSwitches: (windowId, target) =>
         pullRequestSwitchService.query(windowId, target),
       setProjectPullRequestMergeWhenReady: (windowId, command, signal, initiator) =>

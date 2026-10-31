@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   decodeAggregateVersion,
@@ -18,7 +19,10 @@ import {
 import { decodeCodeEvidenceReference } from "@octant/contracts/code-operations";
 import { ProductFeedbackService } from "../browser/productFeedbackService";
 import { isRoutineHostScope } from "../routineHostScope";
+import { BrowserExtensionService } from "../browser/browserExtensionService";
 import { BrowserProfileService } from "../browser/browserProfileService";
+import { createBrowserCookieReader } from "../browser/cookieImport/browserCookieReader";
+import { readKeychainPasswordWithSecurityTool } from "../browser/cookieImport/keychainPassword";
 import { ProjectBrowserService } from "../browser/projectBrowserService";
 import { OCTANT_LOCAL_ACTOR_ID, ShellServiceError } from "../shellService";
 import {
@@ -45,7 +49,7 @@ export type BrowserDependencies = Pick<ServerStart, "options" | "persistence"> &
   > &
   Pick<AgentRunsWiring, "externalContentIngestionStore"> &
   Pick<WorkspaceWiring, "projectService" | "shellService"> &
-  Pick<ProvidersWiring, "providerDataDirectory"> &
+  Pick<ProvidersWiring, "localPluginImportReceipts" | "providerDataDirectory"> &
   Pick<FoundationsWiring, "browserAuthority" | "codeEvidence">;
 
 export function wireBrowser(deps: BrowserDependencies) {
@@ -54,6 +58,7 @@ export function wireBrowser(deps: BrowserDependencies) {
     browserCaptures,
     codeEvidence,
     externalContentIngestionStore,
+    localPluginImportReceipts,
     machineChangeFeed,
     onWindowRevoked,
     options,
@@ -158,13 +163,20 @@ export function wireBrowser(deps: BrowserDependencies) {
           ? rememberedBrowserOrigins().includes(origin)
           : isBrowserProfileSiteRemembered(rememberedProfileSites(), origin, profile),
       isHostScope: isRoutineHostScope,
+      isLocalWindow: (windowId) => windowAuthorityStore.listWindowIds().includes(windowId),
+      extensionsEnabledIn: (profile) => extensionFoldersFor(profile).length,
       onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
     });
     onWindowRevoked((windowId) => browserToolApprovalService.revokeWindow(windowId));
     const headlessBrowserRuntime = createPlaywrightBrowserRuntime({
       receiptDirectory: join(providerDataDirectory, "browser", "runtime-receipts"),
     });
-    const desktopBrowserRuntime = createDesktopBrowserRuntimeFromEnvironment(process.env);
+    // The extensions enabled in a profile, read from the journal when a page opens
+    // there. The service is built after the runtime, so the runtime reads it late.
+    let extensionFoldersFor: BrowserExtensionService["enabledFolders"] = () => [];
+    const desktopBrowserRuntime = createDesktopBrowserRuntimeFromEnvironment(process.env, {
+      extensionsFor: (profile) => extensionFoldersFor(profile),
+    });
     const browserRuntime =
       options.browserRuntime ??
       (desktopBrowserRuntime === undefined
@@ -248,6 +260,18 @@ export function wireBrowser(deps: BrowserDependencies) {
       now: Date.now,
     });
     onWindowRevoked((windowId) => void browserAutomationService.revokeWindow(windowId));
+    const browserExtensionService = new BrowserExtensionService({
+      dataDirectory: persistence.dataDirectory,
+      journal: persistence.journal,
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      receipts: localPluginImportReceipts,
+      runtime: browserRuntime,
+      readProject: persistence.readProject,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      now: Date.now,
+    });
+    extensionFoldersFor = (profile) => browserExtensionService.enabledFolders(profile);
     // The profiles the desktop app stores, listed and cleared by the person.
     // Clearing closes the server's own records of the profile's pages first, then
     // asks the desktop app to remove the store.
@@ -262,6 +286,13 @@ export function wireBrowser(deps: BrowserDependencies) {
           browserAutomationService.closeProfile(profile),
         ]);
       },
+      // Another browser's cookies are read only on the person's pick, through
+      // the platform's own Keychain prompt, and only on a Mac.
+      cookieReader: createBrowserCookieReader({
+        home: homedir(),
+        readKeychainPassword: readKeychainPasswordWithSecurityTool,
+        now: Date.now,
+      }),
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
@@ -321,6 +352,7 @@ export function wireBrowser(deps: BrowserDependencies) {
     });
     return {
       browserAutomationService,
+      browserExtensionService,
       browserProfileService,
       browserToolApprovalService,
       liveProjectBrowsers,

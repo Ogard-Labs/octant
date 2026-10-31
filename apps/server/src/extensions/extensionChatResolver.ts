@@ -3,6 +3,7 @@ import type {
   ChatThread,
   ProviderContextBlock,
   ProviderToolDefinition,
+  ShieldWatcherLabel,
   WindowId,
 } from "@octant/contracts";
 import type {
@@ -74,7 +75,12 @@ export interface ExtensionToolExecutionPort {
     readonly name: string;
     readonly inputJson: string;
     readonly signal?: AbortSignal;
-  }): Promise<{ readonly result: unknown; readonly isError?: boolean }>;
+  }): Promise<{
+    readonly result: unknown;
+    readonly isError?: boolean;
+    /** What Octant Shield's Watcher found in the result; the tool row carries the mark. */
+    readonly outsideContent?: { readonly labels: ReadonlyArray<ShieldWatcherLabel> };
+  }>;
 }
 
 export const UNAVAILABLE_EXTENSION_TOOL_EXECUTION: ExtensionToolExecutionPort = {

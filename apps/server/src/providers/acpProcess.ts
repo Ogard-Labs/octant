@@ -22,12 +22,9 @@ import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
 import {
   makeProcessConfinementLive,
   ProcessConfinementError,
-  requireSandboxExec,
   seatbeltDenyRule,
-  wrapCommandInSandboxExec,
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
-import { buildLinuxAllowDefaultDenyLaunch } from "../process/linuxConfinement";
 import {
   materializeOsNetworkEgress,
   resolveProviderRuntimeEgressPolicy,
@@ -35,6 +32,11 @@ import {
 } from "../process/threadEgressPolicy";
 import type { AcpClientCapabilities } from "./acpProtocol";
 import { makeBoundedProviderStderr } from "./providerProcessDiagnostic";
+import {
+  acquireProviderRuntimeNetwork,
+  type ProviderRuntimeNetworkPort,
+  type ProviderRuntimeProxiedNetwork,
+} from "../network/providerRuntimeNetwork";
 
 export type { AcpSessionMode } from "./acpProfiles";
 
@@ -49,6 +51,8 @@ export interface AcpConfinementInput {
   readonly profile: AcpProviderProfile;
   readonly binaryPath: string;
   readonly root: string;
+  /** The Project's extra folders, granted what `root` is granted. */
+  readonly extraFolders?: ReadonlyArray<string>;
   readonly managedHome: string;
   readonly mode: AcpSessionMode;
   readonly executionPolicy: ProviderExecutionPolicy;
@@ -57,6 +61,13 @@ export interface AcpConfinementInput {
   readonly environment: NodeJS.ProcessEnv;
   /** Exact loopback ports owned by app-managed ACP tool bridges for this process. */
   readonly loopbackPorts?: ReadonlyArray<number>;
+  /**
+   * The launch's own egress proxy. Present, the runtime's OS rules reach
+   * only that listener (and the bridge ports above); absent, a runtime below
+   * Full access keeps open network, as on a host that does not route
+   * runtimes through the proxy.
+   */
+  readonly network?: ProviderRuntimeProxiedNetwork;
 }
 
 export interface AcpConfinementPort {
@@ -81,6 +92,8 @@ export interface AcpProcessStartInput {
   readonly profile: AcpProviderProfile;
   readonly binaryPath: string;
   readonly root: string;
+  /** The Project's extra folders, granted what `root` is granted. */
+  readonly extraFolders?: ReadonlyArray<string>;
   readonly managedHome: string;
   readonly mode: AcpSessionMode;
   readonly executionPolicy: ProviderExecutionPolicy;
@@ -108,6 +121,8 @@ export interface AcpProcessOptions {
   readonly shutdownTimeoutMs?: number;
   readonly startupTimeoutMs?: number;
   readonly stderrBytes?: number;
+  /** Routes the runtime through its own egress proxy below Full access. */
+  readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
 }
 
 export interface AcpConfinementOptions {
@@ -391,65 +406,13 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
             root,
           ),
         ];
-        // Full access is unrestricted except for the static MCP/skills/hooks
-        // denials. Darwin uses allow-default plus trailing denies. Linux binds
-        // the host root and overlays the same paths.
+        // Full access runs the agent as its own app does: no sandbox, no
+        // credential-file or extension denials. Octant's own file tools still
+        // refuse protected paths, and secrets are redacted from what it records.
         if (input.executionPolicy === "full-access") {
-          if (denyPaths.length === 0) {
-            return {
-              command: input.binaryPath,
-              args,
-              cwd: root,
-              environment: { ...input.environment, ...hostAuthentication.environment },
-            };
-          }
-          const launch = yield* Effect.try({
-            try: () => {
-              if (platform === "darwin") {
-                requireSandboxExec({ platform, sandboxPath });
-                return wrapCommandInSandboxExec({
-                  sandboxPath,
-                  executable: input.binaryPath,
-                  args,
-                  profile: [
-                    "(version 1)",
-                    "(allow default)",
-                    ...denyPaths.flatMap((path) => [
-                      seatbeltDenyRule("file-read*", path),
-                      seatbeltDenyRule("file-write*", path),
-                    ]),
-                  ].join("\n"),
-                });
-              }
-              if (platform === "linux") {
-                return buildLinuxAllowDefaultDenyLaunch(
-                  {
-                    executable: input.binaryPath,
-                    args,
-                    cwd: root,
-                    denyPaths,
-                  },
-                  { bwrapPath: sandboxPath },
-                );
-              }
-              throw new ProcessConfinementError(
-                "incompatible",
-                `${name} Full access extension denials require macOS or Linux.`,
-              );
-            },
-            catch: (error) =>
-              failure(
-                error instanceof ProcessConfinementError && error.reason === "invalid-configuration"
-                  ? "invalid-configuration"
-                  : "incompatible",
-                error instanceof ProcessConfinementError
-                  ? error.message
-                  : `${name} Full access extension denials could not be prepared.`,
-              ),
-          });
           return {
-            command: launch.command,
-            args: launch.args,
+            command: input.binaryPath,
+            args,
             cwd: root,
             environment: { ...input.environment, ...hostAuthentication.environment },
           };
@@ -460,14 +423,17 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
         // Connection checks are not Chat threads. They must reach the
         // provider's own control plane to authenticate and discover models,
         // while remaining read-only and rooted in the managed home.
-        const networkEgress = materializeOsNetworkEgress(
-          input.purpose === "probe"
-            ? resolveProbeEgressPolicy()
-            : resolveProviderRuntimeEgressPolicy({
-                mode: input.mode,
-                executionPolicy: input.executionPolicy,
-              }),
-        );
+        const networkEgress =
+          input.network === undefined
+            ? materializeOsNetworkEgress(
+                input.purpose === "probe"
+                  ? resolveProbeEgressPolicy()
+                  : resolveProviderRuntimeEgressPolicy({
+                      mode: input.mode,
+                      executionPolicy: input.executionPolicy,
+                    }),
+              )
+            : ({ kind: "proxied", endpoint: input.network.endpoint } as const);
         const confinement = makeProcessConfinementLive({
           platform,
           sandboxPath,
@@ -503,6 +469,10 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
               executable: input.binaryPath,
               args,
               boundRoot: root,
+              // Chat runs in the managed home and has no Project folders.
+              ...(input.mode === "chat" || input.extraFolders === undefined
+                ? {}
+                : { extraBoundRoots: input.extraFolders }),
               temporaryDirectory,
               networkEgress,
               writeBoundRoot: !(input.executionPolicy === "plan" || input.mode === "chat"),
@@ -557,7 +527,11 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
           command: launch.command,
           args: launch.args,
           cwd: root,
-          environment: { ...input.environment, ...hostAuthentication.environment },
+          environment: {
+            ...input.environment,
+            ...hostAuthentication.environment,
+            ...input.network?.environment,
+          },
         };
       }),
   };
@@ -1178,16 +1152,29 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           executionPolicy: input.executionPolicy,
           ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
         });
+        const network =
+          input.executionPolicy === "full-access"
+            ? undefined
+            : yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
+                runtime: "acp",
+                profileId: profile.kind,
+                root: input.root,
+                executionPolicy: input.executionPolicy,
+                loopbackPorts: input.loopbackPorts ?? [],
+                environment,
+              });
         const launch = yield* confinement.prepare({
           profile,
           binaryPath: input.binaryPath,
           root: input.root,
+          ...(input.extraFolders === undefined ? {} : { extraFolders: input.extraFolders }),
           managedHome: input.managedHome,
           mode: input.mode,
           executionPolicy: input.executionPolicy,
           ...(input.purpose === undefined ? {} : { purpose: input.purpose }),
           environment,
           ...(input.loopbackPorts === undefined ? {} : { loopbackPorts: input.loopbackPorts }),
+          ...(network === undefined ? {} : { network }),
         });
         const managed = yield* Effect.acquireRelease(
           acquireConnection(

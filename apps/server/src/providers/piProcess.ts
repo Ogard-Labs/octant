@@ -44,6 +44,11 @@ import {
   resolveProviderRuntimeEgressPolicy,
 } from "../process/threadEgressPolicy";
 import type { PiManagedToolBridgeConfig } from "./piManagedTools";
+import {
+  acquireProviderRuntimeNetwork,
+  type ProviderRuntimeNetworkPort,
+  type ProviderRuntimeProxiedNetwork,
+} from "../network/providerRuntimeNetwork";
 
 export type PiSessionMode = "chat" | "work" | "code";
 
@@ -56,8 +61,12 @@ export interface PiLaunchSpec {
 
 export interface PiConfinementPort {
   readonly prepare: (input: {
+    /** The launch's own egress proxy below Full access; absent keeps open network. */
+    readonly network?: ProviderRuntimeProxiedNetwork;
     readonly binaryPath: string;
     readonly root: string;
+    /** The Project's extra folders, granted what `root` is granted. */
+    readonly extraFolders?: ReadonlyArray<string>;
     readonly piHome: string;
     readonly sessionDirectory: string;
     readonly sessionId: string;
@@ -82,6 +91,8 @@ export interface PiProcessPort {
   readonly start: (input: {
     readonly binaryPath: string;
     readonly root: string;
+    /** The Project's extra folders, granted what `root` is granted. */
+    readonly extraFolders?: ReadonlyArray<string>;
     readonly piHome: string;
     readonly sessionDirectory: string;
     readonly sessionId: string;
@@ -111,6 +122,8 @@ export interface PiProcessOptions {
   readonly inheritedEnvironment?: NodeJS.ProcessEnv;
   readonly shutdownTimeoutMs?: number;
   readonly versionTimeoutMs?: number;
+  /** Routes the runtime through its own egress proxy below Full access. */
+  readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
 }
 
 const SIDE_EFFECT_TOOLS = ["bash", "edit", "write"] as const;
@@ -604,12 +617,15 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
         // read-metadata on that link before it can resolve to the realpath.
         const configuredBinaryDirectory = dirname(input.binaryPath);
         const packageRoot = packageRootAbove(dirname(resolvedBinaryPath));
-        const networkEgress = materializeOsNetworkEgress(
-          resolveProviderRuntimeEgressPolicy({
-            mode: input.mode,
-            executionPolicy: input.executionPolicy,
-          }),
-        );
+        const networkEgress =
+          input.network === undefined
+            ? materializeOsNetworkEgress(
+                resolveProviderRuntimeEgressPolicy({
+                  mode: input.mode,
+                  executionPolicy: input.executionPolicy,
+                }),
+              )
+            : ({ kind: "proxied", endpoint: input.network.endpoint } as const);
         if (input.toolBridge !== undefined && platform === "linux" && networkEgress !== "allow") {
           return yield* Effect.fail(
             failure(
@@ -632,6 +648,9 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
               executable: input.binaryPath,
               args,
               boundRoot: root,
+              ...(input.mode === "chat" || input.extraFolders === undefined
+                ? {}
+                : { extraBoundRoots: input.extraFolders }),
               temporaryDirectory: temporaryDirectoryPath,
               networkEgress,
               writeBoundRoot: !(input.executionPolicy === "plan" || input.mode === "chat"),
@@ -676,10 +695,25 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
           command: launch.command,
           args: launch.args,
           cwd: root,
-          environment,
+          environment:
+            input.network === undefined
+              ? environment
+              : { ...environment, ...input.network.environment },
         };
       }),
   };
+}
+
+/** The loopback port of the tool bridge URL, which the runtime's proxy lets through to its own launch. */
+function loopbackPortOf(bridge: PiManagedToolBridgeConfig | undefined): ReadonlyArray<number> {
+  if (bridge === undefined) return [];
+  try {
+    const url = new URL(bridge.url);
+    const port = Number(url.port);
+    return Number.isInteger(port) && port > 0 ? [port] : [];
+  } catch {
+    return [];
+  }
 }
 
 function wait(milliseconds: number): Promise<void> {
@@ -747,7 +781,21 @@ export function makePiProcessLive(options: PiProcessOptions = {}): PiProcessPort
             input.executionPolicy === "full-access" ? "disabled" : "enabled",
             input.modelProvider,
           );
-          const launch = yield* confinement.prepare({ ...input, environment: baseEnvironment });
+          const network =
+            input.executionPolicy === "full-access"
+              ? undefined
+              : yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
+                  runtime: "pi",
+                  root: input.root,
+                  executionPolicy: input.executionPolicy,
+                  loopbackPorts: loopbackPortOf(input.toolBridge),
+                  environment: baseEnvironment,
+                });
+          const launch = yield* confinement.prepare({
+            ...input,
+            environment: baseEnvironment,
+            ...(network === undefined ? {} : { network }),
+          });
           const versionProbe = prepareConfinedVersionProbe({
             binaryPath: input.binaryPath,
             displayName: "Pi",

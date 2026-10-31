@@ -25,6 +25,7 @@ import {
   applyProvenanceToThreadTaint,
   hasThreadExternalContentReference,
   readApprovalOutsideContent,
+  readShieldWatcherLabels,
   readThreadExternalContentState,
   readThreadExternalContentTaint,
 } from "./externalContentTaintProjection";
@@ -415,6 +416,41 @@ describe("a cleared thread in the taint projection", () => {
     }
     expect(projectionRows(restarted.connection)).toEqual(live);
     restarted.connection.close();
+  });
+});
+
+describe("what Octant Shield's Watcher found", () => {
+  it("reads the label kinds a thread's results earned and forgets them with a clear", () => {
+    const connection = openMigrated();
+    try {
+      const projection = new ExternalContentTaintProjection();
+      const watched = (sourceLabel: string, version: number, thread = threadId) =>
+        envelope({
+          threadId: thread,
+          version,
+          sequence: version + (thread === threadId ? 0 : 10),
+          provenance: { origin: "tool-result", sourceLabel },
+          contentReference: `${sourceLabel}-${String(version)}`,
+        });
+      projection.apply(connection, watched("web-fetch", 1));
+      projection.apply(connection, watched("shield-watcher-fake-authority", 2));
+      projection.apply(connection, watched("shield-watcher-agent-instructions", 3));
+      projection.apply(connection, watched("shield-watcher-agent-instructions", 4));
+      projection.apply(connection, watched("shield-watcher-hidden-text", 1, otherThreadId));
+      // A label the contract does not know is never passed on.
+      projection.apply(connection, watched("shield-watcher-unknown", 5));
+
+      expect(readShieldWatcherLabels(connection, threadId)).toEqual([
+        "agent-instructions",
+        "fake-authority",
+      ]);
+      expect(readShieldWatcherLabels(connection, otherThreadId)).toEqual(["hidden-text"]);
+
+      projection.apply(connection, clearedEnvelope({ threadId, version: 6, sequence: 6 }));
+      expect(readShieldWatcherLabels(connection, threadId)).toEqual([]);
+    } finally {
+      connection.close();
+    }
   });
 });
 

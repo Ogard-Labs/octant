@@ -9,6 +9,7 @@ import type {
   ProviderContextBreakdown,
   ProviderExecutionPolicy,
   ProviderFailure,
+  ProviderNativeSetup,
   ProviderToolDefinition,
   ThreadPublishedSnapshot,
 } from "@octant/contracts";
@@ -17,6 +18,7 @@ import { createManagedMcpTools, type ManagedToolAnswer } from "./managedMcpTools
 import { Effect, Stream, type Scope } from "effect";
 
 import {
+  claudeOffersTool,
   decodeAccount,
   decodeAutoCompactThreshold,
   decodeContextBreakdown,
@@ -78,9 +80,17 @@ export interface ClaudeSandboxSettings {
   readonly allowUnsandboxedCommands: false;
   readonly filesystem: {
     readonly denyRead: readonly ["/"];
-    readonly allowRead: readonly [string];
-    readonly allowWrite: readonly [string];
+    /** The Project root, then its extra folders. */
+    readonly allowRead: readonly [string, ...string[]];
+    readonly allowWrite: readonly [string, ...string[]];
   };
+  /**
+   * The sandbox's commands reach the network only through this loopback
+   * port: Octant's egress proxy for the session. The Agent SDK's
+   * `sandbox.network.httpProxyPort` points the sandbox at an outside proxy
+   * instead of its own, so the proxy decides every host.
+   */
+  readonly network?: { readonly httpProxyPort: number };
 }
 
 export const CLAUDE_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -93,6 +103,8 @@ export function isClaudeEffortLevel(value: string): value is ClaudeEffortLevel {
 export interface ClaudeOpenQueryInput {
   readonly binaryPath: string;
   readonly projectRoot: string;
+  /** The Project's extra folders, granted what `projectRoot` is granted. */
+  readonly additionalDirectories?: ReadonlyArray<string>;
   readonly authEnvironment: Readonly<Record<string, string | undefined>>;
   readonly model: string;
   /** Agent SDK `effort` for the session; absent means the SDK default. */
@@ -119,6 +131,13 @@ export interface ClaudeOpenQueryInput {
    */
   readonly persistSession?: false;
   readonly tools: readonly string[];
+  /**
+   * What this session loads of the person's own Claude setup, already held to
+   * what the driver supports for the session's mode and posture. Absent opens
+   * the query with no setting sources, skills, agents, plugins, or MCP
+   * servers but Octant's own.
+   */
+  readonly nativeSetup?: ProviderNativeSetup;
   /** Decoder attestation for the one in-process server owned by this adapter. */
   readonly managedToolServer?: boolean;
   readonly sandbox?: ClaudeSandboxSettings;
@@ -376,6 +395,18 @@ export type ClaudeDecodedMessage =
       /** What the compacted window holds, in tokens, when the runtime said. */
       readonly postTokens?: number;
     }
+  | {
+      /** A reply from one of the runtime's own subagents, read only for the tools it calls. */
+      readonly kind: "child-assistant";
+      readonly sessionId: string;
+      /** The parent's `Agent` call that started the subagent. */
+      readonly parentToolUseId: string;
+      readonly toolUses: readonly {
+        readonly toolUseId: string;
+        readonly toolName: string;
+        readonly input: { readonly [key: string]: ClaudeJsonValue };
+      }[];
+    }
   | { readonly kind: "ignored" };
 
 export interface ClaudeUserMessage {
@@ -466,6 +497,61 @@ interface ClaudeAgentSdkHookOutput {
   };
 }
 
+/** The settings files a query reads: the account's home, the Project's, and the Project's local file. */
+export type ClaudeSettingSource = "user" | "project" | "local";
+
+/** Flag-level settings, which outrank every settings file the query reads. */
+export interface ClaudeFlagSettings {
+  readonly availableModels?: readonly string[];
+  readonly disableAllHooks?: true;
+  readonly autoMemoryEnabled?: false;
+}
+
+export interface ClaudeNativeQueryOptions {
+  readonly settingSources: ReadonlyArray<ClaudeSettingSource>;
+  readonly skills: readonly [] | "all";
+  readonly strictMcpConfig: boolean;
+  readonly settings: ClaudeFlagSettings;
+}
+
+/**
+ * How a query reads the person's own Claude setup. With none of it on, the
+ * query reads no settings file, enables no skill, and starts no MCP server
+ * but Octant's, which is how every session opened before this rule.
+ *
+ * The account's home settings are where its skills, plugins, and hooks live
+ * (`user`), so turning on skills or hooks reads that file; when hooks are off
+ * (Chat and Plan) a flag setting keeps every hook from running, and it
+ * outranks the file. Project settings and `.mcp.json` come only with the
+ * Project's own code: Claude Code reads a Project's skills only with the
+ * `project` source, which also loads that Project's hooks, so Project skills
+ * load in a trusted Project and not otherwise. The runtime has no switch that
+ * starts the account's MCP servers without also reading a Project's
+ * `.mcp.json` (`strictMcpConfig` governs both), so MCP servers start only
+ * with the Project's code. Claude's own memory stays off by flag as well as
+ * by its environment switch.
+ */
+export function claudeNativeQueryOptions(
+  setup: ProviderNativeSetup | undefined,
+): ClaudeNativeQueryOptions {
+  if (setup === undefined) {
+    return { settingSources: [], skills: [], strictMcpConfig: true, settings: {} };
+  }
+  const readsHome = setup.skills || setup.hooks || setup.projectCode;
+  const settingSources: ClaudeSettingSource[] = [];
+  if (readsHome) settingSources.push("user");
+  if (setup.projectCode) settingSources.push("project", "local");
+  return {
+    settingSources,
+    skills: setup.skills ? "all" : [],
+    strictMcpConfig: !setup.projectCode,
+    settings: {
+      ...(readsHome && !setup.hooks ? { disableAllHooks: true as const } : {}),
+      ...(readsHome ? { autoMemoryEnabled: false as const } : {}),
+    },
+  };
+}
+
 interface ClaudeAgentSdkInvocationOptions {
   readonly cwd: string;
   readonly env: Record<string, string | undefined>;
@@ -477,12 +563,12 @@ interface ClaudeAgentSdkInvocationOptions {
   readonly persistSession?: false;
   readonly permissionMode: ClaudePermissionMode;
   readonly allowDangerouslySkipPermissions?: true;
-  readonly settings?: { readonly availableModels: readonly string[] };
-  readonly settingSources: readonly [];
-  readonly skills: readonly [];
+  readonly settings?: ClaudeFlagSettings;
+  readonly settingSources: ReadonlyArray<ClaudeSettingSource>;
+  readonly skills: readonly [] | "all";
   readonly mcpServers: Readonly<Record<string, never>>;
-  readonly strictMcpConfig: true;
-  readonly additionalDirectories: readonly [];
+  readonly strictMcpConfig: boolean;
+  readonly additionalDirectories: readonly string[];
   readonly tools: readonly string[];
   readonly agents: Readonly<Record<string, never>>;
   readonly plugins: readonly [];
@@ -646,6 +732,8 @@ const SANDBOX_KEYS = [
   "filesystem",
 ] as const;
 const SANDBOX_FILESYSTEM_KEYS = ["allowRead", "allowWrite", "denyRead"] as const;
+/** The only network setting Octant sends: the session's egress proxy port. */
+const SANDBOX_NETWORK_KEYS = ["httpProxyPort"] as const;
 
 function hasExactKeys(
   value: unknown,
@@ -668,20 +756,34 @@ function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
     ) {
       return input.sandbox === undefined;
     }
-    if (!hasExactKeys(input.sandbox, SANDBOX_KEYS)) return false;
+    const sandbox = input.sandbox;
+    if (sandbox === undefined) return false;
+    const { network, ...rest } = sandbox;
+    if (!hasExactKeys(rest, SANDBOX_KEYS)) return false;
+    // A network setting is only ever the proxy port: anything that would let
+    // the sandbox pick its own domains, sockets, or bindings is refused.
     if (
-      input.sandbox.enabled !== true ||
-      input.sandbox.failIfUnavailable !== true ||
-      input.sandbox.autoAllowBashIfSandboxed !== false ||
-      input.sandbox.allowUnsandboxedCommands !== false ||
-      !hasExactKeys(input.sandbox.filesystem, SANDBOX_FILESYSTEM_KEYS)
+      network !== undefined &&
+      (!hasExactKeys(network, SANDBOX_NETWORK_KEYS) ||
+        !Number.isInteger(network.httpProxyPort) ||
+        network.httpProxyPort < 1 ||
+        network.httpProxyPort > 65_535)
+    ) {
+      return false;
+    }
+    if (
+      sandbox.enabled !== true ||
+      sandbox.failIfUnavailable !== true ||
+      sandbox.autoAllowBashIfSandboxed !== false ||
+      sandbox.allowUnsandboxedCommands !== false ||
+      !hasExactKeys(sandbox.filesystem, SANDBOX_FILESYSTEM_KEYS)
     ) {
       return false;
     }
     return (
-      isExactPathTuple(input.sandbox.filesystem.denyRead, "/") &&
-      isExactPathTuple(input.sandbox.filesystem.allowRead, input.projectRoot) &&
-      isExactPathTuple(input.sandbox.filesystem.allowWrite, input.projectRoot)
+      isExactPathTuple(sandbox.filesystem.denyRead, "/") &&
+      isExactPathTuple(sandbox.filesystem.allowRead, input.projectRoot) &&
+      isExactPathTuple(sandbox.filesystem.allowWrite, input.projectRoot)
     );
   } catch {
     return false;
@@ -709,9 +811,17 @@ function liveBridge(): ClaudeAgentSdkBridge {
         ...baseOptions,
         ...(settings === undefined
           ? {}
-          : { settings: { availableModels: [...settings.availableModels] } }),
+          : {
+              settings: {
+                ...(settings.availableModels === undefined
+                  ? {}
+                  : { availableModels: [...settings.availableModels] }),
+                ...(settings.disableAllHooks === undefined ? {} : { disableAllHooks: true }),
+                ...(settings.autoMemoryEnabled === undefined ? {} : { autoMemoryEnabled: false }),
+              },
+            }),
         settingSources: [...invocation.options.settingSources],
-        skills: [...invocation.options.skills],
+        skills: invocation.options.skills === "all" ? "all" : [],
         mcpServers: { ...invocation.options.mcpServers },
         additionalDirectories: [...invocation.options.additionalDirectories],
         tools: [...invocation.options.tools],
@@ -727,6 +837,9 @@ function liveBridge(): ClaudeAgentSdkBridge {
                   allowRead: [...sandbox.filesystem.allowRead],
                   allowWrite: [...sandbox.filesystem.allowWrite],
                 },
+                ...(sandbox.network === undefined
+                  ? {}
+                  : { network: { httpProxyPort: sandbox.network.httpProxyPort } }),
               },
             }),
         hooks: {
@@ -807,6 +920,9 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
           );
           const bindSpawn = options.spawnClaudeCodeProcess({
             projectRoot: input.projectRoot,
+            ...(input.additionalDirectories === undefined
+              ? {}
+              : { extraFolders: input.additionalDirectories }),
             executionPolicy: input.executionPolicy,
             runsCommands: input.tools.includes("Bash"),
           });
@@ -822,7 +938,9 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               if (initializedSessionId === undefined) {
                 return { behavior: "deny", message: "Claude session is not initialized." };
               }
-              if (callback.agentID !== undefined) {
+              // A subagent's call reaches the same gate as the parent's own, at the
+              // parent's posture, once the person let Claude run its subagents.
+              if (callback.agentID !== undefined && input.nativeSetup?.subagents !== true) {
                 return { behavior: "deny", message: "Claude subagent tool use is unavailable." };
               }
               if (requestsUnavailableBackgroundTool(toolName, toolInput)) {
@@ -834,7 +952,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               // This only authorizes forwarding to the app. The in-process
               // handler still waits for the server's tool policy and answer.
               if (isManagedTool(toolName)) return { behavior: "allow", updatedInput: toolInput };
-              if (!input.tools.includes(toolName)) {
+              if (!claudeOffersTool(input, toolName)) {
                 return {
                   behavior: "deny",
                   message: "Claude requested a tool outside the configured allowlist.",
@@ -860,7 +978,10 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
             };
             const preToolUse: ClaudeAgentSdkInvocationOptions["hooks"]["PreToolUse"][0]["hooks"][0] =
               async (hookInput, toolUseId, callback) => {
-                if (hookInput.agent_id !== undefined || hookInput.agent_type !== undefined) {
+                if (
+                  input.nativeSetup?.subagents !== true &&
+                  (hookInput.agent_id !== undefined || hookInput.agent_type !== undefined)
+                ) {
                   return {
                     hookSpecificOutput: {
                       hookEventName: "PreToolUse",
@@ -905,7 +1026,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                     },
                   };
                 }
-                if (!input.tools.includes(hookInput.tool_name)) {
+                if (!claudeOffersTool(input, hookInput.tool_name)) {
                   return {
                     hookSpecificOutput: {
                       hookEventName: "PreToolUse",
@@ -935,6 +1056,16 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   },
                 };
               };
+            const native = claudeNativeQueryOptions(input.nativeSetup);
+            const flagSettings: ClaudeFlagSettings = {
+              ...native.settings,
+              // Claude Code upgrades Haiku to Sonnet in Plan unless Sonnet is
+              // excluded. Keep the explicit selection local to this query.
+              ...(input.executionPolicy === "plan" &&
+              (input.model === "haiku" || input.model.startsWith("claude-haiku-"))
+                ? { availableModels: [input.model] }
+                : {}),
+            };
             const invocationOptions: ClaudeAgentSdkInvocationOptions = {
               cwd: input.projectRoot,
               env: {
@@ -948,12 +1079,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                 CLAUDE_CODE_ENABLE_TASKS: "false",
               },
               model: input.model,
-              // Claude Code upgrades Haiku to Sonnet in Plan unless Sonnet is
-              // excluded. Keep the explicit selection local to this query.
-              ...(input.executionPolicy === "plan" &&
-              (input.model === "haiku" || input.model.startsWith("claude-haiku-"))
-                ? { settings: { availableModels: [input.model] } }
-                : {}),
+              ...(Object.keys(flagSettings).length === 0 ? {} : { settings: flagSettings }),
               ...(input.effort === undefined ? {} : { effort: input.effort }),
               pathToClaudeCodeExecutable: input.binaryPath,
               ...(input.resumeSessionId === undefined ? {} : { resume: input.resumeSessionId }),
@@ -965,11 +1091,13 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               ...(input.executionPolicy === "full-access"
                 ? { allowDangerouslySkipPermissions: true }
                 : {}),
-              settingSources: [],
-              skills: [],
+              settingSources: native.settingSources,
+              skills: native.skills,
               mcpServers: {},
-              strictMcpConfig: true,
-              additionalDirectories: [],
+              strictMcpConfig: native.strictMcpConfig,
+              // The Project's extra folders, which Claude Code then counts as
+              // its workspace beside `cwd`; its sandbox lists them too.
+              additionalDirectories: [...(input.additionalDirectories ?? [])],
               tools: [...input.tools],
               agents: {},
               plugins: [],
@@ -984,6 +1112,9 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                         allowRead: [...input.sandbox.filesystem.allowRead] as [string],
                         allowWrite: [...input.sandbox.filesystem.allowWrite] as [string],
                       },
+                      ...(input.sandbox.network === undefined
+                        ? {}
+                        : { network: { httpProxyPort: input.sandbox.network.httpProxyPort } }),
                     },
                   }),
               // The SDK composes the launch and its `SpawnOptions` carry no

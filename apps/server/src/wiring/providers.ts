@@ -90,6 +90,7 @@ import type { CompatibleFetch } from "../providers/openAiCompatibleEndpoint";
 import { type ClaudeAgentSdkPort, makeClaudeAgentSdkPort } from "../providers/claudeAgentSdkPort";
 import type { ClaudeResumeIdentityPort } from "../providers/claudeDriver";
 import { type ClaudeProcessPort, makeClaudeProcessLive } from "../providers/claudeProcess";
+import type { ProviderRuntimeNetworkPort } from "../network/providerRuntimeNetwork";
 import { ClaudeResumeIdentityJournal } from "../providers/claudeResumeIdentityJournal";
 import { ClaudeResumeIdentityStore } from "../providers/claudeResumeIdentityStore";
 import { type CodexProcessPort, makeCodexProcessLive } from "../providers/codexProcess";
@@ -125,6 +126,7 @@ import { ProviderUsageReadingStore } from "../providers/providerUsageReadingStor
 import { HeldTurnContextFile, heldTurnContext } from "../providers/heldTurnContext";
 import { ProviderRuntimeUsageLimitsStore } from "../providers/providerRuntimeUsageLimitsStore";
 import { attachProviderRuntimeUsageLimits } from "../providers/providerRuntimeUsageLimitsDriver";
+import { redactProviderRuntimeSecrets } from "../providers/secretRedactingDriver";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { NativeHarnessLeadFallbackService } from "../harness/nativeHarnessLeadFallback";
 import { GeneratedImageStore } from "../image/generatedImageStore";
@@ -212,6 +214,8 @@ export interface ConfiguredProviderDriverOptions {
   readonly ohMyPiHome?: (instanceId: ProviderInstance["id"]) => string;
   readonly claudeProcess?: ClaudeProcessPort;
   readonly claudeSdk?: ClaudeAgentSdkPort;
+  /** Where Claude's command sandbox sends its network below Full access. */
+  readonly claudeRuntimeNetwork?: ProviderRuntimeNetworkPort;
   readonly claudeResumeIdentityPort?: ClaudeResumeIdentityPort;
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
   readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
@@ -347,6 +351,9 @@ export function makeConfiguredProviderDriver(
       ...(options.ohMyPiHome === undefined ? {} : { ohMyPiHome: options.ohMyPiHome }),
       ...(options.claudeProcess === undefined ? {} : { claudeProcess: options.claudeProcess }),
       ...(options.claudeSdk === undefined ? {} : { claudeSdk: options.claudeSdk }),
+      ...(options.claudeRuntimeNetwork === undefined
+        ? {}
+        : { claudeRuntimeNetwork: options.claudeRuntimeNetwork }),
       ...(options.claudeResumeIdentityPort === undefined
         ? {}
         : { claudeResumeIdentityPort: options.claudeResumeIdentityPort }),
@@ -380,9 +387,12 @@ export function makeConfiguredProviderDriver(
   if (localUsageHistory !== undefined) {
     driver = { ...driver, localUsageHistory };
   }
+  // Redaction comes first, so every consumer of the stream, the usage tap
+  // included, reads the redacted events.
+  const redacted = redactProviderRuntimeSecrets(driver);
   return options.onRuntimeEvent === undefined
-    ? driver
-    : attachProviderRuntimeUsageLimits(driver, { record: options.onRuntimeEvent });
+    ? redacted
+    : attachProviderRuntimeUsageLimits(redacted, { record: options.onRuntimeEvent });
 }
 
 /**
@@ -508,7 +518,7 @@ export type ProvidersDependencies = Pick<
     | "nativeHarnessRouter"
   > &
   Pick<HarnessStateWiring, "nativeHarnessSessions"> &
-  Pick<IntegrationsWiring, "githubExtensionSnapshot"> &
+  Pick<IntegrationsWiring, "githubExtensionSnapshot" | "providerRuntimeNetwork"> &
   Pick<ComputerUseWiring, "computerUseProcess"> &
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
   Pick<FoundationsWiring, "providerRuntimeRegistry" | "workThreadProjection">;
@@ -529,6 +539,7 @@ export function wireProviders(deps: ProvidersDependencies) {
     options,
     persistence,
     processAuthorityNow,
+    providerRuntimeNetwork,
     providerRuntimeRegistry,
     version,
     windowAuthorityStore,
@@ -569,10 +580,14 @@ export function wireProviders(deps: ProvidersDependencies) {
       if (directory === undefined) return;
       void providerAccountPlanUsageStore.recordWindow(event, directory).catch(() => undefined);
     };
-    const openCodeProcess = options.openCodeProcess ?? makeOpenCodeProcessLive();
-    const codexProcess = options.codexProcess ?? makeCodexProcessLive({ octantVersion: version });
-    const acpProcess = options.acpProcess ?? makeAcpProcessLive();
-    const piProcess = options.piProcess ?? makePiProcessLive();
+    // Below Full access each runtime reaches only its provider's endpoints,
+    // its Project's egress rules, and the person's safe networks.
+    const runtimeNetwork = providerRuntimeNetwork;
+    const openCodeProcess = options.openCodeProcess ?? makeOpenCodeProcessLive({ runtimeNetwork });
+    const codexProcess =
+      options.codexProcess ?? makeCodexProcessLive({ octantVersion: version, runtimeNetwork });
+    const acpProcess = options.acpProcess ?? makeAcpProcessLive({ runtimeNetwork });
+    const piProcess = options.piProcess ?? makePiProcessLive({ runtimeNetwork });
     const ohMyPiProcess = options.ohMyPiProcess ?? makeOhMyPiProcessLive();
     // An outside driver runs on the runtime that runs this server and on
     // nothing else: Bun in development, Electron's Node in the packaged app.
@@ -975,6 +990,9 @@ export function wireProviders(deps: ProvidersDependencies) {
       },
     });
     githubExtensionSnapshot.read = () => extensionApiService.snapshot();
+    // One store for the host: the folder picker issues a receipt through the
+    // extension routes, and installing a Browser extension consumes it.
+    const localPluginImportReceipts = new LocalPluginImportReceiptStore();
     const extensionRoutes = createExtensionRouteHandler({
       service: extensionApiService,
       windowAuthorityStore,
@@ -983,7 +1001,7 @@ export function wireProviders(deps: ProvidersDependencies) {
         ? {}
         : { desktopBridgeSecret: options.desktopBridgeSecret }),
       localPluginFolderRegistry,
-      localPluginImportReceipts: new LocalPluginImportReceiptStore(),
+      localPluginImportReceipts,
       userAddedMcpServers,
       agentToolingDiscovery,
       extensionProjectPins: {
@@ -1365,6 +1383,7 @@ export function wireProviders(deps: ProvidersDependencies) {
             nativeHarness: nativeHarnessEndpointHooks,
             claudeProcess,
             claudeSdk,
+            claudeRuntimeNetwork: runtimeNetwork,
             claudeResumeIdentityPort: claudeResumeIdentityStore,
             isProjectConfinedPath,
             get claudeInstances() {
@@ -1540,6 +1559,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       nativeHarness: nativeHarnessEndpointHooks,
       claudeProcess,
       claudeSdk,
+      claudeRuntimeNetwork: runtimeNetwork,
       claudeResumeIdentityPort: claudeResumeIdentityStore,
       isProjectConfinedPath,
       runtimeRegistry: providerRuntimeRegistry,
@@ -1771,6 +1791,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       extensionRoutes,
       generatedImageStore,
       imageJobService,
+      localPluginImportReceipts,
       localUsageHistoryRoutes,
       managedCodeThreadCreation,
       managedWorktreeRefsList,

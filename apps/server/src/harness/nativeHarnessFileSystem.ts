@@ -2,6 +2,7 @@ import { mkdir, readdir, readFile, realpath, lstat, stat, writeFile } from "node
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { classifyPathContainment } from "@octant/domain";
 import type { NativeHarnessToolResultBounds } from "@octant/contracts";
+import { secretGuardRefusal } from "../process/secretGuard";
 
 /** Directories a search never descends into unless the pattern names them. */
 const SKIPPED_DIRECTORY_NAMES = new Set([".git", "node_modules"]);
@@ -29,7 +30,15 @@ export type NativeHarnessFileRefusal =
    * The files' machine cannot be reached. Nothing reached the files. Kept so
    * a refusal recorded by an earlier build still reads.
    */
-  | "target-unavailable";
+  | "target-unavailable"
+  /** The secret guard's list names the file; `message` says which rule and channel. */
+  | "protected-file";
+
+export interface NativeHarnessFileRefused {
+  readonly kind: "refused";
+  readonly reason: NativeHarnessFileRefusal;
+  readonly message?: string;
+}
 
 export type NativeHarnessReadResult =
   | {
@@ -49,7 +58,7 @@ export type NativeHarnessReadResult =
         readonly kind: "file" | "directory" | "other";
       }>;
     }
-  | { readonly kind: "refused"; readonly reason: NativeHarnessFileRefusal };
+  | NativeHarnessFileRefused;
 
 export type NativeHarnessEditResult =
   | {
@@ -58,7 +67,7 @@ export type NativeHarnessEditResult =
       readonly replacements: number;
       readonly fuzzy: boolean;
     }
-  | { readonly kind: "refused"; readonly reason: NativeHarnessFileRefusal };
+  | NativeHarnessFileRefused;
 
 export type NativeHarnessWriteResult =
   | {
@@ -67,7 +76,7 @@ export type NativeHarnessWriteResult =
       readonly bytes: number;
       readonly created: boolean;
     }
-  | { readonly kind: "refused"; readonly reason: NativeHarnessFileRefusal };
+  | NativeHarnessFileRefused;
 
 export interface NativeHarnessGrepMatch {
   readonly path: string;
@@ -82,11 +91,11 @@ export type NativeHarnessGrepResult =
       readonly filesScanned: number;
       readonly bounds: NativeHarnessToolResultBounds;
     }
-  | { readonly kind: "refused"; readonly reason: NativeHarnessFileRefusal };
+  | NativeHarnessFileRefused;
 
 export type NativeHarnessGlobResult =
   | { readonly kind: "paths"; readonly paths: ReadonlyArray<string>; readonly truncated: boolean }
-  | { readonly kind: "refused"; readonly reason: NativeHarnessFileRefusal };
+  | NativeHarnessFileRefused;
 
 /**
  * The files a harness session's tools reach: a folder on this host, or a
@@ -98,9 +107,20 @@ export type NativeHarnessFileSystemPort = Pick<
 >;
 
 export interface NativeHarnessFileSystemOptions {
-  /** Absolute, already-canonical root every path is confined to. */
+  /** Absolute, already-canonical root relative paths resolve against. */
   readonly root: string;
+  /**
+   * The Project's extra folders, absolute and canonical. A path in one is
+   * inside the Project exactly as a path in `root` is.
+   */
+  readonly extraRoots?: ReadonlyArray<string>;
   readonly maxFileBytes?: number;
+  /**
+   * The secret guard's refusal for a path, or undefined. Defaults to this
+   * host's protected list; a Project that holds the home folder still never
+   * hands a key to these tools, at any level.
+   */
+  readonly protectedFileRefusal?: (path: string) => string | undefined;
 }
 
 /**
@@ -117,15 +137,36 @@ export interface NativeHarnessFileSystemOptions {
  */
 export class NativeHarnessFileSystem {
   readonly #root: string;
+  readonly #extraRoots: ReadonlyArray<string>;
   readonly #maxFileBytes: number;
   readonly #readMarks = new Map<string, string>();
+  readonly #protectedFileRefusal: (path: string) => string | undefined;
 
   constructor(options: NativeHarnessFileSystemOptions) {
     if (!isAbsolute(options.root)) {
       throw new Error("Native harness file system root must be absolute.");
     }
     this.#root = options.root.replace(/\/+$/, "");
+    if ((options.extraRoots ?? []).some((root) => !isAbsolute(root))) {
+      throw new Error("Native harness file system extra roots must be absolute.");
+    }
+    this.#extraRoots = (options.extraRoots ?? []).map((root) => root.replace(/\/+$/, ""));
     this.#maxFileBytes = options.maxFileBytes ?? 5 * 1024 * 1024;
+    this.#protectedFileRefusal =
+      options.protectedFileRefusal ?? ((path) => secretGuardRefusal(path));
+  }
+
+  /** A refusal naming the rule, for a path the secret guard protects. */
+  #protected(...paths: ReadonlyArray<string>): NativeHarnessFileRefused | undefined {
+    for (const path of paths) {
+      const message = this.#protectedFileRefusal(path);
+      if (message !== undefined) return { kind: "refused", reason: "protected-file", message };
+    }
+    return undefined;
+  }
+
+  #lexical(candidate: string): string {
+    return isAbsolute(candidate) ? candidate : resolve(this.#root, candidate);
   }
 
   get root(): string {
@@ -139,6 +180,8 @@ export class NativeHarnessFileSystem {
   }): Promise<NativeHarnessReadResult> {
     const resolved = await this.#contained(input.path);
     if (resolved === undefined) return { kind: "refused", reason: "path-escapes-root" };
+    const guarded = this.#protected(this.#lexical(input.path), resolved);
+    if (guarded !== undefined) return guarded;
     let info;
     try {
       info = await stat(resolved);
@@ -205,6 +248,8 @@ export class NativeHarnessFileSystem {
   }): Promise<NativeHarnessWriteResult> {
     const target = await this.#containedForWrite(input.path);
     if (target === undefined) return { kind: "refused", reason: "path-escapes-root" };
+    const guarded = this.#protected(this.#lexical(input.path), target);
+    if (guarded !== undefined) return guarded;
     let created = true;
     try {
       const existing = await lstat(target);
@@ -232,6 +277,8 @@ export class NativeHarnessFileSystem {
   }): Promise<NativeHarnessEditResult> {
     const resolved = await this.#contained(input.path);
     if (resolved === undefined) return { kind: "refused", reason: "path-escapes-root" };
+    const guarded = this.#protected(this.#lexical(input.path), resolved);
+    if (guarded !== undefined) return guarded;
     const mark = this.#readMarks.get(resolved);
     if (mark === undefined) return { kind: "refused", reason: "not-read-first" };
     let info;
@@ -336,11 +383,18 @@ export class NativeHarnessFileSystem {
     } catch {
       return { kind: "refused", reason: "path-not-found" };
     }
+    if (baseInfo.isFile()) {
+      const guarded = this.#protected(this.#lexical(input.path ?? "."), base);
+      if (guarded !== undefined) return guarded;
+    }
     const files = baseInfo.isFile()
       ? [{ path: base, isFile: true }]
       : this.#walk(base, SKIPPED_DIRECTORY_NAMES.has(firstSegment(input.path ?? "")));
     for await (const entry of files) {
       if (!entry.isFile) continue;
+      // A search across a folder passes over a protected file without
+      // opening it; naming the file itself is refused above.
+      if (this.#protected(entry.path) !== undefined) continue;
       const name = relative(base, entry.path).split(sep).join("/") || entry.path;
       if (include !== undefined && !include.test(name.split("/").at(-1) ?? name)) continue;
       let info;
@@ -433,7 +487,7 @@ export class NativeHarnessFileSystem {
     } catch {
       return undefined;
     }
-    return classifyPathContainment(this.#root, canonical) === "contained" ? canonical : undefined;
+    return this.#inProject(canonical) ? canonical : undefined;
   }
 
   async #containedForWrite(candidate: string): Promise<string | undefined> {
@@ -458,7 +512,7 @@ export class NativeHarnessFileSystem {
         const contained = await this.#contained(ancestor);
         if (contained === undefined) return undefined;
         const target = join(contained, ...trailing.reverse());
-        return classifyPathContainment(this.#root, target) === "contained" ? target : undefined;
+        return this.#inProject(target) ? target : undefined;
       }
       trailing.push(ancestor.slice(dirname(ancestor).length + 1));
       ancestor = dirname(ancestor);
@@ -466,7 +520,16 @@ export class NativeHarnessFileSystem {
     return undefined;
   }
 
+  #inProject(canonical: string): boolean {
+    return [this.#root, ...this.#extraRoots].some(
+      (root) => classifyPathContainment(root, canonical) === "contained",
+    );
+  }
+
   #display(canonical: string): string {
+    // A file in an extra folder is named by its absolute path, since a path
+    // relative to the root would read as climbing out of it.
+    if (classifyPathContainment(this.#root, canonical) !== "contained") return canonical;
     const rel = relative(this.#root, canonical);
     return rel === "" ? "." : rel.split(sep).join("/");
   }

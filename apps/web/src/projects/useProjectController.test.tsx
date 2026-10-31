@@ -641,4 +641,67 @@ describe("useProjectController", () => {
       receiptId,
     });
   });
+  it("sends the add and remove extra folder commands under the current version and reports a refusal as a value", async () => {
+    const server = client();
+    vi.mocked(server.api.executeProject)
+      .mockResolvedValueOnce({} as never)
+      .mockResolvedValueOnce({} as never)
+      .mockRejectedValueOnce({
+        category: "invalid",
+        message: "Your home folder cannot be added to a Project.",
+      });
+    const { result } = renderHook(() =>
+      useProjectController({ activeMode: "code", activeProjectId: codeId, client: server.api }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    const receiptId = `${"R".repeat(42)}A`;
+
+    let added: unknown;
+    let removed: unknown;
+    let refused: unknown;
+    await act(async () => {
+      added = await result.current.addExtraFolder(codeId, receiptId);
+    });
+    await act(async () => {
+      removed = await result.current.removeExtraFolder(codeId, "/Users/example/Dev/Research");
+    });
+    await act(async () => {
+      refused = await result.current.addExtraFolder(codeId, receiptId);
+    });
+
+    expect(server.api.executeProject).toHaveBeenNthCalledWith(1, {
+      kind: "add-project-extra-folder",
+      projectId: codeId,
+      expectedVersion: 1,
+      receiptId,
+    });
+    expect(server.api.executeProject).toHaveBeenNthCalledWith(2, {
+      kind: "remove-project-extra-folder",
+      projectId: codeId,
+      expectedVersion: 1,
+      canonicalRoot: "/Users/example/Dev/Research",
+    });
+    expect(added).toEqual({ status: "changed" });
+    expect(removed).toEqual({ status: "changed" });
+    expect(refused).toEqual({
+      status: "refused",
+      message: "Your home folder cannot be added to a Project.",
+    });
+  });
+
+  it("refuses to add an extra folder to a Chat Project without sending a command", async () => {
+    const server = client();
+    const { result } = renderHook(() =>
+      useProjectController({ activeMode: "chat", activeProjectId: chatId, client: server.api }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    let outcome: unknown;
+    await act(async () => {
+      outcome = await result.current.addExtraFolder(chatId, `${"R".repeat(42)}A`);
+    });
+
+    expect(outcome).toMatchObject({ status: "refused" });
+    expect(server.api.executeProject).not.toHaveBeenCalled();
+  });
 });

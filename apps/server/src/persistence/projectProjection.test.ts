@@ -10,7 +10,7 @@ import {
   type Project,
 } from "@octant/contracts";
 import { afterEach, describe, expect, it } from "vitest";
-import { defaultPermissionModeFor } from "@octant/domain/guardrail-policy";
+import { chosenAutoReviewer, defaultPermissionModeFor } from "@octant/domain/guardrail-policy";
 import { Journal } from "./journal";
 import { applyMigrations, MIGRATIONS } from "./migrations";
 import {
@@ -201,6 +201,55 @@ describe("ProjectProjection", () => {
     );
 
     expect(readProject(connection, code.id)).toEqual(code);
+    connection.close();
+  });
+
+  it("replays a person trusting key providers in a Work Project", () => {
+    const connection = openConnection();
+    const projection = new ProjectProjection();
+    const trusted = decodeProject({ ...work, nativeProviders: ["claude", "codex"], version: 2 });
+    projection.apply(
+      connection,
+      envelope({
+        eventName: "project.native-providers-changed@1",
+        aggregateType: "project",
+        aggregateId: trusted.id,
+        aggregateVersion: trusted.version,
+        payload: { project: trusted },
+      }),
+    );
+    expect(readProject(connection, trusted.id)).toEqual(trusted);
+    connection.close();
+  });
+
+  it("replays a Project's Auto reviewer, which overrides Settings for its threads", () => {
+    const connection = openConnection();
+    const projection = new ProjectProjection();
+    const code = decodeProject({
+      ...work,
+      type: "code",
+      codeAccessPersistence: "current-session",
+      autoReviewer: "octant-shield",
+      version: 2,
+    });
+    projection.apply(
+      connection,
+      envelope({
+        eventName: "project.code-auto-reviewer-changed@1",
+        aggregateType: "project",
+        aggregateId: code.id,
+        aggregateVersion: code.version,
+        payload: { project: code },
+      }),
+    );
+    const replayed = readProject(connection, code.id);
+    expect(replayed).toEqual(code);
+    expect(
+      chosenAutoReviewer({
+        project: replayed?.type === "code" ? replayed : undefined,
+        settings: { autoReviewer: "provider" },
+      }),
+    ).toBe("octant-shield");
     connection.close();
   });
 
