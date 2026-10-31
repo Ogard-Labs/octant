@@ -2,6 +2,7 @@ import type { CodeThread, ProviderModelId, WorkThread } from "@octant/contracts"
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type { ShieldCall } from "@octant/domain/shield-judge-policy";
 import { describe, expect, it, vi } from "vitest";
+import { shieldRoutesApprovals } from "@octant/domain/guardrail-policy";
 import { createHostShield, type HostShieldDependencies } from "./hostShield";
 
 const threadId = "00000000-0000-4000-8000-000000000061";
@@ -214,5 +215,55 @@ describe("Octant Shield as the host wires it", () => {
     const shield = hostShieldWith(thread(), { chosenModel: () => chosen, resolveDriver });
     expect(shield.availableFor(providerInstanceId as never)).toBe(true);
     expect(resolveDriver).toHaveBeenCalledWith(chosen.providerInstanceId);
+  });
+
+  describe("on a Work thread", () => {
+    const work = (access: WorkThread["access"] = "auto") =>
+      ({
+        id: threadId,
+        lifecycle: "active",
+        projectId: "00000000-0000-4000-8000-0000000000b6",
+        providerInstanceId,
+        modelId: "big-model",
+        access,
+      }) as unknown as WorkThread;
+    const review = (shield: ReturnType<typeof hostShieldWith>) =>
+      shield.review({ threadId, call: command("git status"), boundRoot: "/Users/dev/app" });
+
+    it("reviews every runtime that sends its approvals to Octant, and no other", async () => {
+      const kinds = {
+        claude: "claude",
+        codex: "codex",
+        opencode: "opencode",
+        pi: "pi",
+        acp: "gemini",
+        direct: "anthropic-compatible",
+        silent: "ollama",
+      } as const;
+      for (const [label, driverKind] of Object.entries(kinds)) {
+        const routes = shieldRoutesApprovals(driverKind);
+        const shield = hostShieldWith(thread(), {
+          readCodeThread: () => undefined,
+          readWorkThread: () => work(),
+          routesApprovals: () => routes,
+        });
+        const decision = await review(shield);
+        // A runtime that decides inside itself without asking cannot be reviewed.
+        expect(decision === undefined, label).toBe(!routes);
+        if (routes) expect(decision, label).toMatchObject({ verdict: "allow" });
+      }
+    });
+
+    it("leaves a runtime's own reviewer in charge until the person chose Shield", async () => {
+      const shieldFor = (chosen: "octant-shield" | undefined) =>
+        hostShieldWith(thread(), {
+          readCodeThread: () => undefined,
+          readWorkThread: () => work(),
+          providerCapabilities: () => ({ harnessAutoReview: "supported" }),
+          chosenReviewer: () => chosen,
+        });
+      expect(await review(shieldFor(undefined))).toBeUndefined();
+      expect(await review(shieldFor("octant-shield"))).toMatchObject({ verdict: "allow" });
+    });
   });
 });

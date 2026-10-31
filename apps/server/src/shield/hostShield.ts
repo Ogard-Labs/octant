@@ -65,7 +65,7 @@ export interface HostShieldDependencies {
   /** The person's chosen Shield model, when they picked one. */
   readonly chosenModel?: () => ShieldModelChoice | undefined;
   /** The person's Auto reviewer for a thread: its Project's, else Settings'. */
-  readonly chosenReviewer?: (thread: CodeThread) => AutoReviewer | undefined;
+  readonly chosenReviewer?: (thread: CodeThread | WorkThread) => AutoReviewer | undefined;
   readonly spendCeiling?: Pick<SpendCeilingService, "admit" | "settle" | "abandon">;
   /**
    * Records what one review's model call used under the reviewed thread, so
@@ -174,8 +174,7 @@ export function createHostShield(deps: HostShieldDependencies): HostShield {
         if (subject === undefined || subject.thread.lifecycle !== "active") return undefined;
         const thread = subject.thread;
         const reviews = shieldReviewsPrompts({
-          reviewer:
-            subject.kind === "code-thread" ? deps.chosenReviewer?.(subject.thread) : undefined,
+          reviewer: deps.chosenReviewer?.(thread),
           access: subject.access,
           capabilities: {
             providerReview:

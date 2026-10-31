@@ -1,6 +1,7 @@
 import type { ProviderChildActivityEvent, TurnStopReason } from "@octant/contracts";
 import {
   observeTurnMetrics,
+  recordThreadShieldReview,
   recordThreadToolStep,
   startTurnMetrics,
   workThreadAccessOf,
@@ -249,6 +250,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
           message: RUNTIME_OUTSIDE_CONTENT_REFUSAL,
         });
       }
+      let toolSteps: ThreadToolSteps | undefined;
       const connection = yield* input.driver.acquire({
         instanceId: input.command.authority.providerInstanceId,
         projectRoot: input.projectRoot,
@@ -258,6 +260,13 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
           projectId: input.command.authority.projectId,
           threadId: input.command.threadId,
           sessionId: input.providerSessionId,
+          signal: input.signal,
+          // Octant Shield's answer to an approval shows on the transcript
+          // beside the turn's tool rows.
+          onApprovalReviewed: (review) => {
+            toolSteps = recordThreadShieldReview(toolSteps, review);
+            input.onToolSteps?.(toolSteps);
+          },
         },
       });
       yield* Effect.addFinalizer(() =>
@@ -311,7 +320,6 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       // New tasks a full plan turned away, kept until the restatement that
       // follows them can drop the tasks they replace.
       const turnedAwayTasks = new Map<string, ThreadTaskProgress>();
-      let toolSteps: ThreadToolSteps | undefined;
       let terminal: ProviderRuntimeEvent | undefined;
       const pendingRequestHolds = new Map<string, Deferred.Deferred<void>>();
       const pendingRequestCleanups = new Map<string, () => void>();

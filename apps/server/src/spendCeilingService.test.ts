@@ -330,6 +330,56 @@ describe("SpendCeilingService", () => {
     expect(admission.status).toBe("refused");
   });
 
+  it("counts Octant Shield's reviews against the reviewed Work thread's ceiling", () => {
+    const { connection, journal, service } = openService();
+    const ledger = { connection, journal, clock: () => now, uuid: () => crypto.randomUUID() };
+    // A Work thread has a journal of its own, which tells its reviews from a Code thread's.
+    connection
+      .prepare(
+        `INSERT INTO event_journal (
+          event_id, aggregate_type, aggregate_id, aggregate_version, event_name,
+          event_version, correlation_id, actor_kind, actor_id, occurred_at, payload_json
+        ) VALUES (?, 'work-thread', ?, 1, 'work.thread-created@1', 1, ?, 'system', ?, ?, '{}')`,
+      )
+      .run(crypto.randomUUID(), ids.thread, crypto.randomUUID(), "local", now);
+    service.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "thread", threadType: "work-thread", threadId: ids.thread },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { tokenBudget: 1_000 },
+      window: { kind: "lifetime" },
+    });
+    for (const usage of [
+      { inputTokens: 500, outputTokens: 20 },
+      { inputTokens: 360, outputTokens: 20 },
+    ]) {
+      recordShieldReviewUsage(ledger, {
+        threadId: ids.thread,
+        providerInstanceId: ids.provider as never,
+        modelId: "small-model" as never,
+        usage,
+      });
+    }
+    expect(
+      remainingOf(
+        service.snapshot({
+          principalKind: "local-window",
+          threadId: ids.thread,
+          threadType: "work-thread",
+        }),
+        "thread",
+      ),
+    ).toMatchObject({ committedTokens: 900 });
+    const admission = service.admit({
+      reservationId: ids.reservationA,
+      threadId: ids.thread,
+      threadType: "work-thread",
+      turnUpperBoundTokens: 200,
+      countsAsTurn: false,
+    });
+    expect(admission.status).toBe("refused");
+  });
+
   it("counts a child run under another thread of the same Project against the Project ceiling", () => {
     const { connection, journal, service } = openService();
     const sibling = "73000000-0000-4000-8000-000000000011";

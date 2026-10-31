@@ -12,6 +12,8 @@ import {
 import { Effect, Schema, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
+import type { ShieldDecision } from "@octant/contracts";
+import type { ShieldReviewPort } from "../shield/octantShield";
 import { attachWorkRequestRuntime, WorkRequestRuntime } from "./workRequestRuntime";
 
 const projectId = decodeProjectId("00000000-0000-4000-8000-000000000901");
@@ -441,6 +443,174 @@ describe("WorkRequestRuntime", () => {
       sessionId,
       requestId: "approval-1",
       approved: true,
+    });
+  });
+
+  describe("with Octant Shield answering a Work thread's approvals", () => {
+    // Each runtime names its pending call its own way; Shield judges the
+    // connection's call, never the event's text.
+    const runtimes = [
+      { runtime: "Claude Code", tool: "Bash", input: '{"command":"git status"}' },
+      { runtime: "Codex", tool: "shell", input: '{"command":["git","status"]}' },
+      { runtime: "OpenCode", tool: "bash", input: '{"command":"git status"}' },
+      { runtime: "an ACP agent", tool: "execute", input: '{"command":"git status"}' },
+      { runtime: "Pi", tool: "bash", input: '{"command":"git status"}' },
+    ] as const;
+    const decision = (verdict: ShieldDecision["verdict"]): ShieldDecision => ({
+      reviewer: "octant-shield",
+      verdict,
+      stage: "fast-allow",
+      rule: "read-only-git",
+      reason: "A read-only Git command.",
+      latencyMs: 1,
+      decidedAt: decodeTimestamp("2026-10-31T10:00:00.000Z"),
+    });
+    const approval: ProviderRuntimeEvent = {
+      instanceId: providerInstanceId,
+      sequence: 1,
+      correlationId: decodeCorrelationId(String(projectId)),
+      occurredAt: decodeTimestamp("2026-10-31T10:00:00.000Z"),
+      kind: "approval-request",
+      sessionId,
+      requestId: "approval-1",
+      action: "run-terminal-command",
+      description: "Run git status in [CHECKOUT]",
+    };
+
+    async function runTurn(input: {
+      readonly tool: string;
+      readonly input: string;
+      readonly review: ShieldReviewPort["review"] | undefined;
+      readonly answerFails?: boolean;
+      readonly extraFolders?: ReadonlyArray<string>;
+    }) {
+      const record = vi.fn((_input: unknown) => ({ status: "ok" as const, request: {} as never }));
+      const answerApproval = vi.fn((_answer: unknown) =>
+        input.answerFails === true
+          ? Effect.fail({ category: "provider-failed" as const, message: "gone" })
+          : Effect.void,
+      );
+      const reviewed = vi.fn();
+      const runtime = new WorkRequestRuntime({
+        requests: { record, interruptSession: vi.fn(() => []) } as never,
+        uuid: () => "00000000-0000-4000-8000-000000000905",
+        shield: () => (input.review === undefined ? undefined : { review: input.review }),
+      });
+      const connection = {
+        subscribe: Effect.succeed(Stream.succeed(approval)),
+        answerApproval,
+        answerUserInput: () => Effect.void,
+        interrupt: () => Effect.void,
+        approvalCall: () => ({ tool: input.tool, input: input.input }),
+      };
+      const attached = attachWorkRequestRuntime(
+        { acquire: () => Effect.succeed(connection) } as unknown as ProviderDriver,
+        () => runtime,
+      );
+      const received: ProviderRuntimeEvent[] = [];
+      // The session's scope stays open for the whole turn, as in production.
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const acquired = yield* attached.acquire({
+              instanceId: providerInstanceId,
+              projectRoot: "/work",
+              ...(input.extraFolders === undefined ? {} : { extraFolders: input.extraFolders }),
+              mode: "work",
+              workRequest: { projectId, threadId, sessionId, onApprovalReviewed: reviewed },
+            });
+            yield* Stream.unwrapScoped(acquired.subscribe).pipe(
+              Stream.runForEach((next) => Effect.sync(() => received.push(next))),
+            );
+          }),
+        ),
+      );
+      return { record, answerApproval, reviewed, received };
+    }
+
+    for (const { runtime, tool, input } of runtimes) {
+      it(`answers ${runtime}'s allowed call once without asking the person`, async () => {
+        const review = vi.fn(async () => decision("allow"));
+        const turn = await runTurn({ tool, input, review });
+        expect(review).toHaveBeenCalledWith(
+          expect.objectContaining({ threadId: String(threadId), boundRoot: "/work" }),
+        );
+        expect(turn.answerApproval).toHaveBeenCalledWith({
+          sessionId,
+          requestId: "approval-1",
+          approved: true,
+          scope: "once",
+        });
+        expect(turn.record).not.toHaveBeenCalled();
+        expect(turn.received).toEqual([]);
+        expect(turn.reviewed).toHaveBeenCalledWith(
+          expect.objectContaining({ requestId: "approval-1", toolName: tool }),
+        );
+      });
+
+      it(`refuses ${runtime}'s denied call once without asking the person`, async () => {
+        const turn = await runTurn({ tool, input, review: async () => decision("deny") });
+        expect(turn.answerApproval).toHaveBeenCalledWith({
+          sessionId,
+          requestId: "approval-1",
+          approved: false,
+          scope: "once",
+        });
+        expect(turn.record).not.toHaveBeenCalled();
+      });
+
+      it(`hands ${runtime}'s call to the person when Shield asks, and still shows the decision`, async () => {
+        const turn = await runTurn({ tool, input, review: async () => decision("ask") });
+        expect(turn.answerApproval).not.toHaveBeenCalled();
+        expect(turn.record).toHaveBeenCalledOnce();
+        expect(turn.received).toEqual([approval]);
+        expect(turn.reviewed).toHaveBeenCalledWith(
+          expect.objectContaining({ decision: expect.objectContaining({ verdict: "ask" }) }),
+        );
+      });
+    }
+
+    it("judges a call in the Project's extra folders as it judges one in the root", async () => {
+      const review = vi.fn(async () => decision("allow"));
+      await runTurn({ tool: "Bash", input: "{}", review, extraFolders: ["/shared"] });
+      expect(review).toHaveBeenCalledWith(
+        expect.objectContaining({ boundRoot: "/work", extraRoots: ["/shared"] }),
+      );
+    });
+
+    it("asks the person when Shield does not review the thread", async () => {
+      const turn = await runTurn({
+        tool: "Bash",
+        input: "{}",
+        review: async () => undefined,
+      });
+      expect(turn.answerApproval).not.toHaveBeenCalled();
+      expect(turn.record).toHaveBeenCalledOnce();
+      expect(turn.reviewed).not.toHaveBeenCalled();
+    });
+
+    it("asks the person when Shield fails or no Shield is wired", async () => {
+      const failed = await runTurn({
+        tool: "Bash",
+        input: "{}",
+        review: async () => {
+          throw new Error("model unreachable");
+        },
+      });
+      expect(failed.record).toHaveBeenCalledOnce();
+      const unwired = await runTurn({ tool: "Bash", input: "{}", review: undefined });
+      expect(unwired.record).toHaveBeenCalledOnce();
+    });
+
+    it("asks the person when the runtime cannot take Shield's answer", async () => {
+      const turn = await runTurn({
+        tool: "Bash",
+        input: "{}",
+        review: async () => decision("allow"),
+        answerFails: true,
+      });
+      expect(turn.record).toHaveBeenCalledOnce();
+      expect(turn.received).toEqual([approval]);
     });
   });
 });

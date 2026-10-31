@@ -72,14 +72,23 @@ export function toolStepsActivity(
 ): TurnActivity | undefined {
   if (steps === undefined || steps.length === 0) return undefined;
   return {
-    rows: steps.map((step) => ({
-      kind: "tool" as const,
-      id: step.toolCallId,
-      toolName: step.toolName,
-      state: step.state,
-      ...(step.summary === undefined ? {} : { summary: step.summary }),
-      ...(step.published === undefined ? {} : { published: step.published }),
-    })),
+    rows: steps.map((step) =>
+      step.shield !== undefined
+        ? {
+            kind: "review" as const,
+            id: step.toolCallId,
+            summary: step.summary ?? step.toolName,
+            decision: step.shield,
+          }
+        : {
+            kind: "tool" as const,
+            id: step.toolCallId,
+            toolName: step.toolName,
+            state: step.state,
+            ...(step.summary === undefined ? {} : { summary: step.summary }),
+            ...(step.published === undefined ? {} : { published: step.published }),
+          },
+    ),
     reasoning: "",
     ...(truncated === true ? { truncated: true } : {}),
   };
