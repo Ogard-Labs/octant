@@ -4291,7 +4291,11 @@ function recoverWindowAfterRendererExit(reason: string): void {
 const quitShortcutGuard = createQuitShortcutGuard({
   now: () => performance.now(),
   showNotice: () => {
-    const window = BrowserWindow.getFocusedWindow() ?? mainWindow;
+    // An opened server page has no preload bridge, so a hint sent there is never
+    // shown; only a shell window that registered as a trusted renderer can show it.
+    const focused = BrowserWindow.getFocusedWindow();
+    const window =
+      focused !== null && trustedRendererWebContentsIds.has(focused) ? focused : mainWindow;
     if (window === undefined || window.isDestroyed()) return false;
     window.webContents.send(IPC_CHANNELS.quitShortcutHint);
     return true;
