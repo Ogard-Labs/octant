@@ -1122,10 +1122,11 @@ starts a Code session at the same level, and a Work turn journals `shell` and
 
 Allowed; not built yet: an ACP agent whose shell runs in-process with no protocol request reporting
 `unsupported` at Guarded and Reviewed and running only at Full access, in
-Work as in Code; and Octant Shield for the runtimes other than the Octant
-Harness with no reviewer of their own, which ask first at Auto today. A Work
-thread on the Octant Harness at Auto is answered by Shield as a Code thread
-is, judged against its Project folder.
+Work as in Code; and Octant Shield answering a Work thread's provider
+runtimes (Claude Code, Codex, OpenCode, ACP agents, Pi) at Auto as it answers
+a Code thread's: in Work their prompts go to the person today. A Work thread
+on the Octant Harness at Auto is answered by Shield as a Code thread is,
+judged against its Project folder.
 
 A driver that cannot run a Work session at the level in force reports so and
 keeps the narrower behavior; it never runs commands under a weaker guard
