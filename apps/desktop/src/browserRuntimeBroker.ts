@@ -2,7 +2,12 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { BrowserContextPolicy, BrowserProfileClearScope } from "@octant/contracts";
-import { decodeStoredBrowserProfile, MAX_BROWSER_TABS_PER_CONTEXT } from "@octant/contracts";
+import {
+  decodeImportedCookie,
+  decodeStoredBrowserProfile,
+  MAX_BROWSER_TABS_PER_CONTEXT,
+  MAX_COOKIES_PER_IMPORT_BATCH,
+} from "@octant/contracts";
 import type { BrowserProfileStore } from "./browserProfileStore";
 import {
   BrowserNavigationBlockedError,
@@ -22,7 +27,10 @@ const ROUTES = new Set([
   "/v1/contexts/close-all",
   "/v1/profiles/list",
   "/v1/profiles/clear",
+  "/v1/profiles/import-cookies",
 ]);
+/** A batch of cookies is larger than any other request, and is bounded by count too. */
+const IMPORT_BODY_LIMIT = 2 * 1_024 * 1_024;
 
 export interface BrowserRuntimeBroker {
   readonly url: string;
@@ -93,7 +101,7 @@ async function handleIncoming(
   profiles: BrowserProfileStore | undefined,
 ): Promise<Response> {
   if (brokerUrl === undefined) return failure("unavailable", 503);
-  const bytes = await readBody(incoming);
+  const bytes = await readBody(incoming, bodyLimitFor(incoming.url));
   if (bytes === undefined) return failure("too-large", 413);
   const headers = new Headers();
   for (const [name, value] of Object.entries(incoming.headers)) {
@@ -154,6 +162,13 @@ async function handleBrokerRequest(
       }
       await profiles.clear(target, body.scope);
       return Response.json({ ok: true });
+    }
+    if (url.pathname === "/v1/profiles/import-cookies") {
+      if (profiles === undefined) return failure("profiles-unavailable", 409);
+      const target = storedProfileOf(body.profile);
+      const cookies = importedCookiesOf(body.cookies);
+      if (target === undefined || cookies === undefined) return failure("invalid-request", 400);
+      return Response.json(await profiles.importCookies(target, cookies));
     }
     if (url.pathname === "/v1/contexts/create") {
       if (!isUuid(body.contextId) || !isOwner(body.owner) || !isPolicy(body.policy)) {
@@ -216,7 +231,7 @@ function isAuthorized(peerAddress: string, headers: Headers, token: string): boo
 async function jsonBody(request: Request): Promise<Record<string, unknown> | undefined> {
   try {
     const bytes = new Uint8Array(await request.arrayBuffer());
-    if (bytes.byteLength > BODY_LIMIT) return undefined;
+    if (bytes.byteLength > bodyLimitFor(new URL(request.url).pathname)) return undefined;
     const parsed: unknown = JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(bytes));
     return isRecord(parsed) ? parsed : undefined;
   } catch {
@@ -224,15 +239,19 @@ async function jsonBody(request: Request): Promise<Record<string, unknown> | und
   }
 }
 
-function readBody(incoming: IncomingMessage): Promise<Uint8Array | undefined> {
+function bodyLimitFor(path: string | undefined): number {
+  return path?.split("?")[0] === "/v1/profiles/import-cookies" ? IMPORT_BODY_LIMIT : BODY_LIMIT;
+}
+
+function readBody(incoming: IncomingMessage, limit: number): Promise<Uint8Array | undefined> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
     incoming.on("data", (chunk: Buffer) => {
       size += chunk.byteLength;
-      if (size <= BODY_LIMIT) chunks.push(chunk);
+      if (size <= limit) chunks.push(chunk);
     });
-    incoming.once("end", () => resolve(size <= BODY_LIMIT ? Buffer.concat(chunks) : undefined));
+    incoming.once("end", () => resolve(size <= limit ? Buffer.concat(chunks) : undefined));
     incoming.once("error", reject);
   });
 }
@@ -255,6 +274,15 @@ function isPolicy(value: unknown): boolean {
 function storedOrPrivateProfile(value: unknown): boolean {
   if (isRecord(value) && value.kind === "private" && Object.keys(value).length === 1) return true;
   return storedProfileOf(value) !== undefined;
+}
+
+function importedCookiesOf(value: unknown) {
+  if (!Array.isArray(value) || value.length > MAX_COOKIES_PER_IMPORT_BATCH) return undefined;
+  try {
+    return value.map((cookie: unknown) => decodeImportedCookie(cookie));
+  } catch {
+    return undefined;
+  }
 }
 
 function storedProfileOf(value: unknown) {

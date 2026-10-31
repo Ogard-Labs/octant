@@ -522,6 +522,7 @@ describe("Project and memory event payload contracts", () => {
       "project.binding-relinked@1",
       "project.code-access-changed@1",
       "project.code-permission-mode-changed@1",
+      "project.code-auto-reviewer-changed@1",
       "project.code-new-thread-workspace-changed@1",
       "project.code-pull-request-background-refresh-changed@1",
       "project.provider-policy-changed@1",

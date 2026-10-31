@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   decodeAggregateVersion,
@@ -19,6 +20,8 @@ import { decodeCodeEvidenceReference } from "@octant/contracts/code-operations";
 import { ProductFeedbackService } from "../browser/productFeedbackService";
 import { isRoutineHostScope } from "../routineHostScope";
 import { BrowserProfileService } from "../browser/browserProfileService";
+import { createBrowserCookieReader } from "../browser/cookieImport/browserCookieReader";
+import { readKeychainPasswordWithSecurityTool } from "../browser/cookieImport/keychainPassword";
 import { ProjectBrowserService } from "../browser/projectBrowserService";
 import { OCTANT_LOCAL_ACTOR_ID, ShellServiceError } from "../shellService";
 import {
@@ -262,6 +265,13 @@ export function wireBrowser(deps: BrowserDependencies) {
           browserAutomationService.closeProfile(profile),
         ]);
       },
+      // Another browser's cookies are read only on the person's pick, through
+      // the platform's own Keychain prompt, and only on a Mac.
+      cookieReader: createBrowserCookieReader({
+        home: homedir(),
+        readKeychainPassword: readKeychainPasswordWithSecurityTool,
+        now: Date.now,
+      }),
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
