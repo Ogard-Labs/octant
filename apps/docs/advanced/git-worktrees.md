@@ -93,9 +93,11 @@ receives an explicit normalized path set.
   no GitHub token** and strips ambient token variables from ordinary Git
   commands. It never creates a fork automatically; you select an already
   configured writable head remote and the intended base repo and branch.
-- **Agents never merge or change a pull request.** Comments, approvals,
+- **Today, agents never merge or change a pull request.** Comments, approvals,
   request-changes, editing, closing, reopening, and **merge are denied to the
-  agent under every posture**. You can merge an open pull request yourself
+  agent under every posture**. Planned: an agent may merge, turn on
+  auto-merge, or merge a stack when you ask it to or allow it for the
+  Project, and you may merge from a paired device. You can merge an open pull request yourself
   from its review on the desktop: choose a method, then **Confirm merge**.
   Octant merges only the head you reviewed, refuses if it moved, and uses your
   signed-in `gh`. A paired device cannot merge. You can also turn on
