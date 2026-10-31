@@ -327,6 +327,9 @@ function routeFor(command: ExtensionCommand): string {
       return "/api/extensions/inspect";
     case "query-effective-state":
       return "/api/extensions/state";
+    case "resolve-npm-package":
+    case "check-npm-update":
+      return "/api/extensions/npm";
     case "search-skills":
     case "preview-skill":
     case "install-skill":

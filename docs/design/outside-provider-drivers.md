@@ -43,8 +43,8 @@ newly trusted digest of its driver, and only then, with its records cleared
 inspection, the publisher key is pinned at first trust and journaled, a
 version by another key is held until the person re-trusts the new publisher
 or forgets the pin, and the author kit signs a package (see
-[Signature rules](#signature-rules)). No source but a local folder yields a
-driver until the npm source (slice 8) lands.
+[Signature rules](#signature-rules)). A local folder and, with slice 8, a signed
+npm package yield a driver ([npm source](#npm-source)).
 Slice 7 (author kit and example driver) is built: the author-facing protocol
 re-export, the serve helper, the out-of-process conformance kit, and an
 example loopback driver package that passes the kit and the host proxy's
@@ -786,8 +786,9 @@ raw key>` that the host sets and a document that states it is refused, so
   the review and Settings show which key signed what the person trusts.
 - **Missing.** A package from any source other than a local folder without a
   signature file is refused at inspection as `signature-missing`. A verified
-  marketplace package is still refused as `source-unsupported` until the npm
-  source lands (slice 8). An unsigned local folder stays allowed as labelled
+  package from a marketplace source the host cannot fetch at an exact name,
+  version, and integrity is refused as `source-unsupported`; today only the
+  npm source is one ([npm source](#npm-source)). An unsigned local folder stays allowed as labelled
   developer input ([decision 3](#maintainer-decisions)); a signed one is held
   to every check above.
 - **What the pin belongs to.** One key per package name per source (for
@@ -835,6 +836,42 @@ inside the driver document (it would sign itself), registry metadata only
 (a local folder has none), refusing a different key at inspection (the
 person could not then compare the keys before deciding), and a flag on
 `set-source-trust` (one click would accept both)._
+
+### npm source
+
+Built in slice 8. The registry, tarball, and integrity rules are the general
+ones in [Architecture: extensions and skills](../architecture.md#extensions-and-skills);
+these are the rules specific to a driver.
+
+- **Signed under the npm name.** For a package from npm, `name` in
+  `octant-signature.json` is the npm package name (`@scope/name`), not the
+  slug, so the same signed files republished under another npm name fail as
+  `signature-invalid`. The signing tool takes `--name <npm package name>`.
+  The signed files are exactly the files in the tarball, so an author signs
+  what `npm pack` unpacks to.
+- **Version.** The version the driver declares must equal the npm version
+  that carries it, or the package is refused; the signature binds the former
+  and the registry names the latter.
+- **No scripts, no programs.** Nothing is run when a package is fetched. A
+  package with an install lifecycle script, a native binary, or a file with an
+  execute permission in the tarball is refused by the same file rules as a
+  local folder ([Manifest, inspection, and quarantine](#manifest-inspection-and-quarantine)).
+- **Identity and pin.** A package's identity and its publisher pin belong to
+  the registry and the name, so a new version is an update of the same
+  package, the pin follows it, and a same-named package from another registry
+  starts without a pin.
+- **Admission is unchanged.** The package installs held; trusting the source
+  admits it at its digest, which now includes the npm provenance; switches
+  stay the person's. The provider catalog and Settings show the package,
+  exact version, and integrity.
+
+_Rationale: signing the npm name closes republishing of a genuine signed
+package under a lookalike name; requiring the registry's integrity means the
+bytes are the ones the registry published even before the signature is
+checked; refusing a login-bearing registry keeps credentials out of a fetch
+that has no use for them. Rejected: running `npm install --ignore-scripts`
+(it still resolves and downloads dependencies and runs a program the person
+did not review), and trusting the tarball's `package.json` name._
 
 ### Marketplace and catalog
 
@@ -885,9 +922,9 @@ takes the fail-closed option.
   used. The host derives the identity from the folder and the slug, so a
   package cannot name itself into another package's identity, and records a
   local folder as unreviewed.
-- **Source.** Only a `local-folder` source yields a driver until the npm
-  source lands ([decision 4](#maintainer-decisions)). A driver document in
-  any other source is refused as `signature-missing` without a signature, as
+- **Source.** A `local-folder` or a verified npm source yields a driver
+  ([decision 4](#maintainer-decisions)). A driver document in any other
+  source is refused as `signature-missing` without a signature, as
   `signature-invalid` with one that fails, and as `source-unsupported`
   otherwise ([Signature rules](#signature-rules)).
 - **Protocol.** A package that declares no version the host speaks
@@ -1097,7 +1134,8 @@ alternatives considered and the reason for the choice follow it.
    Deferred: an Octant-signed allow-list, which needs an Octant review
    operation and signing key; and npm provenance attestations, which need a
    transparency-log client.
-4. **Sources.** Local folders first, then npm packages once signing lands.
+4. **Sources.** Local folders first, then npm packages once signing lands
+   (both built; the npm rules are under [npm source](#npm-source)).
    Deferred: a curated driver catalog.
 5. **Platforms.** macOS only. Linux follows a Linux extension-process
    confinement design; until then Linux reports `host-prohibited`.

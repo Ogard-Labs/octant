@@ -3407,7 +3407,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   other than `builtin:provider-driver/<kind>`, and any source other than
   `bundled`. That schema stays closed: an outside driver has its own public
   `OutsideProviderDriverEntry` schema in `@octant/plugin-api`, read from a
-  local folder, installed held, and admitted at its digest when its source is
+  local folder or a signed npm package, installed held, and admitted at its digest when its source is
   trusted; the catalog lists effective outside drivers in their own group from
   the registry snapshot. Third-party provider-driver plugins are an authorized
   post-preview track under [Outside provider drivers](design/outside-provider-drivers.md). The catalog repeats installed and trusted from the activation context
@@ -6573,6 +6573,41 @@ Project, thread, and provider policy allow it. Any other state — `not-installe
 `incompatible`, `mode-prohibited`, `project-prohibited`, `thread-prohibited`,
 `host-prohibited`, `stale-catalog-epoch`, `broken`, `draining` — contributes no
 prompt, schema, tool, route, model, or capability.
+
+**npm packages.** A person may type an npm package name, with an optional
+version, range, or dist-tag, in Marketplace or as
+`octant plugin install npm:<package>[@<version>]`. The host looks the package
+up on the registry the person's own npm settings name: `npm_config_registry`,
+then the user `.npmrc`'s scoped `@scope:registry`, then its `registry`, then
+the public registry. Only those addresses are read; no token or other setting
+is read or sent, so a registry that needs a login answers as refused. A
+registry written with an environment variable, one with credentials in the
+address, and plain `http` to anything but this computer are refused rather
+than guessed at, so a private name is never sent to the public registry. The
+host picks one published version, downloads the one tarball the registry's
+metadata names (it must be on the registry's own origin), and requires the
+registry to have published a SHA-256, SHA-384, or SHA-512 integrity for it;
+the downloaded bytes must hash to that integrity or nothing is kept. It
+reads the archive in memory (no links, special files, or unsafe paths) and
+runs nothing from it: no `npm`, no lifecycle script, no dependency install.
+The files in that one tarball are all that is installed. A package is read as
+an Agent Plugin (a root `plugin.json` with the canonical schema) or as a
+signed provider driver ([Outside provider drivers](design/outside-provider-drivers.md#signature-rules));
+any other package is refused as not one Octant can install. The package's
+identity is the registry and the name, not the version, so a newer version
+updates the same package and a same-named package from another registry is a
+different one. The package, exact version, registry, and verified tarball
+integrity are recorded as the package's provenance in the same journaled
+install, shown in its details, and replayed with it. The package then follows
+the ordinary ladder: installed, untrusted, quarantined, switched off.
+"Check for update" asks the recorded registry for its `latest` tag and
+installs nothing; a newer version is looked up, reviewed, and confirmed like
+any install. Every failure is a plain sentence: not found, no matching
+version, integrity missing or mismatched, registry refused or unreachable,
+fetches turned off, an unsupported package. Looking up and checking stay with
+a local window, like the rest of package lifecycle, and obey the Marketplace
+fetches preference. The lookup sends only `Accept` and the constrained
+`User-Agent`; there is no telemetry.
 
 **Selection epoch.** A selected plugin, MCP server, or skill carries the
 catalog epoch it was resolved under, and the host re-resolves it on send, replay,

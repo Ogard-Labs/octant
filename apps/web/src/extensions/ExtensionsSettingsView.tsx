@@ -24,7 +24,10 @@ import type {
   ExtensionProjectPinListing,
 } from "@octant/contracts/extension-rpc";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
-import type { ExtensionPublisherKeyFingerprint } from "@octant/contracts/extensions";
+import type {
+  ExtensionNpmSource,
+  ExtensionPublisherKeyFingerprint,
+} from "@octant/contracts/extensions";
 import { CONNECTOR_PACKAGE_PREFIX } from "@octant/domain";
 import { SettingsDisclosure, SettingsSection } from "../settings/primitives";
 import { AddMcpServerDialog } from "./AddMcpServerDialog";
@@ -116,7 +119,30 @@ function installedPackageName(pkg: ExtensionSnapshot["packages"][number]): strin
   return server?.component.displayName ?? pkg.displayName ?? pkg.slug ?? pkg.extensionId;
 }
 
+/** Where an npm package came from, as the host fetched and checked it. */
+function NpmSourceFacts(props: { readonly npm: ExtensionNpmSource }) {
+  return (
+    <>
+      <div>
+        <dt>npm package</dt>
+        <dd>
+          {props.npm.packageName}@{props.npm.version}
+        </dd>
+      </div>
+      <div>
+        <dt>Registry</dt>
+        <dd>{props.npm.registry}</dd>
+      </div>
+      <div>
+        <dt>Integrity</dt>
+        <dd className="oct-meta--mono extensions-settings__integrity">{props.npm.integrity}</dd>
+      </div>
+    </>
+  );
+}
+
 function installedSourceLabel(pkg: ExtensionSnapshot["packages"][number]): string {
+  if (pkg.npm !== undefined) return `npm · ${pkg.npm.packageName}`;
   if (pkg.addedInSettings !== true) return sourceLabel(pkg.source);
   return pkg.slug?.startsWith(CONNECTOR_PACKAGE_PREFIX) === true ? "Connector" : "Added by you";
 }
@@ -418,6 +444,11 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   const [inspectingSkillId, setInspectingSkillId] = useState<string | undefined>();
   const [installingSkill, setInstallingSkill] = useState(false);
   const [importingLocal, setImportingLocal] = useState(false);
+  const [npmName, setNpmName] = useState("");
+  const [npmRange, setNpmRange] = useState("");
+  const [lookingUpNpm, setLookingUpNpm] = useState(false);
+  /** Set while the reviewed npm version replaces this installed package instead of installing a new one. */
+  const [npmUpdateOf, setNpmUpdateOf] = useState<string | undefined>();
   const [addingServer, setAddingServer] = useState(false);
   const [discoveredRevision, setDiscoveredRevision] = useState(0);
   const [projectPins, setProjectPins] = useState<ExtensionProjectPinListing>();
@@ -615,6 +646,75 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
     [props.client, marketplaceFetchesEnabled],
   );
 
+  const lookUpNpm = useCallback(
+    async (packageName: string, range: string, updateOf?: string) => {
+      setFailure(undefined);
+      if (!marketplaceFetchesEnabled) {
+        setFailure({
+          category: "blocked",
+          message: "Marketplace fetches are turned off in Settings.",
+        });
+        return;
+      }
+      setLookingUpNpm(true);
+      setPreview(undefined);
+      setLocalPreview(undefined);
+      setNpmUpdateOf(undefined);
+      try {
+        const result = await props.client.execute({
+          kind: "resolve-npm-package",
+          packageName: packageName.trim(),
+          ...(range.trim() === "" ? {} : { range: range.trim() }),
+          // An update names the installed package, and the host then asks the
+          // registry that package came from.
+          ...(updateOf === undefined ? {} : { updateOf: updateOf as never }),
+        });
+        if (result.kind === "extension-command-failed") {
+          setFailure({ category: result.failure.category, message: result.failure.message });
+          return;
+        }
+        if (result.kind === "package-inspected") {
+          setLocalPreview(result.preview);
+          setNpmUpdateOf(updateOf);
+        }
+      } catch {
+        setFailure({
+          category: "unavailable" as never,
+          message: "Extension service is unavailable.",
+        });
+      } finally {
+        setLookingUpNpm(false);
+      }
+    },
+    [props.client, marketplaceFetchesEnabled],
+  );
+
+  const checkNpmUpdate = useCallback(
+    async (extensionId: string): Promise<NpmUpdateCheck> => {
+      if (!marketplaceFetchesEnabled) {
+        return { status: "failed", message: "Marketplace fetches are turned off in Settings." };
+      }
+      try {
+        const result = await props.client.execute({
+          kind: "check-npm-update",
+          extensionId: extensionId as never,
+        });
+        if (result.kind === "extension-command-failed") {
+          return { status: "failed", message: result.failure.message };
+        }
+        if (result.kind === "npm-update-checked") {
+          return result.available === undefined
+            ? { status: "current" }
+            : { status: "available", version: result.available };
+        }
+      } catch {
+        // Fall through to the plain failure below.
+      }
+      return { status: "failed", message: "Extension service is unavailable." };
+    },
+    [props.client, marketplaceFetchesEnabled],
+  );
+
   const confirmInstall = useCallback(
     async (entry: ExtensionCatalogEntry) => {
       if (installing) return;
@@ -622,7 +722,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
       setFailure(undefined);
       try {
         const installed = await props.client.execute({
-          kind: "install-package",
+          kind: npmUpdateOf === entry.extensionId ? "update-package" : "install-package",
           extensionId: entry.extensionId,
           packageId: entry.packageId,
           version: entry.version,
@@ -637,6 +737,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
         }
         setPreview(undefined);
         setLocalPreview(undefined);
+        setNpmUpdateOf(undefined);
         await reload();
       } catch {
         setFailure({
@@ -647,7 +748,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
         setInstalling(false);
       }
     },
-    [props.client, reload, installing],
+    [props.client, reload, installing, npmUpdateOf],
   );
 
   const runSkillSearch = useCallback(async () => {
@@ -894,6 +995,15 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                                   message: "The pin could not be changed.",
                                 });
                               }
+                            },
+                          })}
+                      {...(pkg.npm === undefined
+                        ? {}
+                        : {
+                            onCheckNpmUpdate: () => checkNpmUpdate(pkg.extensionId),
+                            onReviewNpmUpdate: (version: string) => {
+                              setView("marketplace");
+                              void lookUpNpm(pkg.npm?.packageName ?? "", version, pkg.extensionId);
                             },
                           })}
                       onTrust={(trusted) =>
@@ -1196,6 +1306,57 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
               </p>
             ) : null}
             <div className="extensions-settings__body">
+              <form
+                aria-label="Install from npm"
+                className="extensions-settings__npm-lookup"
+                noValidate
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void lookUpNpm(npmName, npmRange);
+                }}
+              >
+                <div className="extensions-settings__npm-fields">
+                  <OctantInput
+                    aria-label="npm package name"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    className="extensions-settings__npm-name"
+                    disabled={!marketplaceFetchesEnabled}
+                    onChange={(event) => setNpmName(event.currentTarget.value)}
+                    placeholder="npm package, such as @scope/name"
+                    spellCheck={false}
+                    value={npmName}
+                  />
+                  <OctantInput
+                    aria-label="Version or range"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    className="extensions-settings__npm-range"
+                    disabled={!marketplaceFetchesEnabled}
+                    onChange={(event) => setNpmRange(event.currentTarget.value)}
+                    placeholder="Version, optional"
+                    spellCheck={false}
+                    value={npmRange}
+                  />
+                  <OctantButton
+                    disabled={
+                      !marketplaceFetchesEnabled ||
+                      npmName.trim() === "" ||
+                      lookingUpNpm ||
+                      installing
+                    }
+                    type="submit"
+                    variant="outline"
+                  >
+                    {lookingUpNpm ? "Looking up…" : "Look up"}
+                  </OctantButton>
+                </div>
+                <p className="extensions-settings__description">
+                  Octant fetches the package from the registry your npm settings name and checks it
+                  against the registry's integrity. It runs no install script. Review it, install
+                  it, then trust and enable it yourself.
+                </p>
+              </form>
               <div className="extensions-settings__search">
                 <OctantInput
                   aria-label="Search marketplace"
@@ -1420,14 +1581,20 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                   </span>
                   <span className="extcard-name">{localPreview.entry.displayName}</span>
                   <span className="extcard-src">
-                    {sourceLabel(localPreview.entry.source)} · v
-                    <span>{localPreview.entry.version}</span>
+                    {localPreview.review.provenance.npm === undefined
+                      ? sourceLabel(localPreview.entry.source)
+                      : `npm · ${localPreview.review.provenance.npm.packageName}`}{" "}
+                    · v<span>{localPreview.entry.version}</span>
                   </span>
                   <div
                     className="extensions-settings__preview"
                     aria-label="Package inspection preview"
                   >
-                    <p className="extensions-settings__preview-heading">Review before installing</p>
+                    <p className="extensions-settings__preview-heading">
+                      {npmUpdateOf === undefined
+                        ? "Review before installing"
+                        : "Review before updating"}
+                    </p>
                     {localPreview.review.description !== undefined ? (
                       <p className="extensions-settings__description">
                         {localPreview.review.description}
@@ -1440,10 +1607,22 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                           <dd>{localPreview.review.provenance.publisher}</dd>
                         </div>
                       ) : null}
-                      <div>
-                        <dt>Source</dt>
-                        <dd>{sourceLabel(localPreview.entry.source)}</dd>
-                      </div>
+                      {localPreview.review.provenance.npm === undefined ? (
+                        <div>
+                          <dt>Source</dt>
+                          <dd>{sourceLabel(localPreview.entry.source)}</dd>
+                        </div>
+                      ) : (
+                        <NpmSourceFacts npm={localPreview.review.provenance.npm} />
+                      )}
+                      {localPreview.review.provenance.publisherKey === undefined ? null : (
+                        <div>
+                          <dt>Signed by</dt>
+                          <dd className="oct-meta--mono">
+                            {localPreview.review.provenance.publisherKey}
+                          </dd>
+                        </div>
+                      )}
                       <div>
                         <dt>License</dt>
                         <dd>{licenseLabel(localPreview.review.license)}</dd>
@@ -1497,13 +1676,19 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                     ) : null}
                     <OctantButton
                       variant="default"
-                      aria-label="Confirm install"
+                      aria-label={npmUpdateOf === undefined ? "Confirm install" : "Confirm update"}
                       disabled={installing}
                       onClick={() => void confirmInstall(localPreview.entry)}
                       type="button"
                     >
-                      Confirm install
+                      {npmUpdateOf === undefined ? "Confirm install" : "Confirm update"}
                     </OctantButton>
+                    {npmUpdateOf !== undefined ? null : (
+                      <p className="extensions-settings__state">
+                        Installing adds it untrusted and switched off. Octant ran nothing from the
+                        package.
+                      </p>
+                    )}
                   </div>
                 </div>
               ) : null}
@@ -1861,10 +2046,80 @@ interface InstalledPackageCardProps {
     desired: boolean,
   ) => Promise<boolean>;
   readonly onUninstall: () => Promise<boolean>;
+  /** Present for a package fetched from npm: asks its registry whether a newer version exists. */
+  readonly onCheckNpmUpdate?: () => Promise<NpmUpdateCheck>;
+  /** Opens the review of one newer npm version; nothing is installed until it is confirmed. */
+  readonly onReviewNpmUpdate?: (version: string) => void;
   readonly onTrustNewPublisher: (
     publisherKey: ExtensionPublisherKeyFingerprint,
   ) => Promise<boolean>;
   readonly onForgetPublisher: (publisherKey: ExtensionPublisherKeyFingerprint) => Promise<boolean>;
+}
+
+type NpmUpdateCheck =
+  | { readonly status: "current" }
+  | { readonly status: "available"; readonly version: string }
+  | { readonly status: "failed"; readonly message: string };
+
+/**
+ * An installed npm package's source, and a check for a newer version. The
+ * check asks the registry and installs nothing: a newer version is reviewed
+ * and confirmed like any install.
+ */
+function NpmSourceDetails(props: {
+  readonly npm: ExtensionNpmSource;
+  readonly busy: boolean;
+  readonly onCheck: () => Promise<NpmUpdateCheck>;
+  readonly onReview: (version: string) => void;
+}) {
+  const [checking, setChecking] = useState(false);
+  const [result, setResult] = useState<NpmUpdateCheck | undefined>();
+  return (
+    <div className="extensions-settings__npm-source">
+      <dl className="extensions-settings__compatibility" aria-label="npm source">
+        <NpmSourceFacts npm={props.npm} />
+      </dl>
+      <OctantButton
+        size="sm"
+        variant="outline"
+        disabled={props.busy || checking}
+        onClick={() => {
+          setChecking(true);
+          void props.onCheck().then((next) => {
+            setResult(next);
+            setChecking(false);
+          });
+        }}
+        type="button"
+      >
+        Check for update
+      </OctantButton>
+      {result === undefined ? null : (
+        <p
+          className="extensions-settings__effective"
+          data-blocked={result.status === "failed" ? "true" : undefined}
+          role="status"
+        >
+          {result.status === "current"
+            ? "This is the newest version the registry offers."
+            : result.status === "failed"
+              ? result.message
+              : `Version ${result.version} is available. Nothing was installed.`}
+        </p>
+      )}
+      {result?.status === "available" ? (
+        <OctantButton
+          size="sm"
+          variant="outline"
+          disabled={props.busy}
+          onClick={() => props.onReview(result.version)}
+          type="button"
+        >
+          Review version {result.version}
+        </OctantButton>
+      ) : null}
+    </div>
+  );
 }
 
 /**
@@ -2032,6 +2287,16 @@ function InstalledPackageCard(props: InstalledPackageCardProps) {
           </span>
         ))}
       </div>
+      {pkg.npm === undefined ||
+      props.onCheckNpmUpdate === undefined ||
+      props.onReviewNpmUpdate === undefined ? null : (
+        <NpmSourceDetails
+          busy={props.busy}
+          npm={pkg.npm}
+          onCheck={props.onCheckNpmUpdate}
+          onReview={props.onReviewNpmUpdate}
+        />
+      )}
       {pkg.publisher === undefined ? null : (
         <PublisherKeys
           busy={props.busy}

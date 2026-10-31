@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { ExtensionSource } from "@octant/contracts/extensions";
+import type { ExtensionNpmSource, ExtensionSource } from "@octant/contracts/extensions";
 import { HOST_HARNESS_ENDPOINT_PROTOCOL_VERSIONS } from "@octant/contracts/outside-driver-protocol";
 import {
   OUTSIDE_PROVIDER_DRIVER_DOCUMENT_PATH,
@@ -25,6 +25,12 @@ export interface OutsideProviderDriverPackageInput {
   readonly archiveBytes: number;
   readonly entries: ReadonlyArray<ExtensionArchiveEntry>;
   readonly expectedDigest?: ResolvedExtensionPackage["expectedDigest"];
+  /**
+   * Set only by the host when it fetched the package from an npm registry and
+   * checked the tarball against the registry's integrity. The signature then
+   * names the npm package, and the package may come from a marketplace.
+   */
+  readonly npm?: ExtensionNpmSource;
   readonly appVersion: string;
   readonly platform: NodeJS.Platform;
 }
@@ -41,7 +47,7 @@ export type OutsideProviderDriverPackageReading =
  * document the host used.
  */
 const HOST_ASSIGNED_MANIFEST_FIELDS = ["extensionId", "packageId", "digest", "source"] as const;
-const HOST_ASSIGNED_PROVENANCE_FIELDS = ["reviewed", "reviewedAt", "publisherKey"] as const;
+const HOST_ASSIGNED_PROVENANCE_FIELDS = ["reviewed", "reviewedAt", "publisherKey", "npm"] as const;
 
 /**
  * npm lifecycle scripts that run when a package or its dependents are
@@ -101,7 +107,11 @@ export function readOutsideProviderDriverPackage(
     packageId: stableUuid(`package:${sourceRef}:${slug}`),
     digest: `sha256:${"0".repeat(64)}`,
     source: input.source,
-    provenance: { ...authoredProvenance, reviewed: false },
+    provenance: {
+      ...authoredProvenance,
+      ...(input.npm === undefined ? {} : { npm: input.npm }),
+      reviewed: false,
+    },
   };
   const reading = readOutsideProviderDriverEntry({ ...document, manifest });
   if (reading.status === "refused") return reading;
@@ -114,15 +124,18 @@ export function readOutsideProviderDriverPackage(
   ) {
     return refused("protocol-incompatible");
   }
+  // A signature names the package as its source does: the folder's slug, or
+  // the npm package's name, so one signed package cannot be republished under
+  // another npm name.
   const signature = readOutsideDriverSignature(input.entries, {
-    name: slug,
+    name: input.npm?.packageName ?? slug,
     version: reading.entry.manifest.version,
     protocolVersions: reading.entry.protocolVersions,
   });
   if (signature.status === "invalid") return refused("signature-invalid");
-  // A verified signature from a marketplace is still refused until that
-  // source can be fetched at an exact name, version, and digest.
-  if (marketplace) return refused("source-unsupported");
+  // A verified signature from a marketplace is accepted only from a source the
+  // host can fetch at an exact name, version, and integrity: an npm registry.
+  if (marketplace && input.npm === undefined) return refused("source-unsupported");
   const entryPoint = reading.entry.manifest.components[0]?.entryPoint;
   const filesRefusal = packageFilesRefusal(input.entries, entryPoint);
   if (filesRefusal !== undefined) return refused(filesRefusal);
@@ -186,7 +199,7 @@ export function outsideProviderDriverRefusalMessage(
     case "entry-point-missing":
       return "This provider driver's entry module is not in its package.";
     case "source-unsupported":
-      return "Provider drivers from outside Octant can be added only from a folder on this computer.";
+      return "Provider drivers from outside Octant can be added only from a folder on this computer or an npm package.";
     case "protocol-incompatible":
       return "This provider driver speaks no protocol version this version of Octant speaks.";
     case "ships-executable":
