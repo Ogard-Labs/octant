@@ -337,7 +337,10 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
           : `${provider.displayName} (needs setup)`,
       ...(provider.needsSetup !== undefined &&
       String(saved?.providerId ?? "") !== String(provider.providerId)
-        ? { disabled: true }
+        ? {
+            disabled: true,
+            disabledReason: setupMessage(provider.needsSetup, provider.displayName),
+          }
         : {}),
     })),
     // A saved provider the host no longer offers stays visible, so the person
@@ -368,6 +371,11 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
     (provider) => String(provider.providerId) === draft.providerId,
   );
   const providerOffered = draftProvider !== undefined;
+  // The selected provider's own setup is read in its capability line below.
+  const unselectedNeedingSetup = providers.filter(
+    (provider) =>
+      provider.needsSetup !== undefined && String(provider.providerId) !== draft.providerId,
+  );
   const placements = draftProvider?.placements ?? [];
   const machinesKey =
     draftProvider !== undefined &&
@@ -633,6 +641,19 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
               value={draft.providerId}
             />
           </label>
+          {unselectedNeedingSetup.length === 0 ? null : (
+            // Visible text, not only the option's tooltip: a disabled option
+            // cannot be chosen, so this is the only place its setup is read.
+            <ul aria-label="Providers that need setup" className="project-provider-policy__hint">
+              {unselectedNeedingSetup.map((provider) =>
+                provider.needsSetup === undefined ? null : (
+                  <li key={String(provider.providerId)}>
+                    {setupMessage(provider.needsSetup, provider.displayName)}
+                  </li>
+                ),
+              )}
+            </ul>
+          )}
           {draftProvider === undefined ? null : (
             <p className="project-provider-policy__hint" role="status">
               {providerCapability(draftProvider)}

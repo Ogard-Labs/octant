@@ -127,6 +127,32 @@ describe("ProjectDesktopRecipeSection", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it("tells a person what each unselected provider that needs setup lacks, without opening the list", async () => {
+    const cloud = {
+      providerId: "cloud-desktop",
+      displayName: "Cloud desktop",
+      locality: "cloud",
+      billed: true,
+      needsSetup: "no-credential-store",
+    } as const;
+    const spacesDown = { ...spaces, needsSetup: "daemon-not-connected" } as const;
+    render(
+      <ProjectDesktopRecipeSection
+        client={client([hostLocal, cloud, spacesDown])}
+        onChange={vi.fn(async () => true)}
+        project={project()}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Desktop provider" })).toHaveTextContent(
+        "This host",
+      ),
+    );
+    const list = await screen.findByRole("list", { name: "Providers that need setup" });
+    expect(list).toHaveTextContent(/Cloud desktop needs this host to keep your API key/);
+    expect(list).toHaveTextContent(/Spaces needs its app running and signed in/);
+  });
+
   it("says what a saved provider that needs setup lacks, and sets nothing", async () => {
     const onChange = vi.fn(async () => true);
     const spacesDown = { ...spaces, needsSetup: "daemon-not-connected" } as const;

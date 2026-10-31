@@ -2426,7 +2426,8 @@ smokes, which remain the evidence for what the recordings cannot show.
   the provider, the pane says so, and the project policy refuses a recipe that
   moves to it; a recipe already on it may still be edited or removed.
 - **Settings and the Desktop pane.** The recipe editor lists every offered
-  provider, marks one that needs setup and disables choosing it, says in a
+  provider, marks one that needs setup, disables choosing it, and lists what
+  each such provider lacks under the selector in visible text, says in a
   line what each provider is (where it runs, whose account, whether it bills),
   and starts a new recipe from the first provider that is ready. The pane's
   Start refusal for `needs-setup` points to those settings.

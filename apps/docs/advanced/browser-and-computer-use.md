@@ -301,7 +301,8 @@ settings:
   are installed and Octant has restarted, and Cua Spaces; E2B is listed on
   every host. A line under the list says where the provider runs, whose
   account it uses, and whether it bills you. A provider that isn't set up
-  here shows **(needs setup)** and can't be chosen: E2B needs this computer
+  here shows **(needs setup)** and can't be chosen, and what it needs is
+  listed under the selector: E2B needs this computer
   to have a credential store for your API key, and Cua Spaces needs its app
   running and signed in on this computer. Nothing starts on a provider until
   you save a recipe that names it, and a desktop that bills you still asks
