@@ -1491,10 +1491,8 @@ describe("Codex thread and turn lifecycle", () => {
     await acquired.close();
   });
 
-  it("switches Codex's shell and the Project's agent brief off for a Work thread on start and again on every resume", async () => {
+  it("keeps Codex's shell on and the Project's agent brief off for a Work thread on start and again on every resume", async () => {
     const workOff = {
-      "features.shell_tool": false,
-      "features.unified_exec": false,
       project_doc_max_bytes: 0,
       skills: { config: [] },
     };
@@ -1515,6 +1513,11 @@ describe("Codex thread and turn lifecycle", () => {
       threadId: "thread-existing",
       config: workOff,
     });
+    // Work shares Code's shell at the thread's level, so nothing switches it off.
+    expect(f.calls.find(({ method }) => method === "thread/start")?.input).not.toHaveProperty([
+      "config",
+      "features.shell_tool",
+    ]);
     await work.close();
 
     const code = fixture();
@@ -2770,29 +2773,26 @@ describe("Codex execution authority and approvals", () => {
   );
 
   it.each([
-    ["command", commandApproval(), { decision: "decline" }],
-    ["permissions", permissionsApproval(), { permissions: {}, scope: "turn" }],
+    ["command", commandApproval()],
+    ["permissions", permissionsApproval()],
   ] as const)(
-    "declines a %s approval in a Work session without asking anyone",
-    async (_kind, requestMessage, result) => {
-      const f = fixture();
-      const acquired = await acquireConnection(makeCodexDriver(f.options()), "work");
-      await startSession(acquired.connection);
-      await Effect.runPromise(
-        acquired.connection.send({ sessionId, prompt: "work", attachments: [], tools: [] }),
-      );
-      f.emit(requestMessage);
-      await vi.waitFor(() =>
-        expect(f.calls.filter(({ method }) => method === "approval/respond")).toHaveLength(1),
-      );
-      expect(f.calls.at(-1)?.input).toMatchObject({ result });
-      const answer = await Effect.runPromise(
-        Effect.exit(
-          acquired.connection.answerApproval({ sessionId, requestId: "request-1", approved: true }),
-        ),
-      );
-      expect(String(answer)).toContain("protocol");
-      await acquired.close();
+    "asks a person about a Project-confined %s approval in a Work session, as in Code",
+    async (_kind, requestMessage) => {
+      for (const mode of ["work", "code"] as const) {
+        const f = fixture();
+        const acquired = await acquireConnection(makeCodexDriver(f.options()), mode);
+        await startSession(acquired.connection);
+        await Effect.runPromise(
+          acquired.connection.send({ sessionId, prompt: mode, attachments: [], tools: [] }),
+        );
+        const event = takeEvents(acquired.connection, 1);
+        f.emit(requestMessage);
+        await expect(event).resolves.toMatchObject([
+          { kind: "approval-request", requestId: "request-1" },
+        ]);
+        expect(f.calls.some(({ method }) => method === "approval/respond")).toBe(false);
+        await acquired.close();
+      }
     },
   );
 

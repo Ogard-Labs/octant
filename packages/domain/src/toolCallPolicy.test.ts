@@ -605,8 +605,12 @@ describe("resolveNetworkEgressPolicy", () => {
       "unrestricted",
     );
     expect(resolveNetworkEgressPolicy({ mode: "code", executionPolicy: "plan" })).toBe("none");
+    // Work is guarded as Code is at the same level.
     expect(resolveNetworkEgressPolicy({ mode: "work", executionPolicy: "full-access" })).toBe(
-      "none",
+      "unrestricted",
+    );
+    expect(resolveNetworkEgressPolicy({ mode: "work", executionPolicy: "approval-gated" })).toBe(
+      "provider-endpoints-only",
     );
     expect(resolveNetworkEgressPolicy({ mode: "chat", executionPolicy: "full-access" })).toBe(
       "none",

@@ -257,6 +257,11 @@ export interface PickerGroup {
    * or has no such tool.
    */
   readonly nativeArtifacts?: ProviderObservedState["capabilities"]["nativeArtifacts"];
+  /**
+   * Whether the provider has a reviewer of its own that can answer approval
+   * prompts, which a thread at Auto needs. Absent when never probed.
+   */
+  readonly harnessAutoReview?: ProviderCapabilitySupport;
   readonly unavailableCurrent?: PickerModel;
   /**
    * A model hidden in Settings but still bound to an existing draft/thread.
@@ -439,6 +444,7 @@ export function buildModelPickerGroups(input: ModelPickerInput): ReadonlyArray<P
       ...(observed.capabilities.nativeArtifacts === undefined
         ? {}
         : { nativeArtifacts: observed.capabilities.nativeArtifacts }),
+      harnessAutoReview: observed.capabilities.harnessAutoReview,
       ...(observed.verifiedToolModelIds === undefined
         ? {}
         : { verifiedToolModelIds: observed.verifiedToolModelIds }),
@@ -616,6 +622,9 @@ function maybeAppendUnavailableCurrent(
     ...(observed?.capabilities.nativeArtifacts === undefined
       ? {}
       : { nativeArtifacts: observed.capabilities.nativeArtifacts }),
+    ...(observed === undefined
+      ? {}
+      : { harnessAutoReview: observed.capabilities.harnessAutoReview }),
     ...(observed?.verifiedToolModelIds === undefined
       ? {}
       : { verifiedToolModelIds: observed.verifiedToolModelIds }),

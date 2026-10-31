@@ -700,6 +700,26 @@ export class WorkThreadService {
         this.#projection.apply({ kind: "thread-updated", thread: updated });
         return { kind: "thread-updated", thread: updated };
       }
+      if (command.kind === "change-work-thread-access") {
+        if (current.lifecycle !== "active") {
+          throw this.#failure("invalid", "Only an active Work thread can change its access.");
+        }
+        // The level takes effect when the next turn starts: a turn fixes its
+        // level at admission and journals it, so a running turn keeps the one
+        // it started with.
+        const updated = decodeWorkThread({
+          ...current,
+          access: command.access,
+          version: command.expectedVersion + 1,
+          updatedAt: decodeTimestamp(this.#clock()),
+        });
+        this.#append(current.id, command.expectedVersion, "work.thread-updated@1", {
+          kind: "thread-updated",
+          thread: updated,
+        });
+        this.#projection.apply({ kind: "thread-updated", thread: updated });
+        return { kind: "thread-updated", thread: updated };
+      }
       if (command.kind === "change-work-thread-provider") {
         await this.#requireProviderModel(
           command.providerInstanceId,

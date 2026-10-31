@@ -3,6 +3,7 @@ import {
   observeTurnMetrics,
   recordThreadToolStep,
   startTurnMetrics,
+  workThreadAccessOf,
   type ThreadToolSteps,
 } from "@octant/domain";
 import { boundedToolResultJson } from "../providers/toolResultJson";
@@ -17,6 +18,7 @@ import {
   type ProviderSessionId,
   type ProviderResumeCursor,
   type StartWorkThreadTurnCommand,
+  DEFAULT_WORK_ACCESS,
   type WorkAccess,
   type WorkTurnFailure,
   type WorkTurnRequestId,
@@ -140,8 +142,9 @@ export interface WorkTurnRuntimeOptions {
 /**
  * Provider-backed Work turn runner. Acquires the driver in Work mode with
  * project-backed workspace and optional request-projection context, then
- * streams text deltas into a bounded durable response. Shell/Git/worktree/PR
- * Code authority is never requested.
+ * streams text deltas into a bounded durable response. The session runs at the
+ * thread's level with the shell and Git a Code session at that level has;
+ * worktree, checkout and pull-request authority stay Code's.
  */
 export class WorkTurnRuntime implements WorkTurnRuntimePort {
   readonly #timeoutMs: number;
@@ -264,13 +267,11 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         ...(input.modelOptionValues === undefined
           ? {}
           : { modelOptionValues: input.modelOptionValues }),
-        // Auto-accept lets the provider's edits inside the confined root land
-        // without a prompt; every driver checks the root before it allows one,
-        // and one without an auto-accept path keeps asking.
-        executionPolicy:
-          input.access === "auto-accept-edits"
-            ? ("auto-accept-edits" as const)
-            : ("approval-gated" as const),
+        // The session starts at the thread's level exactly as a Code session
+        // at that level does: shell, Git and edits follow it. Every driver
+        // still checks the root before it allows an edit, and one without a
+        // reviewer of its own keeps asking at Auto.
+        ...workThreadAccessOf(input.access ?? DEFAULT_WORK_ACCESS),
         tools: input.appManagedTools?.definitions ?? [],
         ...(input.nativeArtifacts === true ? { nativeArtifacts: true } : {}),
       };

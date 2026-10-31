@@ -804,6 +804,43 @@ describe("WorkThreadService", () => {
     ).rejects.toMatchObject({ failure: { category: "invalid" } });
   });
 
+  it("moves a Work thread to another level from its composer, Full access included, and journals it", async () => {
+    for (const access of ["auto", "auto-accept-edits", "full-access", "ask-first"] as const) {
+      const fixture = serviceFixture({ threads: [thread()] });
+      await expect(
+        fixture.service.execute(ids.window, {
+          kind: "change-work-thread-access",
+          threadId: ids.thread,
+          expectedVersion: 1,
+          access,
+        }),
+      ).resolves.toEqual({
+        kind: "thread-updated",
+        thread: thread({ access, version: 2 as AggregateVersion, updatedAt: now }),
+      });
+      expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+        expect.objectContaining({
+          events: [
+            expect.objectContaining({
+              eventName: "work.thread-updated@1",
+              payload: expect.objectContaining({ thread: expect.objectContaining({ access }) }),
+            }),
+          ],
+        }),
+      );
+    }
+
+    const archived = serviceFixture({ threads: [thread({ lifecycle: "archived" })] });
+    await expect(
+      archived.service.execute(ids.window, {
+        kind: "change-work-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        access: "full-access",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+  });
+
   it("updates thread metadata with optimistic versions and maps concurrency conflicts", async () => {
     const current = thread();
     const fixture = serviceFixture({ threads: [current] });

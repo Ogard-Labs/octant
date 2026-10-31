@@ -105,6 +105,60 @@ describe("Work thread routes", () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
+  it("refuses a paired device raising a Work thread or the Work default to Full access, and lets it lower one", async () => {
+    const execute = vi.fn(async () => ({ kind: "thread-updated", thread: thread() }));
+    const route = routeFixture({ execute });
+    const remoteDeviceId = "73000000-0000-4000-8000-000000000020";
+    const fromDevice = (command: Record<string, unknown>) => {
+      const remote = request("/api/work/threads/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(command),
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "73000000-0000-4000-8000-000000000021" as never,
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return remote;
+    };
+    const access = (level: string) => ({
+      kind: "change-work-thread-access",
+      threadId,
+      expectedVersion: 1,
+      access: level,
+    });
+
+    for (const raise of [
+      access("full-access"),
+      { kind: "update-work-settings", expectedVersion: 1, defaultAccess: "full-access" },
+    ]) {
+      const refused = await route(fromDevice(raise));
+      expect(refused?.status).toBe(403);
+      expect(await refused?.json()).toMatchObject({ category: "unauthorized" });
+    }
+    expect(execute).not.toHaveBeenCalled();
+
+    expect((await route(fromDevice(access("ask-first"))))?.status).toBe(200);
+    expect(execute).toHaveBeenCalledOnce();
+
+    const local = await route(
+      request("/api/work/threads/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(access("full-access")),
+      }),
+    );
+    expect(local?.status).toBe(200);
+  });
+
   it("rejects missing capability and caller-supplied window identity", async () => {
     const route = routeFixture({});
 

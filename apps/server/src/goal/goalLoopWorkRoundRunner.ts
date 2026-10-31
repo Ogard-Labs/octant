@@ -1,5 +1,6 @@
 import type {
   WindowId,
+  WorkAccess,
   WorkThreadId,
   WorkTurnLookupResult,
   WorkTurnStreamFrame,
@@ -15,7 +16,7 @@ export interface GoalLoopWorkTurnPort {
     windowId: WindowId,
     command: unknown,
     options?: {
-      readonly holdAskFirst?: boolean;
+      readonly accessCeiling?: WorkAccess;
       readonly admissionCurrent?: () => boolean;
     },
   ) => Promise<WorkTurnLookupResult>;
@@ -104,7 +105,10 @@ export function createGoalLoopWorkRoundRunner(
       // auto-accept reaches it only when the loop's ceiling allows it too;
       // otherwise the round asks first, as every Work round did before.
       const accepted = await options.turns.startFirstTurn(scopeId, command, {
-        holdAskFirst: input.authority?.executionPolicy !== "auto-accept-edits",
+        accessCeiling:
+          input.authority?.executionPolicy === "auto-accept-edits"
+            ? "auto-accept-edits"
+            : "ask-first",
         admissionCurrent: options.workEnabled,
       });
       if (accepted.kind !== "accepted") {

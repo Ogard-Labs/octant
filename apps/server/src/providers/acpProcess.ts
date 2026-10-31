@@ -506,17 +506,18 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
               temporaryDirectory,
               networkEgress,
               writeBoundRoot: !(input.executionPolicy === "plan" || input.mode === "chat"),
-              // Work declares shell "denied": ACP terminal/* refusals only
+              // Chat and Plan have no shell: ACP terminal/* refusals only
               // cover providers that route shell through the protocol, so an
               // in-process shell would otherwise still exec inside the jail.
-              allowProcessExec: !(input.executionPolicy === "plan" || input.mode !== "code"),
+              // Work launches exactly as Code does at the same level.
+              allowProcessExec: !(input.executionPolicy === "plan" || input.mode === "chat"),
               // A profile whose entrypoint spawns its own stdio server keeps
               // fork: the child re-execs the provider's own binary, which the
               // exec literals and binds already permit, and fork without a
               // second exec target cannot reach a shell. Chat and Plan never
               // get here — such profiles are refused above.
               allowProcessFork:
-                !(input.executionPolicy === "plan" || input.mode !== "code") ||
+                !(input.executionPolicy === "plan" || input.mode === "chat") ||
                 profile.process.requiresChildServer === true,
               additionalWriteRoots: [managedHome, ...hostAuthentication.writePaths],
               additionalDenyReadPaths: confinedDenyPaths,

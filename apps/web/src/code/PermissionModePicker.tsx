@@ -58,6 +58,11 @@ export interface PermissionModePickerProps {
   readonly warningScope?: FullAccessWarningScope;
   readonly disabled?: boolean;
   readonly profileName?: string;
+  /**
+   * The modes this thread can take, in picker order. Work threads share
+   * Code's levels but have no Plan overlay; absent lists every mode.
+   */
+  readonly modes?: ReadonlyArray<PermissionMode>;
 }
 
 /**
@@ -72,6 +77,10 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
   const triggerDetail = autoFallsBack
     ? AUTO_UNSUPPORTED_REASON
     : PERMISSION_MODE_OPTIONS.find((option) => option.id === props.value)?.detail;
+  const options =
+    props.modes === undefined
+      ? PERMISSION_MODE_OPTIONS
+      : PERMISSION_MODE_OPTIONS.filter((option) => props.modes?.includes(option.id) === true);
   return (
     <>
       <OctantMenuRoot>
@@ -94,12 +103,12 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
                 value={props.value}
                 onValueChange={(value) => {
                   if (props.disabled === true || typeof value !== "string") return;
-                  const next = PERMISSION_MODE_OPTIONS.find((option) => option.id === value);
+                  const next = options.find((option) => option.id === value);
                   if (next === undefined || next.id === props.value) return;
                   warning.guard(next.id, () => props.onChange(next.id));
                 }}
               >
-                {PERMISSION_MODE_OPTIONS.map((option) => {
+                {options.map((option) => {
                   const unsupported = option.id === "auto" && !props.autoSupported;
                   const note = unsupported ? AUTO_UNSUPPORTED_REASON : option.detail;
                   return (

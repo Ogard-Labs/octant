@@ -34,7 +34,7 @@ import {
   type DesktopHostTag,
   type DesktopProviderId,
 } from "@octant/contracts";
-import { defaultShellSettings } from "@octant/domain";
+import { defaultShellSettings, workThreadAccessOf } from "@octant/domain";
 import {
   createDesktopLeaseService,
   createLeasedComputerUsePort,
@@ -259,9 +259,7 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
         executionPolicy:
           "executionPolicy" in current
             ? current.executionPolicy
-            : current.access === "auto-accept-edits"
-              ? "auto-accept-edits"
-              : "approval-gated",
+            : workThreadAccessOf(current.access).executionPolicy,
       };
     },
     // The lease service already refuses an agent naming another thread. The

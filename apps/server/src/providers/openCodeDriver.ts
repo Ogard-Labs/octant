@@ -1182,7 +1182,7 @@ function acquireRuntime(
   probeMode: "chat" | "work" | "code" = "chat",
   probePolicy: ProviderExecutionPolicy = "plan",
 ) {
-  const betaPermissions = betaSessionPermissionRules(probePolicy, probeMode);
+  const betaPermissions = betaSessionPermissionRules(probePolicy);
   return options.runtimeRegistry.acquireRuntime(options.instanceId, {
     idleMs: options.idleLeaseMs ?? 30_000,
     start: async () => {
@@ -1449,7 +1449,6 @@ function makeConnection(
                   executionPolicy,
                   betaPermissions: betaSessionPermissionRules(
                     executionPolicy,
-                    mode,
                     managedToolServerName,
                   ),
                   ...(loopbackPorts.length === 0 ? {} : { loopbackPorts }),
@@ -1775,7 +1774,6 @@ function makeConnection(
                     runtimeClient.createSession({
                       permission: permissionRules(
                         input.executionPolicy,
-                        mode,
                         state.managedTools?.serverName,
                       ),
                       model: splitModelId(input.modelId),
@@ -2033,7 +2031,6 @@ function makeConnection(
                           attachments: input.attachments,
                           permission: permissionRules(
                             state.executionPolicy,
-                            mode,
                             managedTools?.serverName,
                           ),
                         }),
@@ -2292,7 +2289,7 @@ function failClosedBetaEvent(
   if (event.kind !== "file-change") {
     return event;
   }
-  const edit = betaPermissionEffect(betaAgentPermissionRules(state.executionPolicy, mode), "edit");
+  const edit = betaPermissionEffect(betaAgentPermissionRules(state.executionPolicy), "edit");
   // An edit the posture allows, or one the user already approved, may be
   // reported. Any other file change ran without a grant, so the turn fails.
   if (edit === "allow") return event;
@@ -2350,11 +2347,7 @@ function mapAndOffer(
       requestId === "" || action === ""
         ? undefined
         : betaPermissionEffect(
-            betaSessionPermissionRules(
-              state.executionPolicy,
-              beta.mode,
-              state.managedTools?.serverName,
-            ),
+            betaSessionPermissionRules(state.executionPolicy, state.managedTools?.serverName),
             action,
           );
     if (effect === undefined) {
@@ -2518,9 +2511,14 @@ function mapAndOffer(
   }
 }
 
+/**
+ * The session ruleset for a posture. Work and Code share one capability set
+ * at the thread's level, so the mode does not enter: a Work session's bash
+ * and task follow the posture exactly as a Code session's do. Chat runs in
+ * Plan.
+ */
 function permissionRules(
   policy: ProviderExecutionPolicy,
-  mode: "chat" | "work" | "code",
   managedToolServerName?: string,
 ): PermissionRuleset {
   let rules: PermissionRuleset;
@@ -2551,16 +2549,6 @@ function permissionRules(
       { permission: "external_directory", pattern: "*", action: "deny" },
       { permission: "todowrite", pattern: "*", action: "deny" },
     ];
-  }
-  // Work has no shell, Git, or provider-owned subagents: bash and task are
-  // refused outright rather than asked about, since approving either would
-  // grant the thread more than its mode holds, and a task child runs outside
-  // Octant's journal. OpenCode applies the last matching rule.
-  if (mode === "work") {
-    rules.push(
-      { permission: "bash", pattern: "*", action: "deny" },
-      { permission: "task", pattern: "*", action: "deny" },
-    );
   }
   rules.push(
     { permission: "*_*", pattern: "*", action: "deny" },
@@ -2598,10 +2586,7 @@ const BETA_SHELL_AND_SUBAGENT_DENY: PermissionV2Ruleset = [
  * 2.0.22 names the shell `shell` and child agents `subagent`; the 1.x names
  * stay denied too so neither spelling reopens what the posture refuses.
  */
-export function betaAgentPermissionRules(
-  policy: ProviderExecutionPolicy,
-  mode: "chat" | "work" | "code",
-): PermissionV2Ruleset {
+export function betaAgentPermissionRules(policy: ProviderExecutionPolicy): PermissionV2Ruleset {
   const denyExternal: PermissionV2Ruleset = [
     { action: "external_directory", resource: "*", effect: "deny" },
   ];
@@ -2627,7 +2612,6 @@ export function betaAgentPermissionRules(
       { action: "websearch", resource: "*", effect: "deny" },
     ];
   }
-  if (mode === "work") rules.push(...BETA_SHELL_AND_SUBAGENT_DENY);
   return rules;
 }
 
@@ -2639,11 +2623,10 @@ export function betaAgentPermissionRules(
  */
 export function betaSessionPermissionRules(
   policy: ProviderExecutionPolicy,
-  mode: "chat" | "work" | "code",
   managedToolServerName?: string,
 ): PermissionV2Ruleset {
   const rules: PermissionV2Ruleset = [
-    ...betaAgentPermissionRules(policy, mode),
+    ...betaAgentPermissionRules(policy),
     { action: "*_*", resource: "*", effect: "deny" },
     { action: "skill", resource: "*", effect: "deny" },
     // 2.0.22's question tool asks for this permission and then publishes a

@@ -790,25 +790,32 @@ describe("OpenCode driver", () => {
     },
   );
 
-  it("refuses shell and task delegation outright in a Work session while edits still ask", async () => {
-    const fixture = driverFixture();
-    await Effect.runPromise(
-      Effect.scoped(
-        fixture.driver
-          .acquire({ instanceId, projectRoot: "/tmp/project", mode: "work" })
-          .pipe(
-            Effect.flatMap((connection) =>
-              connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
-            ),
+  it.each(["approval-gated", "auto-accept-edits", "full-access"] as const)(
+    "gives a Work session at %s the shell and task rules a Code session at that level gets",
+    async (executionPolicy) => {
+      const rulesFor = async (mode: "work" | "code") => {
+        const fixture = driverFixture();
+        await Effect.runPromise(
+          Effect.scoped(
+            fixture.driver
+              .acquire({ instanceId, projectRoot: "/tmp/project", mode })
+              .pipe(
+                Effect.flatMap((connection) =>
+                  connection.start({ sessionId, modelId, executionPolicy }),
+                ),
+              ),
           ),
-      ),
-    );
-    const rules = fixture.createdPermissions[0]!;
-    expect(evaluatePermission(rules, "bash")).toBe("deny");
-    expect(evaluatePermission(rules, "task")).toBe("deny");
-    expect(evaluatePermission(rules, "edit")).toBe("ask");
-    expect(evaluatePermission(rules, "external_directory")).toBe("deny");
-  });
+        );
+        return fixture.createdPermissions[0]!;
+      };
+      const work = await rulesFor("work");
+      expect(work).toEqual(await rulesFor("code"));
+      const shell = executionPolicy === "full-access" ? "allow" : "ask";
+      expect(evaluatePermission(work, "bash")).toBe(shell);
+      expect(evaluatePermission(work, "task")).toBe(shell);
+      expect(evaluatePermission(work, "external_directory")).toBe("deny");
+    },
+  );
 
   it("isolates MCP tools to the session-owned bridge", async () => {
     const fixture = driverFixture();
@@ -2425,16 +2432,16 @@ describe("OpenCode driver", () => {
     ["full-access", "bash", "allow"],
     ["full-access", "external_directory", "deny"],
   ] as const)("maps 2.x agent permission rules for %s %s as %s", (policy, action, effect) => {
-    const rules = betaAgentPermissionRules(policy, "code");
+    const rules = betaAgentPermissionRules(policy);
     expect(evaluateV2Permission(rules, action)).toBe(effect);
   });
 
-  it("denies the shell and child agents in 2.x Work mode agent permission rules", () => {
-    const rules = betaAgentPermissionRules("approval-gated", "work");
-    expect(evaluateV2Permission(rules, "bash")).toBe("deny");
-    expect(evaluateV2Permission(rules, "shell")).toBe("deny");
-    expect(evaluateV2Permission(rules, "task")).toBe("deny");
-    expect(evaluateV2Permission(rules, "subagent")).toBe("deny");
+  it("asks for the shell and child agents in 2.x approval-gated rules, which Work and Code share", () => {
+    const rules = betaAgentPermissionRules("approval-gated");
+    expect(evaluateV2Permission(rules, "bash")).toBe("ask");
+    expect(evaluateV2Permission(rules, "shell")).toBe("ask");
+    expect(evaluateV2Permission(rules, "task")).toBe("ask");
+    expect(evaluateV2Permission(rules, "subagent")).toBe("ask");
     expect(evaluateV2Permission(rules, "edit")).toBe("ask");
   });
 

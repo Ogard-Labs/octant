@@ -27,7 +27,7 @@ import {
   MAX_WORK_TRANSCRIPT_TURNS,
   ProviderSessionId,
   UtcTimestamp,
-  WORK_TURN_CAPABILITIES,
+  DEFAULT_WORK_ACCESS,
   decodeCancelWorkTurnCommand,
   decodeContextSubjectRef,
   decodeWorkThreadTranscript,
@@ -92,6 +92,9 @@ import {
   FILE_MENTION_UNREADABLE_CONTEXT,
   THREAD_MENTION_UNREADABLE_CONTEXT,
   workProjectKeepsStatusFile,
+  clampWorkAccess,
+  workThreadAccessOf,
+  workTurnCapabilityFacts,
   type ThreadToolSteps,
 } from "@octant/domain";
 import {
@@ -188,10 +191,11 @@ interface WorkUsageFacts {
 
 export interface WorkTurnStartOptions {
   /**
-   * Run this turn ask-first whatever the thread's access, for a caller
-   * whose own authority is narrower than the thread's (a goal loop round).
+   * The most this turn may run at, for a caller whose own authority may be
+   * narrower than the thread's (a goal-loop round, a routine, a delegation):
+   * the turn runs at the thread's level clamped to it (`clampWorkAccess`).
    */
-  readonly holdAskFirst?: boolean;
+  readonly accessCeiling?: WorkAccess;
   /**
    * Set by the host's own usage-limit recovery when it dispatches the
    * authorized continuation: the send is not the person re-engaging, so it
@@ -697,6 +701,13 @@ export class WorkTurnService {
       throw this.#failure("unauthorized", "Work turn admission is no longer current.");
     }
     const thread = await this.#threads.read(authenticatedWindowId, command.threadId);
+    // The level this turn runs at, fixed at admission: the thread's own,
+    // clamped to the caller's ceiling. It is journaled with the turn and is
+    // what the provider session starts with.
+    const turnAccess =
+      options?.accessCeiling === undefined
+        ? (thread?.access ?? DEFAULT_WORK_ACCESS)
+        : clampWorkAccess(thread?.access ?? DEFAULT_WORK_ACCESS, options.accessCeiling);
     const projectBootstrap = await this.#projects.bootstrap(authenticatedWindowId);
     const accessible = projectBootstrap.active.some(
       (project) =>
@@ -1111,7 +1122,7 @@ export class WorkTurnService {
           ...(command.extensionSelections === undefined || command.extensionSelections.length === 0
             ? {}
             : { extensionSelections: command.extensionSelections }),
-          capabilities: WORK_TURN_CAPABILITIES,
+          capabilities: workTurnCapabilityFacts(turnAccess),
           ...(command.delivery === undefined ? {} : { delivery: command.delivery }),
           acceptedAt,
         },
@@ -1145,9 +1156,7 @@ export class WorkTurnService {
     const launch = this.#runTurn({
       command,
       ...(thread === undefined ? {} : { thread }),
-      ...(thread === undefined
-        ? {}
-        : { access: options?.holdAskFirst === true ? ("ask-first" as const) : thread.access }),
+      ...(thread === undefined ? {} : { access: turnAccess }),
       windowId: authenticatedWindowId,
       providerSessionId,
       ...(resumeCursor === undefined ? {} : { resumeCursor }),
@@ -1447,14 +1456,14 @@ export class WorkTurnService {
         : combineAppManagedToolSets(hostTools, input.extensionTools);
     // Only a thread whose person chose the runtime's artifact tool is offered
     // it; every other thread of the account keeps Canvas and its launch keeps
-    // every guard. A Work turn never runs in Plan: it runs ask-first or
-    // auto-accepting edits.
+    // every guard. A Work turn never runs in Plan: it runs at its thread's
+    // level.
     const artifactToolName =
       input.thread?.documentDelivery === "native-artifacts"
         ? input.driver.nativeArtifactTool?.({
             mode: "work",
-            executionPolicy:
-              input.access === "auto-accept-edits" ? "auto-accept-edits" : "approval-gated",
+            executionPolicy: workThreadAccessOf(input.access ?? DEFAULT_WORK_ACCESS)
+              .executionPolicy,
           })
         : undefined;
     const finalPlan = includeWorkToolDefinitions({
