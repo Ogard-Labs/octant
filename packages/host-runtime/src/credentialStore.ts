@@ -21,10 +21,39 @@ const FAILURE_MESSAGES: Readonly<Record<CredentialStoreFailureCategory, string>>
 };
 
 /**
- * Why an unavailable Linux keyring refused, when its own words say: the
- * keyring is locked, or the session has no login keyring to keep keys in.
+ * Why an unavailable Linux keyring refused, when its own words say:
+ * - `locked`: the keyring is locked.
+ * - `no-login-collection`: the session has no login keyring to keep keys in.
+ * - `no-service`: nothing answers as the session's Secret Service, so no
+ *   keyring is running (or it has not started yet).
+ * - `no-tool`: the `secret-tool` program is not installed.
+ * - `denied`: the keyring refused Octant access.
+ * - `timed-out`: the keyring accepted the call and never answered, as one
+ *   waiting for an unlock prompt nobody can see does.
  */
-export type CredentialStoreFailureCause = "locked" | "no-login-collection";
+export type CredentialStoreFailureCause =
+  | "locked"
+  | "no-login-collection"
+  | "no-service"
+  | "no-tool"
+  | "denied"
+  | "timed-out";
+
+/** Every cause the stores can name, for a boundary that must accept only these. */
+export const CREDENTIAL_STORE_FAILURE_CAUSES: ReadonlyArray<CredentialStoreFailureCause> = [
+  "locked",
+  "no-login-collection",
+  "no-service",
+  "no-tool",
+  "denied",
+  "timed-out",
+];
+
+export function credentialStoreFailureCauseOf(
+  value: unknown,
+): CredentialStoreFailureCause | undefined {
+  return CREDENTIAL_STORE_FAILURE_CAUSES.find((cause) => cause === value);
+}
 
 export class CredentialStoreFailure extends Error {
   constructor(

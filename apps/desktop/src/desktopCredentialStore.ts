@@ -1,7 +1,6 @@
 import {
   makeSecretServiceCredentialStore,
   makeWindowsCredentialStore,
-  probeSecretService,
   type CredentialPurgeStore,
   type CredentialStore,
 } from "@octant/host-runtime";
@@ -72,14 +71,16 @@ export type DesktopCredentialBackend =
  * Select the host credential store for this desktop OS.
  *
  * Darwin keeps the Keychain helper. Linux uses the host-runtime Secret Service
- * store (same broker contract as headless). Absence is a value: no fallback
- * file store and no broker when the OS secret service is missing.
+ * store (same broker contract as headless). The Linux stores are chosen without
+ * asking whether a keyring answers: each call reaches the keyring itself, so one
+ * that starts after Octant, or is unlocked later, works on the next key without
+ * a restart, and one that is missing fails that call with its cause. There is
+ * no fallback file store.
  */
 export async function resolveDesktopCredentialBackend(options: {
   readonly platform: NodeJS.Platform;
   readonly keychainHelperPath: string;
   readonly storeScope: string;
-  readonly probe?: typeof probeSecretService;
 }): Promise<DesktopCredentialBackend> {
   if (options.platform === "darwin") {
     return {
@@ -117,8 +118,6 @@ export async function resolveDesktopCredentialBackend(options: {
     };
   }
   if (options.platform === "linux") {
-    const availability = await (options.probe ?? probeSecretService)();
-    if (!availability.available) return { kind: "unavailable" };
     return {
       kind: "secret-service",
       store: makeSecretServiceCredentialStore(),

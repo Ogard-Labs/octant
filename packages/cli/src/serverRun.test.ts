@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   resolveServerRunOptions,
   runServerRunCommand,
+  defaultCredentialBrokerFactory,
   startSecretServiceCredentialBroker,
   type ServerRunSpawnSpec,
 } from "./serverRun";
@@ -298,6 +299,16 @@ describe("runServerRunCommand", () => {
 
     expect(captured?.env).not.toHaveProperty("OCTANT_CREDENTIAL_BROKER_URL");
     expect(captured?.env).not.toHaveProperty("OCTANT_CREDENTIAL_BROKER_TOKEN");
+  });
+
+  it("starts the Linux broker even when no keyring is running yet, and none elsewhere", async () => {
+    const broker = await defaultCredentialBrokerFactory("linux");
+    try {
+      expect(broker?.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+/);
+    } finally {
+      await broker?.close();
+    }
+    await expect(defaultCredentialBrokerFactory("darwin")).resolves.toBeUndefined();
   });
 
   it("keeps public links' owner secrets in the Linux broker it starts", async () => {

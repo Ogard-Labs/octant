@@ -9193,10 +9193,17 @@ mechanisms are:
     host without the desktop app a host-local `octant` prompt is the one way
     to save a key.
   - **Store absent or locked.** `octant server run` starts a credential
-    broker only when Secret Service (`org.freedesktop.secrets` on the user
-    bus) and `/usr/bin/secret-tool` are present at start. Without a broker the
-    routes refuse as `credential-store-unavailable`, and the CLI names both
-    requirements and says to restart the server after starting the keyring.
+    broker on Linux whether or not a keyring answers at start. Every call
+    reaches Secret Service (`org.freedesktop.secrets` on the user bus) through
+    `/usr/bin/secret-tool` then, so a keyring started or unlocked after the
+    server works on the next call with no restart, and Octant caches no
+    verdict about it. A call that cannot reach the keyring refuses as
+    `credential-store-unavailable` with the store's cause when it can tell:
+    locked, no `Login` collection, no service running, no `secret-tool`,
+    denied, or no answer inside the limit. The CLI and the desktop window show
+    the cause and the next step. The desktop on Linux selects its Secret
+    Service stores the same way, without a startup probe, and the Providers
+    and Add endpoint banners read the store again each time they load.
     On macOS the Keychain broker and its helper are owned by the desktop app:
     when the desktop runs the host, the same routes store through its broker
     into the Keychain; `octant server run` on a macOS host without it starts

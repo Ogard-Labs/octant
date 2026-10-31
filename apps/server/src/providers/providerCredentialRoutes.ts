@@ -21,7 +21,11 @@
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { ProviderInstance, ProviderInstanceId, WindowId } from "@octant/contracts";
-import { listApiKeys } from "@octant/host-runtime";
+import {
+  credentialStoreFailureCauseOf,
+  listApiKeys,
+  type CredentialStoreFailureCause,
+} from "@octant/host-runtime";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import type { ProviderCredentialStore } from "./credentialBrokerClient";
@@ -404,15 +408,15 @@ const REFUSAL_MESSAGE: Readonly<Record<ProviderCredentialRefusal, string>> = {
 };
 
 /** The keyring's own reason, when the store said why it refused. */
-function storeCauseOf(error: unknown): "locked" | "no-login-collection" | undefined {
+function storeCauseOf(error: unknown): CredentialStoreFailureCause | undefined {
   const cause =
     typeof error === "object" && error !== null ? (error as { cause?: unknown }).cause : undefined;
-  return cause === "locked" || cause === "no-login-collection" ? cause : undefined;
+  return credentialStoreFailureCauseOf(cause);
 }
 
 function refuse(
   category: ProviderCredentialRefusal,
-  cause?: "locked" | "no-login-collection",
+  cause?: CredentialStoreFailureCause,
 ): Response {
   return Response.json(
     { category, message: REFUSAL_MESSAGE[category], ...(cause === undefined ? {} : { cause }) },

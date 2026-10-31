@@ -11,6 +11,7 @@ import type { CodeOperationApprovalPalette } from "./codeOperationApprovalView";
 import type { PreviewHandoffRequest } from "@octant/contracts/previews";
 import {
   DESKTOP_IPC_CHANNELS as IPC_CHANNELS,
+  KEYRING_ADVICE_MARKER,
   MAX_PROVIDER_CREDENTIAL_BYTES,
   OPEN_IN_APPLICATION_IDS,
   PROVIDER_INSTANCE_ID_PATTERN,
@@ -1529,6 +1530,8 @@ function decodeProviderApiKeySummaries(value: unknown): readonly ProviderApiKeyS
 }
 
 function knownApiKeyFailure(message: string): string | undefined {
+  const advice = message.indexOf(KEYRING_ADVICE_MARKER);
+  if (advice >= 0) return message.slice(advice + KEYRING_ADVICE_MARKER.length);
   return API_KEY_FAILURE_MESSAGES.find(
     (known) => message === known || message.endsWith(`: ${known}`),
   );
@@ -1544,8 +1547,6 @@ const API_KEY_FAILURE_MESSAGES: ReadonlyArray<string> = [
   "The API keys for this provider are too large to store.",
   "That API key is no longer stored.",
   "At least one API key is required.",
-  "Your keyring is locked. Unlock it (open Passwords and Keys and unlock Login), then try again.",
-  "Your session has no Login keyring to keep keys in. Create one named Login in Passwords and Keys, set it as default, then try again.",
   "Octant rejected an invalid API key request.",
   "Octant rejected an unauthorized credential request.",
   "Octant rejected an invalid credential request.",
