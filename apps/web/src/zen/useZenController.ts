@@ -1479,7 +1479,7 @@ export function useZenController(options: UseZenControllerOptions) {
   // Switching between the wall and a hand-made arrangement is a presentation
   // change like collapsing the bar, not a change to any card: the geometry a
   // card stores is left exactly as it was, so leaving the wall finds the
-  // arrangement again (0106).
+  // arrangement again.
   const setLayout = useCallback(
     (next: ZenSpaceLayout) => {
       if (presentationSpace.current === null) return;

@@ -770,7 +770,7 @@ export const GeminiImageProviderConfiguration = Schema.Struct({
 export type GeminiImageProviderConfiguration = typeof GeminiImageProviderConfiguration.Type;
 
 /**
- * Black Forest Labs FLUX endpoint-path names (`docs/decisions/0086`). BFL
+ * Black Forest Labs FLUX endpoint-path names. BFL
  * encodes the model in the URL path, never a body field, so these are the
  * literal path segments, not a vendor catalog Octant maintains. Allowlists
  * stay manual-entry and are never rewritten on save.
@@ -796,7 +796,7 @@ export const BflImageProviderConfiguration = Schema.Struct({
 export type BflImageProviderConfiguration = typeof BflImageProviderConfiguration.Type;
 
 /**
- * Ideogram model-version endpoint-path names (`docs/decisions/0087`). Like
+ * Ideogram model-version endpoint-path names. Like
  * BFL, Ideogram encodes the model version in the URL path, never a body
  * field, so these are the literal path segments, not a vendor catalog Octant
  * maintains. Allowlists stay manual-entry and are never rewritten on save.

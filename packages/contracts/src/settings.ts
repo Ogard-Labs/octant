@@ -28,6 +28,7 @@ export const SETTINGS_SECTION_IDS = [
   "github",
   "linear",
   "permissions",
+  "secret-stores",
   "data",
   "sync",
   "remote-access",

@@ -62,6 +62,9 @@ import {
   type ProviderCredentialResolver,
 } from "../providers/credentialBrokerClient";
 import { makeProviderApiKeyPool } from "../providers/providerApiKeyPool";
+import { makeConnectorLinkedSecrets } from "../secretStores/connectorLinkedSecrets";
+import { makeSecretStoreBrokerClient } from "../secretStores/secretStoreBrokerClient";
+import { secretStoresJournal } from "../secretStores/secretStoresJournal";
 import { createHostOAuthService, extAgentHostIdFor } from "../providers/oauth/hostOAuthService";
 import { makeHostOAuthBrokerClient } from "../providers/oauth/hostOAuthBrokerClient";
 import { hostOAuthEventJournal } from "../providers/oauth/hostOAuthEventJournal";
@@ -730,6 +733,20 @@ export function wireProviders(deps: ProvidersDependencies) {
             secrets: makeMcpServerCredentialBrokerClient({
               url: options.credentialBrokerUrl,
               token: options.credentialBrokerToken,
+            }),
+            // A server's secret may name an item in a linked secret store
+            // instead of holding a value.
+            linkedSecrets: makeConnectorLinkedSecrets({
+              broker: makeSecretStoreBrokerClient({
+                url: options.credentialBrokerUrl,
+                token: options.credentialBrokerToken,
+              }),
+              journal: secretStoresJournal({
+                journal: persistence.journal,
+                connection: persistence.connection,
+                uuid: randomUUID,
+                now: () => new Date().toISOString(),
+              }),
             }),
           }),
     });

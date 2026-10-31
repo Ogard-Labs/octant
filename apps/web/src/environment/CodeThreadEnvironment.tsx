@@ -385,7 +385,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                 summary={deliveryOutcomeLabel(props.deliveryOutcome)}
                 title="Delivers"
               >
-                {/* Decision 0003 makes the outcome the reader's to confirm, and the
+                {/* The outcome is the reader's to confirm, and the
                 host has accepted a confirmation all along — nothing ever sent
                 one, so a thread carried whatever its first prompt read as. */}
                 <CodeDeliveryOutcomeSelector

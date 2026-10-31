@@ -2027,11 +2027,11 @@ export const CodeThreadMetadataRecoveryReason = Schema.Literal(
 export type CodeThreadMetadataRecoveryReason = typeof CodeThreadMetadataRecoveryReason.Type;
 
 /**
- * A board card's plan-completion count (0051): how many of the thread's live
+ * A board card's plan-completion count: how many of the thread's live
  * plan's steps are done, out of how many the plan carries. `none` covers a
- * thread with no live plan (0027 keeps at most one). Only the count crosses
+ * thread with no live plan (a thread keeps at most one). Only the count crosses
  * onto the board; step titles, rationale, and per-step status stay in the
- * thread's own Plan dock (0044).
+ * thread's own Plan dock.
  */
 export const CodeBoardPlanProgress = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("none") }).annotations(strict),

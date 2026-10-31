@@ -72,6 +72,7 @@ export default defineConfig({
             { text: "Sync artifacts across your computers", link: "/guide/sync-artifacts" },
             { text: "Export a Canvas or artifact", link: "/guide/export" },
             { text: "Share a Canvas with a public link", link: "/guide/public-links" },
+            { text: "Use API keys from a secret store", link: "/guide/secret-stores" },
           ],
         },
       ],

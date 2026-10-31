@@ -4,6 +4,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { HostPlatformContext } from "../platform";
+import { SecretStoresClientContext } from "../settings/SecretStoresClientContext";
 import { AddMcpServerDialog } from "./AddMcpServerDialog";
 
 describe("Add MCP server", () => {
@@ -38,6 +39,65 @@ describe("Add MCP server", () => {
         command: "npx",
         args: ["-y", "docs-search-mcp"],
         env: [{ name: "DOCS_TOKEN", value: "private-value", secret: true }],
+      },
+    });
+  });
+
+  it("sends a secret that comes from a linked store as an item reference with no value", async () => {
+    const user = userEvent.setup();
+    const addUserMcpServer = vi.fn(async () => ({ kind: "extension-state-updated" }) as never);
+    const onAdded = vi.fn();
+    const secretStores = {
+      read: vi.fn(async () => ({
+        kind: "secret-stores-view" as const,
+        brokerAvailable: true,
+        stores: [
+          {
+            kind: "onepassword" as const,
+            label: "1Password",
+            linked: true,
+            tool: "ready" as const,
+          },
+        ],
+      })),
+      execute: vi.fn(),
+    };
+    render(
+      <SecretStoresClientContext.Provider value={secretStores as never}>
+        <AddMcpServerDialog
+          client={{ addUserMcpServer }}
+          onAdded={onAdded}
+          onClose={vi.fn()}
+          open
+          secretsAvailable
+        />
+      </SecretStoresClientContext.Provider>,
+    );
+    const form = screen.getByRole("form", { name: "Add an MCP server" });
+    await user.type(within(form).getByLabelText("Name"), "Docs search");
+    await user.type(within(form).getByLabelText("Command"), "npx");
+    await user.click(within(form).getByRole("button", { name: "Add variable" }));
+    await user.type(within(form).getByLabelText("Variable name"), "DOCS_TOKEN");
+    await user.click(within(form).getByRole("checkbox", { name: "Secret" }));
+    await user.click(await within(form).findByRole("checkbox", { name: "From 1Password" }));
+    await user.type(within(form).getByLabelText("Item reference"), "op://Private/Docs/credential");
+    await user.click(within(form).getByRole("button", { name: "Add server" }));
+
+    await waitFor(() => expect(onAdded).toHaveBeenCalled());
+    expect(addUserMcpServer).toHaveBeenCalledWith({
+      name: "Docs search",
+      server: {
+        type: "stdio",
+        command: "npx",
+        args: [],
+        env: [
+          {
+            name: "DOCS_TOKEN",
+            value: "",
+            secret: true,
+            linked: { store: "onepassword", reference: "op://Private/Docs/credential" },
+          },
+        ],
       },
     });
   });

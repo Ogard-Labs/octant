@@ -1,8 +1,8 @@
 /**
  * Developer ID signing, hardened runtime, and notarization.
  *
- * Signing is not a finishing touch on the packaged app: per
- * `docs/decisions/0034` it is a prerequisite of the updater, because Squirrel
+ * Signing is not a finishing touch on the packaged app: it is
+ * a prerequisite of the updater, because Squirrel
  * checks a replacement against the running app's designated requirement and an
  * unsigned app has none to check against. So this runs inside the packaging
  * pipeline, and a release build that cannot sign fails rather than emitting

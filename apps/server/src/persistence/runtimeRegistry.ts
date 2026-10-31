@@ -128,6 +128,8 @@ import {
   CanvasRefreshReceiptRecorded,
   CanvasVersionAppended,
   DiagnosticsExportReceiptRecorded,
+  SUPPORT_BUNDLE_EXPORTED_EVENT,
+  SupportBundleExported,
   DiagnosticsFailureIncidentRecorded,
   DiagnosticsFailureIncidentRecordedV1,
   ExtensionLifecycleEvent,
@@ -204,6 +206,7 @@ import {
 } from "@octant/contracts/code-debug";
 import { HostOAuthJournalRecord } from "@octant/contracts/host-oauth";
 import { ProviderKeyJournalRecord } from "@octant/contracts/provider-key-journal";
+import { SecretStoreJournalRecord } from "@octant/contracts/secret-stores";
 import {
   REMOTE_ACCESS_EVENT_NAMES,
   DeviceKeyRotatedV1,
@@ -388,6 +391,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("provider.catalog-updated@1", 1, ProviderCatalogUpdated)
     .register("host-oauth.recorded@1", 1, HostOAuthJournalRecord)
     .register("provider-key.recorded@1", 1, ProviderKeyJournalRecord)
+    .register("secret-store.recorded@1", 1, SecretStoreJournalRecord)
     .register("ollama.history-recorded@1", 1, OllamaHistoryRecorded)
     .register("claude.resume-identity-recorded@1", 1, ClaudeResumeIdentityRecorded)
     .register("context.manifest-created@1", 1, ContextManifestCreated)
@@ -493,6 +497,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(DIAGNOSTICS_FAILURE_INCIDENT_RECORDED_V1, 1, DiagnosticsFailureIncidentRecordedV1)
     .register(DIAGNOSTICS_FAILURE_INCIDENT_RECORDED, 1, DiagnosticsFailureIncidentRecorded)
     .register(DIAGNOSTICS_EXPORT_RECEIPT_RECORDED, 1, DiagnosticsExportReceiptRecorded)
+    .register(SUPPORT_BUNDLE_EXPORTED_EVENT, 1, SupportBundleExported)
     .register("work.thread-created@1", 1, WorkThreadCreated)
     .register("work.thread-updated@1", 1, WorkThreadUpdated)
     .register("work.thread-completion-confirmed@1", 1, WorkThreadCompletionConfirmed)

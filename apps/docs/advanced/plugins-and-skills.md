@@ -328,7 +328,9 @@ Mark a value **Secret** to keep it in this computer's credential store (the
 Keychain on a Mac) instead of the package; Octant cannot show it again. The
 server appears under Extension packages by the name you gave it, as **Added
 by you**, installed, trusted and switched on, and its tools ask for approval
-on every call like any plugin's. Removing it deletes the
+on every call like any plugin's. With a secret store linked, a secret can
+instead come from an item in it (**From 1Password**): see [Use API keys from a
+secret store](../guide/secret-stores.md). Removing it deletes the
 package and its secrets. Adding a server works only from the Octant window on
 this host, not from a paired device, and a browser-hosted Settings cannot keep
 secrets.

@@ -48,7 +48,7 @@ export type DefaultFolderVerdict =
 
 /**
  * A folder the person named can be anywhere, so it is governed the way the
- * artifact mirror's global folder is (`docs/decisions/0029`): until the
+ * artifact mirror's global folder is: until the
  * standing access-outside-project approval exists, only a folder inside the
  * user's own home is accepted.
  *

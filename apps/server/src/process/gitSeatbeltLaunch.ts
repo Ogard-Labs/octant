@@ -32,8 +32,8 @@ export interface GitSeatbeltLaunchOptions {
    * Whether this launch may write the out-of-root worktree metadata. It
    * defaults to **false**: these rules are appended last and Seatbelt resolves
    * by last matching rule, so a write allow emitted here outranks whatever
-   * posture the caller set on the launch itself — including Plan's, which 0009
-   * keeps read-only always. A caller that genuinely writes that metadata opts
+   * posture the caller set on the launch itself — including Plan's, which is
+   * read-only always. A caller that genuinely writes that metadata opts
    * in and says why; a caller that forgets is confined rather than widened.
    */
   readonly writable?: boolean;

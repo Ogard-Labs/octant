@@ -49,7 +49,7 @@ export function useThreadUtilityPresentation(
    *
    * The caller passes the window's own reading. Callers that omit it get the
    * wide-window answer, so a styling pass that drops the argument cannot
-   * quietly return the dock to hidden (0041).
+   * quietly return the dock to hidden.
    */
   defaultOpen = true,
 ): ThreadUtilityPresentation {

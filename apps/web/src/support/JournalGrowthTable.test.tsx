@@ -12,7 +12,12 @@ const days = Array.from(
 function clientReading(
   readJournalGrowth: DiagnosticsExportClient["readJournalGrowth"],
 ): DiagnosticsExportClient {
-  return { exportEvidence: vi.fn(), readJournalGrowth };
+  return {
+    exportEvidence: vi.fn(),
+    readJournalGrowth,
+    readSupportBundlePreview: vi.fn(),
+    exportSupportBundle: vi.fn(),
+  };
 }
 
 describe("JournalGrowthTable", () => {

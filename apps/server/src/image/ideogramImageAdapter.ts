@@ -29,7 +29,7 @@ export interface IdeogramImageAdapterOptions {
 }
 
 /**
- * Ideogram adapter (`docs/decisions/0087`). Like BFL, the model version is a
+ * Ideogram adapter. Like BFL, the model version is a
  * URL path segment rather than a body field, but the request body is
  * `multipart/form-data` and the response is synchronous — no polling. Every
  * generated image is a URL, never inline bytes, fetched once per image
@@ -155,7 +155,7 @@ async function generateIdeogramImage(input: {
 
   // Every item is checked before any bytes are fetched: one unsafe image
   // fails the whole result rather than returning fewer images than
-  // requested (`docs/decisions/0087`).
+  // requested.
   const approvedUrls: Array<string> = [];
   for (const item of decoded) {
     if (!item.safe) {

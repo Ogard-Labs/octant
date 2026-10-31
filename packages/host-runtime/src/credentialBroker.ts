@@ -14,6 +14,13 @@ import {
   type CloudIamRuntime,
 } from "./cloudIam";
 import {
+  decodeLinkedSecretPointer,
+  encodeLinkedSecretPointer,
+  isLinkedSecretMaterial,
+  isLinkedSecretStoreKind,
+  type LinkedSecretStores,
+} from "./linkedSecretStores";
+import {
   createHostOAuthRuntime,
   handleHostOAuthBrokerRoute,
   isHostOAuthGrantMaterial,
@@ -57,6 +64,14 @@ const ROUTES = new Set([
   "/v1/push-platform-credentials/resolve",
   "/v1/push-platform-credentials/set",
   "/v1/push-platform-credentials/delete",
+  "/v1/secret-stores/status",
+  "/v1/secret-stores/link",
+  "/v1/secret-stores/unlink",
+  "/v1/secret-stores/check",
+  "/v1/secret-stores/point",
+  "/v1/secret-stores/reference",
+  "/v1/secret-stores/clear",
+  "/v1/secret-stores/restore",
   "/v1/oauth/begin",
   "/v1/oauth/status",
   "/v1/oauth/refresh",
@@ -67,6 +82,7 @@ const ROUTES = new Set([
   "/v1/cloud-iam/sign",
   "/v1/cloud-iam/revoke",
 ]);
+const SECRET_STORE_PREFIX = "/v1/secret-stores/";
 const REPLICA_DEVICE_KEY_PREFIX = "/v1/replica-device-keys/";
 const REPLICA_STORE_CREDENTIAL_PREFIX = "/v1/replica-store-credentials/";
 const CANVAS_PUBLIC_SHARE_SECRET_PREFIX = "/v1/canvas-public-share-secrets/";
@@ -142,6 +158,13 @@ export async function startCredentialBroker(
    * device key, or other secret with the same UUID can reach one.
    */
   pushPlatformCredentials?: CredentialStore,
+  /**
+   * The external secret stores a person linked. A provider key or connector
+   * credential may then hold a pointer to an item in one, and the resolve
+   * routes of those two namespaces follow it at use. No other namespace can
+   * hold a pointer, and no route returns one.
+   */
+  linkedSecretStores?: LinkedSecretStores,
 ): Promise<CredentialBroker> {
   const token = randomBytes(32).toString("base64url");
   const runtime = createHostOAuthRuntime({
@@ -175,6 +198,7 @@ export async function startCredentialBroker(
       mcpServerCredentials,
       desktopProviderCredentials,
       pushPlatformCredentials,
+      linkedSecretStores,
     ).then(
       ({ destroyIncoming, response }) => {
         const headers: Record<string, string> = {};
@@ -250,6 +274,7 @@ export async function startCredentialBroker(
         mcpServerCredentials,
         desktopProviderCredentials,
         pushPlatformCredentials,
+        linkedSecretStores,
       ),
   });
 }
@@ -268,6 +293,7 @@ async function handleIncoming(
   mcpServerCredentials: CredentialStore | undefined,
   desktopProviderCredentials: CredentialStore | undefined,
   pushPlatformCredentials: CredentialStore | undefined,
+  linkedSecretStores: LinkedSecretStores | undefined,
 ): Promise<{ destroyIncoming: boolean; response: ResponseData }> {
   if (brokerUrl === undefined) throw new Error("unavailable");
   const headers = requestHeaders(incoming.headers);
@@ -304,6 +330,7 @@ async function handleIncoming(
         mcpServerCredentials,
         desktopProviderCredentials,
         pushPlatformCredentials,
+        linkedSecretStores,
       ),
     ),
   };
@@ -323,6 +350,7 @@ async function handleBrokerRequest(
   mcpServerCredentials: CredentialStore | undefined,
   desktopProviderCredentials: CredentialStore | undefined,
   pushPlatformCredentials: CredentialStore | undefined,
+  linkedSecretStores: LinkedSecretStores | undefined,
 ): Promise<Response> {
   const url = new URL(request.url);
   if (!isAuthorized(peerAddress, request.headers, token)) {
@@ -344,6 +372,16 @@ async function handleBrokerRequest(
 
   if (url.pathname.startsWith("/v1/cloud-iam/")) {
     return handleCloudIamBrokerRoute(url.pathname, request, cloudIam);
+  }
+
+  if (url.pathname.startsWith(SECRET_STORE_PREFIX)) {
+    if (linkedSecretStores === undefined) return failure("not-found", 404);
+    return handleSecretStoreRoute(
+      url.pathname.slice(SECRET_STORE_PREFIX.length),
+      request,
+      linkedSecretStores,
+      { provider: store, "mcp-server": mcpServerCredentials },
+    );
   }
 
   if (url.pathname.startsWith(REPLICA_DEVICE_KEY_PREFIX)) {
@@ -383,6 +421,7 @@ async function handleBrokerRequest(
       "secretId",
       request,
       mcpServerCredentials,
+      linkedSecretStores,
     );
   }
 
@@ -432,6 +471,9 @@ async function handleBrokerRequest(
     const decoded = await readSetJson(request);
     if (decoded.kind === "too-large") return failure("too-large", 413);
     if (decoded.kind === "invalid") return failure("invalid-request", 400);
+    // A pointer is written only by the secret-store routes, which check the
+    // store is linked; a pasted value that looks like one is refused.
+    if (isLinkedSecretMaterial(decoded.credential)) return failure("invalid-request", 400);
     try {
       await store.set(decoded.id, decoded.credential);
       return Response.json({ stored: true });
@@ -457,6 +499,9 @@ async function handleBrokerRequest(
     // A cloud grant holds the portal session and the role's secret key; only
     // the signer may read it.
     if (isCloudIamGrantMaterial(credential)) return failure("cloud-iam-material", 403);
+    if (isLinkedSecretMaterial(credential)) {
+      return followLinkedSecret(credential, linkedSecretStores);
+    }
     return Response.json({ credential });
   } catch (error) {
     return credentialStoreFailure(error);
@@ -473,11 +518,13 @@ async function handleNamespacedRoute(
   field: NamespacedIdField,
   request: Request,
   store: CredentialStore,
+  linkedSecretStores?: LinkedSecretStores,
 ): Promise<Response> {
   if (operation === "set") {
     const decoded = await readSetJson(request, field);
     if (decoded.kind === "too-large") return failure("too-large", 413);
     if (decoded.kind === "invalid") return failure("invalid-request", 400);
+    if (isLinkedSecretMaterial(decoded.credential)) return failure("invalid-request", 400);
     try {
       await store.set(decoded.id, decoded.credential);
       return Response.json({ stored: true });
@@ -496,9 +543,189 @@ async function handleNamespacedRoute(
       await store.delete(decoded.id);
       return Response.json({ deleted: true });
     }
-    return Response.json({ credential: await store.resolve(decoded.id) });
+    const credential = await store.resolve(decoded.id);
+    // Only the connector namespace passes its linked-store handle; in any other
+    // namespace a pointer is just an opaque string that never resolves further.
+    if (isLinkedSecretMaterial(credential)) {
+      return followLinkedSecret(credential, linkedSecretStores);
+    }
+    return Response.json({ credential });
   } catch (error) {
     return credentialStoreFailure(error);
+  }
+}
+
+/**
+ * Fetches a linked item now and returns it to the caller that asked. Nothing
+ * is kept: the value is not stored, cached, or logged here. A store that is
+ * locked, gone, or unlinked answers with a typed cause and no value.
+ */
+async function followLinkedSecret(
+  material: string,
+  linkedSecretStores: LinkedSecretStores | undefined,
+): Promise<Response> {
+  const pointer = decodeLinkedSecretPointer(material);
+  if (pointer === undefined || linkedSecretStores === undefined) {
+    return Response.json(
+      { error: "unavailable", cause: "linked-store-unavailable" },
+      { status: 503 },
+    );
+  }
+  const result = await linkedSecretStores.read(pointer.store, pointer.reference);
+  switch (result.status) {
+    case "read":
+      return Response.json(
+        { credential: result.value },
+        { headers: { "cache-control": "no-store" } },
+      );
+    case "missing":
+    case "invalid-reference":
+      return Response.json({ error: "missing", cause: "linked-item-missing" }, { status: 404 });
+    case "locked":
+      return Response.json({ error: "unavailable", cause: "linked-store-locked" }, { status: 503 });
+    case "not-linked":
+      return Response.json(
+        { error: "unavailable", cause: "linked-store-not-linked" },
+        { status: 503 },
+      );
+    case "unavailable":
+      return Response.json(
+        { error: "unavailable", cause: "linked-store-unavailable" },
+        { status: 503 },
+      );
+  }
+}
+
+type SecretStoreNamespace = "provider" | "mcp-server";
+
+/**
+ * The linked-store routes. They answer expected outcomes as `{ status }` with
+ * HTTP 200 so a locked store is a value the caller handles; a malformed
+ * request is a 400. Nothing here returns a fetched value: `check` only proves
+ * an item resolves, and `reference` returns the pointer (a store name and an
+ * item reference), never what it points at.
+ */
+async function handleSecretStoreRoute(
+  operation: string,
+  request: Request,
+  linked: LinkedSecretStores,
+  namespaces: Readonly<Record<SecretStoreNamespace, CredentialStore | undefined>>,
+): Promise<Response> {
+  const body = await readJsonRecord(request);
+  if (body.kind === "too-large") return failure("too-large", 413);
+  if (body.kind === "invalid") return failure("invalid-request", 400);
+  const value = body.value;
+  const keys = Object.keys(value).sort().join(",");
+  const store = value.store;
+
+  if (operation === "status") {
+    if (keys !== "") return failure("invalid-request", 400);
+    return Response.json({ stores: await linked.status() });
+  }
+  if (operation === "link" || operation === "unlink") {
+    if (keys !== "store" || !isLinkedSecretStoreKind(store)) return failure("invalid-request", 400);
+    if (operation === "unlink") {
+      await linked.unlink(store);
+      return Response.json({ status: "unlinked" });
+    }
+    return Response.json(await linked.link(store));
+  }
+  if (operation === "check") {
+    if (keys !== "reference,store" || !isLinkedSecretStoreKind(store)) {
+      return failure("invalid-request", 400);
+    }
+    if (typeof value.reference !== "string") return failure("invalid-request", 400);
+    return Response.json(await linked.check(store, value.reference));
+  }
+
+  const namespace = value.namespace;
+  const id = value.id;
+  if (
+    (namespace !== "provider" && namespace !== "mcp-server") ||
+    typeof id !== "string" ||
+    !UUID_PATTERN.test(id)
+  ) {
+    return failure("invalid-request", 400);
+  }
+  const target = namespaces[namespace];
+  if (target === undefined) return failure("not-found", 404);
+
+  try {
+    if (operation === "point") {
+      if (keys !== "id,namespace,reference,store" || !isLinkedSecretStoreKind(store)) {
+        return failure("invalid-request", 400);
+      }
+      if (typeof value.reference !== "string") return failure("invalid-request", 400);
+      const checked = await linked.check(store, value.reference);
+      if (checked.status !== "found") return Response.json({ status: checked.status });
+      // Pointing replaces a pointer, never a value the person stored: that
+      // would destroy a key they cannot get back from here.
+      if (await target.has(id)) {
+        const current = await target.resolve(id);
+        if (!isLinkedSecretMaterial(current)) {
+          return Response.json({ status: "key-already-stored" });
+        }
+      }
+      await target.set(id, encodeLinkedSecretPointer({ store, reference: value.reference }));
+      return Response.json({ status: "pointed" });
+    }
+    if (operation === "restore") {
+      // Puts back a pointer that was just replaced. Unlike `point` it does not
+      // read the item: the earlier item may be gone or its store locked by now,
+      // and the pointer is data, not a value. It still needs a linked store, a
+      // valid reference, and a slot that holds a pointer or nothing, so it can
+      // never overwrite a stored key.
+      if (keys !== "id,namespace,reference,store" || !isLinkedSecretStoreKind(store)) {
+        return failure("invalid-request", 400);
+      }
+      if (typeof value.reference !== "string") return failure("invalid-request", 400);
+      if (!linked.isValidReference(store, value.reference)) {
+        return Response.json({ status: "invalid-reference" });
+      }
+      if (!(await linked.isLinked(store))) return Response.json({ status: "not-linked" });
+      if (await target.has(id)) {
+        const current = await target.resolve(id);
+        if (!isLinkedSecretMaterial(current)) {
+          return Response.json({ status: "key-already-stored" });
+        }
+      }
+      await target.set(id, encodeLinkedSecretPointer({ store, reference: value.reference }));
+      return Response.json({ status: "pointed" });
+    }
+    if (operation === "reference" || operation === "clear") {
+      if (keys !== "id,namespace") return failure("invalid-request", 400);
+      if (!(await target.has(id))) return Response.json({ status: "none" });
+      const pointer = decodeLinkedSecretPointer(await target.resolve(id));
+      if (pointer === undefined) return Response.json({ status: "none" });
+      if (operation === "clear") await target.delete(id);
+      return Response.json({
+        status: operation === "clear" ? "cleared" : "linked",
+        store: pointer.store,
+        reference: pointer.reference,
+      });
+    }
+  } catch (error) {
+    return credentialStoreFailure(error);
+  }
+  return failure("not-found", 404);
+}
+
+async function readJsonRecord(
+  request: Request,
+): Promise<
+  { kind: "ok"; value: Record<string, unknown> } | { kind: "invalid" } | { kind: "too-large" }
+> {
+  const declared = request.headers.get("content-length");
+  if (declared !== null && /^\d+$/.test(declared) && BigInt(declared) > BigInt(BODY_LIMIT)) {
+    return { kind: "too-large" };
+  }
+  const bytes = new Uint8Array(await request.arrayBuffer());
+  if (bytes.byteLength > BODY_LIMIT) return { kind: "too-large" };
+  try {
+    const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    return isRecord(value) ? { kind: "ok", value } : { kind: "invalid" };
+  } catch {
+    return { kind: "invalid" };
   }
 }
 

@@ -160,4 +160,64 @@ describe("createDiagnosticsExportClient", () => {
     });
     await expect(bad.readJournalGrowth()).rejects.toBeInstanceOf(DiagnosticsExportClientError);
   });
+
+  it("reads the support bundle list and exports with a destination category only", async () => {
+    const preview = {
+      bundleVersion: 1,
+      generatedAt: "2026-10-31T10:00:00.000Z",
+      sections: [
+        {
+          id: "versions",
+          title: "Versions",
+          includes: "The Octant version.",
+          entries: 3,
+          available: true,
+        },
+      ],
+      neverIncluded: ["Messages, prompts, replies, or notes."],
+    };
+    const exported = {
+      kind: "exported",
+      files: [{ path: "readme.txt", contents: "Octant support bundle" }],
+      receipt: {
+        bundleId: "00000000-0000-4000-8000-000000000001",
+        exportedAt: "2026-10-31T10:00:00.000Z",
+        destinationCategory: "browser-download",
+        sections: ["versions"],
+        fileCount: 1,
+        byteCount: 21,
+      },
+    };
+    const options = {
+      baseUrl: "http://127.0.0.1:4100",
+      windowCapability: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop0",
+    };
+    const previewFetch = fetchReturning(200, preview);
+    const reader = createDiagnosticsExportClient({ ...options, fetch: previewFetch });
+    expect((await reader.readSupportBundlePreview()).sections[0]?.entries).toBe(3);
+    const [previewUrl, previewInit] = previewFetch.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ];
+    expect(previewUrl).toBe("http://127.0.0.1:4100/api/diagnostics/bundle/preview");
+    expect(previewInit.method).toBe("GET");
+
+    const exportFetch = fetchReturning(200, exported);
+    const saver = createDiagnosticsExportClient({ ...options, fetch: exportFetch });
+    const outcome = await saver.exportSupportBundle({ destinationCategory: "browser-download" });
+    expect(outcome.kind).toBe("exported");
+    const [exportUrl, exportInit] = exportFetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(exportUrl).toBe("http://127.0.0.1:4100/api/diagnostics/bundle");
+    expect(JSON.parse(String(exportInit.body))).toEqual({
+      destinationCategory: "browser-download",
+    });
+
+    const refused = createDiagnosticsExportClient({
+      ...options,
+      fetch: fetchReturning(403, { error: "Support bundle is unauthorized." }),
+    });
+    await expect(refused.readSupportBundlePreview()).rejects.toBeInstanceOf(
+      DiagnosticsExportClientError,
+    );
+  });
 });

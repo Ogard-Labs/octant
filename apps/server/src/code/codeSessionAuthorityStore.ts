@@ -19,7 +19,7 @@ export class CodeSessionAuthorityStore {
     this.#threadsByWindow.delete(windowId);
   }
 
-  // A recovery act (0032) discards every capability the thread held, not only
+  // A recovery act discards every capability the thread held, not only
   // the acting window's. A Full-access grant is a window-scoped session grant,
   // but nothing stops a second window from independently holding one for the
   // same thread; recovery must clear all of them or the discarded grant simply

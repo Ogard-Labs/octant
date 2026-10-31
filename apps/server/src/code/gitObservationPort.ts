@@ -575,7 +575,7 @@ export class GitObservationPort {
     // merged tree in the object database, which for a linked worktree lives
     // outside the bound root. Asking the launch for that write would hand the
     // authority to every caller of this port, none of which is policy-aware,
-    // so a Plan thread — read-only always under 0009 — could reach the parent
+    // so a Plan thread — read-only always — could reach the parent
     // repository's refs, objects and hooks. Quarantine the output in the
     // launch's own temporary directory instead and read the real objects
     // through an alternate, the way Git quarantines an incoming push, so

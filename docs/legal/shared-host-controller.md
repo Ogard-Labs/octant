@@ -14,7 +14,7 @@ Octant's audience includes prosumers and small teams who work together on
 infrastructure they control. Collaboration is designed as sharing a host or a
 git remote they own. Never an Octant account, never an Octant-operated store,
 and never host-to-host trust. See
-[`docs/decisions/0040-share-a-host-or-a-git-remote.md`](../decisions/0040-share-a-host-or-a-git-remote.md).
+[Architecture: persistence](../architecture.md#persistence).
 
 This draft covers **layer 2 of that design**: one headless host, several
 paired principals, one journal. The shared team host is not the current
@@ -50,7 +50,7 @@ pair, and who may read which Projects.
 
 ### Controller of record vs machine ownership
 
-Decision 0040 records GDPR controllership as a **journaled fact**, not as
+The design records GDPR controllership as a **journaled fact**, not as
 something derived only from who owns the hardware. Controller, processor,
 and joint-controller relationships are representable so a team can name a
 different legal controller when counsel requires it.
@@ -95,15 +95,14 @@ already open. The JSON bundle carries transcript, evidence, and provenance,
 and names the cut time. Secrets, raw provider payloads, resume cursors, and
 filesystem paths are unrepresentable. Bulk content outside the journal is
 listed as omissions. A paired device may export only a thread it can
-already read. This is not a host-wide dump. See decision 0036 and
+already read. This is not a host-wide dump. See
 [`apps/docs/advanced/privacy-notice.md`](../../apps/docs/advanced/privacy-notice.md).
 
 **Retain and purge.** Retention windows never delete on their own. A
 confirmed purge deletes purgeable bulk content, removes derived
 projections, physically deletes that thread's journal events, and appends
 a tombstone. A remote principal cannot set a window or purge. SQLite free
-pages may retain bytes until vacuum; that residual is reported. See
-decision 0035.
+pages may retain bytes until vacuum; that residual is reported.
 
 **Data map.** Settings → Data & storage shows a read-only map of journal, projections,
 artifacts, credential references (never values), caches, and outbound
@@ -112,7 +111,7 @@ and thread export.
 
 **Diagnostics.** Local, redacted, operator-initiated. Not telemetry.
 
-Layer 2 of decision 0040 additionally requires, before the shared host
+Layer 2 of the sharing design additionally requires, before the shared host
 ships as a product: per-principal export, and controller-confirmed erasure
 of that principal's bulk content with a tombstone that the removal
 happened. Those are not claimed as shipped here.
@@ -174,4 +173,3 @@ truth.
 - [Data residency](../../apps/docs/advanced/data-residency.md)
 - [Privacy and security](../../apps/docs/advanced/privacy-and-security.md)
 - [Remote access](../../apps/docs/advanced/remote-access.md)
-- Decision 0040 (collaboration), 0035 (purge), 0036 (export), 0013 (remote)

@@ -143,6 +143,43 @@ describe("desktop preload bridge", () => {
     expect(answer).toMatchObject({ status: "answered", httpStatus: 200 });
   });
 
+  it("saves the support bundle over its own channel and answers only a file name", async () => {
+    const bridge = (invoke: (channel: string) => Promise<unknown>) =>
+      createHostBridge({ invoke, on: vi.fn(), removeListener: vi.fn() }, projectWindowCapability);
+
+    const saved = vi.fn().mockResolvedValue({ kind: "saved", fileName: "octant-diagnostics.zip" });
+    await expect(bridge(saved).saveSupportBundle()).resolves.toEqual({
+      kind: "saved",
+      fileName: "octant-diagnostics.zip",
+    });
+    expect(saved).toHaveBeenCalledWith(IPC_CHANNELS.saveSupportBundle);
+
+    await expect(
+      bridge(vi.fn().mockResolvedValue({ kind: "cancelled" })).saveSupportBundle(),
+    ).resolves.toEqual({ kind: "cancelled" });
+  });
+
+  it("refuses a save answer that carries a path and hides the main process's own error text", async () => {
+    const bridge = (invoke: (channel: string) => Promise<unknown>) =>
+      createHostBridge({ invoke, on: vi.fn(), removeListener: vi.fn() }, projectWindowCapability);
+
+    await expect(
+      bridge(
+        vi.fn().mockResolvedValue({ kind: "saved", fileName: "/Users/ada/Downloads/x.zip" }),
+      ).saveSupportBundle(),
+    ).rejects.toThrow(/Invalid diagnostics save result/);
+    await expect(
+      bridge(
+        vi.fn().mockResolvedValue({ kind: "saved", fileName: "x.zip", path: "/Users/ada/x.zip" }),
+      ).saveSupportBundle(),
+    ).rejects.toThrow(/Invalid diagnostics save result/);
+    await expect(
+      bridge(
+        vi.fn().mockRejectedValue(new Error("Error invoking remote method: /Users/ada/x.zip")),
+      ).saveSupportBundle(),
+    ).rejects.toThrow("Octant could not save the diagnostics. Nothing was written.");
+  });
+
   it("settles a pairing on its own channel and refuses an answer it does not know", async () => {
     const invoke = vi.fn().mockResolvedValue({ status: "settled" });
     const bridge = createHostBridge(
@@ -405,6 +442,7 @@ describe("desktop preload bridge", () => {
       "revokeAllRemoteDevices",
       "revokeRemoteDevice",
       "rotateRemoteHostIdentity",
+      "saveSupportBundle",
       "selectLocalPluginFolder",
       "selectProjectRoot",
       "selectRuntimeBinary",

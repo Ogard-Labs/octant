@@ -180,7 +180,7 @@ async function readJson(request: Request, limit: number): Promise<ReadJsonResult
   }
 }
 
-function isAllowedOrigin(origin: string): boolean {
+export function isAllowedOrigin(origin: string): boolean {
   try {
     const parsed = new URL(origin);
     return (

@@ -69,6 +69,7 @@ export const DESKTOP_IPC_CHANNELS = {
   selectProjectRoot: "octant:project:select-root",
   selectLocalPluginFolder: "octant:extensions:select-local-plugin-folder",
   selectRuntimeBinary: "octant:providers:select-runtime-binary",
+  saveSupportBundle: "octant:diagnostics:save-support-bundle",
   windowCaptureList: "octant:window-capture:list",
   windowCapturePermission: "octant:window-capture:permission",
   windowCaptureTake: "octant:window-capture:take",

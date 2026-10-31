@@ -8,7 +8,7 @@ import type { AuthorityMutationDecision } from "@octant/client-runtime/host-fede
 
 /**
  * Fail-closed create destination check: name one host, refuse when it is not
- * routable, and never queue the mutation for later (0013 / 0031 / 0059).
+ * routable, and never queue the mutation for later.
  */
 
 export type CreateDestinationDecision =

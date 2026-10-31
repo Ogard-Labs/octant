@@ -2,7 +2,7 @@ import type { ProviderToolDefinition } from "@octant/contracts";
 
 // Every mode advertises the same browser workflow; execution still belongs to
 // each mode's authority adapter. The always-visible description stays short
-// (decision 0067); `help` returns the full usage below on demand.
+// so the tool prefix stays small; `help` returns the full usage below on demand.
 export const BROWSER_TOOL_DEFINITION = {
   name: "octant_browser",
   description:
