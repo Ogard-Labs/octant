@@ -7090,6 +7090,27 @@ never uses a standalone CuaDriver installation. Plan refuses computer-use
 control. See
 [decisions/0113-computer-use-plugin-and-driver-updates.md](decisions/0113-computer-use-plugin-and-driver-updates.md).
 
+**Composer window capture.** In the macOS desktop app, the composer's attach
+menu offers **Capture window…** beside **Choose file…**: the person picks one open
+window and a PNG of it attaches through the ordinary image path, so the same
+model, size, and per-turn limits apply and the server checks authority before
+the bytes are stored. It is a person-driven action of the desktop shell, not a
+tool an agent can call, and it does not need Computer use turned on. Three
+steps keep the person in control, each re-checked in Electron main for an owned
+top-level window: listing reads window titles only (a zero-size thumbnail, so
+no pixels), the macOS Screen Recording permission is requested only after the
+composer explained it and the person chose Continue (a person who denied it is
+sent to System Settings instead of prompted again), and a capture reads exactly
+the one window id the list returned, through a display-media stream
+opened for that source alone in a hidden, network-free page on its own in-memory
+session, from which a single frame is drawn. Electron's thumbnail call is never
+used for the capture, because a non-zero thumbnail size reads the pixels of
+every open window before any can be filtered out. A window that closed before the capture is
+reported, never retargeted. Web and phone clients lack the bridge methods, so
+they never offer the entry; other desktop platforms omit them until their
+capture permission model is designed. Capture bytes go to the attachment path
+only, with no telemetry and no copy kept by the shell.
+
 **Managed device tools.** The iOS Simulator and Android emulator panes ride
 upstream streaming tools (`serve-sim`, `serve-avd`) that Octant vendors as
 pinned, integrity-verified npm releases. Electron main runs them under the
