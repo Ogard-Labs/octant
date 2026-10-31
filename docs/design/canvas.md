@@ -1037,16 +1037,15 @@ version on screen is shown as no longer on the canvas and is never dropped; the
 comment service does not check anchors against a version, because comments
 belong to the Canvas rather than one version. A comparison matrix does not use
 the table row model; its criteria already anchor through node ids. Shared
-snapshots serialise the definition and so never carry comments
-([decisions/0052-canvas-boards.md](../decisions/0052-canvas-boards.md)).
+snapshots serialise the definition and so never carry comments.
 
 ## Artifact library and tags
 
 The **Artifacts** destination is the host-wide library of everything Canvas
 has made: the same journal-derived projection the per-Project inventory reads,
 gathered across every Project and mode on this host — the deliberate,
-recorded exception to per-window Project read scoping
-([0028](../decisions/0028-the-artifact-library.md)). The server decides its
+recorded exception to per-window Project read scoping.
+The server decides its
 scope; a renderer never assembles it from Project reads of its own. A paired
 device is admitted to read it clamped to the Projects the remote catalog
 allows, and an artifact it may not see is absent rather than shown
@@ -1296,8 +1295,7 @@ a design can be silent for minutes while composing the tool call, so Chat and Wo
 wait five minutes for a provider event before cutting a turn off, as Code does.
 Chromium stops painting sandboxed frames that are `inert` or have
 `pointer-events: none`, so a frame shown as a picture stays hit-testable and a
-cover over it takes the pointer
-([decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md](../decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md)).
+cover over it takes the pointer.
 A whole app window is a `desktop` design that runs script, and it is built in
 steps. A frame and the shared stylesheet each hold up to 65,536 characters
 (`CANVAS_MAX_DESIGN_MARKUP_LENGTH`, raised from 32,768): a finished window at

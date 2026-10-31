@@ -96,7 +96,7 @@ export interface CodexThreadStartInput {
   readonly sandbox: "danger-full-access" | "workspace-write" | "read-only";
   /**
    * Who answers approval requests: the host (`user`) or the harness's own
-   * reviewer (`auto_review`, 0104). Always sent, never omitted — Codex
+   * reviewer (`auto_review`). Always sent, never omitted — Codex
    * documents this as an override for "this thread and subsequent turns", so
    * leaving it out keeps whatever the thread was last told, and a thread that
    * once delegated would go on delegating after taint or after the user turned
@@ -555,7 +555,7 @@ export function codexExecutionSettings(
     // sandbox is external (`codexTurnExecutionSettings`). Under an external
     // sandbox `on-request` runs every command without asking (codex-rs
     // `exec_policy.rs`, rust-v0.164.0), which would waive the `shell-commands`
-    // class 0009 keeps independent and 0018 keeps prompting under both of these
+    // class the sandbox rules keep independent and the edit waiver keeps prompting under both of these
     // postures. `untrusted` asks for every command Codex does not itself know
     // to be read-only, and for every patch: a patch edit arrives as
     // `file-change` (auto-accept edits answers those itself) and a command as

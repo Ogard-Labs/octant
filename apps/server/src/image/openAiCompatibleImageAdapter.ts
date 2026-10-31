@@ -50,8 +50,7 @@ export interface OpenAiCompatibleImageAdapterOptions {
 }
 
 /**
- * Image generation over an OpenAI-compatible HTTP instance
- * (`docs/decisions/0085`). The instance's own base URL, credential, and
+ * Image generation over an OpenAI-compatible HTTP instance. The instance's own base URL, credential, and
  * endpoint policy are reused unchanged, exactly like the speech adapter
  * reuses them for `/audio/*`; this adapter only adds the two `images/*`
  * paths. Results are base64 only — a URL form is a protocol failure, never an

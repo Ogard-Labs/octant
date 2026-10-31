@@ -3132,7 +3132,7 @@ describe("CodeService managed thread creation", () => {
 /**
  * Recovery from a superseded checkout. A Project rebind moves the checkout id
  * every earlier thread was pinned to, and the recovery loop can only call those
- * threads unavailable from then on. 0032 refuses a refusal with no door: the way
+ * threads unavailable from then on. A refusal always has a door: the way
  * back is the user's own explicit act, journaled like any other authority change.
  */
 describe("CodeService checkout rebind", () => {

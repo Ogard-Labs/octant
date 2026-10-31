@@ -17,6 +17,9 @@ import {
   readLastModelChoice,
 } from "./modelChoiceMemory";
 import { ComposerModelPicker } from "./ComposerModelPicker";
+import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
+import { ComposerUsageWarning } from "../usage/ComposerUsageWarning";
+import { PlanUsageProvider } from "../usage/PlanUsageContext";
 import { ModelToolVerificationContext } from "./ModelToolVerificationContext";
 
 const providerA = decodeProviderInstanceId("80000000-0000-4000-8000-0000000000a1");
@@ -67,6 +70,58 @@ describe("ComposerModelPicker", () => {
     rememberModelChoice(selection, { id: "effort", value: undefined });
     expect(readRememberedModelOptions(source, selection)).toEqual({});
     next.unmount();
+  });
+
+  it("lists accounts with room first and marks the one that reached its limit", async () => {
+    render(
+      <PlanUsageProvider barStyle="smooth" client={usageClient()}>
+        <ComposerModelPicker
+          groups={groups()}
+          onSelect={vi.fn()}
+          selectedProviderInstanceId={providerA}
+        />
+      </PlanUsageProvider>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Provider and model" }));
+    const rail = await screen.findAllByRole("option", { name: /Local OpenCode|Remote Claude/ });
+    await screen.findByText("Usage limit reached");
+    expect(rail.map((item) => item.getAttribute("aria-label"))).toEqual([
+      "Remote Claude",
+      "Local OpenCode",
+    ]);
+  });
+
+  it("warns that the chosen account is at its limit and switches only when the person picks another", async () => {
+    const onSelect = vi.fn();
+    render(
+      <PlanUsageProvider barStyle="smooth" client={usageClient()}>
+        <ComposerUsageWarning
+          groups={groups()}
+          onSelect={onSelect}
+          selectedProviderInstanceId={String(providerA)}
+        />
+      </PlanUsageProvider>,
+    );
+    const warning = await screen.findByRole("alert");
+    expect(warning).toHaveTextContent("Local OpenCode has reached its usage limit.");
+    expect(warning).toHaveTextContent(/Resets in 3h/);
+    expect(onSelect).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Use Remote Claude" }));
+    expect(onSelect).toHaveBeenCalledWith({ providerInstanceId: providerB, modelId: modelThree });
+  });
+
+  it("stays quiet when the chosen account has room", async () => {
+    render(
+      <PlanUsageProvider barStyle="smooth" client={usageClient()}>
+        <ComposerUsageWarning
+          groups={groups()}
+          onSelect={vi.fn()}
+          selectedProviderInstanceId={String(providerB)}
+        />
+      </PlanUsageProvider>,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("selects advertised lead and sidekick pairings and remembers speed beside effort", async () => {
@@ -886,6 +941,45 @@ describe("ComposerModelPicker", () => {
     expect(screen.queryByRole("slider", { name: /level$/i })).not.toBeInTheDocument();
   });
 });
+
+/** A host that last saw the first account out of its five-hour window and the second with room. */
+function usageClient(): ProviderUsageLimitsClient {
+  const observedAt = new Date().toISOString();
+  const resetsAt = new Date(Date.now() + 3 * 60 * 60_000 + 30_000).toISOString();
+  const entry = (id: typeof providerA, status: "allowed" | "exhausted", utilization: number) => ({
+    providerInstanceId: id,
+    status: "available",
+    source: "provider-runtime",
+    observedAt,
+    limits: {
+      providerInstanceId: id,
+      scope: "account",
+      requests: { status: "unavailable" },
+      tokens: { status: "unavailable" },
+      concurrency: { status: "unavailable" },
+      retry: { status: "inactive" },
+      quota: "available",
+      source: "observed-evidence",
+      confidence: "high",
+      updatedAt: observedAt,
+      rateLimitWindows: [
+        {
+          window: "five_hour",
+          status,
+          utilization,
+          observedAt,
+          ...(status === "exhausted" ? { resetsAt } : {}),
+        },
+      ],
+    },
+  });
+  const snapshot = {
+    version: 1,
+    refreshedAt: observedAt,
+    entries: [entry(providerA, "exhausted", 1), entry(providerB, "allowed", 0.2)],
+  };
+  return { list: vi.fn(async () => snapshot) } as unknown as ProviderUsageLimitsClient;
+}
 
 function groups(options?: { readonly degraded?: boolean }) {
   const instances = [

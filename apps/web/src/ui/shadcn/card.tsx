@@ -3,7 +3,7 @@ import type { ComponentProps } from "react";
 import { cn } from "./utils";
 
 /*
- * A card is bounded by a hairline ring rather than lifted by a shadow (0090):
+ * A card is bounded by a hairline ring rather than lifted by a shadow:
  * it sits in the page, and shadow now means something that floats above it.
  * Semantic elements stay — a card is a section with a heading, not a stack of
  * divs.
@@ -11,10 +11,10 @@ import { cn } from "./utils";
  * The glass variant carries no paint of its own. It marks the card as wearing
  * the glass material, which the static system defines once beside the other
  * surfaces that wear it, together with its reduced-transparency and
- * no-`backdrop-filter` fallbacks (octant.css, 0107). Duplicating the ladder in
+ * no-`backdrop-filter` fallbacks (octant.css). Duplicating the ladder in
  * utilities here would give the material two definitions.
  *
- * Glass belongs only on a surface with a ground behind it (0107). Asking for
+ * Glass belongs only on a surface with a ground behind it. Asking for
  * it on a flat page produces a blurred card over nothing.
  */
 const cardVariants = cva(

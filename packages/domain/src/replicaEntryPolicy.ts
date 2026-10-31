@@ -456,7 +456,7 @@ export function replicaArtifactHidden(
  * holds in its own history is not one: a version committed here while sync
  * was off, or one still queued, descends from it. `ahead` is the one version
  * from another computer that revises the version standing here, when nothing
- * else stands beside it: it is appended here (0040: a later import of the
+ * else stands beside it: it is appended here (a later import of the
  * same origin appends a version), not chosen between. `deletions` are the
  * tombstones that are all that is left.
  */
@@ -564,7 +564,7 @@ export type ReplicaBindingDecision =
   | { readonly kind: "incompatible"; readonly reason: ReplicaBindingRefusal };
 
 /**
- * Whether a synced artifact may be bound to this thread (0040: bind to a
+ * Whether a synced artifact may be bound to this thread (bind to a
  * compatible thread, not merely a Project). The thread's own mode, Project,
  * and authority decide; the artifact brings none of its origin's. A Chat
  * artifact goes to a Chat thread, a Work artifact to a Work thread, and a

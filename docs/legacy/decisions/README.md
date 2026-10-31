@@ -1,16 +1,15 @@
 # Historical design decisions
 
-This directory preserves the reasoning and alternatives behind earlier choices.
-Start implementation from the [current design index](../design/README.md),
-[architecture](../architecture.md), [workspace specification](../design/workspace.md),
-and [DESIGN.md](../../DESIGN.md). Edit the relevant current specification with an
-approved change; an old ADR does not independently block it.
+History only. These records have no authority: they explain how earlier
+choices were reached, and nothing in them constrains current work. Every
+decision still in force is stated in
+[Decisions and requirements](../../design/decisions.md) and its owning
+specification; where a record and a specification differ, the specification is
+the rule. Current documents do not cite these records, and
+`bun run decisions:check` refuses a citation.
 
-Records remain at their existing paths so code comments, PRs, and external links
-keep resolving. Their status labels describe the historical record, not today's
-approval or implementation coverage. A partially superseded record may still say
-`Accepted`; consult the current specification for the effective rule. Existing
-links from specifications remain useful for rationale and supporting detail.
+The records moved here from `docs/decisions/` on 2026-10-31. Their status labels
+describe the record's history, not today's approval or implementation coverage.
 
 ## Index
 
@@ -189,13 +188,13 @@ links from specifications remain useful for rationale and supporting detail.
 
 ## The archive is closed
 
-No records are added after 0164. Write a new or changed rule in its owning
-current specification, with a short rationale beside it when its tradeoff,
-rejected alternatives, or measurements need preserving. Git and the PR keep the
-rest of the history.
+No records are added after 0164, here or at the old `docs/decisions/` path.
+Write a new or changed rule in its owning current specification, with a short
+rationale beside it when its tradeoff, rejected alternatives, or measurements
+need preserving, and update its entry in Decisions and requirements. Git and
+the PR keep the rest of the history.
 
-Existing records stay at their paths and keep their wording so code comments,
-PRs, and external links resolve. Their `Proposed`, `Accepted`, `Superseded`, and
+Records keep their wording. Their `Proposed`, `Accepted`, `Superseded`, and
 `Deprecated` labels describe the record's history only. A specification change
 does not edit, supersede, or re-label a record.
 

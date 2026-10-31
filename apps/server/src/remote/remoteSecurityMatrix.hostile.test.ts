@@ -1,7 +1,7 @@
 // Hostile remote-access security matrix and secret non-leakage.
 //
 // This suite is the Linux-runnable, deterministic hostile matrix for the
-// remote-access threat/failure table (docs/decisions/0013-remote-access-and-mobile.md).
+// remote-access threat/failure table (docs/architecture.md, "Security and authority").
 // It drives the *real* dual-listener gateway composition
 // (`createRemoteGateway`) entirely in-memory: a capturing `serve` records the
 // production boundary fetch (admission + route policy + auth + product
