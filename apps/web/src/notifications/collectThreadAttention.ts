@@ -54,7 +54,7 @@ export function collectThreadAttentionSignals(
       ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
     };
     // A due date in the Project's STATUS.md is the host's reminder, carried
-    // beside whatever the thread itself is asking for (decision 0119).
+    // beside whatever the thread itself is asking for.
     if (thread.followUpDue !== undefined) {
       signals.push({
         ...shared,

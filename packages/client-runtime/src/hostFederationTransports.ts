@@ -165,7 +165,7 @@ export function federatedEntityRefsCollide(
 /**
  * Execute against only the owning/selected host transport. Never fans out a
  * command. Refuses when the destination slot is missing or not ready so a
- * stale read model cannot authorize a mutation on that host (0059 / 0013).
+ * stale read model cannot authorize a mutation on that host.
  */
 export async function routeToOwningHost<T>(input: {
   readonly transports: HostFederationTransports;

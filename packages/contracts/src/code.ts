@@ -716,7 +716,7 @@ export const CodeCommand = Schema.Union(
    * A thread's checkout id is derived from the binding revision it was created
    * against, so rebinding the Project supersedes it and no later observation
    * can produce the thread's own id again. Without this the thread is
-   * fail-closed for good, which 0032 refuses as a resting state. The act is
+   * fail-closed for good, which is never an acceptable resting state. The act is
    * the user's, never inferred from a matching filesystem root: what authority
    * a thread holds only changes because someone asked.
    */

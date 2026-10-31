@@ -3,7 +3,7 @@
  * computers: see which computer wrote each version, open it in a thread here,
  * resolve two versions into one, and undo a deletion.
  *
- * Opening binds it to a compatible thread (0040). The thread's mode, Project,
+ * Opening binds it to a compatible thread. The thread's mode, Project,
  * and authority decide; the artifact brings none of its origin's. Its content
  * enters the thread through thread external-content ingestion first, so the
  * thread is tainted before the Canvas can be read, and its sources keep the
@@ -11,7 +11,7 @@
  * another computer's references against this computer's files.
  *
  * Keep and Restore publish a version whose parents are every version it
- * resolves (0163: the person picks one, which is a new version). Merge makes
+ * resolves (the person picks one, which is a new version). Merge makes
  * a new version from both through the Canvas revise path, so it needs a
  * thread. Nothing here overwrites a version or drops a tombstone.
  */
@@ -180,7 +180,7 @@ export class SyncedArtifactService {
 
   /**
    * Append to each artifact open here the one version another computer wrote
-   * on top of the version standing here (0040: a later import of the same
+   * on top of the version standing here (a later import of the same
    * origin appends a version). It enters the thread as external content
    * first, keeps its id so it is not published again, and is refused like
    * any version if the thread can no longer take it. Two versions are never

@@ -96,6 +96,77 @@ const savedRecipe = decodeDesktopRecipe({
 });
 
 describe("ProjectDesktopRecipeSection", () => {
+  it("lists a provider that needs setup with why, and keeps a recipe from moving to it", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn(async () => true);
+    const cloud = {
+      providerId: "cloud-desktop",
+      displayName: "Cloud desktop",
+      locality: "cloud",
+      billed: true,
+      needsSetup: "no-credential-store",
+    } as const;
+    render(
+      <ProjectDesktopRecipeSection
+        client={client([hostLocal, cloud])}
+        onChange={onChange}
+        project={project()}
+      />,
+    );
+
+    // The recipe starts from the first provider that is ready, not the first listed.
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Desktop provider" })).toHaveTextContent(
+        "This host",
+      ),
+    );
+    await user.click(screen.getByRole("combobox", { name: "Desktop provider" }));
+    expect(
+      await screen.findByRole("option", { name: "Cloud desktop (needs setup)" }),
+    ).toHaveAttribute("aria-disabled", "true");
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("tells a person what each unselected provider that needs setup lacks, without opening the list", async () => {
+    const cloud = {
+      providerId: "cloud-desktop",
+      displayName: "Cloud desktop",
+      locality: "cloud",
+      billed: true,
+      needsSetup: "no-credential-store",
+    } as const;
+    const spacesDown = { ...spaces, needsSetup: "daemon-not-connected" } as const;
+    render(
+      <ProjectDesktopRecipeSection
+        client={client([hostLocal, cloud, spacesDown])}
+        onChange={vi.fn(async () => true)}
+        project={project()}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Desktop provider" })).toHaveTextContent(
+        "This host",
+      ),
+    );
+    const list = await screen.findByRole("list", { name: "Providers that need setup" });
+    expect(list).toHaveTextContent(/Cloud desktop needs this host to keep your API key/);
+    expect(list).toHaveTextContent(/Spaces needs its app running and signed in/);
+  });
+
+  it("says what a saved provider that needs setup lacks, and sets nothing", async () => {
+    const onChange = vi.fn(async () => true);
+    const spacesDown = { ...spaces, needsSetup: "daemon-not-connected" } as const;
+    render(
+      <ProjectDesktopRecipeSection
+        client={client([spacesDown])}
+        onChange={onChange}
+        project={project()}
+      />,
+    );
+    expect(await screen.findByText(/needs its app running and signed in/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Set recipe" })).toBeDisabled();
+  });
+
   it("sets a recipe on a provider the host offers, with the screen chosen and no network", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn(async () => true);

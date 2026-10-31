@@ -28,7 +28,7 @@ const isHttpsEndpoint = Schema.is(ReplicaStoreS3Endpoint);
 
 /**
  * The fact the sync guide requires Settings to state before the switch can be
- * turned on (decision 0163). It sits above the switch and describes it.
+ * turned on. It sits above the switch and describes it.
  */
 export const SYNC_PROVIDER_FACT =
   "Your storage provider can read the synced files: they are signed but not encrypted.";

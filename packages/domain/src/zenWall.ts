@@ -6,7 +6,7 @@
  * and a window resize left the arrangement behind. The wall derives geometry
  * from the card count and the area it has, so those three cannot happen. A
  * space that wants a hand-made arrangement switches to `arrange` and keeps its
- * stored geometry; nothing here is persisted (0106).
+ * stored geometry; nothing here is persisted.
  */
 import {
   MIN_ZEN_ELEMENT_HEIGHT,

@@ -1108,7 +1108,7 @@ export function wireCanvas(deps: CanvasDependencies) {
   });
   // The library is a host-wide read of the same journal-derived projection
   // the per-Project inventory reads. It is deliberately wider than a window's
-  // Project scope (0026); the service, not the route, decides what a given
+  // Project scope; the service, not the route, decides what a given
   // principal may see. A Canvas a Chat thread owns outside every Project is
   // listed for a window on this host under no Project, while its thread still
   // holds it — the same rule that authorizes its tab.

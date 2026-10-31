@@ -297,7 +297,7 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
       authorizeThread: (input) =>
         authorizeWorkThreadForWindow(input) || authorizeCodeThreadForWindow(input),
     });
-    // Hoisted so the Code board can read the same durable state (0051) instead
+    // Hoisted so the Code board can read the same durable state instead
     // of standing up a second plan store.
     const planService = new PlanService({
       store: new JournalPlanStore({ journal: persistence.journal, uuid: randomUUID }),

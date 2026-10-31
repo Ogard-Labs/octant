@@ -710,7 +710,7 @@
 }
 
 /* The Folder | GitHub source switch sits between the header and the body the
-   chosen side draws, at the enclosed-track segment grammar (0071). */
+   chosen side draws, at the enclosed-track segment grammar. */
 .project-dialog__source {
   margin: var(--oct-space-3) 0 var(--oct-space-4);
 }

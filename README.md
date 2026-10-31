@@ -283,7 +283,7 @@ import apps; provider-specific payloads stop at adapters.
 - [Current design and maintenance](docs/design/README.md)
 - [Workspace behavior](docs/design/workspace.md)
 - [Visual design system](DESIGN.md)
-- [Historical decision rationale](docs/decisions/README.md)
+- [Decisions and requirements](docs/design/decisions.md)
 - [User guide](apps/docs/) (VitePress; `bun run --cwd apps/docs dev`)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)

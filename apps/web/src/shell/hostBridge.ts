@@ -312,6 +312,10 @@ export function ownerUnlockOf(bridge: OctantHostBridge | undefined): OwnerUnlock
   };
 }
 
+export type SupportBundleSaveResult =
+  | { readonly kind: "cancelled" }
+  | { readonly kind: "saved"; readonly fileName: string };
+
 export interface OctantHostBridge
   extends
     Partial<RemoteAccessAdministrationBridge>,
@@ -457,6 +461,12 @@ export interface OctantHostBridge
    * the host later redeems for the chosen path; the renderer never sees it.
    */
   readonly selectRuntimeBinary?: () => Promise<LocalPluginFolderPickerResult>;
+  /**
+   * Opens the desktop app's native save dialog for the diagnostics bundle and
+   * has the host write it to the chosen path. Answers the saved file's name,
+   * never the path. Absent in a browser or on a paired device, which download.
+   */
+  readonly saveSupportBundle?: () => Promise<SupportBundleSaveResult>;
   /**
    * Window capture for the composer's attach menu. Present only where the host
    * can capture a window (the macOS desktop app), so a web or phone client

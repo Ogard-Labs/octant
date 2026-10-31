@@ -11,7 +11,7 @@ export { providerCliUpdateArgs } from "@octant/domain";
  * the configured absolute binary: Octant never downloads, copies, or replaces
  * a provider executable itself.
  *
- * This spawn is the documented updater-authority exception in ADR 0121, not a
+ * This spawn is the documented updater-authority exception, not a
  * silent unconstrained launch. Session work stays under Seatbelt/Bubblewrap;
  * an explicit updater has to write its own installation tree, so it inherits
  * the host environment and uses the binary directory as cwd.

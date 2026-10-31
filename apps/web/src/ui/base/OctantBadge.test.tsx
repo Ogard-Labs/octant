@@ -9,7 +9,7 @@ describe("OctantBadge", () => {
     const badge = screen.getByText("Waiting");
     expect(badge).toHaveAttribute("data-slot", "badge");
     expect(badge).toHaveAttribute("data-variant", "warning");
-    // 0073 has no size below `text-xs`; the label used to be drawn at 10px.
+    // The type ramp has no size below `text-xs`; the label used to be drawn at 10px.
     expect(badge.className).toContain("text-xs");
     expect(badge.className).not.toContain("text-[10px]");
   });

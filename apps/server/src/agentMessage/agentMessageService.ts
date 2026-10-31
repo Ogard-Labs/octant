@@ -142,7 +142,7 @@ export class AgentMessageDeliveryRefused extends Error {
 }
 
 /**
- * Journaled agent-to-agent delivery (decision 0063).
+ * Journaled agent-to-agent delivery.
  *
  * The host alone admits, clamps, journals, and delivers. `sent` is admission
  * only: the body waits in the host's store until the recipient thread's next

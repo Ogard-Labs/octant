@@ -442,7 +442,7 @@ function designAssetGuidance(
 /**
  * Which block kind fits a need, and how to author it.
  *
- * Decision 0067 keeps the always-visible tool prefix small, and this guidance
+ * The always-visible tool prefix is kept small, and this guidance
  * was more than half of every mode's prefix while it rode in the description.
  * Describe answers it instead: `use` for every listed kind when no kinds are
  * named, and `detail` for each kind an agent asks for, beside its schema.

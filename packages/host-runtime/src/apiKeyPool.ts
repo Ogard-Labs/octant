@@ -61,7 +61,8 @@ export type ApiKeyPoolErrorReason =
   | "duplicate-label"
   | "too-many-keys"
   | "too-large"
-  | "unknown-key";
+  | "unknown-key"
+  | "linked-secret";
 
 const POOL_ERROR_MESSAGES: Readonly<Record<ApiKeyPoolErrorReason, string>> = {
   corrupt: "The stored API keys could not be read.",
@@ -72,6 +73,8 @@ const POOL_ERROR_MESSAGES: Readonly<Record<ApiKeyPoolErrorReason, string>> = {
   "too-many-keys": "A provider can hold at most 16 API keys.",
   "too-large": "The API keys for this provider are too large to store.",
   "unknown-key": "That API key is no longer stored.",
+  "linked-secret":
+    "This provider's key comes from a linked secret store. Remove the link in Settings first.",
 };
 
 export class ApiKeyPoolError extends Error {

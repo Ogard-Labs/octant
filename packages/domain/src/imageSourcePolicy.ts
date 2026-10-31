@@ -7,8 +7,7 @@ import type {
 
 /**
  * Custom image sources ride an OpenAI-compatible HTTP instance, the same base
- * URL, credential, and endpoint policy that instance already has for chat
- * (`docs/decisions/0085`). Only that family exposes the `images/*` routes the
+ * URL, credential, and endpoint policy that instance already has for chat. Only that family exposes the `images/*` routes the
  * adapter speaks, so an instance of any other kind is never offered and never
  * resolves.
  */

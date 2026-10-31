@@ -147,7 +147,7 @@
 }
 
 /* Workbook viewer: OctantTabs/OctantTabsTab own the tab strip's color,
-   border, and selected-state paint (0046). This class only sizes the
+   border, and selected-state paint. This class only sizes the
    strip so many worksheets scroll horizontally instead of overflowing
    the pane. */
 .preview-workbook__tabs {
