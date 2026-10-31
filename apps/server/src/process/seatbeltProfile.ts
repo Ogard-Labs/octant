@@ -38,6 +38,7 @@ import {
   buildSecretGuardSeatbeltProfile,
   secretGuardEntries,
   secretGuardLinuxPaths,
+  secretGuardPersonRules,
   secretGuardSeatbeltRules,
 } from "./secretGuard";
 import type { OsNetworkEgress } from "./threadEgressPolicy";
@@ -708,6 +709,10 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
           ...(input.usersDirectory === undefined ? {} : { usersDirectory: input.usersDirectory }),
         });
 
+  const guardEntries = secretGuardEntries({
+    platform: "darwin",
+    homeDirectory: input.homeDirectory,
+  });
   const lines = [
     "(version 1)",
     "(deny default)",
@@ -864,8 +869,9 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     // The secret guard follows every grant above, so a protected file inside
     // a granted root (a home folder opened as a Project) stays denied. Caller
     // rules come after it: the Plan launch's own Keychain sign-in read is one.
+    // The paths the person added come after those too, so nothing reopens them.
     ...secretGuardSeatbeltRules({
-      entries: secretGuardEntries({ platform: "darwin", homeDirectory: input.homeDirectory }),
+      entries: guardEntries,
       ownAccountPaths: ownAccountRoots(input, readRoots, additionalWriteRoots),
       ownWriteRoots: additionalWriteRoots,
       readableRoots: [
@@ -878,6 +884,7 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     }),
     '(allow file-write-data (literal "/dev/null"))',
     ...(input.extraRules ?? []),
+    ...secretGuardPersonRules(guardEntries),
   ];
   return lines.join("\n");
 }

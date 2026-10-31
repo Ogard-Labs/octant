@@ -79,7 +79,7 @@ import {
 import { claudeProcessPlanUsageLimits, decodeClaudeProcessPlanUsage } from "./claudeProcessUsage";
 import { claudeNativeArtifactsSupport } from "./claudeNativeArtifacts";
 import { readClaudePublishedSnapshot } from "./claudePublishedSnapshot";
-import { secretGuardRefusal } from "../process/secretGuard";
+import { secretGuardRefusal, secretGuardSearchRefusal } from "../process/secretGuard";
 import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 import { providerResumeBinding, resumeBindingRefuses } from "./resumeBinding";
 
@@ -305,29 +305,79 @@ function claudeOwnAccountPaths(environment: Readonly<Record<string, string | und
   );
 }
 
+/** Claude's tools that read every file beneath a folder. */
+const CLAUDE_SEARCH_TOOLS = new Set<string>(["Grep", "Glob", "LS"]);
+
 /**
- * Why a file tool call that names a protected file is refused, at every
- * posture. Claude's own file tools run in the runtime process, so below Full
- * access, where that process is not wrapped, this gate is what keeps a
- * Project that contains the home folder from handing over a key.
+ * Why a file tool call that touches a protected file is refused, at every
+ * posture. Claude's own file tools run in the runtime process, and below Full
+ * access that process is not wrapped: its own sandbox holds only its commands,
+ * and that sandbox cannot carry the list, because its `allowRead` (the Project
+ * root) takes precedence over any `denyRead` beneath it. So this gate is what
+ * keeps a Project that contains the home folder from handing over a key.
+ *
+ * A search reads every file beneath its root, and Claude's search tools take
+ * no exclusion, so a search rooted at or above an existing protected file is
+ * refused whole: Grep in content mode rooted at `~/.aws` read
+ * `~/.aws/credentials` while only the folder was named. A search with no path
+ * runs in the Project root and is judged there.
  */
 export function claudeFileToolSecretRefusal(
   toolName: string,
   input: Readonly<Record<string, unknown>>,
   ownAccountPaths: ReadonlyArray<string>,
+  projectRoot: string,
+  searchesRunUnguarded: boolean,
   homeDirectory?: string,
 ): string | undefined {
+  const options = {
+    ownAccountPaths,
+    ...(homeDirectory === undefined ? {} : { homeDirectory }),
+  };
+  if (CLAUDE_SEARCH_TOOLS.has(toolName)) {
+    // Under Plan and Full access the runtime runs inside Octant's profile, so
+    // a search passes over a protected file the OS refuses to open.
+    if (!searchesRunUnguarded) return undefined;
+    const pattern = typeof input.pattern === "string" ? input.pattern : "";
+    const roots = [
+      typeof input.path === "string" ? input.path : projectRoot,
+      // An absolute Glob pattern searches from its own fixed prefix.
+      ...(toolName === "Glob" && pattern.startsWith("/") ? [globFixedPrefix(pattern)] : []),
+    ];
+    for (const root of roots) {
+      const refusal = secretGuardSearchRefusal(root, options);
+      if (refusal !== undefined) return refusal;
+    }
+    return undefined;
+  }
   if (!CLAUDE_READ_TOOLS.has(toolName) && !CLAUDE_EDIT_TOOLS.has(toolName)) return undefined;
   for (const key of ["file_path", "notebook_path", "path"] as const) {
     const value = input[key];
     if (typeof value !== "string") continue;
-    const refusal = secretGuardRefusal(value, {
-      ownAccountPaths,
-      ...(homeDirectory === undefined ? {} : { homeDirectory }),
-    });
+    const refusal = secretGuardRefusal(value, options);
     if (refusal !== undefined) return refusal;
   }
   return undefined;
+}
+
+/**
+ * Whether the runtime process runs outside Octant's profile at this posture,
+ * on its own sandbox (which holds only its commands), so a search it runs in
+ * process is not held by the secret guard's OS rule.
+ */
+export function claudeSearchesRunUnguarded(policy: ProviderExecutionPolicy): boolean {
+  return policy === "approval-gated" || policy === "auto-accept-edits";
+}
+
+/** The folders of an absolute glob before its first wildcard. */
+function globFixedPrefix(pattern: string): string {
+  const segments: string[] = [];
+  for (const segment of pattern.split("/")) {
+    if (/[*?[{]/u.test(segment)) break;
+    segments.push(segment);
+  }
+  const prefix = segments.join("/");
+  return prefix === "" ? "/" : prefix;
 }
 
 /** Whether a file tool's target resolves to the login keychain folder or a file in it. */
@@ -1960,6 +2010,8 @@ function makeConnection(
             request.toolName,
             requestInput,
             ownClaudeAccountPaths,
+            projectRoot,
+            claudeSearchesRunUnguarded(input.executionPolicy),
           );
           if (secretRefusal !== undefined) return deny(secretRefusal);
           // Claude Code takes a hook "allow" as the final word and runs the

@@ -1,5 +1,13 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { NO_PROTECTED_FILES_CHANGES } from "@octant/domain/secret-guard-policy";
@@ -10,6 +18,8 @@ import {
   configureSecretGuardLocations,
   secretGuardEntries,
   secretGuardLinuxPaths,
+  secretGuardRefusal,
+  secretGuardSearchRefusal,
 } from "./secretGuard";
 import {
   buildDenyDefaultSeatbeltProfile,
@@ -199,7 +209,8 @@ describe("secret guard at Full access", () => {
     const port = secretGuardedCommandConfinement(
       makeProcessConfinementLive({
         platform: "darwin",
-        sandboxPath: "/usr/bin/sandbox-exec",
+        // Any executable stands in off macOS, where only the profile text is checked.
+        sandboxPath: process.platform === "darwin" ? "/usr/bin/sandbox-exec" : "/bin/sh",
         homeDirectory: home,
       }),
     );
@@ -228,6 +239,53 @@ describe("secret guard at Full access", () => {
         networkEgress: "allow",
       }),
     ).toThrow("secret guard");
+  });
+
+  it("never lets an exception reopen a path the person protected", () => {
+    const home = fakeHome();
+    applyProtectedFilesChoice({
+      added: ["~/.ssh", "~/.codex/auth.json", "~/Library/Keychains/login.keychain-db"],
+      removed: [],
+    });
+    const own = [join(home, ".codex")];
+    const profile = buildSecretGuardSeatbeltProfile({
+      entries: secretGuardEntries({ platform: "darwin", homeDirectory: home }),
+      ownAccountPaths: own,
+    }).split("\n");
+    const lastAllow = profile.findLastIndex((line) => line.startsWith("(allow file-"));
+    for (const added of [".ssh", ".codex/auth.json", "Library/Keychains/login.keychain-db"]) {
+      const denial = profile.indexOf(
+        `(deny file-read* file-write* (subpath "${join(home, added)}"))`,
+      );
+      expect(denial, added).toBeGreaterThan(lastAllow);
+    }
+    if (process.platform !== "darwin") return;
+    for (const file of [
+      ".ssh/id_test.pub",
+      ".ssh/config",
+      ".codex/auth.json",
+      "Library/Keychains/login.keychain-db",
+    ]) {
+      expect(runUnder(guarded(home, "/bin/cat", [join(home, file)], own)).status, file).not.toBe(0);
+    }
+  });
+
+  it("keeps a person's path denied after a confined launch's own extra rules", () => {
+    const home = fakeHome();
+    applyProtectedFilesChoice({ added: ["~/Library/Keychains/login.keychain-db"], removed: [] });
+    const keychain = join(home, "Library/Keychains/login.keychain-db");
+    const profile = buildDenyDefaultSeatbeltProfile({
+      boundRoot: join(home, "project"),
+      temporaryDirectory: join(home, "project"),
+      networkEgress: "none",
+      homeDirectory: home,
+      usersDirectory: dirname(home),
+      privateHomeAllowPaths: [],
+      extraRules: [`(allow file-read* (literal "${keychain}"))`],
+    }).split("\n");
+    expect(
+      profile.indexOf(`(deny file-read* file-write* (subpath "${keychain}"))`),
+    ).toBeGreaterThan(profile.indexOf(`(allow file-read* (literal "${keychain}"))`));
   });
 
   it("adds the person's own paths and drops a removed group", () => {
@@ -300,6 +358,36 @@ describe("secret guard below Full access", () => {
     });
     expect(profile).toMatch(/\(deny file-read\* file-write\* \(regex #"[^\n]*Library\/Keychains/u);
     expect(profile).not.toMatch(/\(allow [^\n]*keychain-db/u);
+  });
+});
+
+describe("secret guard refusals for host file tools", () => {
+  it("refuses a protected file named through the target of a linked folder", () => {
+    const home = fakeHome();
+    const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), "octant-secret-elsewhere-")));
+    directories.push(elsewhere);
+    mkdirSync(join(elsewhere, "aws"));
+    writeFileSync(join(elsewhere, "aws", "credentials"), "fake");
+    rmSync(join(home, ".aws"), { recursive: true, force: true });
+    symlinkSync(join(elsewhere, "aws"), join(home, ".aws"));
+    for (const path of [join(home, ".aws/credentials"), join(elsewhere, "aws/credentials")]) {
+      expect(secretGuardRefusal(path, { platform: "darwin", homeDirectory: home }), path).toContain(
+        "Cloud command-line credentials",
+      );
+    }
+    expect(
+      secretGuardSearchRefusal(join(elsewhere, "aws"), { platform: "darwin", homeDirectory: home }),
+    ).toContain("Cloud command-line credentials");
+  });
+
+  it("refuses a search above a protected file and allows one beside it", () => {
+    const home = fakeHome();
+    const options = { platform: "darwin" as const, homeDirectory: home };
+    expect(secretGuardSearchRefusal(join(home, ".aws"), options)).toContain(
+      "This search would read it",
+    );
+    expect(secretGuardSearchRefusal(home, options)).toContain("Refused");
+    expect(secretGuardSearchRefusal(join(home, "project"), options)).toBeUndefined();
   });
 });
 

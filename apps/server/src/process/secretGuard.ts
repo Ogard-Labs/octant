@@ -118,10 +118,67 @@ export function secretGuardRefusal(
   });
   const entry = protectedEntryFor(
     pathForms(path),
-    entries,
+    withResolvedForms(entries),
     uniqueForms(options.ownAccountPaths ?? []),
   );
   return entry === undefined ? undefined : protectedFileRefusal(entry, homeDirectory);
+}
+
+/**
+ * The refusal for a search (a grep, a glob, a listing) rooted at `root`, or
+ * undefined. A search reads every file beneath its root, so a root at or
+ * above an existing protected file is refused, naming that file: a search
+ * rooted at `~/.aws` would otherwise read `~/.aws/credentials` through a tool
+ * that names only the folder. A root inside a protected folder is refused
+ * the same way.
+ */
+export function secretGuardSearchRefusal(
+  root: string,
+  options: {
+    readonly ownAccountPaths?: ReadonlyArray<string>;
+    readonly platform?: NodeJS.Platform;
+    readonly homeDirectory?: string;
+  } = {},
+): string | undefined {
+  if (!root.startsWith("/")) return undefined;
+  const homeDirectory = options.homeDirectory ?? homedir();
+  const entries = withResolvedForms(
+    secretGuardEntries({ platform: options.platform ?? process.platform, homeDirectory }),
+  );
+  const own = uniqueForms(options.ownAccountPaths ?? []);
+  const roots = pathForms(root);
+  const inside = protectedEntryFor(roots, entries, own);
+  if (inside !== undefined) return protectedFileRefusal(inside, homeDirectory);
+  const covered = secretGuardLinuxPaths({ entries, ownAccountPaths: own, withinRoots: roots })
+    .filter((path) => roots.some((form) => isSameOrInside(path, form)))
+    .sort();
+  for (const path of covered) {
+    const entry = protectedEntryFor([path], entries, own);
+    if (entry === undefined) continue;
+    return [
+      protectedFileRefusal(entry, homeDirectory),
+      "This search would read it: search a folder that holds no protected file.",
+    ].join(" ");
+  }
+  return undefined;
+}
+
+/**
+ * Each entry under its lexical spelling and under the path the kernel
+ * resolves it to. A requested path is judged in both forms, and so must the
+ * list be: with `~/.aws` a link to another folder, a tool naming the link's
+ * target directly otherwise matched nothing, though the Seatbelt rules deny
+ * both spellings.
+ */
+function withResolvedForms(
+  entries: ReadonlyArray<ResolvedProtectedEntry>,
+): ReadonlyArray<ResolvedProtectedEntry> {
+  return entries.flatMap((entry): ReadonlyArray<ResolvedProtectedEntry> => {
+    const location = entry.kind === "path" ? entry.path : entry.directory;
+    return pathForms(location).map((form) =>
+      entry.kind === "path" ? { ...entry, path: form } : { ...entry, directory: form },
+    );
+  });
 }
 
 const SSH_SCAN_LIMIT = 256;
@@ -199,53 +256,88 @@ export function secretGuardSeatbeltRules(input: SecretGuardSeatbeltInput): Reado
   const own = uniqueForms(input.ownAccountPaths);
   const ownWrite = uniqueForms(input.ownWriteRoots ?? []);
   const readable = uniqueForms(input.readableRoots ?? []);
-  const rules: string[] = [];
-  const reallow: string[] = [];
+  // Seatbelt applies the last matching rule, so an exception (an account's own
+  // home, public keys, the login keychain) reopens whatever was denied before
+  // it. Each exception therefore follows only its own rule's denial, and every
+  // rule with no exception is denied after all of them: an exception can
+  // reopen the path its rule was written around and nothing another rule
+  // protects. The person's own paths come later still (`secretGuardPersonRules`).
+  const excepted: string[] = [];
+  const plain: string[] = [];
   for (const entry of input.entries) {
-    if (entry.kind === "path") {
-      const forms = pathForms(entry.path);
-      if (
-        entry.ownAccountExempt &&
-        forms.some((form) => own.some((o) => isSameOrInside(form, o)))
-      ) {
+    if (entry.ruleId === "added") continue;
+    const block = entryRules(entry, own, ownWrite, readable, input.profile);
+    if (block.exceptions.length === 0) plain.push(...block.denials);
+    else excepted.push(...block.denials, ...block.exceptions);
+  }
+  return [...new Set([...excepted, ...plain])];
+}
+
+/**
+ * The paths the person added, denied after every built-in rule and every
+ * exception, and after a launch's own extra rules, so nothing reopens them.
+ */
+export function secretGuardPersonRules(
+  entries: ReadonlyArray<ResolvedProtectedEntry>,
+): ReadonlyArray<string> {
+  return [
+    ...new Set(
+      entries
+        .filter((entry) => entry.ruleId === "added")
+        .flatMap((entry) => entryRules(entry, [], [], [], "allow-default").denials),
+    ),
+  ];
+}
+
+function entryRules(
+  entry: ResolvedProtectedEntry,
+  own: ReadonlyArray<string>,
+  ownWrite: ReadonlyArray<string>,
+  readable: ReadonlyArray<string>,
+  profile: SecretGuardSeatbeltInput["profile"],
+): { readonly denials: ReadonlyArray<string>; readonly exceptions: ReadonlyArray<string> } {
+  const denials: string[] = [];
+  const exceptions: string[] = [];
+  if (entry.kind === "path") {
+    const forms = pathForms(entry.path);
+    if (entry.ownAccountExempt && forms.some((form) => own.some((o) => isSameOrInside(form, o)))) {
+      return { denials, exceptions };
+    }
+    for (const form of forms) {
+      denials.push(`(deny file-read* file-write* (subpath "${escapeSeatbeltString(form)}"))`);
+    }
+    if (!entry.ownAccountExempt) return { denials, exceptions };
+    for (const owned of own) {
+      if (!forms.some((form) => owned !== form && isSameOrInside(owned, form))) continue;
+      if (profile === "allow-default") {
+        exceptions.push(
+          `(allow file-read* file-write* (subpath "${escapeSeatbeltString(owned)}"))`,
+        );
         continue;
       }
-      for (const form of forms) {
-        rules.push(`(deny file-read* file-write* (subpath "${escapeSeatbeltString(form)}"))`);
+      exceptions.push(`(allow file-read* (subpath "${escapeSeatbeltString(owned)}"))`);
+      if (ownWrite.some((root) => isSameOrInside(owned, root))) {
+        exceptions.push(`(allow file-write* (subpath "${escapeSeatbeltString(owned)}"))`);
       }
-      if (!entry.ownAccountExempt) continue;
-      for (const owned of own) {
-        if (!forms.some((form) => owned !== form && isSameOrInside(owned, form))) continue;
-        if (input.profile === "allow-default") {
-          reallow.push(`(allow file-read* file-write* (subpath "${escapeSeatbeltString(owned)}"))`);
-          continue;
-        }
-        reallow.push(`(allow file-read* (subpath "${escapeSeatbeltString(owned)}"))`);
-        if (ownWrite.some((root) => isSameOrInside(owned, root))) {
-          reallow.push(`(allow file-write* (subpath "${escapeSeatbeltString(owned)}"))`);
-        }
-      }
-      continue;
     }
-    for (const directory of pathForms(entry.directory)) {
-      rules.push(
-        `(deny file-read* file-write* (regex #"${namesRegex(directory, entry.name, entry.depth)}"))`,
-      );
-      if (entry.except === undefined) continue;
-      const reachable =
-        input.profile === "allow-default" ||
-        readable.some((root) => isSameOrInside(directory, root));
-      if (!reachable) continue;
-      // A confined launch gets the exception back for reading only: write
-      // reach under a read-only root is not the exception's to give.
-      const operations =
-        input.profile === "allow-default" ? "file-read* file-write*" : "file-read*";
-      reallow.push(
-        `(allow ${operations} (regex #"${namesRegex(directory, entry.except, entry.depth)}"))`,
-      );
-    }
+    return { denials, exceptions };
   }
-  return [...new Set([...rules, ...reallow])];
+  for (const directory of pathForms(entry.directory)) {
+    denials.push(
+      `(deny file-read* file-write* (regex #"${namesRegex(directory, entry.name, entry.depth)}"))`,
+    );
+    if (entry.except === undefined) continue;
+    const reachable =
+      profile === "allow-default" || readable.some((root) => isSameOrInside(directory, root));
+    if (!reachable) continue;
+    // A confined launch gets the exception back for reading only: write
+    // reach under a read-only root is not the exception's to give.
+    const operations = profile === "allow-default" ? "file-read* file-write*" : "file-read*";
+    exceptions.push(
+      `(allow ${operations} (regex #"${namesRegex(directory, entry.except, entry.depth)}"))`,
+    );
+  }
+  return { denials, exceptions };
 }
 
 /** The Full access profile: everything allowed, then only the secret files denied. */
@@ -266,6 +358,7 @@ export function buildSecretGuardSeatbeltProfile(input: {
       ownAccountPaths: input.ownAccountPaths,
       profile: "allow-default",
     }),
+    ...secretGuardPersonRules(input.entries),
   ].join("\n");
 }
 

@@ -10,9 +10,10 @@ import {
 } from "@octant/contracts";
 import { Effect, Exit, Fiber, PubSub, Scope, Stream } from "effect";
 import { existsSync, readdirSync } from "node:fs";
-import { mkdir, rm, writeFile } from "node:fs/promises";
-import { basename, isAbsolute, resolve } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, isAbsolute, join, resolve } from "node:path";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import type {
@@ -25,6 +26,7 @@ import type {
 import {
   claudeExecutionOptions,
   claudeFileToolSecretRefusal,
+  claudeSearchesRunUnguarded,
   makeClaudeDriver,
 } from "./claudeDriver";
 import type { ClaudeResumeIdentity, ClaudeResumeIdentityPort } from "./claudeDriver";
@@ -385,39 +387,73 @@ async function acquire(
 
 describe("Claude file tools and the secret guard", () => {
   const home = "/Users/person";
+  const refusal = (tool: string, input: Record<string, unknown>, own: string[] = []) =>
+    claudeFileToolSecretRefusal(tool, input, own, `${home}/project`, true, home);
 
   it("refuses a file tool naming a protected file and says which channel to use", () => {
-    const refusal = claudeFileToolSecretRefusal(
-      "Read",
-      { file_path: `${home}/.ssh/id_ed25519` },
-      [],
-      home,
+    const read = refusal("Read", { file_path: `${home}/.ssh/id_ed25519` });
+    expect(read).toContain("SSH private keys");
+    expect(read).toContain("SSH agent");
+    expect(refusal("Grep", { path: `${home}/.aws/credentials` })).toContain(
+      "Cloud command-line credentials",
     );
-    expect(refusal).toContain("SSH private keys");
-    expect(refusal).toContain("SSH agent");
-    expect(
-      claudeFileToolSecretRefusal("Grep", { path: `${home}/.aws/credentials` }, [], home),
-    ).toContain("Cloud command-line credentials");
-    expect(
-      claudeFileToolSecretRefusal("Write", { file_path: `${home}/.npmrc` }, [], home),
-    ).toContain("Package registry tokens");
+    expect(refusal("Write", { file_path: `${home}/.npmrc` })).toContain("Package registry tokens");
   });
 
   it("lets the runtime read its own account state and ordinary files", () => {
     expect(
-      claudeFileToolSecretRefusal(
-        "Read",
-        { file_path: `${home}/.claude/.credentials.json` },
-        [`${home}/.claude`],
-        home,
-      ),
+      refusal("Read", { file_path: `${home}/.claude/.credentials.json` }, [`${home}/.claude`]),
     ).toBeUndefined();
-    expect(
-      claudeFileToolSecretRefusal("Read", { file_path: `${home}/.ssh/config` }, [], home),
-    ).toBeUndefined();
-    expect(
-      claudeFileToolSecretRefusal("Bash", { command: `cat ${home}/.ssh/id_rsa` }, [], home),
-    ).toBeUndefined();
+    expect(refusal("Read", { file_path: `${home}/.ssh/config` })).toBeUndefined();
+    expect(refusal("Bash", { command: `cat ${home}/.ssh/id_rsa` })).toBeUndefined();
+  });
+
+  describe("searches", () => {
+    let fakeHome = "";
+    beforeAll(async () => {
+      fakeHome = await realpath(await mkdtemp(join(tmpdir(), "octant-claude-search-")));
+      await mkdir(join(fakeHome, ".aws"), { recursive: true });
+      await writeFile(join(fakeHome, ".aws", "credentials"), "fake");
+      await writeFile(join(fakeHome, ".aws", "config"), "[default]\n");
+      await mkdir(join(fakeHome, "project", "src"), { recursive: true });
+      await writeFile(join(fakeHome, "project", "src", "a.ts"), "export {};\n");
+    });
+    afterAll(async () => {
+      await rm(fakeHome, { recursive: true, force: true });
+    });
+    const search = (
+      tool: string,
+      input: Record<string, unknown>,
+      projectRoot = join(fakeHome, "project"),
+      unguarded = true,
+    ) => claudeFileToolSecretRefusal(tool, input, [], projectRoot, unguarded, fakeHome);
+
+    it("refuses a search rooted at a folder that holds a protected file", () => {
+      const grep = search("Grep", { pattern: "key", path: join(fakeHome, ".aws") });
+      expect(grep).toContain("Cloud command-line credentials");
+      expect(grep).toContain("This search would read it");
+      expect(search("Glob", { pattern: "**/*", path: fakeHome })).toContain("Refused");
+      expect(search("Glob", { pattern: `${fakeHome}/.aws/*` })).toContain("Refused");
+    });
+
+    it("refuses a search with no path when the Project holds a protected file", () => {
+      expect(search("Grep", { pattern: "key" }, fakeHome)).toContain("Refused");
+    });
+
+    it("lets a search run where no protected file lies beneath it", () => {
+      expect(search("Grep", { pattern: "export" })).toBeUndefined();
+      expect(search("Glob", { pattern: "src/**/*.ts" })).toBeUndefined();
+    });
+
+    it("leaves searches to the OS rule where the runtime runs inside Octant's profile", () => {
+      expect(
+        search("Grep", { pattern: "key", path: join(fakeHome, ".aws") }, undefined, false),
+      ).toBeUndefined();
+      expect(claudeSearchesRunUnguarded("approval-gated")).toBe(true);
+      expect(claudeSearchesRunUnguarded("auto-accept-edits")).toBe(true);
+      expect(claudeSearchesRunUnguarded("full-access")).toBe(false);
+      expect(claudeSearchesRunUnguarded("plan")).toBe(false);
+    });
   });
 });
 
