@@ -43,6 +43,7 @@ import {
   isCodeExternalEditorTargetCurrent,
 } from "../codeExternalEditorRoutes";
 import { createCodeOperationApprovalRouteHandler } from "../codeOperationApprovalRoutes";
+import { suggestProjectActions } from "../code/projectActionSuggestions";
 import { ProjectTerminalService } from "../code/projectTerminalService";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { createLocalServerRouteHandler } from "../localServerRoutes";
@@ -137,6 +138,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
                 return undefined;
               }
             },
+            suggestActions: suggestProjectActions,
             readRunning: persistence.readRunningProjectTerminals,
             journal: persistence.journal,
             actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },

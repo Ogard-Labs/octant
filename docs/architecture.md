@@ -7934,6 +7934,26 @@ mechanisms are:
   Project inactive or rebound ends the terminal the same way. A host restart
   ends a terminal still recorded as running as `host-restarted`, since its
   process did not survive.
+- **Project actions.** A Code Project keeps up to twelve named actions (for
+  example Run, Test, Dev) on its record: a name unique within the Project, a
+  one-line command, and a folder inside the bound root. The person saves the
+  whole list from the Project overview (`project.code-actions-changed@1`); a
+  paired device is refused, because a saved line is later typed into the
+  person's own shell. A Work or archived Project has none. The host suggests
+  actions from the root `package.json` scripts (with the package manager the
+  lockfile names, leaving out install and publish hooks) and the root
+  `Makefile` targets; it reads them without running anything, and nothing is
+  saved until the person confirms. Running an action is the Project terminal's
+  `run-action` command: the caller names the action, never its text, and the
+  host reads the line from the Project record now, then types it into a
+  terminal the window already owns, entering the action's folder from the root
+  first. It therefore runs under that terminal's confinement and posture with
+  the same authority checks as any other write, and typing into a shell that is
+  running another program reaches that program. The header buttons (the first
+  three, with the rest in a menu) and the command palette's Actions group ask
+  the window to run one; the window reuses a Project terminal it already
+  pinned, otherwise opens and pins one, and shows it in Zen, the Project
+  terminal's only surface.
 - **Terminal Browser grant.** A person may start a Code thread
   terminal with a Browser grant, so a provider CLI they type there can drive
   that thread's Browser and nothing else. It is off by default, asked for per

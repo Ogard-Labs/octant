@@ -14,6 +14,8 @@ import {
   type BindingRevisionId,
   type CodeProject,
   type CodeTerminalId,
+  type ProjectAction,
+  type ProjectActionSuggestion,
   type EventActor as EventActorValue,
   type Project,
   type ProjectId,
@@ -58,6 +60,8 @@ export interface ProjectTerminalServiceOptions {
    * folder is gone, moved, or no longer the one the binding names.
    */
   readonly resolveRoot: (project: CodeProject) => Promise<string | undefined>;
+  /** What the Project's own files at this root suggest saving as actions. */
+  readonly suggestActions: (root: string) => Promise<ReadonlyArray<ProjectActionSuggestion>>;
   /** Terminals the journal still records as running, for restart. */
   readonly readRunning: () => ReadonlyArray<{
     readonly projectId: ProjectId;
@@ -147,6 +151,7 @@ export class ProjectTerminalService {
       );
     }
     if (command.kind === "start") return this.#start(windowId, command);
+    if (command.kind === "suggest-actions") return this.#suggest(windowId, command.projectId);
 
     const owner = this.#owners.get(String(command.terminalId));
     if (owner === undefined) {
@@ -185,6 +190,25 @@ export class ProjectTerminalService {
         case "stop":
           await this.#end(command.terminalId, owner, "stopped");
           return this.#view(command.terminalId, owner);
+        case "run-action": {
+          // The line comes from the Project record read now, never from the
+          // caller, so a window can only type what the person saved.
+          const action = authority.project.actions?.find(
+            (candidate) => String(candidate.id) === String(command.actionId),
+          );
+          if (action === undefined) {
+            return refused("unavailable", "This Project has no such action.");
+          }
+          const root = await this.#options.resolveRoot(authority.project);
+          if (root === undefined) {
+            return refused(
+              "unavailable",
+              "This Project's folder is unavailable. Relink the Project.",
+            );
+          }
+          this.#options.terminals.write(String(command.terminalId), actionLine(root, action));
+          return this.#view(command.terminalId, owner);
+        }
       }
     } catch {
       return refused("unavailable", "This terminal is no longer running.");
@@ -225,6 +249,20 @@ export class ProjectTerminalService {
       ending.push(this.#end(owner.terminalId, owner, "authority-revoked"));
     }
     await Promise.allSettled(ending);
+  }
+
+  async #suggest(windowId: WindowId, projectId: ProjectId): Promise<ProjectTerminalResult> {
+    const authority = this.#authority(windowId, projectId);
+    if (authority.kind === "refused") return refused(authority.reason, authority.message);
+    const root = await this.#options.resolveRoot(authority.project);
+    if (root === undefined) {
+      return refused("unavailable", "This Project's folder is unavailable. Relink the Project.");
+    }
+    return decodeProjectTerminalResult({
+      kind: "project-action-suggestions",
+      projectId,
+      suggestions: await this.#options.suggestActions(root).catch(() => []),
+    });
   }
 
   async #start(
@@ -465,4 +503,16 @@ export class ProjectTerminalService {
 
 function refused(reason: ProjectTerminalRefusalReason, message: string): ProjectTerminalResult {
   return { kind: "project-terminal-refused", reason, message };
+}
+
+/**
+ * The line typed for an action: clear whatever half-typed input the shell
+ * holds, enter the action's folder from the Project root (so one action does
+ * not inherit the folder an earlier one left the shell in), and run the
+ * command. The path is single-quoted, so a name cannot be read as an option or
+ * split into words.
+ */
+function actionLine(root: string, action: ProjectAction): string {
+  const folder = action.directory === "." ? root : `${root}/${action.directory}`;
+  return `\u0015cd '${folder.replaceAll("'", "'\\''")}' && ${action.command}\r`;
 }

@@ -35,6 +35,7 @@ import type {
   ThreadBoardPullRequestIdentity,
 } from "@octant/contracts";
 import type {
+  ProjectAction,
   ProjectAvailability,
   ProjectId,
   ProjectColor,
@@ -426,6 +427,10 @@ export interface WorkspaceViewProps {
     brandKit: CanvasDesignBrand,
   ) => Promise<boolean>;
   readonly onWorkStatusFileChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
+  readonly onActionsChange?: (
+    projectId: ProjectId,
+    actions: ReadonlyArray<ProjectAction>,
+  ) => Promise<boolean>;
   readonly onDesktopRecipeChange?: (
     projectId: ProjectId,
     recipe: DesktopRecipe | null,
@@ -2228,6 +2233,7 @@ function renderNonCodeTab(
         {...(props.onDesktopRecipeChange === undefined
           ? {}
           : { onDesktopRecipeChange: props.onDesktopRecipeChange })}
+        {...(props.onActionsChange === undefined ? {} : { onActionsChange: props.onActionsChange })}
         {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
         {...(props.projectWindowCapability === undefined
           ? {}

@@ -68,6 +68,12 @@ function project(
     readonly lifecycle?: "active" | "archived";
     readonly revisionId?: string;
     readonly codeAccessPersistence?: "current-session" | "project-default";
+    readonly actions?: ReadonlyArray<{
+      readonly id: string;
+      readonly name: string;
+      readonly command: string;
+      readonly directory: string;
+    }>;
   } = {},
 ): Project {
   const actor = { kind: "local-user", actorId: ids.actor } as const;
@@ -92,7 +98,10 @@ function project(
       },
     ],
     ...((overrides.type ?? "code") === "code"
-      ? { codeAccessPersistence: overrides.codeAccessPersistence ?? "current-session" }
+      ? {
+          codeAccessPersistence: overrides.codeAccessPersistence ?? "current-session",
+          ...(overrides.actions === undefined ? {} : { actions: overrides.actions }),
+        }
       : {}),
   });
 }
@@ -186,6 +195,9 @@ function harness(
       options.access?.(String(window), String(id)) ??
       (String(window) === ids.window && String(id) === ids.project),
     resolveRoot: async () => ("root" in options ? options.root : root),
+    suggestActions: async () => [
+      { name: "Dev", command: "bun run dev", directory: ".", source: "package.json" as const },
+    ],
     readRunning: () => readRunningProjectTerminals(connection),
     journal,
     actor,
@@ -212,6 +224,66 @@ const start = (overrides: Partial<{ projectId: ProjectId; terminalId: string }> 
 function refusal(result: ProjectTerminalResult) {
   return result.kind === "project-terminal-refused" ? result.reason : undefined;
 }
+
+describe("Project terminal actions", () => {
+  const actionId = "92000000-0000-4000-8000-000000000001";
+  const withActions = (directory: string) =>
+    new Map([
+      [
+        ids.project,
+        project({
+          actions: [{ id: actionId, name: "Dev", command: "bun run dev", directory }],
+        }),
+      ],
+    ]);
+  const run = (id: string = actionId) =>
+    ({
+      kind: "run-action",
+      projectId,
+      terminalId,
+      actionId: id,
+    }) as ProjectTerminalCommand;
+
+  it("types the saved line into the person's shell from the Project root", async () => {
+    const { service, terminals } = harness({ projects: withActions("apps/web") });
+    await service.execute(windowId, "local-window", start());
+
+    const result = await service.execute(windowId, "local-window", run());
+
+    expect(result).toMatchObject({ kind: "project-terminal", terminal: { state: "running" } });
+    expect(terminals.writes).toEqual([`\u0015cd '${root}/apps/web' && bun run dev\r`]);
+  });
+
+  it("refuses an action the Project did not save, and a paired device, and types nothing", async () => {
+    const { service, terminals } = harness({ projects: withActions(".") });
+    await service.execute(windowId, "local-window", start());
+
+    const unknown = await service.execute(
+      windowId,
+      "local-window",
+      run("92000000-0000-4000-8000-000000000009"),
+    );
+    const remote = await service.execute(windowId, "remote-device", run());
+
+    expect(refusal(unknown)).toBe("unavailable");
+    expect(refusal(remote)).toBe("unauthorized");
+    expect(terminals.writes).toEqual([]);
+  });
+
+  it("suggests actions only to the window that holds the Code Project", async () => {
+    const { service } = harness();
+    const command = { kind: "suggest-actions", projectId } as ProjectTerminalCommand;
+
+    expect(await service.execute(windowId, "local-window", command)).toMatchObject({
+      kind: "project-action-suggestions",
+      suggestions: [{ command: "bun run dev" }],
+    });
+    expect(refusal(await service.execute(otherWindowId, "local-window", command))).toBe(
+      "unauthorized",
+    );
+    expect(refusal(await service.execute(windowId, "remote-device", command))).toBe("unauthorized");
+  });
+});
 
 describe("Project terminals", () => {
   it("opens the person's shell at the Project's own root with no credentials and records who opened it", async () => {
@@ -506,6 +578,7 @@ describe("Project terminals", () => {
       readProject: () => project(),
       canAccessProject: () => true,
       resolveRoot: async () => root,
+      suggestActions: async () => [],
       readRunning: () => readRunningProjectTerminals(connection),
       journal,
       actor,

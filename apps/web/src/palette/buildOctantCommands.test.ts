@@ -82,3 +82,27 @@ describe("plugin MCP server commands", () => {
     });
   });
 });
+
+describe("Project action commands", () => {
+  const dev = { actionId: "a1", name: "Dev", command: "bun run dev", projectName: "Octant" };
+
+  it("runs the action the person saved, from the palette", () => {
+    const onRunProjectAction = vi.fn();
+    const command = buildOctantCommands(
+      sources({ projectActions: [dev], onRunProjectAction }),
+    ).find((candidate) => candidate.group === "Actions");
+
+    expect(command).toMatchObject({ title: "Dev", detail: "Octant · bun run dev" });
+    if (command?.action.kind !== "run") throw new Error("Expected a run action.");
+    command.action.run();
+    expect(onRunProjectAction).toHaveBeenCalledWith(dev);
+  });
+
+  it("offers none where the window has no way to run one", () => {
+    expect(
+      buildOctantCommands(sources({ projectActions: [dev] })).some(
+        (candidate) => candidate.group === "Actions",
+      ),
+    ).toBe(false);
+  });
+});

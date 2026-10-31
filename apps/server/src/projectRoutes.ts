@@ -221,6 +221,21 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
           origin,
         );
       }
+      // A saved action is a command the person later clicks to run in their own
+      // shell, so only a window on the host writes the list.
+      if (
+        command.kind === "change-code-project-actions" &&
+        readPrincipalRouteContext(request)?.principal.kind === "remote-device"
+      ) {
+        return response(
+          {
+            category: "unauthorized",
+            message: "A Code Project's actions are set on the host.",
+          },
+          403,
+          origin,
+        );
+      }
       // A desktop recipe chooses what this host runs and for how long, so it
       // is set from a window on the host. A paired device may still watch and
       // operate the desktops a recipe produces.

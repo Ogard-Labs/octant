@@ -32,6 +32,20 @@ export interface OctantCommandSources {
    */
   readonly appleProjects: ReadonlyArray<CommandAppleProject>;
   readonly onOpenAppleProject: (project: CommandAppleProject) => void;
+  /**
+   * The saved actions of the Code Project in view. A window with no such
+   * Project contributes none, so the palette never offers a button the header
+   * would not show.
+   */
+  readonly projectActions?: ReadonlyArray<CommandProjectAction>;
+  readonly onRunProjectAction?: (action: CommandProjectAction) => void;
+}
+
+export interface CommandProjectAction {
+  readonly actionId: string;
+  readonly name: string;
+  readonly command: string;
+  readonly projectName: string;
 }
 
 export interface CommandThread {
@@ -178,6 +192,19 @@ export function buildOctantCommands(sources: OctantCommandSources): ReadonlyArra
         server.reference,
       ],
       action: { kind: "address", reference: server.reference },
+    });
+  }
+
+  for (const action of sources.projectActions ?? []) {
+    const run = sources.onRunProjectAction;
+    if (run === undefined) break;
+    commands.push({
+      id: `project-action:${action.actionId}`,
+      title: action.name,
+      group: "Actions",
+      detail: `${action.projectName} · ${action.command}`,
+      keywords: ["run", "action", action.command, action.projectName],
+      action: { kind: "run", run: () => run(action) },
     });
   }
 

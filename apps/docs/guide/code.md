@@ -19,6 +19,21 @@ The server validates that the folder exists and the renderer receives an opaque 
 
 A Code Project can remember how new threads should start: in **this Project's current checkout**, or in **a managed worktree Octant creates**. The default is the current checkout, which creates no worktree the owner did not ask for. Set the habit from the Project overview; the composer still lets one thread override it without rewriting the Project. Desktop and phone both inherit that default, and the new thread shows which root it bound. A missing or unauthorized root fails closed instead of inventing a worktree.
 
+## Actions
+
+A Code Project can keep named commands such as Run, Test, or Dev. Open the
+Project overview and choose **Actions**. Add a name, the command, and
+optionally a folder inside the Project. Octant also looks in the Project's
+`package.json` scripts and `Makefile` targets and offers them as suggestions;
+nothing is saved until you add one and choose **Save actions**.
+
+Each action becomes a button in the window header (the first three, with the
+rest under **More**) and an entry in the command palette. Choosing it types the
+command into the Project terminal and opens that terminal in Zen. It runs with
+the same sandbox and approvals as anything else you type there. If the terminal
+is already running a program, the command goes to that program, so stop it
+first. Actions are set from this computer's window, not from a paired device.
+
 ## Quick tools on the start screen
 
 Once you choose a Project on a Code start screen, **Terminal** and **Browser**
