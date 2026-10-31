@@ -24,6 +24,28 @@ export const AppleProjectPath = Schema.NonEmptyTrimmedString.pipe(
   }),
 );
 export type AppleProjectPath = typeof AppleProjectPath.Type;
+/**
+ * A project path as a caller may send it: checkout-relative, or absolute. The
+ * server turns an absolute path into the checkout-relative form, or refuses it
+ * with a reason; the normalized form everywhere else stays `AppleProjectPath`.
+ * Without this, the request decode rejected `/…` before the server could say why.
+ */
+export const AppleProjectPathInput = Schema.Union(
+  AppleProjectPath,
+  Schema.NonEmptyTrimmedString.pipe(
+    Schema.maxLength(1024),
+    Schema.filter(
+      (value) =>
+        value.startsWith("/") &&
+        !value.includes("\\") &&
+        !value.includes("\0") &&
+        value
+          .slice(1)
+          .split("/")
+          .every((segment) => segment.length > 0 && segment !== "." && segment !== ".."),
+    ),
+  ),
+);
 export const AppleEvidenceReference = Schema.NonEmptyTrimmedString.pipe(
   Schema.maxLength(512),
   Schema.filter((value) => !value.includes("/") && !value.includes("\\") && !value.includes("\0")),
@@ -159,7 +181,7 @@ export const AppleBuildRequest = Schema.Struct({
   scheme: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
   configuration: Schema.optional(AppleBuildConfiguration),
   simulatorId: Schema.optional(AppleSimulatorId),
-  projectPath: AppleProjectPath,
+  projectPath: AppleProjectPathInput,
   timeoutMs: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(60 * 60 * 1000)),
   approval: ToolActionApproval,
 }).annotations(strict);
@@ -264,7 +286,7 @@ export const AppleDiscoveryRequest = Schema.Struct({
   authority: ToolActionAuthority,
   threadId: CodeThreadId,
   checkoutId: CodeCheckoutId,
-  projectPath: AppleProjectPath,
+  projectPath: AppleProjectPathInput,
 }).annotations(strict);
 export type AppleDiscoveryRequest = typeof AppleDiscoveryRequest.Type;
 
