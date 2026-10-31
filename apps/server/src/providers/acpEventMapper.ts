@@ -9,6 +9,7 @@ import type {
 } from "@octant/contracts";
 import type { AcpServerNotification, AcpServerRequest } from "./acpProtocol";
 import { outsideContentTarget, outsideContentToolName } from "./outsideContentRead";
+import { providerApprovalCall } from "./providerApprovalCall";
 
 const STREAM_CHUNK_CHARACTERS = 65_536;
 const LABEL_MAX_CHARACTERS = 256;
@@ -439,6 +440,28 @@ export function mapAcpPermissionRequest(
       requestId,
       action: toolKind,
       description: title,
+      ...withCall(
+        providerApprovalCall({
+          tool: toolKind,
+          arguments: {
+            ...(typeof request.params.toolCall.rawInput === "object" &&
+            request.params.toolCall.rawInput !== null
+              ? request.params.toolCall.rawInput
+              : request.params.toolCall.rawInput === undefined
+                ? {}
+                : { input: request.params.toolCall.rawInput }),
+            ...(request.params.toolCall.locations == null
+              ? {}
+              : { locations: request.params.toolCall.locations }),
+          },
+        }),
+      ),
     }),
   };
+}
+
+function withCall(
+  call: ReturnType<typeof providerApprovalCall>,
+): { readonly call?: NonNullable<ReturnType<typeof providerApprovalCall>> } {
+  return call === undefined ? {} : { call };
 }

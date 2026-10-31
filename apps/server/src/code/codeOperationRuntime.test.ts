@@ -2184,6 +2184,126 @@ describe("CodeOperationRuntime", () => {
     expect(chosen.start).toMatchObject({ nativeArtifacts: true });
   });
 
+  describe("Octant Shield answering a provider runtime's prompts", () => {
+    const decision = (verdict: "allow" | "ask" | "deny") => ({
+      reviewer: "octant-shield" as const,
+      verdict,
+      stage: "model" as const,
+      reason: `Shield said ${verdict}.`,
+      latencyMs: 5,
+      decidedAt: now as never,
+    });
+    const runWith = async (verdict: "allow" | "ask" | "deny" | undefined) => {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const connection = providerConnection(queue);
+      const review = vi.fn(async () => (verdict === undefined ? undefined : decision(verdict)));
+      const fixture = runtimeFixture({
+        provider: providerDriver(connection),
+        approvalValidator: false,
+        checkoutRoot: "/Users/dev/app",
+        shield: { review },
+      });
+      const startOperation = operationId(40);
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "approval-request",
+            requestId: "provider-approval-9",
+            action: "Bash",
+            description: "Bash · git status",
+            call: {
+              tool: "Bash",
+              input: JSON.stringify({ command: "git status", cwd: "[CHECKOUT]/src" }),
+            },
+          }),
+        ),
+      );
+      const frames = async () =>
+        (await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 50)).map(
+          (frame) => frame.event,
+        );
+      return { connection, review, fixture, frames };
+    };
+
+    it("answers the provider itself when Shield allows, journals Shield's decision, and asks nobody", async () => {
+      const { connection, review, fixture, frames } = await runWith("allow");
+      await vi.waitFor(() =>
+        expect(connection.answerApproval).toHaveBeenCalledWith({
+          sessionId,
+          requestId: "provider-approval-9",
+          approved: true,
+        }),
+      );
+      expect(review).toHaveBeenCalledWith(
+        expect.objectContaining({
+          boundRoot: "/Users/dev/app",
+          call: expect.objectContaining({
+            tool: "Bash",
+            command: "git status",
+            workingDirectory: "/Users/dev/app/src",
+          }),
+        }),
+      );
+      const events = await frames();
+      expect(events).toContainEqual({
+        kind: "approval-reviewed",
+        summary: "Bash · git status",
+        decision: decision("allow"),
+      });
+      expect(events.some((event) => event.kind === "approval-requested")).toBe(false);
+      await fixture.runtime.close();
+      fixture.close();
+    });
+
+    it("refuses the call for the provider when Shield denies", async () => {
+      const { connection, fixture, frames } = await runWith("deny");
+      await vi.waitFor(() =>
+        expect(connection.answerApproval).toHaveBeenCalledWith({
+          sessionId,
+          requestId: "provider-approval-9",
+          approved: false,
+        }),
+      );
+      expect((await frames()).some((event) => event.kind === "approval-requested")).toBe(false);
+      await fixture.runtime.close();
+      fixture.close();
+    });
+
+    it("hands an escalated call to the person as the ordinary approval", async () => {
+      const { connection, fixture, frames } = await runWith("ask");
+      await vi.waitFor(async () => {
+        const events = await frames();
+        expect(events.map((event) => event.kind)).toEqual(
+          expect.arrayContaining(["approval-reviewed", "approval-requested"]),
+        );
+      });
+      expect(connection.answerApproval).not.toHaveBeenCalled();
+      await fixture.runtime.close();
+      fixture.close();
+    });
+
+    it("asks the person as before when Shield is not the thread's reviewer", async () => {
+      const { connection, fixture, frames } = await runWith(undefined);
+      await vi.waitFor(async () => {
+        expect((await frames()).some((event) => event.kind === "approval-requested")).toBe(true);
+      });
+      expect((await frames()).some((event) => event.kind === "approval-reviewed")).toBe(false);
+      expect(connection.answerApproval).not.toHaveBeenCalled();
+      await fixture.runtime.close();
+      fixture.close();
+    });
+  });
+
   it("runs a provider turn asynchronously and owns exact input, approval, and cancellation", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
@@ -5988,6 +6108,7 @@ function runtimeFixture(options: {
     typeof createCodeOperationRuntime
   >[0]["resolveSelectedExtensions"];
   agentMessages?: Parameters<typeof createCodeOperationRuntime>[0]["agentMessages"];
+  shield?: Parameters<typeof createCodeOperationRuntime>[0]["shield"];
   siblingThreads?: Parameters<typeof createCodeOperationRuntime>[0]["siblingThreads"];
   contributedTools?: Parameters<typeof createCodeOperationRuntime>[0]["contributedTools"];
   canvas?: Parameters<typeof createCodeOperationRuntime>[0]["canvas"];
@@ -6297,6 +6418,7 @@ function runtimeFixture(options: {
       ? {}
       : { resolveSelectedExtensions: options.resolveSelectedExtensions }),
     ...(options.agentMessages === undefined ? {} : { agentMessages: options.agentMessages }),
+    ...(options.shield === undefined ? {} : { shield: options.shield }),
     ...(options.siblingThreads === undefined ? {} : { siblingThreads: options.siblingThreads }),
     ...(options.contributedTools === undefined
       ? {}

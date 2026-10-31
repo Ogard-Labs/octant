@@ -215,7 +215,9 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
         approvalClass: "child-provider-action",
         shieldCall: (boundRoot) =>
           shieldCallFromProviderRequest({
-            tool: input.event.action,
+            tool: input.event.call?.tool ?? input.event.action,
+            input: input.event.call?.input,
+            workingDirectory: input.event.call?.workingDirectory,
             description: input.event.description,
             boundRoot,
           }),

@@ -631,6 +631,7 @@ export function startOctantServer(
       routeCodeService,
       terminalProcessPort,
     } = yield* wireCodeRuntime({
+      hostShield,
       onHarnessQuestionAsked,
       onHarnessQuestionSettled,
       onHarnessRecoveryLifted,

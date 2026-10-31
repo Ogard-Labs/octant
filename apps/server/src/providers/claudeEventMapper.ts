@@ -20,6 +20,7 @@ import type {
 } from "./claudeAgentSdkPort";
 import { outputStopReason } from "./outputStopReason";
 import { outsideContentTarget } from "./outsideContentRead";
+import { providerApprovalCall } from "./providerApprovalCall";
 
 const STREAM_CHUNK_CHARACTERS = 65_536;
 const DIFF_MAX_CHARACTERS = 65_536;
@@ -1433,10 +1434,12 @@ export function mapClaudeToolRequest(
   if (correlated.kind === "failure") return correlated;
   const normalizedRequestId = correlated.requestId;
   const target = approvalTarget(context, request);
+  const call = providerApprovalCall({ tool: toolName, arguments: request.input });
   const requestEvent = mappedEvent(context, {
     kind: "approval-request",
     requestId: normalizedRequestId,
     action: toolName,
+    ...(call === undefined ? {} : { call }),
     // A person can only judge a prompt that says what it is for. "Claude
     // requests permission to use Edit." was approved blind every time.
     description:

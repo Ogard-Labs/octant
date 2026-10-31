@@ -156,6 +156,8 @@ export interface CodeTurnEvent {
   readonly reconciliation?: CodeObservationReconciliation;
   readonly executionPolicy?: CodeThread["executionPolicy"];
   readonly permissionPersistence?: PermissionPersistence;
+  /** On `approval`: the pending call, for an automatic reviewer. Never journaled. */
+  readonly call?: Extract<ProviderRuntimeEvent, { kind: "approval-request" }>["call"];
 }
 
 export interface CodeTurnRunnerInput {
@@ -856,6 +858,7 @@ function normalizeProviderEvent(
         ),
         executionPolicy: input.thread.executionPolicy,
         permissionPersistence: input.thread.permissionPersistence,
+        ...(event.call === undefined ? {} : { call: event.call }),
       });
     case "user-input-request":
       return Effect.succeed({

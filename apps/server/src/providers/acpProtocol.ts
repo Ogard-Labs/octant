@@ -125,6 +125,11 @@ const PermissionRequestParams = Schema.Struct({
     toolCallId: Schema.NonEmptyTrimmedString,
     title: Schema.optional(Schema.NullOr(Schema.String)),
     kind: Schema.optional(Schema.NullOr(Schema.NonEmptyTrimmedString)),
+    /** What the agent proposes to run; read for an automatic reviewer only. */
+    rawInput: Schema.optional(Schema.Unknown),
+    locations: Schema.optional(
+      Schema.NullOr(Schema.Array(Schema.Struct({ path: Schema.String }))),
+    ),
   }),
   options: Schema.Array(
     Schema.Struct({

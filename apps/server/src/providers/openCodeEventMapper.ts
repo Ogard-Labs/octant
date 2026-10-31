@@ -10,6 +10,7 @@ import type {
 import type { Event } from "@opencode-ai/sdk/v2/types";
 import { outputStopReason } from "./outputStopReason";
 import { outsideContentTarget } from "./outsideContentRead";
+import { providerApprovalCall } from "./providerApprovalCall";
 
 export interface OpenCodeEventContext {
   readonly instanceId: ProviderInstanceId;
@@ -442,6 +443,7 @@ export function mapOpenCodeEvent(
               requestId,
               action,
               description: "Approval is required for this action.",
+              ...openCodeApprovalCall(action, event.properties),
             }),
           ];
     }
@@ -456,6 +458,7 @@ export function mapOpenCodeEvent(
               requestId,
               action,
               description: "Approval is required for this action.",
+              ...openCodeApprovalCall(action, event.properties),
             }),
           ];
     }
@@ -556,4 +559,22 @@ export function mapOpenCodeEvent(
     default:
       return assertNever(event);
   }
+}
+
+/**
+ * The pending call an OpenCode permission names, for an automatic reviewer:
+ * its patterns and the metadata it carries (a command, a path).
+ */
+function openCodeApprovalCall(
+  action: string,
+  properties: object,
+): { readonly call?: NonNullable<ReturnType<typeof providerApprovalCall>> } {
+  const record = properties as Record<string, unknown>;
+  const metadata =
+    typeof record.metadata === "object" && record.metadata !== null ? record.metadata : {};
+  const call = providerApprovalCall({
+    tool: action,
+    arguments: { ...metadata, ...(record.patterns === undefined ? {} : { patterns: record.patterns }) },
+  });
+  return call === undefined ? {} : { call };
 }

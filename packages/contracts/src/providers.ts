@@ -2471,6 +2471,21 @@ export const decodeProviderChildObservationState = Schema.decodeUnknownSync(
   ProviderChildObservationState,
 );
 
+export const MAX_PROVIDER_APPROVAL_CALL_INPUT_LENGTH = 8_192;
+
+/**
+ * The pending call an approval request is about, as the runtime described it:
+ * its tool, its arguments as bounded JSON, and where it runs. It never carries
+ * the call's output. The host reads it to let an automatic reviewer judge the
+ * call and does not journal it.
+ */
+export const ProviderApprovalCall = Schema.Struct({
+  tool: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
+  input: Schema.optional(Schema.String.pipe(Schema.maxLength(MAX_PROVIDER_APPROVAL_CALL_INPUT_LENGTH))),
+  workingDirectory: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4_096))),
+}).annotations(strict);
+export type ProviderApprovalCall = typeof ProviderApprovalCall.Type;
+
 export const ProviderRuntimeEvent = Schema.Union(
   Schema.Struct({
     ...ProviderRuntimeEventFields,
@@ -2725,6 +2740,7 @@ export const ProviderRuntimeEvent = Schema.Union(
     requestId: Schema.NonEmptyTrimmedString,
     action: Schema.NonEmptyTrimmedString,
     description: Schema.NonEmptyTrimmedString,
+    call: Schema.optional(ProviderApprovalCall),
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,
@@ -2732,6 +2748,7 @@ export const ProviderRuntimeEvent = Schema.Union(
     requestId: Schema.NonEmptyTrimmedString,
     action: Schema.NonEmptyTrimmedString,
     description: Schema.NonEmptyTrimmedString,
+    call: Schema.optional(ProviderApprovalCall),
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,
