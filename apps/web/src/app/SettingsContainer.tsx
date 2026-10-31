@@ -99,6 +99,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
     extensionClient,
     folderBrowseClient,
     hostControlClient,
+    protectedFilesClient,
     localUsageHistoryClient,
     nativeHarnessClient,
     providerUsageLimitsClient,
@@ -197,6 +198,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
       {...(props.browserAutomationClient === undefined
         ? {}
         : { browserAutomationClient: props.browserAutomationClient })}
+      protectedFilesClient={protectedFilesClient}
       {...(canvasClient === undefined ? {} : { canvasClient })}
       {...(desktopPaneClient === undefined ? {} : { desktopPaneClient })}
       {...(replicaStoreSettingsClient === undefined ? {} : { replicaStoreSettingsClient })}

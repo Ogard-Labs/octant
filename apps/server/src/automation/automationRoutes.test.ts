@@ -555,6 +555,40 @@ describe("automation routes", () => {
     expect(unknown).toMatchObject({ kind: "automation-command-failed", reason: "not-found" });
   });
 
+  it("refuses a paired device opting a routine into its Project's level, and lets a local window", async () => {
+    const harness = createHarness();
+    const create = (id: string) =>
+      postCommand({
+        kind: "create-automation",
+        automationId: automationId(id),
+        expectedVersion: 0,
+        definition: { ...automationDefinitionDraftFixture(), projectLevel: "opted-in" },
+      });
+    const remote = create("b301");
+    bindPrincipalRouteContext(remote, {
+      principal: {
+        kind: "remote-device",
+        hostId: "local" as never,
+        deviceId: remoteDeviceId as never,
+        credentialGeneration: 1,
+        origin: "https://remote.example",
+        protocolVersion: 1,
+        capabilityDigest: "d".repeat(64),
+        sessionId: "00000000-0000-4000-8000-000000000403" as never,
+      },
+      scopeId: decodeWindowId(remoteDeviceId),
+    });
+    expect(decodeAutomationCommandResult(await json(await harness.handler(remote)))).toMatchObject({
+      kind: "automation-command-failed",
+      reason: "unauthorized",
+    });
+    expect(harness.projection.getDefinition(automationId("b301"))).toBeUndefined();
+
+    const local = decodeAutomationCommandResult(await json(await harness.handler(create("b302"))));
+    expect(local.kind).not.toBe("automation-command-failed");
+    expect(harness.projection.getDefinition(automationId("b302"))?.projectLevel).toBe("opted-in");
+  });
+
   it("rejects a remote-device principal from another host and allows the owning host", async () => {
     const harness = createHarness();
     seedAutomation(harness, automationId("b201"));

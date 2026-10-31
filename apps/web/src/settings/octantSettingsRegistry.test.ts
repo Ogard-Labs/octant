@@ -74,6 +74,8 @@ describe("octantSettingsRegistry", () => {
     ]);
     expect(section("permissions")?.label).toBe("Permissions");
     expect(ids("permissions")).toEqual([
+      "protected-files",
+      "protected-files-add",
       "public-links",
       "public-link-service",
       "browser-site-approvals",

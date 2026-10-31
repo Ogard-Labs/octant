@@ -77,6 +77,23 @@ describe("automation run identity", () => {
     );
   });
 
+  it("carries the person's opt-in to the Project's level into every run it builds", () => {
+    const definition = automationDefinitionFixture({ projectLevel: "opted-in" } as never);
+    const occurrence = {
+      kind: "scheduled",
+      automationId: definition.id,
+      definitionRevision: definition.definitionRevision,
+      triggerKind: "once",
+      scheduledAt: definition.trigger.kind === "once" ? definition.trigger.scheduledAt : undefined,
+    } as AutomationOccurrence;
+    const run = buildAutomationRunForOccurrence({
+      definition,
+      occurrence,
+      now: AUTOMATION_TEST_NOW as UtcTimestamp,
+    });
+    expect(run.definitionSnapshot.projectLevel).toBe("opted-in");
+  });
+
   it("builds a queued manual run with a null scheduled instant", () => {
     const definition = automationDefinitionFixture();
     const occurrence: AutomationOccurrence = {

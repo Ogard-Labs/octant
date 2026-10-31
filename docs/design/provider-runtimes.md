@@ -442,8 +442,9 @@ Seatbelt profile, fx's HTTP pool aborts certificate loading when its read of
 `/etc/ssl/cert.pem`, so it cannot reach the Vercel AI Gateway. `fxProfile`
 therefore sets `readsSystemKeychain`, and a sandboxed macOS launch below Full
 access gets one extra rule, `(allow file-read* (literal
-"/Library/Keychains/System.keychain"))`, emitted last so no earlier Keychain or
-secret-file denial overrides it. No other profile sets it, nothing grants a
+"/Library/Keychains/System.keychain"))`, emitted after the Keychain and built-in
+secret-file denials so neither overrides it; a path the person protects still
+does. No other profile sets it, nothing grants a
 write there, and the rest of `/Library/Keychains`, `~/Library/Keychains`, and
 `/var/db/SystemKey` stay denied. The file is world-readable on macOS and its
 item secrets are encrypted with the root-only SystemKey, so the read yields no

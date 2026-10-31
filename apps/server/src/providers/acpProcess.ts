@@ -22,13 +22,10 @@ import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
 import {
   makeProcessConfinementLive,
   ProcessConfinementError,
-  requireSandboxExec,
   seatbeltAllowLiteralReadRule,
   seatbeltDenyRule,
-  wrapCommandInSandboxExec,
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
-import { buildLinuxAllowDefaultDenyLaunch } from "../process/linuxConfinement";
 import {
   materializeOsNetworkEgress,
   resolveProviderRuntimeEgressPolicy,
@@ -413,65 +410,13 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
             root,
           ),
         ];
-        // Full access is unrestricted except for the static MCP/skills/hooks
-        // denials. Darwin uses allow-default plus trailing denies. Linux binds
-        // the host root and overlays the same paths.
+        // Full access runs the agent as its own app does: no sandbox, no
+        // credential-file or extension denials. Octant's own file tools still
+        // refuse protected paths, and secrets are redacted from what it records.
         if (input.executionPolicy === "full-access") {
-          if (denyPaths.length === 0) {
-            return {
-              command: input.binaryPath,
-              args,
-              cwd: root,
-              environment: { ...input.environment, ...hostAuthentication.environment },
-            };
-          }
-          const launch = yield* Effect.try({
-            try: () => {
-              if (platform === "darwin") {
-                requireSandboxExec({ platform, sandboxPath });
-                return wrapCommandInSandboxExec({
-                  sandboxPath,
-                  executable: input.binaryPath,
-                  args,
-                  profile: [
-                    "(version 1)",
-                    "(allow default)",
-                    ...denyPaths.flatMap((path) => [
-                      seatbeltDenyRule("file-read*", path),
-                      seatbeltDenyRule("file-write*", path),
-                    ]),
-                  ].join("\n"),
-                });
-              }
-              if (platform === "linux") {
-                return buildLinuxAllowDefaultDenyLaunch(
-                  {
-                    executable: input.binaryPath,
-                    args,
-                    cwd: root,
-                    denyPaths,
-                  },
-                  { bwrapPath: sandboxPath },
-                );
-              }
-              throw new ProcessConfinementError(
-                "incompatible",
-                `${name} Full access extension denials require macOS or Linux.`,
-              );
-            },
-            catch: (error) =>
-              failure(
-                error instanceof ProcessConfinementError && error.reason === "invalid-configuration"
-                  ? "invalid-configuration"
-                  : "incompatible",
-                error instanceof ProcessConfinementError
-                  ? error.message
-                  : `${name} Full access extension denials could not be prepared.`,
-              ),
-          });
           return {
-            command: launch.command,
-            args: launch.args,
+            command: input.binaryPath,
+            args,
             cwd: root,
             environment: { ...input.environment, ...hostAuthentication.environment },
           };
@@ -521,8 +466,9 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 seatbeltDenyRule("file-write*", path),
               ])
             : []),
-          // Last, so no earlier Keychain or secret-file denial overrides this
-          // one literal read. Nothing grants a write beneath /Library.
+          // Caller rules follow the Keychain and built-in secret-file denials,
+          // so neither overrides this one literal read; a path the person
+          // protects in Settings still does. Nothing grants a write there.
           ...(platform === "darwin" && profile.process.readsSystemKeychain === true
             ? [seatbeltAllowLiteralReadRule(SYSTEM_KEYCHAIN_PATH)]
             : []),
