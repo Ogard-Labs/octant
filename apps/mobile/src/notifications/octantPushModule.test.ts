@@ -134,7 +134,7 @@ describe("the phone's notification port over the native module", () => {
   });
 
   it("forgets a computer even where push is no longer supported, and reports a native failure", async () => {
-    const forgetHost = vi.fn(async () => undefined);
+    const forgetHost = vi.fn(async () => true);
     const unsupported = createNativeNotificationPermissionPort(
       native({ isSupported: () => false, forgetHost }),
       { platform: "ios" },
@@ -151,5 +151,19 @@ describe("the phone's notification port over the native module", () => {
       { platform: "ios" },
     );
     await expect(failing.forgetHost("host")).rejects.toThrow("keychain busy");
+  });
+
+  it("reports a deletion the module says failed, rather than treating any answer as success", async () => {
+    for (const answer of [false, undefined, null, "true", 0]) {
+      const port = createNativeNotificationPermissionPort(
+        native({ forgetHost: async () => answer }),
+        { platform: "android" },
+      );
+      await expect(port.forgetHost("host")).rejects.toThrow("could not delete");
+    }
+    const port = createNativeNotificationPermissionPort(native({ forgetHost: async () => true }), {
+      platform: "android",
+    });
+    await expect(port.forgetHost("host")).resolves.toBeUndefined();
   });
 });

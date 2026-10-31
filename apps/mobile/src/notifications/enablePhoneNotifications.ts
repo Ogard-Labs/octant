@@ -25,6 +25,8 @@ type RequestCapability = (input: {
 
 export type EnablePhoneNotificationsResult =
   | { readonly status: "registered" }
+  /** Notifications were turned off for this computer while this was under way. */
+  | { readonly status: "cancelled" }
   | {
       readonly status: "refused";
       readonly reason:
@@ -53,7 +55,10 @@ async function registerWithComputer(input: {
   readonly token: string;
   readonly book: PushRegistrationBook;
   readonly requestCapability: RequestCapability;
+  /** True once the person has turned notifications off for this computer. */
+  readonly isCancelled: () => boolean;
 }): Promise<EnablePhoneNotificationsResult> {
+  if (input.isCancelled()) return { status: "cancelled" };
   const notificationPublicKey = await input.permission.getNotificationPublicKey(
     input.transport.hostId,
     input.deviceId,
@@ -69,6 +74,9 @@ async function registerWithComputer(input: {
   });
   if (issued.status === "unreachable") return { status: "refused", reason: "gateway-unreachable" };
   if (issued.status === "refused") return { status: "refused", reason: "gateway-refused" };
+  // The last point at which stopping leaves nothing behind: past it the
+  // computer holds a registration, which turning notifications off clears.
+  if (input.isCancelled()) return { status: "cancelled" };
   // Thread names stay off the lock screen until the person turns them on.
   await registerMobilePushToken({
     transport: input.transport,
@@ -83,6 +91,9 @@ async function registerWithComputer(input: {
       threadTitles: false,
     },
   });
+  // Turned off while registering: nothing is recorded, and the forgetting that
+  // is waiting for this run clears the registration and the key next.
+  if (input.isCancelled()) return { status: "cancelled" };
   await input.book.record({
     hostId: input.transport.hostId,
     deviceId: input.deviceId,
@@ -116,15 +127,19 @@ export async function enablePhoneNotifications(input: {
   if (token === undefined || token.length === 0) {
     return { status: "refused", reason: "no-platform-token" };
   }
-  return registerWithComputer({
-    transport: input.transport,
-    hostKeyFingerprint: input.hostKeyFingerprint,
-    deviceId: input.deviceId,
-    permission: input.permission,
-    token,
-    book: input.book,
-    requestCapability: input.requestCapability ?? requestMobilePushCapability,
-  });
+  const deviceId = input.deviceId;
+  return input.book.lifecycle.run(input.transport.hostId, (isCancelled) =>
+    registerWithComputer({
+      transport: input.transport,
+      hostKeyFingerprint: input.hostKeyFingerprint,
+      deviceId,
+      permission: input.permission,
+      token,
+      book: input.book,
+      requestCapability: input.requestCapability ?? requestMobilePushCapability,
+      isCancelled,
+    }),
+  );
 }
 
 export type PhoneNotificationRotationOutcome =
@@ -132,6 +147,10 @@ export type PhoneNotificationRotationOutcome =
   | "rotated"
   | "not-connected"
   | "permission-withdrawn"
+  /** Turned off, or its record gone, while the run was under way: nothing was registered. */
+  | "forgotten"
+  /** The phone could not delete this computer's key; the next run tries again. */
+  | "key-not-deleted"
   | "failed";
 
 export interface PhoneNotificationRotationReport {
@@ -158,21 +177,41 @@ export async function rotatePhoneNotifications(input: {
   readonly transportForHost: (hostId: string) => MobileRemoteTransport | undefined;
   readonly requestCapability?: RequestCapability;
 }): Promise<PhoneNotificationRotationReport> {
-  const records = await input.book.list();
-  if (records.length === 0) return { status: "nothing-registered", hosts: [] };
+  const all = await input.book.list();
+  if (all.length === 0) return { status: "nothing-registered", hosts: [] };
+  const hosts: Array<{ hostId: string; outcome: PhoneNotificationRotationOutcome }> = [];
+
+  // A key the phone was told to forget and could not delete is deleted again
+  // before anything else, and its computer is never registered with again.
+  for (const record of all.filter((entry) => entry.forgetPending === true)) {
+    const forgotten = await forgetPhoneNotificationsForHost({
+      hostId: record.hostId,
+      permission: input.permission,
+      book: input.book,
+      transport: input.transportForHost(record.hostId),
+    });
+    hosts.push({
+      hostId: record.hostId,
+      outcome: forgotten.keyForgotten ? "forgotten" : "key-not-deleted",
+    });
+  }
+  const records = all.filter((entry) => entry.forgetPending !== true);
+  if (records.length === 0) return { status: "checked", hosts };
   // A build that cannot tell says nothing about the registrations it did not make.
   if (!input.permission.available) return { status: "unavailable", hosts: [] };
 
   if ((await input.permission.getStatus()) === "denied") {
-    const hosts: Array<{ hostId: string; outcome: PhoneNotificationRotationOutcome }> = [];
     for (const record of records) {
-      await forgetPhoneNotificationsForHost({
+      const forgotten = await forgetPhoneNotificationsForHost({
         hostId: record.hostId,
         permission: input.permission,
         book: input.book,
         transport: input.transportForHost(record.hostId),
       });
-      hosts.push({ hostId: record.hostId, outcome: "permission-withdrawn" });
+      hosts.push({
+        hostId: record.hostId,
+        outcome: forgotten.keyForgotten ? "permission-withdrawn" : "key-not-deleted",
+      });
     }
     return { status: "checked", hosts };
   }
@@ -182,40 +221,50 @@ export async function rotatePhoneNotifications(input: {
   const digest = await digestPlatformToken(token);
   const requestCapability = input.requestCapability ?? requestMobilePushCapability;
 
-  const hosts: Array<{ hostId: string; outcome: PhoneNotificationRotationOutcome }> = [];
-  for (const record of records) {
-    if (record.tokenDigest === digest) {
-      hosts.push({ hostId: record.hostId, outcome: "unchanged" });
+  for (const snapshot of records) {
+    if (snapshot.tokenDigest === digest) {
+      hosts.push({ hostId: snapshot.hostId, outcome: "unchanged" });
       continue;
     }
-    const transport = input.transportForHost(record.hostId);
-    if (transport === undefined) {
-      hosts.push({ hostId: record.hostId, outcome: "not-connected" });
-      continue;
-    }
-    try {
-      const result = await registerWithComputer({
-        transport,
-        hostKeyFingerprint: record.hostKeyFingerprint,
-        deviceId: record.deviceId,
-        permission: input.permission,
-        token,
-        book: input.book,
-        requestCapability,
-      });
-      hosts.push({
-        hostId: record.hostId,
-        outcome: result.status === "registered" ? "rotated" : "failed",
-      });
-    } catch {
-      hosts.push({ hostId: record.hostId, outcome: "failed" });
-    }
+    const outcome = await input.book.lifecycle.run(
+      snapshot.hostId,
+      async (isCancelled): Promise<PhoneNotificationRotationOutcome> => {
+        // The list above is older than any wait since: the person may have
+        // turned notifications off for this computer, so its record is read
+        // again and a record that is gone or marked for forgetting ends this.
+        const record = (await input.book.list()).find((entry) => entry.hostId === snapshot.hostId);
+        if (record === undefined || record.forgetPending === true || isCancelled()) {
+          return "forgotten";
+        }
+        const transport = input.transportForHost(record.hostId);
+        if (transport === undefined) return "not-connected";
+        try {
+          const result = await registerWithComputer({
+            transport,
+            hostKeyFingerprint: record.hostKeyFingerprint,
+            deviceId: record.deviceId,
+            permission: input.permission,
+            token,
+            book: input.book,
+            requestCapability,
+            isCancelled,
+          });
+          if (result.status === "registered") return "rotated";
+          return result.status === "cancelled" ? "forgotten" : "failed";
+        } catch {
+          return "failed";
+        }
+      },
+    );
+    hosts.push({ hostId: snapshot.hostId, outcome });
   }
   return { status: "checked", hosts };
 }
 
 /** Longest the phone waits for a computer to confirm it dropped a registration. */
 const HOST_CLEAR_WAIT_MS = 3_000;
+/** Longest forgetting waits for an enable or rotation already under way on the computer. */
+const IN_FLIGHT_WAIT_MS = 5_000;
 
 /**
  * Forgets one computer's notifications on this phone: the host is asked to drop
@@ -226,6 +275,12 @@ const HOST_CLEAR_WAIT_MS = 3_000;
  * answer in time: a registration it keeps is then useless, because no key
  * remains that could open what it sends, and the computer drops it when
  * delivery fails or the device is revoked.
+ *
+ * It ends any enable or rotation under way for the computer first, and runs
+ * after it stops, so an older run cannot register again, make the key again, or
+ * restore the record once this has finished. A key the phone could not delete is
+ * reported (`keyForgotten: false`) and its record is kept, marked, so the next
+ * run deletes it again instead of the phone believing it is gone.
  */
 export async function forgetPhoneNotificationsForHost(input: {
   readonly hostId: string;
@@ -235,31 +290,44 @@ export async function forgetPhoneNotificationsForHost(input: {
   readonly transport?: MobileRemoteTransport | undefined;
   readonly waitMs?: number;
 }): Promise<{ readonly clearedOnComputer: boolean; readonly keyForgotten: boolean }> {
-  let clearedOnComputer = false;
-  if (input.transport !== undefined) {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      const receipt = await Promise.race([
-        clearMobilePushToken(input.transport),
-        new Promise<undefined>((resolve) => {
-          timer = setTimeout(() => resolve(undefined), input.waitMs ?? HOST_CLEAR_WAIT_MS);
-        }),
-      ]);
-      clearedOnComputer = receipt?.result === "cleared" || receipt?.result === "already-cleared";
-    } catch {
-      clearedOnComputer = false;
-    } finally {
-      if (timer !== undefined) clearTimeout(timer);
-    }
-  }
-  let keyForgotten = true;
-  try {
-    await input.permission.forgetHost(input.hostId);
-  } catch {
-    keyForgotten = false;
-  }
-  await input.book.remove(input.hostId);
-  return { clearedOnComputer, keyForgotten };
+  input.book.lifecycle.cancel(input.hostId);
+  return input.book.lifecycle.run(
+    input.hostId,
+    async () => {
+      let clearedOnComputer = false;
+      if (input.transport !== undefined) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          const receipt = await Promise.race([
+            clearMobilePushToken(input.transport),
+            new Promise<undefined>((resolve) => {
+              timer = setTimeout(() => resolve(undefined), input.waitMs ?? HOST_CLEAR_WAIT_MS);
+            }),
+          ]);
+          clearedOnComputer =
+            receipt?.result === "cleared" || receipt?.result === "already-cleared";
+        } catch {
+          clearedOnComputer = false;
+        } finally {
+          if (timer !== undefined) clearTimeout(timer);
+        }
+      }
+      let keyForgotten = true;
+      try {
+        await input.permission.forgetHost(input.hostId);
+      } catch {
+        keyForgotten = false;
+      }
+      if (keyForgotten) {
+        await input.book.remove(input.hostId);
+      } else {
+        const record = (await input.book.list()).find((entry) => entry.hostId === input.hostId);
+        if (record !== undefined) await input.book.record({ ...record, forgetPending: true });
+      }
+      return { clearedOnComputer, keyForgotten };
+    },
+    IN_FLIGHT_WAIT_MS,
+  );
 }
 
 export const ENABLE_REFUSAL_COPY: Readonly<

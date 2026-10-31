@@ -623,8 +623,15 @@ that reaches it.
   the computer is asked to drop its registration (waiting at most three
   seconds), then `forgetHost` removes the notifications delivered for that
   computer and its key, and the phone's record of the registration goes, even
-  if an earlier step failed. A revoke made on the computer reaches the phone as
-  a refused session; the host has already dropped the registration.
+  if an earlier step failed. Forgetting first ends any enablement or rotation
+  under way for that computer and runs after it stops (waiting at most five
+  seconds), and a rotation reads the computer's record again before it acts, so
+  an older run cannot register, make the key, or restore the record after the
+  person has turned notifications off. A key the phone could not delete is not
+  reported as gone: the record is kept, marked, the person is told, and the next
+  run deletes the key again and never registers that computer. A revoke made on
+  the computer reaches the phone as a refused session; the host has already
+  dropped the registration.
 - A build carries the iOS extension, the push entitlement, and the shared
   Keychain group only when it is made with `OCTANT_MOBILE_PUSH=1`, because they
   need the push capability and Keychain sharing on the app's App ID and the

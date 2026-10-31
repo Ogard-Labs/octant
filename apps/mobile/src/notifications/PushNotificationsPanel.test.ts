@@ -4,6 +4,13 @@ import { describe, expect, it, vi } from "vitest";
 import { ThemeProvider } from "../../design-system/theme";
 import { PushNotificationsPanel } from "./PushNotificationsPanel";
 import { createUnavailableNotificationPermissionPort } from "./notificationPermissionPort";
+import { createPushRegistrationBook } from "./pushRegistrationBook";
+
+const emptyStorage = () => ({
+  getItem: async () => null,
+  setItem: async () => undefined,
+  deleteItem: async () => undefined,
+});
 
 vi.mock("react-native", () => vi.importActual("react-native-web"));
 vi.mock("../../design-system", async () => ({
@@ -20,11 +27,7 @@ describe("mobile notification settings", () => {
           transport: undefined,
           permission: createUnavailableNotificationPermissionPort(),
           hostKeyFingerprint: "f".repeat(64),
-          book: {
-            list: async () => [],
-            record: async () => undefined,
-            remove: async () => undefined,
-          },
+          book: createPushRegistrationBook(emptyStorage()),
           resolveDeviceId: async () => undefined,
         }),
       }),
@@ -46,11 +49,7 @@ describe("mobile notification settings", () => {
             transport: undefined,
             permission: { ...createUnavailableNotificationPermissionPort(), available },
             hostKeyFingerprint: "f".repeat(64),
-            book: {
-              list: async () => [],
-              record: async () => undefined,
-              remove: async () => undefined,
-            },
+            book: createPushRegistrationBook(emptyStorage()),
             resolveDeviceId: async () => undefined,
           }),
         }),

@@ -405,7 +405,7 @@ describe("forgetting a computer's notifications when it is unpaired", () => {
     }
   });
 
-  it("drops the record and reports the key when the native side fails to forget it", async () => {
+  it("keeps a marked record and reports it when the native side could not delete the key", async () => {
     const book = await registeredBook();
     const outcome = await forgetPhoneNotificationsForHost({
       hostId,
@@ -417,7 +417,40 @@ describe("forgetting a computer's notifications when it is unpaired", () => {
       book,
     });
     expect(outcome).toEqual({ clearedOnComputer: false, keyForgotten: false });
+    expect(await book.list()).toMatchObject([{ hostId, forgetPending: true }]);
+  });
+
+  it("deletes a key it could not delete before, on the next run, and never registers that computer again", async () => {
+    const host = recordingHost();
+    const book = await registeredBook();
+    let failing = true;
+    const forgetHost = vi.fn(async () => {
+      if (failing) throw new Error("keychain busy");
+    });
+    const port = permission({ forgetHost, getDevicePushToken: async () => rotatedToken });
+    await forgetPhoneNotificationsForHost({ hostId, permission: port, book });
+    const requestCapability = vi.fn();
+
+    const stillFailing = await rotatePhoneNotifications({
+      book,
+      permission: port,
+      transportForHost: () => host.transport,
+      requestCapability,
+    });
+    expect(stillFailing.hosts).toEqual([{ hostId, outcome: "key-not-deleted" }]);
+    expect(await book.list()).toMatchObject([{ hostId, forgetPending: true }]);
+
+    failing = false;
+    const retried = await rotatePhoneNotifications({
+      book,
+      permission: port,
+      transportForHost: () => host.transport,
+      requestCapability,
+    });
+    expect(retried.hosts).toEqual([{ hostId, outcome: "forgotten" }]);
     expect(await book.list()).toEqual([]);
+    expect(requestCapability).not.toHaveBeenCalled();
+    expect(host.bodies).toHaveLength(0);
   });
 
   it("leaves other computers' records alone", async () => {
@@ -432,5 +465,134 @@ describe("forgetting a computer's notifications when it is unpaired", () => {
     expect((await book.list()).map((record) => record.hostId)).toEqual([
       "33333333-3333-4333-8333-333333333333",
     ]);
+  });
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+describe("turning notifications off while a rotation or enablement is under way", () => {
+  it("does not let a rotation that was waiting for the platform token undo the opt-out", async () => {
+    const host = recordingHost();
+    const book = await registeredBook();
+    const token = deferred<string | undefined>();
+    const calls: string[] = [];
+    const port = permission({
+      getDevicePushToken: () => token.promise,
+      getNotificationPublicKey: async () => {
+        calls.push("key");
+        return publicKey;
+      },
+      forgetHost: async () => void calls.push("forget"),
+    });
+    const requestCapability = vi.fn();
+
+    const rotation = rotatePhoneNotifications({
+      book,
+      permission: port,
+      transportForHost: () => host.transport,
+      requestCapability,
+    });
+    await forgetPhoneNotificationsForHost({
+      hostId,
+      permission: port,
+      book,
+      transport: host.transport,
+    });
+    token.resolve(rotatedToken);
+    const report = await rotation;
+
+    expect(report.hosts).toEqual([{ hostId, outcome: "forgotten" }]);
+    expect(calls).toEqual(["forget"]);
+    expect(requestCapability).not.toHaveBeenCalled();
+    expect(host.requests).toEqual(["DELETE /api/remote/auth/push-token"]);
+    expect(await book.list()).toEqual([]);
+  });
+
+  it("stops a rotation that is asking the gateway and clears after it, leaving no registration, key or record", async () => {
+    const host = recordingHost();
+    const book = await registeredBook();
+    const gate = deferred<{ status: "issued"; capability: string }>();
+    const calls: string[] = [];
+    const port = permission({
+      getDevicePushToken: async () => rotatedToken,
+      getNotificationPublicKey: async () => {
+        calls.push("key");
+        return publicKey;
+      },
+      forgetHost: async () => void calls.push("forget"),
+    });
+    const requestCapability = vi.fn(() => gate.promise);
+
+    const rotation = rotatePhoneNotifications({
+      book,
+      permission: port,
+      transportForHost: () => host.transport,
+      requestCapability,
+    });
+    await vi.waitFor(() => expect(requestCapability).toHaveBeenCalled());
+    const forgetting = forgetPhoneNotificationsForHost({
+      hostId,
+      permission: port,
+      book,
+      transport: host.transport,
+    });
+    gate.resolve({ status: "issued", capability: rotatedCapability });
+    const [report] = await Promise.all([rotation, forgetting]);
+
+    expect(report.hosts).toEqual([{ hostId, outcome: "forgotten" }]);
+    // The key was made before the opt-out, and its deletion came last.
+    expect(calls).toEqual(["key", "forget"]);
+    expect(host.requests).toEqual(["DELETE /api/remote/auth/push-token"]);
+    expect(host.bodies).toHaveLength(0);
+    expect(await book.list()).toEqual([]);
+  });
+
+  it("stops an enablement the same way", async () => {
+    const host = recordingHost();
+    const book = memoryBook();
+    const gate = deferred<{ status: "issued"; capability: string }>();
+    const requestCapability = vi.fn(() => gate.promise);
+    const enabling = enablePhoneNotifications({
+      transport: host.transport,
+      hostKeyFingerprint: fingerprint,
+      deviceId,
+      permission: permission(),
+      book,
+      requestCapability,
+    });
+    await vi.waitFor(() => expect(requestCapability).toHaveBeenCalled());
+    const forgetting = forgetPhoneNotificationsForHost({
+      hostId,
+      permission: permission(),
+      book,
+      transport: host.transport,
+    });
+    gate.resolve({ status: "issued", capability });
+    const [result] = await Promise.all([enabling, forgetting]);
+    expect(result).toEqual({ status: "cancelled" });
+    expect(host.bodies).toHaveLength(0);
+    expect(await book.list()).toEqual([]);
+  });
+
+  it("lets the person turn notifications on again after turning them off", async () => {
+    const host = recordingHost();
+    const book = await registeredBook();
+    await forgetPhoneNotificationsForHost({ hostId, permission: permission(), book });
+    const result = await enablePhoneNotifications({
+      transport: host.transport,
+      hostKeyFingerprint: fingerprint,
+      deviceId,
+      permission: permission(),
+      book,
+      requestCapability: async () => ({ status: "issued", capability }),
+    });
+    expect(result).toEqual({ status: "registered" });
+    expect(await book.list()).toHaveLength(1);
   });
 });

@@ -17,6 +17,7 @@ export interface OctantPushNativeModule {
   /** The platform token as text, or nothing when the system gave none. */
   readonly devicePushToken: () => Promise<unknown>;
   readonly notificationPublicKey: (hostId: string, deviceId: string) => Promise<unknown>;
+  /** Answers `true` once the key is deleted; `false` when the deletion failed. */
   readonly forgetHost: (hostId: string) => Promise<unknown>;
 }
 
@@ -106,9 +107,14 @@ export function createNativeNotificationPermissionPort(
     },
     // Not gated on `available`: a computer removed from a build whose push
     // support went away still loses any key an earlier build made for it.
+    // The module answers `true` only when the key and the delivered
+    // notifications are gone; `false`, or any other answer, is a failure the
+    // caller must keep a record of, never a deletion.
     async forgetHost(hostId) {
       if (native === null) return;
-      await native.forgetHost(hostId);
+      if ((await native.forgetHost(hostId)) !== true) {
+        throw new Error("The phone could not delete the notification key for this computer.");
+      }
     },
   };
 }

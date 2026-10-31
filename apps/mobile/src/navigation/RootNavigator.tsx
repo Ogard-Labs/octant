@@ -74,6 +74,7 @@ function HostsBody(props: {
   }, [guestHubStore, hosts]);
   const [keyNotDeleted, setKeyNotDeleted] = useState(false);
   const [removeFailed, setRemoveFailed] = useState(false);
+  const [notificationKeyKept, setNotificationKeyKept] = useState(false);
   const removeMobileHostInTurn = useMemo(
     () => createMobileHostRemover({ registry, hub, deviceKeyStore }),
     [deviceKeyStore, hub, registry],
@@ -83,6 +84,7 @@ function HostsBody(props: {
   const removeHost = useCallback(
     (hostId: string) => {
       setRemoveFailed(false);
+      setNotificationKeyKept(false);
       // The computer is asked to drop its registration while the connection
       // still stands, then notifications already shown for it go, and so does
       // the key that opens them, whether or not the rest of the removal lands.
@@ -92,6 +94,11 @@ function HostsBody(props: {
         book: pushRegistrations,
         transport: transportForHost(hostId),
       })
+        .then((forgotten) => {
+          // The record of the key stays, so the next time the app opens it
+          // deletes the key again; the person is told it is not gone yet.
+          if (!forgotten.keyForgotten) setNotificationKeyKept(true);
+        })
         .catch(() => undefined)
         .then(() => removeMobileHostInTurn(hostId))
         .then((result) => {
@@ -272,6 +279,13 @@ function HostsBody(props: {
             {hostsError !== undefined ? <Text style={styles.sectionBody}>{hostsError}</Text> : null}
             {removeFailed ? (
               <Text style={styles.sectionBody}>{"Couldn't remove that computer. Try again."}</Text>
+            ) : null}
+            {notificationKeyKept ? (
+              <Text style={styles.sectionBody} testID="mobile-notification-key-kept">
+                {
+                  "This phone could not delete its notification key for that computer. Octant will try again the next time it opens."
+                }
+              </Text>
             ) : null}
             {keyNotDeleted ? (
               <Text style={styles.sectionBody} testID="mobile-host-key-not-deleted">

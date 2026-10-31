@@ -46,7 +46,9 @@ export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
       setMessage(
         result.status === "registered"
           ? "Notifications are on for this computer."
-          : ENABLE_REFUSAL_COPY[result.reason],
+          : result.status === "cancelled"
+            ? "Notifications were turned off for this computer."
+            : ENABLE_REFUSAL_COPY[result.reason],
       );
     } catch (cause) {
       setMessage(
@@ -76,9 +78,11 @@ export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
         transport: props.transport,
       });
       setMessage(
-        forgotten.clearedOnComputer
-          ? "Notifications are off for this computer."
-          : "Notifications are off on this phone. The computer could not be told, so it may still try to send them.",
+        !forgotten.keyForgotten
+          ? "Notifications are off, but this phone could not delete its notification key for this computer. Octant will try again the next time it opens."
+          : forgotten.clearedOnComputer
+            ? "Notifications are off for this computer."
+            : "Notifications are off on this phone. The computer could not be told, so it may still try to send them.",
       );
     } catch (cause) {
       setMessage(
