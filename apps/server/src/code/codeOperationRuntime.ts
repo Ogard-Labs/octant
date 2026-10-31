@@ -243,13 +243,19 @@ function defaultAcpTerminalConfinement(): CodeAcpTerminalConfinement {
         executable: input.executable,
         args: input.args,
         boundRoot: input.boundRoot,
+        ...(input.extraBoundRoots === undefined ? {} : { extraBoundRoots: input.extraBoundRoots }),
         temporaryDirectory: input.temporaryDirectory,
         networkEgress: "allow",
         allowProcessExec: true,
         allowProcessFork: true,
         allowFileReadStar: true,
         writeBoundRoot: true,
-        readRoots: [input.boundRoot, input.temporaryDirectory, dirname(input.executable)],
+        readRoots: [
+          input.boundRoot,
+          ...(input.extraBoundRoots ?? []),
+          input.temporaryDirectory,
+          dirname(input.executable),
+        ],
       }),
   };
 }
@@ -3801,6 +3807,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             this.#effectiveThread(active.windowId, active.thread.id)?.executionPolicy ??
             active.thread.executionPolicy,
           checkoutRoot: active.checkoutRoot,
+          ...(active.extraFolders.length === 0 ? {} : { extraFolders: active.extraFolders }),
           uuid: this.#options.uuid,
           pathPort: this.#options.acpPathPort ?? liveCodeTestSourcePort,
           terminalConfinement:

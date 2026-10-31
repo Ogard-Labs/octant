@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyFileMention,
   boundFileMentionText,
+  classifyFileMentionExtraFolderPath,
   classifyFileMentionRelativePath,
   FILE_MENTION_OUT_OF_ROOT_CONTEXT,
   formatFileMentionContext,
@@ -116,5 +117,23 @@ describe("formatFileMentionContext", () => {
 
   it("states an out-of-root refusal in words", () => {
     expect(FILE_MENTION_OUT_OF_ROOT_CONTEXT).toContain("outside this thread's bound root");
+  });
+});
+
+describe("classifyFileMentionExtraFolderPath", () => {
+  const folders = ["/work/notes", "/work/ref"];
+
+  it("places an absolute path in the extra folder that contains it", () => {
+    expect(classifyFileMentionExtraFolderPath("/work/notes/a/b.md", folders)).toEqual({
+      kind: "in-folder",
+      folder: "/work/notes",
+      path: "a/b.md",
+    });
+  });
+
+  it("refuses a sibling with a shared prefix, a traversal, and a relative path", () => {
+    for (const raw of ["/work/notes-old/a.md", "/work/notes/../x", "/work/notes", "notes/a.md"]) {
+      expect(classifyFileMentionExtraFolderPath(raw, folders)).toEqual({ kind: "out-of-root" });
+    }
   });
 });

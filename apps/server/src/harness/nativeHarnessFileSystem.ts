@@ -95,7 +95,10 @@ export type NativeHarnessGlobResult =
 export type NativeHarnessFileSystemPort = Pick<
   NativeHarnessFileSystem,
   "root" | "read" | "write" | "edit" | "glob" | "grep"
->;
+> & {
+  /** The Project's extra folders; the shell reaches them as it reaches `root`. */
+  readonly extraRoots?: ReadonlyArray<string>;
+};
 
 export interface NativeHarnessFileSystemOptions {
   /** Absolute, already-canonical root relative paths resolve against. */
@@ -140,6 +143,10 @@ export class NativeHarnessFileSystem {
 
   get root(): string {
     return this.#root;
+  }
+
+  get extraRoots(): ReadonlyArray<string> {
+    return this.#extraRoots;
   }
 
   async read(input: {

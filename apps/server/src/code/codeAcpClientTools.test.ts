@@ -42,12 +42,14 @@ function tools(
     environment: { PATH: "/usr/bin:/bin", TMPDIR: "/tmp" },
     prepare: ({ executable, args }) => ({ command: executable, args }),
   },
+  extraFolders: ReadonlyArray<string> = [],
 ) {
   return createCodeAcpClientTools({
     windowId,
     thread: thread(executionPolicy),
     readExecutionPolicy: () => executionPolicy,
     checkoutRoot: root,
+    ...(extraFolders.length === 0 ? {} : { extraFolders }),
     uuid: () => "fixed-id",
     pathPort: liveCodeTestSourcePort,
     terminalConfinement,
@@ -84,6 +86,66 @@ describe("ACP Code client tools", () => {
       ).resolves.toMatchObject({ result: { error: "path-outside-checkout" }, isError: true });
     } finally {
       await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("reads, writes and starts a terminal in an extra folder but refuses a folder beside it", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-acp-"));
+    const extra = await mkdtemp(join(tmpdir(), "octant-acp-extra-"));
+    const beside = await mkdtemp(join(tmpdir(), "octant-acp-beside-"));
+    try {
+      await writeFile(join(extra, "note.txt"), "extra note", "utf8");
+      await writeFile(join(beside, "note.txt"), "not yours", "utf8");
+      const prepared: Array<ReadonlyArray<string> | undefined> = [];
+      const appTools = tools(
+        root,
+        "full-access",
+        {
+          environment: { PATH: "/usr/bin:/bin", TMPDIR: "/tmp" },
+          prepare: ({ executable, args, extraBoundRoots }) => {
+            prepared.push(extraBoundRoots);
+            return { command: executable, args };
+          },
+        },
+        [extra],
+      );
+      await expect(
+        appTools.execute({
+          name: "octant_acp_fs_read_text_file",
+          inputJson: JSON.stringify({ path: join(extra, "note.txt") }),
+        }),
+      ).resolves.toEqual({ result: { content: "extra note" } });
+      await expect(
+        appTools.execute({
+          name: "octant_acp_fs_write_text_file",
+          inputJson: JSON.stringify({ path: join(extra, "made.txt"), content: "saved" }),
+        }),
+      ).resolves.toEqual({ result: {} });
+      await expect(readFile(join(extra, "made.txt"), "utf8")).resolves.toBe("saved");
+      await expect(
+        appTools.execute({
+          name: "octant_acp_fs_read_text_file",
+          inputJson: JSON.stringify({ path: join(beside, "note.txt") }),
+        }),
+      ).resolves.toMatchObject({ result: { error: "path-outside-checkout" }, isError: true });
+      await expect(
+        appTools.execute({
+          name: "octant_acp_terminal_create",
+          inputJson: JSON.stringify({ command: "/bin/pwd", args: [], cwd: extra }),
+        }),
+      ).resolves.toMatchObject({ result: { terminalId: expect.any(String) } });
+      await expect(
+        appTools.execute({
+          name: "octant_acp_terminal_create",
+          inputJson: JSON.stringify({ command: "/bin/pwd", args: [], cwd: beside }),
+        }),
+      ).resolves.toMatchObject({ result: { error: "cwd-outside-checkout" }, isError: true });
+      // The terminal in the extra folder is jailed with the checkout as an extra root.
+      expect(prepared.at(-1)).toBeDefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(extra, { recursive: true, force: true });
+      await rm(beside, { recursive: true, force: true });
     }
   });
 

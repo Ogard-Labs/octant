@@ -45,7 +45,7 @@ import { WorkTurnUsageStore } from "../work/workTurnUsageStore";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { threadMentionContextResolver } from "../chat/threadMentionService";
 import { createFileMentionRouteHandler } from "../fileMentionRoutes";
-import { pinFileMentionRoot } from "../fileMentionIo";
+import { pinFileMentionExtraRoots, pinFileMentionRoot } from "../fileMentionIo";
 import { fileMentionContextBlocks, FileMentionService } from "../fileMentionService";
 import {
   createThreadExportRouteHandler,
@@ -63,6 +63,7 @@ import {
   defaultShellSettings,
   enabledModes,
   isAgentRunActiveStatus,
+  projectExtraFolderRoots,
   THREAD_MENTION_UNREADABLE_CONTEXT,
   WORK_GOAL_LOOP_CEILING,
   workThreadAccessOf,
@@ -527,11 +528,16 @@ export function wireWork(deps: WorkDependencies) {
               view.checkout,
               codeWorkingDirectoryProbePath,
             );
+            const owner = persistence.readProject(view.thread.projectId);
+            const extraRoots = await pinFileMentionExtraRoots(
+              owner === undefined || owner.type === "chat" ? [] : projectExtraFolderRoots(owner),
+            );
             if (rooted !== undefined) {
               return {
                 kind: "ok",
                 rootPath: rooted.rootPath,
                 rootIdentity: rooted.rootIdentity,
+                extraRoots,
               };
             }
             // A Code Project may bind a non-Git folder. Mention
@@ -571,6 +577,7 @@ export function wireWork(deps: WorkDependencies) {
                 device: metadata.dev.toString(10),
                 inode: metadata.ino.toString(10),
               },
+              extraRoots,
             };
           } catch {
             return { kind: "unauthorized" };
@@ -597,7 +604,13 @@ export function wireWork(deps: WorkDependencies) {
             ) {
               return { kind: "unauthorized" };
             }
-            return pinFileMentionRoot(project.binding.canonicalRoot);
+            const pinned = await pinFileMentionRoot(project.binding.canonicalRoot);
+            return pinned.kind === "ok"
+              ? {
+                  ...pinned,
+                  extraRoots: await pinFileMentionExtraRoots(projectExtraFolderRoots(project)),
+                }
+              : pinned;
           } catch {
             return { kind: "unavailable" };
           }

@@ -231,6 +231,102 @@ describe("FileMentionService", () => {
     expect(io.locate).toHaveBeenCalledWith(rootPath, "notes.md", rootIdentity);
   });
 
+  describe("with an extra folder", () => {
+    const extraPath = "/private/extra-notes";
+    const extraIdentity = { device: "3", inode: "4" };
+    const withExtra = (): FileMentionAuthority => ({
+      ...authority(),
+      resolveWorkRoot: vi.fn(async () => ({
+        kind: "ok" as const,
+        rootPath,
+        rootIdentity,
+        extraRoots: [{ rootPath: extraPath, rootIdentity: extraIdentity }],
+      })),
+    });
+
+    it("completes a file in the extra folder by its absolute path", async () => {
+      const io = trackingIo();
+      io.list = vi.fn(async (root: string) =>
+        root === extraPath
+          ? [{ path: "ideas/plan.md" as never, kind: "file" as const }]
+          : [{ path: "src/main.ts" as never, kind: "file" as const }],
+      );
+      const service = new FileMentionService({ authority: withExtra(), io });
+
+      const result = await service.execute(
+        {
+          kind: "complete-file-mentions",
+          requestId,
+          scope: { mode: "work", threadId },
+          query: "plan",
+        },
+        { windowId },
+      );
+
+      expect(result).toMatchObject({
+        kind: "file-mentions-completed",
+        candidates: [{ path: `${extraPath}/ideas/plan.md`, kind: "file" }],
+      });
+    });
+
+    it("reads a file in the extra folder against the extra folder's own identity", async () => {
+      const io = trackingIo();
+      io.locate = vi.fn(async () => ({
+        kind: "file" as const,
+        canonicalPath: `${extraPath}/ideas/plan.md`,
+        device: "5",
+        inode: "6",
+        size: 4,
+      }));
+      io.readBytes = vi.fn(async () => new TextEncoder().encode("plan"));
+      const service = new FileMentionService({ authority: withExtra(), io });
+
+      const result = await service.execute(
+        {
+          kind: "resolve-file-mentions",
+          requestId,
+          scope: { mode: "work", threadId },
+          paths: [`${extraPath}/ideas/plan.md`],
+        },
+        { windowId },
+      );
+
+      expect(result).toMatchObject({
+        kind: "file-mentions-resolved",
+        mentions: [{ path: `${extraPath}/ideas/plan.md`, text: "plan" }],
+        unavailable: [],
+      });
+      expect(io.locate).toHaveBeenCalledWith(extraPath, "ideas/plan.md", extraIdentity);
+    });
+
+    it("still refuses an absolute path beside the extra folder and a traversal out of it", async () => {
+      const io = trackingIo();
+      const service = new FileMentionService({ authority: withExtra(), io });
+
+      const result = await service.execute(
+        {
+          kind: "resolve-file-mentions",
+          requestId,
+          scope: { mode: "work", threadId },
+          paths: [`${extraPath}-old/a.md`, `${extraPath}/../secret.txt`, "/etc/passwd"],
+        },
+        { windowId },
+      );
+
+      expect(result).toMatchObject({
+        kind: "file-mentions-resolved",
+        mentions: [],
+        unavailable: [
+          { reason: "out-of-root" },
+          { reason: "out-of-root" },
+          { reason: "out-of-root" },
+        ],
+      });
+      expect(io.locate).not.toHaveBeenCalled();
+      expect(io.readBytes).not.toHaveBeenCalled();
+    });
+  });
+
   it("pins Work mention listing to the authorized root identity", async () => {
     const io = trackingIo();
     const service = new FileMentionService({ authority: authority(), io });
