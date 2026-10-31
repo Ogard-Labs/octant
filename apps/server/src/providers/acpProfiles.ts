@@ -18,7 +18,9 @@ import type {
   AcpAgentKind,
   ProviderModel,
   ProviderDriverKind,
+  ProviderCapabilities,
   ProviderExecutionPolicy,
+  ProviderNativeSetup,
 } from "@octant/contracts";
 import type { AcpInitializeResult } from "./acpProtocol";
 
@@ -102,6 +104,16 @@ export interface AcpProcessProfile {
   readonly hostDeniedEntries?: ReadonlyArray<string>;
   /** Project-root entries the agent may neither read nor write. */
   readonly forbiddenRootEntries?: ReadonlyArray<string>;
+  /**
+   * A key provider's own setup, for a session that carries it: the guards
+   * that launch leaves out and the Project-root entries it may read again.
+   * Only Mistral Vibe, the one key provider on this bridge, has one; every
+   * other agent keeps every guard and every deny.
+   */
+  readonly nativeSetup?: (setup: ProviderNativeSetup) => {
+    readonly releasedGuards: ReadonlyArray<string>;
+    readonly releasedRootEntries: ReadonlyArray<string>;
+  };
   readonly confinement: AcpConfinementStrategy;
 }
 
@@ -144,8 +156,23 @@ export interface AcpProviderProfile {
   }) => ProviderModel["configuration"];
   /** Reasoning the agent publishes and takes in the session metadata instead. */
   readonly sessionMetaReasoning?: AcpSessionMetaReasoning;
-  /** ACP `mode` config value for a product mode and execution policy. */
-  readonly sessionMode: (mode: AcpSessionMode, policy: ProviderExecutionPolicy) => string;
+  /**
+   * ACP `mode` config value for a product mode and execution policy, and
+   * whether the thread chose the agent's own reviewer (`autoReview`), which
+   * only a profile with `ownReviewer` honours.
+   */
+  readonly sessionMode: (
+    mode: AcpSessionMode,
+    policy: ProviderExecutionPolicy,
+    autoReview?: boolean,
+  ) => string;
+  /**
+   * The agent has a mode of its own that answers its approval prompts, which
+   * Reviewed may use as its reviewer in Code (`harnessAutoReview`).
+   */
+  readonly ownReviewer?: true;
+  /** Which of its own features a key provider on this bridge can load (`nativeSetup`). */
+  readonly nativeSetupSupport?: NonNullable<ProviderCapabilities["nativeSetup"]>;
   /**
    * The agent answers a mode it does not offer with success and keeps its
    * previous mode, so a renamed or dropped mode would leave a turn running
@@ -525,12 +552,27 @@ const vibeProfile: AcpProviderProfile = {
   // `chat` was removed in 2.23.3 and `default` became `ask` in 2.24.1, so the
   // names below and the version floor have to agree. `accept-edits` is never
   // selected: it auto-approves edits inside the agent, which would bypass
-  // Octant's approval bridge.
-  sessionMode: (mode, policy) => {
+  // Octant's approval bridge. `auto-approve` is Vibe's own answer to its
+  // prompts, so a Code thread at Reviewed that chose it runs in that mode
+  // inside the same confined launch as Guarded; the host withdraws it on a
+  // thread marked by outside content.
+  sessionMode: (mode, policy, autoReview) => {
     if (mode === "chat") return "ask";
     if (policy === "plan") return "plan";
     if (policy === "full-access") return "auto-approve";
+    if (autoReview === true && mode === "code") return "auto-approve";
     return "ask";
+  },
+  ownReviewer: true,
+  nativeSetupSupport: {
+    // Vibe's agent profiles are modes, not subagents Octant could follow.
+    subagents: "unsupported",
+    // Its own web fetch was never switched off; each fetch marks the thread.
+    webTools: "supported",
+    skills: "supported",
+    toolServers: "supported",
+    hooks: "supported",
+    projectCode: "supported",
   },
   chatSessionRoot: "managed-home",
   userQuestions: "unsupported",
@@ -607,6 +649,34 @@ const vibeProfile: AcpProviderProfile = {
       ".vibe/plugins",
       ".vibe/tools",
     ],
+    // The person's own Vibe setup, for a session that carries it. Project
+    // context is the Project's instruction text, which every runtime may read,
+    // so it comes with any of it. A trusted Project's `.vibe` entries become
+    // readable again, and Vibe's own folder-trust list still decides whether
+    // it loads them. Telemetry, update checks, notifications, the voice and
+    // narrator features, the keyring, and the agent allowlist stay as above.
+    nativeSetup: (setup) => {
+      const on =
+        setup.skills || setup.toolServers || setup.hooks || setup.projectCode || setup.webTools;
+      return {
+        releasedGuards: [
+          ...(on ? ["VIBE_INCLUDE_PROJECT_CONTEXT"] : []),
+          ...(setup.skills ? ["VIBE_SKILL_PATHS", "VIBE_DISABLED_SKILLS"] : []),
+          ...(setup.toolServers ? ["VIBE_MCP_SERVERS", "VIBE_ENABLE_CONNECTORS"] : []),
+          ...(setup.hooks ? ["VIBE_ENABLE_EXPERIMENTAL_HOOKS"] : []),
+          ...(setup.projectCode ? ["VIBE_TOOL_PATHS"] : []),
+        ],
+        releasedRootEntries: setup.projectCode
+          ? [
+              ".vibe/agents",
+              ".vibe/config.toml",
+              ".vibe/hooks.toml",
+              ".vibe/plugins",
+              ".vibe/tools",
+            ]
+          : [],
+      };
+    },
     confinement: { kind: "deny-default-seatbelt" },
   },
 };

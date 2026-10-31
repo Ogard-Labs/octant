@@ -1,5 +1,7 @@
 import {
   CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS,
+  type CodeProjectPullRequestActionContext,
+  type CodeProjectPullRequestActionOutcome,
   type CodeProjectPullRequestDetailObserved,
   type CodeProjectPullRequestDetailSection,
   type CodeProjectPullRequestFreshness,
@@ -21,6 +23,10 @@ import { CodeBlock } from "../transcript/CodeBlock";
 import "./project-pull-request-review.css";
 import { PullRequestConversation } from "./CodeReviewPane";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import {
+  ProjectPullRequestActions,
+  type ProjectPullRequestPersonAction,
+} from "./ProjectPullRequestActions";
 
 const PR_STATE_LABELS: Record<CodeProjectPullRequestDetailObserved["pullRequestState"], string> = {
   open: "Open",
@@ -72,6 +78,14 @@ export interface ProjectPullRequestReviewPaneProps {
     headSha: string,
   ) => Promise<CodeProjectPullRequestMergeOutcome>;
   readonly onRefresh?: () => void;
+  /**
+   * The person's own labels, comment, review reply, close, and reopen; absent
+   * where the host has no such actions.
+   */
+  readonly onLoadActionContext?: () => Promise<CodeProjectPullRequestActionContext>;
+  readonly onAct?: (
+    action: ProjectPullRequestPersonAction,
+  ) => Promise<CodeProjectPullRequestActionOutcome>;
   /** Merge when ready and Auto-fix; absent where the host has no switches. */
   readonly switches?: CodeProjectPullRequestSwitchesView;
   readonly onMergeWhenReady?: (
@@ -317,8 +331,17 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
         />
       )}
 
+      {props.onLoadActionContext === undefined || props.onAct === undefined ? null : (
+        <ProjectPullRequestActions
+          loadContext={props.onLoadActionContext}
+          onAct={props.onAct}
+          pullRequestState={detail.pullRequestState}
+          {...(props.onRefresh === undefined ? {} : { onChanged: props.onRefresh })}
+        />
+      )}
+
       <p className="code-pr-review__guardrail">
-        Review data is read-only; merging is explicit and approval-gated.
+        Review data is read-only; merging and your own actions are explicit.
       </p>
 
       {waiting ? (
@@ -480,6 +503,7 @@ function PullRequestSwitches(props: {
 }) {
   const { detail, switches } = props;
   const [pending, setPending] = useState<"merge-when-ready" | "auto-fix">();
+  const [confirmingMergeWhenReady, setConfirmingMergeWhenReady] = useState(false);
   const [refusal, setRefusal] = useState<{
     readonly switch: "merge-when-ready" | "auto-fix";
     readonly outcome: Exclude<CodeProjectPullRequestSwitchOutcome, { status: "applied" }>;
@@ -554,10 +578,63 @@ function PullRequestSwitches(props: {
           onCheckedChange={(checked) => {
             const run = props.onMergeWhenReady;
             if (run === undefined) return;
-            void change("merge-when-ready", () => run(checked, props.mergeMethod, detail.headSha));
+            // Turning it on hands the merge to GitHub, so it asks first, as a
+            // merge does; turning it off is immediate.
+            if (checked) {
+              setConfirmingMergeWhenReady(true);
+              return;
+            }
+            void change("merge-when-ready", () => run(false, props.mergeMethod, detail.headSha));
           }}
         />
       </div>
+      {confirmingMergeWhenReady ? (
+        <div
+          aria-label="Confirm Merge when ready"
+          className="code-pr-review__merge-confirmation"
+          role="region"
+          onKeyDown={(event) => {
+            if (event.key === "Escape" && pending === undefined) {
+              event.preventDefault();
+              event.stopPropagation();
+              setConfirmingMergeWhenReady(false);
+            }
+          }}
+        >
+          <strong>Merge pull request #{detail.number} when ready?</strong>
+          <p>
+            GitHub merges the head you reviewed ({detail.headSha.slice(0, 7)}) once its required
+            checks and reviews pass, using {MERGE_METHOD_COPY[props.mergeMethod]}. A new push turns
+            it off.
+          </p>
+          <div className="code-pr-review__actions">
+            <OctantButton
+              autoFocus
+              disabled={pending !== undefined}
+              onClick={() => setConfirmingMergeWhenReady(false)}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              Cancel
+            </OctantButton>
+            <OctantButton
+              disabled={pending !== undefined}
+              onClick={() => {
+                const run = props.onMergeWhenReady;
+                if (run === undefined) return;
+                setConfirmingMergeWhenReady(false);
+                void change("merge-when-ready", () => run(true, props.mergeMethod, detail.headSha));
+              }}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Confirm Merge when ready
+            </OctantButton>
+          </div>
+        </div>
+      ) : null}
       <div className="code-pr-review__switch">
         <div className="code-pr-review__switch-text">
           <strong>Auto-fix</strong>
@@ -590,6 +667,12 @@ function PullRequestSwitches(props: {
     </section>
   );
 }
+
+const MERGE_METHOD_COPY: Record<CodeProjectPullRequestMergeMethod, string> = {
+  merge: "a merge commit",
+  squash: "squash and merge",
+  rebase: "rebase and merge",
+};
 
 function mergeWhenReadyCopy(state: CodeProjectPullRequestSwitchesView["mergeWhenReady"]): string {
   if (state.status === "off") {

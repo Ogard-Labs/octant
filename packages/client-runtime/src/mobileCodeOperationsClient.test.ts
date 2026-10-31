@@ -3,6 +3,9 @@ import { MAX_CODE_EVIDENCE_BATCH_ITEMS } from "@octant/contracts";
 import {
   MOBILE_CODE_CONVERSATION_TURNS,
   loadMobileCodeConversation,
+  loadMobilePullRequestMergeState,
+  mergeMobilePullRequest,
+  setMobileMergeWhenReady,
   observeMobilePullRequest,
   sendMobileCodeTurn,
 } from "./mobileCodeOperationsClient";
@@ -39,6 +42,149 @@ describe("mobileCodeOperationsClient", () => {
     await expect(
       observeMobilePullRequest({ transport, threadId, checkoutId }),
     ).resolves.toMatchObject({ kind: "pull-request-review", state: "none" });
+  });
+});
+
+describe("mobile pull-request merge", () => {
+  const target = {
+    projectId: "20000000-0000-4000-8000-000000000001",
+    baseRepository: "octant/octant",
+    number: 12,
+  };
+  const head = "9".repeat(40);
+  const calls: Array<{ path: string; body: unknown }> = [];
+  const transportFor = (answers: Record<string, unknown>): MobileRemoteTransport => ({
+    hostId: "host-1",
+    authenticatedFetch: (async ({ path, body }: { path: string; body?: string }) => {
+      calls.push({ path, body: JSON.parse(body ?? "{}") });
+      const answer = answers[path.split("/").pop() ?? ""];
+      return answer === undefined ? jsonResponse({}, 403) : jsonResponse(answer);
+    }) as MobileRemoteTransport["authenticatedFetch"],
+  });
+  const detailView = (overrides: Record<string, unknown> = {}) => ({
+    version: 1,
+    query: {
+      projectId: target.projectId,
+      repositoryOwner: "octant",
+      repositoryName: "octant",
+      number: 12,
+    },
+    detail: {
+      state: "observed",
+      freshness: "fresh",
+      ambiguous: false,
+      staleSections: [],
+      number: 12,
+      url: "https://github.com/octant/octant/pull/12",
+      title: "Change",
+      pullRequestState: "open",
+      baseRepository: "octant/octant",
+      baseBranch: "main",
+      headRepository: "octant",
+      headBranch: "feature/a",
+      headSha: head,
+      author: "octocat",
+      mergeability: "mergeable",
+      matchesDeliveryBranch: false,
+      description: "",
+      diff: "",
+      diffTruncated: false,
+      commits: [],
+      files: [],
+      checks: [],
+      reviews: [],
+      comments: [],
+      ...overrides,
+    },
+    freshness: { status: "fresh" },
+    linkedThreads: [],
+    generatedAt: "2026-08-22T08:00:00.000Z",
+  });
+  const switchesView = {
+    version: 1,
+    target: {
+      projectId: target.projectId,
+      repositoryOwner: "octant",
+      repositoryName: "octant",
+      number: 12,
+    },
+    mergeWhenReady: { status: "off" },
+    autoFix: { status: "off" },
+    generatedAt: "2026-08-22T08:00:00.000Z",
+  };
+
+  it("re-reads the head from GitHub and offers a merge only for a fresh, mergeable, open pull request", async () => {
+    const ready = await loadMobilePullRequestMergeState(
+      transportFor({ refresh: detailView(), switches: switchesView }),
+      target,
+    );
+    expect(ready).toEqual({ headSha: head, mergeable: true, mergeWhenReady: { status: "off" } });
+    const conflicting = await loadMobilePullRequestMergeState(
+      transportFor({
+        refresh: detailView({ mergeability: "conflicting" }),
+        switches: switchesView,
+      }),
+      target,
+    );
+    expect(conflicting.mergeable).toBe(false);
+  });
+
+  it("sends the person's confirmation of the head with a merge, and a refusal comes back as a value", async () => {
+    calls.length = 0;
+    const outcome = await mergeMobilePullRequest(
+      transportFor({ merge: { status: "refused", reason: "checks-not-passing" } }),
+      { ...target, method: "squash", headSha: head },
+    );
+    expect(outcome).toEqual({ status: "refused", reason: "checks-not-passing" });
+    expect(calls[0]).toEqual({
+      path: "/api/code/project-pull-requests/merge",
+      body: {
+        projectId: target.projectId,
+        repositoryOwner: "octant",
+        repositoryName: "octant",
+        number: 12,
+        method: "squash",
+        headSha: head,
+        confirmed: true,
+      },
+    });
+  });
+
+  it("turns Merge when ready on with the confirmed head and off without one", async () => {
+    calls.length = 0;
+    const transport = transportFor({
+      "merge-when-ready": { status: "applied", view: switchesView },
+    });
+    await setMobileMergeWhenReady(transport, {
+      ...target,
+      enabled: true,
+      method: "squash",
+      headSha: head,
+    });
+    await setMobileMergeWhenReady(transport, { ...target, enabled: false });
+    expect(calls[0]?.body).toMatchObject({ kind: "enable", headSha: head, confirmed: true });
+    expect(calls[1]?.body).toEqual({
+      kind: "disable",
+      target: {
+        projectId: target.projectId,
+        repositoryOwner: "octant",
+        repositoryName: "octant",
+        number: 12,
+      },
+    });
+  });
+
+  it("refuses a repository it cannot split before sending anything", async () => {
+    calls.length = 0;
+    await expect(
+      mergeMobilePullRequest(transportFor({}), {
+        ...target,
+        baseRepository: "no-slash",
+        method: "squash",
+        headSha: head,
+      }),
+    ).rejects.toThrow();
+    expect(calls).toHaveLength(0);
   });
 });
 

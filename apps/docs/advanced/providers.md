@@ -178,6 +178,14 @@ What each one loads today:
   does; the approval says so, and you clear it in OpenCode. Your own
   OpenCode configuration, MCP servers, and permission rules do not load in
   Octant yet.
+- **Mistral Vibe:** its skills, the Project's context files, the MCP
+  servers, connectors, and hooks in its own settings, and in a trusted
+  Project that Project's `.vibe` tools, MCP servers, hooks, plugins, and
+  agents, as long as Vibe itself trusts the folder too.
+
+At Auto in Code, Mistral Vibe now reviews its own approvals with its
+auto-approve mode, as Claude Code and Codex do with theirs, until the thread
+reads something from the web.
 
 Only a window on the computer running Octant can change either switch; a
 paired phone or browser cannot. Plan mode stays read-only, so it never runs
@@ -206,7 +214,7 @@ it instead of imitating it.
 | Octant tools (Browser, Computer)  | Yes         | Yes                         | macOS, some releases | After a check | macOS, some agents    | Verified models                          | Verified models                          |
 | Change model inside a thread      | Yes         | Yes                         | No                   | No            | No                    | Yes                                      | Yes                                      |
 | Compact session                   | Yes         | Yes, Codex 0.162.1 or newer | No                   | No            | No                    | Octant does it; Code uses Octant Harness | Octant does it; Code uses Octant Harness |
-| Auto-review of approvals in Code  | Yes         | Yes                         | No                   | No            | No                    | No                                       | No                                       |
+| Auto-review of approvals in Code  | Yes         | Yes                         | No                   | No            | Mistral Vibe          | No                                       | No                                       |
 
 - **Replayed** means the provider keeps no session of its own, so Octant sends
   the thread's history again, fitted to the model's context window. Changing

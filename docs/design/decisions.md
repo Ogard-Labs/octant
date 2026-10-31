@@ -204,7 +204,7 @@ At the Reviewed level a reviewer stands in for the person's click: the provider'
 - The person chooses the reviewer in Settings › Access with a Project override; the provider's own is the default where it exists (built for Code in Settings › Code › Access and on a Code Project's overview).
 - A verdict the provider reports is journaled with the provider as approver and shown like a person's approval (not built yet: today the journal records the thread setting, not per-call verdicts).
 - Taint withdraws the provider's own reviewer for irreversible, publish and new-egress classes.
-- Built for the two key CLI providers in Code; one ACP agent's auto-approve mode is not built yet.
+- Built in Code for the two key CLI providers and for Mistral Vibe's auto-approve mode.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Security and authority, Reviewed](../architecture.md#security-and-authority).
 
@@ -269,7 +269,7 @@ The key providers run inside Octant as they run on their own, with their native 
 - Claude Code loads its own subagents (each shown as a child run, every call through the parent's gate), web search and fetch (asking below Full access, marking the thread), home skills, settings and hooks, and a trusted Project's settings, hooks, skills, MCP servers and plugins; its account's MCP servers start only with a trusted Project's.
 - Codex keeps its Project skills and, in Chat, the person's tool servers and plugins; its own subagents run only at Full access, because their approvals never reach Octant, each shown as a child run, with their web searches marking the thread.
 - OpenCode loads its own skills and answers a remembered 2.x approval `always`, saying the grant lives in OpenCode's own store; the person's own OpenCode config and permission rules, its delegation as child runs, and Reviewed through Octant Shield are not built yet.
-- Mistral Vibe's driver still switches these native features off (not built yet).
+- Mistral Vibe loads its own skills and Project context, the account's MCP servers, connectors and hooks, and a trusted Project's `.vibe` tools, MCP servers, hooks, plugins and agents under its own folder trust; it still runs through the ACP bridge (promotion not built yet).
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Providers](../architecture.md#providers) and [Provider runtimes: Key providers](provider-runtimes.md#key-providers).
 
@@ -687,7 +687,7 @@ A Code thread may push its own branch and open, update and stack pull requests f
 - Plan mode and revoked forge access refuse every action; force-with-lease on the thread's own branch is the default, and a plain force-push or any push to the default branch needs the person's approval for that one act, which Full access does not stand in for.
 - Each action journals the actor, repository, number and head SHA, and Octant stores no forge token.
 - Built: push, amend with force-with-lease, plain force-push on approval, open (ready, draft, stacked), edit, labels of existing labels only, comments and review replies (approved for each post at every level), close and reopen, and an agent's merge on request.
-- Approving or requesting changes as a person, and a renderer surface for the person's own comment, reply, label, close and reopen controls, are allowed (not built yet).
+- The review pane carries the person's own label, comment, review-reply, close and reopen controls; the labels and review threads they name are read through a desktop-window-only query, and a label the repository lacks is never offered. Approving or requesting changes as a person is allowed (not built yet).
 - At Guarded and Reviewed a Code agent's shell can still reach forge credentials, and a change made that way is journaled only as a shell command (known gap).
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
@@ -700,7 +700,8 @@ A person merges one open pull request from its review in a local window. A Code 
 - Octant uses the host's forge command-line login and strips ambient tokens; every attempt journals the actor, repository, number, method, approved head SHA and result.
 - A paired phone or web client may merge one pull request or a whole stack, but only with `confirmed: true` for the head it reviewed; the server then requires the repository's required checks to pass and refuses when they fail, are pending or cannot be read. A stack merges bottom first, each child retargeted to the branch the stack lands on before it merges, and is refused whole unless it is one chain. A review reply is posted only after the thread is read back and found on the named pull request.
 - An agent merges on the person's request only after the person approves that one merge in the thread, at every guardrail level; no routine, plugin or hub or peer host reaches it.
-- Auto-merge from a paired device, an agent's merge on a Project setting or routine, and a fresh owner-device unlock are allowed (not built yet).
+- Merge when ready from a paired phone or web client needs the same confirmation of the reviewed head, and the phone panel offers Merge and Merge when ready after re-reading the pull request from GitHub.
+- An agent's merge on a Project setting or routine, and a fresh owner-device unlock, are allowed (not built yet).
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
@@ -708,7 +709,7 @@ Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Modes: Chat, Wor
 
 A Code thread's pull request review carries two switches the person turns on: Merge when ready, which turns on the forge's own auto-merge, and Auto-fix, which wakes one linked Code thread to fix failed required checks, unresolved review threads and base conflicts.
 
-- Only a local window turns either on; paired devices are refused, and no provider, agent tool, plugin or routine reaches these routes.
+- Only a local window turns Auto-fix on. A paired phone or web client may turn Merge when ready on with `confirmed: true` for the head it reviewed, and off without it; the forge still waits for the required checks and reviews. No provider, agent tool, plugin or routine reaches these routes.
 - Merge when ready uses the forge's auto-merge matched to the head the person saw, never a loop of Octant's own, and answers unsupported when the repository does not allow auto-merge.
 - Auto-fix wakes the thread with one turn through the routine follow-up path, under the thread's own level and approvals; it marks the thread as having read outside content first, and sends no turn if that mark is refused.
 - Auto-fix states Octant's rules to the agent first: never force-push, never rewrite pushed history, merge the base branch instead of rebasing.
