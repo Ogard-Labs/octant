@@ -8,6 +8,7 @@ import {
   createServer as createTlsServer,
 } from "node:tls";
 import { afterEach, describe, expect, it } from "vitest";
+import { decideProviderRuntimeEgress } from "@octant/domain/safe-network-policy";
 import {
   PRIVATE_LISTENER_TEST_CERT,
   PRIVATE_LISTENER_TEST_KEY,
@@ -74,12 +75,25 @@ describe("native harness tool egress proxy", () => {
     ]);
   });
 
-  it("lets a placed runtime reach any public name with no rule, and refuses every private answer, address, and single label", async () => {
+  it("decides a provider runtime's requests by its decider, and refuses a private answer the decider does not trust", async () => {
     const origin = await tcpFixture();
     const harness = await startEgressHarness({
-      decision: "public-destinations",
+      decision: {
+        kind: "provider-runtime",
+        decide: (destination) =>
+          decideProviderRuntimeEgress({
+            destination,
+            providerDomains: ["provider.example"],
+            launchLoopbackPorts: [],
+            places: [],
+            projectRules: [],
+            reviewerAllowed: [],
+            now: new Date().toISOString(),
+          }),
+        privateAddressAllowed: () => false,
+      },
       resolve: async (host) =>
-        host === "metadata.internal.example" ? ["169.254.169.254"] : ["93.184.216.10"],
+        host === "metadata.provider.example" ? ["169.254.169.254"] : ["93.184.216.10"],
       routes: new Map([["93.184.216.10", origin.port]]),
     });
     const allowed = await openTunnel(
@@ -91,9 +105,9 @@ describe("native harness tool egress proxy", () => {
     expect(await roundTrip(allowed.socket, "ping", 4)).toBe("ping");
     allowed.socket.end();
     for (const [target, reason] of [
-      ["metadata.internal.example:80", "private-destination"],
+      ["metadata.provider.example:443", "private-destination"],
+      ["registry.npmjs.org:443", "no-rule registry.npmjs.org:443"],
       ["169.254.169.254:80", "ip-literal"],
-      ["localhost:443", "invalid-name"],
       ["metadata:80", "invalid-name"],
     ] as const) {
       const refused = await openTunnel(harness.proxy, target, harness.authorization);
@@ -104,16 +118,72 @@ describe("native harness tool egress proxy", () => {
     const closed = await harness.proxy.close();
     expect(closed.status).toBe("summarized");
     expect(harness.dialed).toEqual([{ address: "93.184.216.10", port: 443 }]);
-    expect(harness.records.summaries[0]?.entries).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ host: "api.provider.example", decision: "allowed" }),
-        expect.objectContaining({
-          host: "metadata.internal.example",
-          decision: "refused",
-          reason: "private-destination",
+  });
+
+  it("asks a provider runtime's reviewer hook about an unlisted host and decides again afterwards", async () => {
+    const origin = await tcpFixture();
+    const allowed: Array<{ readonly host: string; readonly port: number }> = [];
+    const asked: string[] = [];
+    const harness = await startEgressHarness({
+      decision: {
+        kind: "provider-runtime",
+        decide: (destination) =>
+          decideProviderRuntimeEgress({
+            destination,
+            providerDomains: [],
+            launchLoopbackPorts: [],
+            places: [],
+            projectRules: [],
+            reviewerAllowed: allowed,
+            now: new Date().toISOString(),
+          }),
+        privateAddressAllowed: () => false,
+        escalate: async (destination) => {
+          asked.push(destination.host);
+          if (destination.host === "pypi.org") allowed.push(destination);
+        },
+      },
+      routes: new Map([["93.184.216.10", origin.port]]),
+    });
+    const passed = await openTunnel(harness.proxy, "pypi.org:443", harness.authorization);
+    expect(passed.status).toBe(200);
+    passed.socket.end();
+    const refused = await openTunnel(harness.proxy, "evil.example:443", harness.authorization);
+    expect(refused.status).toBe(403);
+    expect(refused.answer).toContain("octant-egress-refused: no-rule evil.example:443");
+    expect(asked).toEqual(["pypi.org", "evil.example"]);
+  });
+
+  it("serves a client that cannot send the launch token only when the launch asked for no token", async () => {
+    const origin = await tcpFixture();
+    const decision = {
+      kind: "provider-runtime" as const,
+      decide: (destination: { readonly host: string; readonly port: number }) =>
+        decideProviderRuntimeEgress({
+          destination,
+          providerDomains: ["provider.example"],
+          launchLoopbackPorts: [],
+          places: [],
+          projectRules: [],
+          reviewerAllowed: [],
+          now: new Date().toISOString(),
         }),
-      ]),
-    );
+      privateAddressAllowed: () => false,
+    };
+    const tokenless = await startEgressHarness({
+      decision,
+      authentication: "none",
+      routes: new Map([["93.184.216.10", origin.port]]),
+    });
+    const passed = await openTunnel(tokenless.proxy, "api.provider.example:443", undefined);
+    expect(passed.status).toBe(200);
+    passed.socket.end();
+    const tokened = await startEgressHarness({
+      decision,
+      routes: new Map([["93.184.216.10", origin.port]]),
+    });
+    const refused = await openTunnel(tokened.proxy, "api.provider.example:443", undefined);
+    expect(refused.status).toBe(407);
   });
 
   it("passes a TLS session whose server name is the CONNECT host", async () => {

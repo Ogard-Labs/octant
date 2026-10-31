@@ -564,6 +564,77 @@ describe("mapClaudeMessage", () => {
     ]);
   });
 
+  it("shows Claude's own subagent as a child run and marks the thread when the subagent reads the web", () => {
+    const ctx = context();
+    const started = mapped(ctx, {
+      kind: "stream-event",
+      sessionId: claudeSessionId,
+      event: {
+        kind: "content-start",
+        index: 0,
+        content: {
+          kind: "tool-use",
+          toolUseId: "sdk-agent",
+          toolName: "Agent",
+          input: { description: "Read the release notes", prompt: "private prompt" },
+        },
+      },
+    });
+    expect(eventValues(started)).toMatchObject([
+      { kind: "tool-start", toolName: "Agent" },
+      {
+        kind: "child-agent-activity",
+        status: "starting",
+        task: "Read the release notes",
+        summary: "Claude started a subagent.",
+      },
+    ]);
+    const childId = eventValues(started)[1];
+    if (childId?.kind !== "child-agent-activity") throw new Error("Expected a child run");
+
+    const childRead = mapped(ctx, {
+      kind: "child-assistant",
+      sessionId: claudeSessionId,
+      parentToolUseId: "sdk-agent",
+      toolUses: [
+        {
+          toolUseId: "sdk-child-fetch",
+          toolName: "WebFetch",
+          input: { url: "https://example.invalid" },
+        },
+        { toolUseId: "sdk-child-read", toolName: "Read", input: { file_path: "/repo/a.ts" } },
+      ],
+    });
+    expect(eventValues(childRead).map((next) => next.kind)).toEqual([
+      "child-agent-activity",
+      "outside-content-read",
+      "child-agent-activity",
+    ]);
+    expect(eventValues(childRead)[1]).toMatchObject({ source: "web-fetch", toolName: "WebFetch" });
+
+    const finished = mapped(ctx, {
+      kind: "tool-results",
+      sessionId: claudeSessionId,
+      results: [{ toolUseId: "sdk-agent", isError: false }],
+    });
+    expect(eventValues(finished)[0]).toMatchObject({
+      kind: "child-agent-activity",
+      childAgentId: childId.childAgentId,
+      status: "completed",
+    });
+    expect(JSON.stringify([started, childRead, finished])).not.toContain("private prompt");
+
+    // A subagent reply that names no running subagent is not one Octant opened.
+    expect(
+      mapped(ctx, {
+        kind: "child-assistant",
+        sessionId: claudeSessionId,
+        parentToolUseId: "sdk-agent",
+        toolUses: [],
+      }),
+    ).toMatchObject([{ kind: "failure" }]);
+  });
+
   it("treats claude.ai's answer to an artifact publish as outside content and carries the page it names", () => {
     const ctx = context();
     const started = mapped(ctx, {

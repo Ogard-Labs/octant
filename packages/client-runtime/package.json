@@ -51,6 +51,7 @@
     "./project-terminal-client": "./src/projectTerminalClient.ts",
     "./goal-loop-client": "./src/goalLoopClient.ts",
     "./native-harness-client": "./src/nativeHarnessClient.ts",
+    "./safe-networks-client": "./src/safeNetworksClient.ts",
     "./follow-up-suggestion-client": "./src/followUpSuggestionClient.ts",
     "./side-task-client": "./src/sideTaskClient.ts",
     "./mobile-native-harness-client": "./src/mobileNativeHarnessClient.ts",

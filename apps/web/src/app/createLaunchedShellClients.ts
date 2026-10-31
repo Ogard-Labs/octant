@@ -86,6 +86,7 @@ import {
   type HostResourceClient,
 } from "@octant/client-runtime/host-resource-client";
 import { createHostControlClient } from "@octant/client-runtime/host-control-client";
+import { createSafeNetworksClient } from "@octant/client-runtime/safe-networks-client";
 import { createImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import { createSpeechClient } from "@octant/client-runtime/speech-client";
 import { createIntegrationClient } from "@octant/client-runtime/integration-client";
@@ -172,6 +173,7 @@ export interface LaunchedShellClients {
   readonly hostClient: HostClient;
   readonly hostResourceClient: HostResourceClient;
   readonly hostControlClient: ReturnType<typeof createHostControlClient>;
+  readonly safeNetworksClient: ReturnType<typeof createSafeNetworksClient>;
   readonly imageGenerationClient: ReturnType<typeof createImageGenerationClient>;
   readonly speechClient: ReturnType<typeof createSpeechClient>;
   readonly linearTransport: ReturnType<typeof createIntegrationClient>;
@@ -330,6 +332,7 @@ export function createLaunchedShellClients(
       windowCapability: options.windowCapability,
     }),
     hostControlClient: createHostControlClient(port),
+    safeNetworksClient: createSafeNetworksClient(port),
     imageGenerationClient: createImageGenerationClient(port),
     speechClient: createSpeechClient(port),
     linearTransport: createIntegrationClient({ ...port, slug: "linear" }),

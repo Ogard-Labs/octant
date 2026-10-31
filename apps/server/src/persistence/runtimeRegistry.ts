@@ -220,6 +220,17 @@ import {
   ShieldServerSetPayload,
 } from "@octant/contracts/shield-servers";
 import {
+  RUNTIME_NETWORK_EVENT_NAMES,
+  RuntimeNetworkDecisionsRecordedPayload,
+  RuntimeNetworkLaunchStartedPayload,
+  RuntimeNetworkLaunchSummarizedPayload,
+  RuntimeNetworkReviewerAllowedPayload,
+  SAFE_NETWORKS_EVENT_NAMES,
+  SafeNetworksLimitsSetPayload,
+  SafeNetworksPlacesSetPayload,
+  SafeNetworksProjectOverrideClearedPayload,
+} from "@octant/contracts/safe-networks";
+import {
   CODE_LANGUAGE_SERVER_EVENT_NAMES,
   CodeLanguageServerApprovalGranted,
 } from "@octant/contracts/code-language";
@@ -511,6 +522,25 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(SHIELD_SERVERS_EVENT_NAMES.serverSet, 1, ShieldServerSetPayload)
     .register(SHIELD_SERVERS_EVENT_NAMES.serverRemoved, 1, ShieldServerRemovedPayload)
     .register(SHIELD_REMOTE_COMMAND_EVENT_NAMES.ran, 1, ShieldRemoteCommandRanPayload)
+    .register(SAFE_NETWORKS_EVENT_NAMES.limitsSet, 1, SafeNetworksLimitsSetPayload)
+    .register(SAFE_NETWORKS_EVENT_NAMES.placesSet, 1, SafeNetworksPlacesSetPayload)
+    .register(
+      SAFE_NETWORKS_EVENT_NAMES.projectOverrideCleared,
+      1,
+      SafeNetworksProjectOverrideClearedPayload,
+    )
+    .register(RUNTIME_NETWORK_EVENT_NAMES.launchStarted, 1, RuntimeNetworkLaunchStartedPayload)
+    .register(
+      RUNTIME_NETWORK_EVENT_NAMES.decisionsRecorded,
+      1,
+      RuntimeNetworkDecisionsRecordedPayload,
+    )
+    .register(
+      RUNTIME_NETWORK_EVENT_NAMES.launchSummarized,
+      1,
+      RuntimeNetworkLaunchSummarizedPayload,
+    )
+    .register(RUNTIME_NETWORK_EVENT_NAMES.reviewerAllowed, 1, RuntimeNetworkReviewerAllowedPayload)
     .register(AGENT_RUN_REQUESTED, 1, AgentRunRequested)
     .register(AGENT_RUN_STATUS_CHANGED, 1, AgentRunStatusChanged)
     .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged)

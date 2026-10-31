@@ -29,6 +29,7 @@ export const SETTINGS_SECTION_IDS = [
   "linear",
   "servers",
   "permissions",
+  "access",
   "secret-stores",
   "data",
   "sync",
