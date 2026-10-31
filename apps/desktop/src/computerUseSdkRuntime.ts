@@ -149,6 +149,27 @@ export async function computerUsePermissions(request: boolean = false) {
   return permissions;
 }
 
+/**
+ * The running driver's own view of its grants. macOS can refuse the driver
+ * while it allows Octant: an ad-hoc signed Octant launched by LaunchServices
+ * does not pass its grant to the child. An unreadable answer counts as refused.
+ */
+export async function computerDriverPermissions(
+  runtime: ComputerDriverRuntime,
+): Promise<{ readonly accessibility: boolean; readonly screenRecording: boolean }> {
+  try {
+    const result = await runtime.call("check_permissions", {});
+    const report: unknown = JSON.parse(result.structuredJson ?? "null");
+    if (result.isError || !isRecord(report)) throw new Error("Unreadable permission report.");
+    return {
+      accessibility: report.accessibility === true,
+      screenRecording: report.screen_recording === true,
+    };
+  } catch {
+    return { accessibility: false, screenRecording: false };
+  }
+}
+
 export async function openComputerUsePermissionSettings(): Promise<void> {
   if (process.platform !== "darwin") return;
   const sdk = await import("@trycua/cua-driver/electron");

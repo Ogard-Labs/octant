@@ -6571,7 +6571,11 @@ Settings exposes plugin enablement, macOS permission setup, the driver version,
 and update controls. An explicit permission setup requests macOS access, then
 opens Screen Recording settings if it remains unavailable; macOS may suppress
 a repeated prompt. Opening Settings does not grant access. Recheck only reads
-the current state and never requests permissions. The app bundles a pinned,
+the current state and never requests permissions. While the plugin is enabled
+and macOS allows Octant, the reported permissions are the running driver's own
+`check_permissions` answer, not Octant's: macOS can refuse the child while
+allowing Octant (measured with an ad-hoc signed build launched by
+LaunchServices), and an unreadable answer counts as refused. The app bundles a pinned,
 publisher-verified driver. The driver runs under Octant's macOS permissions,
 so it checks upstream daily only
 when the person turns automatic updates on in Settings › Computer use; it is
