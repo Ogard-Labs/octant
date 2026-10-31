@@ -67,6 +67,11 @@ export function HarnessApprovalPanel(props: HarnessApprovalPanelProps) {
           ? `Needs your say-so (${approval.approvalClass}).`
           : "Allow this request for this child."}
       </p>
+      {approval.shield === undefined ? null : (
+        <p className="native-harness-card__detail">
+          Octant Shield asks you: {approval.shield.reason}
+        </p>
+      )}
       {approval.outsideContent === undefined ? null : (
         <ApprovalOutsideContentNote outsideContent={approval.outsideContent} />
       )}

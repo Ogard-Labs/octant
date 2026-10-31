@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { realpath, stat as statFromDisk } from "node:fs/promises";
 import { join } from "node:path";
 import { queueSteeringWhereDelivered, withSteerable } from "../harness/nativeHarnessSteerability";
+import { createHostShield, shieldRoutesApprovals } from "../shield/hostShield";
 import {
   AggregateId,
   decodeCodeThreadId,
@@ -99,12 +100,21 @@ export type HarnessDependencies = Pick<ServerStart, "persistence"> &
   Pick<
     HarnessStateWiring,
     | "agentRunInteractions"
+    | "shieldHolder"
     | "nativeHarnessApprovals"
     | "nativeHarnessQuestions"
     | "nativeHarnessSessions"
   > &
   Pick<WorkRequestStateWiring, "runningWorkTurnAccess"> &
-  Pick<FoundationsWiring, "codeBoardEventStore" | "workThreadProjection" | "workTurnProjection"> &
+  Pick<
+    FoundationsWiring,
+    | "codeBoardEventStore"
+    | "codeEvidence"
+    | "providerRuntimeRegistry"
+    | "workThreadProjection"
+    | "workTurnProjection"
+  > &
+  Pick<AgentRunsWiring, "spendCeiling"> &
   Pick<WorkspaceWiring, "projectService">;
 
 export function wireHarness(deps: HarnessDependencies) {
@@ -115,6 +125,7 @@ export function wireHarness(deps: HarnessDependencies) {
     agentRunOrchestration,
     agentRunPersistence,
     codeBoardEventStore,
+    codeEvidence,
     codeParentActiveTurn,
     codeSessionAuthority,
     configuredDriverOptions,
@@ -123,6 +134,9 @@ export function wireHarness(deps: HarnessDependencies) {
     externalContentIngestionStore,
     goalService,
     nativeHarnessApprovals,
+    providerRuntimeRegistry,
+    shieldHolder,
+    spendCeiling,
     nativeHarnessLeadFallback,
     nativeHarnessQuestions,
     nativeHarnessRouter,
@@ -490,10 +504,47 @@ export function wireHarness(deps: HarnessDependencies) {
       await nativeHarnessObserver.turnCompleted(input);
     },
   };
+  const resolveConfiguredDriver = (providerInstanceId: ProviderInstanceId) => {
+    const instance = persistence.readProviderInstance(providerInstanceId);
+    if (instance === undefined || !instance.enabled) return undefined;
+    try {
+      return makeConfiguredProviderDriver(instance, configuredDriverOptions);
+    } catch {
+      return undefined;
+    }
+  };
+  const readTurnExecutionPolicy = codeTurnExecutionPolicyReader({
+    readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+    codeSessionAuthority,
+    codeOperationRuntime: { threadWithActiveTurnPosture: codeParentActiveTurn },
+  });
+  const hostShield = createHostShield({
+    readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+    readTurnExecutionPolicy: (threadId) => readTurnExecutionPolicy(threadId),
+    providerCapabilities: (providerInstanceId) =>
+      providerRuntimeRegistry.observedState(providerInstanceId)?.capabilities,
+    routesApprovals: (providerInstanceId) => {
+      const instance = persistence.readProviderInstance(providerInstanceId);
+      return instance !== undefined && shieldRoutesApprovals(instance.driverKind);
+    },
+    catalog: (providerInstanceId) => persistence.readProviderCatalog?.(providerInstanceId)?.models,
+    resolveDriver: resolveConfiguredDriver,
+    tainted: (threadId) =>
+      readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
+    personMessages: (threadId, limit) =>
+      codeBoardEventStore.personPromptsForThread(threadId, limit).flatMap((prompt) => {
+        const text = codeEvidence.read(prompt);
+        return text === undefined ? [] : [text];
+      }),
+    spendCeiling,
+    scratchRoot: harnessWorkDirectory,
+  });
+  shieldHolder.port = hostShield;
   const nativeHarnessComposition = createNativeHarnessComposition({
     goals: goalService,
     questions: nativeHarnessQuestions,
     approvals: nativeHarnessApprovals,
+    shield: hostShield,
     childInteractions: (run) => agentRunInteractions.toolsFor(run) ?? {},
     isChildAuthorityCurrent: (run) => agentRunInteractions.isCurrent(run) === true,
     activity: nativeHarnessSessions,
@@ -624,6 +675,7 @@ export function wireHarness(deps: HarnessDependencies) {
     researchRouter,
     sideTaskFirstMessage,
     sideTaskRoutes,
+    hostShield,
     threadWork,
   };
 }
