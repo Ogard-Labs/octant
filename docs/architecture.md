@@ -1951,7 +1951,11 @@ the thread it came from.
   agent profile: provider, model, policy, permission persistence) and an
   authority snapshot whose effective authority never widens the requested one
   and fits under the profile. Work routines take the shared capability set at
-  the routine's level, as Code routines do. By
+  the routine's level, as Code routines do: a Work routine's authority
+  captures the shell and Git, and one saved without them (every Work routine
+  saved before Work had the shell) blocks at dispatch as `authority-mismatch`
+  until a person saves it again under a profile that grants them, because a
+  Work turn cannot withhold them and a routine never runs above its snapshot. By
   default Full access is not eligible, whether or not it was remembered
   elsewhere: the contract refuses it on the snapshot and dispatch blocks it as
   `full-access-ineligible`, and Code runs are created approval-gated. The

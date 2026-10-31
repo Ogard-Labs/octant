@@ -395,10 +395,6 @@ function automationAuthorityDoesNotWiden(
   );
 }
 
-function automationAuthorityFitsMode(authority: AgentRunAuthority, mode: AutomationMode): boolean {
-  return mode !== "work" || (!authority.shell && !authority.git);
-}
-
 function automationAuthorityProfileFitsExecutionProfile(
   authorityProfile: AutomationAuthorityProfileReceipt,
   executionProfile: AutomationExecutionProfileReceipt,
@@ -522,7 +518,6 @@ function automationDefinitionDraftMatchesPolicy(definition: AutomationDefinition
       definition.authorityProfile.requested,
       definition.authorityProfile.effective,
     ) ||
-    !automationAuthorityFitsMode(definition.authorityProfile.effective, definition.mode) ||
     !automationAuthorityProfileFitsExecutionProfile(
       definition.authorityProfile,
       definition.executionProfile,
@@ -881,12 +876,10 @@ export const AutomationRun = Schema.Struct({
             run.dispatchIntent.authoritySnapshot,
             run.authoritySnapshot,
           ));
-      const authoritySnapshotMatchesDefinition =
-        automationAuthoritySnapshotMatchesDefinition(
-          run.authoritySnapshot,
-          run.definitionSnapshot,
-        ) &&
-        automationAuthorityFitsMode(run.authoritySnapshot.effective, run.definitionSnapshot.mode);
+      const authoritySnapshotMatchesDefinition = automationAuthoritySnapshotMatchesDefinition(
+        run.authoritySnapshot,
+        run.definitionSnapshot,
+      );
       const cancellationTombstoneMatchesLifecycle =
         run.cancellationTombstone === undefined ||
         (run.lifecycle === "cancelled" && run.firstTurnAcceptance === undefined);

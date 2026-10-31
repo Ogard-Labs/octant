@@ -79,6 +79,15 @@ describe("native harness turn observer", () => {
     ).toEqual({ kind: "paused", status: "recovery-required", detail: "Restarted." });
   });
 
+  it("tells a Work harness lead it can run commands, now that Work has the shell", () => {
+    const text = observer(true)
+      .subject.contextFor({ ...scope, mode: "work" })
+      .map((block) => block.text)
+      .join("\n");
+    expect(text).toContain("run commands in it with bash");
+    expect(text).not.toMatch(/no shell/i);
+  });
+
   it("puts the stable instructions in front of a harness turn and nothing in front of others", () => {
     const harness = observer(true).subject.contextFor(scope);
     expect(harness[0]?.kind).toBe("instructions");

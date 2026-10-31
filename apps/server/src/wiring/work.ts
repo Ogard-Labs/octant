@@ -64,6 +64,7 @@ import {
   enabledModes,
   isAgentRunActiveStatus,
   THREAD_MENTION_UNREADABLE_CONTEXT,
+  WORK_GOAL_LOOP_CEILING,
   workThreadAccessOf,
 } from "@octant/domain";
 import {
@@ -778,21 +779,13 @@ export function wireWork(deps: WorkDependencies) {
     // turn goes through, so it adds no place work happens and no authority the
     // thread did not already have; everything it may or may not do is decided
     // by the domain and journaled here.
-    // What a Work turn holds, stated once. Work and Code share one capability
-    // set at the thread's level: a Work session has the shell and Git a Code
-    // session at that level has, and the level decides who approves each
-    // command and write (see workTurnPosture). Reach outside the Project
-    // stays refused below Full access.
-    const WORK_TURN_POSTURE = {
-      filesystem: true,
-      shell: true,
-      git: true,
-      network: false,
-      tools: true,
-      subagents: false,
-      executionPolicy: "approval-gated",
-      permissionPersistence: "current-session",
-    } as const;
+    // What a Work turn holds, stated once and shared with the client's loop
+    // ceiling. Work and Code share one capability set at the thread's level:
+    // a Work session has the shell and Git a Code session at that level has,
+    // and the level decides who approves each command and write (see
+    // workTurnPosture). Reach outside the Project stays refused below Full
+    // access.
+    const WORK_TURN_POSTURE = WORK_GOAL_LOOP_CEILING;
     const workTurnPosture = (threadId: string) => {
       const thread = workThreadProjection.read(threadId as never);
       if (thread === undefined || thread.lifecycle !== "active") return undefined;

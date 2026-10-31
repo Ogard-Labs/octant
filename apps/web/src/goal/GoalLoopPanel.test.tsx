@@ -1,6 +1,6 @@
 import type { GoalLoopClient } from "@octant/client-runtime/goal-loop-client";
 import type { ThreadGoal } from "@octant/contracts";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { GoalLoopPanel } from "./GoalLoopPanel";
@@ -134,6 +134,32 @@ describe("watching a loop work on its own", () => {
     expect(await screen.findByRole("button", { name: "Start loop" })).toBeVisible();
     expect(screen.getByText(/no checkpoint to go back to/i)).toBeVisible();
     expect(screen.getByText(/stops at the budget/i)).toBeVisible();
+  });
+
+  it("starts a loop under a ceiling that keeps the shell and Git a Work turn holds", async () => {
+    const execute = vi.fn(async () => ({ kind: "goal-loop", loop: runningLoop, rounds: [] }));
+    render(
+      <GoalLoopPanel
+        client={client({
+          read: vi.fn(async () => ({
+            loop: null,
+            rounds: [],
+          })) as unknown as GoalLoopClient["read"],
+          execute: execute as unknown as GoalLoopClient["execute"],
+        })}
+        goal={goal}
+        threadId={threadId}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Start loop" }));
+    await waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "start-goal-loop",
+        ceiling: expect.objectContaining({ shell: true, git: true, filesystem: true }),
+      }),
+    );
   });
 
   it("renders nothing at all on a host that serves no loops", () => {
