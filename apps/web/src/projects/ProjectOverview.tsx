@@ -1,7 +1,14 @@
+import type { PermissionMode } from "@octant/contracts/providers";
 import { createDesktopPaneClient } from "@octant/client-runtime/desktop-pane-client";
+import { createProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
-import type { ProjectAvailability, ProjectId, ProjectSummary } from "@octant/contracts/projects";
+import type {
+  ProjectAction,
+  ProjectAvailability,
+  ProjectId,
+  ProjectSummary,
+} from "@octant/contracts/projects";
 import type { CanvasDesignBrand } from "@octant/contracts/canvas";
 import type { DesktopRecipe, DesktopRecipeKeyChange } from "@octant/contracts/desktop-lease";
 import type { ProjectColor, ProjectProviderPolicy } from "@octant/contracts/projects";
@@ -17,7 +24,9 @@ import { FolderPicker } from "./FolderPicker";
 import { ProjectMemorySection } from "./ProjectMemorySection";
 import { ProjectThreadsSection } from "./ProjectThreadsSection";
 import { ProjectBrandKitSection } from "./ProjectBrandKitSection";
+import { ProjectActionsSection } from "./ProjectActionsSection";
 import { ProjectDesktopRecipeSection } from "./ProjectDesktopRecipeSection";
+import { ProjectPermissionModeSection } from "./ProjectPermissionModeSection";
 import { ProjectProviderPolicySection } from "./ProjectProviderPolicySection";
 import {
   PROJECT_COLOR_MENU_ITEMS,
@@ -52,6 +61,11 @@ export interface ProjectOverviewProps {
     projectId: ProjectId,
     policy: ProjectProviderPolicy,
   ) => Promise<boolean>;
+  /** Sets the mode this Code Project's new threads start in; absent follows Settings. */
+  readonly onPermissionModeChange?: (
+    projectId: ProjectId,
+    permissionMode: PermissionMode | undefined,
+  ) => Promise<boolean>;
   /** Absent when the host cannot accept the change; the brand kit is then not shown. */
   readonly onBrandKitChange?: (
     projectId: ProjectId,
@@ -62,6 +76,11 @@ export interface ProjectOverviewProps {
     projectId: ProjectId,
     recipe: DesktopRecipe | null,
     key?: DesktopRecipeKeyChange,
+  ) => Promise<boolean>;
+  /** Absent when the host cannot accept the change; a Code Project's actions are then not shown. */
+  readonly onActionsChange?: (
+    projectId: ProjectId,
+    actions: ReadonlyArray<ProjectAction>,
   ) => Promise<boolean>;
   /** The host this window reaches, so the recipe editor can ask which desktop providers it offers. */
   readonly serverUrl?: string;
@@ -93,6 +112,19 @@ export function ProjectOverview(props: ProjectOverviewProps) {
     if (serverUrl === undefined || windowCapability === undefined) return undefined;
     try {
       return createDesktopPaneClient({
+        baseUrl: serverUrl,
+        fetch: globalThis.fetch,
+        windowCapability,
+      });
+    } catch {
+      return undefined;
+    }
+  }, [serverUrl, windowCapability]);
+
+  const projectTerminalClient = useMemo(() => {
+    if (serverUrl === undefined || windowCapability === undefined) return undefined;
+    try {
+      return createProjectTerminalClient({
         baseUrl: serverUrl,
         fetch: globalThis.fetch,
         windowCapability,
@@ -409,6 +441,39 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                   }
                   project={props.project}
                   providerInstances={props.providerInstances ?? []}
+                />
+              </ProjectOverviewInspector>
+            ) : null}
+            {props.project.type === "code" && props.onActionsChange !== undefined ? (
+              <ProjectOverviewInspector
+                key={`${String(props.project.id)}-actions`}
+                label="Actions"
+                summary="Run, Test, Dev and other commands for this Project's terminal"
+              >
+                <ProjectActionsSection
+                  {...(projectTerminalClient === undefined
+                    ? {}
+                    : { client: projectTerminalClient })}
+                  disabled={archived || connectionStale}
+                  onChange={async (actions) =>
+                    (await props.onActionsChange?.(props.project.id, actions)) ?? false
+                  }
+                  project={props.project}
+                />
+              </ProjectOverviewInspector>
+            ) : null}
+            {props.project.type === "code" && props.onPermissionModeChange !== undefined ? (
+              <ProjectOverviewInspector
+                key={`${String(props.project.id)}-mode`}
+                label="Default mode"
+                summary="The mode this Project's new threads start in"
+              >
+                <ProjectPermissionModeSection
+                  disabled={archived || connectionStale}
+                  onChange={async (mode) =>
+                    (await props.onPermissionModeChange?.(props.project.id, mode)) ?? false
+                  }
+                  project={props.project}
                 />
               </ProjectOverviewInspector>
             ) : null}

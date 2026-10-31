@@ -10,6 +10,7 @@ import {
 } from "@octant/contracts/desktop-lease";
 import type { ProjectSummary } from "@octant/contracts/projects";
 import { useEffect, useRef, useState } from "react";
+import { providerCapability, setupMessage } from "../desktop/desktopPaneModel";
 import { hostCredentialStore, useHostPlatform } from "../platform";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
@@ -163,7 +164,10 @@ function draftOf(
   providers: ReadonlyArray<LeasableDesktopProvider>,
 ): RecipeDraft {
   if (saved === undefined) {
-    const providerId = String(providers[0]?.providerId ?? "");
+    const providerId = String(
+      (providers.find((provider) => provider.needsSetup === undefined) ?? providers[0])
+        ?.providerId ?? "",
+    );
     return {
       providerId,
       placementId: firstPlacement(providerId, providers),
@@ -325,7 +329,19 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
   const providerOptions: ReadonlyArray<OctantSelectOption> = [
     ...providers.map((provider) => ({
       id: String(provider.providerId),
-      label: provider.displayName,
+      // A provider that needs setup is listed so the person sees why, but a
+      // recipe cannot move to it; one already saved on it stays editable.
+      label:
+        provider.needsSetup === undefined
+          ? provider.displayName
+          : `${provider.displayName} (needs setup)`,
+      ...(provider.needsSetup !== undefined &&
+      String(saved?.providerId ?? "") !== String(provider.providerId)
+        ? {
+            disabled: true,
+            disabledReason: setupMessage(provider.needsSetup, provider.displayName),
+          }
+        : {}),
     })),
     // A saved provider the host no longer offers stays visible, so the person
     // sees why the recipe cannot start a desktop, but cannot be chosen again.
@@ -355,6 +371,11 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
     (provider) => String(provider.providerId) === draft.providerId,
   );
   const providerOffered = draftProvider !== undefined;
+  // The selected provider's own setup is read in its capability line below.
+  const unselectedNeedingSetup = providers.filter(
+    (provider) =>
+      provider.needsSetup !== undefined && String(provider.providerId) !== draft.providerId,
+  );
   const placements = draftProvider?.placements ?? [];
   const machinesKey =
     draftProvider !== undefined &&
@@ -543,9 +564,12 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
       : undefined;
   const costReady = !billed || centsOf(draft.hourlyCost) !== undefined;
   const unchanged = saved !== undefined && sameDraft(draft, draftOf(saved, providers));
+  const providerSetUp =
+    draftProvider?.needsSetup === undefined || String(saved?.providerId ?? "") === draft.providerId;
   const canSave =
     !disabled &&
     providerOffered &&
+    providerSetUp &&
     placementOffered &&
     machineOffered &&
     limitsRefusal === undefined &&
@@ -617,6 +641,27 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
               value={draft.providerId}
             />
           </label>
+          {unselectedNeedingSetup.length === 0 ? null : (
+            // Visible text, not only the option's tooltip: a disabled option
+            // cannot be chosen, so this is the only place its setup is read.
+            <ul aria-label="Providers that need setup" className="project-provider-policy__hint">
+              {unselectedNeedingSetup.map((provider) =>
+                provider.needsSetup === undefined ? null : (
+                  <li key={String(provider.providerId)}>
+                    {setupMessage(provider.needsSetup, provider.displayName)}
+                  </li>
+                ),
+              )}
+            </ul>
+          )}
+          {draftProvider === undefined ? null : (
+            <p className="project-provider-policy__hint" role="status">
+              {providerCapability(draftProvider)}
+              {draftProvider.needsSetup === undefined
+                ? ""
+                : ` ${setupMessage(draftProvider.needsSetup, draftProvider.displayName)}`}
+            </p>
+          )}
           {placementOptions.length === 0 ? null : (
             <label className="project-provider-policy__mode">
               <span>Runs on</span>

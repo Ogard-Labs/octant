@@ -179,11 +179,11 @@ Intentionally out of scope; changing this requires an approved design change.
   designated Code thread per Code Project that reads the Project's board and
   proposes work the user must explicitly confirm. It launches and redirects
   nothing.
-- **Other pull-request mutation and agent-initiated merge** — force-push,
-  review approval, comments, closing, and any merge an agent or remote client
-  starts. The person's own confirmed merge and an agent opening or editing
-  its own thread's draft, ready, or stacked pull request on request are the
-  exceptions ([architecture](architecture.md#modes-chat-work-and-code)).
+- **Merges and force-pushes an agent starts on its own initiative** — and any
+  merge a hub or peer host starts. A Code thread's own pull-request work, a
+  merge or plain force-push the person asked for or allowed, and a person's
+  merge from any of their clients are allowed under
+  [Git and pull requests](architecture.md#modes-chat-work-and-code).
 - **Octant-operated cloud accounts or telemetry** — the product stays
   local-first and privacy-preserving by default.
 - **Auto-installing or auto-updating provider runtimes** — Octant detects
@@ -191,7 +191,8 @@ Intentionally out of scope; changing this requires an approved design change.
   them; explicit provider-owned update actions remain user-triggered.
 - **Core capabilities that depend on an optional extension** — browser/computer
   use, tests, Apple validation, approvals, memory, and subagents stay
-  app-managed and provider-neutral. Beyond them, a first-class provider may
-  offer a capability in full while every other provider gets a documented
-  degraded form or reports the capability unsupported
+  app-managed and provider-neutral. Beyond them, the first-class providers
+  (Claude Code, Codex, Mistral Vibe, and OpenCode) are to keep their own
+  native capabilities (mostly not built yet) while every other provider gets a documented degraded form or
+  reports the capability unsupported
   ([architecture](architecture.md#overview-and-principles)).

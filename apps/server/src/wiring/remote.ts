@@ -26,6 +26,10 @@ import { createProviderCredentialRouteHandler } from "../providers/providerCrede
 import { makePushPlatformCredentialBrokerClient } from "../providers/credentialBrokerClient";
 import { ProviderServiceError } from "../providers/providerService";
 import { providerKeyJournal, reconcileProviderKeyChanges } from "../providers/providerKeyJournal";
+import { makeSecretStoreBrokerClient } from "../secretStores/secretStoreBrokerClient";
+import { secretStoresJournal } from "../secretStores/secretStoresJournal";
+import { createSecretStoresRouteHandler } from "../secretStores/secretStoresRoutes";
+import { createSecretStoresService } from "../secretStores/secretStoresService";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import {
   createExternalContentRouteHandler,
@@ -182,7 +186,7 @@ export type RemoteDependencies = Pick<
   > &
   Pick<RoutesWiring, "authenticatedProductDispatch"> &
   Pick<FoundationsWiring, "workThreadProjection"> &
-  Pick<FoundationsWiring, "providerRuntimeRegistry"> &
+  Pick<FoundationsWiring, "hostMemoryGuard" | "providerRuntimeRegistry"> &
   Pick<CodeRuntimeWiring, "codeOperationRuntime">;
 
 const decodeAgentRunParentThreadId = Schema.decodeUnknownSync(AgentRunParentThreadId);
@@ -220,6 +224,7 @@ export function wireRemote(deps: RemoteDependencies) {
     generatedImageStore,
     debugConfigurationApprovals,
     debugService,
+    hostMemoryGuard,
     languageServerApprovals,
     onWorkTurnCancelled,
     options,
@@ -927,6 +932,33 @@ export function wireRemote(deps: RemoteDependencies) {
       }
     },
   });
+  // Linked secret stores: the broker holds each pointer and follows it at use;
+  // the host journals each link and each change to a key's reference.
+  const secretStoresRoutes = createSecretStoresRouteHandler({
+    service: createSecretStoresService({
+      broker:
+        options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+          ? undefined
+          : makeSecretStoreBrokerClient({
+              url: options.credentialBrokerUrl,
+              token: options.credentialBrokerToken,
+            }),
+      journal: secretStoresJournal({
+        journal: persistence.journal,
+        connection: persistence.connection,
+        uuid: randomUUID,
+        now: () => new Date().toISOString(),
+      }),
+      readProviderInstances: () => persistence.readProviderInstances(),
+      reprobe: async (windowId, instance) => {
+        await providerService.probe(windowId, instance.id, { fresh: true });
+      },
+    }),
+    windowAuthorityStore,
+    ...(options.allowedRendererHttpOrigin === undefined
+      ? {}
+      : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
+  });
   const privateListenerSetting = createPrivateListenerSetting(providerDataDirectory);
   const privateListenerAdministrationRoutes = createPrivateListenerAdministrationRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
@@ -1070,6 +1102,7 @@ export function wireRemote(deps: RemoteDependencies) {
   const hostControlRoutes = createHostControlRouteHandler({
     windowAuthorityStore,
     diagnostics: composeHostDiagnostics,
+    memory: () => hostMemoryGuard.report(),
     threadRetention,
     ...(options.hostControl?.servicePolicy === undefined
       ? {}
@@ -1154,6 +1187,7 @@ export function wireRemote(deps: RemoteDependencies) {
     privateListenerSetting,
     providerCredentialRoutes,
     remoteHost,
+    secretStoresRoutes,
   };
 }
 

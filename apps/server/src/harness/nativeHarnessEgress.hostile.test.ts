@@ -485,12 +485,9 @@ describe("native harness hostile content", () => {
     expect(lead.shell.commands).toEqual([]);
   });
 
-  it("refuses an injected command, write, or edit under full access when nobody is there to confirm", async () => {
-    // On a clean thread full access runs the shell without asking.
-    const clean = await hostileCodeLead({ posture: "full-access" });
-    expect(await clean.call("bash", { command: "bun test" })).toMatchObject({ isError: false });
-
-    const lead = await hostileCodeLead({ posture: "full-access" });
+  it("refuses an injected command, write, or edit below Full access when nobody is there to confirm", async () => {
+    // A standing approval covers the shell on a clean thread.
+    const lead = await hostileCodeLead({ posture: "auto-accept-edits", answers: [] });
     await lead.call("web-fetch", { url: lead.pageUrl });
     expect(lead.tainted()).toBe(true);
     for (const [name, input] of [
@@ -498,13 +495,30 @@ describe("native harness hostile content", () => {
       ["write", { path: ".git/hooks/pre-commit", content: "#!/bin/sh\n" }],
       ["edit", { path: "README.md", oldText: "hello", newText: "pwned" }],
     ] as const) {
-      expect(await lead.call(name, input)).toMatchObject({
-        isError: true,
-        result: { error: "approval-required" },
-      });
+      expect(await lead.call(name, input)).toMatchObject({ isError: true });
     }
     expect(lead.shell.commands).toEqual([]);
     expect(existsSync(join(lead.checkoutRoot, ".git/hooks/pre-commit"))).toBe(false);
+  });
+
+  it("records outside content at Full access and asks nobody before the next command, write, or edit", async () => {
+    const lead = await hostileCodeLead({ posture: "full-access", answers: [] });
+    await lead.call("web-fetch", { url: lead.pageUrl });
+    expect(lead.tainted()).toBe(true);
+    expect(await lead.call("bash", { command: "bun test" })).toMatchObject({ isError: false });
+    expect(await lead.call("write", { path: "notes.md", content: "x\n" })).toMatchObject({
+      isError: false,
+    });
+    // An edit needs the file read first in the same turn.
+    const turn = lead.nextTurn();
+    await lead.call("read", { path: "README.md" }, turn);
+    expect(
+      await lead.call("edit", { path: "README.md", oldText: "hello", newText: "hi" }, turn),
+    ).toMatchObject({ isError: false });
+    expect(lead.asked).toEqual([]);
+    expect(lead.shell.commands).toEqual(["bun test"]);
+    // The mark stays on the thread for the tool row, the card and the journal.
+    expect(lead.tainted()).toBe(true);
   });
 
   it("answers a tool the page names but the thread was never offered without consulting policy or a person", async () => {
@@ -578,61 +592,35 @@ describe("native harness hostile content", () => {
     ]);
   });
 
-  it("runs a full-access command unasked after a person clears the thread, until the next fetch", async () => {
-    const lead = await hostileCodeLead({ posture: "full-access", answers: ["approve", "approve"] });
+  it("lets a person clear a marked Full access thread, and the next fetch marks it again", async () => {
+    const lead = await hostileCodeLead({ posture: "full-access", answers: [] });
     await lead.call("web-fetch", { url: lead.pageUrl });
     expect(lead.tainted()).toBe(true);
-
-    // Marked: full access no longer covers the shell, and the answer is single use.
-    expect(await lead.call("bash", { command: "bun test" })).toMatchObject({ isError: false });
-    expect(lead.asked).toEqual([
-      expect.objectContaining({
-        toolName: "bash",
-        approvalClass: "shell-commands",
-        singleUse: true,
-      }),
-    ]);
-
     expect(lead.clear()).toMatchObject({ kind: "cleared" });
     expect(lead.tainted()).toBe(false);
-    // Cleared: full access applies again, on this turn's tools and the next turn's.
-    expect(await lead.call("bash", { command: "bun run lint" })).toMatchObject({ isError: false });
-    expect(
-      await lead.call("bash", { command: "bun run typecheck" }, lead.nextTurn()),
-    ).toMatchObject({ isError: false });
-    expect(lead.asked).toHaveLength(1);
-
-    // The clear holds for nothing. The same page, the same bytes, marks the
-    // thread again, and the next command asks once more.
     expect(await lead.call("web-fetch", { url: lead.pageUrl })).toMatchObject({ isError: false });
-    expect(lead.asked).toHaveLength(1);
     expect(lead.tainted()).toBe(true);
-    expect(await lead.call("bash", { command: INJECTED_COMMAND })).toMatchObject({
-      isError: false,
-    });
-    expect(lead.asked).toHaveLength(2);
-    expect(lead.asked[1]).toMatchObject({
-      toolName: "bash",
-      approvalClass: "shell-commands",
-      singleUse: true,
-    });
-    expect(lead.shell.commands).toEqual([
-      "bun test",
-      "bun run lint",
-      "bun run typecheck",
-      INJECTED_COMMAND,
-    ]);
+    expect(lead.asked).toEqual([]);
   });
 
-  it("asks before every web-fetch on a tainted thread, so a URL cannot carry data out silently", async () => {
-    // Nobody to confirm: the second fetch refuses, even under full access.
-    const unattended = await hostileCodeLead({ posture: "full-access" });
+  it("asks before every web-fetch on a tainted thread below Full access, so a URL cannot carry data out silently", async () => {
+    // Nobody to confirm: the second fetch refuses.
+    const unattended = await hostileCodeLead({ posture: "auto-accept-edits" });
     await unattended.call("web-fetch", { url: unattended.pageUrl });
     expect(unattended.tainted()).toBe(true);
     expect(
       await unattended.call("web-fetch", { url: `${unattended.pageUrl}?k=secret` }),
     ).toMatchObject({ isError: true, result: { error: "approval-required" } });
     expect(unattended.pageSeen).toHaveLength(1);
+
+    // At Full access the fetch goes through, and the thread stays marked.
+    const full = await hostileCodeLead({ posture: "full-access" });
+    await full.call("web-fetch", { url: full.pageUrl });
+    expect(await full.call("web-fetch", { url: `${full.pageUrl}?page=2` })).toMatchObject({
+      isError: false,
+    });
+    expect(full.pageSeen).toHaveLength(2);
+    expect(full.tainted()).toBe(true);
 
     // With a person there, each fetch waits for them; "always" does not stick.
     const lead = await hostileCodeLead({
@@ -665,7 +653,7 @@ describe("native harness hostile content", () => {
 
   it("refuses a tainted thread's search query that carries data before any request reaches the endpoint", async () => {
     const smuggled = "forecast https://collector.invalid/?k=hunter2";
-    const lead = await hostileCodeLead({ posture: "full-access", answers: [] });
+    const lead = await hostileCodeLead({ posture: "approval-gated", answers: [] });
     await lead.call("web-fetch", { url: lead.pageUrl });
     expect(lead.tainted()).toBe(true);
 
@@ -689,6 +677,13 @@ describe("native harness hostile content", () => {
     ).toMatchObject({ isError: false, result: { results: [{ title: "Bun workspaces" }] } });
     expect(lead.asked).toEqual([]);
     expect(lead.searchSeen).toHaveLength(1);
+
+    // At Full access outside content is recorded only, so the same query is sent.
+    const full = await hostileCodeLead({ posture: "full-access", answers: [] });
+    await full.call("web-fetch", { url: full.pageUrl });
+    expect(await full.call("web-search", { query: smuggled })).toMatchObject({ isError: false });
+    expect(full.asked).toEqual([]);
+    expect(full.searchSeen).toHaveLength(1);
 
     // A clean thread's identical data-bearing query is sent as before.
     const clean = await hostileCodeLead({ posture: "full-access" });
@@ -1145,9 +1140,10 @@ describe("native harness command network", () => {
    * A Code lead and a child composed with every shell the server has, each
    * recording what it ran, and a posture the test can change between calls.
    */
-  function postureCode(options: { readonly proxied: boolean }) {
+  function postureCode(options: { readonly proxied: boolean; readonly fullAccess?: boolean }) {
     const networked = recordingShell();
     const offline = recordingShell();
+    const unsandboxed = recordingShell();
     const proxiedScopes: HarnessEgressScope[] = [];
     const proxiedCommands: string[] = [];
     const postures = new Map<string, ProviderExecutionPolicy | undefined>();
@@ -1175,6 +1171,7 @@ describe("native harness command network", () => {
       isHarnessProvider: () => true,
       shell: networked,
       offlineShell: offline,
+      ...(options.fullAccess === true ? { fullAccessShell: unsandboxed } : {}),
       ...(options.proxied
         ? {
             proxiedShell: (scope: HarnessEgressScope) => {
@@ -1245,6 +1242,7 @@ describe("native harness command network", () => {
         networked: networked.commands,
         offline: offline.commands,
         proxied: proxiedCommands,
+        unsandboxed: unsandboxed.commands,
       }),
       proxiedScopes,
       postureReads,
@@ -1257,7 +1255,12 @@ describe("native harness command network", () => {
       const code = postureCode({ proxied: true });
       code.setPosture(posture);
       await code.bash(code.lead, "npm install");
-      expect(code.ran()).toEqual({ networked: [], offline: [], proxied: ["npm install"] });
+      expect(code.ran()).toEqual({
+        networked: [],
+        offline: [],
+        proxied: ["npm install"],
+        unsandboxed: [],
+      });
       expect(code.proxiedScopes).toEqual([
         { threadId: code.threadId, projectId: String(authority.projectId) },
       ]);
@@ -1274,6 +1277,21 @@ describe("native harness command network", () => {
       networked: ["curl https://example.com/"],
       offline: ["curl https://example.org/"],
       proxied: [],
+      unsandboxed: [],
+    });
+  });
+
+  it("runs a Full access command outside the sandbox and puts the next one back when the posture drops", async () => {
+    const code = postureCode({ proxied: true, fullAccess: true });
+    code.setPosture("full-access");
+    await code.bash(code.lead, "cat ~/.ssh/config");
+    code.setPosture("approval-gated");
+    await code.bash(code.lead, "npm install");
+    expect(code.ran()).toEqual({
+      networked: [],
+      offline: [],
+      proxied: ["npm install"],
+      unsandboxed: ["cat ~/.ssh/config"],
     });
   });
 
@@ -1305,6 +1323,7 @@ describe("native harness command network", () => {
       networked: ["npm install", "bun test"],
       offline: ["cat README.md"],
       proxied: [],
+      unsandboxed: [],
     });
   });
 
@@ -1313,7 +1332,12 @@ describe("native harness command network", () => {
     code.setPosture("approval-gated");
     const narrow = code.child({ network: true, executionPolicy: "full-access" });
     await code.bash(narrow.tools, "npm install");
-    expect(code.ran()).toEqual({ networked: [], offline: [], proxied: ["npm install"] });
+    expect(code.ran()).toEqual({
+      networked: [],
+      offline: [],
+      proxied: ["npm install"],
+      unsandboxed: [],
+    });
     expect(code.proxiedScopes).toContainEqual({
       threadId: narrow.runId,
       projectId: String(authority.projectId),

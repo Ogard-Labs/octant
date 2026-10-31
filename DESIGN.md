@@ -75,11 +75,10 @@ but they do not own a second palette or visual language.
   that already is. Weights follow the one ladder in [Scale](#scale).
 - **Sentence case everywhere**: titles, labels, buttons, tabs, menu items.
   Product nouns keep their capital (Project, Chat, Work, Code, Environment).
-- **Say what happens.** A posture name never promises more than the runtime
-  does. Where a session-only Full access leaves Octant Harness asking, the
-  access control and the dock's Access fact read "Full access · asks first",
-  and the control's tooltip says "Full access this session. Octant Harness
-  still asks before writes and commands."
+- **Say what happens.** A mode name never promises more than the runtime
+  does. Where a thread's provider has no reviewer, a thread set to Auto reads
+  "Ask first" and says why; Full access says it has no sandbox and no
+  prompts.
 - **One sentence of help.** A subtitle or row description is one sentence
   that says what the thing does. Longer explanations move to the docs.
 - **Numbers read in English.** Counts, sizes, and token figures use the
@@ -102,7 +101,7 @@ but they do not own a second palette or visual language.
   a host fact (see "Host platform in copy" under
   [Security and authority](docs/architecture.md#security-and-authority)).
 - **Vocabulary.** `Project`, `thread`, `checkout`, `worktree`, `base branch`,
-  `Environment`, `access` (Plan / Approval / Auto-accept edits / Full access),
+  `Environment`, `mode` (Auto / Ask first / Accept edits / Plan / Full access),
   `delivery` (Investigation / Local implementation / Pull request / Merged).
   The word "target" does not appear in the interface.
 
@@ -633,7 +632,15 @@ tabs or action tiles: adding a folder lives in the composer's Project picker. Th
 behavior is in [Workspace](docs/design/workspace.md#start-screen-cards).
 
 First-run setup asks only what a first task needs — a usable provider, a
-Project folder, and a model — and ends in one primary action, Start a task,
+Project folder, a model, and the
+[mode](docs/architecture.md#security-and-authority) new threads start in
+(Auto pre-selected and marked Recommended, then Ask first, Accept edits, Plan,
+and Full access, in that order; Full access reads "No sandbox, no prompts"
+and is never pre-selected; Auto uses the provider's own reviewer or
+[Octant Shield](docs/architecture.md#octant-shield), so it is listed for every
+runtime, and where no reviewer can run the picker shows it unavailable with
+the reason; the pick becomes the default for every new Work and Code thread
+until changed in Settings › Access; this question is allowed, not built yet) — and ends in one primary action, Start a task,
 that opens the new-task composer in that Project. Every step is optional from
 the first one. Opening setup focuses the current step's heading so a long
 provider list does not scroll past its introduction; Tab then reaches the
@@ -1281,8 +1288,12 @@ All six composers use `ComposerAttachButton` for their file chooser. The visible
 button is the only tab stop; an unsupported model keeps the button reachable
 and explains the refusal in the surface's status line. It never opens the file
 chooser or uploads while refused. Model, access, and destination controls keep
-one type scale. Access labels read "Plan · read-only"
-and "Ask for approvals" in both new and existing threads.
+one type scale. The mode picker reads the same in new and existing threads:
+Auto (with "Recommended" where the provider has a reviewer, otherwise
+listed disabled with the reason), Ask first, Accept edits, Plan, and Full
+access, each with a one-line description. Choosing a mode is one click and
+changes the thread; the first Full access pick on this machine or in a
+Project shows the one-time warning first.
 The Code start screen's agent home (suggested prompts, Up next, Start something
 new, and Continue) is laid out in
 [Start screen: Code agent home](docs/design/start-screen.md#code-agent-home). The start screen has no image-generation control: a job needs a thread to
@@ -2093,7 +2104,26 @@ proceed. Native Code approvals keep their isolated host-owned document. The
 extension tool request names the plugin, its server, and the tool, and adds
 "Always allow in this Project" only when the host marks the call rememberable
 and the window is a local one. Settings › Permissions lists those answers by
-Project, each with Revoke, beside Remembered websites. A Browser request from a
+Project, each with Revoke, beside Remembered websites. Its Access section
+(Settings › Access) shows the global guardrail level with one-click change,
+which governs Work and Code alike. The levels, top to bottom, are Ask first,
+Accept edits, Auto, and Full access; Full access is the lowest, and there is
+no separate switch below it. The first time a machine or a Project picks Full
+access, a one-time warning asks to confirm, in the warning role: "Agents can
+change any file and run any command without asking, with no sandbox, so they
+can read your whole home folder, including SSH and cloud keys." It offers
+Cancel (focused) and Use Full access, and is not shown again for that scope.
+At Full access a tool row that read outside content carries a quiet tag and
+the thread card a small mark; neither prompts. The section also shows, each
+as an account default a Project
+may override: **Auto reviewer** (Provider's own / Octant Shield), **Safe
+networks** (trusted hosts, domains, address ranges, and private-network tags),
+and **Servers** (registered SSH hosts, each with a Read-only, Operate, or Admin
+profile and an optional notes file). The rules behind them are in
+[Octant Shield](docs/architecture.md#octant-shield); allowed, not built yet.
+A Work Project's **Developer tools** switch is presentation, not a
+permission, so it lives on that Project's overview, not here
+([Workspace](docs/design/workspace.md); allowed, not built yet). A Browser request from a
 CLI in a Code thread's terminal names the origin and the thread and says a
 program in the terminal asked, not the thread's agent
 ([Terminal Browser grant](docs/design/terminal-browser-grant.md#the-window)).
@@ -2122,8 +2152,8 @@ Cancel; Tab can leave the warning to continue reviewing. Escape within the warni
 or Cancel returns focus to Merge (or the review heading if Merge is unavailable).
 An attempted merge keeps its existing freshness and reviewed-head checks, and
 focus moves to its result when the attempt completes. It is not a trusted task
-approval surface. Only the person at a local window can merge; who may merge and
-what the host checks are owned by
+approval surface. Who may merge (a person, or a Code thread the person
+allowed) and what the host checks are owned by
 [architecture](docs/architecture.md#modes-chat-work-and-code).
 
 A dialog with a visible heading uses that heading as its accessible name through
@@ -2286,6 +2316,26 @@ Last observed model facts are presentation only and never authorize selection
 or execution. Saved Chat/Code revisions reconcile untouched fields without
 remounting the form. Keep deliberate section expansion, text growth, and manual
 resizing distinct from unsolicited layout movement.
+
+### Secret stores
+
+Settings › Secret stores sits with Permissions under Privacy & data and is
+host-scoped. It has two cards. **Linked secret stores** is a plain row per
+tool: the tool's name, one line saying whether it is linked and whether the
+store is ready, locked, not installed, or unreachable, and one button, Link or
+Unlink. Unlink waits for a confirmation that says which providers stop getting
+their key and that nothing in the store is changed. A refusal (a locked store,
+a missing tool) appears in the card's feedback slot, in the host's own words.
+**Check an item** takes an item reference and answers Found, locked, missing, or
+unreachable; it never shows what an item holds. On a host with no credential
+broker the card says so and offers no button.
+
+A provider's key from a store lives on the provider's own card, under **Key from
+a secret store**, beside the API keys. It appears only when a store is linked or
+the provider already points at an item, so a card never carries a section most
+people do not use. It shows the item reference in code type with Check, Change
+item, and Remove, or one reference field with Use this item. No control on
+either surface has a field for a key, and nothing on them shows one.
 
 ### Optional Settings details
 

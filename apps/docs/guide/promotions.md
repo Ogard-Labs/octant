@@ -1,10 +1,12 @@
 ---
-description: Promotions create a linked Code thread from Work work with explicit user approval and no inherited authority.
+description: Promotions create a linked Code thread from Work work with explicit user approval, moving it to Code's coding tools.
 ---
 
 # Promotions
 
 When Work work becomes software engineering, Octant offers an explicit promotion to a linked Code thread. The promotion never changes mode silently and never carries Work filesystem authority into Code.
+
+Planned: Work and Code share the same capabilities under the same guardrail level, so a promotion moves work to Code's focus (checkouts, worktrees, pull requests, and a delivery target) rather than giving it more power. The new Code thread starts at the level its Project uses, as any new Code thread does. Not built yet; today the steps below apply.
 
 ## How promotions work
 
@@ -25,7 +27,7 @@ A promotion proposal:
 - Requires explicit user approval before creating the Code thread.
 - Starts the Code thread in approval-gated mode, regardless of the Work thread's authority level.
 
-The Code thread resolves its own authority independently. The user can adjust the authority mode (Plan, Approval-gated, or Full access) through the Code thread's controls.
+The Code thread resolves its own authority independently. The user can change its mode (Auto, Ask first, Accept edits, Plan, or Full access) from the Code thread's composer.
 
 ## Context transfer
 

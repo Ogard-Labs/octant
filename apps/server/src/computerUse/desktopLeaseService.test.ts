@@ -35,6 +35,7 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { catchUpProjection } from "../persistence/projection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
+import { bundledDesktopProviders } from "./bundledDesktopProviders";
 import {
   createDesktopLeaseService,
   type DesktopLeaseService,
@@ -109,6 +110,8 @@ interface HostState {
   readonly threads: Map<string, { active: boolean; executionPolicy: ProviderExecutionPolicy }>;
   readonly recipes: Map<string, DesktopRecipe>;
   providers: Array<RegisteredDesktopProvider>;
+  /** Asked for the providers on every call, in place of `providers`, when a test sets it. */
+  providerList?: () => ReadonlyArray<RegisteredDesktopProvider>;
   /** Windows and devices that may not open any thread. */
   readonly deniedScopes: Set<string>;
   /** The user Octant runs as, whose home holds a daemon-run provider's socket. */
@@ -142,7 +145,7 @@ function serviceOver(connection: SqliteConnection, state: HostState): DesktopLea
     hostTag,
     platform: "linux",
     hasScreen: false,
-    providers: () => state.providers,
+    providers: () => state.providerList?.() ?? state.providers,
     recipe: (owner) => state.recipes.get(String(owner.threadId)),
     thread: (owner) => state.threads.get(String(owner.threadId)),
     callerMayOpen: (_actor, owner, scopeId) =>
@@ -1702,6 +1705,144 @@ describe.runIf(process.platform === "linux")("desktop artifact transfer", () => 
     await expect(
       service.transfer({ owner: code(threadA), actor: agentOf(threadA), leaseId, path: "app.bin" }),
     ).resolves.toEqual({ status: "refused", reason: "no-root" });
+  });
+});
+
+describe("desktop lease service over the bundled cloud and daemon-run providers", () => {
+  const spacesOf = () => {
+    const fake = createFakeDesktopProvider({ id: "spaces.example" });
+    const provider: DesktopProvider = {
+      ...fake.provider,
+      daemon: { socketPath: ".spaces/spaces.sock", methods: [] },
+      placements: [
+        {
+          id: decodeDesktopPlacementId("here"),
+          displayName: "This machine",
+          locality: "host-local",
+          billed: false,
+        },
+      ],
+    };
+    return { provider, backend: fake.backend };
+  };
+  const onSpaces = decodeDesktopRecipe({ ...recipeFor("spaces.example"), placementId: "here" });
+
+  function bundled() {
+    const cloud = createFakeDesktopProvider({
+      id: "cloud.example",
+      locality: "cloud",
+      billed: true,
+    });
+    const spaces = spacesOf();
+    const setup = { credentialStore: true, daemon: true };
+    const harness = host({ providers: [cloud] });
+    harness.state.daemonUserId = 1_000;
+    harness.state.providerList = bundledDesktopProviders({
+      cloud: cloud.provider,
+      daemon: spaces.provider,
+      credentialStore: () => setup.credentialStore,
+      daemonReady: () => setup.daemon,
+    });
+    return { ...harness, service: harness.restart(), cloud, spaces, setup };
+  }
+
+  it("lists a cloud and a daemon-run provider before any lease, and asks the daemon nothing until one is journaled", async () => {
+    const { service, restart, state, spaces } = bundled();
+    await service.start();
+    expect(service.destination()).toMatchObject({
+      status: "leasable",
+      leasable: [
+        { providerId: "cloud.example", billed: true, locality: "cloud" },
+        { providerId: "spaces.example", daemon: true },
+      ],
+    });
+    expect(spaces.backend.calls()).toEqual([]);
+
+    state.recipes.set(threadA, onSpaces);
+    await expect(
+      service.acquire({ owner: code(threadA), actor: agentOf(threadA) }),
+    ).resolves.toMatchObject({ status: "acquired", lease: { providerId: "spaces.example" } });
+    expect(runningDesktops(spaces.backend)).toBe(1);
+
+    // Once a lease of it is journaled, a restart finds and destroys what it left.
+    await expect(restart().start()).resolves.toMatchObject({ released: 1, stillRunning: 0 });
+    expect(spaces.backend.calls()).toContain("listOwned");
+    expect(runningDesktops(spaces.backend)).toBe(0);
+  });
+
+  it("lists a provider that needs setup with the reason and starts nothing on it, calling no provider", async () => {
+    const { service, state, cloud, spaces, setup } = bundled();
+    setup.credentialStore = false;
+    setup.daemon = false;
+    expect(service.destination()).toMatchObject({
+      leasable: [
+        { providerId: "cloud.example", needsSetup: "no-credential-store" },
+        { providerId: "spaces.example", needsSetup: "daemon-not-connected" },
+      ],
+    });
+    state.recipes.set(threadB, onSpaces);
+    for (const [threadId, caller] of [
+      [threadA, { actor: agentOf(threadA) }],
+      [
+        threadA,
+        {
+          actor: person,
+          scopeId: "window-1",
+          confirmedProvider: decodeDesktopProviderId("cloud.example"),
+        },
+      ],
+      [threadB, { actor: agentOf(threadB) }],
+    ] as const) {
+      await expect(service.acquire({ owner: code(threadId), ...caller })).resolves.toEqual({
+        status: "refused",
+        reason: "needs-setup",
+      });
+    }
+    await expect(
+      service.overview({ owner: code(threadA), actor: person, scopeId: "window-1" }),
+    ).resolves.toMatchObject({ start: { status: "refused", reason: "needs-setup" } });
+    // Only the restart listing reached the cloud account; nothing was created.
+    expect(cloud.backend.calls()).not.toContain("status");
+    expect(cloud.backend.calls()).not.toContain("acquire");
+    expect(spaces.backend.calls()).toEqual([]);
+
+    // Once the person sets it up, the same recipe starts on the next call.
+    setup.daemon = true;
+    expect(service.destination()).toMatchObject({
+      leasable: [{ providerId: "cloud.example" }, { providerId: "spaces.example" }],
+    });
+    state.recipes.set(threadA, onSpaces);
+    await expect(
+      service.acquire({ owner: code(threadA), actor: agentOf(threadA) }),
+    ).resolves.toMatchObject({ status: "acquired" });
+  });
+
+  it("still asks before a billed cloud desktop starts once it is offered, then destroys it with its thread", async () => {
+    const { service, state, cloud } = bundled();
+    state.answer = "declined";
+    await expect(
+      service.acquire({ owner: code(threadA), actor: agentOf(threadA) }),
+    ).resolves.toEqual({ status: "refused", reason: "declined" });
+    expect(state.asked).toEqual(["billed"]);
+    // A person's own tab asks too: without their confirmation nothing starts.
+    const caller = { owner: code(threadA), actor: person, scopeId: "window-1" };
+    await expect(service.acquire(caller)).resolves.toEqual({
+      status: "refused",
+      reason: "declined",
+    });
+    expect(cloud.backend.calls()).not.toContain("acquire");
+
+    const started = await service.acquire({
+      ...caller,
+      confirmedProvider: decodeDesktopProviderId("cloud.example"),
+      confirmedEstimateUsdCents: 400,
+    });
+    expect(started).toMatchObject({ status: "acquired", lease: { billed: true } });
+    expect(runningDesktops(cloud.backend)).toBe(1);
+    state.threads.set(threadA, { active: false, executionPolicy: "full-access" });
+    await service.sweep();
+    expect(runningDesktops(cloud.backend)).toBe(0);
+    expect(cloud.backend.calls()).toContain("verifyGone");
   });
 });
 

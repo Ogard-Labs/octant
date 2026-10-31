@@ -52,10 +52,6 @@ const UNWRAPPED: ReadonlyArray<{
     reason: "The runtime's own sandbox settings still answer for the postures that write.",
   },
   {
-    file: "codexProcess.ts",
-    reason: "One app-server carries every thread on a provider instance, so it has no one root.",
-  },
-  {
     file: "ohMyPiProcess.ts",
     reason: "A probe with no turn, unconfined against 0009 and 0122 both. Held, not excused.",
   },

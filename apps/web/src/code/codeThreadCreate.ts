@@ -68,6 +68,7 @@ export function planCodeThreadCreate(input: CodeThreadCreateInput): CodeThreadCr
           : { modelOptionValues: input.composer.modelOptionValues }),
         executionPolicy: input.composer.executionPolicy,
         permissionPersistence: input.composer.permissionPersistence,
+        ...(input.composer.autoApprove === true ? { autoApprove: true } : {}),
         deliveryTarget,
         sourceBranch: input.composer.deliveryTarget.proposedBaseBranch,
         startFromOrigin: input.composer.worktreeSource.startFromOrigin,
@@ -116,6 +117,7 @@ export function planCodeThreadCreate(input: CodeThreadCreateInput): CodeThreadCr
           : { modelOptionValues: input.composer.modelOptionValues }),
         executionPolicy: input.composer.executionPolicy,
         permissionPersistence: input.composer.permissionPersistence,
+        ...(input.composer.autoApprove === true ? { autoApprove: true } : {}),
         // Work in the existing checkout lands on the branch that checkout is
         // already on, never on a branch intent invented for a new worktree.
         deliveryTarget: {

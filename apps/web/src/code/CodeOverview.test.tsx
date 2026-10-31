@@ -184,9 +184,7 @@ describe("CodeOverview", () => {
     expect(screen.getByText("Opened pull request · Pending")).toBeVisible();
     expect(screen.getByText("Reviewing the checkout")).toBeVisible();
     expect(screen.getByRole("region", { name: "Code quick start" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent(
-      "Ask for approvals",
-    );
+    expect(screen.getByRole("button", { name: "Mode" })).toHaveTextContent("Ask first");
     const message = screen.getByLabelText("First message");
     fireEvent.change(message, { target: { value: "Keep the draft" } });
     expect(message).toHaveValue("Keep the draft");
@@ -545,7 +543,11 @@ function controller(): CodeController {
     turnErrorInTranscript: false,
     providerRequests: [],
     providerAnswerRefusal: undefined,
-    bootstrap: { checkouts: [checkout], settings: {} as never, threads: [thread] } as never,
+    bootstrap: {
+      checkouts: [checkout],
+      settings: { defaultExecutionPolicy: "approval-gated" } as never,
+      threads: [thread],
+    } as never,
     client: { queryBoard: vi.fn(async () => boardView([])) } as never,
     editorDrafts: {
       clear: vi.fn(),

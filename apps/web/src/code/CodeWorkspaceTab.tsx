@@ -31,7 +31,6 @@ export default function CodeWorkspaceTab(props: {
   readonly appleToolchainClient?: AppleToolchainClient;
   readonly extensionClient?: ExtensionClient;
   readonly automationClient?: AutomationClient;
-  readonly projectRemembersFullAccess?: boolean;
   readonly tab: CodeWorkspaceTab;
   readonly hostBridge?: OctantHostBridge;
   readonly onOpenBrowser?: () => void;
@@ -147,7 +146,6 @@ export default function CodeWorkspaceTab(props: {
           ? {}
           : { automationClient: props.automationClient })}
         {...(approvals === undefined ? {} : { approvals })}
-        {...(props.projectRemembersFullAccess !== true ? {} : { projectRemembersFullAccess: true })}
         client={props.controller.client}
         controller={props.controller}
         {...(props.holdAccessNotice === undefined

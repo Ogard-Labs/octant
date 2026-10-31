@@ -318,12 +318,20 @@ describe("native harness tools", () => {
     });
   });
 
-  it("asks for a fresh confirmation before a write on a tainted thread, even with full access", async () => {
-    const { tools } = await fixture({ externalContentIngested: true });
+  it("asks for a fresh confirmation before a write on a tainted thread, even with a standing approval", async () => {
+    const { tools } = await fixture({
+      executionPolicy: "auto-accept-edits",
+      externalContentIngested: true,
+    });
     const write = await call(tools, "write", { path: "b.ts", content: "x" });
     expect((write.result as { error: string }).error).toBe("approval-required");
     expect((write.result as { message: string }).message).toContain("project-file-writes");
     expect((await call(tools, "read", { path: "a.ts" })).isError).toBe(false);
+  });
+
+  it("writes on a tainted thread at Full access without asking", async () => {
+    const { tools } = await fixture({ externalContentIngested: true });
+    expect((await call(tools, "write", { path: "b.ts", content: "x" })).isError).toBe(false);
   });
 
   it("refuses everything when the thread no longer holds authority", async () => {

@@ -9,7 +9,7 @@ import type {
 } from "@octant/contracts";
 import type { ProjectId } from "@octant/contracts/projects";
 import { buildModelPickerGroups, type PickerGroup } from "@octant/domain";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -141,14 +141,18 @@ function mount(overrides: Partial<FirstRunOnboardingProps> = {}) {
   };
 }
 
-function railStep(title: "Providers" | "Project" | "Model") {
+function railStep(title: "Providers" | "Project" | "Model" | "Mode") {
   // The rail step reads as its title followed by its summary; a bare title is
   // the readiness view's fact button, not the rail.
-  return screen.getByRole("button", { name: (name) => name.startsWith(title) && name !== title });
+  return screen.getByRole("button", {
+    // "Mode" is also the start of "Model".
+    name: (name) =>
+      name.startsWith(title) && name !== title && !(title === "Mode" && name.startsWith("Model")),
+  });
 }
 
 async function openHandoff(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(railStep("Model"));
+  await user.click(railStep("Mode"));
   await user.click(screen.getByRole("button", { name: "Continue" }));
 }
 
@@ -179,10 +183,11 @@ describe("FirstRunOnboarding", () => {
     const dialog = screen.getByRole("dialog", { name: "Welcome to Octant" });
     const heading = screen.getByRole("heading", { name: "Welcome to Octant" });
     expect(dialog).toHaveAttribute("aria-labelledby", heading.id);
-    expect(screen.getByText("Step 1 of 3")).toBeVisible();
+    expect(screen.getByText("Step 1 of 4")).toBeVisible();
     expect(railStep("Providers")).toHaveAttribute("aria-current", "step");
     expect(railStep("Project")).toBeVisible();
     expect(railStep("Model")).toBeVisible();
+    expect(railStep("Mode")).toBeVisible();
     expect(screen.queryByRole("button", { name: /About you|Workspace|Navigator/ })).toBeNull();
     expect(screen.queryByLabelText("Name")).toBeNull();
     await waitFor(() => expect(screen.getByRole("heading", { name: "Providers" })).toHaveFocus());
@@ -199,8 +204,11 @@ describe("FirstRunOnboarding", () => {
     await user.click(screen.getByRole("button", { name: "Continue" }));
     expect(screen.getByRole("heading", { name: "Model" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByRole("heading", { name: "Mode" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Continue" }));
     expect(screen.getByRole("heading", { name: "Your first task" })).toBeVisible();
 
+    await user.click(screen.getByRole("button", { name: "Back" }));
     await user.click(screen.getByRole("button", { name: "Back" }));
     await user.click(screen.getByRole("button", { name: "Back" }));
     expect(screen.getByRole("heading", { name: "Project" })).toBeVisible();
@@ -331,6 +339,7 @@ describe("FirstRunOnboarding", () => {
     await user.click(railStep("Model"));
     await user.click(screen.getByRole("option", { name: /Llama Test/ }));
     await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Start a task" }));
 
     expect(props.controller.complete).not.toHaveBeenCalled();
@@ -372,6 +381,7 @@ describe("FirstRunOnboarding", () => {
 
     await user.click(railStep("Model"));
     await user.click(screen.getByRole("option", { name: /Llama Test/ }));
+    await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Start a task" }));
 
@@ -429,6 +439,7 @@ describe("FirstRunOnboarding", () => {
 
     await user.click(railStep("Model"));
     await user.click(screen.getByRole("option", { name: /Llama Test/ }));
+    await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Start a task" }));
     expect(await screen.findByText(/did not keep one of your answers/)).toBeVisible();
@@ -566,12 +577,54 @@ describe("FirstRunOnboarding", () => {
     expect(screen.getByText("No Code folder yet. A task starts in a Project.")).toBeVisible();
   });
 
-  it("titles the readiness view and does not count it as a fourth setup step", async () => {
+  it("pre-selects Auto, marked Recommended, where the provider has a reviewer, and records it on Continue", async () => {
+    const user = userEvent.setup();
+    const onSetDefaultMode = vi.fn(async () => true);
+    mount({ ...readyHandoff(), autoSupportedFor: () => true, onSetDefaultMode });
+
+    await user.click(railStep("Mode"));
+    const modes = screen.getByRole("radiogroup", { name: "Mode for new threads" });
+    expect(within(modes).getByRole("radio", { name: /Auto/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(within(modes).getByText("Recommended")).toBeVisible();
+    expect(within(modes).getByRole("radio", { name: /Full access/ })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    expect(within(modes).queryByRole("radio", { name: /Off/ })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(onSetDefaultMode).toHaveBeenCalledWith("auto");
+  });
+
+  it("pre-selects Ask first and says why Auto is not offered where the provider has no reviewer", async () => {
+    const user = userEvent.setup();
+    const onSetDefaultMode = vi.fn(async () => true);
+    mount({ ...readyHandoff(), autoSupportedFor: () => false, onSetDefaultMode });
+
+    await user.click(railStep("Mode"));
+    const auto = screen.getByRole("radio", { name: /Auto/ });
+    expect(auto).toBeDisabled();
+    expect(auto).toHaveAccessibleDescription(
+      "This provider has no reviewer of its own, so this thread asks first.",
+    );
+    expect(screen.getByRole("radio", { name: /Ask first/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    await user.click(screen.getByRole("radio", { name: /Accept edits/ }));
+
+    expect(onSetDefaultMode).toHaveBeenLastCalledWith("accept-edits");
+  });
+
+  it("titles the readiness view and does not count it as a fifth setup step", async () => {
     const user = userEvent.setup();
     mount(readyHandoff());
 
-    await user.click(railStep("Model"));
-    expect(screen.getByText("Step 3 of 3")).toBeVisible();
+    await user.click(railStep("Mode"));
+    expect(screen.getByText("Step 4 of 4")).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "Continue" }));
     expect(screen.getByRole("heading", { name: "Your first task" })).toBeVisible();

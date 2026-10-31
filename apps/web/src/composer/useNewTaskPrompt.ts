@@ -4,7 +4,7 @@ import {
   type LinearIssueContextRequest,
 } from "@octant/contracts";
 import type { CodeNewThreadWorkspace } from "@octant/contracts/projects";
-import type { PermissionPersistence, ProviderExecutionPolicy } from "@octant/contracts/providers";
+import type { PermissionMode, PermissionPersistence } from "@octant/contracts/providers";
 import { createContext, useCallback, useContext, useState, useSyncExternalStore } from "react";
 import type { ComposerExtensionSelection } from "./composerExtensionSelection";
 
@@ -26,7 +26,7 @@ export interface NewTaskCodeCheckoutDraft {
   readonly workspaceOverride?: CodeNewThreadWorkspace;
   readonly worktreeRemote?: string;
   readonly startFromOriginOverride?: boolean;
-  readonly executionPolicy?: ProviderExecutionPolicy;
+  readonly permissionMode?: PermissionMode;
   readonly permissionPersistence?: PermissionPersistence;
 }
 

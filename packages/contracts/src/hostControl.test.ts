@@ -57,6 +57,54 @@ describe("HostControlStatus", () => {
     expect(decoded.policy.kind).toBe("unavailable");
   });
 
+  it("decodes the memory report with a relief and a previous stop", () => {
+    const decoded = decodeHostControlStatus({
+      ...status,
+      memory: {
+        pressure: "elevated",
+        processMegabytes: 2300,
+        lastRelief: {
+          at: "2026-10-31T10:00:00.000Z",
+          pressure: "elevated",
+          source: "system",
+          idleProviderRuntimesStopped: 2,
+          idleSessionsReleased: 1,
+          cachesTrimmed: true,
+          activeTurnsKept: 1,
+        },
+        previousStop: {
+          lastSeenAt: "2026-10-31T09:00:00.000Z",
+          pressure: "critical",
+          processMegabytes: 4100,
+        },
+      },
+    });
+    expect(decoded.memory?.lastRelief?.idleProviderRuntimesStopped).toBe(2);
+    expect(decoded.memory?.previousStop?.pressure).toBe("critical");
+  });
+
+  it("refuses a memory report that names more than counts", () => {
+    expect(() =>
+      decodeHostControlStatus({
+        ...status,
+        memory: {
+          pressure: "normal",
+          processMegabytes: 300,
+          lastRelief: {
+            at: "2026-10-31T10:00:00.000Z",
+            pressure: "elevated",
+            source: "system",
+            idleProviderRuntimesStopped: 0,
+            idleSessionsReleased: 0,
+            cachesTrimmed: false,
+            activeTurnsKept: 0,
+            providers: ["codex"],
+          },
+        },
+      }),
+    ).toThrow();
+  });
+
   it("rejects a maintenance service mode, excess properties, and negative counters", () => {
     expect(() =>
       decodeHostControlStatus({

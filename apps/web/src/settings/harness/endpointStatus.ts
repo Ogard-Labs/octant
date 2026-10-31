@@ -151,10 +151,17 @@ export function endpointStatus(input: EndpointStatusInput): EndpointStatus {
       // A browser cannot read the Keychain, so after a reload it cannot tell a
       // missing key from a refused one; it sends both to the desktop app,
       // which is where either is fixed.
-      return observed.credentialStatus === "missing" || input.keysHere === false
-        ? keyNeeded(input)
-        : keyRefused();
+      if (observed.credentialStatus === "missing" || input.keysHere === false) {
+        return keyNeeded(input);
+      }
+      // The stored check keeps only the host's sentence. A check that never
+      // got a key to send says so; only a service that answered and turned the
+      // key down is a refused key.
+      return refusalStatus(input, observed.message, undefined);
     case "unavailable":
+      if (observed.credentialStatus === "unavailable" || isKeyUnreadable(observed.message)) {
+        return keyUnreadable(input);
+      }
       return cannotConnect(`The last check couldn't reach ${endpointHost(instance)}.`);
     case "incompatible":
       return notWorking(
@@ -179,9 +186,9 @@ function failureStatus(input: EndpointStatusInput, failure: ProviderProbeFailure
     failure.reason === "authentication-required"
   ) {
     if (input.signInOffer !== undefined) return refusedSignIn(input, input.signInOffer);
-    if (/missing or unavailable/i.test(message)) return keyNeeded(input);
-    return keyRefused();
+    return refusalStatus(input, message, failure.category);
   }
+  if (isKeyUnreadable(message)) return keyUnreadable(input);
   if (
     failure.category === "unavailable" ||
     failure.category === "interrupted" ||
@@ -265,6 +272,52 @@ function keyNeeded(input: EndpointStatusInput): EndpointStatus {
     label: NEEDS_KEY_LABEL,
     sentence: "No API key is saved for it.",
     fix: { kind: "add-key", label: "Add key" },
+  };
+}
+
+/**
+ * What a check that ended unauthenticated or unauthorized tells the person.
+ * The host's sentences say which it was: no key reached the service, the
+ * service rejected the key it was sent (HTTP 401), or the service took the key
+ * and denied this request (HTTP 403, as a key limited to some calls does for
+ * the model list). Only the second is a refused key; reading all three as one
+ * told a person with a working key to replace it.
+ */
+function refusalStatus(
+  input: EndpointStatusInput,
+  message: string | undefined,
+  category: ProviderProbeFailure["category"] | undefined,
+): EndpointStatus {
+  if (message !== undefined && /missing or unavailable/i.test(message)) return keyNeeded(input);
+  if (
+    category === "unauthorized" ||
+    (message !== undefined && /denied this request/i.test(message))
+  ) {
+    return keyNotAllowed();
+  }
+  return keyRefused();
+}
+
+function isKeyUnreadable(message: string | undefined): boolean {
+  return message !== undefined && /credential store is unavailable/i.test(message);
+}
+
+function keyUnreadable(input: EndpointStatusInput): EndpointStatus {
+  return {
+    tone: "failed",
+    label: "Can't read key",
+    sentence: `Octant couldn't read the saved key from ${thisComputerName(input.hostPlatform)}'s credential store. Check that it is running and unlocked, then try again.`,
+    fix: { kind: "try-again", label: "Try again" },
+  };
+}
+
+function keyNotAllowed(): EndpointStatus {
+  return {
+    tone: "failed",
+    label: "Request denied",
+    sentence:
+      "The service took the key but denied this request. Check what the key is allowed to do.",
+    fix: { kind: "try-again", label: "Try again" },
   };
 }
 

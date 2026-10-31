@@ -822,7 +822,7 @@ function validateTarget(
     : undefined;
 }
 
-function validRepository(value: string): boolean {
+export function validRepository(value: string): boolean {
   return REPOSITORY_PATTERN.test(value) && !value.includes("..") && !value.includes("//");
 }
 
@@ -852,7 +852,7 @@ function validBody(value: string): boolean {
   return !value.includes("\0") && Buffer.byteLength(value) <= MAX_BODY_BYTES;
 }
 
-function sanitizeGhEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+export function sanitizeGhEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   // `gh` runs extensions and credential helpers, so it never sees the broker
   // coordinates and bridge secret the desktop handed this server.
   const sanitized = childProcessEnvironment(environment);
