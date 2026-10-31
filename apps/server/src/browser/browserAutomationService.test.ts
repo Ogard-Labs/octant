@@ -83,6 +83,7 @@ function harness(
   let now = Date.parse("2026-07-27T20:00:00.000Z");
   const runtime: BrowserRuntimePort = {
     available: vi.fn(async () => true),
+    nativeAvailable: vi.fn(async () => true),
     createContext: vi.fn(async (contextId) => void contexts.add(contextId)),
     inspectTarget: vi.fn(async () => ({ sensitive: false })),
     act: vi.fn(async (contextId, input) => {
@@ -619,6 +620,25 @@ describe("BrowserAutomationService", () => {
         correlationId: action().correlationId,
       });
       expect(completed.observation?.capture).toEqual({ status: "kept", captureId });
+    });
+
+    it("records the profile of a signed-in page with the capture it keeps", async () => {
+      const captures = { keep: keep() };
+      const { service } = harness({ captures });
+      await service.create({
+        windowId,
+        threadId: threadOne,
+        action: action(),
+        policy: { ...policy, profile: { kind: "personal" } },
+      });
+      await service.act({
+        windowId,
+        request: request({ kind: "screenshot" }),
+        capturedBy: "agent",
+      });
+      expect(captures.keep).toHaveBeenCalledWith(
+        expect.objectContaining({ profile: { kind: "personal" } }),
+      );
     });
 
     it("keeps a screenshot the person took in the pane", async () => {
