@@ -1,4 +1,4 @@
-import type { PermissionMode, WorkAccess } from "@octant/contracts";
+import { DEFAULT_WORK_ACCESS, type PermissionMode, type WorkAccess } from "@octant/contracts";
 import {
   permissionModeOf,
   workAccessOfPermissionMode,
@@ -16,9 +16,13 @@ export const WORK_PERMISSION_MODES: ReadonlyArray<PermissionMode> = [
   "full-access",
 ];
 
-/** The picker's word for a Work thread's level. */
-export function workModeOf(access: WorkAccess): PermissionMode {
-  return permissionModeOf(workThreadAccessOf(access));
+/**
+ * The picker's word for a Work thread's level. A thread record that carries
+ * no level (one a host sent before levels existed, or a summary that leaves
+ * it out) is at Ask first, as the contract decodes it.
+ */
+export function workModeOf(access: WorkAccess | undefined): PermissionMode {
+  return permissionModeOf(workThreadAccessOf(access ?? DEFAULT_WORK_ACCESS));
 }
 
 /** The Work level a picker choice stores; Plan has none. */
