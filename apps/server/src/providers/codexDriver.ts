@@ -12,6 +12,7 @@ import {
   type ProviderInstanceId,
   type ProviderModel,
   type ProviderModelOptionValues,
+  type ProviderNativeSetup,
   type ProviderProbeResult,
   type ProviderRuntimeEvent,
   type ProviderRateLimitWindow,
@@ -39,6 +40,9 @@ import { Cause, Effect, Exit, Option, Queue, Scope, Stream } from "effect";
 import {
   codexAccountWindowStatus,
   mapCodexMessage,
+  mapCodexSubagentCall,
+  mapCodexSubagentWebSearch,
+  type CodexSubagentCall,
   type CodexEventContext,
   type CodexPendingApproval,
 } from "./codexEventMapper";
@@ -81,6 +85,7 @@ import {
   type CodexThreadResult,
   type CodexTurnResult,
   type CodexTurnSteerResult,
+  isUnmodeledThreadItem,
 } from "./codexProtocol";
 import { CodexRpcClientFailure } from "./codexRpcClient";
 import { modelEvidenceFromObservedState } from "./providerContextFacts";
@@ -198,6 +203,30 @@ const CODEX_CHAT_CONFIG = {
   "features.plugins": false,
   "features.apps": false,
 } as const satisfies CodexThreadConfig;
+
+/**
+ * A Chat thread whose person let Codex use their own tool servers: still no
+ * execution environment, shell, or image view, but the person's MCP servers,
+ * plugins, and apps stay as their Codex config has them. Those run with their
+ * own reach, which Chat's no-filesystem rule does not cover, and the switch
+ * says so.
+ */
+const CODEX_CHAT_OWN_TOOL_SERVERS_CONFIG = {
+  ...CODEX_SHELL_OFF_CONFIG,
+  "features.view_image": false,
+} as const satisfies CodexThreadConfig;
+
+/**
+ * Codex's own subagents run on threads of their own whose approvals never
+ * reach Octant, so a child that asked would wait out of sight. They run only
+ * at Full access, where nothing asks, once the person let Codex run them.
+ */
+function codexRunsOwnSubagents(input: {
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly nativeSetup?: ProviderNativeSetup;
+}): boolean {
+  return input.nativeSetup?.subagents === true && input.executionPolicy === "full-access";
+}
 
 /**
  * A Chat thread's overrides: `CODEX_CHAT_CONFIG` plus every MCP server in the
@@ -454,6 +483,20 @@ const capabilities = {
   forceStop: "unsupported",
   ...unsupportedChatCapabilities,
   appManagedTools: "supported",
+  nativeSetup: {
+    // Only at Full access: a subagent's approvals never reach Octant.
+    subagents: "supported",
+    // Codex's own web search was never switched off; each search marks.
+    webTools: "supported",
+    skills: "supported",
+    toolServers: "supported",
+    // The account home's hooks load as Codex loads them; Octant never
+    // switched them off.
+    hooks: "supported",
+    // Octant has no switch of its own for a Project's Codex config; Codex's
+    // own folder trust decides.
+    projectCode: "unsupported",
+  },
 } as const;
 
 function codexChatCapabilities(
@@ -809,6 +852,8 @@ export function makeCodexClient(connection: CodexAppServerConnection): CodexClie
 
 export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
   const clientFactory = options.clientFactory ?? makeCodexClient;
+  // Codex's own subagent threads outlive the turn and connection that started them.
+  const subagentLineage = new Map<string, string>();
   const clock = options.clock ?? (() => new Date().toISOString());
   const makeCorrelation = options.correlationId ?? (() => crypto.randomUUID());
   const contextFacts = makeCodexContextFacts(options, clientFactory, clock);
@@ -869,9 +914,17 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
       // The process is leased when the first session names its posture, so
       // one lease is one root under one mode and posture and Octant's profile
       // can be exact for it.
-      const leaseKey = (executionPolicy: ProviderExecutionPolicy) =>
-        JSON.stringify([projectRoot, extraFolders, threadMode, executionPolicy]);
-      const leaseFor = (executionPolicy: ProviderExecutionPolicy) =>
+      // A lease that runs Codex's own subagents is its own process: the flag
+      // rides on the command line and cannot change on a running process, so
+      // it is part of the posture the key names.
+      const leaseKey = (executionPolicy: ProviderExecutionPolicy, ownSubagents = false) =>
+        JSON.stringify([
+          projectRoot,
+          extraFolders,
+          threadMode,
+          ownSubagents ? `${executionPolicy}+own-subagents` : executionPolicy,
+        ]);
+      const leaseFor = (executionPolicy: ProviderExecutionPolicy, ownSubagents: boolean) =>
         Effect.gen(function* () {
           const runtime = yield* acquireRuntime(
             options,
@@ -882,8 +935,9 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
               ...(extraFolders.length === 0 ? {} : { extraFolders }),
               mode: threadMode,
               executionPolicy,
+              ...(ownSubagents ? { ownSubagents: true as const } : {}),
             },
-            leaseKey(executionPolicy),
+            leaseKey(executionPolicy, ownSubagents),
           );
           // Turn starts probe first, but not every caller does (compaction,
           // summaries, agent runs), so the session itself refuses too.
@@ -902,16 +956,20 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
       // app-server that last ran it, `thread/unsubscribe` does not unload it,
       // and another app-server's resume is refused ("already has an active
       // writer") until that process ends. A thread whose posture changed
-      // between turns, or whose Project gained or lost an extra folder, last ran
-      // under another lease of this root and mode, idle for up to its delay, so
-      // every idle lease of this root and mode other than the one this resume
-      // uses closes now. The folder set is matched loosely on purpose: the old
-      // set is gone from the Project by the time the thread resumes. One a
-      // connection still holds keeps running and the resume reports the conflict.
-      const closeIdleOtherLeases = (executionPolicy: ProviderExecutionPolicy) =>
+      // between turns, whose own subagents were turned on or off, or whose
+      // Project gained or lost an extra folder, last ran under another lease
+      // of this root and mode, idle for up to its delay, so every idle lease of
+      // this root and mode other than the one this resume uses closes now. The
+      // folder set is matched loosely on purpose: the old set is gone from the
+      // Project by the time the thread resumes. One a connection still holds
+      // keeps running and the resume reports the conflict.
+      const closeIdleOtherLeases = (
+        executionPolicy: ProviderExecutionPolicy,
+        ownSubagents: boolean,
+      ) =>
         Effect.promise(() =>
           options.runtimeRegistry.closeIdleLeasesWhere(options.instanceId, (lease) => {
-            if (lease === leaseKey(executionPolicy)) return false;
+            if (lease === leaseKey(executionPolicy, ownSubagents)) return false;
             const parsed = codexThreadLease(lease);
             return parsed?.root === projectRoot && parsed.mode === threadMode;
           }),
@@ -931,6 +989,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             makeRequestId,
             makeTaskId,
             makeToolCallId,
+            subagentLineage,
           },
         );
       });
@@ -1201,6 +1260,18 @@ interface ConnectionFactories {
   readonly makeRequestId: () => string;
   readonly makeTaskId: () => string;
   readonly makeToolCallId: () => string;
+  /** Each of Codex's own subagent threads, by the thread that started it; shared by the driver's connections. */
+  readonly subagentLineage: Map<string, string>;
+}
+
+/** How far a subagent's subagents are followed back to the thread that owns them. */
+const MAX_CODEX_SUBAGENT_DEPTH = 8;
+/** Subagent threads a driver remembers; the oldest is forgotten first. */
+const MAX_CODEX_SUBAGENT_LINEAGE = 1_024;
+
+/** Every agent thread a subagent call names: the ones it started and the ones it reports on. */
+function codexSubagentThreads(item: CodexSubagentCall): ReadonlyArray<string> {
+  return [...new Set([...item.receiverThreadIds, ...Object.keys(item.agentsStates ?? {})])];
 }
 
 /**
@@ -1230,8 +1301,12 @@ function makeConnection(
   options: CodexDriverOptions,
   leaseFor: (
     executionPolicy: ProviderExecutionPolicy,
+    ownSubagents: boolean,
   ) => Effect.Effect<CodexLeasedRuntime, ProviderFailure, Scope.Scope>,
-  closeIdleOtherLeases: (executionPolicy: ProviderExecutionPolicy) => Effect.Effect<void>,
+  closeIdleOtherLeases: (
+    executionPolicy: ProviderExecutionPolicy,
+    ownSubagents: boolean,
+  ) => Effect.Effect<void>,
   projectRoot: string,
   extraFolders: ReadonlyArray<string>,
   mode: ProviderAcquireInput["mode"],
@@ -1242,10 +1317,40 @@ function makeConnection(
     let client = UNLEASED_CODEX_CLIENT;
     let version = "";
     let leasedPolicy: ProviderExecutionPolicy | undefined;
+    let leasedOwnSubagents = false;
     let closed = false;
     const queue = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<ProviderSessionId, SessionState>();
     const sessionsByThread = new Map<string, SessionState>();
+    /**
+     * The session that owns one of Codex's own subagent threads: its parent
+     * thread, or the parent's parent for a subagent a subagent started. The
+     * lineage lives with the driver, not this connection, because each turn
+     * acquires a new connection and a subagent outlives the turn that started
+     * it; the resumed session is found again by its Codex thread.
+     */
+    const subagentOwner = (threadId: string): SessionState | undefined => {
+      let current = threadId;
+      for (let depth = 0; depth < MAX_CODEX_SUBAGENT_DEPTH; depth += 1) {
+        const parentThread = factories.subagentLineage.get(current);
+        if (parentThread === undefined) return undefined;
+        const owner = sessionsByThread.get(parentThread);
+        if (owner !== undefined) return owner;
+        current = parentThread;
+      }
+      return undefined;
+    };
+    const recordSubagent = (childThreadId: string, parentThreadId: string) => {
+      const lineage = factories.subagentLineage;
+      if (childThreadId === parentThreadId) return;
+      lineage.delete(childThreadId);
+      lineage.set(childThreadId, parentThreadId);
+      // The oldest entry goes first once the driver has seen this many.
+      if (lineage.size > MAX_CODEX_SUBAGENT_LINEAGE) {
+        const oldest = lineage.keys().next().value;
+        if (oldest !== undefined) lineage.delete(oldest);
+      }
+    };
     const pendingApprovalOwners = new Map<string, ProviderSessionId>();
     /** Each pending approval's call, for an automatic reviewer; never published. */
     const approvalCalls = new Map<string, ProviderApprovalCall>();
@@ -1256,12 +1361,21 @@ function makeConnection(
     })();
     let unsubscribe: (() => void) | undefined;
     let pendingLifecycleRegistrations = 0;
-    const modeThreadConfig = (): Effect.Effect<CodexThreadConfig, ProviderFailure> =>
+    const modeThreadConfig = (
+      nativeSetup: ProviderNativeSetup | undefined,
+    ): Effect.Effect<CodexThreadConfig, ProviderFailure> =>
       Effect.gen(function* () {
-        const skills = yield* codexProjectSkillsConfig(client, version, projectRoot);
+        // The person's own Project skills load as Codex loads them, so none
+        // is switched off and none needs listing first.
+        const skills =
+          nativeSetup?.skills === true
+            ? undefined
+            : yield* codexProjectSkillsConfig(client, version, projectRoot);
         const modeConfig =
           mode === "chat"
-            ? yield* codexChatThreadConfig(client, projectRoot)
+            ? nativeSetup?.toolServers === true
+              ? CODEX_CHAT_OWN_TOOL_SERVERS_CONFIG
+              : yield* codexChatThreadConfig(client, projectRoot)
             : mode === "work"
               ? CODEX_WORK_CONFIG
               : {};
@@ -1352,6 +1466,40 @@ function makeConnection(
       } as ProviderRuntimeEvent);
       unsubscribeWhenIdle();
     };
+    /**
+     * A message on one of Codex's own subagent threads. Only a session that
+     * runs them at Full access has any, and nothing there asks a person, so
+     * two things are read: a web search the subagent ran, which marks the
+     * owning thread, and a subagent call it made, which shows the agents it
+     * started, waited on, or closed as child runs under it. Everything else
+     * on those threads is Codex's own.
+     */
+    const observeSubagentThread = (message: CodexServerMessage) => {
+      if (
+        message.kind !== "notification" ||
+        (message.method !== "item/started" && message.method !== "item/completed")
+      ) {
+        return;
+      }
+      const subagentThread = message.params.threadId;
+      const owner = subagentOwner(subagentThread);
+      const item = message.params.item;
+      if (owner === undefined || isUnmodeledThreadItem(item)) return;
+      if (message.method === "item/completed" && item.type === "collabAgentToolCall") {
+        for (const threadId of codexSubagentThreads(item)) {
+          recordSubagent(threadId, subagentThread);
+        }
+        if (owner.terminal || owner.context === undefined) return;
+        for (const mapped of mapCodexSubagentCall(owner.context, item, subagentThread)) {
+          if (mapped.kind === "event") offer(mapped.event);
+        }
+        return;
+      }
+      if (message.method !== "item/started" || item.type !== "webSearch") return;
+      if (owner.terminal || owner.context === undefined) return;
+      const mark = mapCodexSubagentWebSearch(owner.context, item.query);
+      if (mark.kind === "event") offer(mark.event);
+    };
     const handleMessage = (message: CodexServerMessage) => {
       if (message.kind === "notification" && message.method === "account/rateLimits/updated") {
         // Account usage names no thread; every session mid-turn on this
@@ -1365,7 +1513,11 @@ function makeConnection(
         return;
       }
       const state = stateForMessage(message, sessionsByThread, sessions);
-      if (state === undefined || state.terminal) return;
+      if (state === undefined) {
+        observeSubagentThread(message);
+        return;
+      }
+      if (state.terminal) return;
       if (
         message.kind === "notification" &&
         message.method === "turn/started" &&
@@ -1477,6 +1629,12 @@ function makeConnection(
         if (item.event.kind === "context-compacted" && state.compaction !== undefined) {
           state.compaction.compacted = true;
         }
+        // A subagent Codex started runs on a thread of its own; its web
+        // searches and its own subagents are read from that thread on this
+        // session's behalf, this turn and every later one.
+        if (item.event.kind === "child-agent-activity") {
+          recordSubagent(item.event.childAgentId, state.threadId);
+        }
         offer(item.event);
         if (isTerminal(item.event)) {
           settleCompaction(state, item.event.kind === "failed" || item.event.kind === "completed");
@@ -1531,10 +1689,13 @@ function makeConnection(
      */
     const ensureRuntime = (
       executionPolicy: ProviderExecutionPolicy,
+      ownSubagents: boolean,
     ): Effect.Effect<void, ProviderFailure> =>
       Effect.suspend(() => {
+        const sameAuthority = () =>
+          leasedPolicy === executionPolicy && leasedOwnSubagents === ownSubagents;
         if (leasedPolicy !== undefined) {
-          return leasedPolicy === executionPolicy
+          return sameAuthority()
             ? Effect.void
             : Effect.fail(
                 failure(
@@ -1543,9 +1704,9 @@ function makeConnection(
                 ),
               );
         }
-        return Scope.extend(leaseFor(executionPolicy), connectionScope).pipe(
+        return Scope.extend(leaseFor(executionPolicy, ownSubagents), connectionScope).pipe(
           Effect.flatMap((runtime) => {
-            if (leasedPolicy !== undefined && leasedPolicy !== executionPolicy) {
+            if (leasedPolicy !== undefined && !sameAuthority()) {
               return Effect.fail(
                 failure(
                   "unauthorized",
@@ -1557,6 +1718,7 @@ function makeConnection(
               client = runtime.client;
               version = runtime.version;
               leasedPolicy = executionPolicy;
+              leasedOwnSubagents = ownSubagents;
               const lost = () => {
                 if (!closed) runtimeLost();
               };
@@ -1640,7 +1802,7 @@ function makeConnection(
       start: (input) =>
         withPendingLifecycle(() =>
           Effect.gen(function* () {
-            yield* ensureRuntime(input.executionPolicy);
+            yield* ensureRuntime(input.executionPolicy, codexRunsOwnSubagents(input));
             ensureSubscribed();
             const settings = codexExecutionSettings(input.executionPolicy, input.autoApprove);
             const requestedOptions = input.modelOptionValues;
@@ -1663,7 +1825,7 @@ function makeConnection(
               optionSettings = codexModelOptionSettings(observedModel, requestedOptions);
             }
             const dynamicTools = codexDynamicTools(input.tools);
-            const modeConfig = yield* modeThreadConfig();
+            const modeConfig = yield* modeThreadConfig(input.nativeSetup);
             const config = { ...optionSettings.config, ...modeConfig };
             const thread = yield* request(() =>
               client.threadStart({
@@ -1726,9 +1888,9 @@ function makeConnection(
         }
         return withPendingLifecycle(() =>
           Effect.gen(function* () {
-            yield* ensureRuntime(input.executionPolicy);
+            yield* ensureRuntime(input.executionPolicy, codexRunsOwnSubagents(input));
             ensureSubscribed();
-            const modeConfig = yield* modeThreadConfig();
+            const modeConfig = yield* modeThreadConfig(input.nativeSetup);
             const resumeRequest = () =>
               Effect.tryPromise({
                 try: () =>
@@ -1755,7 +1917,7 @@ function makeConnection(
                 Effect.catchAll((error) =>
                   isActiveWriterConflict(error) && attempt < CODEX_RESUME_WRITER_CONFLICT_ATTEMPTS
                     ? (attempt === 1
-                        ? closeIdleOtherLeases(input.executionPolicy)
+                        ? closeIdleOtherLeases(input.executionPolicy, codexRunsOwnSubagents(input))
                         : Effect.void
                       ).pipe(
                         Effect.zipRight(

@@ -160,6 +160,41 @@ describe("Codex stable 0.144.4 protocol", () => {
     }
   });
 
+  it("decodes a subagent call as codex-cli 0.164.0 sends it, keeping only what Octant reads", () => {
+    const decoded = decodeCodexServerMessage({
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        completedAtMs: 20,
+        item: {
+          type: "collabAgentToolCall",
+          id: "collab-1",
+          tool: "spawnAgent",
+          status: "completed",
+          senderThreadId: "thread-1",
+          receiverThreadIds: ["thread-child"],
+          prompt: "Find the release notes",
+          model: null,
+          reasoningEffort: null,
+          agentsStates: { "thread-child": { status: "running", message: null } },
+        },
+      },
+    });
+    expect(decoded).toMatchObject({
+      kind: "notification",
+      method: "item/completed",
+      params: {
+        item: {
+          type: "collabAgentToolCall",
+          tool: "spawnAgent",
+          receiverThreadIds: ["thread-child"],
+          agentsStates: { "thread-child": { status: "running" } },
+        },
+      },
+    });
+  });
+
   it("decodes responses without requiring a jsonrpc member", () => {
     expect(decodeCodexServerMessage({ id: 1, result: { ok: true }, futureField: true })).toEqual({
       kind: "response",
