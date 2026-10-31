@@ -16,7 +16,18 @@ const owner = decodeComputerUseOwner({
 
 function fixture(protectedField = false, additionalElements = 0, unresolved = false) {
   let snapshot = 0;
+  let clickFailure: string | undefined;
   const call = vi.fn(async (name: string) => {
+    if (name === "click" && clickFailure !== undefined)
+      return {
+        text: clickFailure,
+        images: [],
+        structuredJson: JSON.stringify({ code: "tool_invocation_failed" }),
+        rawJson: "{}",
+        isError: true,
+        errorCode: "tool_invocation_failed",
+        degraded: false,
+      };
     const data =
       name === "list_apps"
         ? { apps: [{ bundle_id: "com.example.Fixture", name: "Fixture", pid: 123, running: true }] }
@@ -82,6 +93,9 @@ function fixture(protectedField = false, additionalElements = 0, unresolved = fa
     call,
     setUnresolved: (value: boolean) => {
       unresolved = value;
+    },
+    failClicksWith: (text: string | undefined) => {
+      clickFailure = text;
     },
   };
 }
@@ -227,6 +241,49 @@ describe("Thread-owned computer control", () => {
       );
       if (result.kind === "observation")
         expect(result.observationId).not.toBe(observed.observationId);
+    } finally {
+      await host.close();
+    }
+  });
+
+  it("says when the driver cannot press an element, instead of reporting the driver as unavailable", async () => {
+    const { host, failClicksWith } = fixture();
+    try {
+      const observed = await host.execute(
+        owner,
+        decodeComputerControlCommand({
+          operation: "observe",
+          appId: "com.example.Fixture",
+          windowId: 9,
+        }),
+      );
+      if (observed.kind !== "observation") throw new Error("Expected a window observation.");
+      // A text area offers no press action; the driver reports kAXErrorActionUnsupported.
+      failClicksWith("AX action failed: AXUIElementPerformAction(AXPress) returned -25206");
+      const unsupported = await host.execute(owner, {
+        operation: "click",
+        observationId: observed.observationId,
+        elementIndex: 4,
+      });
+      expect(unsupported).toMatchObject({ kind: "refused", reason: "action-unsupported" });
+      if (unsupported.kind === "refused") expect(unsupported.message).toContain("type");
+      failClicksWith("AX action failed: some other failure");
+      const again = await host.execute(
+        owner,
+        decodeComputerControlCommand({
+          operation: "observe",
+          appId: "com.example.Fixture",
+          windowId: 9,
+        }),
+      );
+      if (again.kind !== "observation") throw new Error("Expected a window observation.");
+      expect(
+        await host.execute(owner, {
+          operation: "click",
+          observationId: again.observationId,
+          elementIndex: 4,
+        }),
+      ).toMatchObject({ kind: "refused", reason: "driver-unavailable" });
     } finally {
       await host.close();
     }
