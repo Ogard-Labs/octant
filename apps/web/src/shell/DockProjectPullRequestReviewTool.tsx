@@ -16,7 +16,7 @@ import type {
   CodeProjectPullRequestSwitchTarget,
   CodeProjectPullRequestSwitchesView,
 } from "@octant/contracts";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ProjectPullRequestPersonAction } from "../code/ProjectPullRequestActions";
 import { ProjectPullRequestReviewPane } from "../code/ProjectPullRequestReviewPane";
 import { ShellState } from "./ShellState";
@@ -84,6 +84,19 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
     repositoryName: props.query.repositoryName,
     number: props.query.number,
   };
+
+  // Stable across renders: the switches poll re-renders this tool every 20
+  // seconds, and a new function identity would re-read the labels and review
+  // threads from GitHub each time.
+  const { loadActionContext } = props;
+  const { projectId, repositoryOwner, repositoryName, number } = props.query;
+  const readActionContext = useCallback(
+    () =>
+      loadActionContext === undefined
+        ? Promise.resolve({ status: "unavailable", reason: "unavailable" } as const)
+        : loadActionContext({ projectId, repositoryOwner, repositoryName, number }),
+    [loadActionContext, projectId, repositoryOwner, repositoryName, number],
+  );
 
   useEffect(() => {
     const load = loadSwitchesRef.current;
@@ -282,12 +295,7 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
         {...(props.loadActionContext === undefined || props.act === undefined
           ? {}
           : {
-              onLoadActionContext: () => {
-                const load = props.loadActionContext;
-                return load === undefined
-                  ? Promise.resolve({ status: "unavailable", reason: "unavailable" } as const)
-                  : load(target);
-              },
+              onLoadActionContext: readActionContext,
               onAct: (action: ProjectPullRequestPersonAction) => {
                 const act = props.act;
                 return act === undefined

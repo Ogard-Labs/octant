@@ -274,3 +274,7 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+.code-pr-actions__threads > li > button {
+  justify-self: start;
+}

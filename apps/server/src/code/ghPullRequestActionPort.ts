@@ -160,9 +160,11 @@ export class GhPullRequestActionPort {
           "graphql",
           "-f",
           `query=${CONTEXT_THREADS_QUERY}`,
-          "-F",
+          // -f keeps owner and name strings: -F would turn a repository named
+          // `true` or `2048` into a boolean or integer GraphQL rejects.
+          "-f",
           `owner=${request.owner}`,
-          "-F",
+          "-f",
           `name=${request.name}`,
           "-F",
           `number=${request.number}`,

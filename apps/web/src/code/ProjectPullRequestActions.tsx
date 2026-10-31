@@ -50,13 +50,17 @@ export function ProjectPullRequestActions(props: ProjectPullRequestActionsProps)
   const [replyThread, setReplyThread] = useState<string>();
   const [reply, setReply] = useState("");
   const noticeRef = useRef<HTMLParagraphElement>(null);
+  const readSequence = useRef(0);
   const { loadContext } = props;
   const closed = props.pullRequestState === "closed";
   const merged = props.pullRequestState === "merged";
 
   const reload = useCallback(async () => {
+    // Only the newest read may land, so a slow older answer never replaces it.
+    const sequence = ++readSequence.current;
     try {
       const next = await loadContext();
+      if (sequence !== readSequence.current) return;
       if (next.status === "read") {
         setContext(next);
         setLoadFailure(undefined);
@@ -272,7 +276,7 @@ export function ProjectPullRequestActions(props: ProjectPullRequestActionsProps)
                     }}
                     size="sm"
                     type="button"
-                    variant="ghost"
+                    variant="secondary"
                   >
                     Reply
                   </OctantButton>

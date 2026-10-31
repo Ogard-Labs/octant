@@ -89,6 +89,15 @@ describe("pull-request action context", () => {
     expect(run).toHaveBeenCalledTimes(3);
   });
 
+  it("sends the owner and repository name as strings so a name like 2048 still reads", async () => {
+    const { port, run } = fixture([ok({ labels: [] }), ok([]), ok({})]);
+    await port.readContext({ owner: "2048", name: "true", number: 7 }, signal);
+    const graphql = run.mock.calls.map((call) => call[0]).find((args) => args[0] === "api");
+    expect(graphql).toEqual(expect.arrayContaining(["-f", "owner=2048", "-f", "name=true"]));
+    expect(graphql).not.toContain("owner=2048-F");
+    expect(graphql?.filter((arg) => arg === "-F")).toHaveLength(1);
+  });
+
   it("reports a signed-out GitHub as unavailable and writes nothing", async () => {
     const { port, run } = fixture([
       { exitCode: 1, stdout: "", stderr: "HTTP 401: Bad credentials" },
