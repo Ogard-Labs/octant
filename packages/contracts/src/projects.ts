@@ -258,14 +258,6 @@ export type ChatProject = typeof ChatProject.Type;
 export const WorkProjectStatusFile = Schema.Literal("enabled", "disabled");
 export type WorkProjectStatusFile = typeof WorkProjectStatusFile.Type;
 
-export const WorkProject = Schema.Struct({
-  ...ProjectFields,
-  type: Schema.Literal("work"),
-  ...BoundProjectFields,
-  statusFile: Schema.optional(WorkProjectStatusFile),
-}).annotations(strict);
-export type WorkProject = typeof WorkProject.Type;
-
 /**
  * Whether the host may keep this Project's pull-request snapshot current on a
  * bounded background cadence. Absent means disabled: only an explicit refresh
@@ -329,6 +321,33 @@ export const ProjectActions = Schema.Array(ProjectAction).pipe(
 );
 export type ProjectActions = typeof ProjectActions.Type;
 
+/**
+ * Whether a Work Project shows Octant's developer surfaces (its Project
+ * terminal and Project actions today; Git and pull-request panels where they
+ * exist), and who last turned them on or off and when. A person sets it from a
+ * window on the host; an agent, a routine, or an import never does. It changes
+ * what the Project shows, never what its threads may do: a Work thread runs
+ * commands and `git` through its shell at its level with it off. Absent means
+ * off.
+ */
+export const WorkProjectDeveloperTools = Schema.Struct({
+  enabled: Schema.Boolean,
+  changedBy: EventActor,
+  changedAt: UtcTimestamp,
+}).annotations(strict);
+export type WorkProjectDeveloperTools = typeof WorkProjectDeveloperTools.Type;
+
+export const WorkProject = Schema.Struct({
+  ...ProjectFields,
+  type: Schema.Literal("work"),
+  ...BoundProjectFields,
+  statusFile: Schema.optional(WorkProjectStatusFile),
+  developerTools: Schema.optional(WorkProjectDeveloperTools),
+  /** Named commands for the Project terminal. Absent means none were defined. */
+  actions: Schema.optional(ProjectActions),
+}).annotations(strict);
+export type WorkProject = typeof WorkProject.Type;
+
 export const CodeProject = Schema.Struct({
   ...ProjectFields,
   type: Schema.Literal("code"),
@@ -381,6 +400,8 @@ const WorkProjectSummary = Schema.Struct({
   nativeProviders: Schema.optional(KeyProviderDriverKinds),
   extraFolders: Schema.optional(ProjectExtraFolders),
   statusFile: Schema.optional(WorkProjectStatusFile),
+  developerTools: Schema.optional(WorkProjectDeveloperTools),
+  actions: Schema.optional(ProjectActions),
 }).annotations(strict);
 
 const CodeProjectSummary = Schema.Struct({
@@ -647,6 +668,18 @@ export const ProjectCommand = Schema.Union(
     ...ProjectCommandFields,
     statusFile: WorkProjectStatusFile,
   }).annotations(strict),
+  /** Turns a Work Project's developer surfaces on or off; see {@link WorkProjectDeveloperTools}. */
+  Schema.Struct({
+    kind: Schema.Literal("change-work-project-developer-tools"),
+    ...ProjectCommandFields,
+    enabled: Schema.Boolean,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-work-project-actions"),
+    ...ProjectCommandFields,
+    /** The whole list; an empty list removes every action. */
+    actions: ProjectActions,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-project-brand-kit"),
     ...ProjectCommandFields,
@@ -730,6 +763,14 @@ export const ProjectCommandResult = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("work-project-status-file-changed"),
+    project: WorkProject,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("work-project-developer-tools-changed"),
+    project: WorkProject,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("work-project-actions-changed"),
     project: WorkProject,
   }).annotations(strict),
   Schema.Struct({
@@ -899,6 +940,15 @@ export const WorkProjectStatusFileChanged = Schema.Struct({
   project: WorkProject,
 }).annotations(strict);
 export type WorkProjectStatusFileChanged = typeof WorkProjectStatusFileChanged.Type;
+/** Journaled with who turned the switch and when, on the Project's own stream. */
+export const WorkProjectDeveloperToolsChanged = Schema.Struct({
+  project: WorkProject,
+}).annotations(strict);
+export type WorkProjectDeveloperToolsChanged = typeof WorkProjectDeveloperToolsChanged.Type;
+export const WorkProjectActionsChanged = Schema.Struct({ project: WorkProject }).annotations(
+  strict,
+);
+export type WorkProjectActionsChanged = typeof WorkProjectActionsChanged.Type;
 export const ProjectBrandKitChanged = Schema.Struct({ project: Project }).annotations(strict);
 export type ProjectBrandKitChanged = typeof ProjectBrandKitChanged.Type;
 /** Journaled once per person's save or removal; the lease service reads the Project it leaves. */
@@ -938,6 +988,8 @@ export const PROJECT_EVENT_NAMES = [
   "project.provider-policy-changed@1",
   "project.native-providers-changed@1",
   "project.work-status-file-changed@1",
+  "project.work-developer-tools-changed@1",
+  "project.work-actions-changed@1",
   "project.brand-kit-changed@1",
   "project.code-desktop-recipe-changed@1",
   "project.code-actions-changed@1",
@@ -1002,6 +1054,10 @@ export const decodeProjectNativeProvidersChanged = Schema.decodeUnknownSync(
 export const decodeWorkProjectStatusFileChanged = Schema.decodeUnknownSync(
   WorkProjectStatusFileChanged,
 );
+export const decodeWorkProjectDeveloperToolsChanged = Schema.decodeUnknownSync(
+  WorkProjectDeveloperToolsChanged,
+);
+export const decodeWorkProjectActionsChanged = Schema.decodeUnknownSync(WorkProjectActionsChanged);
 export const decodeProjectBrandKitChanged = Schema.decodeUnknownSync(ProjectBrandKitChanged);
 export const decodeCodeProjectDesktopRecipeChanged = Schema.decodeUnknownSync(
   CodeProjectDesktopRecipeChanged,

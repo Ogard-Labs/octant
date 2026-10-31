@@ -16,6 +16,7 @@ import {
   type CodeProjectPullRequestBackgroundRefresh,
   type CodeAccessPersistence,
   type WorkProject,
+  type WorkProjectDeveloperTools,
   type WorkProjectStatusFile,
   type Project,
   type ProjectAction,
@@ -320,6 +321,63 @@ export function changeCodeProjectActions(
   return {
     ...rest,
     ...(actions.length === 0 ? {} : { actions }),
+    version: nextVersion(project),
+    updatedAt,
+  };
+}
+
+/**
+ * Save a Work Project's named actions. Work and Code share the shell at the
+ * thread's level, so a Work Project keeps actions as a Code Project does; they
+ * run in its Project terminal, under that terminal's confinement.
+ */
+export function changeWorkProjectActions(
+  project: Project,
+  actions: ReadonlyArray<ProjectAction>,
+  updatedAt: UtcTimestamp,
+): WorkProject {
+  if (project.type !== "work") {
+    reject("binding-not-allowed", "Only Work Projects take Work Project actions");
+  }
+  if (project.lifecycle === "archived") {
+    reject("invalid-lifecycle", "Archived Projects are read-only");
+  }
+  if (JSON.stringify(project.actions ?? []) === JSON.stringify(actions)) {
+    reject("invalid-lifecycle", "Work Project actions are already saved");
+  }
+  const { actions: _replaced, ...rest } = project;
+  return {
+    ...rest,
+    ...(actions.length === 0 ? {} : { actions }),
+    version: nextVersion(project),
+    updatedAt,
+  };
+}
+
+/**
+ * Turn a Work Project's developer surfaces on or off, recording who did and
+ * when. Presentation only: no thread's authority reads it.
+ */
+export function changeWorkProjectDeveloperTools(
+  project: Project,
+  input: {
+    readonly enabled: boolean;
+    readonly changedBy: WorkProjectDeveloperTools["changedBy"];
+  },
+  updatedAt: UtcTimestamp,
+): WorkProject {
+  if (project.type !== "work") {
+    reject("binding-not-allowed", "Only Work Projects have a Developer tools switch");
+  }
+  if (project.lifecycle === "archived") {
+    reject("invalid-lifecycle", "Archived Projects are read-only");
+  }
+  if ((project.developerTools?.enabled ?? false) === input.enabled) {
+    reject("invalid-lifecycle", "Work Project Developer tools are already set that way");
+  }
+  return {
+    ...project,
+    developerTools: { enabled: input.enabled, changedBy: input.changedBy, changedAt: updatedAt },
     version: nextVersion(project),
     updatedAt,
   };
