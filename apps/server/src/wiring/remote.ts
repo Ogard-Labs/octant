@@ -1075,6 +1075,9 @@ export function wireRemote(deps: RemoteDependencies) {
   // host-wide facts, so no remote device ever reaches it.
   const supportBundleRoutes = createSupportBundleRouteHandler({
     windowAuthorityStore,
+    ...(options.desktopBridgeSecret === undefined
+      ? {}
+      : { desktopBridgeSecret: options.desktopBridgeSecret }),
     sources: () => ({
       connection: persistence.connection,
       journal: persistence.journal,

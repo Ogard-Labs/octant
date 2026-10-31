@@ -132,4 +132,48 @@ describe("SupportBundleControl", () => {
 
     expect(await screen.findByText(/could not list what a bundle holds/)).toBeInTheDocument();
   });
+
+  describe("in the desktop app", () => {
+    it("opens the native save dialog instead of downloading and asks the host for nothing itself", async () => {
+      const client = clientWith({});
+      const saveNatively = vi.fn(async () => ({
+        kind: "saved" as const,
+        fileName: "for-support.zip",
+      }));
+      render(<SupportBundleControl client={client} saveNatively={saveNatively} />);
+      fireEvent.click(screen.getByRole("button", { name: "Save diagnostics…" }));
+      expect(saveNatively).not.toHaveBeenCalled();
+      fireEvent.click(await screen.findByRole("button", { name: "Save file" }));
+
+      expect(await screen.findByText(/Saved for-support\.zip/)).toBeInTheDocument();
+      expect(saveNatively).toHaveBeenCalledOnce();
+      expect(client.exportSupportBundle).not.toHaveBeenCalled();
+      expect(clicked).toEqual([]);
+    });
+
+    it("returns to the list when the person dismisses the dialog", async () => {
+      const client = clientWith({});
+      const saveNatively = vi.fn(async () => ({ kind: "cancelled" as const }));
+      render(<SupportBundleControl client={client} saveNatively={saveNatively} />);
+      fireEvent.click(screen.getByRole("button", { name: "Save diagnostics…" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Save file" }));
+
+      await waitFor(() => expect(screen.getByRole("button", { name: "Save file" })).toBeEnabled());
+      expect(screen.getByText("This file will include")).toBeInTheDocument();
+      expect(screen.queryByText(/Saved /)).not.toBeInTheDocument();
+    });
+
+    it("says nothing was written when the host could not write the file", async () => {
+      const client = clientWith({});
+      const saveNatively = vi.fn(async () => {
+        throw new Error("Octant could not save the diagnostics. Nothing was written.");
+      });
+      render(<SupportBundleControl client={client} saveNatively={saveNatively} />);
+      fireEvent.click(screen.getByRole("button", { name: "Save diagnostics…" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Save file" }));
+
+      expect(await screen.findByText(/Nothing was written/)).toBeInTheDocument();
+      expect(client.exportSupportBundle).not.toHaveBeenCalled();
+    });
+  });
 });

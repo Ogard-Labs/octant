@@ -72,8 +72,9 @@ octant diagnostics export --list
 ```
 
 Before anything is written, Octant lists what the file will include and what it
-never includes. In Settings you then choose **Save file** or **Cancel**; in the
-terminal the same list prints first, and `--list` stops after it. `--out` takes a
+never includes. In Settings you then choose **Save file** or **Cancel**. In the
+desktop app **Save file** opens the usual save dialog, offering a dated name in
+Downloads; in a browser it downloads the file. In the terminal the same list prints first, and `--list` stops after it. `--out` takes a
 name ending in `.zip`, or a new or empty folder, and never overwrites.
 
 The file holds:
@@ -90,8 +91,9 @@ The file holds:
 It never holds messages, prompts, replies, file contents, Project or thread
 names, API keys, tokens, or passwords. Your home folder shows as `~`. Octant
 sends the file nowhere: you read it, and you choose whether to send it. Octant
-records that you saved one, with the time and the kind of place (for example
-Downloads), never the folder name or anything the file holds.
+records that you saved one, with the time and how you chose where (the desktop
+dialog, a browser download, or the kind of folder for the terminal), never the
+folder name or anything the file holds.
 
 This is separate from **Failure report** in the same place, which exports a
 redacted report about one failed operation, found by its correlation ID.

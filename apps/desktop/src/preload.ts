@@ -282,6 +282,11 @@ export interface OctantHostBridge {
   /** Native file picker for a runtime's executable; returns an opaque receipt, never the path. */
   readonly selectRuntimeBinary: () => Promise<PickerReceiptResult>;
   /**
+   * Opens the native save dialog for the support bundle and has the host write
+   * it to the chosen path. Answers only the saved file's name, never a path.
+   */
+  readonly saveSupportBundle: () => Promise<SupportBundleSaveResult>;
+  /**
    * Window capture for the composer. Present only on macOS, where the host can
    * capture a window: listing reads titles only, the permission is requested
    * only on the person's say-so, and a capture reads the one window picked.
@@ -776,6 +781,17 @@ export function createHostBridge(
       ),
     selectRuntimeBinary: async () =>
       decodePickerReceiptResult(await ipc.invoke(IPC_CHANNELS.selectRuntimeBinary), "binary"),
+    saveSupportBundle: async () => {
+      let answer: unknown;
+      try {
+        answer = await ipc.invoke(IPC_CHANNELS.saveSupportBundle);
+      } catch {
+        // The main process's own sentence arrives with a remote-call prefix;
+        // the renderer gets one fixed sentence.
+        throw new Error("Octant could not save the diagnostics. Nothing was written.");
+      }
+      return decodeSupportBundleSaveResult(answer);
+    },
     ...(platform === "darwin"
       ? {
           listCaptureWindows: async () =>
@@ -1765,6 +1781,31 @@ function decodeCaptureWindowResult(value: unknown): CaptureWindowResult {
       });
   }
   throw new TypeError("Invalid window capture result.");
+}
+
+export type SupportBundleSaveResult =
+  | Readonly<{ kind: "cancelled" }>
+  | Readonly<{ kind: "saved"; fileName: string }>;
+
+function decodeSupportBundleSaveResult(value: unknown): SupportBundleSaveResult {
+  if (!isRecord(value)) throw new TypeError("Invalid diagnostics save result.");
+  const keys = Object.keys(value).sort();
+  if (keys.length === 1 && keys[0] === "kind" && value.kind === "cancelled") {
+    return Object.freeze({ kind: "cancelled" });
+  }
+  if (
+    keys.length === 2 &&
+    keys[0] === "fileName" &&
+    keys[1] === "kind" &&
+    value.kind === "saved" &&
+    typeof value.fileName === "string" &&
+    value.fileName.trim().length > 0 &&
+    value.fileName.length <= 255 &&
+    !/[\\/]/.test(value.fileName)
+  ) {
+    return Object.freeze({ kind: "saved", fileName: value.fileName });
+  }
+  throw new TypeError("Invalid diagnostics save result.");
 }
 
 function decodePickerReceiptResult(

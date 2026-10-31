@@ -15,6 +15,7 @@ const LOCAL_ONLY_PROBES = [
   { path: "/api/diagnostics/journal-growth", method: "GET" },
   { path: "/api/diagnostics/bundle", method: "POST" },
   { path: "/api/diagnostics/bundle/preview", method: "GET" },
+  { path: "/api/diagnostics/bundle/save", method: "POST" },
   { path: "/api/host-control/status", method: "GET" },
   { path: "/api/host-control/data-map", method: "GET" },
   { path: "/api/host-control/export", method: "GET" },

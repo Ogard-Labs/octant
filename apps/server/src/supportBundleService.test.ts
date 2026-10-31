@@ -280,6 +280,52 @@ describe("exportSupportBundle", () => {
   });
 });
 
+describe("exportSupportBundle with a staged write", () => {
+  const stage = () => {
+    const calls: string[] = [];
+    return {
+      calls,
+      stage: () => {
+        calls.push("stage");
+        return {
+          commit: () => calls.push("commit"),
+          abort: () => calls.push("abort"),
+        };
+      },
+    };
+  };
+
+  it("puts the file in place only after the export is journaled", async () => {
+    const base = store();
+    const staged = stage();
+    const outcome = await exportSupportBundle(
+      { destinationCategory: "chosen-by-person" },
+      sources(base),
+      staged.stage,
+    );
+    expect(outcome.kind).toBe("exported");
+    expect(staged.calls).toEqual(["stage", "commit"]);
+  });
+
+  it("takes the staged file back when the export cannot be recorded", async () => {
+    const base = store();
+    const staged = stage();
+    const outcome = await exportSupportBundle(
+      { destinationCategory: "chosen-by-person" },
+      sources(base, {
+        journal: {
+          append: () => {
+            throw new Error("disk full");
+          },
+        },
+      }),
+      staged.stage,
+    );
+    expect(outcome.kind).toBe("failed");
+    expect(staged.calls).toEqual(["stage", "abort"]);
+  });
+});
+
 describe("previewSupportBundle", () => {
   it("lists the sections with live counts and records nothing", async () => {
     const base = store();

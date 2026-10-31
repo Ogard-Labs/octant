@@ -4,13 +4,16 @@ import type { SupportBundleFile, SupportBundlePreview } from "@octant/contracts"
 import { buildSupportBundleZip, supportBundleEntriesLabel } from "@octant/domain";
 import { OctantButton } from "../ui/base/OctantButton";
 import { SettingsState } from "../settings/primitives";
+import type { SupportBundleSaveResult } from "../shell/hostBridge";
 
 /**
  * Save diagnostics: a file about this host that the person reads and sends
  * themselves. Choosing the button lists what a bundle holds and never holds
- * and saves nothing; only Save file asks the host to build it. The renderer
- * cannot see the folder a download lands in, so the host is told only that it
- * went to a browser download. Nothing is uploaded.
+ * and saves nothing; only Save file asks the host to build it. The desktop app
+ * opens its native save dialog and the host writes the file where the person
+ * chose, journaling only that the person chose it. A browser or a paired device
+ * cannot see where a download lands, so the host is told only that it went to a
+ * browser download. Nothing is uploaded.
  */
 
 type BundleState =
@@ -21,7 +24,14 @@ type BundleState =
   | { readonly kind: "saved"; readonly fileName: string }
   | { readonly kind: "error"; readonly message: string };
 
-export function SupportBundleControl({ client }: { readonly client: DiagnosticsExportClient }) {
+export function SupportBundleControl({
+  client,
+  saveNatively,
+}: {
+  readonly client: DiagnosticsExportClient;
+  /** The desktop app's native save dialog; absent in a browser, which downloads. */
+  readonly saveNatively?: () => Promise<SupportBundleSaveResult>;
+}) {
   const [state, setState] = useState<BundleState>({ kind: "idle" });
   const headingId = useId();
 
@@ -36,6 +46,25 @@ export function SupportBundleControl({ client }: { readonly client: DiagnosticsE
 
   const save = async (preview: SupportBundlePreview) => {
     setState({ kind: "saving", preview });
+    if (saveNatively !== undefined) {
+      try {
+        const saved = await saveNatively();
+        setState(
+          saved.kind === "cancelled"
+            ? { kind: "review", preview }
+            : { kind: "saved", fileName: saved.fileName },
+        );
+      } catch (error) {
+        setState({
+          kind: "error",
+          message:
+            error instanceof Error && error.message.startsWith("Octant could not save")
+              ? error.message
+              : "The file could not be saved. Nothing was written.",
+        });
+      }
+      return;
+    }
     try {
       const outcome = await client.exportSupportBundle({ destinationCategory: "browser-download" });
       if (outcome.kind === "failed") {

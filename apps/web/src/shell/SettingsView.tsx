@@ -2433,7 +2433,12 @@ function MaintenanceSection({
             scope="host"
             settingId="save-diagnostics"
           >
-            <SupportBundleControl client={diagnosticsExportClient} />
+            <SupportBundleControl
+              client={diagnosticsExportClient}
+              {...(props.hostBridge?.saveSupportBundle === undefined
+                ? {}
+                : { saveNatively: props.hostBridge.saveSupportBundle })}
+            />
           </SettingRow>
         ) : null}
         {diagnosticsExportClient !== undefined ? (

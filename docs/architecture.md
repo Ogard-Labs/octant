@@ -2788,12 +2788,22 @@ or .zip>` write the same files, built by one host command
   journaled as `diagnostics.support-bundle-exported@1` with the time, the
   sections, the file and byte counts, and the destination as a category
   (`downloads`, `desktop`, `documents`, `home-folder`, `temporary-folder`,
-  `other-folder`, or `browser-download`), never a path or any content. If the
-  event cannot be recorded, no bundle is handed over. The record is made when
-  the host hands the files over, before the caller writes them, so a write
-  that then fails still shows as an export. The web app saves a stored zip
-  through the browser's download (a native save dialog is not wired yet) and
-  the CLI writes a `.zip` or a new or empty folder, refusing to overwrite. This
+  `other-folder` for the CLI, `browser-download` for a browser or paired
+  client, or `chosen-by-person` for the desktop dialog), never a path or any
+  content. If the event cannot be recorded, no bundle is handed over. The desktop
+  app opens Electron's native save dialog (`dialog.showSaveDialog`, opening in
+  Downloads at `octant-diagnostics-<date>.zip`) from the main process over the
+  preload bridge's `saveSupportBundle`, and posts the chosen path with the
+  desktop secret to `/api/diagnostics/bundle/save`, a route no renderer origin
+  can call. The host stages the zip beside that path, journals the export, and
+  only then moves the file into place, so a refused record leaves no file and an
+  unwritable folder leaves no record. The renderer learns the saved file's name
+  and nothing else. A browser or paired client has no such bridge: the web app
+  builds a stored zip from the files the host hands over and saves it through
+  the browser's download, and the host records `browser-download`. Those
+  hand-overs are journaled before the caller writes the files, so a write that
+  then fails still shows as an export. The CLI writes a `.zip` or a new or empty
+  folder, refusing to overwrite. This
   is separate from the failure report above, which exports one failed
   operation by correlation ID.
 - **Recovery.** Sequence-based reconnect replay for local and remote clients —

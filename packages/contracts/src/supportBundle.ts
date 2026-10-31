@@ -37,6 +37,7 @@ export const SupportBundleDestinationCategory = Schema.Literal(
   "temporary-folder",
   "other-folder",
   "browser-download",
+  "chosen-by-person",
 );
 export type SupportBundleDestinationCategory = typeof SupportBundleDestinationCategory.Type;
 
@@ -99,6 +100,24 @@ export const SupportBundleOutcome = Schema.Union(
 );
 export type SupportBundleOutcome = typeof SupportBundleOutcome.Type;
 
+/**
+ * What the host answers the desktop app after it wrote a bundle to the place
+ * the person chose in the native save dialog. The file name is the last path
+ * segment the person typed; the folder never leaves the host.
+ */
+export const SupportBundleSaveOutcome = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("saved"),
+    fileName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
+    receipt: SupportBundleReceipt,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("failed"),
+    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(240)),
+  }).annotations(strict),
+);
+export type SupportBundleSaveOutcome = typeof SupportBundleSaveOutcome.Type;
+
 /** Durable journal payload: the receipt and nothing from the bundle itself. */
 export const SupportBundleExported = Schema.Struct({
   receipt: SupportBundleReceipt,
@@ -110,4 +129,5 @@ export const decodeSupportBundleExportRequest = Schema.decodeUnknownSync(
   SupportBundleExportRequest,
 );
 export const decodeSupportBundleOutcome = Schema.decodeUnknownSync(SupportBundleOutcome);
+export const decodeSupportBundleSaveOutcome = Schema.decodeUnknownSync(SupportBundleSaveOutcome);
 export const decodeSupportBundleExported = Schema.decodeUnknownSync(SupportBundleExported);

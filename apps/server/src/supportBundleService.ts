@@ -9,6 +9,7 @@ import {
   type ProviderInstance,
   type ProviderObservedState,
   type SupportBundleExportRequest,
+  type SupportBundleFile,
   type SupportBundleOutcome,
   type SupportBundlePreview,
 } from "@octant/contracts";
@@ -267,14 +268,36 @@ export async function previewSupportBundle(
  * and never any of its content. The host sends the bundle to no one; the
  * caller writes it where the person chose.
  */
+/**
+ * A write the host makes itself, in two steps so the record comes first: stage
+ * the file beside its destination, and put it in place only once the export is
+ * journaled. Staging throws when the place cannot be written.
+ */
+export type StageSupportBundleDelivery = (files: ReadonlyArray<SupportBundleFile>) => {
+  readonly commit: () => void;
+  readonly abort: () => void;
+};
+
 export async function exportSupportBundle(
   request: SupportBundleExportRequest,
   sources: SupportBundleSources,
+  stage?: StageSupportBundleDelivery,
 ): Promise<SupportBundleOutcome> {
   const bundleId = (sources.idGenerator ?? randomUUID)();
   const facts = await gatherSupportBundleFacts(sources, bundleId);
   const files = buildSupportBundleFiles(facts, homeDirectoriesFor(sources));
   const byteCount = files.reduce((sum, file) => sum + Buffer.byteLength(file.contents), 0);
+  let staged: ReturnType<StageSupportBundleDelivery> | undefined;
+  if (stage !== undefined) {
+    try {
+      staged = stage(files);
+    } catch {
+      return {
+        kind: "failed",
+        message: "Octant could not write the support bundle there. Nothing was saved.",
+      };
+    }
+  }
   try {
     const payload = decodeSupportBundleExported({
       receipt: {
@@ -303,9 +326,19 @@ export async function exportSupportBundle(
         },
       ],
     });
+    try {
+      staged?.commit();
+    } catch {
+      staged?.abort();
+      return {
+        kind: "failed",
+        message: "Octant could not write the support bundle there. Nothing was saved.",
+      };
+    }
     return { kind: "exported", files, receipt: payload.receipt };
   } catch {
     // An export nobody recorded is not offered: the record is part of the promise.
+    staged?.abort();
     return {
       kind: "failed",
       message: "The support bundle could not be recorded, so nothing was saved.",

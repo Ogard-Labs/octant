@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -14,6 +14,7 @@ import { WindowAuthorityStore } from "./windowAuthorityStore";
 const NOW = "2026-10-31T10:00:00.000Z";
 const nowMs = new Date(NOW).getTime();
 const windowId = "70000000-0000-4000-8000-000000000001";
+const BRIDGE_SECRET = "bridge-secret-for-the-save-route";
 const capability = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop0";
 
 const directories: Array<string> = [];
@@ -40,6 +41,7 @@ function setup() {
   let built = 0;
   const handler = createSupportBundleRouteHandler({
     windowAuthorityStore,
+    desktopBridgeSecret: BRIDGE_SECRET,
     now: () => nowMs,
     sources: () => {
       built += 1;
@@ -70,7 +72,7 @@ function setup() {
       };
     },
   });
-  return { handler, connection, builds: () => built };
+  return { handler, connection, directory, builds: () => built };
 }
 
 function call(
@@ -189,5 +191,79 @@ describe("support bundle routes", () => {
       (await handler(call("/api/diagnostics/bundle", { method: "GET", capability })))?.status,
     ).toBe(405);
     expect(builds()).toBe(0);
+  });
+
+  describe("save to the path the person chose in the native dialog", () => {
+    const save = (path: string, body: unknown, headers: Record<string, string> = {}) =>
+      new Request(`http://127.0.0.1:3100${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify(body),
+      });
+    const secret = { "x-octant-desktop-secret": BRIDGE_SECRET };
+
+    it("writes a zip there, journals only the category, and answers with the file name", async () => {
+      const { handler, connection, directory } = setup();
+      const target = join(directory, "octant-diagnostics.zip");
+      const response = await handler(
+        save("/api/diagnostics/bundle/save", { absolutePath: target }, secret),
+      );
+      expect(response?.status).toBe(200);
+      const text = await response!.text();
+      expect(JSON.parse(text)).toMatchObject({ kind: "saved", fileName: "octant-diagnostics.zip" });
+      expect(text).not.toContain(directory);
+      expect(readFileSync(target).readUInt32LE(0)).toBe(0x04034b50);
+      expect(readdirSync(directory).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+      const row = connection
+        .prepare("SELECT payload_json AS payload FROM event_journal WHERE event_name = ?")
+        .get("diagnostics.support-bundle-exported@1") as { payload: string };
+      expect(JSON.parse(row.payload).receipt.destinationCategory).toBe("chosen-by-person");
+      expect(row.payload).not.toContain(directory);
+    });
+
+    it("refuses a caller without the desktop secret, with an origin, or with a relative path", async () => {
+      const { handler, directory } = setup();
+      const target = join(directory, "never.zip");
+      const refusals = [
+        await handler(save("/api/diagnostics/bundle/save", { absolutePath: target })),
+        await handler(
+          save(
+            "/api/diagnostics/bundle/save",
+            { absolutePath: target },
+            { "x-octant-desktop-secret": "wrong" },
+          ),
+        ),
+        await handler(
+          save(
+            "/api/diagnostics/bundle/save",
+            { absolutePath: target },
+            { ...secret, origin: "http://localhost:5173" },
+          ),
+        ),
+        await handler(save("/api/diagnostics/bundle/save", { absolutePath: "never.zip" }, secret)),
+        await handler(
+          save("/api/diagnostics/bundle/save", { absolutePath: target, extra: 1 }, secret),
+        ),
+      ];
+      expect(refusals.map((response) => response?.status)).toEqual([401, 401, 401, 400, 400]);
+      expect(existsSync(target)).toBe(false);
+    });
+
+    it("saves nothing and records nothing when the place cannot be written", async () => {
+      const { handler, connection, directory } = setup();
+      const response = await handler(
+        save(
+          "/api/diagnostics/bundle/save",
+          { absolutePath: join(directory, "missing-folder", "x.zip") },
+          secret,
+        ),
+      );
+      expect(response?.status).toBe(422);
+      expect(await response!.json()).toMatchObject({ kind: "failed" });
+      const rows = connection
+        .prepare("SELECT count(*) AS n FROM event_journal WHERE event_name = ?")
+        .get("diagnostics.support-bundle-exported@1") as { n: number };
+      expect(rows.n).toBe(0);
+    });
   });
 });
