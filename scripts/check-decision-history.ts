@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
  * well-formed `0001-replacement.md`, fix the index row, and every rule there
  * passes. The number set is still contiguous, the record is still well formed,
  * and the index still agrees. An `Accepted` decision has been rewritten in
- * place, which `docs/decisions/README.md` says never happens.
+ * place, which the archive's README says never happens.
  *
  * Answering that needs the repository, not the tree, so it lives here rather
  * than widening `findDecisionViolations` into something that reads git.
@@ -22,6 +22,12 @@ import { fileURLToPath } from "node:url";
  * and filename are all frozen; a rule that changes goes in its owning current
  * specification instead. Records added after the base are the tree gate's
  * business (Rule H there refuses them).
+ *
+ * The archive moved from `docs/decisions/` to `docs/legacy/decisions/` on
+ * 2026-10-31. A base from before the move still names the old paths, so a
+ * record is looked up by filename in the new folder. The move is the one change
+ * a record may carry: a relative link that left the folder (`../`) may gain the
+ * one `../` the deeper folder needs, and nothing else.
  *
  * A gate that reads history can only be as good as the history it is given, and
  * the common CI checkout is a depth-1 clone that has none. Answering from a
@@ -64,8 +70,9 @@ export type HistoryCheck =
     }
   | { readonly status: "skipped"; readonly reason: string };
 
-const DECISIONS_DIRECTORY = "docs/decisions";
-const RECORD_PATH = /^docs\/decisions\/(\d{4})-[a-z0-9-]+\.md$/;
+const DECISIONS_DIRECTORY = "docs/legacy/decisions";
+const FORMER_DECISIONS_DIRECTORY = "docs/decisions";
+const RECORD_PATH = /^docs\/(?:legacy\/)?decisions\/(\d{4})-[a-z0-9-]+\.md$/;
 const BASE_OVERRIDE = "OCTANT_DECISIONS_BASE";
 const DEFAULT_BASE_REFS = ["origin/main", "main"] as const;
 
@@ -111,19 +118,21 @@ export function findHistoryViolations(
   readCurrent: (path: string) => string | undefined,
 ): ReadonlyArray<HistoryViolation> {
   return base.flatMap((was): ReadonlyArray<HistoryViolation> => {
-    const now = readCurrent(was.path);
+    const path = currentArchivePath(was.path);
+    const now = readCurrent(path);
     if (now === undefined) {
       return [
         {
-          path: was.path,
+          path,
           reason: "is gone; the decision archive is closed, so its records keep their paths",
         },
       ];
     }
-    if (now !== was.content) {
+    const moved = path !== was.path;
+    if (now !== was.content && !(moved && now === rebaseOutwardLinks(was.content))) {
       return [
         {
-          path: was.path,
+          path,
           reason:
             "was edited; the decision archive is closed, so its records keep their wording and status. Change the owning specification instead",
         },
@@ -131,6 +140,17 @@ export function findHistoryViolations(
     }
     return [];
   });
+}
+
+/** Where a record at a base path lives now: the same filename in the legacy folder. */
+export function currentArchivePath(path: string): string {
+  const former = `${FORMER_DECISIONS_DIRECTORY}/`;
+  return path.startsWith(former) ? `${DECISIONS_DIRECTORY}/${path.slice(former.length)}` : path;
+}
+
+/** A record's links out of its folder, one level deeper. */
+export function rebaseOutwardLinks(content: string): string {
+  return content.replaceAll("](../", "](../../");
 }
 
 function git(root: string, args: ReadonlyArray<string>): string | undefined {
@@ -165,6 +185,7 @@ function readBaseRecords(root: string, commit: string): ReadonlyArray<ArchivedRe
     commit,
     "--",
     DECISIONS_DIRECTORY,
+    FORMER_DECISIONS_DIRECTORY,
   ]);
   if (listed === undefined) return [];
   return listed
@@ -203,7 +224,10 @@ export async function checkDecisionHistory(
   const base = resolveBase(readRepositoryState(root, requested));
   if (base.status === "unanswerable") return { status: "skipped", reason: base.reason };
   const records = readBaseRecords(root, base.commit);
-  const current = await readWorkingTree(root, records);
+  const current = await readWorkingTree(
+    root,
+    records.map((record) => ({ ...record, path: currentArchivePath(record.path) })),
+  );
   return {
     status: "checked",
     base: `${base.ref} (${base.commit.slice(0, 12)})`,

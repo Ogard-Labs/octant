@@ -150,7 +150,7 @@ export function wireDevices(deps: DevicesDependencies) {
     const simulatorDevice = createDesktopSimulatorDevicePort(process.env);
     // Raw captures land under this host's own data directory, created 0700 —
     // a root no other confined launch is granted, so device pixels are never
-    // readable by an unrelated confined command (0160). Only the capture
+    // readable by an unrelated confined command. Only the capture
     // launch itself carries the directory as an extra write root.
     const appleCaptureDirectory = join(providerDataDirectory, "apple-runtime", "captures");
     // Folders the removed physical-device and distribution features left in this

@@ -98,7 +98,7 @@ export function assertImageJobProfileEligible(
 /**
  * A custom image source has no allowlist of its own: eligibility is exact
  * membership in the Settings-configured list, never an arbitrary model
- * string the caller happens to supply (`docs/decisions/0085`).
+ * string the caller happens to supply.
  */
 export function assertCustomImageSourceEligible(
   instance: ProviderInstance,

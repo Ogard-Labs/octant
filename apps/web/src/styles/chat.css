@@ -766,7 +766,7 @@
 }
 
 /* The row controls' look is the system's `.composer-row` treatment
-   (ADR 0038); nothing to restate here. */
+   (octant.css); nothing to restate here. */
 
 .chat-composer .composer-pool-control {
   min-width: 132px;

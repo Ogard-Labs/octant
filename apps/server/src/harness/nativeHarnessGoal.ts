@@ -98,8 +98,8 @@ export function createNativeHarnessGoalPort(options: {
       });
       if (checked.status !== "recorded" || !threadGoalCriteriaMet(checked.goal)) return checked;
       // Every criterion now has a passing check the host observed and already
-      // recorded on the goal: that is the evidence completion requires
-      // (decision 0025), so the goal completes here rather than waiting for a
+      // recorded on the goal: that is the evidence completion requires,
+      // so the goal completes here rather than waiting for a
       // model to claim it is done.
       const completion = await run({
         kind: "complete-thread-goal",

@@ -2,7 +2,7 @@ import { readdir, readFile, writeFile } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 
 /**
- * Enforces the stylesheet half of the component contract (0016 and 0046):
+ * Enforces the stylesheet half of the component contract:
  * feature stylesheets may place a surface but must not repaint it. The
  * component boundary check covers .tsx; this one covers every .css file the
  * renderer ships.
@@ -101,7 +101,7 @@ function isAccessibilityFallback(headers: ReadonlyArray<string>): boolean {
   return headers.some((header) => /^@media\b/.test(header) && ACCESSIBILITY_MEDIA.test(header));
 }
 
-// 0046: a feature stylesheet may place or size a shared control, never repaint
+// A feature stylesheet may place or size a shared control, never repaint
 // it. These are the properties that recipe owns.
 const PAINT_PROPERTY =
   /^(?:background(?:-color|-image)?|border(?:-(?:top|right|bottom|left|block|inline|block-start|block-end|inline-start|inline-end))?(?:-(?:color|width|style))?|border-(?:top|bottom)-(?:left|right)-radius|border-(?:start-start|start-end|end-start|end-end)-radius|border-radius|box-shadow|color|outline(?:-color|-width|-style)?)$/;
@@ -129,7 +129,7 @@ export function collectPrimitiveClasses(
       const primitive = match[1] ?? "";
       const attributes = readAttributes(source, match.index + match[0].length);
       // `unstyled` hands the paint to the feature on purpose; OctantTextarea
-      // does the same for `composer-input`, the system prompt (0038).
+      // does the same for `composer-input`, the system prompt.
       if (
         UNSTYLED_ON.test(attributes) ||
         BARE_VARIANT.test(attributes) ||

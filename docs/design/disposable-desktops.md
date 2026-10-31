@@ -2455,9 +2455,7 @@ Bubblewrap launch every confined process already uses. Starting with a
 host-local provider keeps the first consequential code (leases, teardown,
 transfer, attribution) testable without spending money, and makes the cloud
 driver a translation layer rather than the place where lifecycle bugs are
-found. The archived [0053](../decisions/0053-computer-use-destinations.md)
-holds the earlier destination reasoning; this specification is the current
-rule.
+found.
 
 ## Verification
 

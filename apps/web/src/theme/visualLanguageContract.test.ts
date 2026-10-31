@@ -77,7 +77,7 @@ describe("the public-block visual language", () => {
     // The recipes round cards, menus, and popovers at their `xl` step and the
     // stylesheets round panels at the medium token. They were 14px and 16px, so
     // a menu sat beside a popover with a different corner.
-    // The recipes' scale keeps its one root (0090), so the two numbers are
+    // The recipes' scale keeps its one root, so the two numbers are
     // read and compared rather than one aliased to the other.
     const px = (source: string, pattern: RegExp) => Number(source.match(pattern)?.[1]);
     const tailwind = readFileSync(join(webRoot, "styles/tailwind.css"), "utf8");

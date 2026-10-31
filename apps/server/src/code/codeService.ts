@@ -1713,7 +1713,7 @@ export class CodeService {
         // Recovery from a superseded checkout. The thread's id was derived from
         // the binding revision it was created against, so once the Project is
         // rebound the recovery loop can only ever call it unavailable. This is
-        // the way back out, and 0032 requires one to exist: explicit, journaled,
+        // the way back out, and one must always exist: explicit, journaled,
         // and never inferred from a filesystem root that happens to match.
         const bound = this.#persistence.readCodeCheckout(current.checkoutId);
         if (bound?.kind === "managed-worktree") {
@@ -1757,7 +1757,7 @@ export class CodeService {
           kind: "thread-updated",
           thread: rebound,
         });
-        // 0032: recovery discards, never revalidates. A session grant of Full
+        // Recovery discards, never revalidates. A session grant of Full
         // access was minted against the checkout the thread just left, so it
         // does not carry onto the new one; the thread returns to its persisted
         // posture and the user re-grants if they still want it. Discard the

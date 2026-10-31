@@ -630,7 +630,7 @@ describe("CodeComposerAdapter interactions", () => {
   });
 
   /**
-   * A Code thread belongs to a Project (decision 0035). Enter must not start a
+   * A Code thread belongs to a Project. Enter must not start a
    * first turn while no Project is chosen, or the thread would run against a
    * root nobody picked.
    */

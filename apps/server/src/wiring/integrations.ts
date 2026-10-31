@@ -175,7 +175,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       isMarked: (threadId: string) =>
         readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
     };
-    // Agent-to-agent messaging (decision 0063): the host owns admission,
+    // Agent-to-agent messaging: the host owns admission,
     // clamping, journaling, and delivery. The endpoint resolver is composed
     // lazily from the thread authorities declared later in this startup; a
     // send runs only inside a live turn, well after they exist.
@@ -225,7 +225,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
       // The admitting principal on a local host is the host user, whose Open
       // scope covers every mode. A remote window's narrower Open scope is a
-      // 0013 federation concern and stays out of this seam.
+      // federation concern and stays out of this seam.
       openModes: ["chat", "work", "code"],
     });
     // The sibling-threads tool's host side. It appends only to the reader's

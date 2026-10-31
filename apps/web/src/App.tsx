@@ -2792,7 +2792,7 @@ function LaunchedShell(
    * The host handed the thread off: its document is a Canvas of that thread,
    * so the Canvas tool opens on it beside the transcript, once, like any
    * document a turn wrote. The dock rises only when that thread is the one in
-   * front, because 0079 opens the document without moving focus.
+   * front, because the handoff opens the document without moving focus.
    */
   /** The person asked to see a Canvas drawn in the thread beside that thread. */
   function openCanvasInSidebar(card: CanvasThreadReferenceCard): void {

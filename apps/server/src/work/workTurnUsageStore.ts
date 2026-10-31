@@ -9,7 +9,7 @@ import type { WorkTurnRequestId } from "@octant/contracts";
  * the turn — the goal loop — to read what the provider actually reported.
  * It is deliberately not a database: a restart loses it, and a loop that cannot
  * see spend falls back to time and turn budgets, which are the ceilings
- * ADR 0025 already requires.
+ * the goal loop already requires.
  */
 export class WorkTurnUsageStore {
   readonly #byRequest = new Map<

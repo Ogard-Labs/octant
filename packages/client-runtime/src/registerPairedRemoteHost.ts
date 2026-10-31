@@ -7,7 +7,7 @@ import type { RemotePairingApproval } from "./remotePairingClient";
  *
  * Pairing already stores the device key; the registry holds only non-secret
  * identity and a credential handle so Settings can reconnect, revoke, or
- * remove that host without inventing a second trust path (0013 / 0059).
+ * remove that host without inventing a second trust path.
  */
 export async function registerPairedRemoteHost(input: {
   readonly registry: ClientHostRegistry;

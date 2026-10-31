@@ -3,7 +3,7 @@ import { fieldPaint } from "./field-paint";
 import { cn } from "./utils";
 
 export type TextareaProps = ComponentProps<"textarea"> & {
-  /** Skip the field recipe. The composer prompt is Octant-owned (0038). */
+  /** Skip the field recipe. The composer prompt is Octant-owned. */
   readonly unstyled?: boolean;
 };
 

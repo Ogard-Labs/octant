@@ -10,7 +10,7 @@ import { Schema } from "effect";
  * unconstrained payload keeps history replayable without pretending the
  * feature still exists — nothing consumes what they decode to.
  *
- * Rootless threads were retired by decision 0037. Remote SSH environments and
+ * Rootless threads were retired. Remote SSH environments and
  * the provider-runtime egress records only they emitted were removed with the
  * feature.
  */
