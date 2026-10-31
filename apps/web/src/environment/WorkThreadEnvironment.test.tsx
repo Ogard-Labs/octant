@@ -10,6 +10,7 @@ import {
 } from "@octant/contracts";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { decodeProjectExtraFolder } from "@octant/contracts/projects";
 import { describe, expect, it, vi } from "vitest";
 import { WorkThreadEnvironment } from "./WorkThreadEnvironment";
 
@@ -228,5 +229,47 @@ describe("WorkThreadEnvironment", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Choose an existing folder inside this Project.",
     );
+  });
+
+  it("lists the Project's extra folders from home, and shows nothing when it has none", async () => {
+    const user = userEvent.setup();
+    const withExtras = {
+      ...workProject(),
+      extraFolders: [
+        decodeProjectExtraFolder({
+          canonicalRoot: "/Users/example/Dev/Research",
+          addedBy: { kind: "local-user", actorId: "30000000-0000-4000-8000-000000000102" },
+          addedAt: "2026-07-17T08:00:00.000Z",
+        }),
+      ],
+    } as ProjectSummary;
+    const { unmount } = render(
+      <WorkThreadEnvironment
+        environmentOpen
+        projects={[workProject()]}
+        tab={workTab()}
+        threadClient={threadClient()}
+      >
+        <div />
+      </WorkThreadEnvironment>,
+    );
+    await openEnvironment();
+    expect(screen.queryByRole("button", { name: /^Extra folders/ })).not.toBeInTheDocument();
+    unmount();
+
+    render(
+      <WorkThreadEnvironment
+        environmentOpen
+        projects={[withExtras]}
+        tab={workTab()}
+        threadClient={threadClient()}
+      >
+        <div />
+      </WorkThreadEnvironment>,
+    );
+    await openEnvironment();
+    await user.click(screen.getByRole("button", { name: /^Extra folders/ }));
+
+    expect(screen.getByTitle("/Users/example/Dev/Research")).toHaveTextContent("~/Dev/Research");
   });
 });

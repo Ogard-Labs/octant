@@ -1265,7 +1265,17 @@ export function decodeMessage(
   ) {
     return decodeChildMessage(message, message.parent_tool_use_id);
   }
-  if (message.subagent_type !== undefined || message.task_description !== undefined) {
+  // A subagent's own task frames name its type; they are read below only in
+  // a session with its own subagents on.
+  const ownSubagentTaskFrame =
+    input.nativeSetup?.subagents === true &&
+    message.type === "system" &&
+    typeof message.subtype === "string" &&
+    message.subtype.startsWith("task_");
+  if (
+    (message.subagent_type !== undefined && !ownSubagentTaskFrame) ||
+    message.task_description !== undefined
+  ) {
     throw protocol("Claude returned an unsupported runtime message.");
   }
   if (message.type === "assistant") {
@@ -1426,14 +1436,27 @@ export function decodeMessage(
     let description: string | undefined;
     let summary: string | undefined;
     let usage: ClaudeTaskUsage | undefined;
+    // A session with its own subagents on reports each one's lifecycle as a
+    // task: `task_started` names the agent (`task_type: "local_agent"`,
+    // `subagent_type`, its prompt) and later frames carry the subagent type.
+    // The prompt is the runtime's and is never kept. Workflows stay refused.
+    const subagentTask = (value: Record<string, unknown>) =>
+      input.nativeSetup?.subagents === true &&
+      (value.subagent_type === undefined || typeof value.subagent_type === "string");
     if (message.subtype === "task_started") {
+      const ownSubagent =
+        subagentTask(message) &&
+        (message.task_type === undefined || message.task_type === "local_agent") &&
+        (message.prompt === undefined || typeof message.prompt === "string") &&
+        (message.skip_transcript === undefined || typeof message.skip_transcript === "boolean");
       if (
         typeof message.description !== "string" ||
-        message.subagent_type !== undefined ||
-        message.task_type !== undefined ||
         message.workflow_name !== undefined ||
-        message.prompt !== undefined ||
-        (message.skip_transcript !== undefined && message.skip_transcript !== false)
+        (!ownSubagent &&
+          (message.subagent_type !== undefined ||
+            message.task_type !== undefined ||
+            message.prompt !== undefined ||
+            (message.skip_transcript !== undefined && message.skip_transcript !== false)))
       ) {
         throw protocol("Claude returned an unsupported runtime message.");
       }
@@ -1441,7 +1464,7 @@ export function decodeMessage(
     } else if (message.subtype === "task_progress") {
       if (
         typeof message.description !== "string" ||
-        message.subagent_type !== undefined ||
+        (message.subagent_type !== undefined && !subagentTask(message)) ||
         (message.last_tool_name !== undefined && typeof message.last_tool_name !== "string") ||
         (message.summary !== undefined && typeof message.summary !== "string")
       ) {
@@ -1456,7 +1479,9 @@ export function decodeMessage(
         !TASK_NOTIFICATION_STATUSES.has(message.status) ||
         typeof message.output_file !== "string" ||
         typeof message.summary !== "string" ||
-        (message.skip_transcript !== undefined && message.skip_transcript !== false)
+        (message.skip_transcript !== undefined &&
+          message.skip_transcript !== false &&
+          !(subagentTask(message) && typeof message.skip_transcript === "boolean"))
       ) {
         throw protocol("Claude returned an unsupported runtime message.");
       }
@@ -1471,7 +1496,9 @@ export function decodeMessage(
           (typeof patch.status !== "string" || !TASK_UPDATE_STATUSES.has(patch.status))) ||
         (patch.description !== undefined && typeof patch.description !== "string") ||
         (patch.error !== undefined && typeof patch.error !== "string") ||
-        (patch.is_backgrounded !== undefined && patch.is_backgrounded !== false)
+        (patch.is_backgrounded !== undefined &&
+          patch.is_backgrounded !== false &&
+          !(subagentTask(message) && typeof patch.is_backgrounded === "boolean"))
       ) {
         throw protocol("Claude returned an unsupported runtime message.");
       }

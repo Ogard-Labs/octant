@@ -1,5 +1,9 @@
 import type { CodeOperationExecuteOptions } from "./code/codeOperationService";
 import {
+  refusesTerminalSessionImport,
+  TERMINAL_SESSION_LOCAL_ONLY,
+} from "./terminalSessions/terminalSessionAuthority";
+import {
   NATIVE_ARTIFACTS_LOCAL_ONLY,
   refusesThreadDocumentDelivery,
 } from "./threadDocumentDeliveryAuthority";
@@ -653,6 +657,18 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           ) {
             return failureResponse(
               { category: "unauthorized", message: FULL_ACCESS_LOCAL_ONLY },
+              403,
+              origin,
+            );
+          }
+          if (
+            command !== undefined &&
+            (command.kind === "create-code-thread" ||
+              command.kind === "create-managed-code-thread") &&
+            refusesTerminalSessionImport(request, command)
+          ) {
+            return failureResponse(
+              { category: "unauthorized", message: TERMINAL_SESSION_LOCAL_ONLY },
               403,
               origin,
             );

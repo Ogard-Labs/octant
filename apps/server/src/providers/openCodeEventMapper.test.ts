@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import { adaptBetaOpenCodeEvent } from "./openCodeDriver";
 import {
   mapOpenCodeEvent,
+  openCodeApprovalCall,
   type OpenCodeEvent,
   type OpenCodeEventContext,
 } from "./openCodeEventMapper";
@@ -965,5 +966,40 @@ describe("OpenCode 2.0.22 events", () => {
       "Unsupported provider event.",
     );
     expect(() => adaptAndMap("session.future.event", {})).toThrow("Unsupported provider event.");
+  });
+});
+
+describe("the pending call an OpenCode permission names", () => {
+  it("reads a v2 permission's resources as the paths, command, or address it targets", () => {
+    const edit = openCodeApprovalCall("edit", {
+      id: "permission-2",
+      sessionID: "session-1",
+      action: "edit",
+      resources: ["/Users/dev/.ssh/id_ed25519"],
+    });
+    expect(JSON.parse(edit?.input ?? "{}")).toEqual({ paths: ["/Users/dev/.ssh/id_ed25519"] });
+    const bash = openCodeApprovalCall("bash", { action: "bash", resources: ["git status"] });
+    expect(JSON.parse(bash?.input ?? "{}")).toEqual({ command: "git status" });
+    const fetch = openCodeApprovalCall("webfetch", {
+      action: "webfetch",
+      resources: ["https://example.net/a"],
+    });
+    expect(JSON.parse(fetch?.input ?? "{}")).toEqual({ url: "https://example.net/a" });
+    // Several commands are not one command a rule could read, so none is named.
+    const many = openCodeApprovalCall("bash", { action: "bash", resources: ["ls", "rm -rf x"] });
+    expect(JSON.parse(many?.input ?? "{}")).toEqual({ patterns: ["ls", "rm -rf x"] });
+  });
+
+  it("reads the command from its metadata and patterns, without the ids or other metadata", () => {
+    const call = openCodeApprovalCall("bash", {
+      id: "permission-1",
+      sessionID: "session-1",
+      patterns: ["bun run test"],
+      metadata: { command: "bun run test", output: "must-not-cross" },
+    });
+    expect(call).toEqual({
+      tool: "bash",
+      input: JSON.stringify({ command: "bun run test", patterns: ["bun run test"] }),
+    });
   });
 });
