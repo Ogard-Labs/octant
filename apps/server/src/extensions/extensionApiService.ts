@@ -40,6 +40,12 @@ import {
   outsideProviderDriverRefusalMessage,
 } from "./outsideProviderDriverPackage";
 import { StandaloneSkillService } from "./standaloneSkillService";
+import {
+  npmSourceRefusalCategory,
+  npmSourceRefusalMessage,
+  type NpmPackageSourcePort,
+} from "./npmPackageSource";
+import { compareNpmVersions } from "./npmVersionRange";
 
 export interface ExtensionPackageResolverPort {
   resolve(
@@ -72,6 +78,7 @@ export class ExtensionApiService {
   readonly #resolver: ExtensionPackageResolverPort;
   readonly #skills: StandaloneSkillService | undefined;
   readonly #activation: ExtensionActivationServicePort | undefined;
+  readonly #npm: NpmPackageSourcePort | undefined;
   readonly #onStateChanged:
     | ((snapshot: ExtensionSnapshot, command: ExtensionCommand) => void | Promise<void>)
     | undefined;
@@ -88,6 +95,8 @@ export class ExtensionApiService {
     readonly resolver: ExtensionPackageResolverPort;
     readonly skills?: StandaloneSkillService;
     readonly activation?: ExtensionActivationServicePort;
+    /** Looks packages up on an npm registry; without it the npm commands are unavailable. */
+    readonly npmSource?: NpmPackageSourcePort;
     /** Told which command changed the state, so its consequences can follow it. */
     readonly onStateChanged?: (
       snapshot: ExtensionSnapshot,
@@ -103,6 +112,7 @@ export class ExtensionApiService {
     this.#resolver = options.resolver;
     this.#skills = options.skills;
     this.#activation = options.activation;
+    this.#npm = options.npmSource;
     this.#onStateChanged = options.onStateChanged;
     this.#userAddedMcpServers = options.userAddedMcpServers;
   }
@@ -158,6 +168,53 @@ export class ExtensionApiService {
             signal,
           );
           return { kind: "package-preview", preview: previewFor(inspection) };
+        }
+        case "resolve-npm-package": {
+          if (this.#npm === undefined) return unsupportedCommand();
+          const resolution = await this.#npm.resolve(
+            {
+              packageName: command.packageName,
+              ...(command.range === undefined ? {} : { range: command.range }),
+            },
+            signal,
+          );
+          if (resolution.status === "refused") {
+            return failure(
+              npmSourceRefusalCategory(resolution.reason),
+              npmSourceRefusalMessage(resolution),
+            );
+          }
+          return {
+            kind: "package-inspected",
+            preview: previewFor(this.#inspectResolved(resolution.resolved)),
+          };
+        }
+        case "check-npm-update": {
+          if (this.#npm === undefined) return unsupportedCommand();
+          const installed = this.#lifecycle
+            .snapshot()
+            .packages.find((candidate) => candidate.extensionId === command.extensionId);
+          if (installed?.npm === undefined) {
+            return failure("invalid", "This package did not come from an npm registry.");
+          }
+          const latest = await this.#npm.latest(
+            { packageName: installed.npm.packageName, registry: installed.npm.registry },
+            signal,
+          );
+          if (latest.status === "refused") {
+            return failure(
+              npmSourceRefusalCategory(latest.reason),
+              npmSourceRefusalMessage(latest),
+            );
+          }
+          return {
+            kind: "npm-update-checked",
+            extensionId: command.extensionId,
+            installedVersion: installed.version,
+            ...(compareNpmVersions(latest.version, installed.version) > 0
+              ? { available: latest.version as never }
+              : {}),
+          };
         }
         case "install-package": {
           const inspection = this.#inspections.get(commandKey(command));
@@ -276,7 +333,10 @@ export class ExtensionApiService {
     command: Extract<ExtensionCommand, { readonly kind: "inspect-package" }>,
     signal?: AbortSignal,
   ): Promise<InspectedExtensionPackage> {
-    const resolved = await this.#resolver.resolve(command, signal);
+    return this.#inspectResolved(await this.#resolver.resolve(command, signal));
+  }
+
+  #inspectResolved(resolved: ResolvedExtensionPackage): InspectedExtensionPackage {
     const inspection = inspectExtensionPackage({
       ...resolved,
       ...(resolved.expectedDigest === undefined ? {} : { expectedDigest: resolved.expectedDigest }),

@@ -18,6 +18,7 @@ const LOCAL_ONLY_PROBES = [
   { path: "/api/host-control/export", method: "GET" },
   { path: "/api/host-control/lifecycle", method: "POST" },
   { path: "/api/extensions/lifecycle", method: "POST" },
+  { path: "/api/extensions/npm", method: "POST" },
   { path: "/api/extensions/tool-grants", method: "POST" },
   { path: "/api/desktop/window-authorities", method: "GET" },
   { path: "/api/desktop/provider-credentials/set", method: "POST" },

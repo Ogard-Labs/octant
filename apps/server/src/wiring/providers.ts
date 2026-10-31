@@ -157,6 +157,8 @@ import { ShellSettingsStandaloneSkillActivationStore } from "../extensions/stand
 import { createCompositeSkillMarketplace } from "../extensions/compositeSkillMarketplace";
 import { CodexPluginPackageResolver } from "../extensions/codexPluginResolver";
 import { NpmAgentPluginMarketplace } from "../extensions/npmAgentPluginMarketplace";
+import { NpmPackageSource } from "../extensions/npmPackageSource";
+import { readUserNpmConfig } from "../extensions/npmRegistryConfig";
 import { createDefaultCodexPluginPackageSources } from "../extensions/curatedBuildIosAppsCatalog";
 import { AgentPluginMcpSessionManager } from "../extensions/agentPluginMcpSessionManager";
 import { LocalPluginFolderRegistry } from "../extensions/localPluginFolderRegistry";
@@ -873,6 +875,18 @@ export function wireProviders(deps: ProvidersDependencies) {
       lifecycle: extensionLifecycleService,
       resolver: extensionPackageResolver,
       skills: standaloneSkillService,
+      // Packages from the npm registry the person's own npm settings name.
+      // The registry address is read from those settings at each lookup;
+      // nothing else in them is read.
+      npmSource: new NpmPackageSource({
+        appVersion: version,
+        platform: process.platform,
+        isMarketplaceFetchAllowed,
+        readRegistryConfig: async () => ({
+          env: process.env,
+          userConfigText: await readUserNpmConfig(homedir(), process.env),
+        }),
+      }),
       activation: {
         resolve: (snapshot, query) =>
           agentPluginMcpSessionManager.projectEffectiveState(

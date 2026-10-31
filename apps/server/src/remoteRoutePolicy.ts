@@ -73,6 +73,7 @@ const LOCAL_ONLY_PREFIXES = [
   "/api/shell",
   "/api/folders",
   "/api/extensions/lifecycle",
+  "/api/extensions/npm",
   "/api/extensions/skills",
   "/api/extensions/tool-grants",
   "/api/providers/discovery",
