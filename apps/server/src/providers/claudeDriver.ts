@@ -1,4 +1,5 @@
 import type { ManagedToolAnswer } from "./managedMcpTools";
+import { providerApprovalCall } from "./providerApprovalCall";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -21,6 +22,7 @@ import {
   type ProviderSessionId,
   type ThreadPublishedSnapshot,
   type UtcTimestamp,
+  type ProviderApprovalCall,
 } from "@octant/contracts";
 import type {
   ProviderAcquireInput,
@@ -443,6 +445,8 @@ interface ClaudePreToolGrant {
 interface ClaudePendingApprovalState extends ClaudePendingApproval {
   readonly decision: DeferredValue<ClaudeToolDecision>;
   readonly reuseKey: string;
+  /** The pending call for an automatic reviewer; never published. */
+  readonly call?: ProviderApprovalCall | undefined;
 }
 
 interface ClaudePendingQuestionState extends ClaudePendingQuestion {
@@ -1826,6 +1830,10 @@ function makeConnection(
             ...mapped.request,
             decision: deferred<ClaudeToolDecision>(),
             reuseKey,
+            call: providerApprovalCall({
+              tool: mapped.request.toolName,
+              arguments: request.input,
+            }),
           };
           activeState.pendingApprovals.set(pending.requestId, pending);
           publish(pending.event);
@@ -2497,6 +2505,8 @@ function makeConnection(
           }
           await release(state);
         }),
+      approvalCall: ({ sessionId, requestId }) =>
+        sessions.get(sessionId)?.pendingApprovals.get(requestId)?.call,
       answerApproval: (answer) =>
         Effect.suspend(() => {
           const state = sessions.get(answer.sessionId);
@@ -2522,7 +2532,11 @@ function makeConnection(
               }
               // A publish is never reused: the same input republishes the
               // file as it is now, which the person has not seen.
-              if (persistence === "current-session" && pending.toolName !== CLAUDE_ARTIFACT_TOOL) {
+              if (
+                answer.scope !== "once" &&
+                persistence === "current-session" &&
+                pending.toolName !== CLAUDE_ARTIFACT_TOOL
+              ) {
                 state.approvalReuse.add(pending.reuseKey);
               }
               pending.decision.resolve({ behavior: "allow" });

@@ -1077,10 +1077,19 @@ describe("Claude execution policy", () => {
       callback.then((decision) => ({ kind: "decision" as const, decision })),
     ]);
     expect(first.kind).toBe("approval");
+    // The pending call reaches an automatic reviewer through the connection,
+    // never on the event, and is gone once the request is answered.
+    expect(JSON.stringify(first)).not.toContain('"call"');
+    expect(acquired.connection.approvalCall?.({ sessionId, requestId: "request-1" })).toMatchObject(
+      { tool: "Edit", input: expect.stringContaining('"file_path"') },
+    );
     await Effect.runPromise(
       acquired.connection.answerApproval({ sessionId, requestId: "request-1", approved: true }),
     );
     await expect(callback).resolves.toEqual({ behavior: "allow" });
+    expect(
+      acquired.connection.approvalCall?.({ sessionId, requestId: "request-1" }),
+    ).toBeUndefined();
     await acquired.close();
   });
 
@@ -1235,6 +1244,60 @@ describe("Claude execution policy", () => {
       acquired.connection.answerApproval({ sessionId, requestId: "request-1", approved: false }),
     );
     await expect(callback).resolves.toMatchObject({ behavior: "deny" });
+    await acquired.close();
+  });
+
+  it("asks again for the same call after a one-call answer, even when the person reuses approvals for the session", async () => {
+    const f = harness("subscription", "current-session");
+    const acquired = await acquire(f.driver);
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const open = f.opens[0]!;
+    const signal = new AbortController().signal;
+    const input = { file_path: `${projectRoot}/src/app.ts`, old_string: "a", new_string: "b" };
+    const nextApproval = () =>
+      Effect.runPromise(
+        Stream.runHead(
+          Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+            Stream.filter(
+              (event) => event.sessionId === sessionId && event.kind === "approval-request",
+            ),
+          ),
+        ),
+      );
+    const ask = async (toolUseId: string) => {
+      const approval = nextApproval();
+      await Promise.resolve();
+      await open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Edit",
+        input,
+        toolUseId,
+        signal,
+      });
+      const callback = open.canUseTool({ toolName: "Edit", input, toolUseId, signal });
+      const first = await Promise.race([
+        approval.then((result) => ({ kind: "event" as const, result })),
+        callback.then((decision) => ({ kind: "decision" as const, decision })),
+      ]);
+      return { first, callback };
+    };
+    const firstCall = await ask("edit-once");
+    expect(firstCall.first.kind).toBe("event");
+    await Effect.runPromise(
+      acquired.connection.answerApproval({
+        sessionId,
+        requestId: "request-1",
+        approved: true,
+        scope: "once",
+      }),
+    );
+    await expect(firstCall.callback).resolves.toEqual({ behavior: "allow" });
+    // The same call again is asked again: a one-call answer is never reused.
+    const secondCall = await ask("edit-again");
+    expect(secondCall.first.kind).toBe("event");
     await acquired.close();
   });
 

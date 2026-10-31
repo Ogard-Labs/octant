@@ -13,6 +13,7 @@ import {
   type ProviderSessionId,
   type ProviderToolAnswer,
   type ProviderToolDefinition,
+  type ProviderApprovalCall,
 } from "@octant/contracts";
 import { decidesCodeEffectsByApproval } from "@octant/domain";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
@@ -31,6 +32,7 @@ import {
 } from "./piProcess";
 import { PiRpcFailure, type PiRpcEvent, type PiRpcResponse } from "./piRpcClient";
 import { outputStopReason } from "./outputStopReason";
+import { providerApprovalCall } from "./providerApprovalCall";
 import { versionAtLeast } from "./acpProcess";
 import {
   createPiManagedToolsBridge,
@@ -84,6 +86,8 @@ interface ResumeIdentity {
 interface PendingApproval {
   readonly uiId: string;
   readonly toolCallId: string;
+  /** The pending call, for an automatic reviewer; never published. */
+  readonly call?: ProviderApprovalCall;
 }
 
 interface PiRuntime {
@@ -113,7 +117,10 @@ interface SessionState {
   readonly runtime: PiRuntime;
   completed: boolean;
   readonly approvals: Map<string, PendingApproval>;
-  readonly tools: Map<string, { terminal: boolean; answered: boolean; name: string }>;
+  readonly tools: Map<
+    string,
+    { terminal: boolean; answered: boolean; name: string; readonly args?: unknown }
+  >;
   readonly toolNames: ReadonlySet<string>;
   readonly pendingTools: Map<string, PendingPiTool>;
   readonly managedTools?: PiManagedToolsBridge;
@@ -625,7 +632,12 @@ function makeConnection(
         if (toolCallId === undefined || toolName === undefined || state.tools.has(toolCallId)) {
           return protocolFailure(state, "Pi tool start was invalid.");
         }
-        state.tools.set(toolCallId, { terminal: false, answered: false, name: toolName });
+        state.tools.set(toolCallId, {
+          terminal: false,
+          answered: false,
+          name: toolName,
+          ...(event.args === undefined ? {} : { args: event.args }),
+        });
         rememberToolCall(state.sessionId, toolCallId, toolName);
         emit(state, { kind: "tool-start", toolCallId, toolName });
         return;
@@ -685,7 +697,12 @@ function makeConnection(
           void state.client.respondToUi(uiId, { confirmed: false });
           return protocolFailure(state, "Pi approval identity was repeated.");
         }
-        state.approvals.set(requestId, { uiId, toolCallId });
+        const call = providerApprovalCall({ tool: toolName, arguments: tool.args });
+        state.approvals.set(requestId, {
+          uiId,
+          toolCallId,
+          ...(call === undefined ? {} : { call }),
+        });
         emit(state, {
           kind: "approval-request",
           requestId,
@@ -1170,6 +1187,8 @@ function makeConnection(
             }),
           ),
         ),
+      approvalCall: ({ sessionId, requestId }) =>
+        sessions.get(sessionId)?.approvals.get(requestId)?.call,
       answerApproval: (input) =>
         stateFor(input.sessionId).pipe(
           Effect.flatMap((state) => {
