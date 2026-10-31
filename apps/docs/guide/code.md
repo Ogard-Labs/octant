@@ -219,7 +219,8 @@ Delivery, Agents, Browser, Review, iOS Simulator, and Android emulator stay in
 the dock.
 
 A Code thread's agent can also propose a scheduled routine, confirmed by you
-in the thread and listed under Routines here; see
+in the thread, and you can create one yourself with **New routine** under
+Routines here, which lists all of this Project's routines; see
 [Routines from a thread](/guide/work#routines-from-a-thread). A Code routine
 runs in this thread's checkout, asks before effects, and cannot be proposed
 from Plan. A Code thread can also [follow up later](/guide/work#follow-up-later)

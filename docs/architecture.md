@@ -1570,12 +1570,15 @@ the thread it came from.
   authority. Chat is never offered the tool, a turn that runs as the host (a
   routine's run, or a usage-limit resume) is refused it as
   `automation-recursion`, and a Code turn in Plan is
-  refused it because Plan is read-only. A proposal creates nothing. The host
-  holds it for ten minutes as a confirmation card in the thread, listed and
+  refused it because Plan is read-only. A proposal creates nothing, whatever
+  the thread's posture: a remembered Full access does not let an agent create
+  or confirm a routine, and the routine it leads to is approval-gated anyway.
+  The host holds it for ten minutes as a suggestion chip at the foot of the
+  thread, listed and
   answerable only by the window or paired device whose turn raised it; with
   no such window open, or once it goes away, the proposal is withdrawn
-  unanswered. Confirm is the
-  `POST /api/automations/proposals/decide` route, under the same transport
+  unanswered. The chip's one click confirms and dismissing it declines.
+  Confirm is the `POST /api/automations/proposals/decide` route, under the same transport
   principal and Project check as `commands`. On confirm the host builds the
   definition from the thread's live facts (Project version and binding, the
   Code thread's own available checkout, the thread's provider and model, and
@@ -1584,7 +1587,8 @@ the thread it came from.
   confirming principal, so every ceiling and revalidation above applies
   unchanged: filesystem and tools only, no network or subagents, Work without
   shell or Git, Code asking first, and session-only permission kept
-  session-only. A thread that left its Project, an archived thread, a
+  session-only in both the authority receipt and the execution profile each
+  run's thread is created from. A thread that left its Project, an archived thread, a
   Plan-posture Code thread, or an unavailable checkout refuses at confirm and
   creates nothing. The first answer takes the proposal off the list, so a
   retry cannot create a second routine. The call waits for the answer and
@@ -1593,8 +1597,18 @@ the thread it came from.
   the matrix under [security and authority](#security-and-authority): a
   provider or model without it is not offered the tool, and its degraded form
   is the person creating the routine in Automation Center.
-- **Origin thread.** A routine confirmed from a proposal records the proposing
-  thread as `originThreadId` on its journaled definition. Only the host sets
+- **Created from a thread by a person.** The person may also create a routine
+  from a Work or Code thread's Environment with
+  `POST /api/automations/thread-routines` (`create-thread-routine`: thread,
+  name, prompt, trigger, missed-run policy). The host builds the definition
+  from that thread's live facts exactly as for a confirmed proposal, so its
+  Project, mode, binding, and approval-gated profile are the thread's and the
+  body cannot name wider ones; a thread outside the named Project, Chat, or a
+  Plan-posture Code thread refuses. It is created as the requesting principal
+  through the same create command.
+- **Origin thread.** A routine confirmed from a proposal, or created from a
+  thread by a person, records that thread as `originThreadId` on its journaled
+  definition. Only the host sets
   it, never a command body, and later revisions keep it, so the projection
   rebuilds the link on replay. It links the routine and the thread in the UI
   and grants nothing.
@@ -1609,7 +1623,7 @@ the thread it came from.
   the evidence. It is made two ways, both through the create path above as a
   person's principal: the agent proposes it with `octant_propose_routine`
   (trigger `follow-up`: an instant and a prompt) and the person confirms the
-  card, or the person sets it up from the thread with
+  chip, or the person sets it up from the thread with
   `POST /api/automations/follow-ups` (`schedule-follow-up`: thread, time,
   prompt), which builds the definition from the thread's live facts exactly as
   a confirmed proposal does. Chat threads cannot have one, and the proposal

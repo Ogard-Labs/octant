@@ -1134,6 +1134,23 @@ export const AutomationFollowUpRequest = Schema.Union(
 );
 export type AutomationFollowUpRequest = typeof AutomationFollowUpRequest.Type;
 
+/**
+ * A person creating a routine from a Work or Code thread's Environment. Like
+ * a confirmed proposal, the host builds it from the thread's own facts; the
+ * body names only the thread and what the person chose.
+ */
+export const AutomationThreadRoutineRequest = Schema.Struct({
+  kind: Schema.Literal("create-thread-routine"),
+  threadId: AutomationThreadId,
+  mode: AutomationMode,
+  projectId: ProjectId,
+  displayName: boundedText(MAX_AUTOMATION_DISPLAY_NAME_LENGTH),
+  taskPrompt: boundedText(MAX_AUTOMATION_TASK_PROMPT_LENGTH),
+  trigger: AutomationTrigger,
+  missedRunPolicy: AutomationMissedRunPolicy,
+}).annotations(strict);
+export type AutomationThreadRoutineRequest = typeof AutomationThreadRoutineRequest.Type;
+
 export const AutomationQuery = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("list-automations"),
@@ -1452,3 +1469,6 @@ export const decodeRoutineProposalDecisionResult = Schema.decodeUnknownSync(
   RoutineProposalDecisionResult,
 );
 export const decodeAutomationFollowUpRequest = Schema.decodeUnknownSync(AutomationFollowUpRequest);
+export const decodeAutomationThreadRoutineRequest = Schema.decodeUnknownSync(
+  AutomationThreadRoutineRequest,
+);

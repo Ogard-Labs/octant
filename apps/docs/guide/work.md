@@ -163,16 +163,27 @@ that Project and thread. Chat has no board.
 ## Routines from a thread
 
 Ask the agent to do something later or on a schedule ("every Monday at 9,
-summarize last week's changes") and it can propose a routine. A card in the
-thread shows exactly what would run and when: the name, the schedule and time
-zone, the first run, what happens to runs missed while the computer is off,
-and the prompt each run starts with. Nothing exists until you choose **Create
-routine**; **Decline**, or no answer within ten minutes, creates nothing.
+summarize last week's changes") and it can propose a routine. It shows as a
+suggestion at the foot of the thread with exactly what would run and when: the
+name, the schedule and time zone, the first run, what happens to runs missed
+while the computer is off, and the prompt each run starts with. Nothing exists
+until you click **Create routine**; dismissing it, or no answer within ten
+minutes, creates nothing. The agent can never create one on its own, even in a
+thread with Full access.
+
+You can also create one yourself: open **Routines** in the thread's
+Environment and choose **New routine**. Give it a name, the task for each run,
+a schedule (once, every so many minutes, or weekly at a time in a time zone),
+and what to do with runs missed while the computer is off. It belongs to the
+thread's Project and mode; you do not pick them.
 
 A routine made this way belongs to the thread's Project. Each run starts a new
 thread there that asks before it changes anything, and a Work run has no shell
 or Git, whatever the proposal said. It appears under Routines in the thread's
-Environment, where you can pause, resume, or open it in Automation Center. A
+Environment. That list shows every active and paused routine of the
+Project, not only this thread's: this thread's follow-ups first, then the
+routines made from this thread, then the rest. Each can be paused, resumed, or
+opened in Automation Center. Past five, choose **Show all**. A
 routine's own run cannot propose more routines. A provider that cannot use
 Octant's tools does not get this; create the routine in Automation Center
 instead.
@@ -182,10 +193,10 @@ instead.
 A follow-up is a one-time turn sent back into the same thread at a time you
 pick, so the agent picks up the conversation where it left off ("tomorrow
 morning, check whether the reply arrived and summarise it"). Set one up from
-the thread's Environment with **Follow up later**: choose **In 1 hour**,
+the thread's Environment with **Follow up later** under Routines: choose **In 1 hour**,
 **Tomorrow at 9:00**, or **Pick a time**, and say what to check. The agent can
-also propose one; it shows as a card, and nothing is scheduled until you
-choose **Schedule follow-up**.
+also propose one; it shows as a suggestion, and nothing is scheduled until
+you click **Schedule follow-up**.
 
 A pending follow-up is listed in Environment ("Follows up tomorrow at 9:00")
 with **Change time** and **Cancel**. When it runs, the transcript marks the

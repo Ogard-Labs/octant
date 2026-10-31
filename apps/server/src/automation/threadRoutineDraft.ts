@@ -155,7 +155,9 @@ export function buildThreadRoutineDraft(
           providerInstanceId: thread.providerInstanceId,
           modelId: thread.modelId,
           executionPolicy: profile.defaultExecutionPolicy,
-          permissionPersistence: profile.defaultPermissionPersistence,
+          // Each run's thread takes its persistence from here, so a
+          // session-only thread's narrower answer must reach it too.
+          permissionPersistence: authority.permissionPersistence,
         },
         authorityProfile: {
           profileId: profile.id,

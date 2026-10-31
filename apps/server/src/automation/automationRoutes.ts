@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   decodeAutomationCommandResult,
   decodeAutomationFollowUpRequest,
+  decodeAutomationThreadRoutineRequest,
   decodeAutomationTrigger,
   decodeRoutineProposalDecision,
   decodeRoutineProposalId,
@@ -21,7 +22,9 @@ import {
   type HostId,
   type ProjectId,
   type RoutineProposal,
+  type UtcTimestamp,
 } from "@octant/contracts";
+import { resolveNextAutomationOccurrence } from "@octant/domain";
 import { ClientPrincipalError } from "../clientPrincipal";
 import { resolvePrincipalRouteContext, type PrincipalRouteContext } from "../principalRouteContext";
 import type { ProjectService } from "../projectService";
@@ -161,6 +164,9 @@ export function createAutomationRouteHandler(dependencies: AutomationRouteDepend
       }
       if (route === "follow-ups" && request.method === "POST") {
         return await handleFollowUp(dependencies, context, body, origin);
+      }
+      if (route === "thread-routines" && request.method === "POST") {
+        return await handleThreadRoutine(dependencies, context, body, origin);
       }
       return failureResponse("Automation request is invalid.", 400, origin);
     } catch {
@@ -480,6 +486,53 @@ async function createThreadRoutine(
     } as AutomationCommand,
     { originThreadId: proposal.threadId },
   );
+}
+
+/**
+ * A person creating a routine from a thread's Environment: the same draft
+ * from the thread's live facts and the same create as a confirmed proposal,
+ * so its Project, mode, and authority are the thread's, never the body's.
+ */
+async function handleThreadRoutine(
+  dependencies: AutomationRouteDependencies,
+  context: PrincipalRouteContext,
+  body: unknown,
+  origin: string | null,
+): Promise<Response> {
+  let request;
+  try {
+    request = decodeAutomationThreadRoutineRequest(body);
+  } catch {
+    return failureResponse("Routine request is invalid.", 400, origin);
+  }
+  const now = new Date((dependencies.now ?? Date.now)()).toISOString() as UtcTimestamp;
+  const firstRunAt = resolveNextAutomationOccurrence({
+    trigger: request.trigger,
+    after: now,
+    inclusive: false,
+  });
+  if (firstRunAt === undefined) {
+    return jsonResponse(
+      decodeAutomationCommandResult(
+        commandFailure("invalid", "That schedule never runs after now."),
+      ),
+      200,
+      origin,
+    );
+  }
+  const result = await createThreadRoutine(dependencies, context, {
+    proposalId: decodeRoutineProposalId((dependencies.uuid ?? randomUUID)()),
+    threadId: request.threadId,
+    mode: request.mode,
+    projectId: request.projectId,
+    displayName: request.displayName,
+    taskPrompt: request.taskPrompt,
+    trigger: request.trigger,
+    missedRunPolicy: request.missedRunPolicy,
+    firstRunAt,
+    requestedAt: now,
+  });
+  return jsonResponse(decodeAutomationCommandResult(result), 200, origin);
 }
 
 /** The plain name a follow-up a person set up from the thread goes by. */

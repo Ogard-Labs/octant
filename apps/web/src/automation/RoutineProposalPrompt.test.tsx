@@ -48,29 +48,31 @@ describe("RoutineProposalPrompt", () => {
   it("shows the routine's name, schedule, and prompt for this thread", async () => {
     renderPrompt(client([proposal()]));
 
-    const card = await screen.findByRole("group", { name: "Routine proposal" });
-    expect(card).toHaveTextContent("Create the routine “Friday digest”?");
+    const card = await screen.findByRole("article", { name: "Routine proposal" });
+    expect(card).toHaveTextContent("Friday digest");
     expect(card).toHaveTextContent("(UTC)");
     expect(card).toHaveTextContent("Summarize this week's changes.");
   });
 
-  it("creates the routine when the person confirms", async () => {
+  it("creates the routine in one click on the chip", async () => {
     const fake = client([proposal()]);
     renderPrompt(fake);
 
     await userEvent.click(await screen.findByRole("button", { name: "Create routine" }));
 
     expect(fake.decideProposal).toHaveBeenCalledWith({ proposalId, decision: "confirm" });
-    await waitFor(() => expect(screen.queryByRole("group")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("article")).not.toBeInTheDocument());
   });
 
-  it("declines the routine when the person declines", async () => {
+  it("declines and creates nothing when the person dismisses the chip", async () => {
     const fake = client([proposal()]);
     renderPrompt(fake);
 
-    await userEvent.click(await screen.findByRole("button", { name: "Decline" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Dismiss Friday digest" }));
 
+    expect(fake.decideProposal).toHaveBeenCalledTimes(1);
     expect(fake.decideProposal).toHaveBeenCalledWith({ proposalId, decision: "decline" });
+    await waitFor(() => expect(screen.queryByRole("article")).not.toBeInTheDocument());
   });
 
   it("says a follow-up goes back into this thread, and schedules it only when confirmed", async () => {
@@ -85,8 +87,9 @@ describe("RoutineProposalPrompt", () => {
     ]);
     renderPrompt(fake);
 
-    const card = await screen.findByRole("group", { name: "Follow-up proposal" });
-    expect(card).toHaveTextContent("Follow up in this thread: “Check for the reply”?");
+    const card = await screen.findByRole("article", { name: "Follow-up proposal" });
+    expect(card).toHaveTextContent("Follow-up here");
+    expect(card).toHaveTextContent("Check for the reply");
     expect(card).toHaveTextContent("new turn in this thread");
     expect(fake.decideProposal).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "Schedule follow-up" }));

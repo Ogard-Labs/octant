@@ -7,8 +7,10 @@ import {
 } from "../polling/ThreadActivityRevisions";
 import { samePollingData } from "../polling/samePollingData";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
-import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
-import { OctantButton } from "../ui/base/OctantButton";
+import { X } from "lucide-react";
+import "../followUps/follow-up-suggestions.css";
+import { OctantAlert } from "../ui/base/OctantAlert";
+import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import {
   automationMissedRunPolicyLabel,
   automationModeLabel,
@@ -20,9 +22,11 @@ const ACTIVE_PROPOSAL_POLL_MS = 500;
 const IDLE_PROPOSAL_POLL_MS = 5_000;
 
 /**
- * A routine this thread's agent proposed, waiting on the host for the person.
- * The card says exactly what would run and when; nothing exists until Create
- * routine, which the host performs as this window. The host lists only this
+ * A routine this thread's agent proposed, waiting on the host for the person,
+ * as a suggestion chip at the foot of the thread like the reply's suggested
+ * tasks. It says exactly what would run and when; nothing exists until its one
+ * click, which the host performs as this window. Dismissing it declines, so
+ * the agent hears no and nothing is created. The host lists only this
  * window's proposals; the open thread's are shown, oldest first.
  */
 export function RoutineProposalPrompt(props: {
@@ -93,44 +97,47 @@ export function RoutineProposalPrompt(props: {
     pending.trigger.kind === "weekly-local"
       ? `${routineScheduleLabel(pending.trigger)} (${pending.trigger.timeZone})`
       : routineScheduleLabel(pending.trigger);
+  const label = followUp ? "Follow-up proposal" : "Routine proposal";
   return (
-    <OctantApprovalCard
-      actions={
-        <>
+    <section aria-label="Suggested by the agent" className={`follow-up-cards ${props.className}`}>
+      <article aria-label={label} className="follow-up-card">
+        <div className="follow-up-card__head">
+          <span className="follow-up-card__kind">
+            {followUp ? "Follow-up here · suggested" : "Routine · suggested"}
+          </span>
+          <OctantIconButton
+            disabled={busy}
+            label={`Dismiss ${pending.displayName}`}
+            onClick={() => void decide("decline")}
+            size="icon-xs"
+            type="button"
+          >
+            <X aria-hidden="true" size={12} />
+          </OctantIconButton>
+        </div>
+        <p className="follow-up-card__title">{pending.displayName}</p>
+        <p className="follow-up-card__summary">
+          {followUp
+            ? `Once, ${formatAutomationInstant(pending.firstRunAt)}. It sends this prompt as a new turn in this thread, asks before it changes anything, and is skipped if the thread is busy, done, or archived by then.`
+            : `${schedule} · First run ${formatAutomationInstant(pending.firstRunAt)} · ${automationMissedRunPolicyLabel(pending.missedRunPolicy)}. Each run starts a new ${automationModeLabel(pending.mode)} thread in this Project with this prompt, and asks before it changes anything.`}
+        </p>
+        <p className="follow-up-card__prompt">{pending.taskPrompt}</p>
+        <div className="follow-up-card__actions">
           <OctantButton
             disabled={busy}
             onClick={() => void decide("confirm")}
-            size="sm"
+            size="xs"
             type="button"
           >
             {followUp ? "Schedule follow-up" : "Create routine"}
           </OctantButton>
-          <OctantButton
-            disabled={busy}
-            onClick={() => void decide("decline")}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            Decline
-          </OctantButton>
-        </>
-      }
-      className={props.className}
-      detail={
-        followUp
-          ? `Once, ${formatAutomationInstant(pending.firstRunAt)}. It sends this prompt as a new turn in this thread, asks before it changes anything, and is skipped if the thread is busy, done, or archived by then.`
-          : `${schedule} · First run ${formatAutomationInstant(pending.firstRunAt)} · ${automationMissedRunPolicyLabel(pending.missedRunPolicy)}. Each run starts a new ${automationModeLabel(pending.mode)} thread in this Project with this prompt, and asks before it changes anything.`
-      }
-      error={message}
-      label={followUp ? "Follow-up proposal" : "Routine proposal"}
-      summary={
-        followUp
-          ? `Follow up in this thread: “${pending.displayName}”?`
-          : `Create the routine “${pending.displayName}”?`
-      }
-    >
-      <code className="approval-row__code">{pending.taskPrompt}</code>
-    </OctantApprovalCard>
+        </div>
+      </article>
+      {message === undefined ? null : (
+        <OctantAlert className="follow-up-cards__error" tone="danger">
+          {message}
+        </OctantAlert>
+      )}
+    </section>
   );
 }

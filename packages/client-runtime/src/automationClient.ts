@@ -8,6 +8,7 @@ import {
   AutomationQueryResponse,
   decodeHostAnswer,
   type AutomationFollowUpRequest,
+  type AutomationThreadRoutineRequest,
   type RoutineProposal,
   type RoutineProposalDecision,
   RoutineProposalDecisionResult,
@@ -63,6 +64,14 @@ export interface AutomationClient {
    */
   followUp(
     request: AutomationFollowUpRequest,
+    signal?: AbortSignal,
+  ): Promise<AutomationCommandResult>;
+  /**
+   * Create a routine from a Work or Code thread, as this window. The host
+   * takes the Project, mode, and authority from the thread itself.
+   */
+  createThreadRoutine(
+    request: AutomationThreadRoutineRequest,
     signal?: AbortSignal,
   ): Promise<AutomationCommandResult>;
   /** Routines this window's thread agents proposed, waiting for the person. */
@@ -162,6 +171,21 @@ export function createAutomationClient(options: AutomationClientOptions): Automa
           method: "POST",
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(followUpRequest),
+        },
+        decodeCommandResult,
+        1,
+        signal,
+      );
+    },
+    createThreadRoutine(routineRequest, signal) {
+      // One attempt: a replayed create would make a second routine.
+      return request(
+        options.fetch,
+        new URL("/api/automations/thread-routines", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(routineRequest),
         },
         decodeCommandResult,
         1,

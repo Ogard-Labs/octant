@@ -339,6 +339,11 @@ describe("routine proposals from a thread", () => {
       executionPolicy: "approval-gated",
       permissionPersistence: "current-session",
     });
+    // Each run's thread is created from the execution profile, not the receipt.
+    expect(answer.automation.executionProfile).toMatchObject({
+      executionPolicy: "approval-gated",
+      permissionPersistence: "current-session",
+    });
   });
 
   it("creates nothing on decline and tells the agent it was declined", async () => {
@@ -575,5 +580,86 @@ describe("one-time follow-ups in the same thread", () => {
         definition: draft,
       }),
     ).toMatchObject({ kind: "automation-command-failed" });
+  });
+});
+
+async function threadRoutines(
+  handler: (request: Request) => Promise<Response | undefined>,
+  body: unknown,
+  key = capability,
+) {
+  const response = await handler(
+    new Request("http://127.0.0.1/api/automations/thread-routines", {
+      method: "POST",
+      headers: { "x-octant-window-capability": key, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
+  return { status: response?.status, body: await response?.json() };
+}
+
+const manualRoutine = {
+  kind: "create-thread-routine",
+  threadId: THREAD,
+  projectId: PROJECT,
+  displayName: "Morning check",
+  taskPrompt: "Summarise what changed overnight.",
+  trigger: {
+    kind: "weekly-local",
+    weekdays: [1, 2, 3, 4, 5],
+    localTime: "09:00",
+    timeZone: "Europe/Oslo",
+  },
+  missedRunPolicy: "skip",
+};
+
+describe("routines a person creates from a thread's Environment", () => {
+  it("creates a Work routine in the thread's Project and mode, authored by the window", async () => {
+    const h = harness();
+    const created = await threadRoutines(h.handler, { ...manualRoutine, mode: "work" });
+    expect(created.body).toMatchObject({
+      kind: "automation-created",
+      automation: {
+        mode: "work",
+        projectId: PROJECT,
+        binding: { kind: "work", projectId: PROJECT },
+        originThreadId: THREAD,
+        targetPolicy: "new-thread",
+        missedRunPolicy: "skip",
+        createdBy: { kind: "local-window", windowId: String(windowId) },
+        authorityProfile: {
+          effective: { shell: false, git: false, executionPolicy: "approval-gated" },
+        },
+      },
+    });
+  });
+
+  it("creates a Code routine on the thread's checkout that asks before effects", async () => {
+    const h = harness({ mode: "code" });
+    const created = await threadRoutines(h.handler, { ...manualRoutine, mode: "code" });
+    expect(created.body).toMatchObject({
+      kind: "automation-created",
+      automation: {
+        mode: "code",
+        binding: { kind: "code", repositoryId: REPOSITORY, checkoutId: CHECKOUT },
+        executionProfile: { executionPolicy: "approval-gated" },
+        originThreadId: THREAD,
+      },
+    });
+  });
+
+  it("refuses a routine for a Project the thread is not in, and for Chat", async () => {
+    const h = harness();
+    const elsewhere = await threadRoutines(h.handler, {
+      ...manualRoutine,
+      mode: "work",
+      projectId: "bb000000-0000-4000-8000-0000000000ff",
+    });
+    expect(elsewhere.body).toMatchObject({ kind: "automation-command-failed" });
+    const chat = await threadRoutines(h.handler, { ...manualRoutine, mode: "chat" });
+    expect(chat.status).toBe(400);
+    expect(
+      h.projection.listSummaries({ hostId: "local" as never, mode: "all", limit: 10 }).items,
+    ).toEqual([]);
   });
 });

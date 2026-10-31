@@ -563,34 +563,48 @@ Dock visibility and responsive presentation follow [DESIGN.md](../../DESIGN.md#s
 
 ### Routines
 
-A Work or Code thread's Environment has a Routines row when routines were
-created from that thread (the agent proposed them and the person confirmed;
-see the architecture's routine rules). Each lists its name, the schedule in
-plain words with the next run, and whether it is Active or Paused, with
-**Open in Automation Center** and **Pause** or **Resume**, which are the
-ordinary Automation commands. Other routines of the same Project are not
-listed here; Automation Center lists them. A thread with none shows no row.
-An agent's proposal waits as a confirmation card in the thread, like a tool
-approval: it states the name, the schedule and its time zone, the first run,
-the missed-run policy, that each run starts a new thread in this Project that
-asks before it changes anything, and the exact prompt, with **Create routine**
-and **Decline**.
+Every Work and Code thread's Environment has a **Routines** row, because both
+ways to create one start there. Its body opens with two actions, **Follow up
+later** and **New routine**, and then lists every active and paused routine of
+the thread's Project, not only those this thread created, in this order: this
+thread's pending follow-ups, then routines created from this thread, then the
+rest of the Project's routines (another thread's follow-up among them); within
+each group, soonest next run first. The header shows the count. Each entry has
+its name, Active or Paused, a small line saying how it relates to the thread
+("Follow-up here", "From this thread", "Follow-up in another thread", or
+nothing for the rest), the schedule in plain words with the next run (and the
+time zone of a weekly one), and **Open in Automation Center**. A follow-up here
+has **Change time** and **Cancel**, because a one-time turn is moved or
+cancelled rather than paused; every other entry has **Pause** or **Resume**.
+These are the ordinary Automation commands. Past five entries the row shows
+the first five and **Show all**. A Project with no routines shows only the two
+actions. The row reads the Project's whole list, page by page, so a busy
+Project cannot push this thread's older routine out of it.
 
-A routine that follows up in this thread (target policy `same-thread`) is not
-listed under Routines. It has its own **Follow-up** row, which every Work and
-Code thread's Environment shows, because setting one up starts there: the row
-carries a **Follow up later** action that opens a small picker with **In 1
-hour**, **Tomorrow at 9:00** (the person's local clock), and **Pick a time**,
-and a short prompt, prefilled, for what to check. A pending follow-up is
-listed under the row as "Follows up tomorrow at 9:00", with the header
-repeating the time, and has **Change time** and **Cancel**. Nothing pending
-reads "Nothing scheduled". An agent's follow-up proposal uses the same
-confirmation card, labelled as a follow-up in this thread, with **Schedule
-follow-up** and **Decline**. The turn a follow-up sends is shown in the
-transcript under a "Scheduled follow-up" line with only its prompt, so a
-reader can tell it was scheduled and not typed. The sidebar row shows no mark
-for a pending follow-up: no existing row mark fits a scheduled turn, and the
-Environment row is where it is managed.
+**New routine** opens a small form: a name, the task for each run, and the
+Automation Center editor's own schedule fields (once at a time, every N
+minutes, or weekly on chosen days at a time in a time zone, prefilled with
+weekdays at 9:00 in the person's zone) and missed-run choice. It names no
+Project, mode, or profile: the host takes them from the thread, and the form
+says each run starts a new thread in this Project with at most this thread's
+access, asking before it changes anything.
+
+**Follow up later** opens a small picker with **In 1 hour**, **Tomorrow at
+9:00** (the person's local clock), and **Pick a time**, and a short prompt,
+prefilled, for what to check. A pending follow-up reads "Follows up tomorrow
+at 9:00".
+
+An agent's proposal, a routine or a follow-up, waits as a suggestion chip at
+the foot of the thread, in the same card as the reply's suggested tasks. It is
+labelled "Routine · suggested" or "Follow-up here · suggested" and states the
+name, the schedule and its time zone, the first run, the missed-run policy,
+what each run does, and the exact prompt. Its one action, **Create routine**
+or **Schedule follow-up**, creates it as the person; dismissing the chip
+declines, so nothing is created and the agent is told so. The turn a
+follow-up sends is shown in the transcript under a "Scheduled follow-up" line
+with only its prompt, so a reader can tell it was scheduled and not typed. The
+sidebar row shows no mark for a pending follow-up: no existing row mark fits a
+scheduled turn, and the Environment row is where it is managed.
 
 ### Subagents
 
