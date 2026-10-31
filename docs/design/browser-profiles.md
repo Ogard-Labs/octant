@@ -10,8 +10,8 @@ Workspace owns the Browser pane
 ([Workspace: tool lifecycles](workspace.md#tool-lifecycles)). DESIGN.md owns
 the controls and the approval card.
 
-Status: profiles, their storage, site approvals, refusals, and Settings are
-built. Browser extensions are approved design, not yet built; the Extensions
+Status: profiles, their storage, site approvals, refusals, Settings, and cookie
+import are built. Browser extensions are approved design, not yet built; the Extensions
 section below is that design. Four smaller pieces of the profile design are not
 built yet and are marked where they appear: purging a Project removes its
 profile, a kept screenshot's record names the profile, the driver indicator and
@@ -37,7 +37,9 @@ and service workers in. There are three kinds:
 - The Personal profile is for sites the person uses across Projects. It is not
   their everyday browser's profile: Octant never opens another browser's profile
   in place. The `existing-profile` profile mode in the Browser contract is
-  retired: the schema no longer decodes it, so no caller can ask for it.
+  retired: the schema no longer decodes it, so no caller can ask for it. The one
+  way another browser's sign-ins reach Octant is the person's explicit
+  [cookie import](#cookie-import) into a Project or Personal profile.
 - Chat has no Browser, so it has no profile. A Chat Project has no Project
   profile.
 - The person signs in by typing into the page themselves. Octant saves no
@@ -119,6 +121,62 @@ it is for a Private page: downloads are blocked; camera, microphone, location,
 notifications, devices, and screen capture are refused; only http and https
 addresses open; a loopback HTTPS certificate is accepted only by the context
 opened for it; the host's session ceiling and tab limit apply.
+
+## Cookie import
+
+A person can bring the sign-ins they already have in another browser on this Mac
+into one Project or Personal profile, so they do not sign in again.
+
+- **Only on the person's pick.** Settings › Data & privacy › Browser profiles has
+  "Import cookies…" on each stored profile. The dialog lists the browsers
+  installed on this Mac and each one's profiles by the names that browser shows;
+  nothing is opened to produce the list. The person chooses a browser and one of
+  its profiles and presses Import. Octant never imports in the background, on
+  startup, on a schedule, or because an agent, a routine, a plugin, or a paired
+  device asked. Only a local window can send the command, and the host refuses a
+  paired device before it reads anything.
+- **Which browsers.** Chromium-family browsers (Chrome, Chromium, Brave, Edge,
+  Vivaldi, Arc) and Firefox. Safari is not offered: its cookie store sits behind
+  a macOS privacy permission Octant does not ask for.
+- **The browser's own encryption.** A Chromium-family browser on macOS encrypts
+  cookie values with a key it keeps in the login Keychain as "<Browser> Safe
+  Storage". Octant asks for that key through the platform's documented tool
+  (`security find-generic-password`), which makes macOS show its own Keychain
+  prompt naming the item. If the person declines, or macOS cannot answer, the
+  import reports "macOS did not allow Octant to read the browser's cookie key"
+  and imports nothing. A database with nothing encrypted needs no prompt, and
+  Firefox stores values in the clear. The key is held in memory for the one read
+  and dropped. A decrypted value is accepted only when it proves itself: where the
+  database prefixes values with the SHA-256 of their host, the prefix must match
+  the row's own host key, and the value must be valid UTF-8, which is rejected
+  rather than repaired. A row that fails is left behind and counted; if no
+  encrypted row checks out, the key is wrong or stale and the import fails with
+  nothing imported.
+- **How it reads.** The host copies the browser's cookie database (and its
+  write-ahead files) into a fresh owner-only temporary folder, reads the copy
+  read-only, and deletes the folder, so the browser may be running and its own
+  files are never touched. The source is accepted only if the listing offered it,
+  so a profile name cannot become a path.
+- **What it keeps and leaves.** Cookies for web hosts, with an expiry in the
+  future (or none), a name and value a browser would store, and a shape its
+  prefix rules allow, are set in the chosen profile's own session by the desktop
+  app. Expired cookies, malformed ones, cookies partitioned by top-level site, and
+  a Firefox container tab's cookies are left behind and counted. Imported cookies
+  merge with what the profile already holds; a cookie of the same name, domain,
+  and path is replaced.
+- **Where cookies go.** From the source database, through the host's memory, to
+  the desktop app over the authenticated loopback broker in batches of at most
+  200, into the profile's session. They are never sent off this Mac, never
+  written anywhere else, and never in a journal, a log, an answer to a window, a
+  thread, a capture, an export, or anything an agent reads. A failure reports a
+  fixed sentence that names no cookie or site.
+- **The record.** The host journals `browser.cookies-imported@1` with the source
+  browser, its profile id, the Octant profile, and the number imported and left
+  behind. It holds no cookie, name, site, or value. A store failure part way
+  still records what arrived.
+- **Clearing.** "Clear cookies…" on the same row removes a profile's cookies and
+  keeps its other storage (it is the `cookies` scope of the clear described
+  above); "Sign out…" removes everything.
 
 ## The agent on a signed-in page
 
@@ -261,6 +319,9 @@ work without it, and takes no extension-support package:
 | `profile-not-local`      | A paired device tries to open, switch to, or answer for a profile page                                |
 | `profile-needs-a-person` | A routine, a subagent, or a terminal Browser grant tries to use a profile page                        |
 | `profile-unavailable`    | The Project is archived, its mode is off, the native Browser is not available, or the store is locked |
+| `source-not-found`       | A cookie import names a browser or profile that is not on this Mac                                    |
+| `keychain-refused`       | The person declined the Keychain prompt for the browser's cookie key, or macOS would not answer       |
+| `source-unreadable`      | A cookie database could not be opened or decrypted, or the browser keeps no key in the Keychain       |
 | `extension-not-local`    | A paired device or any non-person caller tries to install, enable, or disable an extension            |
 | `extension-unsupported`  | The manifest is not Manifest V3, or the host has no desktop app                                       |
 

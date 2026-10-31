@@ -2414,6 +2414,39 @@ describe("CodeOperationRuntime", () => {
       fixture.close();
     });
 
+    it.each([
+      ["provider", true],
+      [undefined, true],
+      ["octant-shield", false],
+    ] as const)(
+      "starts a key provider's own reviewer at Auto only when it is the reviewer chosen (%s)",
+      async (chosen, ownReviewer) => {
+        const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+        const starts: Array<ProviderSessionStart> = [];
+        const connection = providerConnection(queue, starts);
+        const fixture = runtimeFixture({
+          provider: providerDriver(connection),
+          approvalValidator: false,
+          chosenAutoReviewer: () => chosen,
+          resolveProviderCapabilities: () => ({ harnessAutoReview: "supported" }) as never,
+          readThreadExternalContentTaint: () => ({ externalContentIngested: false }),
+        });
+        fixture.setThread(decodeCodeThread({ ...thread(), autoApprove: true }));
+        await fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(48),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        });
+        await vi.waitFor(() => expect(starts).toHaveLength(1));
+        expect(starts[0]?.autoApprove === true).toBe(ownReviewer);
+        await fixture.runtime.close();
+        fixture.close();
+      },
+    );
+
     it("asks the person as before when Shield is not the thread's reviewer", async () => {
       const { connection, fixture, frames } = await runWith(undefined);
       await vi.waitFor(async () => {
@@ -6351,6 +6384,13 @@ function runtimeFixture(options: {
   >[0]["resolveSelectedExtensions"];
   agentMessages?: Parameters<typeof createCodeOperationRuntime>[0]["agentMessages"];
   shield?: Parameters<typeof createCodeOperationRuntime>[0]["shield"];
+  chosenAutoReviewer?: Parameters<typeof createCodeOperationRuntime>[0]["chosenAutoReviewer"];
+  resolveProviderCapabilities?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["resolveProviderCapabilities"];
+  readThreadExternalContentTaint?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["readThreadExternalContentTaint"];
   siblingThreads?: Parameters<typeof createCodeOperationRuntime>[0]["siblingThreads"];
   contributedTools?: Parameters<typeof createCodeOperationRuntime>[0]["contributedTools"];
   canvas?: Parameters<typeof createCodeOperationRuntime>[0]["canvas"];
@@ -6664,6 +6704,15 @@ function runtimeFixture(options: {
       : { resolveSelectedExtensions: options.resolveSelectedExtensions }),
     ...(options.agentMessages === undefined ? {} : { agentMessages: options.agentMessages }),
     ...(options.shield === undefined ? {} : { shield: options.shield }),
+    ...(options.chosenAutoReviewer === undefined
+      ? {}
+      : { chosenAutoReviewer: options.chosenAutoReviewer }),
+    ...(options.resolveProviderCapabilities === undefined
+      ? {}
+      : { resolveProviderCapabilities: options.resolveProviderCapabilities }),
+    ...(options.readThreadExternalContentTaint === undefined
+      ? {}
+      : { readThreadExternalContentTaint: options.readThreadExternalContentTaint }),
     ...(options.siblingThreads === undefined ? {} : { siblingThreads: options.siblingThreads }),
     ...(options.contributedTools === undefined
       ? {}
