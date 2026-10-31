@@ -21,6 +21,7 @@ import {
   THREAD_PURGE_RETAINED_SCOPES,
 } from "@octant/domain";
 import { purgeComposerThreadDrafts } from "../composer/composerThreadDraftStore";
+import { HostMemoryLimits } from "./HostMemoryLimits";
 import { HostPrivacyExport } from "./HostPrivacyExport";
 import { driverLabel } from "../providers/providerSettingsPresentation";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -333,6 +334,15 @@ export function HostSettingsSection({
           ]}
         />
       </SettingsSection>
+
+      {status.memory === undefined ? null : (
+        <SettingsSection
+          description="When the host counts its own size as low memory and frees idle work."
+          title="Memory"
+        >
+          <HostMemoryLimits client={client} memory={status.memory} onSaved={() => void refresh()} />
+        </SettingsSection>
+      )}
 
       <SettingsSection description="Host services available to this app." title="Capabilities">
         {status.capabilities.length === 0 ? (

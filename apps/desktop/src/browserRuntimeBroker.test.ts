@@ -134,8 +134,8 @@ describe("BrowserRuntimeBroker", () => {
   });
 });
 
-function request(url: string, token: string, body: unknown): Request {
-  return new Request(new URL("v1/contexts/act", url), {
+function request(url: string, token: string, body: unknown, path = "v1/contexts/act"): Request {
+  return new Request(new URL(path, url), {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -144,3 +144,107 @@ function request(url: string, token: string, body: unknown): Request {
     body: JSON.stringify(body),
   });
 }
+
+describe("BrowserRuntimeBroker profiles", () => {
+  const projectId = "40000000-0000-4000-8000-000000000001";
+  function store() {
+    return {
+      list: vi.fn(async () => [{ profile: { kind: "personal" as const }, sizeBytes: 12 }]),
+      clear: vi.fn(async () => undefined),
+    };
+  }
+  const post = (broker: { url: string; token: string }, path: string, body: unknown) =>
+    request(broker.url, broker.token, body, path);
+
+  it("lists and clears stored profiles for the authenticated server only", async () => {
+    const profiles = store();
+    const broker = await startBrowserRuntimeBroker(host() as never, profiles);
+    try {
+      const listed = await broker.fetchForTest(post(broker, "v1/profiles/list", {}));
+      expect(await listed.json()).toEqual({
+        profiles: [{ profile: { kind: "personal" }, sizeBytes: 12 }],
+      });
+
+      const cleared = await broker.fetchForTest(
+        post(broker, "v1/profiles/clear", {
+          profile: { kind: "project", projectId },
+          scope: "cookies",
+        }),
+      );
+      expect(cleared.status).toBe(200);
+      expect(profiles.clear).toHaveBeenCalledWith({ kind: "project", projectId }, "cookies");
+
+      const wrongToken = await broker.fetchForTest(
+        request(
+          broker.url,
+          "wrong",
+          { profile: { kind: "personal" }, scope: "all" },
+          "v1/profiles/clear",
+        ),
+      );
+      expect(wrongToken.status).toBe(401);
+      expect(profiles.clear).toHaveBeenCalledOnce();
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("refuses a profile it cannot name or a scope it does not know, clearing nothing", async () => {
+    const profiles = store();
+    const broker = await startBrowserRuntimeBroker(host() as never, profiles);
+    try {
+      for (const body of [
+        { profile: { kind: "private" }, scope: "all" },
+        { profile: { kind: "project", projectId: "../../etc" }, scope: "all" },
+        { profile: { kind: "personal" }, scope: "everything" },
+        { profile: { kind: "personal", partition: "persist:other" }, scope: "all" },
+      ]) {
+        const response = await broker.fetchForTest(post(broker, "v1/profiles/clear", body));
+        expect(response.status).toBe(400);
+      }
+      expect(profiles.clear).not.toHaveBeenCalled();
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("says plainly that profiles are unavailable when the app keeps none", async () => {
+    const broker = await startBrowserRuntimeBroker(host() as never);
+    try {
+      const response = await broker.fetchForTest(post(broker, "v1/profiles/list", {}));
+      expect(response.status).toBe(409);
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("accepts a stored profile in a context's policy and refuses a malformed one", async () => {
+    const surface = host();
+    const broker = await startBrowserRuntimeBroker(surface as never, store());
+    try {
+      const policy = (profile: unknown) => ({
+        profileMode: "isolated",
+        profile,
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 2,
+        sessionTimeoutMs: 300_000,
+      });
+      const create = (profile: unknown) =>
+        broker.fetchForTest(
+          post(broker, "v1/contexts/create", {
+            contextId,
+            owner: { windowId: "window-a", threadId: contextId },
+            policy: policy(profile),
+          }),
+        );
+
+      expect((await create({ kind: "personal" })).status).toBe(200);
+      expect((await create({ kind: "personal", partition: "x" })).status).toBe(400);
+      expect((await create({ kind: "everyone" })).status).toBe(400);
+      expect(surface.createContext).toHaveBeenCalledOnce();
+    } finally {
+      await broker.close();
+    }
+  });
+});

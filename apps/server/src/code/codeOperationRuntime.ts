@@ -187,6 +187,7 @@ import {
   createCodeAppManagedTools,
   type CodeAppManagedToolsOptions,
   type CodeDeviceApprovalEffect,
+  type PullRequestToolCommand,
 } from "./codeAppManagedTools";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { heldTurnContext } from "../providers/heldTurnContext";
@@ -1723,11 +1724,12 @@ async function approvalContext(
   thread: CodeThread,
   checkout: CodeCheckoutIdentity,
 ): Promise<ApprovalContext | undefined> {
-  const pullRequestTarget =
-    command?.kind === "create-pull-request"
-      ? await options.resolvePullRequestTarget(thread.id)
-      : undefined;
-  if (command?.kind === "create-pull-request" && pullRequestTarget === undefined) return undefined;
+  const changesPullRequest =
+    command?.kind === "create-pull-request" || command?.kind === "update-pull-request";
+  const pullRequestTarget = changesPullRequest
+    ? await options.resolvePullRequestTarget(thread.id)
+    : undefined;
+  if (changesPullRequest && pullRequestTarget === undefined) return undefined;
   return {
     projectId: thread.projectId,
     threadId: thread.id,
@@ -1928,13 +1930,30 @@ function approvalPrompt(
         effectDetail = `${command.remote}: ${command.localRef} → ${command.remoteRef}\nHEAD ${command.expectedHeadOid}`;
         break;
       case "create-pull-request":
-        message = "Allow pull request creation?";
+        message =
+          command.draft === true
+            ? "Allow draft pull request creation?"
+            : "Allow pull request creation?";
         effectDetail = [
-          `Target: ${pullRequestTarget?.baseRepository}:${pullRequestTarget?.baseBranch}`,
+          `Target: ${pullRequestTarget?.baseRepository}:${command.baseBranch ?? pullRequestTarget?.baseBranch}`,
+          ...(command.baseBranch === undefined
+            ? []
+            : ["Stacked on the open pull request of that branch"]),
           `Head: ${pullRequestTarget?.head}`,
           `Title: ${command.title}`,
           "Body:",
           command.body,
+        ].join("\n");
+        break;
+      case "update-pull-request":
+        message = "Allow pull request change?";
+        effectDetail = [
+          `Pull request of ${pullRequestTarget?.head} in ${pullRequestTarget?.baseRepository}`,
+          ...(command.draft === undefined
+            ? []
+            : [command.draft ? "Turn it back into a draft" : "Mark it ready for review"]),
+          ...(command.title === undefined ? [] : [`Title: ${command.title}`]),
+          ...(command.body === undefined ? [] : ["Body:", command.body]),
         ].join("\n");
         break;
       case "create-review-finding":
@@ -3139,6 +3158,63 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   }
 
   /**
+   * One pull-request change the thread's agent asked for, asked of the person
+   * in the thread like a device effect. An approval becomes the host's one-use
+   * approval for exactly that command, bound to the thread's delivery target,
+   * which the operation service validates before `gh` runs.
+   */
+  async #askPullRequestApproval(
+    active: ActiveTurn,
+    command: PullRequestToolCommand,
+    signal?: AbortSignal,
+  ): Promise<
+    | { readonly status: "approved"; readonly approvalId: CodeApprovalId }
+    | { readonly status: "denied" | "cancelled" | "expired" | "unavailable" | "too-large" }
+  > {
+    const store = this.#approvalStore;
+    if (store === undefined) return { status: "unavailable" };
+    const thread = this.#options.persistence.readCodeThread(command.threadId);
+    const checkout = this.#options.persistence.readCodeCheckout(command.checkoutId);
+    if (
+      thread === undefined ||
+      checkout === undefined ||
+      String(thread.id) !== String(active.thread.id) ||
+      thread.checkoutId !== checkout.id ||
+      thread.lifecycle !== "active" ||
+      checkout.availability !== "available" ||
+      !(await this.#options.windowAccess.canAccessProject(active.windowId, thread.projectId))
+    ) {
+      return { status: "unavailable" };
+    }
+    const context = await approvalContext(this.#options, command, thread, checkout);
+    if (context === undefined) return { status: "unavailable" };
+    const effect: CodeOperationApprovalRequest["effect"] = { kind: "operation", command };
+    const prompt = approvalPrompt(effect, thread, checkout, context.pullRequestTarget);
+    const shown = `${prompt.message}\n${prompt.detail}`;
+    const summary = boundProviderSummary(shown);
+    if (summary === undefined) return { status: "unavailable" };
+    // The approval authorizes the full title and body, so the person must be
+    // able to read all of it; a prompt cut at the summary bound would have
+    // them allow text they never saw.
+    if (summary !== shown.trim()) return { status: "too-large" };
+    const outcome = await this.#askToolApproval(active, summary, undefined, signal);
+    if (outcome !== "approved") return { status: outcome };
+    try {
+      const receipt = store.issue({
+        windowId: active.windowId,
+        effect,
+        contextDigest: approvalContextDigest(context),
+      });
+      return receipt === undefined
+        ? { status: "unavailable" }
+        : { status: "approved", approvalId: receipt.approvalId };
+    } catch {
+      // Host time recovery refuses to mint approvals; the change stays refused.
+      return { status: "unavailable" };
+    }
+  }
+
+  /**
    * The wording and binding context of one device approval. A Simulator,
    * emulator, or device effect is asked only while the turn's posture decides
    * effects by approval; a device lease is asked under every posture, Full
@@ -3489,6 +3565,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           uuid: this.#options.uuid,
           deviceApproval: {
             request: (effect, signal) => this.#askDeviceApproval(active, effect, signal),
+          },
+          pullRequestApproval: {
+            request: (command, signal) => this.#askPullRequestApproval(active, command, signal),
           },
           browserApproval: {
             isApproved: (contextId) => {
@@ -4488,6 +4567,7 @@ function turnState(
 function createPullRequestPort(options: CodeOperationRuntimeOptions): CodeOperationPullRequestPort {
   const unavailable: CodeOperationPullRequestPort = {
     ensure: async () => ({ status: "unavailable" as const }),
+    update: async () => ({ status: "unavailable" as const }),
     observeReview: async () => ({ status: "unavailable" as const }),
   };
   if (options.ghExecutable === undefined) return unavailable;
@@ -4532,8 +4612,15 @@ function baseCheckoutResolver(
 
 function codeOperationGitPort(git: GitService): CodeOperationGitPort {
   return {
-    observe: async ({ checkoutRoot, maxDiffBytes }) =>
-      mapGitObservation(await git.observe(checkoutRoot), maxDiffBytes),
+    observe: async ({ checkoutRoot, maxDiffBytes, ignoreWhitespace }) =>
+      mapGitObservation(
+        await git.observe(
+          checkoutRoot,
+          undefined,
+          ignoreWhitespace === true ? { ignoreWhitespace: true } : undefined,
+        ),
+        maxDiffBytes,
+      ),
     observeRemotes: async ({ checkoutRoot }) => {
       const remotes = await git.observeRemotes(checkoutRoot);
       return remotes?.map((remote) => ({
@@ -4569,6 +4656,7 @@ function codeOperationGitPort(git: GitService): CodeOperationGitPort {
       const result = await git.readDiff({
         checkoutRoot: input.checkoutRoot,
         scope: { kind: "branch", baseRef: input.baseRef },
+        ...(input.ignoreWhitespace === true ? { ignoreWhitespace: true } : {}),
       });
       return result.status === "ready"
         ? {

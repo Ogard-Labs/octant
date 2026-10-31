@@ -351,6 +351,7 @@ The host watches its own size and the system's memory pressure and eases itself 
 
 - It samples every 15 seconds (every 5 under pressure); a reading the platform cannot give is unknown, never normal.
 - Relief runs in a fixed order: log the reading, stop idle provider runtimes and parked sessions, then trim caches it rebuilds on demand.
+- The size at which the host counts as low or very low is the Memory limits setting in Settings > Host: Automatic (the built-in pair, scaled down on a small machine) or Custom (two sizes in GB, applied as entered). It is journaled with who, when and the old and new values, applies without a restart, and only a local window can change it.
 - The report carries counts and levels only, never a provider, thread or path, and nothing leaves the machine.
 - Only a clean shutdown marks the host's memory record clean, so the next start reports an unexpected stop without claiming a cause.
 

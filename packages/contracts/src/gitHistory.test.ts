@@ -37,6 +37,38 @@ describe("Git history reads", () => {
     ).toThrow();
   });
 
+  it("accepts a whitespace flag on a commit and a local-commits read that carries nothing else", () => {
+    const commit = {
+      kind: "commit",
+      ...scope,
+      oid: "a".repeat(40),
+      parent: 0,
+      ignoreWhitespace: true,
+    };
+    expect(decodeGitHistoryQuery(commit)).toEqual(commit);
+    expect(decodeGitHistoryQuery({ kind: "local-commits", ...scope }).kind).toBe("local-commits");
+    expect(() =>
+      decodeGitHistoryQuery({ kind: "local-commits", ...scope, revision: "HEAD" }),
+    ).toThrow();
+  });
+
+  it("carries the local-commits truncation flag through a history page", () => {
+    const page = {
+      status: "history",
+      ...scope,
+      commits: [],
+      comparedWith: "origin/main",
+      commitsTruncated: true,
+      refs: [],
+      head: null,
+      branch: null,
+      shallow: false,
+      refsTruncated: false,
+      nextCursor: null,
+    };
+    expect(decodeGitHistoryResult(page)).toEqual(page);
+  });
+
   it("preserves unavailable and truncated results instead of inventing empty history", () => {
     expect(
       decodeGitHistoryResult({ status: "unavailable", message: "Git history is unavailable." })

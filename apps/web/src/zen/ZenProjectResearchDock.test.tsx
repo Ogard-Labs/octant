@@ -107,4 +107,96 @@ describe("ZenProjectResearchDock", () => {
     expect(onUndock).toHaveBeenCalledOnce();
     await waitFor(() => expect(pages.execute).toHaveBeenCalledWith({ kind: "stop", projectId }));
   });
+
+  it("opens a new page in the profile the person last chose for this Project", async () => {
+    globalThis.localStorage.setItem(`octant.browser.profile.${String(projectId)}`, "project");
+    try {
+      const pages = client((command) =>
+        command.kind === "open"
+          ? browser({ title: "Example", url: "https://example.com/" })
+          : browser(),
+      );
+      render(
+        <ZenProjectResearchDock
+          client={pages}
+          dock={dock}
+          onCollapse={() => undefined}
+          onUndock={() => undefined}
+        />,
+      );
+
+      expect(screen.getByRole("button", { name: "Browser profile: Project" })).toBeInTheDocument();
+      fireEvent.change(screen.getByRole("textbox", { name: "Project browser address" }), {
+        target: { value: "https://example.com/" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Open" }));
+
+      await waitFor(() =>
+        expect(pages.execute).toHaveBeenCalledWith({
+          kind: "open",
+          projectId,
+          url: "https://example.com/",
+          profile: "project",
+        }),
+      );
+    } finally {
+      globalThis.localStorage.clear();
+    }
+  });
+
+  it("opens a page Private when no profile was ever chosen", async () => {
+    globalThis.localStorage.clear();
+    const pages = client((command) =>
+      command.kind === "open"
+        ? browser({ title: "Example", url: "https://example.com/" })
+        : browser(),
+    );
+    render(
+      <ZenProjectResearchDock
+        client={pages}
+        dock={dock}
+        onCollapse={() => undefined}
+        onUndock={() => undefined}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Browser profile: Private" })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Project browser address" }), {
+      target: { value: "https://example.com/" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+
+    await waitFor(() =>
+      expect(pages.execute).toHaveBeenCalledWith({
+        kind: "open",
+        projectId,
+        url: "https://example.com/",
+      }),
+    );
+  });
+
+  it("shows the profile the host put the page in", async () => {
+    const pages = client(() => ({
+      kind: "project-browser",
+      browser: {
+        projectId,
+        mode: "work",
+        subjectId,
+        context: { contextId, state: "active", presentation: "headless", profile: "personal" },
+        page: { title: "Example", url: "https://example.com/" },
+      },
+    }));
+    render(
+      <ZenProjectResearchDock
+        client={pages}
+        dock={dock}
+        onCollapse={() => undefined}
+        onUndock={() => undefined}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("button", { name: "Browser profile: Personal" }),
+    ).toBeInTheDocument();
+  });
 });

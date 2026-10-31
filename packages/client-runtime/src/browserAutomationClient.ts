@@ -32,6 +32,11 @@ import {
   type BrowserCapturesCommand,
   BrowserCapturesResponse,
 } from "@octant/contracts/browser-capture";
+import {
+  BrowserProfilesResult,
+  decodeBrowserProfilesCommand,
+  type BrowserProfilesCommand,
+} from "@octant/contracts/browser-profiles";
 import { decodeHostAnswer } from "@octant/contracts";
 
 export interface BrowserAutomationClientOptions {
@@ -80,6 +85,14 @@ export interface BrowserAutomationClient {
   ): Promise<BrowserAutomationSnapshot>;
   listApprovals?(signal?: AbortSignal): Promise<BrowserToolApprovalList>;
   decideApproval?(decision: BrowserToolApprovalDecision): Promise<boolean>;
+  /**
+   * Sign out of, or list, the stored Browser profiles. A refusal is a result,
+   * so the pane can say in words why a profile was not cleared.
+   */
+  manageProfiles?(
+    command: BrowserProfilesCommand,
+    signal?: AbortSignal,
+  ): Promise<BrowserProfilesResult>;
 }
 
 export type BrowserAutomationClientFailureCategory =
@@ -187,6 +200,14 @@ export function createBrowserAutomationClient(
         "/api/browser/captures/take",
         decodeBrowserCaptureTakeCommand(input),
         decodeHostAnswer(BrowserAutomationSnapshot),
+        signal,
+      ),
+    manageProfiles: (command, signal) =>
+      post(
+        options,
+        "/api/browser/profiles",
+        decodeBrowserProfilesCommand(command),
+        decodeHostAnswer(BrowserProfilesResult),
         signal,
       ),
     listApprovals: (signal) =>

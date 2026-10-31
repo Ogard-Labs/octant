@@ -2,6 +2,11 @@ import {
   type ProjectBrowserCommand,
   ProjectBrowserResult,
 } from "@octant/contracts/project-browser";
+import {
+  BrowserProfilesResult,
+  decodeBrowserProfilesCommand,
+  type BrowserProfilesCommand,
+} from "@octant/contracts/browser-profiles";
 import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -13,6 +18,11 @@ export interface ProjectBrowserClientOptions {
 
 export interface ProjectBrowserClient {
   execute(command: ProjectBrowserCommand, signal?: AbortSignal): Promise<ProjectBrowserResult>;
+  /** Sign out of a stored profile from the dock's own profile menu. */
+  manageProfiles?(
+    command: BrowserProfilesCommand,
+    signal?: AbortSignal,
+  ): Promise<BrowserProfilesResult>;
 }
 
 export class ProjectBrowserClientFailure extends Error {
@@ -39,35 +49,45 @@ export function createProjectBrowserClient(
   validateLoopbackBaseUrl(options.baseUrl);
   const fetch = bindFetchPort(options.fetch);
   const url = new URL("/api/browser/project-contexts", options.baseUrl).toString();
+  const profilesUrl = new URL("/api/browser/profiles", options.baseUrl).toString();
+
+  async function post(target: string, command: unknown, signal: AbortSignal | undefined) {
+    let response: Response;
+    try {
+      response = await fetch(target, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": options.windowCapability,
+        },
+        body: JSON.stringify(command),
+        ...(signal === undefined ? {} : { signal }),
+      });
+    } catch {
+      throw new ProjectBrowserClientFailure("Project browsers are unavailable.", 0);
+    }
+    const body: unknown = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const message =
+        typeof body === "object" &&
+        body !== null &&
+        "message" in body &&
+        typeof body.message === "string"
+          ? body.message
+          : "Project browsers are unavailable.";
+      throw new ProjectBrowserClientFailure(message, response.status);
+    }
+    return body;
+  }
 
   return {
     async execute(command, signal) {
-      let response: Response;
-      try {
-        response = await fetch(url, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            "x-octant-window-capability": options.windowCapability,
-          },
-          body: JSON.stringify(command),
-          ...(signal === undefined ? {} : { signal }),
-        });
-      } catch {
-        throw new ProjectBrowserClientFailure("Project browsers are unavailable.", 0);
-      }
-      const body: unknown = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const message =
-          typeof body === "object" &&
-          body !== null &&
-          "message" in body &&
-          typeof body.message === "string"
-            ? body.message
-            : "Project browsers are unavailable.";
-        throw new ProjectBrowserClientFailure(message, response.status);
-      }
-      return decodeHostAnswer(ProjectBrowserResult)(body);
+      return decodeHostAnswer(ProjectBrowserResult)(await post(url, command, signal));
+    },
+    async manageProfiles(command, signal) {
+      return decodeHostAnswer(BrowserProfilesResult)(
+        await post(profilesUrl, decodeBrowserProfilesCommand(command), signal),
+      );
     },
   };
 }

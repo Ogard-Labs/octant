@@ -44,6 +44,7 @@ import { DEFAULT_AVATAR_ACCENT, DEFAULT_USER_AVATAR } from "@octant/contracts/us
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { ChatThreadId, CodeEnvironmentObservation } from "@octant/contracts";
+import { resolveRememberedBrowserProfileSites } from "./browserProfilePolicy";
 import { trimTrailingSlashes } from "./trimTrailing";
 import { resolveAvailableMode } from "./modePolicy";
 
@@ -186,6 +187,7 @@ export function defaultShellSettings(): ShellSettings {
     userProfile: { accent: DEFAULT_AVATAR_ACCENT, avatar: DEFAULT_USER_AVATAR },
     standaloneSkillActivations: {},
     rememberedBrowserOrigins: [],
+    rememberedBrowserProfileSites: [],
   };
 }
 
@@ -705,7 +707,25 @@ export function replaceShellSettings(
       current.rememberedBrowserOrigins,
       replacement.rememberedBrowserOrigins,
     ),
+    rememberedBrowserProfileSites: resolveProfileSites(
+      current.rememberedBrowserProfileSites,
+      replacement.rememberedBrowserProfileSites,
+    ),
   };
+}
+
+function resolveProfileSites(
+  current: ShellSettings["rememberedBrowserProfileSites"],
+  replacement: ShellSettings["rememberedBrowserProfileSites"] | undefined,
+): ShellSettings["rememberedBrowserProfileSites"] {
+  const resolved = resolveRememberedBrowserProfileSites(current, replacement);
+  if (resolved.kind === "rejected") {
+    reject(
+      "invalid-settings",
+      "Remembered signed-in sites can only be added by the approval decision.",
+    );
+  }
+  return resolved.sites;
 }
 
 interface LayoutStats {
