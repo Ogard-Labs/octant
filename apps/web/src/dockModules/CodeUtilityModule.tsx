@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { autoReviewFor } from "../code/autoReview";
 import { decodeCodeThreadId, decodeWorkspaceTab, type WorkspaceTab } from "@octant/contracts";
 import CodeWorkspaceTab from "../code/CodeWorkspaceTab";
 import { ShellState } from "../shell/ShellState";
@@ -43,13 +44,16 @@ export function CodeUtilityModule(
   }
   const tab = codeUtilityTab(props.surface, threadId, props.appleProjectPath, props.utilityTabId);
   const providerInstanceId = controller.activeView.thread.providerInstanceId;
-  const harnessAutoReviewSupported =
+  const autoReview =
     props.providerController === undefined
       ? undefined
-      : props.providerController.observedByInstance.get(providerInstanceId)?.capabilities
-            .harnessAutoReview === "supported"
-        ? true
-        : undefined;
+      : autoReviewFor({
+          providerInstanceId,
+          instances: props.providerController.instances,
+          observedByInstance: props.providerController.observedByInstance,
+          chosen: controller.bootstrap?.settings.autoReviewer,
+        });
+  const harnessAutoReviewSupported = autoReview?.status === "reviewer" ? true : undefined;
   return (
     <Suspense
       fallback={<ShellState state="loading" title={`Loading ${surfaceLabel(props.surface)}`} />}
@@ -63,6 +67,7 @@ export function CodeUtilityModule(
           ? {}
           : { providerGroups: props.codeProviderGroups })}
         {...(harnessAutoReviewSupported === undefined ? {} : { harnessAutoReviewSupported })}
+        {...(autoReview === undefined ? {} : { autoReview })}
         {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
         {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
         tab={tab}

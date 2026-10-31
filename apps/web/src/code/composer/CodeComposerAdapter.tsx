@@ -1,4 +1,5 @@
 import { useDraftModelOptions } from "../../providers/useDraftModelOptions";
+import type { AutoReview } from "../autoReview";
 import {
   mentionChipsFromDraft,
   mentionChipsToDraft,
@@ -128,6 +129,8 @@ export interface CodeComposerAdapterProps {
   readonly onPermissionModeChange?: (mode: PermissionMode) => void;
   /** Whether the selected provider has a reviewer of its own, so Auto applies. */
   readonly autoSupported?: boolean;
+  /** Who would answer the new thread's prompts at Auto, or why nobody can. */
+  readonly autoReview?: AutoReview;
   readonly providerGroups: ReadonlyArray<PickerGroup>;
   readonly selectedProviderInstanceId?: ProviderInstanceId;
   readonly selectedModelId?: ProviderModelId;
@@ -872,6 +875,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                   />
                   <PermissionModePicker
                     autoSupported={props.autoSupported === true}
+                    autoReview={props.autoReview}
                     onChange={(next) => {
                       setPermissionMode(next);
                       props.onPermissionModeChange?.(next);

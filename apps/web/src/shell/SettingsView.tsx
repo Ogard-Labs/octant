@@ -961,6 +961,7 @@ function ActiveSectionContent({
             <CodeSettingsView
               focusedSetting={focusedSetting}
               onUpdate={props.codeController.updateSettings}
+              providerSnapshot={props.providerController?.snapshot}
               settings={props.codeController.bootstrap.settings}
             />
           )}

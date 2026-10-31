@@ -1,4 +1,6 @@
 import type { WorkspaceContentTabs } from "./workspaceContentTabs";
+import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
+import { autoReviewFor, type AutoReview } from "../code/autoReview";
 import {
   discardNewTaskDraftForOverview,
   discardNewTaskDraftForPane,
@@ -1155,13 +1157,16 @@ function renderCodeTab(
             (checkout) => String(checkout.id) === String(activeThread.checkoutId),
           )?.availability;
   const providerInstanceId = activeThread?.providerInstanceId;
-  const harnessAutoReviewSupported =
-    providerInstanceId === undefined
-      ? undefined
-      : props.providerController.observedByInstance.get(providerInstanceId)?.capabilities
-            .harnessAutoReview === "supported"
-        ? true
-        : undefined;
+  const autoReview = autoReviewFor({
+    providerInstanceId,
+    instances: props.providerController.instances,
+    observedByInstance: props.providerController.observedByInstance,
+    chosen: chosenAutoReviewer({
+      project: project?.type === "code" ? project : undefined,
+      settings: codeController.bootstrap?.settings,
+    }),
+  });
+  const harnessAutoReviewSupported = autoReview?.status === "reviewer" ? true : undefined;
   const content = (
     <Suspense
       fallback={
@@ -1219,6 +1224,7 @@ function renderCodeTab(
           ? {}
           : { providerGroups: props.codeProviderGroups ?? props.draftProviderGroups })}
         {...(harnessAutoReviewSupported === undefined ? {} : { harnessAutoReviewSupported })}
+        {...(autoReview === undefined ? {} : { autoReview })}
         {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
         {...(props.imageGenerationClient === undefined
           ? {}
@@ -1584,11 +1590,7 @@ function renderNonCodeTab(
           {...(props.onDraftPermissionModeChange === undefined
             ? {}
             : { onPermissionModeChange: props.onDraftPermissionModeChange })}
-          {...(props.draftSelectedProviderInstanceId !== undefined &&
-          props.providerController.observedByInstance.get(props.draftSelectedProviderInstanceId)
-            ?.capabilities.harnessAutoReview === "supported"
-            ? { autoSupported: true }
-            : {})}
+          {...draftAutoReview(props)}
           onSelectProvider={props.onDraftSelectProvider ?? (() => {})}
           {...(props.draftCodeExecute === undefined ? {} : { codeExecute: props.draftCodeExecute })}
           {...(props.onDraftCreateCodeThread === undefined
@@ -2818,4 +2820,25 @@ function WorkProjectOverviewSlot(props: {
       />
     </NewTaskDraftScopeContext.Provider>
   );
+}
+
+/**
+ * Who would answer a new thread's prompts at Auto on the chosen provider, by
+ * the account's choice; the Project's own choice applies once the thread is
+ * created.
+ */
+function draftAutoReview(props: WorkspaceViewProps): {
+  readonly autoSupported?: true;
+  readonly autoReview?: AutoReview;
+} {
+  const autoReview = autoReviewFor({
+    providerInstanceId: props.draftSelectedProviderInstanceId,
+    instances: props.providerController.instances,
+    observedByInstance: props.providerController.observedByInstance,
+    chosen: props.codeController.bootstrap?.settings.autoReviewer,
+  });
+  if (autoReview === undefined) return {};
+  return autoReview.status === "reviewer"
+    ? { autoSupported: true, autoReview }
+    : { autoReview };
 }
