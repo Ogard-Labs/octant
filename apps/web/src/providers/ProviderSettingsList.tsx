@@ -27,6 +27,10 @@ import { CheckCircle2, ChevronDown, ChevronRight, ChevronUp } from "lucide-react
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ProviderToolVerification } from "./ProviderToolVerification";
 import { ClaudeArtifactDeliverySetting } from "./ClaudeArtifactDeliverySetting";
+import {
+  ProviderNativeSetupSetting,
+  type ProviderNativeSetupSettingProps,
+} from "./ProviderNativeSetupSetting";
 import { ModelContextWindowField } from "./ModelContextWindowField";
 import { hostCredentialStore, useHostPlatform } from "../platform";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -115,6 +119,7 @@ export type ProviderSettingsListProps = Pick<
   | "onUpdateProviderCli"
   | "onSetEnabled"
   | "onSetClaudeArtifactDelivery"
+  | "onSetProviderNativeSetup"
   | "onDataTagsChange"
   | "onModelDataTagsChange"
   | "onModelContextWindowChange"
@@ -332,6 +337,9 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         {...(props.onSetClaudeArtifactDelivery === undefined
           ? {}
           : { onSetClaudeArtifactDelivery: props.onSetClaudeArtifactDelivery })}
+        {...(props.onSetProviderNativeSetup === undefined
+          ? {}
+          : { onSetProviderNativeSetup: props.onSetProviderNativeSetup })}
         onDataTagsChange={props.onDataTagsChange}
         onModelDataTagsChange={props.onModelDataTagsChange}
         {...(props.onModelContextWindowChange === undefined
@@ -649,6 +657,7 @@ interface ProviderRowProps {
   readonly onUpdateProviderCli?: ProviderSettingsViewProps["onUpdateProviderCli"];
   readonly onSetEnabled: ProviderSettingsViewProps["onSetEnabled"];
   readonly onSetClaudeArtifactDelivery?: ProviderSettingsViewProps["onSetClaudeArtifactDelivery"];
+  readonly onSetProviderNativeSetup?: ProviderSettingsViewProps["onSetProviderNativeSetup"];
   readonly onDataTagsChange: ProviderSettingsViewProps["onDataTagsChange"];
   readonly onModelDataTagsChange: ProviderSettingsViewProps["onModelDataTagsChange"];
   readonly onModelContextWindowChange?: ProviderSettingsViewProps["onModelContextWindowChange"];
@@ -749,6 +758,7 @@ function ProviderRow(props: ProviderRowProps) {
   const acpInstance: AcpAgentProviderInstance | undefined = isAcpAgentInstance(props.instance)
     ? props.instance
     : undefined;
+  const keyProviderInstance = keyProviderAccount(props.instance);
   const isPi = props.instance.driverKind === "pi";
   const isOhMyPi = props.instance.driverKind === "oh-my-pi";
   const isOllama = props.instance.driverKind === "ollama";
@@ -1668,6 +1678,18 @@ function ProviderRow(props: ProviderRowProps) {
                     }
                   />
                 )}
+                {keyProviderInstance === undefined ||
+                props.onSetProviderNativeSetup === undefined ? null : (
+                  <ProviderNativeSetupSetting
+                    disabled={disabled}
+                    instance={keyProviderInstance}
+                    {...(props.observed === undefined ? {} : { observed: props.observed })}
+                    onChange={(enabled) =>
+                      props.onSetProviderNativeSetup?.(props.instance.id, enabled) ??
+                      Promise.resolve(false)
+                    }
+                  />
+                )}
                 {acpInstance === undefined ? null : (
                   <div
                     className={`provider-card__facts provider-card__facts--${acpInstance.driverKind}`}
@@ -2013,6 +2035,28 @@ function directoryOf(path: string): string {
 
 function providerBinaryPath(instance: ProviderInstance): string | undefined {
   return "binaryPath" in instance.configuration ? instance.configuration.binaryPath : undefined;
+}
+
+/** The account a "Run as itself" switch belongs to: only a key provider has one. */
+function keyProviderAccount(
+  instance: ProviderInstance,
+): ProviderNativeSetupSettingProps["instance"] | undefined {
+  const driverKind =
+    instance.driverKind === "claude" ||
+    instance.driverKind === "codex" ||
+    instance.driverKind === "opencode" ||
+    instance.driverKind === "mistral-vibe"
+      ? instance.driverKind
+      : undefined;
+  if (driverKind === undefined) return undefined;
+  return {
+    id: String(instance.id),
+    displayName: instance.displayName,
+    driverKind,
+    ...("nativeSetup" in instance && instance.nativeSetup === true
+      ? { nativeSetup: true as const }
+      : {}),
+  };
 }
 
 function authenticationGuidance(

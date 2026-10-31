@@ -245,9 +245,12 @@ The key providers run inside Octant as they run on their own, with their native 
 - Turning a native feature on never turns on a provider's own memory, telemetry or self-update.
 - Octant still journals a native child run, marks outside content a native web tool read, and reports each capability honestly.
 - Every other provider keeps the deny rules for Project code and skills until it is promoted the same way.
+- A person turns it on for a key provider account (Run as itself) or trusts a Work or Code Project for a key provider (Trusted providers), only from a window on the host; both are journaled and the host resolves them for every session it starts or resumes.
+- A Project's own settings, hooks, MCP servers and plugins load only in a Project the person trusted for that provider, at every level.
+- A per-thread switch is not built yet.
 - Today's drivers still switch these native features off (not built yet).
 
-Status: Designed, not built. Since: 2026-10-31. Detail: [Architecture: Providers](../architecture.md#providers) and [Provider runtimes: Key providers](provider-runtimes.md#key-providers).
+Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Providers](../architecture.md#providers) and [Provider runtimes: Key providers](provider-runtimes.md#key-providers).
 
 ## Release scope
 

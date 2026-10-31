@@ -2156,6 +2156,21 @@ export function useProviderController(options: ProviderControllerOptions) {
       }),
     [execute],
   );
+  const setProviderNativeSetup = useCallback(
+    (instanceId: ProviderInstanceId, enabled: boolean) =>
+      execute((current) => {
+        const instance = findProvider(current, instanceId);
+        return instance === undefined
+          ? undefined
+          : {
+              kind: "set-provider-native-setup",
+              instanceId,
+              expectedVersion: instance.version,
+              enabled,
+            };
+      }),
+    [execute],
+  );
   const setDataTags = useCallback(
     (instanceId: ProviderInstanceId, dataTags: ProviderDataTags) =>
       execute((current) => {
@@ -2591,6 +2606,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     changeAmazonBedrockConfiguration,
     setEnabled,
     setClaudeArtifactDelivery,
+    setProviderNativeSetup,
     setDataTags,
     setModelDataTags,
     setModelContextWindow,

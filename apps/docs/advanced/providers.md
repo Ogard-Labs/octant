@@ -141,6 +141,32 @@ tools as unsupported, and its text and native-tool support do not imply an
 app-browser bridge. Changing the thread to Full access does not remove the
 isolation requirement.
 
+### Let a provider run as itself
+
+Claude Code, Codex, OpenCode, and Mistral Vibe can run in Octant the way they
+run on their own: their own subagents, web search and fetch, skills, and the
+MCP servers, plugins, settings, and hooks you set up for them. Octant still
+shows each subagent it can see and marks a thread that read the web.
+
+- **For an account:** in Settings › Providers, open the account and turn on
+  **Run … as itself**. Its threads then load its own setup in Chat, Work, and
+  Code.
+- **For a Project:** on a Work or Code Project's page, check the provider
+  under **Trusted providers**. That also lets the provider load the
+  Project's own settings, hooks, MCP servers, and plugins, code that no
+  Octant review step sees. A provider you do not trust there never loads a
+  Project's code, even at Full access.
+- **Full access** turns a provider's own setup on by itself, as in the
+  provider's own app.
+
+Only a window on the computer running Octant can change either switch; a
+paired phone or browser cannot. Plan mode stays read-only, so it never runs
+hooks, tool servers, or a Project's code. Chat never gets a folder or a
+shell, so it never runs hooks or a Project's code; your own tool servers do
+run in Chat when the switch is on. A provider's own memory, usage telemetry,
+and self-update stay off either way. The account's Settings card lists any
+part a provider cannot load in Octant yet.
+
 ### What each provider can do
 
 Claude Code and Codex are the two providers Octant is built around, and they

@@ -129,6 +129,7 @@ export * from "./navigatorAssistantPolicy";
 export * from "./providerAccountProfile";
 export * from "./providerAccountPlanUsage";
 export * from "./providerPolicy";
+export * from "./providerNativeSetupPolicy";
 export * from "./providerCatalogPolicy";
 export * from "./researchPolicy";
 export * from "./shellPolicy";

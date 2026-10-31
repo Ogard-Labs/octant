@@ -12,6 +12,7 @@ import {
   MAX_WORK_TURN_RESPONSE_BYTES,
   type ProviderAttachmentInput,
   type ProviderModelOptionValues,
+  type ProviderNativeSetup,
   type ProviderContextBlock,
   type ProviderFailure,
   type ProviderRuntimeEvent,
@@ -88,6 +89,8 @@ export interface WorkTurnRuntimePort {
     readonly access?: WorkAccess;
     /** The thread chose the runtime's own artifact tool and this turn offers it. */
     readonly nativeArtifacts?: boolean;
+    /** What the session may load of the provider's own setup; absent keeps it all off. */
+    readonly nativeSetup?: ProviderNativeSetup;
     readonly appManagedTools?: AppManagedToolSet;
     /**
      * Records that the runtime's own web search, page fetch, or hosted tool
@@ -277,6 +280,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         ...workThreadAccessOf(input.access ?? DEFAULT_WORK_ACCESS),
         tools: input.appManagedTools?.definitions ?? [],
         ...(input.nativeArtifacts === true ? { nativeArtifacts: true } : {}),
+        ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
       };
       const handle = yield* input.resumeCursor === undefined
         ? connection.start({ ...options, modelId: input.command.authority.modelId })

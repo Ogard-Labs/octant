@@ -4697,6 +4697,7 @@ function LaunchedShell(
       setProjectArchived: projectController.setArchived,
       setProjectColor: projectController.setColor,
       setProjectProviderPolicy: projectController.setProviderPolicy,
+      setProjectNativeProviders: projectController.setNativeProviders,
       setProjectPermissionMode: projectController.setCodePermissionMode,
       setProjectAutoReviewer: projectController.setCodeAutoReviewer,
       setProjectBrandKit: projectController.setBrandKit,

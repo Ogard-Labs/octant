@@ -14,7 +14,10 @@ import { thisComputerName } from "../platform";
 
 export const capabilityLabels: ReadonlyArray<
   readonly [
-    Exclude<keyof ProviderObservedState["capabilities"], "sessionCompaction" | "nativeArtifacts">,
+    Exclude<
+      keyof ProviderObservedState["capabilities"],
+      "sessionCompaction" | "nativeArtifacts" | "nativeSetup"
+    >,
     string,
   ]
 > = [

@@ -1749,6 +1749,7 @@ function providerSettingsViewProps(
     onRetry: controller.retry,
     onSetEnabled: controller.setEnabled,
     onSetClaudeArtifactDelivery: controller.setClaudeArtifactDelivery,
+    onSetProviderNativeSetup: controller.setProviderNativeSetup,
     onDataTagsChange: controller.setDataTags,
     onModelDataTagsChange: controller.setModelDataTags,
     onModelContextWindowChange: controller.setModelContextWindow,
