@@ -4,6 +4,7 @@ import { AggregateVersion, GlobalSequence, UtcTimestamp } from "./events";
 import { ThreadRestFields } from "./threadRest";
 import { ThreadLiveTurnFields } from "./threadLiveTurn";
 import { GithubIssueContextRequest } from "./githubIssueContext";
+import { TerminalSessionImportRequest } from "./terminalSessions";
 import { LinearIssueContextRequest } from "./linearIssueContext";
 import { BindingRevisionId, ProjectId } from "./projects";
 import { ThreadWorkingDirectory } from "./workingDirectory";
@@ -567,6 +568,8 @@ export const CreateManagedCodeThreadCommand = Schema.Struct({
   approvalId: Schema.optional(CodeApprovalId),
   issueContext: Schema.optional(GithubIssueContextRequest),
   linearIssueContext: Schema.optional(LinearIssueContextRequest),
+  /** A terminal session in the Project's folder the thread starts from. */
+  terminalSession: Schema.optional(TerminalSessionImportRequest),
 })
   .annotations(strict)
   .pipe(
@@ -584,6 +587,8 @@ export const CreateCodeThreadCommand = Schema.Struct({
   approvalId: Schema.optional(CodeApprovalId),
   issueContext: Schema.optional(GithubIssueContextRequest),
   linearIssueContext: Schema.optional(LinearIssueContextRequest),
+  /** A terminal session in the Project's folder the thread starts from. */
+  terminalSession: Schema.optional(TerminalSessionImportRequest),
 }).annotations(strict);
 export type CreateCodeThreadCommand = typeof CreateCodeThreadCommand.Type;
 
@@ -749,6 +754,17 @@ export const CodeCommand = Schema.Union(
     kind: Schema.Literal("change-code-thread-document-delivery"),
     ...CodeThreadCommandFields,
     documentDelivery: ThreadDocumentDelivery,
+  }).annotations(strict),
+  /**
+   * Files a Code thread into another Code Project bound to the same folder
+   * (or one that contains it, when the thread's checkout stays valid there).
+   * The thread keeps its history, guardrail level and checkout; the host
+   * refuses any Project under which the checkout would not stay valid.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("move-code-thread"),
+    ...CodeThreadCommandFields,
+    projectId: ProjectId,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-code-thread-working-directory"),

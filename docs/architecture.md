@@ -340,18 +340,40 @@ lasts): the kernel's pressure level on macOS, and the available share of
 `/proc/meminfo` on Linux, where under 10% reads as low and under 5% as very
 low. A reading the platform cannot give is "unknown", which counts as no
 signal, never as normal pressure. The host process counts as pressure on its
-own once it holds 2 GiB (4 GiB for very low), or a quarter (a half) of a
-machine smaller than 8 GiB. On the first low reading, when pressure rises, and
+own once it holds its **memory limits**: low at the first, very low at the
+second. The setting is Automatic by default, which is 2 GiB (4 GiB for very
+low), or a quarter (a half) of a machine smaller than 8 GiB. Custom replaces
+the pair with two sizes in GB of 1024³ bytes, the same unit as the default
+(0.5 to 64, very low above low) that apply as
+given on any machine, without the small-machine scaling: the person chose them
+knowing what else the machine runs. The limits are a host setting in Settings >
+Host, changed only by a local window: `POST /api/host-control/memory-limits`
+sits on the loopback host-control surface, behind the `host.service.memory-limits`
+action that a paired device is denied, so a paired device can neither read nor
+change it. Each change is one journaled event
+(`host-memory-limits.changed@1`) naming who made it, when, and the values
+before and after; the `host_memory_limits_projection` row is rebuilt from those
+events, and saving the values already in force records nothing. A pair that is
+out of bounds or not ordered comes back as a refused outcome with a plain
+message, never as a stored value. The guard reads the saved limits at every
+sample, and a change takes a reading at once, so a new limit applies without a
+restart; a limits read that fails falls back to Automatic and is logged, since
+the built-in pair is the safe reading. The limits only move when the host eases
+itself; they never touch a running turn or the system's own signal. On the
+first low reading, when pressure rises, and
 then at most once a minute while it lasts, the host eases itself in a fixed
 order: it logs the reading, stops provider runtimes whose last lease ended and
 sessions parked for reuse (the next turn starts them again), then trims caches
 it rebuilds on demand (SQLite's page cache and, under Bun, the heap). A running
 turn is never stopped; the report only counts how many were left running. The
 host-control status carries a `memory` report (level, the host's size in
-megabytes, the last relief as counts, and any unclean stop) and nothing named:
+megabytes, the limits in force as set and as resolved for this machine, the last
+relief as counts, and any unclean stop) and nothing named:
 no provider, thread, or path. The renderer shows it as one dismissible, quiet
 notice and as rows in Settings > Host, only when the host stopped something, when
-memory was very low, or after an unclean stop. Dismissal is local to the
+memory was very low, or after an unclean stop. The Memory limits control (an
+Automatic or Custom choice with two fields) sits in its own Memory section on
+the same page whenever the host reports memory. Dismissal is local to the
 renderer. Nothing leaves the machine.
 
 The host keeps `host-memory.json` in its data directory (owner-only: the last
@@ -477,7 +499,9 @@ protected `mobile-testflight` environment and uploads only when its `submit`
 input is set; pull requests get no release credential. GitHub holds only the
 revocable Expo token; Apple certificates, profiles, and the App Store Connect
 key stay in EAS's credential service. The App ID enables no optional Apple
-capability (push, associated domains, Sign in with Apple, iCloud), testers are
+capability (push, associated domains, Sign in with Apple, iCloud) until the
+maintainer builds with phone push on (`OCTANT_MOBILE_PUSH=1`, which adds push
+and Keychain sharing for the notification service extension), testers are
 maintainer-controlled App Store Connect users, and external groups, public
 links, and store listing stay closed until
 [public store distribution](design/mobile-maturity.md#phase-e-public-store-distribution),
@@ -976,6 +1000,47 @@ gate their domains: with one off, the composer offers only the other kind.
 | **Chat** | A virtual, memory-scoped Project, or no Project at all                                                                              | No filesystem or shell authority. Optional safe research tools; scratch space is isolated per thread.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | **Work** | Exactly one OS-confined project root                                                                                                | The shared capability set at the thread's [guardrail level](#security-and-authority): file reads and writes, shell, Git, local command-line tools, SSH to the person's own machines, provider-native tools, and subagents, as in Code. Focus: documents and artifacts with document adapters (docx, pptx, pdf, image), research with citations, local tasks, and the server-authoritative board; Done by a person. Developer surfaces stay hidden until the person turns them on for the Project (below).                                                                                                                                                                                                                                           |
 | **Code** | Exactly one directory, ideally a repository root; Code threads select a checkout (current checkout or a managed worktree) inside it | The same shared capability set at the thread's guardrail level, which starts in the mode the person picked at first run (Auto pre-selected; Ask first where the provider has no Auto) or later set for the Project or in Settings › Code › Access; any thread switches mode from its composer. Plan mode is always read-only. Focus: Git, terminals, tests, pull requests, review, and managed subagents inside the bound root, with checkouts, managed worktrees, and the objective delivery target. Creating a Code Project may explicitly initialize Git in that folder so a Code thread can prepare a checkout immediately; if that initialization fails, creation is refused and no Project is journaled. Binding without Git remains allowed. |
+
+A No-project Chat thread can be filed into a Chat Project from its thread menu
+(**Move to Project…**), picking one or creating it there. The move is the
+server's `move-chat-thread` command: it keeps the thread's kind, history, and
+settings, accepts only an active Chat Project, and adds no filesystem, shell, or
+network authority; the Project's memory applies from the thread's next message.
+A Chat already in a Project offers no move. A tool-extension selection resolved
+while the thread had no Project no longer matches its new scope and is refused
+until it is selected again.
+
+A Work or Code thread can be filed into another Project of its own mode from its
+row menu (**Move to Project…**). The server's `move-work-thread` and
+`move-code-thread` commands keep the thread's kind, history, and guardrail
+level, and add no filesystem reach: the pure `decideThreadMove` policy admits
+only an active Project of the same mode whose bound folder is the thread's
+folder or contains it, and refuses an archived thread, a running turn, a thread
+waiting on the person, the thread's own Project, and any other folder, each with
+a plain reason. A person makes the move; a routine acting as the host is
+refused. A Work thread takes the destination's binding revision and its working
+directory is rewritten to name the same place under the new root, so a
+containing folder changes the confinement root but not where the thread works.
+A Code thread also needs its checkout to stay valid: the destination's checkout
+must be the same repository at the same folder, so a Project that merely
+contains the thread's folder is refused. A checkout of the Project's folder is
+re-derived under the destination and journaled before the thread; a managed
+worktree keeps its own identity. A session grant of Full access is discarded on
+the move. The destination's provider policy still applies to the thread's
+provider and model. Each move is one journaled thread update by the local
+person with its time, and replays like any other thread update.
+
+Stop asks the runtime to end a turn. When the runtime does not end it, a
+provider whose sessions each own a process (reported as the `forceStop`
+capability, Claude today) lets the person **Force stop** the turn ten seconds
+after pressing Stop in Chat. The server's `force-stop-chat-turn` command kills
+that attempt's own runtime process tree and nothing else, journals the attempt
+`cancelled`, and leaves the thread usable and its session resumable. A runtime
+that serves several threads from one process (Codex, OpenCode) reports
+`forceStop` unsupported: the command is refused, the UI never offers it, and
+Stop settles the attempt at once as before. For a provider that supports it, a
+Stop keeps the attempt running until the runtime really ends it, so a Stop that
+did not take stays visible. Work and Code do not offer Force stop yet.
 
 **One authority model, two focuses** (maintainer decision, 2026-10-31: "Work
 and Code should essentially be able to do the same, but Work is more for
@@ -3380,7 +3445,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   other than `builtin:provider-driver/<kind>`, and any source other than
   `bundled`. That schema stays closed: an outside driver has its own public
   `OutsideProviderDriverEntry` schema in `@octant/plugin-api`, read from a
-  local folder, installed held, and admitted at its digest when its source is
+  local folder or a signed npm package, installed held, and admitted at its digest when its source is
   trusted; the catalog lists effective outside drivers in their own group from
   the registry snapshot. Third-party provider-driver plugins are an authorized
   post-preview track under [Outside provider drivers](design/outside-provider-drivers.md). The catalog repeats installed and trusted from the activation context
@@ -6547,6 +6612,41 @@ Project, thread, and provider policy allow it. Any other state — `not-installe
 `host-prohibited`, `stale-catalog-epoch`, `broken`, `draining` — contributes no
 prompt, schema, tool, route, model, or capability.
 
+**npm packages.** A person may type an npm package name, with an optional
+version, range, or dist-tag, in Marketplace or as
+`octant plugin install npm:<package>[@<version>]`. The host looks the package
+up on the registry the person's own npm settings name: `npm_config_registry`,
+then the user `.npmrc`'s scoped `@scope:registry`, then its `registry`, then
+the public registry. Only those addresses are read; no token or other setting
+is read or sent, so a registry that needs a login answers as refused. A
+registry written with an environment variable, one with credentials in the
+address, and plain `http` to anything but this computer are refused rather
+than guessed at, so a private name is never sent to the public registry. The
+host picks one published version, downloads the one tarball the registry's
+metadata names (it must be on the registry's own origin), and requires the
+registry to have published a SHA-256, SHA-384, or SHA-512 integrity for it;
+the downloaded bytes must hash to that integrity or nothing is kept. It
+reads the archive in memory (no links, special files, or unsafe paths) and
+runs nothing from it: no `npm`, no lifecycle script, no dependency install.
+The files in that one tarball are all that is installed. A package is read as
+an Agent Plugin (a root `plugin.json` with the canonical schema) or as a
+signed provider driver ([Outside provider drivers](design/outside-provider-drivers.md#signature-rules));
+any other package is refused as not one Octant can install. The package's
+identity is the registry and the name, not the version, so a newer version
+updates the same package and a same-named package from another registry is a
+different one. The package, exact version, registry, and verified tarball
+integrity are recorded as the package's provenance in the same journaled
+install, shown in its details, and replayed with it. The package then follows
+the ordinary ladder: installed, untrusted, quarantined, switched off.
+"Check for update" asks the recorded registry for its `latest` tag and
+installs nothing; a newer version is looked up, reviewed, and confirmed like
+any install. Every failure is a plain sentence: not found, no matching
+version, integrity missing or mismatched, registry refused or unreachable,
+fetches turned off, an unsupported package. Looking up and checking stay with
+a local window, like the rest of package lifecycle, and obey the Marketplace
+fetches preference. The lookup sends only `Accept` and the constrained
+`User-Agent`; there is no telemetry.
+
 **Selection epoch.** A selected plugin, MCP server, or skill carries the
 catalog epoch it was resolved under, and the host re-resolves it on send, replay,
 resume, and at provider handoff. The epoch is a hash of the facts a selection
@@ -8443,6 +8543,7 @@ access` agree); a thread's own change is journaled as
   | `appManagedTools`        | `supported`                                                                       | `supported`                                                                    | `unsupported`; `supported` on macOS in a verified isolated config        | `unsupported`; `supported` once the probe attests the tool bridge on Pi 0.85.1 or 1.1.0 and later | `varies`: `supported` on macOS when the agent serves HTTP MCP                 | `unsupported`; `supported` for each model a person verified      | `unsupported`; `supported` for each model a person verified                       | `unsupported`; `supported` for each model the host verified      | `unsupported`                         |
   | `acpClientCapabilities`  | `absent`                                                                          | `absent`                                                                       | `absent`                                                                 | `absent`                                                                                          | `supported`                                                                   | `absent`                                                         | `absent`                                                                          | `absent`                                                         | `absent`                              |
   | `modelSwitch`            | `supported`                                                                       | `supported`                                                                    | `supported`; the resume names the thread's current model on every prompt | `absent`; same                                                                                    | `absent`; same                                                                | `absent`; Octant replays history, so the model may change        | `absent`; Octant replays history, so the model may change                         | `absent`; Octant replays history, so the model may change        | `absent`                              |
+  | `forceStop`              | `supported`                                                                       | `unsupported`; one process serves every thread                                 | `unsupported`; one process serves every thread                           | `absent`                                                                                          | `absent`                                                                      | `absent`                                                         | `absent`                                                                          | `absent`                                                         | `absent`                              |
   | `sessionCompaction.chat` | `supported`; `unavailable` when the install lacks `/compact`                      | `supported`; `unavailable` before Codex 0.162.1                                | `absent`                                                                 | `absent`                                                                                          | `absent`                                                                      | `unsupported`; Octant summarizes                                 | `unsupported`; Octant summarizes                                                  | `unsupported`; Octant summarizes                                 | `absent`                              |
   | `sessionCompaction.work` | as Chat                                                                           | as Chat                                                                        | `absent`                                                                 | `absent`                                                                                          | `absent`                                                                      | `unsupported`; Octant summarizes                                 | `unsupported`; Octant summarizes                                                  | `unsupported`; Octant summarizes                                 | `absent`                              |
   | `sessionCompaction.code` | as Chat                                                                           | as Chat                                                                        | `absent`                                                                 | `absent`                                                                                          | `absent`                                                                      | `supported`; Octant Harness compacts its own transcript          | `supported`; Octant Harness compacts its own transcript                           | `supported`; Octant Harness compacts its own transcript          | `absent`                              |

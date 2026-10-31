@@ -350,6 +350,7 @@ async function driverFixture(port: ReturnType<typeof createAgentRunClaudeResumeI
     messages: Stream.never,
     send: () => Effect.void,
     requestCompaction: () => Effect.void,
+    forceKill: () => Effect.void,
     interrupt: () => Effect.void,
     setPermissionMode: () => Effect.void,
     supportedModels: () => Effect.succeed(initialization.models),

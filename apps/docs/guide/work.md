@@ -54,6 +54,14 @@ Work and Code can do the same things. A Work thread gets the same shell, Git, co
 
 What differs is focus: Work shows documents, artifacts, local tasks, and its board, and keeps Git panels, pull requests, reviews, issue trackers, and worktrees out of sight until you turn on **Developer tools** in the Work Project's overview. A Work thread is still Done when you mark it Done. The Developer tools switch is not built yet.
 
+## Continue a terminal session
+
+A new Work task can start from a Claude Code or Codex session you had in a
+terminal in the same folder. Choose **Create from…**, then **Terminal**, and
+pick the session. The task shows that conversation as folded, read-only
+history, and the assistant reads it once at the start. The session stays on
+this Mac, and the task is marked as holding outside content.
+
 ## Work settings
 
 **Settings › Work** sets what a new Work thread starts with:
@@ -130,6 +138,16 @@ hand. A thread that is waiting on you cannot be snoozed.
 Put-away threads move to the archive on their own after a week. Change that
 window, or turn it off, under **Settings › General › Archive put-away
 threads**. Archiving keeps every thread; only a confirmed purge deletes.
+
+## Move to a Project
+
+Choose **Move to Project…** from a Work thread's row menu to file it into
+another Work Project. The thread stays a Work thread and keeps its history and
+its access level. It can move only to a Work Project whose folder is the same
+as, or contains, the folder it works in; Projects bound to any other folder are
+listed greyed out with the reason, and the host refuses them too. The thread
+keeps working in the same place inside the new Project's folder. Octant refuses
+the move while a turn is running or the agent is waiting on you.
 
 ## Export
 

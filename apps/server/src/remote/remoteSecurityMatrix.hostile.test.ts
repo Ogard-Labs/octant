@@ -1303,6 +1303,45 @@ describe("push registrations follow the paired device (in-memory gateway)", () =
     }
   });
 
+  it("replaces a phone's registration when its capability rotates, keeping the old one nowhere and journaling a change without either", async () => {
+    const older = "capability-before-rotation";
+    const newer = "capability-after-rotation";
+    const harness = await setup();
+    try {
+      const session = await establishSession(harness);
+      expect((await putPushToken(harness, session, older)).status).toBe(200);
+      const collapseKey = harness.pushRegistrations.get({
+        hostId,
+        deviceId: session.deviceId,
+      })?.collapseKey;
+      const rotated = await putPushToken(harness, session, newer);
+      expect(rotated.status).toBe(200);
+      expect(rotated.json()).toMatchObject({ result: "registered" });
+      // Sending the same capability again changes nothing.
+      expect((await putPushToken(harness, session, newer)).json()).toMatchObject({
+        result: "already-registered",
+      });
+
+      const stored = harness.pushRegistrations.get({ hostId, deviceId: session.deviceId });
+      expect(stored?.token).toBe(newer);
+      // The destination keeps its collapse key, so an update still replaces the
+      // notification it updates on the phone.
+      expect(stored?.collapseKey).toBe(collapseKey);
+      const file = readFileSync(join(harness.directory, PUSH_REGISTRATIONS_FILE), "utf8");
+      expect(file).toContain(newer);
+      expect(file).not.toContain(older);
+      const events = pushRegistrationEvents(harness);
+      expect(
+        events.map((event) => (JSON.parse(event.payload_json) as { change?: string }).change),
+      ).toEqual(["added", "changed"]);
+      expect(JSON.stringify(events)).not.toContain(older);
+      expect(JSON.stringify(events)).not.toContain(newer);
+      expect(rotated.bodyText).not.toContain(newer);
+    } finally {
+      await harness.gateway.stop();
+    }
+  });
+
   it("drops at restart a registration whose device has no standing and keeps the paired phone's", async () => {
     const harness = await setup();
     const session = await establishSession(harness);

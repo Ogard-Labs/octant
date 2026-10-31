@@ -4,6 +4,8 @@ import {
   type HostLifecycleAction,
   HostLifecycleOutcome,
   HostRestoreOutcome,
+  SetHostMemoryLimitsOutcome,
+  type SetHostMemoryLimitsRequest,
 } from "@octant/contracts/host-control";
 import { HostDataMap } from "@octant/contracts/host-data-map";
 import {
@@ -36,6 +38,7 @@ export interface HostControlClient {
   lifecycle(action: HostLifecycleAction): Promise<HostLifecycleOutcome>;
   backup(label?: string): Promise<HostBackupOutcome>;
   restore(): Promise<HostRestoreOutcome>;
+  setMemoryLimits(request: SetHostMemoryLimitsRequest): Promise<SetHostMemoryLimitsOutcome>;
   readThreadRetention(): Promise<ThreadRetentionState>;
   setThreadRetention(request: SetThreadRetentionRequest): Promise<SetThreadRetentionOutcome>;
   purgeThreads(request: PurgeThreadsRequest): Promise<PurgeThreadsOutcome>;
@@ -138,6 +141,15 @@ export function createHostControlClient(options: HostControlClientOptions): Host
     async restore() {
       const body = await call({ path: "/api/host-control/restore", method: "POST", body: {} });
       return decodeOrThrow(decodeHostAnswer(HostRestoreOutcome), body);
+    },
+    async setMemoryLimits(request) {
+      const body = await call({
+        path: "/api/host-control/memory-limits",
+        method: "POST",
+        body: request,
+        decodableStatuses: [403],
+      });
+      return decodeOrThrow(decodeHostAnswer(SetHostMemoryLimitsOutcome), body);
     },
     async readThreadRetention() {
       const body = await call({ path: "/api/host-control/thread-retention", method: "GET" });

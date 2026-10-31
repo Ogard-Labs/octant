@@ -123,6 +123,35 @@ describe("createHostControlClient", () => {
     expect(JSON.parse(init.body as string)).toEqual({ action: "restart" });
   });
 
+  it("posts memory limits and decodes both a saved outcome and a refusal", async () => {
+    const saved = fetchReturning(200, {
+      kind: "saved",
+      limits: { kind: "custom", pressuredGb: 3, criticalGb: 6 },
+    });
+    const client = createHostControlClient({
+      baseUrl: "http://127.0.0.1:4100",
+      fetch: saved,
+      windowCapability: capability,
+    });
+    const request = { limits: { kind: "custom", pressuredGb: 3, criticalGb: 6 } } as const;
+    expect((await client.setMemoryLimits(request)).kind).toBe("saved");
+    const [url, init] = saved.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:4100/api/host-control/memory-limits");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual(request);
+
+    const refused = createHostControlClient({
+      baseUrl: "http://127.0.0.1:4100",
+      fetch: fetchReturning(403, {
+        kind: "refused",
+        code: "unauthorized",
+        message: "Memory limits can only be changed on this host.",
+      }),
+      windowCapability: capability,
+    });
+    expect(await refused.setMemoryLimits(request)).toMatchObject({ kind: "refused" });
+  });
+
   it("decodes a refused lifecycle outcome without throwing", async () => {
     const fetchImpl = fetchReturning(200, {
       kind: "refused",
