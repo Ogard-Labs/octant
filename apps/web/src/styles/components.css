@@ -1447,6 +1447,58 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
   white-space: pre-wrap;
 }
 
+/* An approval Octant Shield answered: a quiet line among the tool rows. */
+.turn-activity__review {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  min-width: 0;
+  min-height: 28px;
+  padding: 0 2px;
+  color: var(--oct-muted);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+}
+
+.turn-activity__disclosure + .turn-activity__review,
+.turn-activity__review + .turn-activity__disclosure,
+.turn-activity__review + .turn-activity__review {
+  border-top: 1px solid var(--oct-border-soft);
+}
+
+.turn-activity__review-icon {
+  flex: none;
+  color: var(--oct-meta);
+}
+
+.turn-activity__review[data-verdict="deny"] .turn-activity__review-icon {
+  color: var(--oct-danger-fg);
+}
+
+.turn-activity__review-verdict {
+  flex: none;
+  color: var(--oct-fg-2);
+}
+
+.turn-activity__review-call {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 40%;
+  overflow: hidden;
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-detail);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.turn-activity__review-reason {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .turn-activity__truncated {
   margin: 0 0 2px;
   color: var(--oct-meta);

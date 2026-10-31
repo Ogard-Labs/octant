@@ -39,6 +39,7 @@ import { HarnessRetryNotice } from "./harnessRetry";
 import { HubMemberId } from "./hubAndSpokes";
 import { ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId, type ProviderToolDefinition } from "./providers";
+import { ShieldDecision } from "./shield";
 import { ThreadPlanStepId } from "./threadPlan";
 import { SessionMetrics, TurnMetrics, TurnUsage } from "./turnMetrics";
 
@@ -1104,6 +1105,12 @@ export const NativeHarnessApproval = Schema.Struct({
   commandHosts: Schema.optional(
     Schema.Array(NativeHarnessCommandHost).pipe(Schema.maxItems(MAX_NATIVE_HARNESS_COMMAND_HOSTS)),
   ),
+  /**
+   * Octant Shield's decision on this call, at Auto with Shield reviewing. An
+   * allow or deny is Shield's answer, journaled settled; an ask is why Shield
+   * handed the call to the person, who answers it as any other approval.
+   */
+  shield: Schema.optional(ShieldDecision),
   askedAt: UtcTimestamp,
   settledAt: Schema.optional(UtcTimestamp),
 })
@@ -1111,6 +1118,8 @@ export const NativeHarnessApproval = Schema.Struct({
   .pipe(
     Schema.filter(
       (approval) =>
+        (approval.shield?.verdict !== "allow" || approval.status === "approved") &&
+        (approval.shield?.verdict !== "deny" || approval.status === "denied") &&
         (approval.status === "pending") === (approval.settledAt === undefined) &&
         (approval.outsideContent === undefined || approval.singleUse === true) &&
         // Only a single-use confirmation can name hosts: a remembered approval

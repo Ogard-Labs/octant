@@ -572,6 +572,14 @@ async function projectConversationTurns(
         });
         continue;
       }
+      if (step.kind === "review") {
+        replayed = applyActivityEvent(replayed, {
+          kind: "approval-reviewed",
+          summary: step.summary,
+          decision: step.decision,
+        });
+        continue;
+      }
       const text = await readConversationText(
         client,
         threadId,

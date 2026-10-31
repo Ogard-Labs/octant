@@ -213,8 +213,16 @@ export interface NativeHarnessToolPorts {
     readonly freshConfirmation: boolean;
     /** The call being approved; a command it runs names its launch by it. */
     readonly callId: string;
+    /**
+     * The call's decoded arguments and, for a goal check, the command it will
+     * run: what an automatic reviewer judges. Never the call's result.
+     */
+    readonly arguments?: unknown;
+    readonly command?: string | undefined;
     readonly signal?: AbortSignal;
-  }) => Promise<"approved" | "denied" | "expired" | "cancelled" | "too-many-waiting">;
+  }) => Promise<
+    "approved" | "denied" | "shield-denied" | "expired" | "cancelled" | "too-many-waiting"
+  >;
   /** The thread's goal, when the host can reach it. */
   readonly goal?: NativeHarnessGoalPort;
   /** Queued notes from the person, handed to the lead inside the next tool result. */
@@ -404,18 +412,24 @@ export function createNativeHarnessTools(
         approvalClass: decision.policy.approvalClass,
         freshConfirmation: decision.reason === "taint-requires-fresh-confirmation",
         callId: String(request.actionId),
+        arguments: args,
+        ...(approvedCheck === undefined ? {} : { command: approvedCheck }),
         ...(signal === undefined ? {} : { signal }),
       });
       if (outcome !== "approved") {
         return refused(
-          outcome === "denied" ? "approval-denied" : `approval-${outcome}`,
+          outcome === "denied" || outcome === "shield-denied"
+            ? "approval-denied"
+            : `approval-${outcome}`,
           outcome === "denied"
             ? `The person did not allow ${name} here. Do not retry it; say what you would have done.`
-            : outcome === "expired"
-              ? `Nobody answered the approval for ${name} in time. Continue without it and say so.`
-              : outcome === "too-many-waiting"
-                ? `Too many approvals are already waiting for a person, so ${name} was not asked. Continue without it and say so.`
-                : `The turn was cancelled while waiting for approval of ${name}.`,
+            : outcome === "shield-denied"
+              ? `Octant Shield did not allow ${name} here. Do not retry it; say what you would have done.`
+              : outcome === "expired"
+                ? `Nobody answered the approval for ${name} in time. Continue without it and say so.`
+                : outcome === "too-many-waiting"
+                  ? `Too many approvals are already waiting for a person, so ${name} was not asked. Continue without it and say so.`
+                  : `The turn was cancelled while waiting for approval of ${name}.`,
         );
       }
     }
