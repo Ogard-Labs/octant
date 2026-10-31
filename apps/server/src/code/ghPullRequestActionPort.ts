@@ -41,6 +41,27 @@ export type GhPullRequestSummaryResult =
     }>
   | Readonly<{ status: "unavailable" }>;
 
+const CONTEXT_THREADS_QUERY =
+  "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:50){nodes{id isResolved isOutdated path comments(first:1){nodes{author{login} body}}}}}}}";
+
+export type GhPullRequestActionContextResult =
+  | Readonly<{
+      status: "read";
+      labels: ReadonlyArray<string>;
+      repositoryLabels: ReadonlyArray<string>;
+      reviewThreads: ReadonlyArray<
+        Readonly<{
+          id: string;
+          resolved: boolean;
+          outdated: boolean;
+          path: string;
+          author: string;
+          excerpt: string;
+        }>
+      >;
+    }>
+  | Readonly<{ status: "unavailable"; reason: "disconnected" | "unauthenticated" | "unavailable" }>;
+
 const THREAD_OWNER_QUERY =
   "query($thread:ID!){node(id:$thread){... on PullRequestReviewThread{pullRequest{number repository{name owner{login}}}}}}";
 
@@ -109,6 +130,89 @@ export class GhPullRequestActionPort {
       headBranch: value.headRefName,
       baseBranch: value.baseRefName,
       headSha: value.headRefOid,
+    };
+  }
+
+  /**
+   * What the person's controls name: the pull request's labels, the labels the
+   * repository already has, and its review threads. Nothing here writes.
+   */
+  async readContext(
+    request: GhPullRequestIdentityRequest,
+    signal: AbortSignal,
+  ): Promise<GhPullRequestActionContextResult> {
+    const repository = repositoryOf(request);
+    if (repository === undefined) return { status: "unavailable", reason: "unavailable" };
+    const [view, labels, threads] = await Promise.all([
+      this.#run(
+        ["pr", "view", String(request.number), "--repo", repository, "--json", "labels"],
+        undefined,
+        signal,
+      ),
+      this.#run(
+        ["label", "list", "--repo", repository, "--limit", "100", "--json", "name"],
+        undefined,
+        signal,
+      ),
+      this.#run(
+        [
+          "api",
+          "graphql",
+          "-f",
+          `query=${CONTEXT_THREADS_QUERY}`,
+          "-F",
+          `owner=${request.owner}`,
+          "-F",
+          `name=${request.name}`,
+          "-F",
+          `number=${request.number}`,
+        ],
+        undefined,
+        signal,
+      ),
+    ]);
+    for (const result of [view, labels, threads]) {
+      if (result === undefined) return { status: "unavailable", reason: "disconnected" };
+      if (result.exitCode !== 0) {
+        const diagnostic = `${result.stderr ?? ""}\n${result.stdout}`;
+        return /HTTP 401|bad credentials|authentication required|not logged in/i.test(diagnostic)
+          ? { status: "unavailable", reason: "unauthenticated" }
+          : { status: "unavailable", reason: "unavailable" };
+      }
+    }
+    const viewValue = parseJson(view?.stdout ?? "");
+    const labelsValue = parseJson(labels?.stdout ?? "");
+    const nodes = pathOf(parseJson(threads?.stdout ?? ""), [
+      "data",
+      "repository",
+      "pullRequest",
+      "reviewThreads",
+      "nodes",
+    ]);
+    if (!isRecord(viewValue) || !Array.isArray(labelsValue) || !Array.isArray(nodes)) {
+      return { status: "unavailable", reason: "unavailable" };
+    }
+    return {
+      status: "read",
+      labels: labelNames(viewValue.labels).slice(0, 50),
+      repositoryLabels: labelNames(labelsValue).slice(0, 100),
+      reviewThreads: nodes.flatMap((node) => {
+        if (!isRecord(node) || typeof node.id !== "string" || !NODE_ID_PATTERN.test(node.id)) {
+          return [];
+        }
+        const first = pathOf(node, ["comments", "nodes", "0"]);
+        return [
+          {
+            id: node.id,
+            resolved: node.isResolved === true,
+            outdated: node.isOutdated === true,
+            path: typeof node.path === "string" ? node.path.slice(0, 1_024) : "",
+            author: isRecord(first) && isRecord(first.author) ? loginText(first.author.login) : "",
+            excerpt:
+              isRecord(first) && typeof first.body === "string" ? first.body.slice(0, 400) : "",
+          },
+        ];
+      }),
     };
   }
 
@@ -404,6 +508,27 @@ function validLabel(label: string): boolean {
 
 function validComment(body: string): boolean {
   return body.trim() !== "" && !body.includes("\0") && Buffer.byteLength(body) <= MAX_COMMENT_BYTES;
+}
+
+function labelNames(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) =>
+    isRecord(entry) && typeof entry.name === "string" && validLabel(entry.name) ? [entry.name] : [],
+  );
+}
+
+function loginText(value: unknown): string {
+  return typeof value === "string" ? value.slice(0, 255) : "";
+}
+
+function pathOf(value: unknown, path: ReadonlyArray<string>): unknown {
+  let current = value;
+  for (const key of path) {
+    if (Array.isArray(current)) current = current[Number(key)];
+    else if (isRecord(current)) current = current[key];
+    else return undefined;
+  }
+  return current;
 }
 
 function parseJson(text: string): unknown {

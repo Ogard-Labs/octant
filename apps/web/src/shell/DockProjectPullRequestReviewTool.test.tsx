@@ -3,6 +3,9 @@ import {
   decodeCodeProjectPullRequestSwitchesView,
   decodeCodeThreadId,
   decodeUtcTimestamp,
+  type CodeProjectPullRequestActionCommand,
+  type CodeProjectPullRequestActionContext,
+  type CodeProjectPullRequestActionOutcome,
   type CodeProjectPullRequestMergeOutcome,
   type CodeProjectPullRequestSwitchOutcome,
   type CodeProjectPullRequestDetailQuery,
@@ -247,11 +250,17 @@ describe("DockProjectPullRequestReviewTool", () => {
     const mergeWhenReady = await screen.findByRole("switch", { name: "Merge when ready" });
     expect(mergeWhenReady).not.toBeChecked();
     await user.click(mergeWhenReady);
+    expect(setMergeWhenReady).not.toHaveBeenCalled();
+    expect(
+      await screen.findByRole("region", { name: "Confirm Merge when ready" }),
+    ).toHaveTextContent("9999999");
+    await user.click(screen.getByRole("button", { name: "Confirm Merge when ready" }));
     expect(setMergeWhenReady).toHaveBeenCalledWith({
       kind: "enable",
       target: query,
       headSha: "9".repeat(40),
       method: "squash",
+      confirmed: true,
     });
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Merge when ready is unsupported: this repository does not allow auto-merge.",
@@ -264,6 +273,32 @@ describe("DockProjectPullRequestReviewTool", () => {
     expect(setAutoFix).toHaveBeenCalledWith({ kind: "enable", target: query, threadId });
     await waitFor(() => expect(autoFix).toBeChecked());
     expect(screen.getByText(/On\. Watching for failed checks/)).toBeVisible();
+  });
+
+  it("turns Merge when ready on only after the person confirms, and cancelling sends nothing", async () => {
+    const user = userEvent.setup();
+    const off = decodeCodeProjectPullRequestSwitchesView({
+      version: 1,
+      target: query,
+      mergeWhenReady: { status: "off" },
+      autoFix: { status: "off" },
+      generatedAt: "2026-08-22T08:00:00.000Z",
+    });
+    const setMergeWhenReady = vi.fn();
+    render(
+      <DockProjectPullRequestReviewTool
+        load={async () => detailView()}
+        loadSwitches={async () => off}
+        query={query}
+        refresh={async () => detailView()}
+        setAutoFix={vi.fn()}
+        setMergeWhenReady={setMergeWhenReady}
+      />,
+    );
+    await user.click(await screen.findByRole("switch", { name: "Merge when ready" }));
+    await user.click(await screen.findByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("region", { name: "Confirm Merge when ready" })).toBeNull();
+    expect(setMergeWhenReady).not.toHaveBeenCalled();
   });
 
   it("keeps Auto-fix off and says why when no Code thread is linked", async () => {
@@ -290,5 +325,146 @@ describe("DockProjectPullRequestReviewTool", () => {
       "title",
       "Link a Code thread to this pull request to use Auto-fix.",
     );
+  });
+
+  describe("the person's own pull-request actions", () => {
+    const readContext = (
+      overrides: Partial<Extract<CodeProjectPullRequestActionContext, { status: "read" }>> = {},
+    ): CodeProjectPullRequestActionContext => ({
+      status: "read",
+      labels: ["bug"],
+      repositoryLabels: ["bug", "p1"],
+      reviewThreads: [
+        {
+          id: "PRRT_1",
+          resolved: false,
+          outdated: false,
+          path: "src/a.ts",
+          author: "reviewer",
+          excerpt: "Please rename this.",
+        },
+        {
+          id: "PRRT_2",
+          resolved: true,
+          outdated: false,
+          path: "src/b.ts",
+          author: "reviewer",
+          excerpt: "Already handled.",
+        },
+      ],
+      ...overrides,
+    });
+    const done = async (): Promise<CodeProjectPullRequestActionOutcome> => ({ status: "done" });
+    const renderActions = (
+      act: (
+        command: CodeProjectPullRequestActionCommand,
+      ) => Promise<CodeProjectPullRequestActionOutcome>,
+      context: CodeProjectPullRequestActionContext = readContext(),
+      view = detailView(),
+    ) =>
+      render(
+        <DockProjectPullRequestReviewTool
+          act={act}
+          load={async () => view}
+          loadActionContext={async () => context}
+          query={query}
+          refresh={async () => view}
+        />,
+      );
+
+    it("adds and removes only labels the repository already has, naming the pull request", async () => {
+      const user = userEvent.setup();
+      const act = vi.fn(done);
+      renderActions(act);
+      await user.click(await screen.findByRole("button", { name: "Add label p1" }));
+      expect(act).toHaveBeenLastCalledWith({ kind: "labels", ...query, add: ["p1"], remove: [] });
+      await user.click(await screen.findByRole("button", { name: "Remove label bug" }));
+      expect(act).toHaveBeenLastCalledWith({ kind: "labels", ...query, add: [], remove: ["bug"] });
+      expect(screen.queryByRole("textbox", { name: /label/i })).toBeNull();
+    });
+
+    it("posts a comment under the person's name and clears the box", async () => {
+      const user = userEvent.setup();
+      const act = vi.fn(done);
+      renderActions(act);
+      const box = await screen.findByRole("textbox", { name: "Comment" });
+      expect(screen.getByRole("button", { name: "Post comment" })).toBeDisabled();
+      await user.type(box, "Looks good.");
+      await user.click(screen.getByRole("button", { name: "Post comment" }));
+      expect(act).toHaveBeenCalledWith({ kind: "comment", ...query, body: "Looks good." });
+      await waitFor(() => expect(box).toHaveValue(""));
+      expect(await screen.findByText("Posted your comment.")).toBeVisible();
+    });
+
+    it("replies in an open review thread only, naming that thread", async () => {
+      const user = userEvent.setup();
+      const act = vi.fn(done);
+      renderActions(act);
+      expect(await screen.findByText("Please rename this.")).toBeVisible();
+      expect(screen.queryByText("Already handled.")).toBeNull();
+      await user.click(screen.getByRole("button", { name: "Reply" }));
+      await user.type(screen.getByRole("textbox", { name: "Your reply" }), "Renamed.");
+      await user.click(screen.getByRole("button", { name: "Post reply" }));
+      expect(act).toHaveBeenCalledWith({
+        kind: "reply",
+        ...query,
+        reviewThreadId: "PRRT_1",
+        body: "Renamed.",
+      });
+    });
+
+    it("closes an open pull request and reopens a closed one, never offering either once merged", async () => {
+      const user = userEvent.setup();
+      const act = vi.fn(done);
+      const first = renderActions(act);
+      await user.click(await screen.findByRole("button", { name: "Close pull request" }));
+      expect(act).toHaveBeenCalledWith({ kind: "close", ...query });
+      first.unmount();
+
+      const closed = decodeCodeProjectPullRequestDetailView({
+        ...detailView(),
+        detail: { ...detailView().detail, pullRequestState: "closed" },
+      });
+      const second = renderActions(act, readContext(), closed);
+      await user.click(await screen.findByRole("button", { name: "Reopen pull request" }));
+      expect(act).toHaveBeenLastCalledWith({ kind: "reopen", ...query });
+      second.unmount();
+
+      const merged = decodeCodeProjectPullRequestDetailView({
+        ...detailView(),
+        detail: { ...detailView().detail, pullRequestState: "merged" },
+      });
+      renderActions(act, readContext(), merged);
+      await screen.findByRole("textbox", { name: "Comment" });
+      expect(screen.queryByRole("button", { name: /close pull request|reopen/i })).toBeNull();
+    });
+
+    it("says plainly when the host refuses, and when a paired device may not do it", async () => {
+      const user = userEvent.setup();
+      const act = vi
+        .fn<
+          (
+            command: CodeProjectPullRequestActionCommand,
+          ) => Promise<CodeProjectPullRequestActionOutcome>
+        >()
+        .mockResolvedValueOnce({ status: "refused", reason: "label-not-found" })
+        .mockRejectedValueOnce({ category: "unauthorized" });
+      renderActions(act);
+      await user.click(await screen.findByRole("button", { name: "Add label p1" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "the repository does not have that label",
+      );
+      await user.click(screen.getByRole("button", { name: "Add label p1" }));
+      await waitFor(() =>
+        expect(screen.getByRole("alert")).toHaveTextContent("Only the desktop window can do this."),
+      );
+    });
+
+    it("shows the actions as off, with the reason, when the Project is not connected to the repository", async () => {
+      renderActions(vi.fn(done), { status: "refused", reason: "not-authorized" });
+      expect(
+        await screen.findByText(/not connected to that repository, so these actions are off/),
+      ).toBeVisible();
+    });
   });
 });

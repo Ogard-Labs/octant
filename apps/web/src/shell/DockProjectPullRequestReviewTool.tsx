@@ -1,4 +1,8 @@
 import type {
+  CodeProjectPullRequestActionCommand,
+  CodeProjectPullRequestActionContext,
+  CodeProjectPullRequestActionContextQuery,
+  CodeProjectPullRequestActionOutcome,
   CodeProjectPullRequestDetailObserved,
   CodeProjectPullRequestDetailQuery,
   CodeProjectPullRequestDetailRefreshCommand,
@@ -13,6 +17,7 @@ import type {
   CodeProjectPullRequestSwitchesView,
 } from "@octant/contracts";
 import { useEffect, useRef, useState } from "react";
+import type { ProjectPullRequestPersonAction } from "../code/ProjectPullRequestActions";
 import { ProjectPullRequestReviewPane } from "../code/ProjectPullRequestReviewPane";
 import { ShellState } from "./ShellState";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -31,6 +36,12 @@ export interface DockProjectPullRequestReviewToolProps {
     method: CodeProjectPullRequestMergeMethod,
     headSha: string,
   ) => Promise<CodeProjectPullRequestMergeOutcome>;
+  readonly loadActionContext?: (
+    query: CodeProjectPullRequestActionContextQuery,
+  ) => Promise<CodeProjectPullRequestActionContext>;
+  readonly act?: (
+    command: CodeProjectPullRequestActionCommand,
+  ) => Promise<CodeProjectPullRequestActionOutcome>;
   readonly loadSwitches?: (
     target: CodeProjectPullRequestSwitchTarget,
   ) => Promise<CodeProjectPullRequestSwitchesView>;
@@ -262,10 +273,26 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
                 return applySwitch(() =>
                   set(
                     enabled
-                      ? { kind: "enable", target, headSha, method }
+                      ? { kind: "enable", target, headSha, method, confirmed: true }
                       : { kind: "disable", target },
                   ),
                 );
+              },
+            })}
+        {...(props.loadActionContext === undefined || props.act === undefined
+          ? {}
+          : {
+              onLoadActionContext: () => {
+                const load = props.loadActionContext;
+                return load === undefined
+                  ? Promise.resolve({ status: "unavailable", reason: "unavailable" } as const)
+                  : load(target);
+              },
+              onAct: (action: ProjectPullRequestPersonAction) => {
+                const act = props.act;
+                return act === undefined
+                  ? Promise.resolve({ status: "unavailable", reason: "unavailable" } as const)
+                  : act({ ...action, ...target });
               },
             })}
         {...(props.setAutoFix === undefined

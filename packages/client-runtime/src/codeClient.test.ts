@@ -458,6 +458,32 @@ describe("code client", () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
+  it("reads the labels and review threads the person's controls name", async () => {
+    const query = {
+      projectId: decodeProjectId("10000000-0000-4000-8000-000000000001"),
+      repositoryOwner: "octant",
+      repositoryName: "octant",
+      number: 12,
+    } as const;
+    const context = {
+      status: "read",
+      labels: ["bug"],
+      repositoryLabels: ["bug", "p1"],
+      reviewThreads: [],
+    } as const;
+    const fetch = vi.fn().mockResolvedValue(Response.json(context));
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+
+    await expect(client.readProjectPullRequestActionContext?.(query)).resolves.toEqual(context);
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/api/code/project-pull-requests/action-context`,
+      expect.objectContaining({ method: "POST", body: JSON.stringify(query) }),
+    );
+    await expect(
+      client.readProjectPullRequestActionContext?.({ ...query, number: 0 } as never),
+    ).rejects.toMatchObject({ category: "invalid" });
+  });
+
   it("sends the pull-request switch commands and an unsupported forge comes back as a value", async () => {
     const target = {
       projectId: decodeProjectId("10000000-0000-4000-8000-000000000001"),
