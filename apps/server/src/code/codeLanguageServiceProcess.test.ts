@@ -18,6 +18,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   decodeCodeCheckoutIdentity,
   decodeCodeFileChangeNotice,
+  decodeCodeProjectFilePath,
   decodeCodeRelativePath,
   decodeCodeThread,
   type CodeCheckoutIdentity,
@@ -36,6 +37,7 @@ import {
   type ProcessConfinementPrepareInput,
 } from "../process/seatbeltProfile";
 import { deriveCodeFileId } from "./codeFileIdentity";
+import { withProjectExtraFolders } from "./codeProjectFolderRoot";
 import {
   CodeLanguageService,
   type CodeLanguageAgentReadResult,
@@ -140,6 +142,8 @@ interface Harness {
     folders: Map<string, string>;
     reach: boolean;
     turnedOff: boolean;
+    /** The Project's extra folders, by absolute path. */
+    extraFolders: string[];
   };
   open(
     path: string,
@@ -175,6 +179,7 @@ function harness(input: {
     folders: new Map<string, string>(),
     reach: true,
     turnedOff: false,
+    extraFolders: [] as string[],
   };
   state.threads = [state.thread];
   let launches = 0;
@@ -196,10 +201,17 @@ function harness(input: {
           : state.folders.get(String(thread.id)),
       canAccessProject: () => state.reach,
       effectiveThread: (_scope, thread) => thread,
-      resolveRoot: (_scope, thread, checkout, relativePath) => ({
-        fileId: deriveCodeFileId(String(thread.id), String(checkout.id), relativePath),
-        rootPath: input.checkout,
-        rootIdentity: { device: "1", inode: "1" },
+      resolveRoot: withProjectExtraFolders({
+        resolve: (_scope, thread, checkout, relativePath) => ({
+          fileId: deriveCodeFileId(String(thread.id), String(checkout.id), relativePath),
+          rootPath: input.checkout,
+          rootIdentity: { device: "1", inode: "1" },
+        }),
+        extraFolders: () => state.extraFolders,
+        probePath: decodeCodeRelativePath("package.json"),
+        fileId: (threadId, checkoutId, path) =>
+          deriveCodeFileId(threadId, checkoutId, path as never),
+        statIdentity: async () => ({ device: "2", inode: "2" }),
       }),
     },
     components: () => (state.turnedOff ? [] : [input.component]),
@@ -253,8 +265,8 @@ function harness(input: {
       service.readForAgent(
         scopeId,
         position === undefined
-          ? { kind: "diagnostics", ...scope(), path: decodeCodeRelativePath(path) }
-          : { kind: "definition", ...scope(), path: decodeCodeRelativePath(path), position },
+          ? { kind: "diagnostics", ...scope(), path: decodeCodeProjectFilePath(path) }
+          : { kind: "definition", ...scope(), path: decodeCodeProjectFilePath(path), position },
       ),
   };
 }
@@ -725,6 +737,30 @@ describe("Code language service reads for an agent", () => {
       reason: "path-outside-checkout",
     });
     expect(test.launches()).toBe(0);
+  });
+
+  it("reads a file in an extra folder by absolute path, in a server of its own, and refuses a folder beside it", async () => {
+    const { paths, test, log } = fake();
+    const extra = join(paths.root, "extra");
+    const beside = join(paths.root, "beside");
+    mkdirSync(extra);
+    mkdirSync(beside);
+    writeFileSync(join(extra, "c.ts"), "export const c = 1;\n");
+    writeFileSync(join(beside, "d.ts"), "export const d = 1;\n");
+    test.state.extraFolders = [extra];
+
+    const read = await test.agent(join(extra, "c.ts"));
+    expect(read).toMatchObject({ status: "diagnostics" });
+    const opened = logged(log).filter((entry) => entry.method === "textDocument/didOpen");
+    expect(opened).toHaveLength(1);
+
+    expect(await test.agent(join(beside, "d.ts"))).toEqual({
+      status: "refused",
+      reason: "checkout-unavailable",
+    });
+    expect(await test.agent(join(extra, "..", "beside", "d.ts"))).toMatchObject({
+      status: "refused",
+    });
   });
 
   it("never starts or reads through a server that runs repository tooling, even one a local approval covers", async () => {

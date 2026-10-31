@@ -922,9 +922,16 @@ export function createCodeOperationRuntime(
     }>
   >();
   const testDiscovery = options.repositoryTestDiscovery ?? new RepositoryTestDiscoveryService();
+  const extraFoldersOf = (projectId: string | undefined): ReadonlyArray<string> =>
+    projectId === undefined
+      ? []
+      : (options.readProjectExtraFolders?.(projectId as CodeThread["projectId"]) ?? []);
   const repositoryTests = {
-    discover: (input: { readonly checkoutId: string; readonly rootPath: string }) =>
-      testDiscovery.discover(input),
+    discover: (input: {
+      readonly checkoutId: string;
+      readonly rootPath: string;
+      readonly projectId?: string;
+    }) => testDiscovery.discover(input),
     run: async (input: Parameters<CodeOperationServiceOptions["repositoryTests"]["run"]>[0]) => {
       if (activeTests.has(input.runId)) throw new Error("Repository test is already running.");
       const controller = new AbortController();
@@ -939,7 +946,11 @@ export function createCodeOperationRuntime(
         done,
       });
       try {
-        return await testRunner.run({ ...input, signal: controller.signal });
+        return await testRunner.run({
+          ...input,
+          extraFolders: extraFoldersOf(input.projectId),
+          signal: controller.signal,
+        });
       } finally {
         activeTests.delete(input.runId);
         markDone();

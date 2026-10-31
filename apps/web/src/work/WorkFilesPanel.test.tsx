@@ -114,6 +114,46 @@ describe("WorkFilesPanel", () => {
     });
   });
 
+  it("shows a file in an extra folder by its own name and opens it with a path-free name", async () => {
+    const onOpenFile = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <WorkFilesPanel
+        client={client({
+          status: "listed",
+          listing: {
+            kind: "work-file-listing",
+            threadId,
+            projectId,
+            entries: [
+              { kind: "directory", path: "/Users/me/Notes" },
+              {
+                kind: "file",
+                path: "/Users/me/Notes/ideas.md",
+                byteLength: 10,
+                origin: "untouched",
+                preview: {
+                  targetId: "00000000-0000-4000-8000-0000000004b1",
+                  opaqueRef: "00000000-0000-4000-8000-0000000004b2",
+                },
+              },
+            ],
+            previewHostId: "00000000-0000-4000-8000-0000000004b3",
+            truncated: false,
+            observedAt: "2026-09-04T10:00:00.000Z",
+          },
+        })}
+        onOpenFile={onOpenFile}
+        projectId={projectId}
+        threadId={threadId}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /ideas\.md/ }));
+
+    expect(onOpenFile).toHaveBeenCalledWith(expect.objectContaining({ displayName: "ideas.md" }));
+  });
+
   it("leaves a file the host gave no target inert rather than looking clickable", async () => {
     const onOpenFile = vi.fn();
     render(

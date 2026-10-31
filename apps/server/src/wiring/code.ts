@@ -25,6 +25,7 @@ import {
   type ProviderModel,
   type WindowId,
 } from "@octant/contracts";
+import { projectExtraFolderRoots } from "@octant/domain";
 import { Effect } from "effect";
 import { WorkAttachmentStore } from "../work/workAttachmentStore";
 import { resolveThreadWorkingDirectory } from "../threadWorkingDirectoryAuthority";
@@ -597,7 +598,12 @@ export function wireCode(deps: CodeDependencies) {
     const codeFileSearch = new CodeSearchService();
     // Discovery reads only the checkout's package.json and .octant/tests.json,
     // so it needs no file helper either. The same instance authorizes a run.
-    const codeTestDiscovery = new RepositoryTestDiscoveryService();
+    const codeTestDiscovery = new RepositoryTestDiscoveryService({
+      extraFolders: (projectId) => {
+        const project = persistence.readProject(projectId as ProjectId);
+        return project?.type === "code" ? projectExtraFolderRoots(project) : [];
+      },
+    });
     let codeFiles: Pick<CodeFileService, "open" | "save"> & Partial<Pick<CodeFileService, "list">> =
       {
         open: async () => ({

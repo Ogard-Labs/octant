@@ -142,6 +142,32 @@ describe("PreviewService.open", () => {
     }
   });
 
+  it("opens a file from an extra folder the resolver placed, reading it from that folder", async () => {
+    const extra = mkdtempSync(join(tmpdir(), "preview-service-extra-"));
+    try {
+      writeFileSync(join(extra, "ideas.md"), "# Ideas\nbody\n");
+      const placed = new PreviewService({
+        hostId: ids.host,
+        budget: { maxSniffBytes: 4096, maxByteSize: 1024 * 1024, maxRenderBytes: 1024 * 1024 },
+        textBudget: { maxLinesPerChunk: 4, maxBytesPerChunk: 1024 },
+        targetResolver: {
+          async resolve() {
+            return { ok: true, relativePath: "ideas.md", displayName: "ideas.md", folder: extra };
+          },
+        },
+        projectRootResolver: { resolve: async () => ({ ok: true, canonicalRoot: root }) },
+        uuid: () => "66666666-6666-4666-8666-666666666666",
+      });
+
+      const outcome = await placed.open({ authority: authority(), target: target() });
+
+      expect(outcome.kind).toBe("ready");
+      expect(JSON.stringify(outcome)).not.toContain(extra);
+    } finally {
+      rmSync(extra, { recursive: true, force: true });
+    }
+  });
+
   it("denies a target minted for a different host as unauthorized with only the target id", async () => {
     const outcome = await service.open({
       authority: authority(),

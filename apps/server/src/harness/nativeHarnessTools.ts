@@ -65,9 +65,9 @@ const DEFAULT_DELEGATE_WAIT_MS = 60_000;
 const STALE_AUTHORITY_MESSAGE =
   "This thread can no longer use tools: it was archived or deleted, its folder or Project changed, or its provider was turned off. Do not retry. Tell the person what you would have done, and that they can reopen the thread or start a new one.";
 
-function shellExtraRoots(filesystem: {
+function shellExtraRoots(filesystem: { readonly extraRoots?: ReadonlyArray<string> }): {
   readonly extraRoots?: ReadonlyArray<string>;
-}): { readonly extraRoots?: ReadonlyArray<string> } {
+} {
   return filesystem.extraRoots === undefined || filesystem.extraRoots.length === 0
     ? {}
     : { extraRoots: filesystem.extraRoots };
@@ -563,7 +563,7 @@ async function execute(
       const run = await ports.shell!.run({
         command: input.command,
         cwd: ports.filesystem!.root,
-        ...shellExtraRoots(ports.filesystem!),
+        ...shellExtraRoots(ports.filesystem ?? {}),
         timeoutMs: input.timeoutMs ?? DEFAULT_SHELL_TIMEOUT_MS,
         callId,
         ...(signal === undefined ? {} : { signal }),

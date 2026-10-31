@@ -69,6 +69,7 @@ function project(
     readonly lifecycle?: "active" | "archived";
     readonly revisionId?: string;
     readonly codeAccessPersistence?: "current-session" | "project-default";
+    readonly extraFolders?: ReadonlyArray<string>;
     readonly actions?: ReadonlyArray<{
       readonly id: string;
       readonly name: string;
@@ -101,6 +102,15 @@ function project(
     ...((overrides.type ?? "code") === "code"
       ? {
           codeAccessPersistence: overrides.codeAccessPersistence ?? "current-session",
+          ...(overrides.extraFolders === undefined
+            ? {}
+            : {
+                extraFolders: overrides.extraFolders.map((canonicalRoot) => ({
+                  canonicalRoot,
+                  addedBy: actor,
+                  addedAt: now,
+                })),
+              }),
           ...(overrides.actions === undefined ? {} : { actions: overrides.actions }),
         }
       : {}),
@@ -361,6 +371,90 @@ describe("Project terminals", () => {
         }),
       },
     ]);
+  });
+
+  describe("with an extra folder", () => {
+    const folderProject = () => {
+      const extra = mkdtempSync(join(tmpdir(), "octant-extra-folder-"));
+      directories.push(extra);
+      const actionId = "92000000-0000-4000-8000-000000000002";
+      return {
+        extra,
+        actionId,
+        projects: new Map([
+          [
+            ids.project,
+            project({
+              extraFolders: [extra],
+              actions: [{ id: actionId, name: "Dev", command: "bun run dev", directory: "web" }],
+            }),
+          ],
+        ]),
+      };
+    };
+
+    it("starts the shell in the extra folder the person picked and keeps the main folder reachable", async () => {
+      const { extra, projects } = folderProject();
+      const { service, terminals } = harness({ projects });
+
+      const result = await service.execute(windowId, "local-window", {
+        ...start(),
+        folder: extra,
+      });
+
+      expect(result).toMatchObject({ kind: "project-terminal" });
+      expect(terminals.launches).toEqual([
+        expect.objectContaining({ cwd: extra, extraFolders: [root] }),
+      ]);
+    });
+
+    it("starts in the main folder by default and binds the extra folder beside it", async () => {
+      const { extra, projects } = folderProject();
+      const { service, terminals } = harness({ projects });
+
+      await service.execute(windowId, "local-window", start());
+
+      expect(terminals.launches).toEqual([
+        expect.objectContaining({ cwd: root, extraFolders: [extra] }),
+      ]);
+    });
+
+    it("refuses a folder the Project does not list and starts no shell", async () => {
+      const { projects } = folderProject();
+      const { service, terminals } = harness({ projects });
+
+      const result = await service.execute(windowId, "local-window", {
+        ...start(),
+        folder: "/Users/person/elsewhere",
+      });
+
+      expect(refusal(result)).toBe("unavailable");
+      expect(terminals.launches).toEqual([]);
+    });
+
+    it("runs a saved action under the picked folder and refuses an unlisted one", async () => {
+      const { extra, actionId, projects } = folderProject();
+      const { service, terminals } = harness({ projects });
+      await service.execute(windowId, "local-window", start());
+      const run = (folder?: string) =>
+        ({
+          kind: "run-action",
+          projectId,
+          terminalId,
+          actionId,
+          ...(folder === undefined ? {} : { folder }),
+        }) as ProjectTerminalCommand;
+
+      await service.execute(windowId, "local-window", run(extra));
+      const refused = await service.execute(
+        windowId,
+        "local-window",
+        run("/Users/person/elsewhere"),
+      );
+
+      expect(terminals.writes).toEqual([`\u0015cd '${extra}/web' && { bun run dev\r}\r`]);
+      expect(refusal(refused)).toBe("unavailable");
+    });
   });
 
   it("runs under Full access only where the Project remembers it", async () => {

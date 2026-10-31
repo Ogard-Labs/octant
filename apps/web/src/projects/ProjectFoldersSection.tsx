@@ -142,8 +142,8 @@ export function ProjectFoldersSection(props: ProjectFoldersSectionProps) {
       </ul>
       {canAdd || extras.length > 0 ? (
         <p className="project-folders__note">
-          Extra folders get the same access as the main folder. Commands, checkouts and Git stay in
-          the main folder.
+          Extra folders get the same access as the main folder. Checkouts and Git stay in the main
+          folder; a terminal or a saved action can start in any of them.
         </p>
       ) : null}
       {canAdd ? (

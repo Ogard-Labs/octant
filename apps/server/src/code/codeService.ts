@@ -561,6 +561,7 @@ export interface CodeRepositoryTestDiscoveryPort {
   readonly discover: (input: {
     readonly checkoutId: string;
     readonly rootPath: string;
+    readonly projectId?: string;
   }) => Promise<ReadonlyArray<CodeRepositoryTestListing["definitions"][number]>>;
 }
 
@@ -2788,6 +2789,7 @@ export class CodeService {
         : await this.#tests.discover({
             checkoutId: String(authorized.checkout.id),
             rootPath: root.rootPath,
+            projectId: String(authorized.thread.projectId),
           });
     return decodeCodeRepositoryTestListing({
       kind: "code-repository-test-listing",

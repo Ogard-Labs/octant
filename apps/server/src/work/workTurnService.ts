@@ -1449,7 +1449,7 @@ export class WorkTurnService {
     // moments of the turn is seen. The provider writes with its own tools
     // inside the bound folder and never calls the mutation service, so this is
     // the only way the host learns what a turn produced.
-    const observation = this.#turnFileObserver?.observe(input.projectRoot);
+    const observation = this.#turnFileObserver?.observe(input.projectRoot, input.extraFolders);
 
     const hostTools =
       input.thread === undefined

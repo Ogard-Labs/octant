@@ -13,6 +13,8 @@ interface RunProjectActionDependencies {
   /** Opens and pins a new Project terminal, or says why it could not. */
   readonly openTerminal: () => Promise<CodeTerminalId | undefined>;
   readonly notify: (message: string) => void;
+  /** An extra folder the person chose; absent runs the action in the main folder. */
+  readonly folder?: string;
 }
 
 /**
@@ -34,6 +36,7 @@ export async function runProjectAction(
         projectId,
         terminalId,
         actionId: action.id,
+        ...(dependencies.folder === undefined ? {} : { folder: dependencies.folder }),
       });
     } catch {
       return "unknown" as const;

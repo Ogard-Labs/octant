@@ -27,6 +27,8 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { Schema } from "effect";
+import { statSync } from "node:fs";
+import { projectExtraFolderRoots } from "@octant/domain";
 import type { Journal } from "../persistence/journal";
 import { LINUX_BUBBLEWRAP_MISSING_NOTICE } from "../process/linuxConfinement";
 import { ProcessConfinementError } from "../process/seatbeltProfile";
@@ -220,7 +222,11 @@ export class ProjectTerminalService {
               "This Project changed while its action was starting.",
             );
           }
-          this.#options.terminals.write(String(command.terminalId), actionLine(root, action));
+          const folder = this.#folderRoot(authority.project, root, command.folder);
+          if (folder === undefined) {
+            return refused("unavailable", "That folder is not one of this Project's folders.");
+          }
+          this.#options.terminals.write(String(command.terminalId), actionLine(folder, action));
           return this.#view(command.terminalId, owner);
         }
       }
@@ -279,6 +285,18 @@ export class ProjectTerminalService {
     });
   }
 
+  /**
+   * The folder a start or an action names, or undefined when the Project does
+   * not list it. Compared as the exact string the Project record holds, so a
+   * caller cannot reach a folder by describing it another way.
+   */
+  #folderRoot(project: CodeProject, mainRoot: string, folder: string | undefined) {
+    if (folder === undefined || folder === mainRoot) return mainRoot;
+    return projectExtraFolderRoots(project).includes(folder) && isDirectory(folder)
+      ? folder
+      : undefined;
+  }
+
   async #start(
     windowId: WindowId,
     command: Extract<ProjectTerminalCommand, { readonly kind: "start" }>,
@@ -301,6 +319,10 @@ export class ProjectTerminalService {
     ) {
       return refused("authority-revoked", "This Project changed while its terminal was starting.");
     }
+    const folder = this.#folderRoot(authority.project, root, command.folder);
+    if (folder === undefined) {
+      return refused("unavailable", "That folder is not one of this Project's folders.");
+    }
     const posture: ProjectTerminalPosture =
       authority.project.codeAccessPersistence === "project-default"
         ? "full-access"
@@ -309,7 +331,14 @@ export class ProjectTerminalService {
       await this.#options.terminals.launch({
         terminalId: String(command.terminalId),
         shell: this.#options.shell ?? defaultTerminalShell(),
-        cwd: root,
+        cwd: folder,
+        // Every folder of the Project is bound like the main one, so the
+        // shell can move between them; the pick only chooses where it starts.
+        // One missing on disk is left out, as from a runtime's profile.
+        extraFolders: [
+          root,
+          ...projectExtraFolderRoots(authority.project).filter(isDirectory),
+        ].filter((candidate) => candidate !== folder),
         // Its own shell history and state, apart from every thread's shells in
         // the same repository.
         stateScope: `project:${String(command.projectId)}`,
@@ -512,6 +541,14 @@ export class ProjectTerminalService {
             output: { text: read.text, replace: read.replace, characters: read.characters },
           }),
     });
+  }
+}
+
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
   }
 }
 

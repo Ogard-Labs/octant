@@ -58,45 +58,54 @@ export class WorkTurnFileObserver {
   }
 
   /**
-   * Start watching `canonicalRoot`. The caller finishes the observation when
-   * the turn settles; an observation that never finishes only holds one
-   * subscription, which the host releases when the process does.
+   * Start watching `canonicalRoot` and each of the Project's extra folders. A
+   * change in an extra folder is recorded by its absolute path, which is how
+   * every Work surface names a file there; a change in the main folder keeps
+   * its relative path. The caller finishes the observation when the turn
+   * settles; an observation holds one subscription per folder, which the host
+   * releases when the process does.
    */
-  observe(canonicalRoot: string): WorkTurnObservation {
+  observe(canonicalRoot: string, extraFolders: ReadonlyArray<string> = []): WorkTurnObservation {
     const observed = new Set<string>();
     let truncated = false;
     let finished = false;
 
-    const subscription = this.#watchPort.watch(
-      canonicalRoot,
-      (relativePath) => {
-        if (finished) return;
-        if (relativePath === undefined) {
+    const watchFolder = (folder: string, prefix: string | undefined) =>
+      this.#watchPort.watch(
+        folder,
+        (relativePath) => {
+          if (finished) return;
+          if (relativePath === undefined) {
+            truncated = true;
+            return;
+          }
+          const accepted = acceptedPath(relativePath);
+          if (accepted === "ignored") return;
+          if (accepted === undefined) {
+            truncated = true;
+            return;
+          }
+          const named = prefix === undefined ? accepted : `${prefix}/${accepted}`;
+          if (observed.size >= this.#maxPaths && !observed.has(named)) {
+            truncated = true;
+            return;
+          }
+          observed.add(named);
+        },
+        () => {
           truncated = true;
-          return;
-        }
-        const accepted = acceptedPath(relativePath);
-        if (accepted === "ignored") return;
-        if (accepted === undefined) {
-          truncated = true;
-          return;
-        }
-        if (observed.size >= this.#maxPaths && !observed.has(accepted)) {
-          truncated = true;
-          return;
-        }
-        observed.add(accepted);
-      },
-      () => {
-        truncated = true;
-      },
-    );
+        },
+      );
+    const subscriptions = [
+      watchFolder(canonicalRoot, undefined),
+      ...extraFolders.map((folder) => watchFolder(folder, folder)),
+    ];
 
     return {
       finish: () => {
         if (finished) return undefined;
         finished = true;
-        subscription.close();
+        for (const subscription of subscriptions) subscription.close();
         if (observed.size === 0 && !truncated) return undefined;
         return {
           paths: [...observed].sort().slice(0, this.#maxPaths),

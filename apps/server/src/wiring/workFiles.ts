@@ -33,7 +33,9 @@ import { derivePreviewHostId } from "../preview/previewHostIdentity";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import {
   canonicalizeWorkRelativePath,
+  classifyFileMentionExtraFolderPath,
   defaultShellSettings,
+  projectExtraFolderRoots,
   type PreviewPosture,
 } from "@octant/domain";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
@@ -305,6 +307,21 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
     windowAuthorityStore,
     maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
   });
+  // A path that starts with a slash names a file in one of the Project's extra
+  // folders as they stand now; a relative one is the main folder's. A slash
+  // path outside every extra folder resolves to nothing.
+  const placeWorkPath = (
+    projectId: ProjectId,
+    path: string,
+  ): { readonly relativePath: string; readonly folder?: string } | undefined => {
+    if (!path.startsWith("/")) return { relativePath: path };
+    const project = persistence.readProject(projectId);
+    if (project === undefined || project.type !== "work") return undefined;
+    const placed = classifyFileMentionExtraFolderPath(path, projectExtraFolderRoots(project));
+    return placed.kind === "in-folder"
+      ? { relativePath: placed.path, folder: placed.folder }
+      : undefined;
+  };
   const previewService = new PreviewService({
     hostId: previewHostId,
     budget: {
@@ -322,7 +339,9 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
         if (kind === "file") {
           const relativePath = workFilePreviewRefs.resolve(projectId, opaqueRef);
           if (relativePath === undefined) return { ok: false, code: "not-found" };
-          return { ok: true, relativePath, displayName: relativePath };
+          const placed = placeWorkPath(projectId, relativePath);
+          if (placed === undefined) return { ok: false, code: "not-found" };
+          return { ok: true, displayName: relativePath, ...placed };
         }
         if (kind !== "artifact-version") return { ok: false, code: "not-found" };
         for (const entry of workArtifactProjection.snapshot().values()) {
