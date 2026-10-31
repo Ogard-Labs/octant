@@ -46,6 +46,7 @@ export * from "./linearIssues";
 export * from "./folderBrowse";
 export * from "./browserAutomation";
 export * from "./browserAutomationRpc";
+export * from "./browserProfiles";
 export * from "./browserCapture";
 export * from "./canvas";
 export * from "./canvasActions";

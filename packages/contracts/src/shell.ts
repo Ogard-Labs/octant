@@ -5,6 +5,7 @@ import { ChatThreadId } from "./chat";
 import { CodeRelativePath, CodeTerminalId, CodeTestRunId, CodeThreadId } from "./code";
 import { WorkThreadId } from "./workThreads";
 import { BrowserContextId, BrowserThreadId } from "./browserAutomation";
+import { StoredBrowserProfile } from "./browserProfiles";
 import { AggregateVersion } from "./events";
 import { HostId, LOCAL_HOST_ID } from "./host";
 import { OctantMode } from "./modes";
@@ -486,6 +487,13 @@ export const StandaloneSkillActivationMap = Schema.Record({
 }).annotations(strict);
 export type StandaloneSkillActivationMap = typeof StandaloneSkillActivationMap.Type;
 
+/** One site remembered for one stored Browser profile; see `rememberedBrowserProfileSites`. */
+export const RememberedBrowserProfileSite = Schema.Struct({
+  origin: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
+  profile: StoredBrowserProfile,
+}).annotations(strict);
+export type RememberedBrowserProfileSite = typeof RememberedBrowserProfileSite.Type;
+
 export const ShellSettings = Schema.Struct({
   chatEnabled: Schema.Boolean,
   workEnabled: Schema.Boolean,
@@ -687,6 +695,17 @@ export const ShellSettings = Schema.Struct({
    */
   rememberedBrowserOrigins: Schema.optionalWith(
     Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048))),
+    { default: () => [] },
+  ),
+  /**
+   * Sites the person approved with "always allow" on a page in a Project or
+   * Personal Browser profile. A pair, never an origin alone: a remembered
+   * Private origin does not cover a signed-in page, and a pair for one profile
+   * does not cover another. Grows only through the approval answer, like
+   * `rememberedBrowserOrigins`.
+   */
+  rememberedBrowserProfileSites: Schema.optionalWith(
+    Schema.Array(RememberedBrowserProfileSite).pipe(Schema.maxItems(1_024)),
     { default: () => [] },
   ),
 }).annotations(strict);

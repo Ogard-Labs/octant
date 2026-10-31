@@ -1155,6 +1155,9 @@ export function wireRemote(deps: RemoteDependencies) {
             dataDirectory: persistence.dataDirectory,
             homeDirectory: homedir(),
             platform: hostRuntimePlatform,
+            ...(process.env.OCTANT_BROWSER_PROFILES_DIRECTORY === undefined
+              ? {}
+              : { browserProfilesDirectory: process.env.OCTANT_BROWSER_PROFILES_DIRECTORY }),
             ...(options.credentialBrokerUrl !== undefined && hostRuntimePlatform === "darwin"
               ? { credentialStore: desktopCredentialStore() }
               : {}),

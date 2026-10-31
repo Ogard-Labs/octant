@@ -157,6 +157,8 @@ import {
   RemotePushRegistrationRecordedV1,
   RemoteServerGrantClosedPayload,
   RemoteServerGrantOpenedPayload,
+  BROWSER_PROFILE_EVENT_NAMES,
+  BrowserProfileCleared,
   TERMINAL_BROWSER_GRANT_EVENT_NAMES,
   TerminalBrowserGrantIssued,
   TerminalBrowserGrantRevoked,
@@ -540,6 +542,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(PRODUCT_FEEDBACK_DELIVERED, 1, ProductFeedbackDelivered)
     .register(PROJECT_TERMINAL_EVENT_NAMES.started, 1, ProjectTerminalStarted)
     .register(PROJECT_TERMINAL_EVENT_NAMES.ended, 1, ProjectTerminalEnded)
+    .register(BROWSER_PROFILE_EVENT_NAMES.cleared, 1, BrowserProfileCleared)
     .register(TERMINAL_BROWSER_GRANT_EVENT_NAMES.issued, 1, TerminalBrowserGrantIssued)
     .register(TERMINAL_BROWSER_GRANT_EVENT_NAMES.revoked, 1, TerminalBrowserGrantRevoked)
     .register(HUB_MEMBERSHIP_CHANGED, 1, HubMembershipChangedPayload)

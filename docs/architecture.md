@@ -8842,12 +8842,15 @@ access` agree); a thread's own change is journaled as
   per browsing context) unless the person at a local window puts it in their
   Project's persistent profile or the host's Personal profile; a profile page
   opens only in the desktop app's native Browser, never headless. Octant never
-  opens or imports another browser's profile. An agent reads or acts on an
+  opens another browser's profile in place. An agent reads or acts on an
   origin in a profile page only after a site approval naming the profile;
   paired devices, routines, subagents, and terminal Browser grants are refused
-  on profile pages. Browser extensions install only from an unpacked folder at
-  a local window, start disabled, are enabled per profile, and never load into a
-  Private page. Detail is in [Browser profiles and extensions](design/browser-profiles.md).
+  on profile pages; a paired device sees only that a signed-in page exists. The
+  person signs out of a profile (closing its pages and removing its storage) at a
+  local window, and the host journals that it happened without naming a site or
+  a cookie. Browser extensions (approved design, not yet built) install only
+  from an unpacked folder at a local window, start disabled, are enabled per
+  profile, and never load into a Private page. Detail is in [Browser profiles and extensions](design/browser-profiles.md).
 - **Side Chat reads.** A Side Chat may read its source thread's transcript,
   state, and files; it never inherits the source's Work or Code execution
   authority. The file tools (`octant_side_chat_list_files`,

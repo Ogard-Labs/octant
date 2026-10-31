@@ -1,4 +1,8 @@
 import type {
+  BrowserProfileClearScope,
+  StoredBrowserProfile,
+} from "@octant/contracts/browser-profiles";
+import type {
   BrowserActionRequest,
   BrowserContextId,
   BrowserContextPolicy,
@@ -76,6 +80,27 @@ export class BrowserNavigationBlockedError extends Error {
 }
 
 /**
+ * A page asked for a stored Browser profile and this runtime cannot hold one.
+ * Only the desktop app's own Browser keeps a profile's store, so a runtime
+ * without it refuses instead of opening a headless copy that would disagree
+ * about who is signed in.
+ */
+export class BrowserProfileUnavailableError extends Error {
+  constructor() {
+    super("Signed-in pages open only in the Octant app's own Browser.");
+    this.name = "BrowserProfileUnavailableError";
+  }
+}
+
+/** The stores behind the Project and Personal profiles, kept by the desktop app. */
+export interface BrowserProfileStorePort {
+  readonly list: () => Promise<
+    ReadonlyArray<{ readonly profile: StoredBrowserProfile; readonly sizeBytes: number }>
+  >;
+  readonly clear: (profile: StoredBrowserProfile, scope: BrowserProfileClearScope) => Promise<void>;
+}
+
+/**
  * What a runtime is told to do to a page. It carries no authority: whoever
  * owns the context has already decided the action may run, and a runtime only
  * ever needed the action itself.
@@ -85,6 +110,13 @@ export type BrowserRuntimeAction = Pick<BrowserActionRequest, "kind"> &
 
 export interface BrowserRuntimePort {
   readonly available: () => Promise<boolean>;
+  /**
+   * Whether the desktop app's own Browser can hold a page right now. Absent on a
+   * runtime that is headless only. A stored profile opens only where this is true.
+   */
+  readonly nativeAvailable?: () => Promise<boolean>;
+  /** The stored profiles' stores; absent where no desktop app keeps them. */
+  readonly profiles?: BrowserProfileStorePort | undefined;
   readonly createContext: (
     contextId: BrowserContextId,
     policy: BrowserContextPolicy,

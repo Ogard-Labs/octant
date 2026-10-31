@@ -23,6 +23,7 @@ import {
 } from "@octant/contracts";
 import type { ProjectSummary, ProjectId } from "@octant/contracts/projects";
 import type { BrowserToolApproval } from "@octant/contracts/browser-automation-rpc";
+import { browserApprovalDetail, browserApprovalSummary } from "../browser/browserProfileCopy";
 import {
   prependEarlierTurns,
   refreshNewestTurns,
@@ -2172,10 +2173,10 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
             </>
           }
           className="thread-column"
-          detail="Shell and file access stay unchanged"
+          detail={browserApprovalDetail(pendingBrowserApproval)}
           error={browserApprovalMessage}
           label="Browser origin approval"
-          summary={`Allow Browser to open ${pendingBrowserApproval.origin}?`}
+          summary={browserApprovalSummary(pendingBrowserApproval)}
         />
       )}
       <ThreadComposer

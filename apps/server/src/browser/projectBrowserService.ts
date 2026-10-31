@@ -10,6 +10,9 @@ import {
   type BrowserContextPolicy,
   type BrowserContextState,
   type BrowserPresentationKind,
+  type BrowserProfile,
+  type BrowserProfileChoice,
+  type StoredBrowserProfile,
   type BrowserThreadId,
   type Project,
   type ProjectBrowserCommand,
@@ -20,7 +23,12 @@ import {
   type ProjectId,
   type WindowId,
 } from "@octant/contracts";
-import type { BrowserRuntimeObservation, BrowserRuntimePort } from "./browserRuntimePort";
+import { browserProfileKey, evaluateBrowserProfileUse } from "@octant/domain";
+import {
+  BrowserProfileUnavailableError,
+  type BrowserRuntimeObservation,
+  type BrowserRuntimePort,
+} from "./browserRuntimePort";
 
 /** The longest a context may live, the same ceiling every browsing context has on this host. */
 const PROJECT_BROWSER_SESSION_MS = 600_000;
@@ -33,7 +41,13 @@ export type ProjectBrowserCaller = "local-window" | "remote-device";
 export interface ProjectBrowserServiceOptions {
   readonly runtime: Pick<
     BrowserRuntimePort,
-    "available" | "createContext" | "act" | "peek" | "closeContext" | "onProcessExit"
+    | "available"
+    | "nativeAvailable"
+    | "createContext"
+    | "act"
+    | "peek"
+    | "closeContext"
+    | "onProcessExit"
   >;
   readonly readProject: (projectId: ProjectId) => Project | undefined;
   /**
@@ -64,6 +78,8 @@ interface OwnedPage {
   readonly bindingRevisionId: BindingRevisionId;
   readonly contextId: BrowserContextId;
   readonly origin: string;
+  /** Where this page keeps its site data. A Private page is `{ kind: "private" }`. */
+  readonly profile: BrowserProfile;
   readonly abort: AbortController;
   state: BrowserContextState;
   presentation: BrowserPresentationKind | undefined;
@@ -168,7 +184,14 @@ export class ProjectBrowserService {
         if (owned !== undefined) await this.#close(owned, "stopped");
         return this.#view(command.projectId, authority.mode, undefined);
       case "open":
-        return this.#open(windowId, command.projectId, authority, command.url, owned);
+        return this.#open(
+          windowId,
+          command.projectId,
+          authority,
+          command.url,
+          command.profile ?? "private",
+          owned,
+        );
     }
   }
 
@@ -190,6 +213,18 @@ export class ProjectBrowserService {
       }
       closing.push(this.#close(owned, "stopped"));
     }
+    await Promise.allSettled(closing);
+  }
+
+  /**
+   * Close every page that lives in one stored profile. Called when the person
+   * signs out of it, so no page keeps a sign-in that was just removed.
+   */
+  async closeProfile(profile: StoredBrowserProfile): Promise<void> {
+    const key = browserProfileKey(profile);
+    const closing = [...this.#pages.values()]
+      .filter((owned) => browserProfileKey(owned.profile) === key)
+      .map((owned) => this.#close(owned, "stopped"));
     await Promise.allSettled(closing);
   }
 
@@ -215,19 +250,34 @@ export class ProjectBrowserService {
     projectId: ProjectId,
     authority: Extract<Authority, { readonly kind: "allowed" }>,
     url: string,
+    choice: BrowserProfileChoice,
     existing: OwnedPage | undefined,
   ): Promise<ProjectBrowserResult> {
     const target = webAddress(url);
     if (target === undefined) {
       return refused("invalid", "Only http and https addresses open in a Project browser.");
     }
-    // A live page on the same site takes the new address. Another site starts
-    // a fresh isolated context: its allowlist is the site it was opened for,
-    // and the person browsing onward from there widens only their own view.
+    const profile: BrowserProfile =
+      choice === "project" ? { kind: "project", projectId } : { kind: choice };
+    // Checked before the old page closes, so a refused switch leaves the page
+    // the person was on.
+    const decision = evaluateBrowserProfileUse({
+      profile,
+      caller: "person",
+      nativeBrowserAvailable: (await this.#options.runtime.nativeAvailable?.()) === true,
+      authority: { mode: authority.mode, projectId },
+    });
+    if (decision.kind === "refused") return refused("profile-unavailable", decision.message);
+    // A live page on the same site and in the same profile takes the new
+    // address. Another site, or another profile, starts a fresh isolated
+    // context: its allowlist is the site it was opened for, nothing the old
+    // context held carries over, and the person browsing onward from there
+    // widens only their own view.
     if (
       existing !== undefined &&
       existing.state === "active" &&
-      existing.origin === target.origin
+      existing.origin === target.origin &&
+      browserProfileKey(existing.profile) === browserProfileKey(profile)
     ) {
       return this.#navigate(existing, target.href);
     }
@@ -245,6 +295,7 @@ export class ProjectBrowserService {
       bindingRevisionId: authority.bindingRevisionId,
       contextId,
       origin: target.origin,
+      profile,
       abort: new AbortController(),
       state: "creating",
       presentation: undefined,
@@ -255,6 +306,7 @@ export class ProjectBrowserService {
     this.#pages.set(key(windowId, projectId), owned);
     const policy: BrowserContextPolicy = {
       profileMode: "isolated",
+      ...(profile.kind === "private" ? {} : { profile }),
       allowedOrigins: [target.origin],
       credentialFieldProtection: true,
       maxConcurrentTabs: MAX_BROWSER_TABS_PER_CONTEXT,
@@ -268,9 +320,12 @@ export class ProjectBrowserService {
         { windowId, threadId: subjectId },
       );
       owned.presentation = presentation === undefined ? undefined : presentation;
-    } catch {
+    } catch (error) {
       this.#forget(owned, "failed");
       await this.#options.runtime.closeContext(contextId).catch(() => undefined);
+      if (error instanceof BrowserProfileUnavailableError) {
+        return refused("profile-unavailable", error.message);
+      }
       return refused(
         "unavailable",
         "The host could not open an isolated browser for this Project.",
@@ -398,6 +453,7 @@ export class ProjectBrowserService {
                 contextId: owned.contextId,
                 state: owned.state,
                 ...(owned.presentation === undefined ? {} : { presentation: owned.presentation }),
+                profile: owned.profile.kind,
               },
               ...(owned.page === undefined ? {} : { page: owned.page }),
             }),

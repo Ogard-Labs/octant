@@ -94,6 +94,8 @@ export interface ComposeHostDataMapInput {
   readonly dataDirectory?: string;
   readonly homeDirectory?: string;
   readonly credentialStore?: HostDataMapCredentialStoreInput;
+  /** Absolute folder of the desktop app's Browser profile stores, when it has one. */
+  readonly browserProfilesDirectory?: string;
   readonly projects?: ReadonlyArray<HostDataMapProjectInput>;
 }
 
@@ -113,6 +115,17 @@ export function composeHostDataMap(input: ComposeHostDataMapInput): HostDataMap 
   const hostCaches = [
     ...namedLocations(store, CACHE_DIRECTORIES),
     ...namedLocations(knownPath(input.homeDirectory), ACCOUNT_DIRECTORIES),
+    // Sign-ins kept by Project and Personal Browser profiles. They live in the
+    // desktop app's own data folder, not the host's, and a person inspecting the
+    // store should see that they exist and where.
+    ...(input.browserProfilesDirectory === undefined
+      ? []
+      : [
+          {
+            name: "Browser profiles (sign-ins)",
+            location: locationFromPath(input.browserProfilesDirectory),
+          },
+        ]),
   ];
 
   return {

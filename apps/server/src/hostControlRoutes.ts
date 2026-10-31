@@ -132,6 +132,8 @@ export interface HostDataMapRouteDependencies {
   readonly homeDirectory?: string;
   readonly platform: "darwin" | "linux";
   readonly credentialStore?: HostDataMapCredentialStoreInput;
+  /** Where the desktop app keeps Browser profile stores, when this host has one. */
+  readonly browserProfilesDirectory?: string;
   readonly listProjects?: () => ReadonlyArray<HostDataMapProjectInput>;
 }
 
@@ -365,6 +367,9 @@ function handleDataMap(
           ...(dataMap.credentialStore === undefined
             ? {}
             : { credentialStore: dataMap.credentialStore }),
+          ...(dataMap.browserProfilesDirectory === undefined
+            ? {}
+            : { browserProfilesDirectory: dataMap.browserProfilesDirectory }),
           ...(dataMap.listProjects === undefined ? {} : { projects: dataMap.listProjects() }),
         }),
   });
