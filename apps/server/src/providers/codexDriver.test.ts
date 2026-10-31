@@ -32,6 +32,7 @@ import type {
   RateLimitSnapshot,
 } from "./codexProtocol";
 import {
+  approvalRequestIsProjectConfined,
   codexExecutionSettings,
   codexTurnExecutionSettings,
   makeCodexClient,
@@ -2422,6 +2423,25 @@ describe("Codex thread and turn lifecycle", () => {
 });
 
 describe("Codex execution authority and approvals", () => {
+  it("lets an approval inside a Project's extra folder reach a person and declines one beside it", () => {
+    const root = "/work/main";
+    const extra = ["/work/notes"];
+    const fileChange = (grantRoot: string) => ({ kind: "file-change" as const, grantRoot });
+    expect(approvalRequestIsProjectConfined(fileChange("/work/notes/drafts"), root, extra)).toBe(
+      true,
+    );
+    expect(approvalRequestIsProjectConfined(fileChange("/work/notes"), root, extra)).toBe(true);
+    expect(approvalRequestIsProjectConfined(fileChange("/work/notes-old"), root, extra)).toBe(false);
+    expect(approvalRequestIsProjectConfined(fileChange("/work/notes/drafts"), root)).toBe(false);
+    const command = (requestedCwd: string) => ({
+      kind: "command" as const,
+      requestedCwd,
+      networkApprovalContext: null,
+    });
+    expect(approvalRequestIsProjectConfined(command("/work/notes"), root, extra)).toBe(true);
+    expect(approvalRequestIsProjectConfined(command("/work"), root, extra)).toBe(false);
+  });
+
   it("maps all execution policies to exact stable Codex settings", () => {
     expect(codexExecutionSettings("full-access")).toEqual({
       approvalPolicy: "never",

@@ -49,6 +49,8 @@ export interface AcpConfinementInput {
   readonly profile: AcpProviderProfile;
   readonly binaryPath: string;
   readonly root: string;
+  /** The Project's extra folders, granted what `root` is granted. */
+  readonly extraFolders?: ReadonlyArray<string>;
   readonly managedHome: string;
   readonly mode: AcpSessionMode;
   readonly executionPolicy: ProviderExecutionPolicy;
@@ -81,6 +83,8 @@ export interface AcpProcessStartInput {
   readonly profile: AcpProviderProfile;
   readonly binaryPath: string;
   readonly root: string;
+  /** The Project's extra folders, granted what `root` is granted. */
+  readonly extraFolders?: ReadonlyArray<string>;
   readonly managedHome: string;
   readonly mode: AcpSessionMode;
   readonly executionPolicy: ProviderExecutionPolicy;
@@ -503,6 +507,10 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
               executable: input.binaryPath,
               args,
               boundRoot: root,
+              // Chat runs in the managed home and has no Project folders.
+              ...(input.mode === "chat" || input.extraFolders === undefined
+                ? {}
+                : { extraBoundRoots: input.extraFolders }),
               temporaryDirectory,
               networkEgress,
               writeBoundRoot: !(input.executionPolicy === "plan" || input.mode === "chat"),
@@ -1181,6 +1189,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           profile,
           binaryPath: input.binaryPath,
           root: input.root,
+          ...(input.extraFolders === undefined ? {} : { extraFolders: input.extraFolders }),
           managedHome: input.managedHome,
           mode: input.mode,
           executionPolicy: input.executionPolicy,

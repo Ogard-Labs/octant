@@ -1150,11 +1150,15 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
             }
             return normalized;
           }),
-    acquire: ({ instanceId, projectRoot, mode }) =>
+    acquire: ({ instanceId, projectRoot, mode, extraFolders = [] }) =>
       instanceId !== options.instanceId
         ? Effect.fail(fail("invalid-configuration", "Provider instance does not match driver."))
         : Effect.gen(function* () {
-            if (!isAbsolute(projectRoot) || resolve(projectRoot) !== projectRoot) {
+            if (
+              [projectRoot, ...extraFolders].some(
+                (root) => !isAbsolute(root) || resolve(root) !== root,
+              )
+            ) {
               return yield* Effect.fail(
                 fail(
                   "invalid-configuration",
@@ -1166,6 +1170,7 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
               options,
               clientFactory,
               projectRoot,
+              mode === "chat" ? [] : extraFolders,
               mode ?? "code",
               clock,
               makeCorrelation,
@@ -1259,6 +1264,7 @@ function makeConnection(
   options: OpenCodeDriverOptions,
   clientFactory: NonNullable<OpenCodeDriverOptions["clientFactory"]>,
   projectRoot: string,
+  extraFolders: ReadonlyArray<string>,
   mode: "chat" | "work" | "code",
   clock: () => string,
   makeCorrelation: () => string,
@@ -1343,6 +1349,7 @@ function makeConnection(
         : {
             mode,
             projectRoot,
+            extraFolders,
             reply: (requestId: string, reply: "once" | "reject") => {
               const active = client;
               const source = state.sourceId;
@@ -1445,12 +1452,14 @@ function makeConnection(
                 .start({
                   binaryPath: options.binaryPath,
                   cwd: projectRoot,
+                  ...(extraFolders.length === 0 ? {} : { extraFolders }),
                   mode,
                   executionPolicy,
                   betaPermissions: betaSessionPermissionRules(
                     executionPolicy,
                     mode,
                     managedToolServerName,
+                    extraFolders,
                   ),
                   ...(loopbackPorts.length === 0 ? {} : { loopbackPorts }),
                   onProcessStarted: (process) =>
@@ -1777,6 +1786,7 @@ function makeConnection(
                         input.executionPolicy,
                         mode,
                         state.managedTools?.serverName,
+                        extraFolders,
                       ),
                       model: splitModelId(input.modelId),
                     }),
@@ -2035,6 +2045,7 @@ function makeConnection(
                             state.executionPolicy,
                             mode,
                             managedTools?.serverName,
+                            extraFolders,
                           ),
                         }),
                       );
@@ -2323,6 +2334,7 @@ function mapAndOffer(
   beta?: {
     readonly mode: "chat" | "work" | "code";
     readonly projectRoot: string;
+    readonly extraFolders: ReadonlyArray<string>;
     readonly reply: (requestId: string, reply: "once" | "reject") => void;
   },
 ): void {
@@ -2354,6 +2366,7 @@ function mapAndOffer(
               state.executionPolicy,
               beta.mode,
               state.managedTools?.serverName,
+              beta.extraFolders,
             ),
             action,
           );
@@ -2518,10 +2531,11 @@ function mapAndOffer(
   }
 }
 
-function permissionRules(
+export function permissionRules(
   policy: ProviderExecutionPolicy,
   mode: "chat" | "work" | "code",
   managedToolServerName?: string,
+  extraFolders: ReadonlyArray<string> = [],
 ): PermissionRuleset {
   let rules: PermissionRuleset;
   if (policy === "full-access") {
@@ -2562,6 +2576,12 @@ function permissionRules(
       { permission: "task", pattern: "*", action: "deny" },
     );
   }
+  // A Project's extra folder is no outside directory: reaching it is allowed,
+  // and the posture's own rules above then decide reads, edits and commands
+  // there exactly as they do in the bound directory.
+  for (const pattern of extraFolderPatterns(extraFolders)) {
+    rules.push({ permission: "external_directory", pattern, action: "allow" });
+  }
   rules.push(
     { permission: "*_*", pattern: "*", action: "deny" },
     { permission: "skill", pattern: "*", action: "deny" },
@@ -2601,6 +2621,7 @@ const BETA_SHELL_AND_SUBAGENT_DENY: PermissionV2Ruleset = [
 export function betaAgentPermissionRules(
   policy: ProviderExecutionPolicy,
   mode: "chat" | "work" | "code",
+  extraFolders: ReadonlyArray<string> = [],
 ): PermissionV2Ruleset {
   const denyExternal: PermissionV2Ruleset = [
     { action: "external_directory", resource: "*", effect: "deny" },
@@ -2628,7 +2649,15 @@ export function betaAgentPermissionRules(
     ];
   }
   if (mode === "work") rules.push(...BETA_SHELL_AND_SUBAGENT_DENY);
+  for (const resource of extraFolderPatterns(extraFolders)) {
+    rules.push({ action: "external_directory", resource, effect: "allow" });
+  }
   return rules;
+}
+
+/** The folder itself and everything beneath it, in OpenCode's wildcard form. */
+function extraFolderPatterns(extraFolders: ReadonlyArray<string>): ReadonlyArray<string> {
+  return extraFolders.flatMap((folder) => [folder, `${folder}/*`]);
 }
 
 /**
@@ -2641,9 +2670,10 @@ export function betaSessionPermissionRules(
   policy: ProviderExecutionPolicy,
   mode: "chat" | "work" | "code",
   managedToolServerName?: string,
+  extraFolders: ReadonlyArray<string> = [],
 ): PermissionV2Ruleset {
   const rules: PermissionV2Ruleset = [
-    ...betaAgentPermissionRules(policy, mode),
+    ...betaAgentPermissionRules(policy, mode, extraFolders),
     { action: "*_*", resource: "*", effect: "deny" },
     { action: "skill", resource: "*", effect: "deny" },
     // 2.0.22's question tool asks for this permission and then publishes a

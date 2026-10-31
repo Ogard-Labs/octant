@@ -591,6 +591,22 @@ export function projectExtraFolderRoots(project: {
   return (project.extraFolders ?? []).map((folder) => folder.canonicalRoot);
 }
 
+/**
+ * What an agent is told about a Project's extra folders, or undefined when it
+ * has none. The runtime only ever hears of its working directory, so without
+ * this it would not know the folders it was granted exist.
+ */
+export function projectExtraFoldersInstructions(
+  extraFolders: ReadonlyArray<string>,
+): string | undefined {
+  if (extraFolders.length === 0) return undefined;
+  return [
+    "This Project has extra folders beside its main folder (your working directory):",
+    ...extraFolders.map((folder) => `- ${folder}`),
+    "You may read and change files in them exactly as in the main folder, naming them by absolute path. Commands, Git and checkouts start in the main folder; the extra folders are plain folders.",
+  ].join("\n");
+}
+
 /** Whether a canonical absolute path lies in one of a Project's folders. */
 export function isPathInProjectFolders(
   folders: ReadonlyArray<string>,

@@ -275,9 +275,10 @@ function claudePolicyOptions(
   }
 }
 
-function claudeSandboxSettings(
+export function claudeSandboxSettings(
   policy: ProviderExecutionPolicy,
   projectRoot: string,
+  extraFolders: ReadonlyArray<string> = [],
 ): ClaudeSandboxSettings | undefined {
   if (policy !== "approval-gated" && policy !== "auto-accept-edits") return undefined;
   return {
@@ -287,9 +288,31 @@ function claudeSandboxSettings(
     allowUnsandboxedCommands: false,
     filesystem: {
       denyRead: ["/"],
-      allowRead: [projectRoot],
-      allowWrite: [projectRoot],
+      // An extra folder is granted exactly what the root is.
+      allowRead: [projectRoot, ...extraFolders],
+      allowWrite: [projectRoot, ...extraFolders],
     },
+  };
+}
+
+/**
+ * The driver options a connection answers "inside the Project?" with: a path
+ * in one of the Project's extra folders counts as inside the root, for every
+ * check that asks about the root, and nothing else changes.
+ */
+function withProjectFolders(
+  options: ClaudeDriverOptions,
+  projectRoot: string,
+  extraFolders: ReadonlyArray<string>,
+): ClaudeDriverOptions {
+  if (extraFolders.length === 0) return options;
+  const inside = options.isProjectConfinedPath;
+  return {
+    ...options,
+    isProjectConfinedPath: (root, absolutePath) =>
+      inside(root, absolutePath) ||
+      (root === projectRoot &&
+        extraFolders.some((folder) => absolutePath === folder || inside(folder, absolutePath))),
   };
 }
 
@@ -1134,13 +1157,15 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
         : undefined,
     probe: makeProbe(options, environmentFactory, factories.clock),
     contextFacts: makeClaudeContextFacts(options, environmentFactory, factories.clock),
-    acquire: ({ instanceId, projectRoot, mode }) => {
+    acquire: ({ instanceId, projectRoot, mode, extraFolders = [] }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
           failure("invalid-configuration", "Provider instance does not match driver."),
         );
       }
-      if (!isAbsolute(projectRoot) || resolve(projectRoot) !== projectRoot) {
+      if (
+        [projectRoot, ...extraFolders].some((root) => !isAbsolute(root) || resolve(root) !== root)
+      ) {
         return Effect.fail(
           failure(
             "invalid-configuration",
@@ -1148,7 +1173,14 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
           ),
         );
       }
-      return makeConnection(options, environmentFactory, projectRoot, mode, factories);
+      return makeConnection(
+        withProjectFolders(options, projectRoot, extraFolders),
+        environmentFactory,
+        projectRoot,
+        extraFolders,
+        mode,
+        factories,
+      );
     },
   };
 }
@@ -1157,6 +1189,7 @@ function makeConnection(
   options: ClaudeDriverOptions,
   environmentFactory: ClaudeEnvironmentFactory,
   projectRoot: string,
+  extraFolders: ReadonlyArray<string>,
   mode: ProviderAcquireInput["mode"],
   factories: ConnectionFactories,
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
@@ -1675,7 +1708,7 @@ function makeConnection(
             projectRoot,
             isProjectConfinedPath: options.isProjectConfinedPath,
           });
-        const sandbox = claudeSandboxSettings(input.executionPolicy, projectRoot);
+        const sandbox = claudeSandboxSettings(input.executionPolicy, projectRoot, extraFolders);
         let callbackState: SessionState | undefined;
         const canUseTool: ClaudeOpenQueryInput["canUseTool"] = async (request) => {
           const activeState = callbackState;
@@ -2010,6 +2043,7 @@ function makeConnection(
             .openQuery({
               binaryPath: options.binaryPath,
               projectRoot,
+              ...(extraFolders.length === 0 ? {} : { additionalDirectories: extraFolders }),
               authEnvironment: offersArtifacts
                 ? claudeArtifactLaunchEnvironment(environment.environment)
                 : environment.environment,

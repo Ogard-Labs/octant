@@ -66,7 +66,7 @@ import { readThreadExternalContentTaint } from "../context/externalContentTaintP
 import { CodeTurnDecisions } from "../turnDecisions/codeTurnDecisions";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
 import { isReplayedAndroidEvidence } from "../android/androidToolchainService";
-import { isNativeHarnessDriverKind } from "@octant/domain";
+import { isNativeHarnessDriverKind, projectExtraFolderRoots } from "@octant/domain";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { type CodeWiring, stableCodeFileId } from "./code";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
@@ -613,6 +613,12 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             projectId: input.thread.projectId,
           }),
         nativeHarnessTools: (input) => nativeHarnessComposition.forCode(input),
+        readProjectExtraFolders: (projectId) => {
+          const project = persistence.readProject(projectId);
+          return project === undefined || project.type === "chat"
+            ? []
+            : projectExtraFolderRoots(project);
+        },
         nativeHarness: nativeHarnessHooks,
         onProviderTurnRequested: (threadId) => {
           if (codeService instanceof CodeService) codeService.noteProviderTurnRequested(threadId);

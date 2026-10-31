@@ -2105,6 +2105,41 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it("launches the provider with the Project's extra folders and names them to the agent", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const provider = providerConnection(queue);
+    const acquired: Array<ReadonlyArray<string> | undefined> = [];
+    const driver = {
+      acquire: (input: { readonly extraFolders?: ReadonlyArray<string> }) => {
+        acquired.push(input.extraFolders);
+        return Effect.succeed(provider);
+      },
+    } as unknown as ProviderDriver;
+    const fixture = runtimeFixture({
+      provider: driver,
+      readProjectExtraFolders: () => ["/Users/example/Notes"],
+    });
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(75),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+      expect(acquired).toEqual([["/Users/example/Notes"]]);
+      const sent = vi.mocked(provider.send).mock.calls[0]?.[0];
+      const named = sent?.context?.find(
+        (block) => block.kind === "instructions" && block.text.includes("extra folders"),
+      );
+      expect(named?.text).toContain("- /Users/example/Notes");
+    } finally {
+      fixture.close();
+    }
+  });
+
   it("tells the model to deliver kept work as a Canvas only when Code offers the Canvas tool", async () => {
     const turn = async (
       canvas: boolean,
@@ -6058,6 +6093,9 @@ function runtimeFixture(options: {
     typeof createCodeOperationRuntime
   >[0]["resolveProviderDriver"];
   isProviderModelAllowed?: (thread: CodeThread) => boolean;
+  readProjectExtraFolders?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["readProjectExtraFolders"];
   compactionRunning?: (threadId: CodeThreadId) => boolean;
   sessionCompactions?: Parameters<typeof createCodeOperationRuntime>[0]["sessionCompactions"];
   spendCeiling?: Parameters<typeof createCodeOperationRuntime>[0]["spendCeiling"];
@@ -6387,6 +6425,9 @@ function runtimeFixture(options: {
     ...(options.onProviderTurnRequested === undefined
       ? {}
       : { onProviderTurnRequested: options.onProviderTurnRequested }),
+    ...(options.readProjectExtraFolders === undefined
+      ? {}
+      : { readProjectExtraFolders: options.readProjectExtraFolders }),
     ...(options.isProviderModelAllowed === undefined
       ? {}
       : { isProviderModelAllowed: options.isProviderModelAllowed }),

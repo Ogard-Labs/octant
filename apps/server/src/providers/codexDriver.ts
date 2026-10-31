@@ -845,13 +845,15 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             options.runtimeRegistry.setObservedState(result);
             return result;
           }),
-    acquire: ({ instanceId, projectRoot, mode }) => {
+    acquire: ({ instanceId, projectRoot, mode, extraFolders = [] }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
           failure("invalid-configuration", "Provider instance does not match driver."),
         );
       }
-      if (!isAbsolute(projectRoot) || resolve(projectRoot) !== projectRoot) {
+      if (
+        [projectRoot, ...extraFolders].some((root) => !isAbsolute(root) || resolve(root) !== root)
+      ) {
         return Effect.fail(
           failure(
             "invalid-configuration",
@@ -864,13 +866,19 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
       // one lease is one root under one mode and posture and Octant's profile
       // can be exact for it.
       const leaseKey = (executionPolicy: ProviderExecutionPolicy) =>
-        JSON.stringify([projectRoot, threadMode, executionPolicy]);
+        JSON.stringify([projectRoot, extraFolders, threadMode, executionPolicy]);
       const leaseFor = (executionPolicy: ProviderExecutionPolicy) =>
         Effect.gen(function* () {
           const runtime = yield* acquireRuntime(
             options,
             clientFactory,
-            { kind: "thread", root: projectRoot, mode: threadMode, executionPolicy },
+            {
+              kind: "thread",
+              root: projectRoot,
+              ...(extraFolders.length === 0 ? {} : { extraFolders }),
+              mode: threadMode,
+              executionPolicy,
+            },
             leaseKey(executionPolicy),
           );
           // Turn starts probe first, but not every caller does (compaction,
@@ -904,7 +912,14 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
           ),
         ).pipe(Effect.asVoid);
       return Effect.gen(function* () {
-        return yield* makeConnection(options, leaseFor, closeIdleOtherPostures, projectRoot, mode, {
+        return yield* makeConnection(
+          options,
+          leaseFor,
+          closeIdleOtherPostures,
+          projectRoot,
+          extraFolders,
+          mode,
+          {
           instanceId: options.instanceId,
           clock,
           makeCorrelation,
@@ -1197,6 +1212,7 @@ function makeConnection(
   ) => Effect.Effect<CodexLeasedRuntime, ProviderFailure, Scope.Scope>,
   closeIdleOtherPostures: (executionPolicy: ProviderExecutionPolicy) => Effect.Effect<void>,
   projectRoot: string,
+  extraFolders: ReadonlyArray<string>,
   mode: ProviderAcquireInput["mode"],
   factories: ConnectionFactories,
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
@@ -1367,7 +1383,7 @@ function makeConnection(
             // Chat has no filesystem or shell authority at all, so nothing
             // Codex asks for is anyone's to approve.
             mode === "chat" ||
-            !approvalRequestIsProjectConfined(item.approval, state.projectRoot)
+            !approvalRequestIsProjectConfined(item.approval, state.projectRoot, extraFolders)
           ) {
             Effect.runFork(
               request(() =>
@@ -2087,38 +2103,49 @@ function declinedApprovalResult(pending: CodexPendingApproval): unknown {
     : { decision: "decline" };
 }
 
-function approvalRequestIsProjectConfined(
-  pending: CodexPendingApproval,
+/** What an approval asks to reach, without the request bookkeeping around it. */
+type CodexApprovalScope = CodexPendingApproval extends infer Approval
+  ? Approval extends CodexPendingApproval
+    ? Omit<Approval, "requestId" | "providerRequestId" | "threadId" | "turnId" | "itemId" | "event">
+    : never
+  : never;
+
+export function approvalRequestIsProjectConfined(
+  pending: CodexApprovalScope,
   projectRoot: string,
+  extraFolders: ReadonlyArray<string> = [],
 ): boolean {
+  // An extra folder is inside the Project exactly as the main folder is.
+  const inProject = (path: string, cwd: string) =>
+    [projectRoot, ...extraFolders].some((root) => pathIsProjectConfined(path, root, cwd));
   if (pending.kind === "command") {
     return (
       typeof pending.requestedCwd === "string" &&
-      pathIsProjectConfined(pending.requestedCwd, projectRoot, projectRoot)
+      inProject(pending.requestedCwd, projectRoot)
     );
   }
   if (pending.kind === "file-change") {
     return (
       pending.grantRoot == null ||
-      pathIsProjectConfined(pending.grantRoot, projectRoot, projectRoot)
+      inProject(pending.grantRoot, projectRoot)
     );
   }
   if (pending.requestedCwd !== projectRoot) return false;
   const fileSystem = pending.permissions.fileSystem;
   if (fileSystem === null) return true;
   const legacyPaths = [...(fileSystem.read ?? []), ...(fileSystem.write ?? [])];
-  if (legacyPaths.some((path) => !pathIsProjectConfined(path, projectRoot, pending.requestedCwd))) {
+  if (legacyPaths.some((path) => !inProject(path, pending.requestedCwd))) {
     return false;
   }
   return (fileSystem.entries ?? []).every(({ path }) => {
     if (path.type === "path") {
-      return pathIsProjectConfined(path.path, projectRoot, pending.requestedCwd);
+      return inProject(path.path, pending.requestedCwd);
     }
     if (path.type === "glob_pattern") return false;
     if (path.value.kind !== "project_roots") return false;
     return (
       path.value.subpath === null ||
-      pathIsProjectConfined(path.value.subpath, projectRoot, projectRoot)
+      inProject(path.value.subpath, projectRoot)
     );
   });
 }
