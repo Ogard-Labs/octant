@@ -3722,3 +3722,22 @@ html[data-octant-increased-contrast="true"]
 .provider-linked-key__item code {
   overflow-wrap: anywhere;
 }
+
+/* Protected files: the path field and its Add button share one row, and the
+   paths a group covers wrap rather than push the row wider than the page. */
+.protected-files__add {
+  display: flex;
+  gap: var(--oct-space-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.protected-files__add > .settings-view__text-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.protected-files__paths {
+  display: block;
+  overflow-wrap: anywhere;
+}

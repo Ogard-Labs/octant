@@ -69,6 +69,7 @@
     "./canvas-export": "./src/canvasExport.ts",
     "./canvas-export-folder": "./src/canvasExportFolder.ts",
     "./canvas-public-share": "./src/canvasPublicShare.ts",
+    "./protected-files": "./src/protectedFiles.ts",
     "./computer-use": "./src/computerUse.ts",
     "./diagnostics": "./src/diagnostics.ts",
     "./support-bundle": "./src/supportBundle.ts",

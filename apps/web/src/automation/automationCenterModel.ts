@@ -251,6 +251,11 @@ export interface AutomationDraftFormInput {
   readonly missedRunPolicy: AutomationMissedRunPolicy;
   readonly deliveryTargetSummary: string;
   readonly deliveryTargetConfirmed: boolean;
+  /**
+   * The person's opt-in to run at the level the Project's new threads start
+   * at, Full access included, instead of asking first.
+   */
+  readonly runsAtProjectLevel?: boolean;
   readonly previousDeliveryTargetRevision?: number;
   readonly actorId: string;
   /** Strict UTC timestamp used as the confirmation instant. */
@@ -387,6 +392,7 @@ export function buildAutomationDraft(input: AutomationDraftFormInput): Automatio
     trigger: normalizedTrigger(input.trigger),
     missedRunPolicy: input.missedRunPolicy,
     targetPolicy: "new-thread",
+    ...(input.runsAtProjectLevel === true ? { projectLevel: "opted-in" } : {}),
   };
   try {
     return { kind: "valid", draft: decodeAutomationDefinitionDraft(candidate) };

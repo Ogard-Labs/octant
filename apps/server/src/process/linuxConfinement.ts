@@ -13,8 +13,10 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, normalize, parse, relative, resolve, sep } from "node:path";
+import { secretGuardEntries, secretGuardLinuxPaths } from "./secretGuard";
 import {
   confinedExecutableExecPaths,
+  ownAccountRoots,
   ProcessConfinementError,
   type ConfinedProcessLaunch,
   type ProcessConfinementPrepareInput,
@@ -586,6 +588,25 @@ export function buildBubblewrapLaunch(
     bindAdditionalDenyPath(path, "read");
   }
   for (const path of hostSecretPaths()) {
+    bindAdditionalDenyPath(path, "read");
+  }
+  // The secret guard's files inside a bound root (a home folder opened as a
+  // Project) are covered like any read denial. A protected file outside every
+  // bound root is already absent from the capsule.
+  for (const path of secretGuardLinuxPaths({
+    entries: secretGuardEntries({ platform: "linux" }),
+    ownAccountPaths: ownAccountRoots(
+      input,
+      input.readRoots ?? [],
+      input.additionalWriteRoots ?? [],
+    ),
+    withinRoots: [
+      input.boundRoot,
+      input.temporaryDirectory,
+      ...(input.readRoots ?? []),
+      ...(input.additionalWriteRoots ?? []),
+    ],
+  })) {
     bindAdditionalDenyPath(path, "read");
   }
 

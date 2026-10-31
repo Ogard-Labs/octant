@@ -11,6 +11,7 @@ import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { IntegrationClient } from "@octant/client-runtime/integration-client";
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
+import type { ProtectedFilesClient } from "@octant/client-runtime/protected-files-client";
 import type { SafeNetworksClient } from "@octant/client-runtime/safe-networks-client";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ReplicaMembershipClient } from "@octant/client-runtime/replica-membership-client";
@@ -77,6 +78,7 @@ export interface ShellSettingsSurfaceProps {
     BrowserAutomationClient,
     "manageExtensions" | "manageProfiles"
   >;
+  readonly protectedFilesClient?: ProtectedFilesClient;
   readonly canvasClient?: Pick<CanvasClient, "publicLinkSettings" | "setPublicLinkSettings">;
   readonly desktopPaneClient?: Pick<DesktopPaneClient, "request">;
   readonly replicaStoreSettingsClient?: ReplicaStoreSettingsClient;
@@ -162,6 +164,9 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             {...(props.browserAutomationClient === undefined
               ? {}
               : { browserAutomationClient: props.browserAutomationClient })}
+            {...(props.protectedFilesClient === undefined
+              ? {}
+              : { protectedFilesClient: props.protectedFilesClient })}
             {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
             {...(props.desktopPaneClient === undefined
               ? {}
