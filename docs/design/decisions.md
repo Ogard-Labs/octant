@@ -42,7 +42,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Modes, Projects and authority](#modes-projects-and-authority)                        | 13        | 10      | 3            | 0                   |
 | [Agents and delegation](#agents-and-delegation)                                       | 4         | 4       | 0            | 0                   |
 | [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 2       | 3            | 1                   |
-| [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 3       | 0            | 1                   |
+| [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 3       | 1            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 1       | 0            | 0                   |
 | [Persistence](#persistence)                                                           | 9         | 8       | 1            | 0                   |
 | [Providers](#providers)                                                               | 6         | 6       | 0            | 0                   |
@@ -69,7 +69,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
 | [Decided, pending a specification update](#decided-pending-a-specification-update)    | 5         | 0       | 0            | 5                   |
-| **All areas**                                                                         | **222**   | **173** | **36**       | **13**              |
+| **All areas**                                                                         | **222**   | **175** | **34**       | **13**              |
 
 ## Principles and hard lines
 
@@ -473,7 +473,7 @@ Input rides the workbench control channel with actor attribution. Agent device t
 - The grant lives in host memory, so a restart asks again. It ends with the window's authority, a successful shutdown or a discovery that finds the destination no longer booted. It never covers boot, shutdown, Open URL or Rotate. _Here only._
 - Open URL and Rotate are effects confirmed on their own; an input whose delivery is unknown is reported interrupted, and an off-screen point is refused, never clamped.
 - An explicit successful screenshot may deliver one PNG through the provider image channel, read through thread and checkout authority; oversized, unavailable or non-PNG output is refused, never resized. Boot, run, open, input and discovery never send screen images. _Here only._
-- `octant_terminal` still requires Full access.
+- `octant_terminal` follows the thread's level: Plan refuses it, Full access runs it, and below that each command the agent types asks the person with the command shown.
 
 Status: Built. Since: —. Detail: [Architecture: Device transport and evidence](../architecture.md#device-transport-and-evidence).
 
@@ -755,10 +755,11 @@ Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](.
 A routine runs at the guardrail level the person picks when creating it, Full access included, and never at a lower level than its creator chose.
 
 - A Code routine may merge the pull requests it opens when the person allowed that at creation; an agent proposing a routine never picks either for the person.
-- Both choices are captured in the authority snapshot and journaled (not built yet).
-- Today Full access is ineligible, Code runs are created approval-gated, and a Work routine gets no shell or Git authority.
+- Built: a person at a local window may opt a routine into its Project's level, journaled on the definition and copied into each run; each run then takes the level the Project's new threads start at, Full access included. Without it a routine asks first, and a Full access profile stays ineligible.
+- A Work routine captures the shell and Git like a Code routine; one saved without them does not run until a person saves it again.
+- Not built yet: the merge permission, and a level picked on the routine itself rather than taken from its Project.
 
-Status: Designed, not built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
+Status: Partly built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
 ### Follow-ups in the same thread
 

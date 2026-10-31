@@ -177,6 +177,7 @@ export function automationRunForDefinition(
       trigger: definition.trigger,
       missedRunPolicy: definition.missedRunPolicy,
       targetPolicy: definition.targetPolicy,
+      ...(definition.projectLevel === undefined ? {} : { projectLevel: definition.projectLevel }),
     },
     authoritySnapshot: {
       profileId: definition.authorityProfile.profileId,

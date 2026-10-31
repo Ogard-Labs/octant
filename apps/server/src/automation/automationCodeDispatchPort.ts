@@ -9,9 +9,12 @@ import {
   type CodeOperationCommand,
   type CodeOperationResult,
   type CodeThreadId,
+  type PermissionMode,
+  type ProjectId,
   type UtcTimestamp,
   type WindowId,
 } from "@octant/contracts";
+import { threadAccessOf } from "@octant/domain";
 import type {
   AutomationCodeDispatchPort,
   AutomationFirstTurnLaunchOutcome,
@@ -54,10 +57,18 @@ export interface CreateAutomationCodeDispatchPortOptions {
   readonly sourceBranch?: string;
   readonly startFromOrigin?: boolean;
   readonly remoteName?: string;
+  /**
+   * The mode a new thread in this Project starts in now: the Project's own
+   * choice, else Settings › Code › Access. Read at each run, for a routine
+   * the person opted into its Project's level.
+   */
+  readonly projectLevel?: (projectId: ProjectId) => PermissionMode;
 }
 
 /**
  * Production Code adapter for Automation A4. Creates approval-gated threads
+ * (or, for a routine the person opted into it, threads at the level the
+ * Project's new threads start at)
  * through the ordinary managed-worktree command path and starts/recovers the
  * first provider turn through CodeOperationService.execute (which owns the
  * stale-`running` recovery seam).
@@ -116,7 +127,11 @@ async function createManagedThread(
       title: input.title.length > 0 ? input.title : automationThreadTitle(snapshot.displayName),
       providerInstanceId: snapshot.executionProfile.providerInstanceId,
       modelId: snapshot.executionProfile.modelId,
-      executionPolicy: "approval-gated",
+      // Asks first unless the person opted this routine into the level the
+      // Project's new threads start at, Full access included.
+      ...(snapshot.projectLevel === "opted-in" && options.projectLevel !== undefined
+        ? threadAccessOf(options.projectLevel(snapshot.projectId))
+        : { executionPolicy: "approval-gated" as const }),
       permissionPersistence: snapshot.executionProfile.permissionPersistence,
       deliveryTarget,
       sourceBranch: options.sourceBranch ?? "development",
@@ -190,8 +205,11 @@ async function startOrRecover(
     sessionId: sessionId as never,
     prompt,
     // A follow-up goes into a thread a person may since have widened; its
-    // turn asks first all the same, and the host only ever narrows a turn.
-    ...(followUp ? { executionPolicy: "approval-gated" as const } : {}),
+    // turn asks first all the same unless the person opted the routine into
+    // the Project's level, and the host only ever narrows a turn.
+    ...(followUp && input.run.definitionSnapshot.projectLevel !== "opted-in"
+      ? { executionPolicy: "approval-gated" as const }
+      : {}),
   };
   try {
     const result = await options.operations.execute(input.scopeId, command);
