@@ -218,7 +218,13 @@ export class FileMentionService {
     for (const extra of root.extraRoots ?? []) {
       const files = await this.#listCached(extra);
       for (const file of files) {
-        listed.push({ ...file, path: decodeFileMentionPath(`${extra.rootPath}/${file.path}`) });
+        // A folder whose own path the wire cannot carry (a backslash,
+        // decomposed Unicode, too long) loses its files, not everyone's.
+        try {
+          listed.push({ ...file, path: decodeFileMentionPath(`${extra.rootPath}/${file.path}`) });
+        } catch {
+          break;
+        }
       }
     }
     return decodeFileMentionCommandResult({

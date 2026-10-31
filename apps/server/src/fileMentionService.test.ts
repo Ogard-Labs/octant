@@ -269,6 +269,42 @@ describe("FileMentionService", () => {
       });
     });
 
+    it("keeps completing the main folder when an extra folder's path cannot be named on the wire", async () => {
+      const io = trackingIo();
+      io.list = vi.fn(async (root: string) =>
+        root === rootPath
+          ? [{ path: "plan.md" as never, kind: "file" as const }]
+          : [{ path: "plan.md" as never, kind: "file" as const }],
+      );
+      const service = new FileMentionService({
+        authority: {
+          ...authority(),
+          resolveWorkRoot: vi.fn(async () => ({
+            kind: "ok" as const,
+            rootPath,
+            rootIdentity,
+            extraRoots: [{ rootPath: "/private/back\\slash", rootIdentity: extraIdentity }],
+          })),
+        },
+        io,
+      });
+
+      const result = await service.execute(
+        {
+          kind: "complete-file-mentions",
+          requestId,
+          scope: { mode: "work", threadId },
+          query: "plan",
+        },
+        { windowId },
+      );
+
+      expect(result).toMatchObject({
+        kind: "file-mentions-completed",
+        candidates: [{ path: "plan.md", kind: "file" }],
+      });
+    });
+
     it("reads a file in the extra folder against the extra folder's own identity", async () => {
       const io = trackingIo();
       io.locate = vi.fn(async () => ({
