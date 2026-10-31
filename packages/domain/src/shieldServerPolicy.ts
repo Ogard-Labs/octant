@@ -113,6 +113,15 @@ const COMMAND_PREFIXES: ReadonlySet<string> = new Set([
   "time",
 ]);
 
+/** A word with the quote characters at either end taken off, scanned so its cost stays linear. */
+function withoutQuotes(word: string): string {
+  let start = 0;
+  let end = word.length;
+  while (start < end && (word.charAt(start) === "'" || word.charAt(start) === '"')) start += 1;
+  while (end > start && (word.charAt(end - 1) === "'" || word.charAt(end - 1) === '"')) end -= 1;
+  return word.slice(start, end);
+}
+
 /**
  * Whether `ssh` runs where the shell runs a command: first, or after a
  * separator, a subshell or substitution opening, or `sudo`/`exec`/`command`,
@@ -123,7 +132,7 @@ const COMMAND_PREFIXES: ReadonlySet<string> = new Set([
 function sshInCommandPosition(text: string): boolean {
   for (const piece of text.split(/[;&|(`\n]/)) {
     for (const word of piece.trim().split(/\s+/)) {
-      const bare = word.replace(/^['"]|['"]$/g, "");
+      const bare = withoutQuotes(word);
       if (bare === "ssh" || bare.endsWith("/ssh")) return true;
       if (!COMMAND_PREFIXES.has(bare) && bare !== "$") break;
     }
@@ -250,7 +259,7 @@ function localWords(text: string): ReadonlyArray<string> | undefined {
 
 /** The first word after `ssh` that is not an option: the host the record names. */
 function guessHost(text: string): string | undefined {
-  const words = text.split(/[\s;&|()`]+/).map((word) => word.replace(/^['"]+|['"]+$/g, ""));
+  const words = text.split(/[\s;&|()`]+/).map((word) => withoutQuotes(word));
   const at = words.findIndex((word) => word === "ssh" || word.endsWith("/ssh"));
   if (at === -1) return undefined;
   for (let index = at + 1; index < words.length; index += 1) {
