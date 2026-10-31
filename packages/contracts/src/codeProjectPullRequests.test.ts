@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  decodeCodeProjectPullRequestActionCommand,
+  decodeCodeProjectPullRequestActionOutcome,
+  decodeCodeProjectPullRequestStackMergeCommand,
+  decodeCodeProjectPullRequestStackMergeOutcome,
   decodeCodeProjectPullRequestDetailQuery,
   decodeCodeProjectPullRequestDetailRefreshCommand,
   decodeCodeProjectPullRequestDetailView,
@@ -398,5 +402,106 @@ describe("Code Project pull-request detail contracts", () => {
         generatedAt,
       }),
     ).toThrow();
+  });
+});
+
+describe("pull-request action contracts", () => {
+  const target = {
+    projectId,
+    repositoryOwner: "octant",
+    repositoryName: "octant",
+    number: 12,
+  };
+
+  it("accepts the five actions and nothing else", () => {
+    for (const command of [
+      { kind: "labels", ...target, add: ["bug"], remove: [] },
+      { kind: "comment", ...target, body: "Thanks." },
+      { kind: "reply", ...target, reviewThreadId: "PRRT_kwDO1", body: "Fixed." },
+      { kind: "close", ...target },
+      { kind: "reopen", ...target },
+    ]) {
+      expect(decodeCodeProjectPullRequestActionCommand(command)).toMatchObject({
+        kind: command.kind,
+      });
+    }
+    for (const command of [
+      { kind: "approve", ...target },
+      { kind: "request-changes", ...target, body: "No." },
+      { kind: "close", ...target, deleteBranch: true },
+      { kind: "labels", ...target, add: [], remove: [] },
+      { kind: "labels", ...target, add: ["a,b"], remove: [] },
+      { kind: "labels", ...target, add: Array.from({ length: 21 }, (_, i) => `l${i}`), remove: [] },
+      { kind: "comment", ...target, body: "" },
+      { kind: "reply", ...target, reviewThreadId: "has spaces", body: "x" },
+    ]) {
+      expect(() => decodeCodeProjectPullRequestActionCommand(command)).toThrow();
+    }
+  });
+
+  it("answers done, a named refusal, or unavailable", () => {
+    for (const outcome of [
+      { status: "done" },
+      { status: "refused", reason: "label-not-found" },
+      { status: "refused", reason: "merged" },
+      { status: "unavailable", reason: "unauthenticated" },
+    ]) {
+      expect(decodeCodeProjectPullRequestActionOutcome(outcome)).toEqual(outcome);
+    }
+    expect(() =>
+      decodeCodeProjectPullRequestActionOutcome({ status: "refused", reason: "because" }),
+    ).toThrow();
+  });
+
+  it("takes a stack of one to ten confirmed heads, and a merge command may carry its confirmation", () => {
+    const item = (number: number) => ({ number, headSha: "a".repeat(40) });
+    const stack = {
+      projectId,
+      repositoryOwner: "octant",
+      repositoryName: "octant",
+      method: "squash",
+      confirmed: true,
+      items: [item(1), item(2)],
+    };
+    expect(decodeCodeProjectPullRequestStackMergeCommand(stack).items).toHaveLength(2);
+    for (const bad of [
+      { ...stack, items: [] },
+      { ...stack, items: Array.from({ length: 11 }, (_, i) => item(i + 1)) },
+      { ...stack, confirmed: false },
+      { ...stack, confirmed: undefined },
+    ]) {
+      expect(() => decodeCodeProjectPullRequestStackMergeCommand(bad)).toThrow();
+    }
+    expect(
+      decodeCodeProjectPullRequestMergeCommand({
+        ...target,
+        method: "merge",
+        headSha: "a".repeat(40),
+        confirmed: true,
+      }),
+    ).toMatchObject({ confirmed: true });
+    expect(() =>
+      decodeCodeProjectPullRequestMergeCommand({
+        ...target,
+        method: "merge",
+        headSha: "a".repeat(40),
+        confirmed: false,
+      }),
+    ).toThrow();
+  });
+
+  it("answers a stack merge as merged, refused whole, or stopped with what landed", () => {
+    for (const outcome of [
+      { status: "merged", merged: [1, 2] },
+      { status: "refused", reason: "not-a-chain" },
+      {
+        status: "stopped",
+        merged: [1],
+        stoppedAt: 2,
+        outcome: { status: "refused", reason: "checks-not-passing" },
+      },
+    ]) {
+      expect(decodeCodeProjectPullRequestStackMergeOutcome(outcome)).toEqual(outcome);
+    }
   });
 });

@@ -528,6 +528,7 @@ export class GitService {
       };
       readonly expectedHeadOid: string;
       readonly expectedStateToken: string;
+      readonly force?: Parameters<GitMutationPort["push"]>[0]["force"];
       readonly authority: "plan" | "approval-gated" | "approved" | "full-access";
       readonly executionPolicy?: ProviderExecutionPolicy;
     },
@@ -557,6 +558,7 @@ export class GitService {
           localRef: input.localRef,
           remoteRef: input.remoteRef,
           confirmation: input.confirmation,
+          ...(input.force === undefined ? {} : { force: input.force }),
           ...mutationPolicy(input.executionPolicy),
         },
         signal,

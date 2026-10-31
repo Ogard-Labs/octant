@@ -6,7 +6,9 @@ import {
   decodeCodeProjectPullRequestDetailQuery,
   decodeCodeProjectPullRequestDetailRefreshCommand,
   decodeCodeProjectPullRequestAutoFixCommand,
+  decodeCodeProjectPullRequestActionCommand,
   decodeCodeProjectPullRequestMergeCommand,
+  decodeCodeProjectPullRequestStackMergeCommand,
   decodeCodeProjectPullRequestMergeWhenReadyCommand,
   decodeCodeProjectPullRequestSwitchTarget,
   decodeCodeThreadComposerActivity,
@@ -38,8 +40,12 @@ import {
   type CodeProjectPullRequestDetailRefreshCommand,
   CodeProjectPullRequestDetailView,
   type CodeProjectPullRequestAutoFixCommand,
+  type CodeProjectPullRequestActionCommand,
+  CodeProjectPullRequestActionOutcome,
   type CodeProjectPullRequestMergeCommand,
   CodeProjectPullRequestMergeOutcome,
+  type CodeProjectPullRequestStackMergeCommand,
+  CodeProjectPullRequestStackMergeOutcome,
   type CodeProjectPullRequestMergeWhenReadyCommand,
   CodeProjectPullRequestSwitchOutcome,
   type CodeProjectPullRequestSwitchTarget,
@@ -193,6 +199,14 @@ export interface CodeClient {
   mergeProjectPullRequest?(
     command: CodeProjectPullRequestMergeCommand,
   ): Promise<CodeProjectPullRequestMergeOutcome>;
+  /** Merge a whole stack in one step, from the bottom; the person has confirmed each head. */
+  mergeProjectPullRequestStack?(
+    command: CodeProjectPullRequestStackMergeCommand,
+  ): Promise<CodeProjectPullRequestStackMergeOutcome>;
+  /** The person's labels, comment, review reply, close, and reopen on a pull request. */
+  actOnProjectPullRequest?(
+    command: CodeProjectPullRequestActionCommand,
+  ): Promise<CodeProjectPullRequestActionOutcome>;
   /** A pull request's Merge when ready and Auto-fix switches. */
   queryProjectPullRequestSwitches?(
     target: CodeProjectPullRequestSwitchTarget,
@@ -558,6 +572,42 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           body: JSON.stringify(validated),
         },
         decodeHostAnswer(CodeProjectPullRequestMergeOutcome),
+      );
+    },
+    async mergeProjectPullRequestStack(command) {
+      let validated: CodeProjectPullRequestStackMergeCommand;
+      try {
+        validated = decodeCodeProjectPullRequestStackMergeCommand(command);
+      } catch {
+        throw invalidProjectPullRequestMerge();
+      }
+      return request(
+        fetch,
+        new URL("/api/code/project-pull-requests/merge-stack", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(validated),
+        },
+        decodeHostAnswer(CodeProjectPullRequestStackMergeOutcome),
+      );
+    },
+    async actOnProjectPullRequest(command) {
+      let validated: CodeProjectPullRequestActionCommand;
+      try {
+        validated = decodeCodeProjectPullRequestActionCommand(command);
+      } catch {
+        throw invalidProjectPullRequestAction();
+      }
+      return request(
+        fetch,
+        new URL("/api/code/project-pull-requests/actions", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(validated),
+        },
+        decodeHostAnswer(CodeProjectPullRequestActionOutcome),
       );
     },
     async queryProjectPullRequestSwitches(target) {
@@ -1670,6 +1720,13 @@ function invalidProjectPullRequestMerge(): CodeClientFailure {
   return new CodeClientFailure({
     category: "invalid",
     message: "Code project pull-request merge is invalid.",
+  });
+}
+
+function invalidProjectPullRequestAction(): CodeClientFailure {
+  return new CodeClientFailure({
+    category: "invalid",
+    message: "Code project pull-request action is invalid.",
   });
 }
 

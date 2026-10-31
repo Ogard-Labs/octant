@@ -13,6 +13,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CacheStatsProjection, type CacheStatsRecorder } from "../cacheStatsProjection";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
+import type { RequiredChecksState } from "@octant/domain/code-pull-request-action-policy";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
 import { CodeProjectPullRequestSnapshotStore } from "./codeProjectPullRequestSnapshotStore";
@@ -107,6 +108,10 @@ function serviceFixture(options: {
   readonly merge?: CodeProjectPullRequestMergePort;
   readonly mergeJournal?: Journal;
   readonly recordMerge?: (record: CodeProjectPullRequestMergeRecorded) => void;
+  readonly requiredChecks?: (
+    request: { readonly owner: string; readonly name: string; readonly number: number },
+    signal: AbortSignal,
+  ) => Promise<RequiredChecksState>;
   readonly clock?: () => string;
   readonly cacheStats?: CacheStatsRecorder;
   readonly snapshotStore?: CodeProjectPullRequestSnapshotStore;
@@ -168,6 +173,7 @@ function serviceFixture(options: {
     detail: { observeReviewByIdentity },
     ...(options.merge === undefined ? {} : { merge: options.merge }),
     ...(options.recordMerge === undefined ? {} : { recordMerge: options.recordMerge }),
+    ...(options.requiredChecks === undefined ? {} : { requiredChecks: options.requiredChecks }),
     ...(mergeJournal === undefined
       ? {}
       : {
@@ -373,6 +379,97 @@ describe("CodeProjectPullRequestService", () => {
       } finally {
         store.close();
       }
+    });
+
+    describe("from a paired phone or web client", () => {
+      const confirmed = { ...mergeCommand, confirmed: true } as const;
+      const signal = () => new AbortController().signal;
+
+      it("merges on the person's confirmation when the required checks pass, and journals the remote caller", async () => {
+        const store = openJournal();
+        try {
+          const mergeByIdentity = vi.fn(async () => ({ status: "merged" }) as const);
+          const fixture = serviceFixture({
+            merge: { mergeByIdentity },
+            mergeJournal: store.journal,
+            requiredChecks: async () => "passing",
+          });
+
+          const outcome = await fixture.service.merge(
+            windowId,
+            confirmed,
+            signal(),
+            "remote-device",
+          );
+
+          expect(outcome.status).toBe("merged");
+          expect(mergeByIdentity).toHaveBeenCalledWith(
+            expect.objectContaining({ number: 12, headSha: "9".repeat(40) }),
+            expect.any(AbortSignal),
+          );
+          expect(store.recorded().map((event) => event.payload)).toEqual([
+            { ...mergeCommand, caller: "remote-device", result: { status: "merged" } },
+          ]);
+        } finally {
+          store.close();
+        }
+      });
+
+      it("refuses without the confirmation and never reaches GitHub", async () => {
+        const mergeByIdentity = vi.fn(async () => ({ status: "merged" }) as const);
+        const fixture = serviceFixture({
+          merge: { mergeByIdentity },
+          requiredChecks: async () => "passing",
+        });
+        await expect(
+          fixture.service.merge(windowId, mergeCommand, signal(), "remote-device"),
+        ).resolves.toEqual({ status: "refused", reason: "not-confirmed" });
+        expect(mergeByIdentity).not.toHaveBeenCalled();
+      });
+
+      it("refuses while a required check fails or is pending, or cannot be read", async () => {
+        for (const [state, reason] of [
+          ["failing", "checks-not-passing"],
+          ["pending", "checks-not-passing"],
+          ["unknown", "checks-unknown"],
+        ] as const) {
+          const mergeByIdentity = vi.fn(async () => ({ status: "merged" }) as const);
+          const fixture = serviceFixture({
+            merge: { mergeByIdentity },
+            requiredChecks: async () => state,
+          });
+          await expect(
+            fixture.service.merge(windowId, confirmed, signal(), "remote-device"),
+          ).resolves.toEqual({ status: "refused", reason });
+          expect(mergeByIdentity).not.toHaveBeenCalled();
+        }
+      });
+
+      it("treats a host that cannot read checks as unknown, not as passing", async () => {
+        const mergeByIdentity = vi.fn(async () => ({ status: "merged" }) as const);
+        const fixture = serviceFixture({ merge: { mergeByIdentity } });
+        await expect(
+          fixture.service.merge(windowId, confirmed, signal(), "remote-device"),
+        ).resolves.toEqual({ status: "refused", reason: "checks-unknown" });
+        expect(mergeByIdentity).not.toHaveBeenCalled();
+      });
+
+      it("keeps the Project check first: a Project the window cannot merge in never reads checks", async () => {
+        const requiredChecks = vi.fn(async () => "passing" as const);
+        const fixture = serviceFixture({
+          merge: { mergeByIdentity: async () => ({ status: "merged" }) },
+          requiredChecks,
+        });
+        await expect(
+          fixture.service.merge(
+            windowId,
+            { ...confirmed, projectId: projectC },
+            signal(),
+            "remote-device",
+          ),
+        ).resolves.toEqual({ status: "refused", reason: "not-authorized" });
+        expect(requiredChecks).not.toHaveBeenCalled();
+      });
     });
 
     it("journals a refusal for a Project this window cannot merge in, without reaching GitHub", async () => {
