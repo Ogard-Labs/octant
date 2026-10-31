@@ -188,7 +188,6 @@ export type ChatProject = typeof ChatProject.Type;
 export const WorkProjectStatusFile = Schema.Literal("enabled", "disabled");
 export type WorkProjectStatusFile = typeof WorkProjectStatusFile.Type;
 
-
 /**
  * Whether the host may keep this Project's pull-request snapshot current on a
  * bounded background cadence. Absent means disabled: only an explicit refresh

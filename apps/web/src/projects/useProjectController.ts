@@ -374,7 +374,8 @@ export function useProjectController(options: ProjectControllerOptions) {
     if (project?.type !== "code" && project?.type !== "work") return false;
     return execute(
       {
-        kind: project.type === "code" ? "change-code-project-actions" : "change-work-project-actions",
+        kind:
+          project.type === "code" ? "change-code-project-actions" : "change-work-project-actions",
         projectId,
         expectedVersion: project.version,
         actions,

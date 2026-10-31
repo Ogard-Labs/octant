@@ -431,7 +431,10 @@ export interface WorkspaceViewProps {
     brandKit: CanvasDesignBrand,
   ) => Promise<boolean>;
   readonly onWorkStatusFileChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
-  readonly onWorkDeveloperToolsChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
+  readonly onWorkDeveloperToolsChange?: (
+    projectId: ProjectId,
+    enabled: boolean,
+  ) => Promise<boolean>;
   readonly onActionsChange?: (
     projectId: ProjectId,
     actions: ReadonlyArray<ProjectAction>,

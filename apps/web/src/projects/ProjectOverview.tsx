@@ -88,7 +88,10 @@ export interface ProjectOverviewProps {
   /** Absent when the host cannot accept the change; the setting is then not shown. */
   readonly onWorkStatusFileChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
   /** Absent when the host cannot accept the change; the switch is then not shown. */
-  readonly onWorkDeveloperToolsChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
+  readonly onWorkDeveloperToolsChange?: (
+    projectId: ProjectId,
+    enabled: boolean,
+  ) => Promise<boolean>;
   readonly providerInstances?: ReadonlyArray<ProviderInstance>;
   readonly project: ProjectSummary;
   readonly projectClient?: ProjectClient;
