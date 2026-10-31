@@ -31,6 +31,7 @@ import {
 } from "../../platform";
 import { ChatOnlyVerify } from "../../providers/ChatOnlyVerify";
 import { ModelContextWindowField } from "../../providers/ModelContextWindowField";
+import { ProviderLinkedKeyEditor } from "../../providers/ProviderLinkedKeyEditor";
 import type { ProviderOAuthSignInState } from "../../providers/ProviderOAuthSignIn";
 import type { ProviderSettingsViewProps } from "../../providers/ProviderSettingsView";
 import { endpointPresetForUrl } from "./addEndpointSteps";
@@ -413,6 +414,12 @@ function AccessSection(
           ) : null}
         </SettingRow>
       </div>
+      <ProviderLinkedKeyEditor
+        disabled={props.disabled}
+        displayName={instance.displayName}
+        instanceId={instance.id}
+        onChanged={(next) => credential.finishMutation(credential.beginMutation(), true, next)}
+      />
     </SettingsSection>
   );
 }

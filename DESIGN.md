@@ -2317,6 +2317,26 @@ or execution. Saved Chat/Code revisions reconcile untouched fields without
 remounting the form. Keep deliberate section expansion, text growth, and manual
 resizing distinct from unsolicited layout movement.
 
+### Secret stores
+
+Settings › Secret stores sits with Permissions under Privacy & data and is
+host-scoped. It has two cards. **Linked secret stores** is a plain row per
+tool: the tool's name, one line saying whether it is linked and whether the
+store is ready, locked, not installed, or unreachable, and one button, Link or
+Unlink. Unlink waits for a confirmation that says which providers stop getting
+their key and that nothing in the store is changed. A refusal (a locked store,
+a missing tool) appears in the card's feedback slot, in the host's own words.
+**Check an item** takes an item reference and answers Found, locked, missing, or
+unreachable; it never shows what an item holds. On a host with no credential
+broker the card says so and offers no button.
+
+A provider's key from a store lives on the provider's own card, under **Key from
+a secret store**, beside the API keys. It appears only when a store is linked or
+the provider already points at an item, so a card never carries a section most
+people do not use. It shows the item reference in code type with Check, Change
+item, and Remove, or one reference field with Use this item. No control on
+either surface has a field for a key, and nothing on them shows one.
+
 ### Optional Settings details
 
 Keep common preferences and host health visible. Use the shared

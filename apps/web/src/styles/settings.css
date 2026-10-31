@@ -3650,3 +3650,13 @@ html[data-octant-increased-contrast="true"]
     height: 44px;
   }
 }
+
+/* A key that comes from a secret store sits under the API key row of an
+   endpoint with the same gap the page leaves between its sections. */
+.settings-card-section > .provider-linked-key {
+  margin-top: var(--oct-space-4);
+}
+
+.provider-linked-key__item code {
+  overflow-wrap: anywhere;
+}

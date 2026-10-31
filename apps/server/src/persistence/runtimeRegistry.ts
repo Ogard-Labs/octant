@@ -203,6 +203,7 @@ import {
 } from "@octant/contracts/code-debug";
 import { HostOAuthJournalRecord } from "@octant/contracts/host-oauth";
 import { ProviderKeyJournalRecord } from "@octant/contracts/provider-key-journal";
+import { SecretStoreJournalRecord } from "@octant/contracts/secret-stores";
 import {
   REMOTE_ACCESS_EVENT_NAMES,
   DeviceKeyRotatedV1,
@@ -386,6 +387,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("provider.catalog-updated@1", 1, ProviderCatalogUpdated)
     .register("host-oauth.recorded@1", 1, HostOAuthJournalRecord)
     .register("provider-key.recorded@1", 1, ProviderKeyJournalRecord)
+    .register("secret-store.recorded@1", 1, SecretStoreJournalRecord)
     .register("ollama.history-recorded@1", 1, OllamaHistoryRecorded)
     .register("claude.resume-identity-recorded@1", 1, ClaudeResumeIdentityRecorded)
     .register("context.manifest-created@1", 1, ContextManifestCreated)

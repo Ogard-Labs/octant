@@ -12,6 +12,7 @@
     "./artifact-bundle": "./src/artifactBundle.ts",
     "./replica-entry": "./src/replicaEntry.ts",
     "./replica-store-settings": "./src/replicaStoreSettings.ts",
+    "./secret-stores": "./src/secretStores.ts",
     "./automation": "./src/automation.ts",
     "./goal-loop": "./src/goalLoop.ts",
     "./ship-target": "./src/shipTarget.ts",
