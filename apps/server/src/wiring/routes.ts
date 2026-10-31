@@ -132,7 +132,7 @@ export type RoutesDependencies = Pick<ServerStart, "latencyStats" | "persistence
     | "workThreadRoutes"
   > &
   Pick<ReplicaWiring, "replicaSyncStatusRoutes" | "syncedArtifactRoutes"> &
-  Pick<AuthorityWiring, "windowAuthorityStore">;
+  Pick<AuthorityWiring, "protectedFilesRoutes" | "windowAuthorityStore">;
 
 export function wireRoutes(deps: RoutesDependencies) {
   const {
@@ -187,6 +187,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     productFeedbackRoutes,
     projectBindingRoutes,
     projectRoutes,
+    protectedFilesRoutes,
     providerOAuthRoutes,
     providerRoutes,
     providerUsageLimitsRoutes,
@@ -304,6 +305,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await threadMentionRoutes(request)) ??
     (await fileMentionRoutes(request)) ??
     (await spendCeilingRoutes(request)) ??
+    (await protectedFilesRoutes(request)) ??
     (await usageDashboardRoutes(request)) ??
     (await localUsageHistoryRoutes(request)) ??
     (await usageRoutes(request)) ??

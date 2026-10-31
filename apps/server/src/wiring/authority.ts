@@ -29,6 +29,15 @@ import type { AgentRunControlAdmissionDependencies } from "../agentRun/agentRunC
 import { isRoutineHostScope } from "../routineHostScope";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
+import { homedir } from "node:os";
+import { decodeUtcTimestamp } from "@octant/contracts";
+import {
+  applyProtectedFilesChoice,
+  configureSecretGuardLocations,
+  secretGuardPlatform,
+} from "../process/secretGuard";
+import { ProtectedFilesService } from "../protectedFilesService";
+import { createProtectedFilesRouteHandler } from "../protectedFilesRoutes";
 import { ExtensionToolApprovalService } from "../extensions/extensionToolApprovalService";
 import { RoutineProposalService } from "../automation/routineProposalService";
 import {
@@ -81,6 +90,21 @@ export function wireAuthority(deps: AuthorityDependencies) {
     machineChangeFeed.publishCommitted(append),
   );
   const processAuthorityNow = (wallClockMs: number) => processAuthorityClock.clamp(wallClockMs);
+  // The secret guard's list as the person changed it. Hydrated here, before
+  // any runtime launches, so the first launch already carries the changes.
+  configureSecretGuardLocations({ dataDirectory: persistence.dataDirectory });
+  const protectedFiles = new ProtectedFilesService({
+    journal: persistence.journal,
+    locations: {
+      platform: secretGuardPlatform(process.platform),
+      home: homedir(),
+      dataDirectory: persistence.dataDirectory,
+    },
+    apply: applyProtectedFilesChoice,
+    uuid: randomUUID,
+    clock: () => decodeUtcTimestamp(new Date().toISOString()),
+    actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+  });
   const codeApprovalStore = new CodeOperationApprovalStore({
     uuid: randomUUID,
     now: Date.now,
@@ -226,6 +250,10 @@ export function wireAuthority(deps: AuthorityDependencies) {
       clampNow: processAuthorityNow,
     },
   );
+  const protectedFilesRoutes = createProtectedFilesRouteHandler({
+    service: protectedFiles,
+    windowAuthorityStore,
+  });
   const agentRunEventStore = new AgentRunEventStore({
     journal: persistence.journal,
     uuid: randomUUID,
@@ -259,6 +287,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     onAgentRunExecutionAccepted,
     processAuthorityNow,
     onWindowRevoked,
+    protectedFilesRoutes,
     simulatorInputGrants,
     unsubscribeMachineChanges,
     windowAuthorityStore,

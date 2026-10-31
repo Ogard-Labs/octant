@@ -940,8 +940,21 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Permissions",
       scope: "host",
       keywords:
-        "permissions remembered websites sites origins browser always allow forget public links share sharing remembered tool approvals extension tools revoke trust allowed",
+        "permissions protected files secrets ssh keys credentials remembered websites sites origins browser always allow forget public links share sharing remembered tool approvals extension tools revoke trust allowed",
       settings: [
+        {
+          id: settingId("protected-files"),
+          label: "Protected files",
+          scope: "host",
+          keywords:
+            "protected files secret guard ssh private keys cloud credentials cluster container registry package tokens netrc keychain password vault browser cookies sign-in deny full access",
+        },
+        {
+          id: settingId("protected-files-add"),
+          label: "Protect another path",
+          scope: "host",
+          keywords: "protected files add path folder secret deny agents",
+        },
         {
           id: settingId("public-links"),
           label: "Public links",

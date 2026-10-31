@@ -46,7 +46,7 @@ export function configureSecretGuardLocations(input: {
   state = {
     ...state,
     dataDirectory: input.dataDirectory,
-    runtimeDirectory: input.runtimeDirectory,
+    runtimeDirectory: input.runtimeDirectory ?? state.runtimeDirectory,
   };
 }
 

@@ -86,6 +86,7 @@ export * from "./projectTerminalClient";
 export * from "./usageClient";
 export * from "./usageDashboardClient";
 export * from "./spendCeilingClient";
+export * from "./protectedFilesClient";
 export * from "./diagnosticsExportClient";
 export * from "./threadExportClient";
 export * from "./validationEvidenceClient";

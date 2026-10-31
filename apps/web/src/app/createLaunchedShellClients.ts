@@ -10,6 +10,10 @@ import {
 } from "@octant/client-runtime";
 import { createAgentRunClient, type AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import {
+  createProtectedFilesClient,
+  type ProtectedFilesClient,
+} from "@octant/client-runtime/protected-files-client";
+import {
   createAgentMessageClient,
   type AgentMessageClient,
 } from "@octant/client-runtime/agent-message-client";
@@ -193,6 +197,7 @@ export interface LaunchedShellClients {
   readonly localUsageHistoryClient: ReturnType<typeof createLocalUsageHistoryClient> | undefined;
   readonly usageDashboardClient: ReturnType<typeof createUsageDashboardClient>;
   readonly spendCeilingClient: ReturnType<typeof createSpendCeilingClient>;
+  readonly protectedFilesClient: ProtectedFilesClient;
   readonly workMutationClient: ReturnType<typeof createWorkMutationClient>;
   readonly workOverviewClient: ReturnType<typeof createWorkOverviewClient>;
   readonly workRequestClient: ReturnType<typeof createWorkRequestClient>;
@@ -333,6 +338,7 @@ export function createLaunchedShellClients(
     usageClient: createUsageClient(port),
     usageDashboardClient: createUsageDashboardClient(port),
     spendCeilingClient: createSpendCeilingClient(port),
+    protectedFilesClient: createProtectedFilesClient(port),
     localUsageHistoryClient:
       providerUsageLimitsClient === undefined ? undefined : createLocalUsageHistoryClient(port),
     workMutationClient: createWorkMutationClient(port),

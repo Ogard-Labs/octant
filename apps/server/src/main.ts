@@ -37,6 +37,7 @@ import {
 } from "./startupFailureReason";
 import { runStartupArtifactInspection } from "./startupArtifactInspection";
 import { watchDesktopParent } from "./desktopParentWatch";
+import { configureSecretGuardLocations } from "./process/secretGuard";
 
 // Validate launch config before loading server modules that transitively
 // import native dependencies (node-pty). This makes the packaged-runtime
@@ -79,6 +80,12 @@ try {
   });
   ownerPaths = paths;
   await prepareHostRuntimePaths(paths);
+  // The secret guard keeps the bridge and control secrets out of every
+  // runtime's reach; it learns where they live before anything launches.
+  configureSecretGuardLocations({
+    dataDirectory: paths.dataDirectory,
+    runtimeDirectory: paths.runtimeDirectory,
+  });
   const hostLogs = new BoundedHostLogStore({ path: paths.serviceLogPath });
   serviceLogs = hostLogs;
   process.env.OCTANT_DATA_DIR = paths.dataDirectory;

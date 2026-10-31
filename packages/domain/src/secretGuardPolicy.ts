@@ -90,11 +90,11 @@ export const LOGIN_KEYCHAIN_NAME = "login\\.keychain-db(-wal|-shm|-journal)?";
 export const SSH_PRIVATE_KEY_NAME = "id_[^/]*";
 export const SSH_PUBLIC_KEY_NAME = "[^/]*\\.pub";
 
-/** Chromium-family profile stores: cookies, saved passwords, and autofill. */
-const CHROMIUM_STORE_NAME =
+/** One browser engine family's profile stores: cookies, saved passwords, and autofill. */
+const PROFILE_STORE_NAME =
   "(Cookies|Login Data|Login Data For Account|Web Data|Safe Browsing Cookies)(-journal|-wal|-shm)?";
-/** Gecko-family profile stores: cookies, saved logins, and the key database. */
-const GECKO_STORE_NAME =
+/** The other engine family's profile stores: cookies, saved logins, and the key database. */
+const PROFILE_LOGIN_STORE_NAME =
   "(cookies\\.sqlite|logins\\.json|key[34]\\.db|signons\\.sqlite)(-wal|-shm)?";
 
 function builtInRules(platform: SecretGuardPlatform): ReadonlyArray<ProtectedFilesRule> {
@@ -201,14 +201,14 @@ function builtInRules(platform: SecretGuardPlatform): ReadonlyArray<ProtectedFil
       ownAccountExempt: false,
       entries: darwin
         ? [
-            names("Library/Application Support", CHROMIUM_STORE_NAME, 5),
-            names("Library/Application Support/Firefox/Profiles", GECKO_STORE_NAME, 2),
+            names("Library/Application Support", PROFILE_STORE_NAME, 5),
+            names("Library/Application Support/Firefox/Profiles", PROFILE_LOGIN_STORE_NAME, 2),
             home("Library/Cookies"),
             home("Library/Containers/com.apple.Safari/Data/Library/Cookies"),
           ]
         : [
-            names(".config", CHROMIUM_STORE_NAME, 5),
-            names(".mozilla/firefox", GECKO_STORE_NAME, 2),
+            names(".config", PROFILE_STORE_NAME, 5),
+            names(".mozilla/firefox", PROFILE_LOGIN_STORE_NAME, 2),
           ],
     },
     {
@@ -408,7 +408,8 @@ export function protectedEntryDisplay(
 function describeNamePattern(name: string): string {
   if (name === SSH_PRIVATE_KEY_NAME) return "id_* (not .pub)";
   if (name === "[^/]*") return "*";
-  if (name === CHROMIUM_STORE_NAME || name === GECKO_STORE_NAME) return "…/cookie and login stores";
+  if (name === PROFILE_STORE_NAME || name === PROFILE_LOGIN_STORE_NAME)
+    return "…/cookie and login stores";
   return name
     .replace(/\[\^\/\]\*/gu, "*")
     .replace(/\\\./gu, ".")

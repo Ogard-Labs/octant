@@ -76,7 +76,7 @@ describe("CodeSettingsView", () => {
       expect(update).not.toHaveBeenCalled();
       const warning = await screen.findByRole("dialog", { name: "Use Full access?" });
       expect(warning).toHaveTextContent(
-        "Agents can change any file and run any command without asking, with no sandbox, so they can read your whole home folder, including SSH and cloud keys.",
+        "Agents can change any file and run any command without asking, with no sandbox. Only protected files, such as SSH and cloud keys, stay out of their reach.",
       );
       await user.click(screen.getByRole("button", { name: "Use Full access" }));
       expect(update).toHaveBeenLastCalledWith(
