@@ -2096,7 +2096,10 @@ proceed. Native Code approvals keep their isolated host-owned document. The
 extension tool request names the plugin, its server, and the tool, and adds
 "Always allow in this Project" only when the host marks the call rememberable
 and the window is a local one. Settings › Permissions lists those answers by
-Project, each with Revoke, beside Remembered websites. A Browser request from a
+Project, each with Revoke, beside Remembered websites, and lists each Work
+Project whose **Shell and tools** switch is on, with a control to turn it
+off; turning it on happens only on that Project's overview
+([Workspace](docs/design/workspace.md); allowed, not built yet). A Browser request from a
 CLI in a Code thread's terminal names the origin and the thread and says a
 program in the terminal asked, not the thread's agent
 ([Terminal Browser grant](docs/design/terminal-browser-grant.md#the-window)).

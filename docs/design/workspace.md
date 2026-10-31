@@ -82,8 +82,15 @@ posture as quiet text (it is a standing setting, not a state or a control, so
 it takes no chip), and facts on one line beneath it, then Details. A Work
 Project's thread list takes the same labelled card. Settings
 rows split into **Context** (Memory, Brand kit, Canvases) and **Access and
-limits** (Provider access, Disposable desktop, Status file, Spend ceiling); a
-group with no rows is not drawn. Over an application ground the cards keep the
+limits** (Provider access, Shell and tools on a Work Project, Disposable
+desktop, Status file, Spend ceiling); a group with no rows is not drawn.
+**Shell and tools** is the Work Project's switch for a shell, Git,
+command-line tools, and SSH through that shell, off by default, set only by
+a person; its row says the Project's guardrail level its commands run at and
+names any provider that cannot honour it
+([Modes](../architecture.md#modes-chat-work-and-code); allowed, not built
+yet). Code Projects have no such row, since a Code thread always has its
+shell. Over an application ground the cards keep the
 opaque card step even under Glass, and the header's text takes the start
 screen's page-colour glow: set straight on the ground, the overview's rows
 read through the ground's letters (October 2026).

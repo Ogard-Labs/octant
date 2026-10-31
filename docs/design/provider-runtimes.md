@@ -21,10 +21,14 @@ and Provider review until the person turns it on, on at Trusted and Off):
 | Claude Code  | `settingSources: []`, `skills: []`, no subagent tool, `WebSearch` and `WebFetch` left out and refused                                | The person's setting sources (home and trusted Project), skills, plugins, hooks, and MCP servers; its subagent tool; `WebSearch` and `WebFetch`; `permissionMode: "auto"` as Provider review | Provider review in Code only |
 | Codex        | Its subagents; Project skills disabled by path; in Chat each named MCP server switched off                                           | Its subagents; Project skills; the person's MCP servers in Chat; `approvalsReviewer: "auto_review"` as Provider review                                                                       | Provider review in Code only |
 | Mistral Vibe | `VIBE_SKILL_PATHS="[]"`, `VIBE_DISABLED_SKILLS='["*"]'`, `VIBE_INCLUDE_PROJECT_CONTEXT="false"`                                      | Its own skills and Project context; a trusted Project's tools and MCP servers; its auto-approve mode as Provider review, reported `unsupported` until mapped                                 | No                           |
-| OpenCode     | Skills and project config off, `skill` denied; Work `shell` and `subagent` denied; Octant's denies outrank saved grants; `once` only | The person's own permission rules; "always" answers; its `subagent` delegation; its skills                                                                                                   | No                           |
+| OpenCode     | Skills and project config off, `skill` denied; Work `shell` and `subagent` denied; Octant's denies outrank saved grants; `once` only | The person's own permission rules; "always" answers; its `subagent` delegation; its skills; `bash` in a Work Project with Shell and tools on                                                 | No                           |
 
 Plan, a mode's withheld tools, and the provider's memory, telemetry, and
-self-update channels stay off at every level. A native child run, a native
+self-update channels stay off at every level. Work's shell is withheld only
+while its Project's Shell and tools switch is off; with it on, each runtime
+starts its Work session with its shell at the Project's level, as the
+[architecture's Work rules](../architecture.md#modes-chat-work-and-code)
+state per provider (allowed; not built yet). A native child run, a native
 web read, and a provider's review verdict are journaled where the runtime
 reports them; where it does not, the capability report says so.
 
@@ -223,7 +227,8 @@ same repository: OpenCode keys them by the repository's root commit, keeps
 them in its own data store (shared with the person's own use because
 provider credentials live there), and applies them as allow after Octant's
 rules. Today Octant's denies still win, so Plan and the Work shell and
-subagent denials hold, and Octant itself never writes such a grant because
+subagent denials hold (the Work shell denial lifts in a Project with Shell
+and tools on; allowed, not built yet), and Octant itself never writes such a grant because
 it answers approvals `once`. The rule is that the person's OpenCode rules
 apply over Octant's level rules, with Plan and a mode's withheld tools still
 Octant's denies (allowed; not built yet). An edit allowed this way still fails the turn

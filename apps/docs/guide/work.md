@@ -52,6 +52,8 @@ To redesign an existing website, ask the agent to open the page in the Browser a
 
 Work has no shell and no Git. The agent in a Work thread is never given a way to run commands, so it never asks you to approve one; changes to files in the Project still ask first. When Work work becomes software engineering, use a [promotion](/guide/promotions) to start a linked Code thread with explicit user approval.
 
+Planned: a **Shell and tools** switch on a Work Project's overview, off until you turn it on. With it on, the Project's Work threads can run commands, Git, your command-line tools, and `ssh` to your own machines, at the Project's guardrail level: at Guarded you approve each command and the first connection to each host. Octant keeps no SSH keys; `ssh` uses your own agent and settings. The thread stays a Work thread with its board, and promotion to Code is still there. This is not built yet.
+
 ## Work settings
 
 **Settings › Work** sets what a new Work thread starts with:
