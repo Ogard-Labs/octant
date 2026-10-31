@@ -265,10 +265,10 @@ The key providers run inside Octant as they run on their own, with their native 
 - Every other provider keeps the deny rules for Project code and skills until it is promoted the same way.
 - A person turns it on for a key provider account (Run as itself) or trusts a Work or Code Project for a key provider (Trusted providers), only from a window on the host; both are journaled and the host resolves them for every session it starts or resumes.
 - A Project's own settings, hooks, MCP servers and plugins load only in a Project the person trusted for that provider, at every level.
-- A per-thread switch is not built yet.
+- A thread may turn a key provider's own setup on or off for itself (Account default, On, Off), only from a window on the host and journaled; Off beats Full access, and On never grants a Project's code, which still needs the Project's trust (built for all four key providers).
 - Claude Code loads its own subagents (each shown as a child run, every call through the parent's gate), web search and fetch (asking below Full access, marking the thread), home skills, settings and hooks, and a trusted Project's settings, hooks, skills, MCP servers and plugins; its account's MCP servers start only with a trusted Project's.
 - Codex keeps its Project skills and, in Chat, the person's tool servers and plugins; its own subagents run only at Full access, because their approvals never reach Octant, each shown as a child run, with their web searches marking the thread.
-- OpenCode loads its own skills and answers a remembered 2.x approval `always`, saying the grant lives in OpenCode's own store; the person's own OpenCode config and permission rules, its delegation as child runs, and Reviewed through Octant Shield are not built yet.
+- OpenCode loads its own skills, the MCP servers in the person's own configuration, and the permission rules they wrote (over the level, under Plan's denials and the outside-directory refusal; a catch-all rule is ignored), follows each session its `task` tool delegates to as a child run with its requests answered through the parent, and answers a remembered 2.x approval `always`, saying the grant lives in OpenCode's own store; Reviewed through Octant Shield is not built yet.
 - Mistral Vibe loads its own skills and Project context, the account's MCP servers, connectors and hooks, and a trusted Project's `.vibe` tools, MCP servers, hooks, plugins and agents under its own folder trust; it still runs through the ACP bridge (promotion not built yet).
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Providers](../architecture.md#providers) and [Provider runtimes: Key providers](provider-runtimes.md#key-providers).
@@ -507,7 +507,7 @@ Chat's missing file and shell authority is withheld by rule, not only in today's
 
 - Provider runtimes launch confined with exec and fork denied or with no execution environment, and a sandbox that only blocks writes is not enough because reads never escalate.
 - Octant-managed tools (research, Canvas) are unaffected because they run on the host.
-- A person's own tool servers stay off in Chat until the person lets the provider run as itself for the account (built for Codex); a per-thread switch is not built yet.
+- A person's own tool servers stay off in Chat until the person lets the provider run as itself for the account (built for Codex), or for one thread with its own-setup choice.
 - Provider-owned memory stays off in every mode, because a provider's global memory reaches across Projects.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
@@ -1542,7 +1542,7 @@ Child runs receive equal-or-narrower authority than the parent, clamped server-s
 - Code children require a verified isolated worktree receipt, and a managed child's Canvas tools are bound to the workspace and Project the host resolved, never a path the model names.
 - A provider transport that cannot carry app-managed tools fails the start with a typed reason rather than dropping the tool.
 - A source turn may send at most three thread messages, and a target turn started by that tool is never offered the tool. _Here only._
-- Native subagents of the key providers are journaled and use the parent's approval path; a provider whose children would bypass it gets them only at Full access (built for Claude Code, and for Codex at Full access only; not built yet for the others, whose adapters keep native subagents off).
+- Native subagents of the key providers are journaled and use the parent's approval path; a provider whose children would bypass it gets them only at Full access (built for Claude Code, for Codex at Full access only, and for OpenCode, whose delegated sessions are followed as child runs; not built yet for the others, whose adapters keep native subagents off).
 
 Status: Partly built. Since: —. Detail: [Architecture: Security and authority, Subagents](../architecture.md#security-and-authority).
 

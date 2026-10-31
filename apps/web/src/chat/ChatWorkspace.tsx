@@ -1314,6 +1314,10 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               })}
           draft={props.controller.pendingDraft}
           caretRestoreKey={String(thread.id)}
+          nativeSetupThread={{
+            threadId: String(thread.id),
+            providerInstanceId: thread.providerInstanceId,
+          }}
           {...(props.controller.pendingDraftCaret === undefined
             ? {}
             : { caretIndex: props.controller.pendingDraftCaret })}

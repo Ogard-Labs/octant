@@ -122,6 +122,7 @@ import { WorkspacePresetPicker } from "../workspacePresets/WorkspacePresetPicker
 import { useWorkspacePresets } from "../workspacePresets/useWorkspacePresets";
 import { PathMentionTypeahead, useCodePathMentions } from "./CodePathMentionPicker";
 import { PermissionModePicker } from "./PermissionModePicker";
+import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import type { CodeFileListingClient } from "@octant/client-runtime";
 import { useAgentProfileName } from "../agentProfile/AgentProfileNames";
 import type { ExtensionProviderFamily } from "@octant/contracts/extensions";
@@ -2051,6 +2052,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   pending={deliveryChanging}
                 />
               ) : null}
+              <ThreadNativeSetupControl
+                disabled={accessChanging}
+                providerInstanceId={thread.providerInstanceId}
+                threadId={String(thread.id)}
+              />
               <PermissionModePicker
                 autoSupported={props.harnessAutoReviewSupported === true}
                 autoReview={props.autoReview}

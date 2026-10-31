@@ -130,4 +130,55 @@ describe("a key provider running as itself", () => {
     expect(providerNativeSetupIsOn(undefined)).toBe(false);
     expect(providerNativeSetupIsOn(everything)).toBe(true);
   });
+
+  it("keeps everything unloaded for a thread that turned it off, even at Full access", () => {
+    expect(
+      resolveProviderNativeSetup({
+        driverKind: "claude",
+        mode: "code",
+        executionPolicy: "full-access",
+        accountAllows: true,
+        projectTrusts: true,
+        threadChoice: "off",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("loads a thread's setup as the account switch would when the thread turned it on", () => {
+    expect(
+      resolveProviderNativeSetup({
+        driverKind: "opencode",
+        mode: "work",
+        executionPolicy: "approval-gated",
+        accountAllows: false,
+        projectTrusts: false,
+        threadChoice: "on",
+      }),
+    ).toEqual({ ...everything, projectCode: false });
+  });
+
+  it("never loads a Project's own code for a thread that turned it on in an untrusted Project", () => {
+    const setup = resolveProviderNativeSetup({
+      driverKind: "mistral-vibe",
+      mode: "code",
+      executionPolicy: "full-access",
+      accountAllows: false,
+      projectTrusts: false,
+      threadChoice: "on",
+    });
+    expect(setup?.projectCode).toBe(false);
+  });
+
+  it("does not let a thread turn on another provider's setup", () => {
+    expect(
+      resolveProviderNativeSetup({
+        driverKind: "pi",
+        mode: "code",
+        executionPolicy: "approval-gated",
+        accountAllows: false,
+        projectTrusts: false,
+        threadChoice: "on",
+      }),
+    ).toBeUndefined();
+  });
 });
