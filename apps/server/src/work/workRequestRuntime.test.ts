@@ -482,6 +482,7 @@ describe("WorkRequestRuntime", () => {
       readonly input: string;
       readonly review: ShieldReviewPort["review"] | undefined;
       readonly answerFails?: boolean;
+      readonly extraFolders?: ReadonlyArray<string>;
     }) {
       const record = vi.fn((_input: unknown) => ({ status: "ok" as const, request: {} as never }));
       const answerApproval = vi.fn((_answer: unknown) =>
@@ -514,6 +515,7 @@ describe("WorkRequestRuntime", () => {
             const acquired = yield* attached.acquire({
               instanceId: providerInstanceId,
               projectRoot: "/work",
+              ...(input.extraFolders === undefined ? {} : { extraFolders: input.extraFolders }),
               mode: "work",
               workRequest: { projectId, threadId, sessionId, onApprovalReviewed: reviewed },
             });
@@ -567,6 +569,14 @@ describe("WorkRequestRuntime", () => {
         );
       });
     }
+
+    it("judges a call in the Project's extra folders as it judges one in the root", async () => {
+      const review = vi.fn(async () => decision("allow"));
+      await runTurn({ tool: "Bash", input: "{}", review, extraFolders: ["/shared"] });
+      expect(review).toHaveBeenCalledWith(
+        expect.objectContaining({ boundRoot: "/work", extraRoots: ["/shared"] }),
+      );
+    });
 
     it("asks the person when Shield does not review the thread", async () => {
       const turn = await runTurn({

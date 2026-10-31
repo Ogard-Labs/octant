@@ -46,6 +46,8 @@ export interface WorkRequestSubscriptionInput {
 export type WorkRequestRuntimeContext = Omit<WorkRequestSubscriptionInput, "connection"> & {
   /** The folder the session runs in, which Shield judges a call against. */
   readonly projectRoot?: string;
+  /** The Project's extra folders, judged as the root is. */
+  readonly extraFolders?: ReadonlyArray<string>;
   readonly signal?: AbortSignal;
   readonly onApprovalReviewed?: NonNullable<
     NonNullable<ProviderAcquireInput["workRequest"]>["onApprovalReviewed"]
@@ -163,6 +165,7 @@ export class WorkRequestRuntime {
             boundRoot: projectRoot,
           }),
           boundRoot: projectRoot,
+          ...(input.extraFolders === undefined ? {} : { extraRoots: input.extraFolders }),
           ...(input.signal === undefined ? {} : { signal: input.signal }),
         });
       } catch {
@@ -334,6 +337,7 @@ export function attachWorkRequestRuntime(
           providerInstanceId: input.instanceId,
           sessionId: input.workRequest.sessionId,
           projectRoot: input.projectRoot,
+          ...(input.extraFolders === undefined ? {} : { extraFolders: input.extraFolders }),
           ...(input.workRequest.signal === undefined ? {} : { signal: input.workRequest.signal }),
           ...(input.workRequest.onApprovalReviewed === undefined
             ? {}
