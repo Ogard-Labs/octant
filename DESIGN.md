@@ -633,7 +633,15 @@ tabs or action tiles: adding a folder lives in the composer's Project picker. Th
 behavior is in [Workspace](docs/design/workspace.md#start-screen-cards).
 
 First-run setup asks only what a first task needs — a usable provider, a
-Project folder, and a model — and ends in one primary action, Start a task,
+Project folder, a model, and the
+[mode](docs/architecture.md#security-and-authority) new threads start in
+(Auto pre-selected and marked Recommended, then Ask first, Accept edits, Plan,
+and Full access, in that order; Full access reads "No sandbox, no prompts"
+and is never pre-selected; Auto uses the provider's own reviewer or
+[Octant Shield](docs/architecture.md#octant-shield), so it is listed for every
+runtime, and where no reviewer can run the picker shows it unavailable with
+the reason; the pick becomes the default for every new Work and Code thread
+until changed in Settings › Access; this question is allowed, not built yet) — and ends in one primary action, Start a task,
 that opens the new-task composer in that Project. Every step is optional from
 the first one. Opening setup focuses the current step's heading so a long
 provider list does not scroll past its introduction; Tab then reaches the
@@ -2093,7 +2101,26 @@ proceed. Native Code approvals keep their isolated host-owned document. The
 extension tool request names the plugin, its server, and the tool, and adds
 "Always allow in this Project" only when the host marks the call rememberable
 and the window is a local one. Settings › Permissions lists those answers by
-Project, each with Revoke, beside Remembered websites. A Browser request from a
+Project, each with Revoke, beside Remembered websites. Its Access section
+(Settings › Access) shows the global guardrail level with one-click change,
+which governs Work and Code alike. The levels, top to bottom, are Ask first,
+Accept edits, Auto, and Full access; Full access is the lowest, and there is
+no separate switch below it. The first time a machine or a Project picks Full
+access, a one-time warning asks to confirm, in the warning role: "Agents can
+change any file and run any command without asking, with no sandbox, so they
+can read your whole home folder, including SSH and cloud keys." It offers
+Cancel (focused) and Use Full access, and is not shown again for that scope.
+At Full access a tool row that read outside content carries a quiet tag and
+the thread card a small mark; neither prompts. The section also shows, each
+as an account default a Project
+may override: **Auto reviewer** (Provider's own / Octant Shield), **Safe
+networks** (trusted hosts, domains, address ranges, and private-network tags),
+and **Servers** (registered SSH hosts, each with a Read-only, Operate, or Admin
+profile and an optional notes file). The rules behind them are in
+[Octant Shield](docs/architecture.md#octant-shield); allowed, not built yet.
+A Work Project's **Developer tools** switch is presentation, not a
+permission, so it lives on that Project's overview, not here
+([Workspace](docs/design/workspace.md); allowed, not built yet). A Browser request from a
 CLI in a Code thread's terminal names the origin and the thread and says a
 program in the terminal asked, not the thread's agent
 ([Terminal Browser grant](docs/design/terminal-browser-grant.md#the-window)).
@@ -2122,8 +2149,8 @@ Cancel; Tab can leave the warning to continue reviewing. Escape within the warni
 or Cancel returns focus to Merge (or the review heading if Merge is unavailable).
 An attempted merge keeps its existing freshness and reviewed-head checks, and
 focus moves to its result when the attempt completes. It is not a trusted task
-approval surface. Only the person at a local window can merge; who may merge and
-what the host checks are owned by
+approval surface. Who may merge (a person, or a Code thread the person
+allowed) and what the host checks are owned by
 [architecture](docs/architecture.md#modes-chat-work-and-code).
 
 A dialog with a visible heading uses that heading as its accessible name through

@@ -302,7 +302,7 @@ describe("provider catalog state", () => {
       agentLoop: "runtime",
       sandbox: "octant-in-plan",
     });
-    expect(providerCatalogCapabilities("codex").sandbox).toBe("runtime");
+    expect(providerCatalogCapabilities("codex").sandbox).toBe("octant");
     expect(providerCatalogCapabilities("opencode").sandbox).toBe("octant");
     expect(providerCatalogCapabilities("openai-compatible")).toEqual({
       modes: { chat: "yes", work: "verified-models", code: "verified-models" },

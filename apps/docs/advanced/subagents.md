@@ -138,8 +138,10 @@ different provider. The lead can also name an eligible provider, model, and
 supported reasoning setting for a specific child. All choices retain the same
 authority and budget checks.
 
-A provider's own subagent feature stays off inside Octant, because a child it
-starts itself would run where Octant cannot show it or answer its approvals.
+Today a provider's own subagent feature is off inside Octant, because a child
+it starts itself would run where Octant cannot show it or answer its approvals.
+Letting Claude, Codex, and OpenCode use their own subagents, shown and
+journaled by Octant, is planned.
 Claude, OpenCode, and Devin turn theirs off through their own settings. Codex
 starts with its multi-agent features and `agents.enabled` switched off for
 that run only; your `CODEX_HOME` and `config.toml` are left as they are.
