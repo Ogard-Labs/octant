@@ -577,9 +577,6 @@ function CodeProjectThreadRow(props: {
       <div className="code-project-thread__meta">
         <span className="code-project-thread__chips">
           <ThreadStateBadge row={row} />
-          {row.thread === undefined ? null : (
-            <span className="tag">{policyLabel(row.thread.executionPolicy)}</span>
-          )}
           {row.thread?.unread === true ? (
             <OctantBadge variant="default">New activity</OctantBadge>
           ) : null}
@@ -588,6 +585,13 @@ function CodeProjectThreadRow(props: {
           ) : null}
           {pinned ? <span className="tag">Pinned</span> : null}
         </span>
+        {/* The access policy is a standing posture, not a state or a control,
+            so it reads as quiet text beside the facts rather than as a chip. */}
+        {row.thread === undefined ? null : (
+          <span className="code-project-thread__posture">
+            {policyLabel(row.thread.executionPolicy)}
+          </span>
+        )}
         {facts.length === 0 ? null : (
           <ul className="code-project-thread__facts" aria-label="Thread facts">
             {facts.map((fact) => (

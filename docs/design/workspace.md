@@ -74,10 +74,13 @@ below the title band. The header sits on the page: the Project tile at 40px
 Project") as its subtitle, and the actions at the right edge, New thread in
 the neutral secondary paint beside the ghost Relink folder and Archive
 Project. Everything else reads on cards in the Settings section recipe: one
-card for the binding (the root in mono with its availability on the first
-row, what the binding grants on the second), then labelled groups. Threads
-are rows in one card: the title alone on its line, then the state chip,
-approval posture, and facts on one line beneath it, then Details. Settings
+card for the binding (the root in mono, read from home as `~/…` with the full
+path on hover and for screen readers, and its availability on the first row,
+what the binding grants on the second), then labelled groups. Threads are rows
+in one card: the title alone on its line, then the state chip, the approval
+posture as quiet text (it is a standing setting, not a state or a control, so
+it takes no chip), and facts on one line beneath it, then Details. A Work
+Project's thread list takes the same labelled card. Settings
 rows split into **Context** (Memory, Brand kit, Canvases) and **Access and
 limits** (Provider access, Disposable desktop, Status file, Spend ceiling); a
 group with no rows is not drawn. Over an application ground the cards keep the

@@ -477,6 +477,35 @@ describe("ProjectOverview", () => {
     expect(screen.getByRole("dialog", { name: "Add Work folder" })).toBeVisible();
   });
 
+  it("shows the repository path from home and keeps the full path for hover and screen readers", () => {
+    render(
+      <ProjectOverview
+        onArchive={vi.fn()}
+        onRelink={vi.fn()}
+        onRename={vi.fn()}
+        project={
+          {
+            id: "20000000-0000-4000-8000-000000000009",
+            name: "brev",
+            lifecycle: "active",
+            pinned: false,
+            rank: "0/1",
+            version: 1,
+            createdAt: "2026-07-21T12:00:00.000Z",
+            updatedAt: "2026-07-21T12:00:00.000Z",
+            type: "code",
+            binding: { canonicalRoot: "/Users/ada/Dev/Repos/brev" },
+          } as never
+        }
+      />,
+    );
+
+    const binding = screen.getByRole("region", { name: "Project binding" });
+    const path = within(binding).getByTitle("/Users/ada/Dev/Repos/brev");
+    expect(path).toHaveTextContent("~/Dev/Repos/brev");
+    expect(within(path).getByText("/Users/ada/Dev/Repos/brev")).toHaveClass("sr-only");
+  });
+
   it("labels a stale remote snapshot read-only and hides root relink affordances", () => {
     render(
       <ProjectOverview

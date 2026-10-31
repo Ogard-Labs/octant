@@ -273,7 +273,10 @@ export function ProjectOverview(props: ProjectOverviewProps) {
             <div className="project-overview__root">
               <span>{props.project.type === "code" ? "Repository" : "Directory"}</span>
               <strong title={props.project.binding.canonicalRoot}>
-                {props.project.binding.canonicalRoot}
+                <span aria-hidden="true">
+                  {homeRelativePath(props.project.binding.canonicalRoot)}
+                </span>
+                <span className="sr-only">{props.project.binding.canonicalRoot}</span>
               </strong>
             </div>
             {unavailable ? (
@@ -543,6 +546,11 @@ function ProjectOverviewInspector(props: {
 
 function label(type: ProjectSummary["type"]): string {
   return type === "chat" ? "Chat" : type === "work" ? "Work" : "Code";
+}
+
+/** The home prefix repeats on every Project; the full path stays in the title. */
+function homeRelativePath(path: string): string {
+  return path.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, "~");
 }
 
 function authorityCopy(type: ProjectSummary["type"]): string {

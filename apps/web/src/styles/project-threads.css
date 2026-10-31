@@ -10,22 +10,35 @@
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 8px;
-  padding: var(--oct-space-4) 16px;
-  border-bottom: 1px solid var(--octant-border);
+  gap: var(--oct-space-3);
 }
 
+/* Titled like the page's other groups, so a Work Project's threads read as
+   the same section a Code Project's do. */
 .project-overview__threads-header h2 {
   margin: 0;
+  color: var(--oct-fg);
+  font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-medium);
 }
 
 .project-overview__threads-header p {
-  margin: 4px 0 0;
-  color: var(--octant-text-muted);
+  margin: 2px 0 0;
+  color: var(--oct-fg-2);
   font-size: var(--oct-text-xs);
-  line-height: 1.45;
+  line-height: var(--oct-leading-snug);
+}
+
+/* The list, or the line that stands in for it, sits in the page's card. */
+.project-overview__threads > :not(.project-overview__threads-header) {
+  padding: var(--oct-space-2) var(--oct-space-4);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(
+    --project-overview-card-fill,
+    color-mix(in oklab, var(--oct-fg) 3%, var(--oct-bg))
+  );
 }
 
 .project-overview__threads .project-threads {
