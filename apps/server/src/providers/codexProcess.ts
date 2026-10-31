@@ -62,6 +62,12 @@ export type CodexLaunchAuthority =
       readonly root: string;
       readonly mode: "chat" | "work" | "code";
       readonly executionPolicy: ProviderExecutionPolicy;
+      /**
+       * The person let Codex run its own subagents, and the thread runs at
+       * Full access, the only posture where a child, whose approvals never
+       * reach Octant, has nothing to wait for.
+       */
+      readonly ownSubagents?: true;
     };
 
 export interface CodexProcessPort {
@@ -300,7 +306,16 @@ export function isAtLeastRelease(
  * added that folder to the sandbox's readable roots, so a memory from any
  * other workspace reached every Octant thread in every mode.
  */
-export function codexAppServerArgs(version: string): readonly string[] {
+export function codexAppServerArgs(
+  version: string,
+  options: { readonly ownSubagents?: true } = {},
+): readonly string[] {
+  // A lease for a Full access thread whose person let Codex run its own
+  // subagents leaves Codex's own defaults for them, as in Codex itself. Its
+  // memories stay off either way.
+  if (options.ownSubagents === true) {
+    return ["app-server", "--listen", "stdio://", "-c", "features.memories=false"];
+  }
   return [
     "app-server",
     "--listen",
@@ -976,7 +991,12 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
             });
             const prepared = prepareCodexLaunch({
               binaryPath,
-              args: codexAppServerArgs(probe.version),
+              args: codexAppServerArgs(
+                probe.version,
+                authority.kind === "thread" && authority.ownSubagents === true
+                  ? { ownSubagents: true }
+                  : {},
+              ),
               authority,
               environment: launchEnvironment ?? codexProcessEnvironment(binaryPath, process.env),
               confinement,

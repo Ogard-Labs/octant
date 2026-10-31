@@ -12,6 +12,7 @@ import {
   type ProviderInstanceId,
   type ProviderModel,
   type ProviderModelOptionValues,
+  type ProviderNativeSetup,
   type ProviderProbeResult,
   type ProviderRuntimeEvent,
   type ProviderRateLimitWindow,
@@ -38,6 +39,7 @@ import { Cause, Effect, Exit, Option, Queue, Scope, Stream } from "effect";
 import {
   codexAccountWindowStatus,
   mapCodexMessage,
+  mapCodexSubagentWebSearch,
   type CodexEventContext,
   type CodexPendingApproval,
 } from "./codexEventMapper";
@@ -79,6 +81,7 @@ import {
   type CodexThreadResult,
   type CodexTurnResult,
   type CodexTurnSteerResult,
+  isUnmodeledThreadItem,
 } from "./codexProtocol";
 import { CodexRpcClientFailure } from "./codexRpcClient";
 import { modelEvidenceFromObservedState } from "./providerContextFacts";
@@ -196,6 +199,30 @@ const CODEX_CHAT_CONFIG = {
   "features.plugins": false,
   "features.apps": false,
 } as const satisfies CodexThreadConfig;
+
+/**
+ * A Chat thread whose person let Codex use their own tool servers: still no
+ * execution environment, shell, or image view, but the person's MCP servers,
+ * plugins, and apps stay as their Codex config has them. Those run with their
+ * own reach, which Chat's no-filesystem rule does not cover, and the switch
+ * says so.
+ */
+const CODEX_CHAT_OWN_TOOL_SERVERS_CONFIG = {
+  ...CODEX_SHELL_OFF_CONFIG,
+  "features.view_image": false,
+} as const satisfies CodexThreadConfig;
+
+/**
+ * Codex's own subagents run on threads of their own whose approvals never
+ * reach Octant, so a child that asked would wait out of sight. They run only
+ * at Full access, where nothing asks, once the person let Codex run them.
+ */
+function codexRunsOwnSubagents(input: {
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly nativeSetup?: ProviderNativeSetup;
+}): boolean {
+  return input.nativeSetup?.subagents === true && input.executionPolicy === "full-access";
+}
 
 /**
  * A Chat thread's overrides: `CODEX_CHAT_CONFIG` plus every MCP server in the
@@ -452,6 +479,20 @@ const capabilities = {
   forceStop: "unsupported",
   ...unsupportedChatCapabilities,
   appManagedTools: "supported",
+  nativeSetup: {
+    // Only at Full access: a subagent's approvals never reach Octant.
+    subagents: "supported",
+    // Codex's own web search was never switched off; each search marks.
+    webTools: "supported",
+    skills: "supported",
+    toolServers: "supported",
+    // The account home's hooks load as Codex loads them; Octant never
+    // switched them off.
+    hooks: "supported",
+    // Octant has no switch of its own for a Project's Codex config; Codex's
+    // own folder trust decides.
+    projectCode: "unsupported",
+  },
 } as const;
 
 function codexChatCapabilities(
@@ -865,15 +906,28 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
       // The process is leased when the first session names its posture, so
       // one lease is one root under one mode and posture and Octant's profile
       // can be exact for it.
-      const leaseKey = (executionPolicy: ProviderExecutionPolicy) =>
-        JSON.stringify([projectRoot, threadMode, executionPolicy]);
-      const leaseFor = (executionPolicy: ProviderExecutionPolicy) =>
+      // A lease that runs Codex's own subagents is its own process: the flag
+      // rides on the command line and cannot change on a running process.
+      const leaseKey = (executionPolicy: ProviderExecutionPolicy, ownSubagents = false) =>
+        JSON.stringify([
+          projectRoot,
+          threadMode,
+          executionPolicy,
+          ...(ownSubagents ? ["own-subagents"] : []),
+        ]);
+      const leaseFor = (executionPolicy: ProviderExecutionPolicy, ownSubagents: boolean) =>
         Effect.gen(function* () {
           const runtime = yield* acquireRuntime(
             options,
             clientFactory,
-            { kind: "thread", root: projectRoot, mode: threadMode, executionPolicy },
-            leaseKey(executionPolicy),
+            {
+              kind: "thread",
+              root: projectRoot,
+              mode: threadMode,
+              executionPolicy,
+              ...(ownSubagents ? { ownSubagents: true as const } : {}),
+            },
+            leaseKey(executionPolicy, ownSubagents),
           );
           // Turn starts probe first, but not every caller does (compaction,
           // summaries, agent runs), so the session itself refuses too.
@@ -895,14 +949,22 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
       // between turns last ran under another lease of this root and mode, idle
       // for up to its delay, so the idle ones close now. One a connection still
       // holds keeps running and the resume reports the conflict.
-      const closeIdleOtherPostures = (executionPolicy: ProviderExecutionPolicy) =>
+      const closeIdleOtherPostures = (
+        executionPolicy: ProviderExecutionPolicy,
+        ownSubagents: boolean,
+      ) =>
         Effect.promise(() =>
           Promise.all(
-            ProviderExecutionPolicy.literals
-              .filter((other) => other !== executionPolicy)
-              .map((other) =>
-                options.runtimeRegistry.closeIdleLease(options.instanceId, leaseKey(other)),
-              ),
+            ProviderExecutionPolicy.literals.flatMap((other) =>
+              [false, true]
+                .filter((variant) => other !== executionPolicy || variant !== ownSubagents)
+                .map((variant) =>
+                  options.runtimeRegistry.closeIdleLease(
+                    options.instanceId,
+                    leaseKey(other, variant),
+                  ),
+                ),
+            ),
           ),
         ).pipe(Effect.asVoid);
       return Effect.gen(function* () {
@@ -1196,8 +1258,12 @@ function makeConnection(
   options: CodexDriverOptions,
   leaseFor: (
     executionPolicy: ProviderExecutionPolicy,
+    ownSubagents: boolean,
   ) => Effect.Effect<CodexLeasedRuntime, ProviderFailure, Scope.Scope>,
-  closeIdleOtherPostures: (executionPolicy: ProviderExecutionPolicy) => Effect.Effect<void>,
+  closeIdleOtherPostures: (
+    executionPolicy: ProviderExecutionPolicy,
+    ownSubagents: boolean,
+  ) => Effect.Effect<void>,
   projectRoot: string,
   mode: ProviderAcquireInput["mode"],
   factories: ConnectionFactories,
@@ -1207,10 +1273,13 @@ function makeConnection(
     let client = UNLEASED_CODEX_CLIENT;
     let version = "";
     let leasedPolicy: ProviderExecutionPolicy | undefined;
+    let leasedOwnSubagents = false;
     let closed = false;
     const queue = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<ProviderSessionId, SessionState>();
     const sessionsByThread = new Map<string, SessionState>();
+    // Codex's own subagent threads, each with the session whose turn started it.
+    const subagentThreads = new Map<string, SessionState>();
     const pendingApprovalOwners = new Map<string, ProviderSessionId>();
     const abortedToolSignal = (() => {
       const controller = new AbortController();
@@ -1219,12 +1288,21 @@ function makeConnection(
     })();
     let unsubscribe: (() => void) | undefined;
     let pendingLifecycleRegistrations = 0;
-    const modeThreadConfig = (): Effect.Effect<CodexThreadConfig, ProviderFailure> =>
+    const modeThreadConfig = (
+      nativeSetup: ProviderNativeSetup | undefined,
+    ): Effect.Effect<CodexThreadConfig, ProviderFailure> =>
       Effect.gen(function* () {
-        const skills = yield* codexProjectSkillsConfig(client, version, projectRoot);
+        // The person's own Project skills load as Codex loads them, so none
+        // is switched off and none needs listing first.
+        const skills =
+          nativeSetup?.skills === true
+            ? undefined
+            : yield* codexProjectSkillsConfig(client, version, projectRoot);
         const modeConfig =
           mode === "chat"
-            ? yield* codexChatThreadConfig(client, projectRoot)
+            ? nativeSetup?.toolServers === true
+              ? CODEX_CHAT_OWN_TOOL_SERVERS_CONFIG
+              : yield* codexChatThreadConfig(client, projectRoot)
             : mode === "work"
               ? CODEX_WORK_CONFIG
               : {};
@@ -1315,6 +1393,36 @@ function makeConnection(
       } as ProviderRuntimeEvent);
       unsubscribeWhenIdle();
     };
+    /**
+     * A message on one of Codex's own subagent threads. Only a session that
+     * runs them at Full access has any, and nothing there asks a person, so
+     * the one thing read is a web search the subagent ran, which marks the
+     * parent's thread; a subagent the subagent starts is followed the same
+     * way. Everything else on those threads is Codex's own.
+     */
+    const observeSubagentThread = (message: CodexServerMessage) => {
+      if (
+        message.kind !== "notification" ||
+        (message.method !== "item/started" && message.method !== "item/completed")
+      ) {
+        return;
+      }
+      const parent = subagentThreads.get(message.params.threadId);
+      const item = message.params.item;
+      if (parent === undefined || isUnmodeledThreadItem(item)) return;
+      if (
+        message.method === "item/completed" &&
+        item.type === "collabAgentToolCall" &&
+        item.tool === "spawnAgent"
+      ) {
+        for (const threadId of item.receiverThreadIds) subagentThreads.set(threadId, parent);
+        return;
+      }
+      if (message.method !== "item/started" || item.type !== "webSearch") return;
+      if (parent.terminal || parent.context === undefined) return;
+      const mark = mapCodexSubagentWebSearch(parent.context, item.query);
+      if (mark.kind === "event") offer(mark.event);
+    };
     const handleMessage = (message: CodexServerMessage) => {
       if (message.kind === "notification" && message.method === "account/rateLimits/updated") {
         // Account usage names no thread; every session mid-turn on this
@@ -1328,7 +1436,11 @@ function makeConnection(
         return;
       }
       const state = stateForMessage(message, sessionsByThread, sessions);
-      if (state === undefined || state.terminal) return;
+      if (state === undefined) {
+        observeSubagentThread(message);
+        return;
+      }
+      if (state.terminal) return;
       if (
         message.kind === "notification" &&
         message.method === "turn/started" &&
@@ -1442,6 +1554,14 @@ function makeConnection(
         if (item.event.kind === "context-compacted" && state.compaction !== undefined) {
           state.compaction.compacted = true;
         }
+        // A subagent Codex started runs on a thread of its own; its web
+        // searches are read from that thread on this session's behalf.
+        if (
+          item.event.kind === "child-agent-activity" &&
+          (item.event.status === "running" || item.event.status === "starting")
+        ) {
+          subagentThreads.set(item.event.childAgentId, state);
+        }
         offer(item.event);
         if (isTerminal(item.event)) {
           settleCompaction(state, item.event.kind === "failed" || item.event.kind === "completed");
@@ -1496,10 +1616,13 @@ function makeConnection(
      */
     const ensureRuntime = (
       executionPolicy: ProviderExecutionPolicy,
+      ownSubagents: boolean,
     ): Effect.Effect<void, ProviderFailure> =>
       Effect.suspend(() => {
+        const sameAuthority = () =>
+          leasedPolicy === executionPolicy && leasedOwnSubagents === ownSubagents;
         if (leasedPolicy !== undefined) {
-          return leasedPolicy === executionPolicy
+          return sameAuthority()
             ? Effect.void
             : Effect.fail(
                 failure(
@@ -1508,9 +1631,9 @@ function makeConnection(
                 ),
               );
         }
-        return Scope.extend(leaseFor(executionPolicy), connectionScope).pipe(
+        return Scope.extend(leaseFor(executionPolicy, ownSubagents), connectionScope).pipe(
           Effect.flatMap((runtime) => {
-            if (leasedPolicy !== undefined && leasedPolicy !== executionPolicy) {
+            if (leasedPolicy !== undefined && !sameAuthority()) {
               return Effect.fail(
                 failure(
                   "unauthorized",
@@ -1522,6 +1645,7 @@ function makeConnection(
               client = runtime.client;
               version = runtime.version;
               leasedPolicy = executionPolicy;
+              leasedOwnSubagents = ownSubagents;
               const lost = () => {
                 if (!closed) runtimeLost();
               };
@@ -1605,7 +1729,7 @@ function makeConnection(
       start: (input) =>
         withPendingLifecycle(() =>
           Effect.gen(function* () {
-            yield* ensureRuntime(input.executionPolicy);
+            yield* ensureRuntime(input.executionPolicy, codexRunsOwnSubagents(input));
             ensureSubscribed();
             const settings = codexExecutionSettings(input.executionPolicy, input.autoApprove);
             const requestedOptions = input.modelOptionValues;
@@ -1628,7 +1752,7 @@ function makeConnection(
               optionSettings = codexModelOptionSettings(observedModel, requestedOptions);
             }
             const dynamicTools = codexDynamicTools(input.tools);
-            const modeConfig = yield* modeThreadConfig();
+            const modeConfig = yield* modeThreadConfig(input.nativeSetup);
             const config = { ...optionSettings.config, ...modeConfig };
             const thread = yield* request(() =>
               client.threadStart({
@@ -1691,9 +1815,9 @@ function makeConnection(
         }
         return withPendingLifecycle(() =>
           Effect.gen(function* () {
-            yield* ensureRuntime(input.executionPolicy);
+            yield* ensureRuntime(input.executionPolicy, codexRunsOwnSubagents(input));
             ensureSubscribed();
-            const modeConfig = yield* modeThreadConfig();
+            const modeConfig = yield* modeThreadConfig(input.nativeSetup);
             const resumeRequest = () =>
               Effect.tryPromise({
                 try: () =>
@@ -1720,7 +1844,10 @@ function makeConnection(
                 Effect.catchAll((error) =>
                   isActiveWriterConflict(error) && attempt < CODEX_RESUME_WRITER_CONFLICT_ATTEMPTS
                     ? (attempt === 1
-                        ? closeIdleOtherPostures(input.executionPolicy)
+                        ? closeIdleOtherPostures(
+                            input.executionPolicy,
+                            codexRunsOwnSubagents(input),
+                          )
                         : Effect.void
                       ).pipe(
                         Effect.zipRight(

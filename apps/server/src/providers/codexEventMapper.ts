@@ -408,6 +408,87 @@ function mapToolCompletion(
   ];
 }
 
+type CodexSubagentCall = Extract<ThreadItem, { readonly type: "collabAgentToolCall" }>;
+
+const CODEX_SUBAGENT_STATUS: Readonly<
+  Record<string, "starting" | "running" | "completed" | "failed">
+> = {
+  pendingInit: "starting",
+  running: "running",
+  completed: "completed",
+  // `closeAgent` ends a subagent with this; it is how a finished one stops.
+  shutdown: "completed",
+  interrupted: "failed",
+  errored: "failed",
+  notFound: "failed",
+};
+
+/**
+ * One of Codex's own subagent calls, finished: each agent thread it names is
+ * shown as a child run of this thread, by the thread id Codex gave it. A
+ * started subagent is `running`; a wait or close reports how each stands.
+ * The prompt is shown as the run's task, cut to one line; nothing a subagent
+ * said is read.
+ */
+function mapCodexSubagentCall(
+  context: CodexEventContext,
+  item: CodexSubagentCall,
+): ReadonlyArray<CodexMappedMessage> {
+  const results: CodexMappedMessage[] = [];
+  const task =
+    item.tool === "spawnAgent" && typeof item.prompt === "string"
+      ? truncate(item.prompt.split("\n")[0]?.trim() ?? "", 200)
+      : "";
+  for (const threadId of item.receiverThreadIds) {
+    const childAgentId = threadId.trim();
+    if (childAgentId.length === 0 || childAgentId.length > 255) continue;
+    const reported = item.agentsStates?.[threadId]?.status;
+    const status =
+      item.status === "failed" || item.status === "interrupted"
+        ? "failed"
+        : reported === undefined
+          ? item.tool === "spawnAgent"
+            ? "running"
+            : undefined
+          : CODEX_SUBAGENT_STATUS[reported];
+    if (status === undefined) continue;
+    results.push(
+      event(context, {
+        kind: "child-agent-activity",
+        childAgentId,
+        ...(task.length === 0 ? {} : { task }),
+        status,
+        summary:
+          status === "running" || status === "starting"
+            ? "Codex is running a subagent."
+            : status === "completed"
+              ? "The subagent finished."
+              : "The subagent stopped before it finished.",
+      }),
+    );
+  }
+  return results.length === 0 ? [{ kind: "ignored" }] : results;
+}
+
+/**
+ * A web search one of Codex's own subagents ran on its own thread. It reached
+ * that subagent's model, whose answer comes back to this thread's, so it
+ * marks this thread as the parent's own search would.
+ */
+export function mapCodexSubagentWebSearch(
+  context: CodexEventContext,
+  query: string,
+): CodexMappedMessage {
+  const target = outsideContentTarget(query);
+  return event(context, {
+    kind: "outside-content-read",
+    toolCallId: context.makeToolCallId(),
+    toolName: "webSearch",
+    source: "web-search",
+    ...(target === undefined ? {} : { target }),
+  });
+}
+
 function mapLifecycle(
   context: CodexEventContext,
   message: ItemLifecycleMessage,
@@ -496,6 +577,10 @@ function mapLifecycle(
         }),
       ];
     }
+    case "collabAgentToolCall":
+      return message.method === "item/completed"
+        ? mapCodexSubagentCall(context, item)
+        : [{ kind: "ignored" }];
     case "contextCompaction":
       // Codex rebuilds a compacted thread from a summary and as many recent
       // user messages as fit in 20,000 tokens (`build_compacted_history` in
