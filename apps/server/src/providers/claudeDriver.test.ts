@@ -1076,10 +1076,19 @@ describe("Claude execution policy", () => {
       callback.then((decision) => ({ kind: "decision" as const, decision })),
     ]);
     expect(first.kind).toBe("approval");
+    // The pending call reaches an automatic reviewer through the connection,
+    // never on the event, and is gone once the request is answered.
+    expect(JSON.stringify(first)).not.toContain('"call"');
+    expect(acquired.connection.approvalCall?.({ sessionId, requestId: "request-1" })).toMatchObject(
+      { tool: "Edit", input: expect.stringContaining('"file_path"') },
+    );
     await Effect.runPromise(
       acquired.connection.answerApproval({ sessionId, requestId: "request-1", approved: true }),
     );
     await expect(callback).resolves.toEqual({ behavior: "allow" });
+    expect(
+      acquired.connection.approvalCall?.({ sessionId, requestId: "request-1" }),
+    ).toBeUndefined();
     await acquired.close();
   });
 

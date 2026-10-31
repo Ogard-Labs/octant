@@ -13,6 +13,7 @@ import {
   type ProviderSessionId,
   type ProviderToolAnswer,
   type ProviderToolDefinition,
+  type ProviderApprovalCall,
 } from "@octant/contracts";
 import { decidesCodeEffectsByApproval } from "@octant/domain";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
@@ -85,6 +86,8 @@ interface ResumeIdentity {
 interface PendingApproval {
   readonly uiId: string;
   readonly toolCallId: string;
+  /** The pending call, for an automatic reviewer; never published. */
+  readonly call?: ProviderApprovalCall;
 }
 
 interface PiRuntime {
@@ -1184,6 +1187,8 @@ function makeConnection(
             }),
           ),
         ),
+      approvalCall: ({ sessionId, requestId }) =>
+        sessions.get(sessionId)?.approvals.get(requestId)?.call,
       answerApproval: (input) =>
         stateFor(input.sessionId).pipe(
           Effect.flatMap((state) => {

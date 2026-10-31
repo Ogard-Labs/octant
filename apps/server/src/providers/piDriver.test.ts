@@ -893,7 +893,12 @@ describe("Pi provider driver", () => {
         type: "message_update",
         assistantMessageEvent: { type: "thinking_delta", delta: "think" },
       });
-      client.emit({ type: "tool_execution_start", toolCallId: "tool-1", toolName: "write" });
+      client.emit({
+        type: "tool_execution_start",
+        toolCallId: "tool-1",
+        toolName: "write",
+        args: { path: "notes.md", content: "kept out of the reviewer" },
+      });
       client.emit({
         type: "extension_ui_request",
         id: "pi-ui-1",
@@ -902,9 +907,13 @@ describe("Pi provider driver", () => {
         message: "Allow?",
       });
       await new Promise<void>((resolve) => setImmediate(resolve));
+      // The reviewer gets the path the write names, never what it writes.
+      const call = connection.approvalCall?.({ sessionId, requestId: "approval-1" });
+      expect(call).toEqual({ tool: "write", input: JSON.stringify({ path: "notes.md" }) });
       await Effect.runPromise(
         connection.answerApproval({ sessionId, requestId: "approval-1", approved: true }),
       );
+      expect(connection.approvalCall?.({ sessionId, requestId: "approval-1" })).toBeUndefined();
       client.emit({
         type: "tool_execution_end",
         toolCallId: "tool-1",

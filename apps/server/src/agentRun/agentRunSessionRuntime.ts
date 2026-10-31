@@ -27,6 +27,7 @@ import {
   type ProviderSessionId,
   type TurnUsage,
   type UtcTimestamp,
+  type ProviderApprovalCall,
 } from "@octant/contracts";
 import { accumulateTurnUsage, defaultAgentRunAuthorityCeilingForMode } from "@octant/domain";
 import {
@@ -191,6 +192,8 @@ export interface AgentRunSessionInteractions {
   readonly approve?: (input: {
     readonly run: AgentRun;
     readonly event: Extract<ProviderRuntimeEvent, { readonly kind: "approval-request" }>;
+    /** The pending call, from the child's connection, for an automatic reviewer. */
+    readonly call?: ProviderApprovalCall | undefined;
     readonly signal: AbortSignal;
   }) => Promise<boolean>;
   readonly askUser?: (input: {

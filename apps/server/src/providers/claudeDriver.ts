@@ -1,4 +1,5 @@
 import type { ManagedToolAnswer } from "./managedMcpTools";
+import { providerApprovalCall } from "./providerApprovalCall";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -21,6 +22,7 @@ import {
   type ProviderSessionId,
   type ThreadPublishedSnapshot,
   type UtcTimestamp,
+  type ProviderApprovalCall,
 } from "@octant/contracts";
 import type {
   ProviderAcquireInput,

@@ -2483,7 +2483,9 @@ export const MAX_PROVIDER_APPROVAL_CALL_INPUT_LENGTH = 8_192;
  */
 export const ProviderApprovalCall = Schema.Struct({
   tool: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
-  input: Schema.optional(Schema.String.pipe(Schema.maxLength(MAX_PROVIDER_APPROVAL_CALL_INPUT_LENGTH))),
+  input: Schema.optional(
+    Schema.String.pipe(Schema.maxLength(MAX_PROVIDER_APPROVAL_CALL_INPUT_LENGTH)),
+  ),
   workingDirectory: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4_096))),
 }).annotations(strict);
 export type ProviderApprovalCall = typeof ProviderApprovalCall.Type;

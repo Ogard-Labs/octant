@@ -6,6 +6,7 @@ import type {
   ProviderRuntimeEvent,
   ProviderSessionId,
   UtcTimestamp,
+  ProviderApprovalCall,
 } from "@octant/contracts";
 import type { AcpServerNotification, AcpServerRequest } from "./acpProtocol";
 import { outsideContentTarget, outsideContentToolName } from "./outsideContentRead";
@@ -54,6 +55,8 @@ export type AcpMappedPermission =
       readonly allowOptionId: string;
       readonly rejectOptionId: string;
       readonly event: ProviderRuntimeEvent;
+      /** The pending call, for an automatic reviewer; never on the event. */
+      readonly call?: ProviderApprovalCall;
     }
   | {
       readonly kind: "question";
@@ -442,26 +445,26 @@ export function mapAcpPermissionRequest(
       description: title,
     }),
     ...withCall(
-        providerApprovalCall({
-          tool: toolKind,
-          arguments: {
-            ...(typeof request.params.toolCall.rawInput === "object" &&
-            request.params.toolCall.rawInput !== null
-              ? request.params.toolCall.rawInput
-              : request.params.toolCall.rawInput === undefined
-                ? {}
-                : { input: request.params.toolCall.rawInput }),
-            ...(request.params.toolCall.locations == null
+      providerApprovalCall({
+        tool: toolKind,
+        arguments: {
+          ...(typeof request.params.toolCall.rawInput === "object" &&
+          request.params.toolCall.rawInput !== null
+            ? request.params.toolCall.rawInput
+            : request.params.toolCall.rawInput === undefined
               ? {}
-              : { locations: request.params.toolCall.locations }),
-          },
-        }),
-      ),
+              : { input: request.params.toolCall.rawInput }),
+          ...(request.params.toolCall.locations == null
+            ? {}
+            : { locations: request.params.toolCall.locations }),
+        },
+      }),
+    ),
   };
 }
 
-function withCall(
-  call: ReturnType<typeof providerApprovalCall>,
-): { readonly call?: NonNullable<ReturnType<typeof providerApprovalCall>> } {
+function withCall(call: ProviderApprovalCall | undefined): {
+  readonly call?: ProviderApprovalCall;
+} {
   return call === undefined ? {} : { call };
 }

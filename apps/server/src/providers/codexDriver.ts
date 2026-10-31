@@ -20,6 +20,7 @@ import {
   type ProviderToolDefinition,
   type ProviderTurnInput,
   type UtcTimestamp,
+  type ProviderApprovalCall,
 } from "@octant/contracts";
 import type {
   ProviderAcquireInput,
@@ -41,6 +42,7 @@ import {
   type CodexEventContext,
   type CodexPendingApproval,
 } from "./codexEventMapper";
+import { providerApprovalCall } from "./providerApprovalCall";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import {
   isAtLeastRelease,
@@ -1210,6 +1212,8 @@ function makeConnection(
     const sessions = new Map<ProviderSessionId, SessionState>();
     const sessionsByThread = new Map<string, SessionState>();
     const pendingApprovalOwners = new Map<string, ProviderSessionId>();
+    /** Each pending approval's call, for an automatic reviewer; never published. */
+    const approvalCalls = new Map<string, ProviderApprovalCall>();
     const abortedToolSignal = (() => {
       const controller = new AbortController();
       controller.abort();
@@ -1958,6 +1962,10 @@ function makeConnection(
           ),
           Effect.asVoid,
         ),
+      approvalCall: ({ sessionId, requestId }) =>
+        pendingApprovalOwners.get(requestId) === sessionId
+          ? approvalCalls.get(requestId)
+          : undefined,
       answerApproval: (input) =>
         stateFor(input.sessionId).pipe(
           Effect.flatMap((state) => {
@@ -2199,4 +2207,22 @@ function isTerminal(event: ProviderRuntimeEvent): boolean {
 
 function defaultSleep(milliseconds: number): Promise<void> {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, milliseconds));
+}
+
+/**
+ * The call a Codex approval request is about, from its own params without the
+ * identifiers that only correlate it: a command and its working directory, a
+ * file change's grant root, or the permissions a sandbox widening asks for.
+ */
+function codexApprovalCall(
+  event: ProviderRuntimeEvent,
+  params: object,
+): ProviderApprovalCall | undefined {
+  if (event.kind !== "approval-request") return undefined;
+  const record = params as Record<string, unknown>;
+  return providerApprovalCall({
+    tool: event.action,
+    arguments: record,
+    workingDirectory: typeof record.cwd === "string" ? record.cwd : undefined,
+  });
 }

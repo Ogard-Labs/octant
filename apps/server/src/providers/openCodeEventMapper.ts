@@ -572,7 +572,10 @@ export function openCodeApprovalCall(
     typeof record.metadata === "object" && record.metadata !== null ? record.metadata : {};
   const call = providerApprovalCall({
     tool: action,
-    arguments: { ...metadata, ...(record.patterns === undefined ? {} : { patterns: record.patterns }) },
+    arguments: {
+      ...metadata,
+      ...(record.patterns === undefined ? {} : { patterns: record.patterns }),
+    },
   });
   return call;
 }

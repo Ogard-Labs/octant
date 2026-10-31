@@ -2693,9 +2693,18 @@ describe("Codex execution authority and approvals", () => {
       expect(JSON.stringify(approvalEvents)).not.toMatch(
         /octant-codex-project|curl|private\.example/,
       );
+      // The command reaches an automatic reviewer through the connection
+      // alone, with its working directory and without the runtime's reason.
+      const call = acquired.connection.approvalCall?.({ sessionId, requestId: "request-1" });
+      expect(call).toMatchObject({ tool: "command", workingDirectory: cwd });
+      expect(call?.input).toContain("curl private.example/secret");
+      expect(call?.input).not.toContain("must-not-cross");
       await Effect.runPromise(
         acquired.connection.answerApproval({ sessionId, requestId: "request-1", approved: false }),
       );
+      expect(
+        acquired.connection.approvalCall?.({ sessionId, requestId: "request-1" }),
+      ).toBeUndefined();
       expect(f.calls.at(-1)?.input).toMatchObject({ result: { decision: "decline" } });
       await acquired.close();
     },

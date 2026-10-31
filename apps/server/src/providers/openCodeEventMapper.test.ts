@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import { adaptBetaOpenCodeEvent } from "./openCodeDriver";
 import {
   mapOpenCodeEvent,
+  openCodeApprovalCall,
   type OpenCodeEvent,
   type OpenCodeEventContext,
 } from "./openCodeEventMapper";
@@ -965,5 +966,20 @@ describe("OpenCode 2.0.22 events", () => {
       "Unsupported provider event.",
     );
     expect(() => adaptAndMap("session.future.event", {})).toThrow("Unsupported provider event.");
+  });
+});
+
+describe("the pending call an OpenCode permission names", () => {
+  it("reads the command from its metadata and patterns, without the ids or other metadata", () => {
+    const call = openCodeApprovalCall("bash", {
+      id: "permission-1",
+      sessionID: "session-1",
+      patterns: ["bun run test"],
+      metadata: { command: "bun run test", output: "must-not-cross" },
+    });
+    expect(call).toEqual({
+      tool: "bash",
+      input: JSON.stringify({ command: "bun run test", patterns: ["bun run test"] }),
+    });
   });
 });

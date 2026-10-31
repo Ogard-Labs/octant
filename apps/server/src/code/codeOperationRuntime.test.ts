@@ -2195,7 +2195,12 @@ describe("CodeOperationRuntime", () => {
     });
     const runWith = async (verdict: "allow" | "ask" | "deny" | undefined) => {
       const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
-      const connection = providerConnection(queue);
+      // The pending call comes from the connection, never from the event.
+      const approvalCall = vi.fn(() => ({
+        tool: "Bash",
+        input: JSON.stringify({ command: "git status", cwd: "/Users/dev/app/src" }),
+      }));
+      const connection = { ...providerConnection(queue), approvalCall };
       const review = vi.fn(async () => (verdict === undefined ? undefined : decision(verdict)));
       const fixture = runtimeFixture({
         provider: providerDriver(connection),
@@ -2221,10 +2226,6 @@ describe("CodeOperationRuntime", () => {
             requestId: "provider-approval-9",
             action: "Bash",
             description: "Bash · git status",
-            call: {
-              tool: "Bash",
-              input: JSON.stringify({ command: "git status", cwd: "[CHECKOUT]/src" }),
-            },
           }),
         ),
       );
@@ -2232,11 +2233,11 @@ describe("CodeOperationRuntime", () => {
         (await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 50)).map(
           (frame) => frame.event,
         );
-      return { connection, review, fixture, frames };
+      return { connection, review, fixture, frames, approvalCall };
     };
 
     it("answers the provider itself when Shield allows, journals Shield's decision, and asks nobody", async () => {
-      const { connection, review, fixture, frames } = await runWith("allow");
+      const { connection, review, fixture, frames, approvalCall } = await runWith("allow");
       await vi.waitFor(() =>
         expect(connection.answerApproval).toHaveBeenCalledWith({
           sessionId,
@@ -2244,6 +2245,7 @@ describe("CodeOperationRuntime", () => {
           approved: true,
         }),
       );
+      expect(approvalCall).toHaveBeenCalledWith({ sessionId, requestId: "provider-approval-9" });
       expect(review).toHaveBeenCalledWith(
         expect.objectContaining({
           boundRoot: "/Users/dev/app",
