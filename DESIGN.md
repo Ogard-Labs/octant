@@ -2354,6 +2354,23 @@ its focus compatibility role for imports, but Appearance does not expose a
 Focus ring color control because the focus indicator is the neutral edge,
 never the theme's focus role.
 
+### Save diagnostics
+
+Host › Maintenance holds Save diagnostics beside the failure report. The row's
+button, **Save diagnostics…**, saves nothing: it opens a plain list in place,
+headed "This file will include", with one row per section (name, how many
+entries it holds now or "Not available", and one sentence on what it holds),
+then "It never includes" and its plain lines. Only **Save file** asks the host
+to build the bundle; **Cancel** closes the list. In the desktop app Save file
+opens the native save dialog, offering `octant-diagnostics-<date>.zip` in
+Downloads; dismissing it returns to the list with nothing written. A browser or
+paired client downloads the zip instead. The saved line names the file and says
+nothing was sent. A host that cannot list or
+build the bundle shows one error sentence and keeps the button. The list is
+text and tabular counts on the page ground, with a hairline between rows and no
+cards. The rule for what the file holds is in
+[Architecture: persistence](docs/architecture.md#persistence).
+
 ### Shell edge cases
 
 - The native window is transparent; the shell root paints the one window

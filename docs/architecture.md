@@ -2754,6 +2754,58 @@ flowchart LR
   (`debugSessions`, a version 3 packet, absent when there were none), with
   no session, thread, or Project named; the rule is in
   [Debugger session rules](design/language-services.md#debugger-session-rules).
+- **Support bundle.** The maintainer approved a diagnostics file the person
+  saves and sends themselves (2026-10-31); Octant never sends it. Host ›
+  Maintenance › Save diagnostics and `octant diagnostics export --out <folder
+or .zip>` write the same files, built by one host command
+  (`/api/diagnostics/bundle`, with a plain-list read at
+  `/api/diagnostics/bundle/preview`). Both routes sit on the loopback
+  administration chain beside host control, reject a paired device, and are
+  not in the remote forward list, so only a window or CLI session on this
+  machine reaches them. The person sees the list of sections, with how many
+  entries each holds now, and what the file never holds, before anything is
+  written; the CLI prints it first and `--list` stops there. The files are a
+  readme plus one JSON file per section: versions (Octant, wire, runtime),
+  system (operating system, release, architecture, processor count, memory),
+  providers (each enabled provider by kind and position, its readiness,
+  process state, sign-in kind, detected version, and capability support, never
+  its name, address, models, or message), host log (the newest 200 lines with
+  time, level, event, and message cut to 240 characters, without details),
+  recent activity (the newest 200 journal event names, sequences, and times
+  from the journal, with the payload column never selected), confinement and
+  guardrails (the default guardrail level and remembered-permission setting,
+  Code threads counted per execution policy, the sandbox tools the host
+  found, and whether the remote listener is on), and process (uptime, memory,
+  processor time, event-loop delay and slow-statement counters, clients,
+  active sessions, store state, and database size). A section the host cannot
+  read says so in its file; it never reads as empty. The fact types have no
+  field for a message, prompt, file content, or Project or thread name. Every
+  string is swept before it is written: the host's home folder becomes `~`,
+  the diagnostics redaction removes keys, tokens, credentialed addresses, and
+  other people's home paths, and a sentence that states a secret is withheld
+  whole. The host log is the same store `octant server logs` reads, which
+  already redacts on write; the bundle redacts it again. A hand-over is
+  journaled as `diagnostics.support-bundle-exported@1` with the time, the
+  sections, the file and byte counts, and the destination as a category
+  (`downloads`, `desktop`, `documents`, `home-folder`, `temporary-folder`,
+  `other-folder` for the CLI, `browser-download` for a browser or paired
+  client, or `chosen-by-person` for the desktop dialog), never a path or any
+  content. If the event cannot be recorded, no bundle is handed over. The desktop
+  app opens Electron's native save dialog (`dialog.showSaveDialog`, opening in
+  Downloads at `octant-diagnostics-<date>.zip`) from the main process over the
+  preload bridge's `saveSupportBundle`, and posts the chosen path with the
+  desktop secret to `/api/diagnostics/bundle/save`, a route no renderer origin
+  can call. The host stages the zip beside that path, journals the export, and
+  only then moves the file into place, so a refused record leaves no file and an
+  unwritable folder leaves no record. The renderer learns the saved file's name
+  and nothing else. A browser or paired client has no such bridge: the web app
+  builds a stored zip from the files the host hands over and saves it through
+  the browser's download, and the host records `browser-download`. Those
+  hand-overs are journaled before the caller writes the files, so a write that
+  then fails still shows as an export. The CLI writes a `.zip` or a new or empty
+  folder, refusing to overwrite. This
+  is separate from the failure report above, which exports one failed
+  operation by correlation ID.
 - **Recovery.** Sequence-based reconnect replay for local and remote clients —
   a dropped stream catches up from the authoritative snapshot before it reopens,
   keeps retrying while the host is unreachable, and a remote session whose window

@@ -128,6 +128,8 @@ import {
   CanvasRefreshReceiptRecorded,
   CanvasVersionAppended,
   DiagnosticsExportReceiptRecorded,
+  SUPPORT_BUNDLE_EXPORTED_EVENT,
+  SupportBundleExported,
   DiagnosticsFailureIncidentRecorded,
   DiagnosticsFailureIncidentRecordedV1,
   ExtensionLifecycleEvent,
@@ -495,6 +497,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(DIAGNOSTICS_FAILURE_INCIDENT_RECORDED_V1, 1, DiagnosticsFailureIncidentRecordedV1)
     .register(DIAGNOSTICS_FAILURE_INCIDENT_RECORDED, 1, DiagnosticsFailureIncidentRecorded)
     .register(DIAGNOSTICS_EXPORT_RECEIPT_RECORDED, 1, DiagnosticsExportReceiptRecorded)
+    .register(SUPPORT_BUNDLE_EXPORTED_EVENT, 1, SupportBundleExported)
     .register("work.thread-created@1", 1, WorkThreadCreated)
     .register("work.thread-updated@1", 1, WorkThreadUpdated)
     .register("work.thread-completion-confirmed@1", 1, WorkThreadCompletionConfirmed)

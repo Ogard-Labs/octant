@@ -1230,8 +1230,15 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           nativeRequired: "nativeBoundsAvailable",
         },
         {
+          id: settingId("save-diagnostics"),
+          label: "Save diagnostics",
+          scope: "host",
+          keywords:
+            "save diagnostics support bundle zip file host versions system log lines journal events names confinement guardrails process memory redacted send yourself",
+        },
+        {
           id: settingId("export-diagnostics"),
-          label: "Export diagnostics",
+          label: "Failure report",
           scope: "host",
           keywords:
             "export diagnostics evidence packet support redacted safe sealed receipt provider storage network remote auth migration confinement process cleanup",
