@@ -45,6 +45,7 @@ import type {
   ProjectSummary,
 } from "@octant/contracts/projects";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
+import type { KeyProviderDriverKinds } from "@octant/contracts/providers";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { DesktopRecipe, DesktopRecipeKeyChange } from "@octant/contracts/desktop-lease";
 import type { PreviewClient } from "@octant/client-runtime/preview-client";
@@ -432,6 +433,10 @@ export interface WorkspaceViewProps {
   readonly onProviderPolicyChange?: (
     projectId: ProjectId,
     policy: ProjectProviderPolicy,
+  ) => Promise<boolean>;
+  readonly onNativeProvidersChange?: (
+    projectId: ProjectId,
+    providers: KeyProviderDriverKinds,
   ) => Promise<boolean>;
   readonly onProjectPermissionModeChange?: (
     projectId: ProjectId,
@@ -2252,6 +2257,9 @@ function renderNonCodeTab(
         {...(props.onProviderPolicyChange === undefined
           ? {}
           : { onProviderPolicyChange: props.onProviderPolicyChange })}
+        {...(props.onNativeProvidersChange === undefined
+          ? {}
+          : { onNativeProvidersChange: props.onNativeProvidersChange })}
         {...(props.onProjectPermissionModeChange === undefined
           ? {}
           : { onPermissionModeChange: props.onProjectPermissionModeChange })}

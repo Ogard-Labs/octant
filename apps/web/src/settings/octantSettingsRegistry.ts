@@ -687,6 +687,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords:
             "claude artifacts artifact tool publish published page claude.ai link documents reports pages canvas delivery upload leaves this computer telemetry usage anthropic privacy",
         },
+        {
+          id: settingId("provider-native-setup"),
+          label: "Run as itself",
+          scope: "host",
+          keywords:
+            "run as itself own setup native subagents web search fetch skills mcp servers plugins hooks settings home folder claude code codex opencode mistral vibe trusted project",
+        },
       ],
     },
     {

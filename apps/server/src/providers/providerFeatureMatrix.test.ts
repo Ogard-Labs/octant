@@ -1,7 +1,11 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ProviderCapabilities, ProviderDriverKind } from "@octant/contracts";
+import {
+  PROVIDER_NATIVE_SETUP_FEATURES,
+  ProviderCapabilities,
+  ProviderDriverKind,
+} from "@octant/contracts";
 import { isImageProfileDriverKind, providerCatalogCapabilities } from "@octant/domain";
 import { unsupportedChatCapabilities } from "@octant/provider-sdk/chat-conformance";
 import { describe, expect, it } from "vitest";
@@ -206,9 +210,17 @@ const perModeCapabilities: ReadonlyArray<string> = ["sessionCompaction", "native
 const perModeRows = perModeCapabilities.flatMap((capability) =>
   ["chat", "work", "code"].map((mode) => `${capability}.${mode}`),
 );
+/**
+ * A key provider's own features, one row each. A driver declares the block
+ * as a nested object, which the static reader cannot compare, so these rows
+ * are checked against the drivers' tests instead.
+ */
+const nativeSetupRows = PROVIDER_NATIVE_SETUP_FEATURES.map((feature) => `nativeSetup.${feature}`);
+const nestedCapabilities: ReadonlyArray<string> = [...perModeCapabilities, "nativeSetup"];
 const expectedRowKeys = [
-  ...Object.keys(ProviderCapabilities.fields).filter((key) => !perModeCapabilities.includes(key)),
+  ...Object.keys(ProviderCapabilities.fields).filter((key) => !nestedCapabilities.includes(key)),
   ...perModeRows,
+  ...nativeSetupRows,
 ];
 
 describe("provider capability matrix", () => {
@@ -246,7 +258,7 @@ describe("provider capability matrix", () => {
         const declared = declaredCapabilities(source.file, source.anchors);
         for (const row of bodyRows) {
           const key = row[0]?.replace(/`/g, "") ?? "";
-          if (perModeCapabilities.includes(key.split(".")[0] ?? "")) continue;
+          if (nestedCapabilities.includes(key.split(".")[0] ?? "")) continue;
           const documented = leadingToken(row[columnIndex + 1] ?? "");
           const actual = declared.get(key) ?? "absent";
           if (documented !== actual) {

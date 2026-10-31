@@ -147,7 +147,9 @@ export function createProviderRouteHandler(dependencies: ProviderRouteDependenci
         // Adding a provider from an outside driver, changing where it sends a key,
         // and Verify tools are steps of admitting one, which only a person at a local window takes.
         // Turning on Claude artifacts sends this host's documents to a
-        // claude.ai account, so it is the same person's decision. Remote
+        // claude.ai account, so it is the same person's decision, and so is
+        // letting a key provider run as itself, which loads code and tool
+        // servers Octant did not review. Remote
         // forwarding never admits provider commands; the route refuses these
         // too.
         const principal = readPrincipalRouteContext(request)?.principal;
@@ -155,7 +157,8 @@ export function createProviderRouteHandler(dependencies: ProviderRouteDependenci
           (command.kind === "create-outside-harness-endpoint-provider" ||
             command.kind === "change-outside-harness-endpoint-configuration" ||
             command.kind === "verify-model-tools" ||
-            command.kind === "set-claude-artifact-delivery") &&
+            command.kind === "set-claude-artifact-delivery" ||
+            command.kind === "set-provider-native-setup") &&
           principal !== undefined &&
           principal.kind !== "local-window"
         ) {

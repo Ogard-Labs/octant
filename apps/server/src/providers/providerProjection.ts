@@ -11,6 +11,7 @@ import {
   decodeProviderInstanceDriverQuarantined,
   decodeProviderInstanceDriverRebound,
   decodeProviderInstanceEnabledChanged,
+  decodeProviderInstanceNativeSetupChanged,
   decodeProviderInstanceRemoved,
   decodeProviderInstanceRenamed,
   type EventEnvelope,
@@ -49,6 +50,8 @@ const instanceDecoders = {
     decodeProviderInstanceDataTagsChanged(payload).instance,
   "provider.instance-enabled-changed@1": (payload: unknown) =>
     decodeProviderInstanceEnabledChanged(payload).instance,
+  "provider.instance-native-setup-changed@1": (payload: unknown) =>
+    decodeProviderInstanceNativeSetupChanged(payload).instance,
 } as const;
 
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateIdSchema);
