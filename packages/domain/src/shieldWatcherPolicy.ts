@@ -222,7 +222,11 @@ function encodesText(text: string): boolean {
  * decode to bytes, not sentences, so they are left alone.
  */
 function decodedText(run: string): string | undefined {
-  const body = run.replace(/=+$/, "").replace(/-/g, "+").replace(/_/g, "/");
+  // Padding is trimmed by scanning, not by a `=+$` pattern, which backtracks
+  // quadratically on a long run of `=`.
+  let end = run.length;
+  while (end > 0 && run.charCodeAt(end - 1) === 0x3d) end -= 1;
+  const body = run.slice(0, end).replace(/-/g, "+").replace(/_/g, "/");
   if (body.length % 4 === 1) return undefined;
   let decoded: string;
   try {

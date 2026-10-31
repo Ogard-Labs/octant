@@ -204,6 +204,12 @@ describe("Octant Shield's Watcher", () => {
     ]);
   });
 
+  it("reads a long hostile run of padding in linear time", () => {
+    const started = performance.now();
+    watchOutsideContent(`${"QUFB".repeat(20)}${"=".repeat(200_000)}x`);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
   it("reads a structured result's string values, not its field names", () => {
     const result = {
       instructions: "fine",
