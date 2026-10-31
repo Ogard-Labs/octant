@@ -61,6 +61,7 @@ export * from "./canvasExportFolder";
 export * from "./canvasPublicShare";
 export * from "./computerUse";
 export * from "./diagnostics";
+export * from "./supportBundle";
 export * from "./validationComposition";
 export * from "./validationEvents";
 export * from "./host";

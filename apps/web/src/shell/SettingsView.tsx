@@ -69,6 +69,7 @@ import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { UsageClient } from "@octant/client-runtime/usage-client";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import { DiagnosticsExportControl } from "../support/DiagnosticsExportControl";
+import { SupportBundleControl } from "../support/SupportBundleControl";
 import { JournalGrowthTable } from "../support/JournalGrowthTable";
 import type { DiagnosticsExportClient } from "@octant/client-runtime/diagnostics-export-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
@@ -2426,9 +2427,20 @@ function MaintenanceSection({
         ) : null}
         {diagnosticsExportClient !== undefined ? (
           <SettingRow
-            description="Creates a local support bundle from the selected host. Review it before sharing."
+            description="Saves a file about this host for you to read and send yourself. It lists versions, provider status, recent log lines, and activity names, never messages or keys. Nothing is uploaded."
+            focused={focusedSetting === settingId("save-diagnostics")}
+            label="Save diagnostics"
+            scope="host"
+            settingId="save-diagnostics"
+          >
+            <SupportBundleControl client={diagnosticsExportClient} />
+          </SettingRow>
+        ) : null}
+        {diagnosticsExportClient !== undefined ? (
+          <SettingRow
+            description="Exports a redacted report about one failed operation, found by its correlation ID. Review it before sharing."
             focused={focusedSetting === settingId("export-diagnostics")}
-            label="Export diagnostics"
+            label="Failure report"
             scope="host"
             settingId="export-diagnostics"
           >

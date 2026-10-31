@@ -68,6 +68,7 @@
     "./canvas-public-share": "./src/canvasPublicShare.ts",
     "./computer-use": "./src/computerUse.ts",
     "./diagnostics": "./src/diagnostics.ts",
+    "./support-bundle": "./src/supportBundle.ts",
     "./validation-composition": "./src/validationComposition.ts",
     "./validation-events": "./src/validationEvents.ts",
     "./validation-rpc": "./src/validationRpc.ts",

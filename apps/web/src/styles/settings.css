@@ -710,6 +710,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="environment-presentation"],
 .setrow[data-setting-id="user-profile"],
 .setrow[data-setting-id="keybindings"],
+.setrow[data-setting-id="save-diagnostics"],
 .setrow[data-setting-id="export-diagnostics"],
 .setrow[data-setting-id="journal-growth"],
 .setrow[data-setting-id="chat-personality"],
@@ -727,6 +728,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="environment-presentation"] > .setrow-control,
 .setrow[data-setting-id="user-profile"] > .setrow-control,
 .setrow[data-setting-id="keybindings"] > .setrow-control,
+.setrow[data-setting-id="save-diagnostics"] > .setrow-control,
 .setrow[data-setting-id="export-diagnostics"] > .setrow-control,
 .setrow[data-setting-id="journal-growth"] > .setrow-control,
 .setrow[data-setting-id="chat-personality"] > .setrow-control,
@@ -3608,6 +3610,67 @@ html[data-octant-increased-contrast="true"]
 .journal-growth__table th:last-child {
   text-align: end;
   font-variant-numeric: tabular-nums;
+}
+
+/* Save diagnostics: the plain list shown before anything is written. */
+.support-bundle {
+  display: grid;
+  gap: var(--oct-space-3);
+  width: 100%;
+}
+
+.support-bundle__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+}
+
+.support-bundle__review {
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
+.support-bundle__heading {
+  margin: 0;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
+}
+
+.support-bundle__list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--oct-text-sm);
+}
+
+.support-bundle__item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 var(--oct-space-3);
+  padding: var(--oct-space-2) 0;
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.support-bundle__name {
+  color: var(--octant-text-primary);
+}
+
+.support-bundle__count {
+  color: var(--oct-meta);
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+
+.support-bundle__what {
+  grid-column: 1 / -1;
+  color: var(--octant-text-secondary);
+}
+
+.support-bundle__list--plain > li {
+  padding: var(--oct-space-1) 0;
+  color: var(--octant-text-secondary);
 }
 
 /* Appearance › Accent: one round swatch per colour, the chosen one ringed in

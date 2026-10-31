@@ -1498,6 +1498,20 @@ describe("SettingsView", () => {
     expect(await screen.findByText(/00000000-0000-4000-8000-0000000000aa/)).toBeInTheDocument();
   });
 
+  it("offers Save diagnostics on the Host page beside the failure report", async () => {
+    const diagnosticsExportClient = {
+      readJournalGrowth: vi.fn(async () => new Promise<never>(() => undefined)),
+      exportEvidence: vi.fn(),
+      readSupportBundlePreview: vi.fn(),
+      exportSupportBundle: vi.fn(),
+    };
+    renderSettings({ diagnosticsExportClient: diagnosticsExportClient as never });
+    navigateTo("Host");
+    expect(screen.getByRole("button", { name: "Save diagnostics…" })).toBeEnabled();
+    expect(screen.getByText("Failure report")).toBeInTheDocument();
+    expect(diagnosticsExportClient.readSupportBundlePreview).not.toHaveBeenCalled();
+  });
+
   it("mounts the Skills & Extensions settings view when an extension client is provided", async () => {
     const extensionClient = {
       snapshot: vi.fn(async () => ({

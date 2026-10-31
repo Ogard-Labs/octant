@@ -77,6 +77,7 @@ export * from "./modelContextWindow";
 export * from "./diagnosticsPolicy";
 export * from "./credentialShapePolicy";
 export * from "./diagnosticsExportPolicy";
+export * from "./supportBundlePolicy";
 export * from "./workConfinementPolicy";
 export * from "./workDeliveryPolicy";
 export * from "./workPromotionPolicy";
