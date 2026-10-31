@@ -3,14 +3,15 @@ name: Mobile (iOS native modules)
 # Compiles the Swift Expo modules in apps/mobile/modules against the Expo
 # version the app pins, so a break shows on the pull request rather than in the
 # next TestFlight build. It generates the native project and builds only the
-# two module targets for the Simulator with signing off, so it reads no secret
-# and needs no account. It runs only when a module, the app config, or the
-# lockfile changes. It is not a required check: path filters do not apply to
+# module targets and the notification service extension for the Simulator with
+# signing off, so it reads no secret and needs no account. It runs only when a
+# module, the app config, a config plugin, or the lockfile changes. It is not a required check: path filters do not apply to
 # the merge queue, and a required check that is skipped counts as passed.
 on:
   pull_request:
     paths:
       - "apps/mobile/modules/**"
+      - "apps/mobile/plugins/**"
       - "apps/mobile/app.config.ts"
       - "apps/mobile/package.json"
       - "bun.lock"
@@ -49,8 +50,12 @@ jobs:
           fi
           echo "DEVELOPER_DIR=$xcode/Contents/Developer" >> "$GITHUB_ENV"
       - run: bun install --frozen-lockfile
+      # Built with the push capability on, so the notification service
+      # extension target exists to be compiled.
       - name: Generate the native iOS project
         working-directory: apps/mobile
+        env:
+          OCTANT_MOBILE_PUSH: "1"
         run: bunx expo prebuild --platform ios --no-install
       - name: Install the pods
         working-directory: apps/mobile/ios
@@ -58,7 +63,7 @@ jobs:
       - name: Build the module targets for the Simulator
         working-directory: apps/mobile/ios
         run: |
-          for scheme in OctantDeviceProtection OctantPinnedTls; do
+          for scheme in OctantDeviceProtection OctantPinnedTls OctantPush; do
             xcodebuild build \
               -workspace Octant.xcworkspace \
               -scheme "$scheme" \
@@ -67,3 +72,14 @@ jobs:
               -configuration Debug \
               CODE_SIGNING_ALLOWED=NO
           done
+      # The notification service extension is a target of the app project, added
+      # by the app's config plugin, so it is built from that project.
+      - name: Build the notification service extension for the Simulator
+        working-directory: apps/mobile/ios
+        run: |
+          xcodebuild build \
+            -project Octant.xcodeproj \
+            -target OctantNotificationService \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO

@@ -499,7 +499,9 @@ protected `mobile-testflight` environment and uploads only when its `submit`
 input is set; pull requests get no release credential. GitHub holds only the
 revocable Expo token; Apple certificates, profiles, and the App Store Connect
 key stay in EAS's credential service. The App ID enables no optional Apple
-capability (push, associated domains, Sign in with Apple, iCloud), testers are
+capability (push, associated domains, Sign in with Apple, iCloud) until the
+maintainer builds with phone push on (`OCTANT_MOBILE_PUSH=1`, which adds push
+and Keychain sharing for the notification service extension), testers are
 maintainer-controlled App Store Connect users, and external groups, public
 links, and store listing stay closed until
 [public store distribution](design/mobile-maturity.md#phase-e-public-store-distribution),
