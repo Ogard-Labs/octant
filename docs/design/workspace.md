@@ -136,6 +136,22 @@ sidebar timer never walks the checkout tree. Inactive modes and hidden windows
 pause those refreshes so background ticks do not contend with the next
 interaction.
 
+### Jump to the next waiting thread
+
+The `next-waiting-thread` keybinding (Mod+Shift+J by default) and the palette
+command **Jump to the next thread that needs you** open the next thread waiting
+on the person. The renderer reads the attention signals the sidebar and Inbox
+already render and adds no host read. Each thread counts once, at its strongest
+reason, in this order: approval, question, finished turn not yet looked at;
+within a reason, in the order the signals are listed. The jump goes to the entry
+after the open thread and wraps from the last to the first; when the open thread
+is not waiting it goes to the first, and when nothing waits it does nothing and
+the command is absent from the palette. A failed turn is not in the order: the
+thread listing reports no failure, and a status is never inferred from silence.
+A due follow-up is a reminder, not a waiting thread, and is left out. The
+Status arrangement's **Needs input** and **Ready for review** headings are the
+list-side counterpart, so no second priority group is added to the Projects tree.
+
 ### Sidebar thread status
 
 The sidebar speaks about what a thread is doing now with one vocabulary, in
