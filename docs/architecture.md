@@ -6878,8 +6878,8 @@ same. This holds in Chat, Work, and Code.
   Spaces), are built; Cua Spaces, reached through the person's local Cua daemon, is
   designed (accepted on 2026-10-27), and its local-daemon port and its driver
   for a Space on this computer or on another of the person's computers that
-  the recipe names are built but
-  offered on no host until the maintainer's live smokes pass; see
+  the recipe names are built and
+  offered, with the maintainer's live smokes still owed; see
   [Disposable desktops](design/disposable-desktops.md#cua-spaces-through-the-local-daemon).
   A driver whose provider runs a daemon on this machine reaches it only
   through the host's daemon port: one Unix socket under the home of Octant's
@@ -6897,9 +6897,10 @@ same. This holds in Chat, Work, and Code.
   billed lease is estimated from the recipe's hourly cost before it starts
   and refused if it would pass the cap, and no agent can change the cap
   ([Disposable desktops: C5](design/disposable-desktops.md#expiry-and-teardown-when-the-daemons-host-may-die)).
-  No host offers a
-  cloud provider yet, so a recipe can
-  name only the host-local provider.
+  A host lists E2B, and Cua on Linux, from its first start; a recipe can
+  name either, and a provider whose setup is missing (no credential store, or
+  no Cua daemon running) is listed as needing setup and refuses every start
+  ([Disposable desktops: offering E2B and Cua](design/disposable-desktops.md#built-offering-e2b-and-cua)).
 
 **Canvas export.** A destination plugin contributes an export target through
 `@octant/plugin-api`. The contribution names the formats it accepts. The host
