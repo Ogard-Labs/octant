@@ -3,6 +3,7 @@ import { resolveChatMessageParts } from "@octant/domain/chat-message-parts";
 import { ChevronRight } from "lucide-react";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { ChatRichText } from "../chat/ChatRichText";
+import { SelectionThreadSurface } from "./SelectionThread";
 
 export const StreamRepliesContext = createContext(true);
 
@@ -60,15 +61,21 @@ export function AssistantMessageBody(props: {
   // not read, such as a reply's follow-up suggestion block.
   const prose = parts.flatMap((part) => (part.kind === "markdown" ? [part.text] : []));
   if (prose.length === parts.length)
-    return hidePartialAnswer ? null : <ChatRichText body={prose.join("\n\n")} />;
+    return hidePartialAnswer ? null : (
+      <SelectionThreadSurface>
+        <ChatRichText body={prose.join("\n\n")} />
+      </SelectionThreadSurface>
+    );
   return (
-    <div className="chat-transcript__parts">
-      {parts.map((part, index) =>
-        hidePartialAnswer && part.kind === "markdown" ? null : (
-          <AssistantResponsePart key={`${part.kind}:${index}`} part={part} />
-        ),
-      )}
-    </div>
+    <SelectionThreadSurface>
+      <div className="chat-transcript__parts">
+        {parts.map((part, index) =>
+          hidePartialAnswer && part.kind === "markdown" ? null : (
+            <AssistantResponsePart key={`${part.kind}:${index}`} part={part} />
+          ),
+        )}
+      </div>
+    </SelectionThreadSurface>
   );
 }
 
