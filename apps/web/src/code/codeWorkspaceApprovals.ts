@@ -27,10 +27,6 @@ export function nativeCodeWorkspaceApprovals(
     androidRequest: Parameters<NonNullable<CodeWorkspaceApprovals["android"]>>[0],
   ) => await request({ effect: { kind: "android-action", request: androidRequest } as never });
   return {
-    // Raising a thread to Full access is the same native confirmation the host
-    // demands for a full-access thread at creation, named by the effect it
-    // authorizes rather than by the surface that asked for it.
-    access: async (effect) => (await request({ effect: { ...effect } as never })) as never,
     git: async (command) => (await approve(command)) as never,
     pullRequest: async (command) => (await approve(command)) as never,
     review: async ({ command }) => (await approve(command)) !== undefined,

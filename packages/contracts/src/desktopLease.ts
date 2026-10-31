@@ -206,6 +206,17 @@ export const LeasableDesktopPlacement = Schema.Struct({
 export type LeasableDesktopPlacement = typeof LeasableDesktopPlacement.Type;
 
 /**
+ * Why a provider this host loaded cannot start a desktop yet, in words the
+ * person can act on: the host has no credential store to keep the key a cloud
+ * account needs, or the provider's local daemon is not running here.
+ */
+export const DesktopProviderSetupReason = Schema.Literal(
+  "no-credential-store",
+  "daemon-not-connected",
+);
+export type DesktopProviderSetupReason = typeof DesktopProviderSetupReason.Type;
+
+/**
  * A provider computer use could lease from on this host now. A provider with
  * `placements` is leased only through a recipe that names one of them, on
  * that placement's locality and billing. `daemon` marks a provider run by a
@@ -219,6 +230,12 @@ export const LeasableDesktopProvider = Schema.Struct({
   billed: Schema.Boolean,
   placements: Schema.optional(Schema.Array(LeasableDesktopPlacement).pipe(Schema.maxItems(16))),
   daemon: Schema.optional(Schema.Literal(true)),
+  /**
+   * Present while the provider is listed but cannot start a desktop until the
+   * person sets something up. A recipe cannot move to it and every start
+   * refuses `needs-setup`.
+   */
+  needsSetup: Schema.optional(DesktopProviderSetupReason),
 }).annotations(strict);
 export type LeasableDesktopProvider = typeof LeasableDesktopProvider.Type;
 
@@ -274,6 +291,8 @@ export const DesktopLeaseRefusalReason = Schema.Literal(
   "no-provider-configured",
   "provider-disabled",
   "provider-unavailable",
+  /** The provider is loaded but the person has not set up what it needs on this host. */
+  "needs-setup",
   "not-leasable-mode",
   "thread-not-active",
   "not-permitted",

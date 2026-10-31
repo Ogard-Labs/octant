@@ -4,8 +4,10 @@ import { thisComputerName } from "../platform";
 /**
  * The shape of first run.
  *
- * Three steps, in the order a first task needs them: what the host can reach,
- * the folder the task works in, and the model it starts with. Providers come
+ * Four steps, in the order a first task needs them: what the host can reach,
+ * the folder the task works in, the model it starts with, and the mode it
+ * starts in. The mode comes after the model because Auto depends on whether
+ * that provider has a reviewer of its own. Providers come
  * first because the model is picked from what the provider step found —
  * offering a model list before the host has looked would offer an empty one.
  * Profile, appearance, and Navigator are not prerequisites for a task, so
@@ -15,7 +17,7 @@ import { thisComputerName } from "../platform";
  * provider, Project, or model they did not give: skip leaves first run
  * answered as skipped, and a missing fact opens that setup surface.
  */
-export const FIRST_RUN_STEP_IDS = ["providers", "project", "model"] as const;
+export const FIRST_RUN_STEP_IDS = ["providers", "project", "model", "mode"] as const;
 export type FirstRunStepId = (typeof FIRST_RUN_STEP_IDS)[number];
 
 export interface FirstRunStepDescriptor {
@@ -36,6 +38,8 @@ export interface FirstRunStepInputs {
   readonly providersReady: boolean;
   readonly projectReady: boolean;
   readonly modelChosen: boolean;
+  /** Whether the host holds a default mode the person chose. */
+  readonly modeChosen?: boolean;
   /** The platform the host reports, which names the computer the providers step searches. */
   readonly hostPlatform?: HostPlatform | undefined;
 }
@@ -44,6 +48,7 @@ const TITLES: Record<FirstRunStepId, string> = {
   providers: "Providers",
   project: "Project",
   model: "Model",
+  mode: "Mode",
 };
 
 function summaries(hostPlatform: HostPlatform | undefined): Record<FirstRunStepId, string> {
@@ -51,6 +56,7 @@ function summaries(hostPlatform: HostPlatform | undefined): Record<FirstRunStepI
     providers: `What ${thisComputerName(hostPlatform)} can actually reach.`,
     project: "The folder your first task works in.",
     model: "The model your first task starts with.",
+    mode: "How much agents may do before they ask.",
   };
 }
 
@@ -62,6 +68,7 @@ export function buildFirstRunSteps(
     providers: inputs.providersReady,
     project: inputs.projectReady,
     model: inputs.modelChosen,
+    mode: inputs.modeChosen === true,
   };
   return FIRST_RUN_STEP_IDS.map((id) => ({
     id,

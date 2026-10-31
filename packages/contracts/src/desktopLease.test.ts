@@ -117,6 +117,18 @@ describe("desktop lease contract", () => {
     expect(() => decodeLeasableDesktopProvider({ ...offered, daemon: false })).toThrow();
   });
 
+  it("lists a provider with the setup it still needs, and refuses a reason it does not know", () => {
+    const listed = decodeLeasableDesktopProvider({
+      providerId: "e2b",
+      displayName: "E2B",
+      locality: "cloud",
+      billed: true,
+      needsSetup: "no-credential-store",
+    });
+    expect(listed.needsSetup).toBe("no-credential-store");
+    expect(() => decodeLeasableDesktopProvider({ ...listed, needsSetup: "later" })).toThrow();
+  });
+
   it("attributes a release a person asked for while teardown records the transition", () => {
     const transitioned = decodeDesktopLeaseTransitioned({
       leaseId,

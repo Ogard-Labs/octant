@@ -4,7 +4,7 @@ import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
 import type {
   PermissionPersistence,
-  ProviderExecutionPolicy,
+  PermissionMode,
   ProviderInstanceId,
   ProviderModelId,
 } from "@octant/contracts/providers";
@@ -111,7 +111,7 @@ export interface ThreadPaneContainerProps {
     | "setCodeNewThreadWorkspace"
     | "setCodePullRequestsOpen"
     | "setDraftError"
-    | "setDraftExecutionPolicy"
+    | "setDraftPermissionMode"
     | "setDraftModelId"
     | "setDraftPendingMessage"
     | "setDraftPermissionPersistence"
@@ -125,8 +125,10 @@ export interface ThreadPaneContainerProps {
     | "setProjectArchived"
     | "setProjectColor"
     | "setProjectProviderPolicy"
+    | "setProjectPermissionMode"
     | "setProjectBrandKit"
     | "setProjectDesktopRecipe"
+    | "setProjectActions"
     | "setProjectWorkStatusFile"
     | "setThreadStatsVisible"
     | "setUsageOpen"
@@ -155,7 +157,7 @@ export interface ThreadPaneContainerProps {
   readonly clients: ReturnType<typeof createLaunchedShellClients>;
   readonly codeBoardProjects: ReadonlyArray<{ readonly id: ProjectId; readonly name: string }>;
   readonly codeController: CodeController;
-  readonly codeDefaultExecutionPolicy: ProviderExecutionPolicy;
+  readonly codeDefaultPermissionMode: PermissionMode;
   readonly codeProviderChoices: ReadonlyArray<CodeThreadProviderChoice>;
   readonly codeProviderGroups: ReturnType<typeof buildModelPickerGroups>;
   readonly codeThreadControllers: CodeThreadControllerRegistry;
@@ -172,7 +174,7 @@ export interface ThreadPaneContainerProps {
   readonly dockSurface?: RightUtilityDockSurfaceId;
   readonly draftCreating: boolean;
   readonly draftError?: string;
-  readonly draftExecutionPolicy?: ProviderExecutionPolicy;
+  readonly draftPermissionMode?: PermissionMode;
   readonly draftPendingMessage?: string;
   readonly draftPermissionPersistence?: PermissionPersistence;
   readonly draftProjectBinding: RefObject<Promise<void> | undefined>;
@@ -254,7 +256,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     chatReadCursorStore,
     codeBoardProjects,
     codeController,
-    codeDefaultExecutionPolicy,
+    codeDefaultPermissionMode,
     codeProviderChoices,
     codeProviderGroups,
     codeThreadControllers,
@@ -271,7 +273,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     dockSurface,
     draftCreating,
     draftError,
-    draftExecutionPolicy,
+    draftPermissionMode,
     draftPendingMessage,
     draftPermissionPersistence,
     draftProjectBinding,
@@ -370,7 +372,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     setCodeNewThreadWorkspace,
     setCodePullRequestsOpen,
     setDraftError,
-    setDraftExecutionPolicy,
+    setDraftPermissionMode,
     setDraftModelId,
     setDraftPendingMessage,
     setDraftPermissionPersistence,
@@ -384,8 +386,10 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     setProjectArchived,
     setProjectColor,
     setProjectProviderPolicy,
+    setProjectPermissionMode,
     setProjectBrandKit,
     setProjectDesktopRecipe,
+    setProjectActions,
     setProjectWorkStatusFile,
     setThreadStatsVisible,
     setUsageOpen,
@@ -676,8 +680,10 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
               onRenameProject={renameProject}
               onProjectColorChange={setProjectColor}
               onProviderPolicyChange={setProjectProviderPolicy}
+              onProjectPermissionModeChange={setProjectPermissionMode}
               onBrandKitChange={setProjectBrandKit}
               onDesktopRecipeChange={setProjectDesktopRecipe}
+              onActionsChange={setProjectActions}
               onWorkStatusFileChange={(projectId, enabled) =>
                 setProjectWorkStatusFile(projectId, enabled ? "enabled" : "disabled")
               }
@@ -761,7 +767,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 : { draftSelectedModelId: effectiveDraftModelId })}
               {...(activeMode === "code"
                 ? {
-                    draftDefaultExecutionPolicy: draftExecutionPolicy ?? codeDefaultExecutionPolicy,
+                    draftDefaultPermissionMode: draftPermissionMode ?? codeDefaultPermissionMode,
                     draftDefaultPermissionPersistence:
                       draftPermissionPersistence ??
                       codeController.bootstrap?.settings.defaultPermissionPersistence ??
@@ -778,10 +784,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   });
                 }
               }}
-              onDraftExecutionPolicyChange={(policy, persistence) => {
-                setDraftExecutionPolicy(policy);
-                setDraftPermissionPersistence(persistence);
-              }}
+              onDraftPermissionModeChange={setDraftPermissionMode}
               onDraftCreateThread={handleDraftCreateThread}
               githubPluginEnabled={FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") === true}
               linearClient={linearClient}

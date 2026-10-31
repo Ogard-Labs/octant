@@ -8,6 +8,7 @@ import {
   decodeProjectBindingRelinked,
   decodeCodeProjectAccessChanged,
   decodeCodeProjectNewThreadWorkspaceChanged,
+  decodeCodeProjectPermissionModeChanged,
   decodeCodeProjectPullRequestBackgroundRefreshChanged,
   decodeProjectProviderPolicyChanged,
   decodeProjectCreated,
@@ -19,6 +20,7 @@ import {
   decodeProjectRenamed,
   decodeWorkProjectStatusFileChanged,
   decodeProjectBrandKitChanged,
+  decodeCodeProjectActionsChanged,
   decodeCodeProjectDesktopRecipeChanged,
   type EventEnvelope,
   type MemoryEntry,
@@ -168,6 +170,8 @@ const projectDecoders = {
   "project.binding-relinked@1": (payload: unknown) => decodeProjectBindingRelinked(payload).project,
   "project.code-access-changed@1": (payload: unknown) =>
     decodeCodeProjectAccessChanged(payload).project,
+  "project.code-permission-mode-changed@1": (payload: unknown) =>
+    decodeCodeProjectPermissionModeChanged(payload).project,
   "project.code-new-thread-workspace-changed@1": (payload: unknown) =>
     decodeCodeProjectNewThreadWorkspaceChanged(payload).project,
   "project.code-pull-request-background-refresh-changed@1": (payload: unknown) =>
@@ -178,6 +182,8 @@ const projectDecoders = {
     decodeWorkProjectStatusFileChanged(payload).project,
   "project.brand-kit-changed@1": (payload: unknown) =>
     decodeProjectBrandKitChanged(payload).project,
+  "project.code-actions-changed@1": (payload: unknown) =>
+    decodeCodeProjectActionsChanged(payload).project,
   "project.code-desktop-recipe-changed@1": (payload: unknown) =>
     decodeCodeProjectDesktopRecipeChanged(payload).project,
 } as const;

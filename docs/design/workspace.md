@@ -425,6 +425,17 @@ through `GitHistoryReader` and the authenticated Code checkout-read boundary;
 its Git subprocesses are network-denied and its data is an ephemeral read,
 not a second journal. Pages anchor to immutable Git tips, and commit details
 compare immutable object IDs with an explicit parent for merges.
+A pull request opened in Review shows, under its header, an **Automatic
+actions** section with two switches: **Merge when ready** and **Auto-fix**.
+Each has one status line under its name that says what it is doing now (off,
+on and waiting on checks, reviews, or a conflict, merged, turned off by
+GitHub; on and watching, waiting while you type or while a turn runs, last
+woke the thread and which try, stopped and why). Auto-fix names the linked
+thread it wakes, the first linked one; with none linked it stays off and its
+hover reason says to link a thread. A refused or unsupported change keeps the
+switch where it was and says why in one alert line under the section. The
+review re-reads the switches every 20 seconds while open. Rules and limits are
+owned by [Architecture: modes](../architecture.md#modes-chat-work-and-code).
 The top-right control reveals the dock only when the active pane has a bound thread
 or a valid launchable tool. A new Code task's pane, before its thread exists, keeps
 the dock: its title band shows the common tools disabled ("Available once the task
@@ -870,7 +881,13 @@ a Project terminal and pins a card that names the Project and the terminal,
 never a thread. The card is a window onto the shell and grants nothing: a card
 naming a terminal this window does not own is refused. Authority, lifecycle,
 and the journal record follow the
-[Project terminal rule](../architecture.md#security-and-authority). Add browser
+[Project terminal rule](../architecture.md#security-and-authority). A Code
+Project's saved actions (Run, Test, Dev) are buttons in the window header, three
+inline and the rest under More, and entries in the command palette's Actions
+group; the Project overview's Actions section edits them and offers suggestions
+the person confirms. Choosing one runs it in the window's pinned Project
+terminal, or opens and pins one, and enters Zen to show it (see
+[Project actions](../architecture.md#security-and-authority)). Add browser
 likewise offers the window's Work or Code Project as "This Project": the dock
 names the Project, never a thread, and shows that Project's own page under the
 Project browsing context rule in the same section.

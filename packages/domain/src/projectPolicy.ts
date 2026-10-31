@@ -1,6 +1,7 @@
 import type { CanvasDesignBrand } from "@octant/contracts/canvas";
 import type { DesktopRecipe, LeasableDesktopProvider } from "@octant/contracts/desktop-lease";
 import type { AggregateVersion, UtcTimestamp } from "@octant/contracts/events";
+import type { PermissionMode } from "@octant/contracts/providers";
 import { designBrandTokenRefusal } from "./canvasDesignFrameKit";
 import { desktopNetworkAllowed } from "./desktopLeasePolicy";
 import {
@@ -15,6 +16,7 @@ import {
   type WorkProject,
   type WorkProjectStatusFile,
   type Project,
+  type ProjectAction,
   type ProjectActor,
   type ProjectColor,
   type ProjectId,
@@ -224,9 +226,75 @@ export function changeCodeProjectAccess(
   if (project.codeAccessPersistence === codeAccessPersistence) {
     reject("invalid-lifecycle", "Code Project access persistence is already selected");
   }
+  // The older remembered-access switch speaks for the Project's whole mode
+  // when it is used, so a Project mode set earlier does not outrank it.
+  const { defaultPermissionMode: _previousMode, ...rest } = project;
   return {
-    ...project,
+    ...rest,
     codeAccessPersistence,
+    version: nextVersion(project),
+    updatedAt,
+  };
+}
+
+/**
+ * Set the mode a Code Project's new threads start in, or return it to the
+ * Settings default. Remembered Full access follows the mode, so every reader
+ * of the older switch (the Project terminal, the CLI) agrees with it.
+ */
+export function changeCodeProjectPermissionMode(
+  project: Project,
+  permissionMode: PermissionMode | undefined,
+  updatedAt: UtcTimestamp,
+): CodeProject {
+  if (project.type !== "code") {
+    reject("binding-not-allowed", "Only Code Projects have a default mode");
+  }
+  const codeAccessPersistence: CodeAccessPersistence =
+    permissionMode === "full-access" ? "project-default" : "current-session";
+  // A Project that remembered Full access before Project modes existed has no
+  // mode of its own but still starts threads in Full access, so returning it to
+  // the Settings default is a change even though both modes are unset.
+  if (
+    project.defaultPermissionMode === permissionMode &&
+    project.codeAccessPersistence === codeAccessPersistence
+  ) {
+    reject("invalid-lifecycle", "This Project already starts threads in that mode");
+  }
+  const { defaultPermissionMode: _previousMode, ...rest } = project;
+  return {
+    ...rest,
+    ...(permissionMode === undefined ? {} : { defaultPermissionMode: permissionMode }),
+    codeAccessPersistence,
+    version: nextVersion(project),
+    updatedAt,
+  };
+}
+
+/**
+ * Replace a Code Project's named terminal actions with the list the person
+ * saved. Only a Code Project has a terminal to run them in, and an archived
+ * Project is read-only. A list equal to the saved one is refused so the journal
+ * never carries an event that changed nothing; an absent list reads as empty.
+ */
+export function changeCodeProjectActions(
+  project: Project,
+  actions: ReadonlyArray<ProjectAction>,
+  updatedAt: UtcTimestamp,
+): CodeProject {
+  if (project.type !== "code") {
+    reject("binding-not-allowed", "Only Code Projects have terminal actions");
+  }
+  if (project.lifecycle === "archived") {
+    reject("invalid-lifecycle", "Archived Projects are read-only");
+  }
+  if (JSON.stringify(project.actions ?? []) === JSON.stringify(actions)) {
+    reject("invalid-lifecycle", "Code Project actions are already saved");
+  }
+  const { actions: _replaced, ...rest } = project;
+  return {
+    ...rest,
+    ...(actions.length === 0 ? {} : { actions }),
     version: nextVersion(project),
     updatedAt,
   };
@@ -362,6 +430,15 @@ export function changeCodeProjectDesktopRecipe(
     );
     if (provider === undefined) {
       reject("invalid-desktop-recipe", "That desktop provider isn't available on this host");
+    }
+    // A provider the host lists but the person has not set up starts nothing,
+    // so a recipe may not move to it. One already on it may still be edited
+    // or removed.
+    if (
+      provider.needsSetup !== undefined &&
+      String(project.desktopRecipe?.providerId ?? "") !== String(recipe.providerId)
+    ) {
+      reject("invalid-desktop-recipe", "That desktop provider needs setup on this host first");
     }
     // A placement decides locality and billing, and so the network and key
     // rules below. A provider that offers placements is leased only on one of

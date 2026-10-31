@@ -26,11 +26,17 @@ import {
   ChatTurnRouteDecided,
   CodeProjectAccessChanged,
   CodeProjectNewThreadWorkspaceChanged,
+  CodeProjectPermissionModeChanged,
   CodeProjectPullRequestBackgroundRefreshChanged,
   CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED,
   CodeProjectPullRequestMergeRecorded,
+  CODE_PROJECT_PULL_REQUEST_MERGE_WHEN_READY_RECORDED,
+  CodeProjectPullRequestMergeWhenReadyRecorded,
+  CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED,
+  CodeProjectPullRequestAutoFixRecorded,
   WorkProjectStatusFileChanged,
   ProjectBrandKitChanged,
+  CodeProjectActionsChanged,
   CodeProjectDesktopRecipeChanged,
   CodeCheckoutObserved,
   CodeCheckoutRemoved,
@@ -342,6 +348,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("project.lifecycle-changed@1", 1, ProjectLifecycleChanged)
     .register("project.binding-relinked@1", 1, ProjectBindingRelinked)
     .register("project.code-access-changed@1", 1, CodeProjectAccessChanged)
+    .register("project.code-permission-mode-changed@1", 1, CodeProjectPermissionModeChanged)
     .register(
       "project.code-new-thread-workspace-changed@1",
       1,
@@ -353,9 +360,16 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       CodeProjectPullRequestBackgroundRefreshChanged,
     )
     .register(CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED, 1, CodeProjectPullRequestMergeRecorded)
+    .register(
+      CODE_PROJECT_PULL_REQUEST_MERGE_WHEN_READY_RECORDED,
+      1,
+      CodeProjectPullRequestMergeWhenReadyRecorded,
+    )
+    .register(CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED, 1, CodeProjectPullRequestAutoFixRecorded)
     .register("project.provider-policy-changed@1", 1, ProjectProviderPolicyChanged)
     .register("project.work-status-file-changed@1", 1, WorkProjectStatusFileChanged)
     .register("project.brand-kit-changed@1", 1, ProjectBrandKitChanged)
+    .register("project.code-actions-changed@1", 1, CodeProjectActionsChanged)
     .register("project.code-desktop-recipe-changed@1", 1, CodeProjectDesktopRecipeChanged)
     .register("memory.entry-created@1", 1, MemoryEntryCreated)
     .register("memory.entry-superseded@1", 1, MemoryEntrySuperseded)

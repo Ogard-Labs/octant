@@ -4,6 +4,7 @@ import type {
   DesktopLeaseEndReason,
   DesktopLeaseRefusalReason,
   DesktopPaneAnswer,
+  DesktopProviderSetupReason,
   DesktopViewRefusalReason,
   LeasableDesktopProvider,
 } from "@octant/contracts";
@@ -131,6 +132,32 @@ export function desktopWhere(
   return placement?.displayName ?? String(lease.placementId);
 }
 
+/** What setting a provider up means on this host, in one sentence a person can act on. */
+export function setupMessage(reason: DesktopProviderSetupReason, providerName: string): string {
+  switch (reason) {
+    case "no-credential-store":
+      return `${providerName} needs this host to keep your API key, and it has no credential store Octant can reach. Set one up on the computer Octant runs on, then open these settings again.`;
+    case "daemon-not-connected":
+      return `${providerName} needs its app running and signed in on the computer Octant runs on. Start it there, then open these settings again.`;
+  }
+}
+
+/**
+ * What a provider is, in one sentence, from what the host reports: where the
+ * desktop runs, whose account it uses, and whether it bills the person.
+ */
+export function providerCapability(provider: LeasableDesktopProvider): string {
+  if (provider.daemon === true) {
+    return `Runs through the ${provider.displayName} app signed in on this computer. Where it runs, and whether it bills you, depends on the place you choose.`;
+  }
+  if (provider.locality === "host-local") {
+    return "Runs on this host. No account and no cost.";
+  }
+  return provider.billed
+    ? `Runs on your own ${provider.displayName} account with an API key kept on this computer. It bills you, and Octant asks before every start.`
+    : `Runs on your own ${provider.displayName} account with an API key kept on this computer.`;
+}
+
 /** Whole US cents as the person reads money: `$4.00`. */
 export function desktopDollars(cents: number): string {
   return new Intl.NumberFormat("en", {
@@ -160,6 +187,8 @@ export function startRefusalMessage(
       return "The desktop provider for this Project is turned off.";
     case "provider-unavailable":
       return "The desktop provider isn't ready on this host.";
+    case "needs-setup":
+      return "The desktop provider for this Project needs setting up on this host first. Open Disposable desktop in the Project's settings to see what it needs.";
     case "computer-use-off":
       return "Computer use is off in Settings.";
     case "plan-mode":

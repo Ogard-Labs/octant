@@ -222,6 +222,72 @@ describe("desktop preload bridge", () => {
     );
   });
 
+  it("offers window capture only on macOS, through fixed channels", async () => {
+    const ipc: IpcRendererPort = { invoke: vi.fn(), on: vi.fn(), removeListener: vi.fn() };
+    for (const platform of ["linux", "win32"] as const) {
+      const bridge = createHostBridge(ipc, projectWindowCapability, undefined, platform);
+      expect(bridge).not.toHaveProperty("listCaptureWindows");
+      expect(bridge).not.toHaveProperty("captureWindow");
+      expect(bridge).not.toHaveProperty("requestCaptureWindowPermission");
+    }
+    const bytes = new Uint8Array([137, 80, 78, 71]);
+    const invoke = vi
+      .fn()
+      .mockResolvedValueOnce({ kind: "windows", windows: [{ id: "window:1:0", name: "Notes" }] })
+      .mockResolvedValueOnce({ kind: "granted" })
+      .mockResolvedValueOnce({ kind: "captured", name: "Notes", mimeType: "image/png", bytes });
+    const bridge = createHostBridge(
+      { invoke, on: vi.fn(), removeListener: vi.fn() },
+      projectWindowCapability,
+      undefined,
+      "darwin",
+    );
+    await expect(bridge.listCaptureWindows?.()).resolves.toEqual({
+      kind: "windows",
+      windows: [{ id: "window:1:0", name: "Notes" }],
+    });
+    await expect(bridge.requestCaptureWindowPermission?.()).resolves.toEqual({ kind: "granted" });
+    await expect(bridge.captureWindow?.("window:1:0")).resolves.toEqual({
+      kind: "captured",
+      name: "Notes",
+      mimeType: "image/png",
+      bytes,
+    });
+    expect(invoke.mock.calls).toEqual([
+      [IPC_CHANNELS.windowCaptureList],
+      [IPC_CHANNELS.windowCapturePermission],
+      [IPC_CHANNELS.windowCaptureTake, "window:1:0"],
+    ]);
+  });
+
+  it("refuses a window capture that is not in the agreed shape", async () => {
+    const asked = vi.fn();
+    const bridgeFor = (reply: unknown) =>
+      createHostBridge(
+        { invoke: asked.mockResolvedValue(reply), on: vi.fn(), removeListener: vi.fn() },
+        projectWindowCapability,
+        undefined,
+        "darwin",
+      );
+    for (const reply of [
+      { kind: "captured", name: "Notes", mimeType: "image/png", bytes: "text" },
+      { kind: "captured", name: "Notes", mimeType: "image/png", bytes: new Uint8Array() },
+      { kind: "captured", name: "Notes", mimeType: "text/html", bytes: new Uint8Array(3) },
+      { kind: "something-else" },
+      undefined,
+    ]) {
+      await expect(bridgeFor(reply).captureWindow?.("window:1:0")).rejects.toThrow(
+        "Invalid window capture result.",
+      );
+    }
+    await expect(
+      bridgeFor({ kind: "windows", windows: [{ id: "x" }] }).listCaptureWindows?.(),
+    ).rejects.toThrow("Invalid window capture list.");
+    await expect(bridgeFor(undefined).captureWindow?.("")).rejects.toThrow(
+      "Invalid window to capture.",
+    );
+  });
+
   it("shows the window why the keyring would not take a key, and hides any other store text", async () => {
     const advice =
       "keyring-advice: No keyring is running in your session, so Octant has nowhere to keep keys. Start one that provides Secret Service and unlock it, then try again. Octant notices it without a restart.";
@@ -272,6 +338,7 @@ describe("desktop preload bridge", () => {
       "approveRemotePairingRequest",
       "attachBrowserSurface",
       "cancelCodeOperationApproval",
+      "captureWindow",
       "checkComputerUseUpdates",
       "checkForAppUpdate",
       "checkManagedToolUpdates",
@@ -295,6 +362,7 @@ describe("desktop preload bridge", () => {
       "hubAdministrationRequest",
       "initialProjectTarget",
       "installAppUpdate",
+      "listCaptureWindows",
       "listOpenInApplications",
       "listPairedComputers",
       "listProviderApiKeys",
@@ -327,6 +395,7 @@ describe("desktop preload bridge", () => {
       "renameProviderApiKey",
       "renameRemoteDevice",
       "replaceProviderApiKey",
+      "requestCaptureWindowPermission",
       "requestCodeOperationApproval",
       "requestComputerUsePermissions",
       "requestPairedComputer",
