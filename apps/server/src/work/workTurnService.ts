@@ -1576,6 +1576,7 @@ export class WorkTurnService {
           sessionNativeSetup(this.#persistence, {
             providerInstanceId: input.command.authority.providerInstanceId,
             projectId: input.command.authority.projectId,
+            threadId: String(input.command.threadId),
             mode: "work",
             executionPolicy:
               input.access === "auto-accept-edits" ? "auto-accept-edits" : "approval-gated",

@@ -1022,6 +1022,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           sessionNativeSetup(persistence, {
             providerInstanceId: thread.providerInstanceId,
             projectId: thread.projectId,
+            threadId: String(thread.id),
             mode: "code",
             executionPolicy: thread.executionPolicy,
           }),
