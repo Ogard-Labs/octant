@@ -167,6 +167,11 @@ What each one loads today:
   folder, and in a trusted Project that Project's settings, hooks, skills,
   and MCP servers. Your own MCP servers start only in a trusted Project,
   because Claude Code starts them together with the Project's `.mcp.json`.
+- **Codex:** the skills in the Project, and in Chat your own MCP servers,
+  plugins, and apps. Its own subagents run only when the thread has Full
+  access, because Codex's subagents ask for approval where Octant cannot
+  show it; each one shows in the thread as a subagent run. Codex's web
+  search was always on.
 
 Only a window on the computer running Octant can change either switch; a
 paired phone or browser cannot. Plan mode stays read-only, so it never runs

@@ -1210,6 +1210,63 @@ describe("ProjectService", () => {
     }
   });
 
+  it("journals a person turning a Work Project's Developer tools on, with who and when, and refuses a Code Project", async () => {
+    const fixture = fixtureService({ projects: [workProject()] });
+    const result = await fixture.service.executeProject(windowId, {
+      kind: "change-work-project-developer-tools",
+      projectId: workId,
+      expectedVersion: 1,
+      enabled: true,
+    });
+    expect(result).toMatchObject({
+      kind: "work-project-developer-tools-changed",
+      project: {
+        developerTools: { enabled: true, changedBy: { kind: "local-user" } },
+        version: 2,
+      },
+    });
+    const event = fixture.append.mock.calls[0]?.[0]?.events?.[0];
+    expect(event?.eventName).toBe("project.work-developer-tools-changed@1");
+    expect(event?.payload).toMatchObject({
+      project: { developerTools: { enabled: true, changedAt: expect.any(String) } },
+    });
+
+    const code = fixtureService({ projects: [codeProject()] });
+    await expect(
+      code.service.executeProject(windowId, {
+        kind: "change-work-project-developer-tools",
+        projectId: workId,
+        expectedVersion: 1,
+        enabled: true,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+  });
+
+  it("saves a Work Project's actions as one journaled event, since Work has the shell", async () => {
+    const fixture = fixtureService({ projects: [workProject()] });
+    const actions = [
+      {
+        id: "92000000-0000-4000-8000-000000000002",
+        name: "Build",
+        command: "make pdf",
+        directory: ".",
+      },
+    ];
+    const result = await fixture.service.executeProject(windowId, {
+      kind: "change-work-project-actions",
+      projectId: workId,
+      expectedVersion: 1,
+      actions,
+    } as never);
+    expect(result).toMatchObject({
+      kind: "work-project-actions-changed",
+      project: { actions, version: 2 },
+    });
+    expect(fixture.append.mock.calls[0]?.[0]?.events?.[0]?.eventName).toBe(
+      "project.work-actions-changed@1",
+    );
+  });
+
   it("writes STATUS.md and never AGENTS.md into the folder when a Work Project opts into a status file", async () => {
     const folder = realpathSync(mkdtempSync(join(tmpdir(), "octant-status-opt-in-")));
     try {
