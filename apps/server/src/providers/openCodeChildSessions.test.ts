@@ -59,7 +59,7 @@ describe("OpenCodeChildSessions", () => {
     });
   });
 
-  it("reports running once and completed once, then stays finished", () => {
+  it("reports running once and completed once, and again when OpenCode resumes the child", () => {
     const children = new OpenCodeChildSessions();
     children.route(created("child", "root"), src(created("child", "root")), isRoot);
     const busy = event("session.status", { sessionID: "child", status: { type: "busy" } });
@@ -71,7 +71,11 @@ describe("OpenCodeChildSessions", () => {
     expect(children.route(idle, src(idle), isRoot)).toMatchObject({
       activity: { status: "completed" },
     });
-    expect(children.route(busy, src(busy), isRoot)).not.toHaveProperty("activity");
+    // A resumed child keeps its owner, so its requests still reach the parent.
+    expect(children.route(busy, src(busy), isRoot)).toMatchObject({
+      rootSource: "root",
+      activity: { status: "running" },
+    });
   });
 
   it("reports a child that errored as failed", () => {

@@ -3065,6 +3065,16 @@ function LaunchedShell(
     serverUrl: props.launch.serverUrl,
     windowCapability: props.projectWindowCapability,
   });
+  const threadNativeSetupServices = useMemo(
+    () =>
+      providerController.threadNativeSetup === undefined
+        ? undefined
+        : {
+            instances: providerController.instances,
+            ...providerController.threadNativeSetup,
+          },
+    [providerController.instances, providerController.threadNativeSetup],
+  );
   // Built once per client and provider list: a new element on every render
   // re-rendered the whole memoized sidebar for each streamed event.
   // The settings opener is a new function each render, so it is read through
@@ -6834,16 +6844,7 @@ function LaunchedShell(
         sidebarWidth={sidebarWidth}
         wideContextOpen={!isNarrow && dockPresentedOpen}
         workspace={
-          <ThreadNativeSetupProvider
-            services={
-              providerController.threadNativeSetup === undefined
-                ? undefined
-                : {
-                    instances: providerController.instances,
-                    ...providerController.threadNativeSetup,
-                  }
-            }
-          >
+          <ThreadNativeSetupProvider services={threadNativeSetupServices}>
             <StartQuickToolsContext.Provider value={startQuickToolsServices}>
               <StartQuickToolsPlacementProvider
                 // The draft scope WorkspaceView gives the active pane's start screen.

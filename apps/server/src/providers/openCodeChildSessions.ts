@@ -81,7 +81,18 @@ export class OpenCodeChildSessions {
       const parent = parentOf(event);
       if (parent === undefined || this.#owners.has(source)) return { kind: "none" };
       const root = isRoot(parent) ? parent : this.#owners.get(parent)?.root;
-      if (root === undefined || this.#owners.size >= MAX_TRACKED_CHILDREN) return { kind: "none" };
+      if (root === undefined) return { kind: "none" };
+      // A finished child's place is freed only when the table is full, so a
+      // child that OpenCode resumes keeps its owner while it can.
+      if (this.#owners.size >= MAX_TRACKED_CHILDREN) {
+        const finished = [...this.#owners.keys()].find((child) => {
+          const status = this.#statuses.get(child);
+          return status === "completed" || status === "failed";
+        });
+        if (finished === undefined) return { kind: "none" };
+        this.#owners.delete(finished);
+        this.#statuses.delete(finished);
+      }
       this.#owners.set(source, { root, parent });
       const task = titleOf(event);
       return this.#child(source, {
@@ -148,18 +159,11 @@ export class OpenCodeChildSessions {
     if (owner === undefined) return { kind: "none" };
     // A status is reported once; a finished child stays finished.
     const previous = this.#statuses.get(childSource);
-    const fresh =
-      activity !== undefined &&
-      activity.status !== previous &&
-      previous !== "completed" &&
-      previous !== "failed";
+    // A finished child OpenCode resumes through `task_id` keeps its session,
+    // so it reports again when it runs.
+    const fresh = activity !== undefined && activity.status !== previous;
     if (fresh) this.#statuses.set(childSource, activity.status);
-    // A finished child frees its place, so a long turn that delegates many
-    // tasks never fills the table and leaves a later child unanswered.
-    if (fresh && (activity.status === "completed" || activity.status === "failed")) {
-      this.#owners.delete(childSource);
-      this.#statuses.delete(childSource);
-    }
+
     return {
       kind: "child",
       rootSource: owner.root,
