@@ -684,13 +684,20 @@ export function shieldCallFromProviderRequest(input: {
   }
   const record =
     typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
-  const workingDirectory =
+  const named =
     stringOf(record.cwd) ?? stringOf(record.workdir) ?? input.workingDirectory ?? input.boundRoot;
+  // A relative working directory is relative to the bound root, where every
+  // runtime starts its session.
+  const workingDirectory = named.startsWith("/") ? named : resolveFrom(named, input.boundRoot);
   const command = commandOf(record);
   const kind = kindOfTool(input.tool) ?? (command === undefined ? "other" : "command");
+  // A runtime asking to widen its own sandbox (Codex's permissions request)
+  // is a privilege change, which Shield never allows.
+  const widensSandbox = input.tool.toLowerCase() === "permissions";
   return {
     tool: input.tool,
     kind: command !== undefined && kind === "other" ? "command" : kind,
+    ...(widensSandbox ? { approvalClass: "privilege-expansion" as const } : {}),
     ...(command === undefined ? {} : { command }),
     paths: pathsOf(record),
     urls: urlsOf(record),

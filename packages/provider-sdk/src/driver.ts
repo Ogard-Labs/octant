@@ -1,4 +1,5 @@
 import type {
+  ProviderApprovalCall,
   ContextCompactionRefusalReason,
   ProviderDriverKind,
   ProviderExecutionPolicy,
@@ -147,6 +148,15 @@ export interface ProviderApprovalAnswer {
   readonly sessionId: ProviderSessionId;
   readonly requestId: string;
   readonly approved: boolean;
+  /**
+   * `once`: the answer covers this one call. A driver neither remembers it for
+   * the session or the Project nor asks the runtime to, whatever the person's
+   * persistence setting says. Every automatic reviewer's answer (Octant
+   * Shield) and every answer on a child run's behalf carries it, so one
+   * automatic allow never authorizes a later call that nobody reviewed.
+   * Absent, the driver applies the person's persistence setting as before.
+   */
+  readonly scope?: "once";
 }
 
 export interface ProviderUserInputAnswer {
@@ -272,6 +282,18 @@ export interface ProviderConnection {
    */
   readonly forceStop?: (sessionId: ProviderSessionId) => Effect.Effect<void, ProviderFailure>;
   readonly answerApproval: (input: ProviderApprovalAnswer) => Effect.Effect<void, ProviderFailure>;
+  /**
+   * The pending call behind an approval request this connection raised and
+   * has not had answered, for an automatic reviewer on the host: its tool, the
+   * argument fields a reviewer judges with credentials redacted, and where it
+   * runs. Never put on an event, journaled, or shown. Absent, or answering
+   * nothing, when the runtime cannot say; the reviewer then judges by the
+   * request's description alone.
+   */
+  readonly approvalCall?: (input: {
+    readonly sessionId: ProviderSessionId;
+    readonly requestId: string;
+  }) => ProviderApprovalCall | undefined;
   readonly answerUserInput: (
     input: ProviderUserInputAnswer,
   ) => Effect.Effect<void, ProviderFailure>;
