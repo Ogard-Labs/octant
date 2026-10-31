@@ -244,6 +244,7 @@ const MODELED_ITEM_TYPES: ReadonlySet<string> = new Set([
   "mcpToolCall",
   "dynamicToolCall",
   "webSearch",
+  "collabAgentToolCall",
 ]);
 
 /**
@@ -329,6 +330,26 @@ const ThreadItem = Schema.Union(
     type: Schema.Literal("webSearch"),
     id: Schema.String,
     query: Schema.String,
+  }),
+  /**
+   * One of Codex's own subagent calls (codex-cli 0.164.0 `ThreadItem`):
+   * starting a subagent, waiting on one, or closing it. Only a thread the
+   * person let run Codex's own subagents ever carries one; Octant reads which
+   * agent threads it names and how they stand, not what they said.
+   */
+  Schema.Struct({
+    type: Schema.Literal("collabAgentToolCall"),
+    id: Schema.String,
+    tool: Schema.String,
+    status: Schema.Literal("inProgress", "completed", "failed", "interrupted"),
+    receiverThreadIds: Schema.Array(Schema.String).pipe(Schema.maxItems(32)),
+    prompt: Schema.optional(Schema.NullOr(Schema.String)),
+    agentsStates: Schema.optional(
+      Schema.Record({
+        key: Schema.String,
+        value: Schema.Struct({ status: Schema.String }),
+      }),
+    ),
   }),
   UnmodeledThreadItem,
 );
