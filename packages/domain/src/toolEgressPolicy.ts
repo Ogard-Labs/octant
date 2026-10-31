@@ -167,37 +167,6 @@ export function decideToolEgress(request: ToolEgressRequest): ToolEgressDecision
   return { kind: "refuse", reason: matchedExpired ? "expired" : "no-rule", host: name.host, port };
 }
 
-export type ProviderRuntimeEgressDecision =
-  | { readonly kind: "allow"; readonly host: string; readonly port: number }
-  | {
-      readonly kind: "refuse";
-      readonly reason: "ip-literal" | "invalid-port" | "invalid-name";
-    };
-
-/**
- * The rule a provider runtime's own proxy decides by,
- * on this host.
- *
- * Any public name is allowed, because inference must not wait on a rule; no
- * thread or Project rule applies and nothing is proposed. A destination that
- * is an address, a single label, or `localhost` is refused here, and the
- * proxy's private-address check refuses every name that resolves to a
- * loopback, private, or link-local address (the cloud metadata service
- * among them), so the host's own network stays out of reach.
- */
-export function decideProviderRuntimeEgress(destination: {
-  readonly host: string;
-  readonly port: number;
-}): ProviderRuntimeEgressDecision {
-  const name = canonicalToolEgressHost(destination.host);
-  if (name.kind === "refused" && name.reason === "ip-literal") {
-    return { kind: "refuse", reason: "ip-literal" };
-  }
-  if (!isPort(destination.port)) return { kind: "refuse", reason: "invalid-port" };
-  if (name.kind === "refused") return { kind: "refuse", reason: "invalid-name" };
-  return { kind: "allow", host: name.host, port: destination.port };
-}
-
 /**
  * Whose rules a launch may use. A child uses its parent's thread rules and
  * none of its own. Taint on the launching thread or its parent suspends
