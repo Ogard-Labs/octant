@@ -172,6 +172,12 @@ What each one loads today:
   access, because Codex's subagents ask for approval where Octant cannot
   show it; each one shows in the thread as a subagent run. Codex's web
   search was always on.
+- **OpenCode:** its skills in `.claude/skills` and `.agents/skills` (below
+  Full access only the Project's). If you remember approvals for the
+  Project, approving one remembers it in OpenCode's own settings, as OpenCode
+  does; the approval says so, and you clear it in OpenCode. Your own
+  OpenCode configuration, MCP servers, and permission rules do not load in
+  Octant yet.
 
 Only a window on the computer running Octant can change either switch; a
 paired phone or browser cannot. Plan mode stays read-only, so it never runs
