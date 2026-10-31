@@ -33,6 +33,7 @@ import type { ComputerUseClient } from "@octant/client-runtime/computer-use-clie
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import { useWorkSettings } from "./work/useWorkSettings";
 import { useAppUpdateReadyNotice } from "./settings/useAppUpdateReadyNotice";
+import { useHostMemoryNotice } from "./host/useHostMemoryNotice";
 import type { WorkTurnClient } from "@octant/client-runtime/work-turn-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ShipClient } from "@octant/client-runtime/ship-client";
@@ -1653,6 +1654,9 @@ function LaunchedShell(
         };
   const [updateReadyNotice, dismissUpdateReadyNotice] = useAppUpdateReadyNotice(
     props.hostBridge?.subscribeAppUpdateState,
+  );
+  const [hostMemoryNotice, dismissHostMemoryNotice] = useHostMemoryNotice(
+    launchedClients.hostControlClient,
   );
   const threadExportClient = useMemo(
     () =>
@@ -7139,8 +7143,22 @@ function LaunchedShell(
           projectAnnouncementSequence={projectController.announcementSequence}
         />
       </ShellFrame>
-      {threadExportNotice !== undefined || updateReadyNotice || quitHintVisible ? (
+      {threadExportNotice !== undefined ||
+      updateReadyNotice ||
+      quitHintVisible ||
+      hostMemoryNotice !== undefined ? (
         <div className="toast-stack">
+          {hostMemoryNotice === undefined ? null : (
+            <OctantToast
+              action={{
+                label: "View host",
+                onSelect: () => void controller.openSettings({ section: "host" }),
+              }}
+              detail={hostMemoryNotice.detail}
+              onDismiss={dismissHostMemoryNotice}
+              title={hostMemoryNotice.title}
+            />
+          )}
           {updateReadyNotice ? (
             <OctantToast
               action={{

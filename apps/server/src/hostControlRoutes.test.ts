@@ -99,6 +99,33 @@ describe("host control routes", () => {
     expect(await handler(makeRequest("/api/other"))).toBeUndefined();
   });
 
+  it("adds the host's memory report to status when a guard is wired, and omits it otherwise", async () => {
+    const memory = {
+      pressure: "elevated" as const,
+      processMegabytes: 2300,
+      previousStop: {
+        lastSeenAt: "2026-08-11T11:00:00.000Z",
+        pressure: "critical" as const,
+        processMegabytes: 4100,
+      },
+    };
+    const wired = setup({ memory: () => memory });
+    const withMemory = decodeHostControlStatus(
+      await (await wired.handler(
+        makeRequest("/api/host-control/status", { method: "GET", capability }),
+      ))!.json(),
+    );
+    expect(withMemory.memory).toEqual(memory);
+
+    const bare = setup();
+    const withoutMemory = decodeHostControlStatus(
+      await (await bare.handler(
+        makeRequest("/api/host-control/status", { method: "GET", capability }),
+      ))!.json(),
+    );
+    expect(withoutMemory.memory).toBeUndefined();
+  });
+
   it("reports compact identity, policy, readiness, capabilities, and lifecycle to a local window", async () => {
     const { handler } = setup();
     const response = await handler(

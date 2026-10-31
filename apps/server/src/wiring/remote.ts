@@ -182,7 +182,7 @@ export type RemoteDependencies = Pick<
   > &
   Pick<RoutesWiring, "authenticatedProductDispatch"> &
   Pick<FoundationsWiring, "workThreadProjection"> &
-  Pick<FoundationsWiring, "providerRuntimeRegistry"> &
+  Pick<FoundationsWiring, "hostMemoryGuard" | "providerRuntimeRegistry"> &
   Pick<CodeRuntimeWiring, "codeOperationRuntime">;
 
 const decodeAgentRunParentThreadId = Schema.decodeUnknownSync(AgentRunParentThreadId);
@@ -220,6 +220,7 @@ export function wireRemote(deps: RemoteDependencies) {
     generatedImageStore,
     debugConfigurationApprovals,
     debugService,
+    hostMemoryGuard,
     languageServerApprovals,
     onWorkTurnCancelled,
     options,
@@ -1070,6 +1071,7 @@ export function wireRemote(deps: RemoteDependencies) {
   const hostControlRoutes = createHostControlRouteHandler({
     windowAuthorityStore,
     diagnostics: composeHostDiagnostics,
+    memory: () => hostMemoryGuard.report(),
     threadRetention,
     ...(options.hostControl?.servicePolicy === undefined
       ? {}
