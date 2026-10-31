@@ -1,4 +1,4 @@
-import type { CodeThread, ProviderModelId } from "@octant/contracts";
+import type { CodeThread, ProviderModelId, WorkThread } from "@octant/contracts";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type { ShieldCall } from "@octant/domain/shield-judge-policy";
 import { describe, expect, it, vi } from "vitest";
@@ -57,6 +57,33 @@ describe("Octant Shield as the host wires it", () => {
       boundRoot: "/Users/dev/app",
     });
     expect(decision).toMatchObject({ verdict: "allow", rule: "read-only-git" });
+  });
+
+  it("reviews a Work thread at Auto as it reviews a Code thread, and leaves its other levels alone", async () => {
+    const work = (access: WorkThread["access"]) =>
+      ({
+        id: threadId,
+        lifecycle: "active",
+        projectId: "00000000-0000-4000-8000-0000000000b6",
+        providerInstanceId,
+        modelId: "big-model",
+        access,
+      }) as unknown as WorkThread;
+    const shieldFor = (access: WorkThread["access"], running?: WorkThread["access"]) =>
+      hostShieldWith(thread(), {
+        readCodeThread: () => undefined,
+        readWorkThread: () => work(access),
+        ...(running === undefined ? {} : { readWorkTurnAccess: () => running }),
+      });
+    const review = (shield: ReturnType<typeof hostShieldWith>) =>
+      shield.review({ threadId, call: command("git status"), boundRoot: "/Users/dev/app" });
+
+    expect(await review(shieldFor("auto"))).toMatchObject({ verdict: "allow" });
+    for (const access of ["ask-first", "auto-accept-edits", "full-access"] as const) {
+      expect(await review(shieldFor(access))).toBeUndefined();
+    }
+    // A goal-loop round or routine holding the turn to Ask first is not reviewed.
+    expect(await review(shieldFor("auto", "ask-first"))).toBeUndefined();
   });
 
   it("leaves Ask first, Plan and Full access to their own approvers", async () => {

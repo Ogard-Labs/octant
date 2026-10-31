@@ -1123,8 +1123,11 @@ starts a Code session at the same level, and a Work turn journals `shell` and
 
 Allowed; not built yet: an ACP agent whose shell runs in-process with no protocol request reporting
 `unsupported` at Guarded and Reviewed and running only at Full access, in
-Work as in Code; and Octant Shield for the runtimes with no reviewer of their
-own, which ask first at Auto today.
+Work as in Code; and Octant Shield answering a Work thread's provider
+runtimes (Claude Code, Codex, OpenCode, ACP agents, Pi) at Auto as it answers
+a Code thread's: in Work their prompts go to the person today. A Work thread
+on the Octant Harness at Auto is answered by Shield as a Code thread is,
+judged against its Project folder.
 
 A driver that cannot run a Work session at the level in force reports so and
 keeps the narrower behavior; it never runs commands under a weaker guard
@@ -10765,7 +10768,12 @@ person already allowed for the session goes through on their word without
 asking Shield. On the Octant Harness an allow or deny is journaled as a
 settled harness approval carrying the decision, an ask is journaled as the
 pending approval with Shield's reason, and the Code transcript shows each
-decision as an `approval-reviewed` row beside the tool rows. A subagent asks
+decision as an `approval-reviewed` row beside the tool rows. A Work thread
+on the Octant Harness at Auto is reviewed the same way, judged against its
+Project folder, with its own turn prompts as the person's messages and its
+model calls counted against its spend ceilings as a Work thread; its
+decisions are journaled with its harness approvals, and its transcript does
+not yet show them as rows (allowed; not built yet). A subagent asks
 under its parent's reviewer, judged against its own worktree, with its own
 taint counted beside the parent's. A provider runtime's prompt reaches
 Shield with the pending call the runtime described: each driver keeps it
