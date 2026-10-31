@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import type { ProviderRuntimeEvent, ShieldWatcherLabel } from "@octant/contracts";
-import { watchOutsideContent } from "@octant/domain/shield-watcher-policy";
-import { recordShieldWatcherLabels } from "../providers/appManagedToolTaint";
+import {
+  SHIELD_WATCHER_SOURCE_PREFIX,
+  watchOutsideContent,
+} from "@octant/domain/shield-watcher-policy";
 import type { RecordExternalContentIngestionInput } from "./externalContentIngestionStore";
 import type { RecordExternalContentIngestion } from "./inheritedExternalContentMark";
 
@@ -119,13 +121,29 @@ export class RuntimeOutsideContentMarks implements RuntimeOutsideContentMarking 
     const digest = createHash("sha256")
       .update(JSON.stringify([event.toolName, event.correlationId, event.toolCallId, event.text]))
       .digest("hex");
-    const recorded = recordShieldWatcherLabels({
-      record: this.#record,
-      threadId,
-      uuid: () => event.correlationId,
-      labels,
-      digest,
-    });
+    // A label that cannot be journaled is owed like a read that could not be
+    // marked, so the thread's next turn cannot resume this session first. Only
+    // the label's own reference is kept, never the page text.
+    let allRecorded = true;
+    for (const label of labels) {
+      const input: RecordExternalContentIngestionInput = {
+        threadId,
+        provenance: {
+          origin: "tool-result",
+          sourceLabel: `${SHIELD_WATCHER_SOURCE_PREFIX}${label}`,
+        },
+        contentReference: `${SHIELD_WATCHER_SOURCE_PREFIX}${label}-${digest}`,
+        correlationId: event.correlationId,
+        authorized: true,
+      };
+      if (this.#recorded(input)) continue;
+      allRecorded = false;
+      const owed =
+        this.#owed.get(threadId) ?? new Map<string, RecordExternalContentIngestionInput>();
+      owed.set(String(input.contentReference), input);
+      this.#owed.set(threadId, owed);
+    }
+    const recorded = allRecorded;
     return recorded ? { status: "watched", labels } : { status: "refused" };
   }
 
