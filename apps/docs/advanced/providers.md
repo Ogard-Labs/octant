@@ -388,14 +388,14 @@ shell are intentionally ignored; add a persistent alias declaration or use
 Local CLI and SDK providers include Codex CLI, Claude Agent SDK,
 OpenCode CLI, Kilo ACP, Pi RPC, Oh My Pi, Devin ACP, Mistral Vibe ACP,
 Ollama, Kimi Code ACP, Grok Build ACP, Goose ACP, GLM Agent, Gemini CLI ACP,
-GitHub Copilot ACP, Cline ACP, and Qwen Code ACP.
+GitHub Copilot ACP, Cline ACP, Qwen Code ACP, and fx.
 
-Octant does not offer fx for now. The current fx release cannot load
-certificates inside Octant's sandbox, so it cannot reach the Vercel AI Gateway.
-Octant does not find fx, add it, or start it. If you already added an fx
-provider, Settings keeps it and its threads and says why it is unavailable; it
-cannot start new turns. Octant will offer fx again once a fx release fixes
-this.
+fx loads its certificates from the macOS System Keychain file,
+`/Library/Keychains/System.keychain`, so Octant's sandbox lets fx read that one
+file and nothing else of the Keychains. Every Mac user can already read it, and
+the passwords inside are encrypted with a key only the system can read, which
+stays blocked. Your own keychains stay blocked too. fx works in Work and Code;
+it does not run in Chat or Plan.
 
 Codex commentary and subsequent answer messages retain paragraph boundaries
 in new responses, including when the provider sends a completed message
