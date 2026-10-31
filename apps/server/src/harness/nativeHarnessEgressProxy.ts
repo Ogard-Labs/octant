@@ -234,6 +234,8 @@ interface Tunnel {
   readonly upstream: Duplex;
   readonly host: string;
   readonly port: number;
+  /** The checked address the upstream connected to; a private one is decided again on every recheck. */
+  readonly address: string;
   readonly tally: Tally;
   expiry: NodeJS.Timeout | undefined;
   closed: boolean;
@@ -541,13 +543,14 @@ export class ToolEgressProxy {
       this.#pending -= 1;
     });
     if (connected === undefined) return;
-    const { upstream, tally, ruleId } = connected;
+    const { upstream, address, tally, ruleId } = connected;
 
     const tunnel: Tunnel = {
       client: socket,
       upstream,
       host: destination.host,
       port: destination.port,
+      address,
       tally,
       expiry: undefined,
       closed: false,
@@ -595,6 +598,7 @@ export class ToolEgressProxy {
   ): Promise<
     | {
         readonly upstream: Duplex;
+        readonly address: string;
         readonly tally: Tally;
         readonly ruleId: ToolEgressRuleId | undefined;
       }
@@ -635,9 +639,9 @@ export class ToolEgressProxy {
       return undefined;
     }
     const tally = this.#count({ ...destination, decision: "allowed" }, { requests: 1 });
-    const upstream = await this.#connect(addresses, destination.port);
-    if (upstream === undefined || this.#closed) {
-      upstream?.destroy();
+    const connected = await this.#connect(addresses, destination.port);
+    if (connected === undefined || this.#closed) {
+      connected?.socket.destroy();
       respond(
         socket,
         502,
@@ -645,7 +649,12 @@ export class ToolEgressProxy {
       );
       return undefined;
     }
-    return { upstream, tally, ruleId: current.ruleId };
+    return {
+      upstream: connected.socket,
+      address: connected.address,
+      tally,
+      ruleId: current.ruleId,
+    };
   }
 
   /**
@@ -796,9 +805,21 @@ export class ToolEgressProxy {
       return false;
     }
     const decision = this.#decide(tunnel.host, tunnel.port);
-    if (decision.kind === "allow") return true;
+    // A provider runtime's tunnel to a private address stays only while what
+    // let that address through still does: a person who stops trusting the
+    // network it is on closes the tunnel, whatever the name's allowance says.
+    const runtime = this.#runtimeDecider();
+    const reason =
+      decision.kind === "refuse"
+        ? decision.reason
+        : runtime !== undefined &&
+            isPrivateAddress(tunnel.address) &&
+            !this.#privateAddressAllowed(runtime, tunnel.address, tunnel.port, decision.by)
+          ? "private-destination"
+          : undefined;
+    if (reason === undefined) return true;
     this.#count(
-      { host: tunnel.host, port: tunnel.port, decision: "refused", reason: decision.reason },
+      { host: tunnel.host, port: tunnel.port, decision: "refused", reason },
       { requests: 1 },
     );
     this.#closeTunnel(tunnel);
@@ -1031,7 +1052,10 @@ export class ToolEgressProxy {
   }
 
   /** Tries each checked address in turn; the socket never resolves a name itself. */
-  async #connect(addresses: ReadonlyArray<string>, port: number): Promise<Duplex | undefined> {
+  async #connect(
+    addresses: ReadonlyArray<string>,
+    port: number,
+  ): Promise<{ readonly socket: Duplex; readonly address: string } | undefined> {
     const dial = this.#options.connect ?? defaultConnect;
     for (const address of addresses) {
       if (this.#closed) return undefined;
@@ -1058,7 +1082,7 @@ export class ToolEgressProxy {
       });
       if (connected) {
         if (socket instanceof Socket) socket.setNoDelay(true);
-        return socket;
+        return { socket, address };
       }
     }
     return undefined;

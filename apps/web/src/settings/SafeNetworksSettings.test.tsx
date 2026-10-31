@@ -228,6 +228,96 @@ describe("SafeNetworksSettings", () => {
     expect(await screen.findByText("Atlas follows the every-Project list.")).toBeVisible();
   });
 
+  it("shows nothing it could save for the newly chosen Project until that Project's list is read", async () => {
+    const own: ReadonlyArray<SafeNetworkPlace> = [{ kind: "domain", domain: "internal.example" }];
+    const refused = [
+      {
+        host: "cdn.example.net",
+        port: 443,
+        runtime: "codex",
+        requests: 1,
+        lastRefusedAt: new Date().toISOString(),
+      },
+    ] as unknown as SafeNetworksView["refused"];
+    let finishBeacon: (value: SafeNetworksView) => void = () => undefined;
+    const beacon = new Promise<SafeNetworksView>((resolve) => {
+      finishBeacon = resolve;
+    });
+    const atlas = view({ refused, project: { projectId: PROJECT_ID, override: own } } as never);
+    const read = vi.fn(async (projectId?: string) =>
+      projectId === PROJECT_ID ? atlas : projectId === OTHER_PROJECT_ID ? beacon : view(),
+    );
+    const command = vi.fn(
+      async (): Promise<SafeNetworksCommandResult> => ({
+        kind: "safe-networks-updated",
+        view: atlas,
+      }),
+    );
+    const user = userEvent.setup();
+    render(<SafeNetworksSettings client={{ read, command }} projectNames={PROJECTS} />);
+
+    await chooseProject(user, "Atlas");
+    expect(await screen.findByText("Atlas has its own list.")).toBeVisible();
+    await chooseProject(user, "Beacon");
+
+    expect(await screen.findByText("Reading this Project's list…")).toBeVisible();
+    expect(screen.queryByText("Atlas has its own list.")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save Project list" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Trust cdn.example.net:443" })).toBeNull();
+    expect(command).not.toHaveBeenCalled();
+
+    finishBeacon(view({ project: { projectId: OTHER_PROJECT_ID, override: null } } as never));
+    expect(await screen.findByText("Beacon follows the every-Project list.")).toBeVisible();
+  });
+
+  it("drops a late answer about the Project that was chosen before", async () => {
+    const own: ReadonlyArray<SafeNetworkPlace> = [{ kind: "domain", domain: "internal.example" }];
+    const refused = [
+      {
+        host: "cdn.example.net",
+        port: 443,
+        runtime: "codex",
+        requests: 1,
+        lastRefusedAt: new Date().toISOString(),
+      },
+    ] as unknown as SafeNetworksView["refused"];
+    let answerAtlas: (value: SafeNetworksCommandResult) => void = () => undefined;
+    const atlasAnswer = new Promise<SafeNetworksCommandResult>((resolve) => {
+      answerAtlas = resolve;
+    });
+    const read = vi.fn(async (projectId?: string) =>
+      projectId === PROJECT_ID
+        ? view({ refused, project: { projectId: PROJECT_ID, override: own } } as never)
+        : projectId === OTHER_PROJECT_ID
+          ? view({ project: { projectId: OTHER_PROJECT_ID, override: null } } as never)
+          : view(),
+    );
+    const command = vi.fn(async () => atlasAnswer);
+    const user = userEvent.setup();
+    render(<SafeNetworksSettings client={{ read, command }} projectNames={PROJECTS} />);
+
+    await chooseProject(user, "Atlas");
+    await user.click(await screen.findByRole("button", { name: "Trust cdn.example.net:443" }));
+    await waitFor(() => expect(command).toHaveBeenCalledOnce());
+    await chooseProject(user, "Beacon");
+    expect(await screen.findByText("Beacon follows the every-Project list.")).toBeVisible();
+
+    answerAtlas({
+      kind: "safe-networks-updated",
+      view: view({
+        project: {
+          projectId: PROJECT_ID,
+          override: [...own, { kind: "host", host: "cdn.example.net", port: 443 }],
+        },
+      } as never),
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Use its own list" })).toBeEnabled(),
+    );
+    expect(screen.getByText("Beacon follows the every-Project list.")).toBeVisible();
+    expect(screen.queryByText("internal.example")).toBeNull();
+  });
+
   it("starts a Project's own list from the every-Project places", async () => {
     const { command, user } = setup({
       projectViews: {

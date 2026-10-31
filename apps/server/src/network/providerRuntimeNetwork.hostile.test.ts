@@ -389,6 +389,52 @@ describe("provider runtime network", () => {
     expect(untrusted.connections()).toBe(0);
   });
 
+  it("closes an open tunnel to a private address once the person stops trusting that network", async () => {
+    const origin = await tcpFixture();
+    const host = runtimeHost({
+      resolve: () => ["10.0.0.9"],
+      routes: new Map([["10.0.0.9", origin.port]]),
+    });
+    host.store.set({
+      scope: { kind: "account" },
+      places: [{ kind: "private-network", tag: "local-network" }],
+      principal: "local-window",
+    });
+    const launch = await started(
+      host.network.start({
+        runtime: "codex",
+        root: "/projects/app",
+        executionPolicy: "approval-gated",
+      }),
+    );
+    const authorization = basicAuthorization(tokenOf(launch.environment));
+    // The provider's own name, answered by an address on the trusted local network.
+    const tunnel = await openTunnel(proxyOf(launch.endpoint), "api.openai.com:443", authorization);
+    expect(tunnel.status).toBe(200);
+    expect(await roundTrip(tunnel.socket, "ping", 4)).toBe("ping");
+
+    expect(
+      host.store.set({ scope: { kind: "account" }, places: [], principal: "local-window" }),
+    ).toEqual({ kind: "changed" });
+    await waitFor(() => tunnel.socket.destroyed || tunnel.socket.readableEnded);
+    const again = await openTunnel(proxyOf(launch.endpoint), "api.openai.com:443", authorization);
+    expect(again.status).toBe(403);
+    expect(again.answer).toContain("octant-egress-refused: private-destination");
+    await launch.release();
+    const summary = host
+      .events(RUNTIME_NETWORK_AGGREGATE)
+      .find((event) => event.eventName === RUNTIME_NETWORK_EVENT_NAMES.launchSummarized);
+    expect(summary?.payload).toMatchObject({
+      entries: expect.arrayContaining([
+        expect.objectContaining({
+          host: "api.openai.com",
+          decision: "refused",
+          reason: "private-destination",
+        }),
+      ]),
+    });
+  });
+
   it("lets the launch's own tool bridge port through on loopback and no other", async () => {
     const bridge = await tcpFixture();
     const other = await tcpFixture();

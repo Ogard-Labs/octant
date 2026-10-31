@@ -307,8 +307,16 @@ export function SafeNetworksSettings(props: SafeNetworksSettingsProps) {
   const pickerId = useId();
   const root = useRef<HTMLDivElement>(null);
   const requestNumber = useRef(0);
+  /**
+   * The Project the picker names now. An answer read or saved for another
+   * selection is dropped when it arrives, so a slow answer about Project A
+   * never lands on Project B.
+   */
+  const selected = useRef("");
   const [projectId, setProjectId] = useState("");
   const [view, setView] = useState<SafeNetworksView | undefined>(undefined);
+  /** The selection `view` was read for; Project controls show only when it is the picker's. */
+  const [loadedFor, setLoadedFor] = useState<string | undefined>(undefined);
   const [loadFailed, setLoadFailed] = useState(false);
   const [accountDraft, setAccountDraft] = useState<ReadonlyArray<SafeNetworkPlace>>([]);
   /** `null` while the Project follows the every-Project list. */
@@ -338,8 +346,9 @@ export function SafeNetworksSettings(props: SafeNetworksSettingsProps) {
       const mine = ++requestNumber.current;
       try {
         const next = await client.read(chosen === "" ? undefined : chosen);
-        if (mine !== requestNumber.current) return;
+        if (mine !== requestNumber.current || chosen !== selected.current) return;
         apply(next, ["account", "project"]);
+        setLoadedFor(chosen);
         setLoadFailed(false);
       } catch {
         if (mine === requestNumber.current) setLoadFailed(true);
@@ -365,10 +374,23 @@ export function SafeNetworksSettings(props: SafeNetworksSettingsProps) {
 
   async function send(command: SafeNetworksCommand, scope: "account" | "project") {
     if (client === undefined) return;
+    const sentFor = projectId;
     setProblem(undefined);
     setBusy(true);
     try {
-      const result = await client.command(command, projectId === "" ? undefined : projectId);
+      const result = await client.command(command, sentFor === "" ? undefined : sentFor);
+      // The person picked another Project while this was saved: the answer
+      // describes the old one, so only the every-Project list may be taken
+      // from it.
+      if (sentFor !== selected.current) {
+        if (result.kind === "safe-networks-updated" && scope === "account") {
+          setAccountDraft(result.view.account);
+          setView((current) =>
+            current === undefined ? current : { ...current, account: result.view.account },
+          );
+        }
+        return;
+      }
       if (result.kind === "safe-networks-updated") {
         apply(result.view, [scope]);
         return;
@@ -387,16 +409,35 @@ export function SafeNetworksSettings(props: SafeNetworksSettingsProps) {
 
   /** The picker only offers the host's own Project ids. */
   const chosenProject = () => projectId as AggregateId;
+  /** Whether what is shown for the Project is the picker's Project, read for it. */
+  const showsChosenProject =
+    projectId !== "" &&
+    loadedFor === projectId &&
+    view?.project !== undefined &&
+    String(view.project.projectId) === projectId;
 
   const saveAccount = (places: ReadonlyArray<SafeNetworkPlace>) =>
     send({ kind: "set-places", scope: { kind: "account" }, places }, "account");
-  const saveProject = (places: ReadonlyArray<SafeNetworkPlace>) =>
-    send(
+  const saveProject = async (places: ReadonlyArray<SafeNetworkPlace>) => {
+    // A list is only ever saved to the Project it was read for.
+    if (!showsChosenProject) return;
+    await send(
       { kind: "set-places", scope: { kind: "project", projectId: chosenProject() }, places },
       "project",
     );
+  };
+
+  function chooseProject(next: string) {
+    if (next === selected.current) return;
+    selected.current = next;
+    setProblem(undefined);
+    setProjectDraft(null);
+    setLoadedFor(undefined);
+    setProjectId(next);
+  }
 
   function followEveryProject() {
+    if (!showsChosenProject) return;
     if (view?.project?.override == null) {
       setProjectDraft(null);
       setProblem(undefined);
@@ -410,7 +451,8 @@ export function SafeNetworksSettings(props: SafeNetworksSettingsProps) {
       refusal.port >= 1
         ? { kind: "host", host: refusal.host, port: refusal.port }
         : { kind: "host", host: refusal.host };
-    const editingProject = projectId !== "" && view?.project !== undefined;
+    if (loadedFor !== projectId) return;
+    const editingProject = showsChosenProject;
     const current = editingProject ? (projectDraft ?? accountDraft) : accountDraft;
     const places = current.some((entry) => JSON.stringify(entry) === JSON.stringify(place))
       ? current
@@ -437,7 +479,8 @@ export function SafeNetworksSettings(props: SafeNetworksSettingsProps) {
     );
   }
 
-  const projectView = projectId === "" ? undefined : view.project;
+  const projectView = showsChosenProject ? view.project : undefined;
+  const readingProject = loadedFor !== projectId;
   const ownList = projectDraft !== null;
   const problemFor = (scope: "account" | "project") =>
     problem?.scope === scope ? problem : undefined;
@@ -476,15 +519,15 @@ export function SafeNetworksSettings(props: SafeNetworksSettingsProps) {
           <OctantSelectField
             id={pickerId}
             aria-label="Project"
-            onValueChange={(next) => {
-              setProblem(undefined);
-              setProjectId(next);
-            }}
+            onValueChange={chooseProject}
             options={projectOptions}
             value={projectId}
           />
         </div>
-        {projectId === "" || projectView === undefined ? null : (
+        {projectId !== "" && readingProject ? (
+          <SettingsState kind="loading">Reading this Project's list…</SettingsState>
+        ) : null}
+        {projectView === undefined ? null : (
           <>
             <div className="safe-networks__status">
               <p>
@@ -540,7 +583,9 @@ export function SafeNetworksSettings(props: SafeNetworksSettingsProps) {
         }
         title="Recently refused"
       >
-        {view.refused.length === 0 ? (
+        {readingProject ? (
+          <SettingsState kind="loading">Reading recent refusals…</SettingsState>
+        ) : view.refused.length === 0 ? (
           <SettingsState kind="empty">Nothing has been refused lately.</SettingsState>
         ) : (
           <ul className="safe-networks__refusals">
