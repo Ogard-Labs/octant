@@ -126,6 +126,7 @@ import { ProviderUsageReadingStore } from "../providers/providerUsageReadingStor
 import { HeldTurnContextFile, heldTurnContext } from "../providers/heldTurnContext";
 import { ProviderRuntimeUsageLimitsStore } from "../providers/providerRuntimeUsageLimitsStore";
 import { attachProviderRuntimeUsageLimits } from "../providers/providerRuntimeUsageLimitsDriver";
+import { redactProviderRuntimeSecrets } from "../providers/secretRedactingDriver";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { NativeHarnessLeadFallbackService } from "../harness/nativeHarnessLeadFallback";
 import { GeneratedImageStore } from "../image/generatedImageStore";
@@ -386,9 +387,12 @@ export function makeConfiguredProviderDriver(
   if (localUsageHistory !== undefined) {
     driver = { ...driver, localUsageHistory };
   }
+  // Redaction comes first, so every consumer of the stream, the usage tap
+  // included, reads the redacted events.
+  const redacted = redactProviderRuntimeSecrets(driver);
   return options.onRuntimeEvent === undefined
-    ? driver
-    : attachProviderRuntimeUsageLimits(driver, { record: options.onRuntimeEvent });
+    ? redacted
+    : attachProviderRuntimeUsageLimits(redacted, { record: options.onRuntimeEvent });
 }
 
 /**

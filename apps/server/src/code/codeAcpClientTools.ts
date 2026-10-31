@@ -17,6 +17,7 @@ import {
 } from "@octant/provider-sdk";
 import type { CodeThread, WindowId } from "@octant/contracts";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { secretGuardRefusal } from "../process/secretGuard";
 import {
   isAbsolutePosixPath,
   joinCodePath,
@@ -127,6 +128,11 @@ export interface CodeAcpClientToolsOptions {
   readonly windowId: WindowId;
   readonly thread: CodeThread;
   readonly readExecutionPolicy: () => CodeThread["executionPolicy"];
+  /**
+   * The secret guard's refusal for a path, or undefined; defaults to this
+   * host's protected list. Checked at every posture, Full access included.
+   */
+  readonly protectedFileRefusal?: (path: string) => string | undefined;
   readonly checkoutRoot: string;
   /** The Project's extra folders: they accept the same paths and cwd as the checkout. */
   readonly extraFolders?: ReadonlyArray<string>;
@@ -283,6 +289,19 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
   };
   const resolveFile = async (path: string) => (await containingFolder(path))?.resolved;
 
+  const protectedFileRefusal =
+    options.protectedFileRefusal ?? ((path: string) => secretGuardRefusal(path));
+  /** The refusal names the rule and the channel, never a bare unreadable file. */
+  const protectedResult = (...paths: ReadonlyArray<string>) => {
+    for (const path of paths) {
+      const message = protectedFileRefusal(path);
+      if (message !== undefined) {
+        return { result: { error: "protected-file", message }, isError: true as const };
+      }
+    }
+    return undefined;
+  };
+
   const read = async (input: AcpClientReadTextFileInput) => {
     if (
       (input.line !== undefined && input.line < 1) ||
@@ -291,6 +310,8 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
       return errorResult("invalid-input");
     const resolved = await resolveFile(input.path);
     if (resolved === undefined) return errorResult("path-outside-checkout");
+    const guarded = protectedResult(input.path, resolved.canonical);
+    if (guarded !== undefined) return guarded;
     if (!resolved.stat.isFile || resolved.stat.size > MAX_FILE_BYTES)
       return errorResult(
         resolved.stat.size > MAX_FILE_BYTES ? "file-oversized" : "file-unreadable",
@@ -344,6 +365,8 @@ export function createCodeAcpClientTools(options: CodeAcpClientToolsOptions): Ap
       return errorResult("path-outside-checkout");
     const { root, roots, resolved: parent } = folder;
     const target = joinCodePath(parent.canonical, basename(input.path));
+    const guarded = protectedResult(input.path, target);
+    if (guarded !== undefined) return guarded;
     const current = await resolveContainedPath(options.pathPort, root, target);
     if (current !== undefined && !current.stat.isFile) return errorResult("path-not-a-file");
     const mode =

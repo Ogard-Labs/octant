@@ -79,6 +79,7 @@ import { JournalGrowthTable } from "../support/JournalGrowthTable";
 import type { DiagnosticsExportClient } from "@octant/client-runtime/diagnostics-export-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
+import type { ProtectedFilesClient } from "@octant/client-runtime/protected-files-client";
 import type { SafeNetworksClient } from "@octant/client-runtime/safe-networks-client";
 import { SafeNetworksSettings } from "../settings/SafeNetworksSettings";
 import type { HostFederationLifecycle } from "@octant/client-runtime/host-federation-lifecycle";
@@ -95,6 +96,7 @@ import { RemoteAccessSettingsSection } from "../host/RemoteAccessSettingsSection
 import { PublicLinkSettings } from "../settings/PublicLinkSettings";
 import { SecretStoresClientContext } from "../settings/SecretStoresClientContext";
 import { SecretStoresSettingsSection } from "../settings/SecretStoresSettingsSection";
+import { ProtectedFilesSettings } from "../settings/ProtectedFilesSettings";
 import { SyncSettingsSection } from "../settings/SyncSettingsSection";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ReplicaMembershipClient } from "@octant/client-runtime/replica-membership-client";
@@ -217,6 +219,8 @@ export interface SettingsViewProps {
     BrowserAutomationClient,
     "manageExtensions" | "manageProfiles"
   >;
+  /** Settings › Permissions › Protected files; absent where the host publishes no list. */
+  readonly protectedFilesClient?: ProtectedFilesClient;
   /** Settings › Data & privacy › Public links; absent where the host has no such surface. */
   readonly canvasClient?: Pick<CanvasClient, "publicLinkSettings" | "setPublicLinkSettings">;
   /** Settings › Computer use › the monthly cap for desktops that bill; absent where the host has no route to it. */
@@ -291,7 +295,8 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
     "Skills extend what agents can do. Review the source, then trust and enable only what you want.",
   github: "Connection and repository access on the selected host.",
   host: "The host process: its status, startup, notifications, and maintenance.",
-  permissions: "What you have already allowed: websites, extension tools, and public links.",
+  permissions:
+    "The files no agent may touch, and what you have already allowed: websites, extension tools, and public links.",
   access: "The network places agents may reach below Full access.",
   data: "What this host stores, how long it keeps threads, and how to back it up.",
   "secret-stores":
@@ -1288,6 +1293,10 @@ function ActiveSectionContent({
     case "permissions":
       return (
         <div className="settings-section-stack" id="settings-permissions">
+          <ProtectedFilesSettings
+            client={props.protectedFilesClient}
+            focusedSetting={focusedSetting}
+          />
           <RememberedBrowserOriginsPanel
             origins={props.settings.rememberedBrowserOrigins}
             profileSites={props.settings.rememberedBrowserProfileSites}

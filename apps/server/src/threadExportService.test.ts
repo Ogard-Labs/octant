@@ -202,6 +202,25 @@ describe("ThreadExportService", () => {
     expect(JSON.stringify(outcome.bundle)).not.toContain("resumeCursor");
   });
 
+  it("exports a key printed in the transcript as the redaction mark", async () => {
+    const fakeKey = `sk-ant-api03-${"g".repeat(24)}`;
+    const view = chatView();
+    const leaked = {
+      ...view,
+      contents: view.contents.map((content) =>
+        content.role === "assistant" ? { ...content, body: `Found ${fakeKey} in .env` } : content,
+      ),
+    };
+    const outcome = await service({ chat: leaked }).exportThread(
+      windowId as never,
+      "local-window",
+      { mode: "chat", threadId },
+    );
+    expect(outcome.kind).toBe("exported");
+    expect(JSON.stringify(outcome)).not.toContain(fakeKey);
+    expect(JSON.stringify(outcome)).toContain("[redacted secret]");
+  });
+
   it("includes generated images with provenance and omits their bytes", async () => {
     const jobId = "a1000000-0000-4000-8000-000000000021";
     const attachmentId = "a1000000-0000-4000-8000-000000000022";

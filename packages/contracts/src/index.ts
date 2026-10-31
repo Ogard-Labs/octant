@@ -61,6 +61,7 @@ export * from "./canvasShare";
 export * from "./canvasExport";
 export * from "./canvasExportFolder";
 export * from "./canvasPublicShare";
+export * from "./protectedFiles";
 export * from "./computerUse";
 export * from "./diagnostics";
 export * from "./supportBundle";
