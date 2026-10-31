@@ -4,8 +4,13 @@ import type {
   CodeProjectPullRequestDetailRefreshCommand,
   CodeProjectPullRequestDetailView,
   CodeProjectPullRequestLinkedThread,
+  CodeProjectPullRequestAutoFixCommand,
   CodeProjectPullRequestMergeMethod,
   CodeProjectPullRequestMergeOutcome,
+  CodeProjectPullRequestMergeWhenReadyCommand,
+  CodeProjectPullRequestSwitchOutcome,
+  CodeProjectPullRequestSwitchTarget,
+  CodeProjectPullRequestSwitchesView,
 } from "@octant/contracts";
 import { useEffect, useRef, useState } from "react";
 import { ProjectPullRequestReviewPane } from "../code/ProjectPullRequestReviewPane";
@@ -26,7 +31,22 @@ export interface DockProjectPullRequestReviewToolProps {
     method: CodeProjectPullRequestMergeMethod,
     headSha: string,
   ) => Promise<CodeProjectPullRequestMergeOutcome>;
+  readonly loadSwitches?: (
+    target: CodeProjectPullRequestSwitchTarget,
+  ) => Promise<CodeProjectPullRequestSwitchesView>;
+  readonly setMergeWhenReady?: (
+    command: CodeProjectPullRequestMergeWhenReadyCommand,
+  ) => Promise<CodeProjectPullRequestSwitchOutcome>;
+  readonly setAutoFix?: (
+    command: CodeProjectPullRequestAutoFixCommand,
+  ) => Promise<CodeProjectPullRequestSwitchOutcome>;
 }
+
+/**
+ * How often an open review re-reads its switches. The host observes the
+ * forge about once a minute, so a faster read would only repeat itself.
+ */
+const SWITCHES_REFRESH_MS = 20_000;
 
 type DetailState =
   | { readonly status: "loading" }
@@ -40,10 +60,70 @@ type DetailState =
 
 export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestReviewToolProps) {
   const [workspace, setWorkspace] = useState<DetailState>({ status: "loading" });
+  const [switches, setSwitches] = useState<CodeProjectPullRequestSwitchesView>();
   const refreshRef = useRef(props.refresh);
+  const loadSwitchesRef = useRef(props.loadSwitches);
   useEffect(() => {
     refreshRef.current = props.refresh;
+    loadSwitchesRef.current = props.loadSwitches;
   });
+  const target: CodeProjectPullRequestSwitchTarget = {
+    projectId: props.query.projectId,
+    repositoryOwner: props.query.repositoryOwner,
+    repositoryName: props.query.repositoryName,
+    number: props.query.number,
+  };
+
+  useEffect(() => {
+    const load = loadSwitchesRef.current;
+    if (load === undefined) return;
+    let active = true;
+    const read = () => {
+      load({
+        projectId: props.query.projectId,
+        repositoryOwner: props.query.repositoryOwner,
+        repositoryName: props.query.repositoryName,
+        number: props.query.number,
+      }).then(
+        (view) => {
+          if (active) setSwitches(view);
+        },
+        () => undefined,
+      );
+    };
+    read();
+    const timer = setInterval(read, SWITCHES_REFRESH_MS);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [
+    props.query.number,
+    props.query.projectId,
+    props.query.repositoryName,
+    props.query.repositoryOwner,
+  ]);
+
+  async function applySwitch(
+    run: () => Promise<CodeProjectPullRequestSwitchOutcome>,
+  ): Promise<CodeProjectPullRequestSwitchOutcome> {
+    try {
+      const outcome = await run();
+      if (outcome.status === "applied") setSwitches(outcome.view);
+      return outcome;
+    } catch (error) {
+      // A paired device is refused before the host reads the command.
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "category" in error &&
+        error.category === "unauthorized"
+      ) {
+        return { status: "refused", reason: "not-authorized" };
+      }
+      return { status: "unavailable", reason: "unavailable" };
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -166,6 +246,44 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
           : { onOpenLinkedThread: props.onOpenLinkedThread })}
         {...(props.onOpenChat === undefined ? {} : { onOpenChat: props.onOpenChat })}
         {...(props.onMerge === undefined ? {} : { onMerge: props.onMerge })}
+        {...(switches === undefined ? {} : { switches })}
+        {...(props.setMergeWhenReady === undefined
+          ? {}
+          : {
+              onMergeWhenReady: (
+                enabled: boolean,
+                method: CodeProjectPullRequestMergeMethod,
+                headSha: string,
+              ) => {
+                const set = props.setMergeWhenReady;
+                if (set === undefined) {
+                  return Promise.resolve({ status: "unavailable", reason: "unavailable" } as const);
+                }
+                return applySwitch(() =>
+                  set(
+                    enabled
+                      ? { kind: "enable", target, headSha, method }
+                      : { kind: "disable", target },
+                  ),
+                );
+              },
+            })}
+        {...(props.setAutoFix === undefined
+          ? {}
+          : {
+              onAutoFix: (
+                enabled: boolean,
+                threadId: CodeProjectPullRequestLinkedThread["threadId"],
+              ) => {
+                const set = props.setAutoFix;
+                if (set === undefined) {
+                  return Promise.resolve({ status: "unavailable", reason: "unavailable" } as const);
+                }
+                return applySwitch(() =>
+                  set(enabled ? { kind: "enable", target, threadId } : { kind: "disable", target }),
+                );
+              },
+            })}
         onRefresh={() => void runRefresh()}
       />
     </>
