@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
-import { originAllowed as sameSiteOriginAllowed } from "@octant/domain";
+import {
+  browserProfileKey,
+  browserProfilePartition,
+  originAllowed as sameSiteOriginAllowed,
+} from "@octant/domain";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
 import {
   MAX_BROWSER_DIAGNOSTIC_ENTRIES,
@@ -93,6 +97,7 @@ interface BrowserSurfaceSessionPort {
             readonly url: string;
             readonly method?: string;
             readonly error?: string;
+            readonly webContentsId?: number;
           }) => void)
         | null,
     ): void;
@@ -111,6 +116,8 @@ export interface BrowserSurfaceViewPort {
   setBounds(bounds: BrowserSurfaceBounds): void;
   setVisible(visible: boolean): void;
   readonly webContents: {
+    /** Electron's id for the page; the key a session-wide request report names. */
+    readonly id?: number;
     capturePage(): Promise<BrowserSurfaceImage>;
     close(): void;
     readonly debugger: {
@@ -252,6 +259,12 @@ const MAX_USER_GRANTED_ORIGINS = 128;
 
 export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
   const surfaces = new Map<string, OwnedSurface>();
+  const surfaceByWebContents = new Map<number, OwnedSurface>();
+  const guardedSessions = new WeakSet<object>();
+  const forgetWebContents = (tab: OwnedTab): void => {
+    const id = tab.view.webContents.id;
+    if (id !== undefined) surfaceByWebContents.delete(id);
+  };
   const goneListeners = new Set<(contextId: string) => void>();
   const stateChannel = options.stateChannel ?? DESKTOP_IPC_CHANNELS.browserSurfaceState;
 
@@ -277,6 +290,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     for (const tab of closing) {
       tab.view.setVisible(false);
       owned.shellWindow?.contentView.removeChildView(tab.view);
+      forgetWebContents(tab);
       if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close();
     }
     owned.shellWindow = undefined;
@@ -321,6 +335,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     owned.tabs.splice(index, 1);
     tab.view.setVisible(false);
     owned.shellWindow?.contentView.removeChildView(tab.view);
+    forgetWebContents(tab);
     if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close();
     if (owned.tabs.length === 0) return markGone(contextId, owned);
     const successor = owned.tabs[Math.min(index, owned.tabs.length - 1)];
@@ -342,7 +357,10 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     tabId: string,
   ): OwnedTab => {
     const view = options.createView({
-      partition: `octant-browser-${contextId}`,
+      // A Private page keeps a partition of its own context; a stored profile
+      // keeps one persistent partition that every page of the profile shares,
+      // which is what makes a sign-in carry from one page to the next.
+      partition: browserProfilePartition(owned.policy.profile, contextId),
       webPreferences: {
         allowRunningInsecureContent: false,
         contextIsolation: true,
@@ -358,7 +376,12 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     );
     view.webContents.session.setDevicePermissionHandler(() => false);
     view.webContents.session.setDisplayMediaRequestHandler((_request, callback) => callback({}));
-    view.webContents.session.on("will-download", (event) => event.preventDefault?.());
+    // A profile's session outlives every context in it, so the download block is
+    // installed once per session rather than once per tab.
+    if (!guardedSessions.has(view.webContents.session)) {
+      guardedSessions.add(view.webContents.session);
+      view.webContents.session.on("will-download", (event) => event.preventDefault?.());
+    }
     // `policy.acceptsLocalCertificate` relaxes nothing here. That acceptance
     // is bounded to the one origin this surface opened, and Electron's
     // certificate verify proc reports only `request.hostname` — no scheme, no
@@ -411,9 +434,17 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     view.webContents.on("console-message", (...args: readonly unknown[]) => {
       recordConsoleError(owned, view.webContents.getURL(), args);
     });
-    view.webContents.session.webRequest?.onErrorOccurred((details) =>
-      recordFailedRequest(owned, details),
-    );
+    // Electron keeps one failed-request listener per session, and the pages of a
+    // stored profile share a session across contexts. The listener each new tab
+    // installs therefore routes by the page that failed, not by the context that
+    // installed it last.
+    const webContentsId = view.webContents.id;
+    if (webContentsId !== undefined) surfaceByWebContents.set(webContentsId, owned);
+    view.webContents.session.webRequest?.onErrorOccurred((details) => {
+      if (details.webContentsId === undefined) return recordFailedRequest(owned, details);
+      const target = surfaceByWebContents.get(details.webContentsId);
+      if (target !== undefined) recordFailedRequest(target, details);
+    });
     view.webContents.on("focus", () => {
       owned.control = "user";
       publish(contextId, owned);
@@ -772,6 +803,23 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     closeAll: async (): Promise<void> => {
       await Promise.all([...surfaces.keys()].map(closeContext));
     },
+    /**
+     * Close every page that lives in one stored profile, and tell the server
+     * each one is gone. Clearing a profile's storage under an open page would
+     * leave the page signed in until its next request, so the pages go first.
+     */
+    closeProfileContexts: async (profile: BrowserContextPolicy["profile"]): Promise<void> => {
+      const key = browserProfileKey(profile);
+      const ownedIds = [...surfaces.entries()]
+        .filter(([, owned]) => browserProfileKey(owned.policy.profile) === key)
+        .map(([contextId]) => contextId);
+      await Promise.all(
+        ownedIds.map(async (contextId) => {
+          await closeContext(contextId);
+          for (const listener of goneListeners) listener(contextId);
+        }),
+      );
+    },
   });
 
   async function closeContext(contextId: BrowserContextId | string): Promise<void> {
@@ -783,6 +831,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     for (const tab of closing) {
       tab.view.setVisible(false);
       owned.shellWindow?.contentView.removeChildView(tab.view);
+      forgetWebContents(tab);
       if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close();
     }
   }

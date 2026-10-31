@@ -879,3 +879,148 @@ describe("BrowserSurfaceHost", () => {
     expect(read.consoleErrors?.at(-1)?.text).toBe("error 39");
   });
 });
+
+describe("BrowserSurfaceHost stored profiles", () => {
+  const projectId = "40000000-0000-4000-8000-000000000001";
+  const policyIn = (profile?: { kind: "personal" } | { kind: "project"; projectId: string }) =>
+    ({
+      profileMode: "isolated",
+      ...(profile === undefined ? {} : { profile }),
+      allowedOrigins: ["https://example.com"],
+      credentialFieldProtection: true,
+      maxConcurrentTabs: 2,
+      sessionTimeoutMs: 300_000,
+    }) as never;
+
+  it("keeps a profile page in the profile's persistent partition, not one of its own", async () => {
+    const createView = vi.fn((_options: { readonly partition: string }) => view());
+    const host = createBrowserSurfaceHost({ createView });
+
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: policyIn({ kind: "personal" }),
+    });
+    await host.createContext({
+      contextId: "60000000-0000-4000-8000-000000000002",
+      owner: { windowId: "window-a", threadId },
+      policy: policyIn({ kind: "project", projectId }),
+    });
+
+    expect(createView.mock.calls.map(([options]) => options.partition)).toEqual([
+      "persist:octant-profile-personal",
+      `persist:octant-profile-project-${projectId}`,
+    ]);
+  });
+
+  it("shares one partition between two contexts of a profile so a sign-in carries over", async () => {
+    const createView = vi.fn((_options: { readonly partition: string }) => view());
+    const host = createBrowserSurfaceHost({ createView });
+    for (const id of [contextId, "60000000-0000-4000-8000-000000000002"]) {
+      await host.createContext({
+        contextId: id,
+        owner: { windowId: "window-a", threadId },
+        policy: policyIn({ kind: "personal" }),
+      });
+    }
+
+    const partitions = createView.mock.calls.map(([options]) => options.partition);
+    expect(new Set(partitions).size).toBe(1);
+  });
+
+  it("installs the download block once on a session two contexts share", async () => {
+    const shared = view();
+    const sharedSession = shared.webContents.session;
+    const second = view();
+    Object.assign(second.webContents, { session: sharedSession });
+    const views = [shared, second];
+    const host = createBrowserSurfaceHost({ createView: () => views.shift() ?? view() });
+    for (const id of [contextId, "60000000-0000-4000-8000-000000000002"]) {
+      await host.createContext({
+        contextId: id,
+        owner: { windowId: "window-a", threadId },
+        policy: policyIn({ kind: "personal" }),
+      });
+    }
+
+    const downloads = vi
+      .mocked(sharedSession.on)
+      .mock.calls.filter(([event]) => event === "will-download");
+    expect(downloads).toHaveLength(1);
+  });
+
+  it("keeps the Private partition for a policy with no profile", async () => {
+    const createView = vi.fn((_options: { readonly partition: string }) => view());
+    const host = createBrowserSurfaceHost({ createView });
+
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: policyIn(),
+    });
+
+    expect(createView.mock.calls[0]?.[0].partition).toBe(`octant-browser-${contextId}`);
+  });
+
+  it("reports a failed request to the context whose page failed, even on a shared session", async () => {
+    const first = view();
+    const second = view();
+    Object.assign(first.webContents, { id: 11 });
+    Object.assign(second.webContents, { id: 22 });
+    const sharedSession = first.webContents.session;
+    Object.assign(second.webContents, { session: sharedSession });
+    const views = [first, second];
+    const host = createBrowserSurfaceHost({ createView: () => views.shift() ?? view() });
+    const other = "60000000-0000-4000-8000-000000000002";
+    for (const id of [contextId, other]) {
+      await host.createContext({
+        contextId: id,
+        owner: { windowId: "window-a", threadId },
+        policy: policyIn({ kind: "personal" }),
+      });
+    }
+    // Electron keeps one listener per session: the last tab to register wins.
+    const listener = vi.mocked(sharedSession.webRequest!.onErrorOccurred).mock.calls.at(-1)?.[0];
+
+    listener?.({ url: "https://example.com/a.js", error: "net::ERR_FAILED", webContentsId: 11 });
+
+    await host.act(contextId, { kind: "navigate", target: "https://example.com/" });
+    await host.act(other, { kind: "navigate", target: "https://example.com/" });
+    const firstRead = await host.act(contextId, { kind: "observe-diagnostics" });
+    const secondRead = await host.act(other, { kind: "observe-diagnostics" });
+    expect(firstRead.failedRequests).toEqual([
+      { url: "https://example.com/a.js", failure: "net::ERR_FAILED" },
+    ]);
+    expect(secondRead.failedRequests ?? []).toEqual([]);
+  });
+
+  it("closes every page of one profile, tells the server each is gone, and leaves other profiles open", async () => {
+    const closed: string[] = [];
+    const host = createBrowserSurfaceHost({ createView: () => view() });
+    host.onContextGone((id) => closed.push(id));
+    const personal = "60000000-0000-4000-8000-000000000002";
+    const privatePage = "60000000-0000-4000-8000-000000000003";
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: policyIn({ kind: "project", projectId }),
+    });
+    await host.createContext({
+      contextId: personal,
+      owner: { windowId: "window-a", threadId },
+      policy: policyIn({ kind: "personal" }),
+    });
+    await host.createContext({
+      contextId: privatePage,
+      owner: { windowId: "window-a", threadId },
+      policy: policyIn(),
+    });
+
+    await host.closeProfileContexts({ kind: "personal" });
+
+    expect(closed).toEqual([personal]);
+    expect(() => host.state(personal)).toThrow(/unknown/);
+    expect(host.state(contextId)).toBeDefined();
+    expect(host.state(privatePage)).toBeDefined();
+  });
+});

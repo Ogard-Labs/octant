@@ -679,3 +679,197 @@ describe("browser diagnostics reach the provider-facing result", () => {
     expect(page?.failedRequests).toBeUndefined();
   });
 });
+
+describe("octant_browser profile argument", () => {
+  const projectId = "90000000-0000-4000-8000-000000000001";
+  const workAuthority = {
+    hostId: "30000000-0000-4000-8000-000000000001",
+    mode: "work",
+    projectId,
+    rootId: "31000000-0000-4000-8000-000000000001",
+    providerInstanceId: "40000000-0000-4000-8000-000000000001",
+    extension: { kind: "core" },
+  } as unknown as ToolActionAuthority;
+  const activeContext = (profile?: unknown) =>
+    snapshot({
+      status: "running",
+      context: {
+        contextId: "50000000-0000-4000-8000-000000000001" as never,
+        threadId,
+        actionId: "60000000-0000-4000-8000-000000000001" as never,
+        correlationId: "70000000-0000-4000-8000-000000000001" as never,
+        authority: workAuthority,
+        policy: {
+          profileMode: "isolated",
+          ...(profile === undefined ? {} : { profile }),
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 8,
+          sessionTimeoutMs: 600_000,
+        },
+        state: "active",
+        createdAt: "2026-10-31T10:00:00.000Z" as never,
+      } as never,
+    });
+
+  function fixture(
+    options: {
+      readonly remembered?: (origin: string, profile: unknown) => boolean;
+      readonly unattended?: boolean;
+      readonly profileCaller?: "terminal-grant";
+      readonly inspect?: BrowserAutomationSnapshot;
+      readonly modelBindings?: Map<string, BrowserModelBinding>;
+    } = {},
+  ) {
+    const create = vi.fn(async (input: { policy: { profile?: unknown } }) =>
+      activeContext(input.policy.profile),
+    );
+    const act = vi.fn(async () =>
+      snapshot({ status: "running", observation: { revision: 3 } as never }),
+    );
+    const request = vi.fn(async (_input: unknown) => "approved" as const);
+    const tools = createBrowserAppManagedTools({
+      windowId,
+      threadId,
+      mode: "work",
+      modelId,
+      resolveModelId: () => modelId,
+      modelBindings: options.modelBindings ?? new Map(),
+      executionPolicy: "approval-gated",
+      resolveAuthority: () => workAuthority,
+      browser: {
+        inspectThread: () => options.inspect ?? snapshot(),
+        create: create as never,
+        act,
+        releaseThread: vi.fn(async () => snapshot()),
+      },
+      approvals: {
+        request,
+        isRemembered: (origin: string, profile: unknown) =>
+          options.remembered?.(origin, profile) === true,
+        isUnattendedScope: () => options.unattended === true,
+      } as never,
+      ...(options.profileCaller === undefined ? {} : { profileCaller: options.profileCaller }),
+      uuid: () => "80000000-0000-4000-8000-000000000001",
+    });
+    const run = (input: Record<string, unknown>) =>
+      tools.execute({ name: "octant_browser", inputJson: JSON.stringify(input) });
+    return { create, request, run };
+  }
+
+  it("keeps a page Private when no profile is asked for", async () => {
+    const { run, create, request } = fixture();
+
+    await run({ operation: "navigate", url: "https://example.com/a" });
+
+    expect(create.mock.calls[0]?.[0].policy.profile).toBeUndefined();
+    expect(request.mock.calls[0]?.[0]).not.toHaveProperty("profile");
+  });
+
+  it("asks the person about the site and names the profile", async () => {
+    const { run, create, request } = fixture();
+
+    await run({ operation: "navigate", url: "https://example.com/a", profile: "personal" });
+
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({ origin: "https://example.com", profile: { kind: "personal" } }),
+    );
+    expect(create.mock.calls[0]?.[0].policy.profile).toEqual({ kind: "personal" });
+  });
+
+  it("maps project to this thread's own Project profile", async () => {
+    const { run, create } = fixture();
+
+    await run({ operation: "navigate", url: "https://example.com/a", profile: "project" });
+
+    expect(create.mock.calls[0]?.[0].policy.profile).toEqual({ kind: "project", projectId });
+  });
+
+  it("lets a pair remembered for that profile stand in for the prompt, and no other pair", async () => {
+    const remembered = fixture({
+      remembered: (origin, profile) =>
+        origin === "https://example.com" &&
+        (profile as { kind: string } | undefined)?.kind === "personal",
+    });
+    await remembered.run({
+      operation: "navigate",
+      url: "https://example.com/a",
+      profile: "personal",
+    });
+    expect(remembered.request).not.toHaveBeenCalled();
+
+    const otherProfile = fixture({
+      remembered: (_origin, profile) =>
+        (profile as { kind: string } | undefined)?.kind === "personal",
+    });
+    await otherProfile.run({
+      operation: "navigate",
+      url: "https://example.com/a",
+      profile: "project",
+    });
+    expect(otherProfile.request).toHaveBeenCalledTimes(1);
+
+    // A remembered Private origin never covers a profile page.
+    const privateOnly = fixture({ remembered: (_origin, profile) => profile === undefined });
+    await privateOnly.run({
+      operation: "navigate",
+      url: "https://example.com/a",
+      profile: "personal",
+    });
+    expect(privateOnly.request).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a profile page for a routine, a subagent, and a terminal grant without asking anyone", async () => {
+    for (const options of [{ unattended: true }, { profileCaller: "terminal-grant" as const }]) {
+      const { run, create, request } = fixture(options);
+
+      const result = await run({
+        operation: "navigate",
+        url: "https://example.com/a",
+        profile: "personal",
+      });
+
+      expect(result).toMatchObject({ isError: true, result: { error: "profile-needs-a-person" } });
+      expect(request).not.toHaveBeenCalled();
+      expect(create).not.toHaveBeenCalled();
+    }
+  });
+
+  it("does not let the agent move an open page to another profile", async () => {
+    const { run, create } = fixture({ inspect: activeContext() });
+
+    const result = await run({
+      operation: "navigate",
+      url: "https://example.com/b",
+      profile: "personal",
+    });
+
+    expect(result).toMatchObject({
+      isError: true,
+      result: { error: "browser-profile-differs-stop-first" },
+    });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("refuses an unattended turn on a page that is already in a profile", async () => {
+    const contextId = "50000000-0000-4000-8000-000000000001";
+    const { run, request } = fixture({
+      unattended: true,
+      inspect: activeContext({ kind: "personal" }),
+      modelBindings: new Map([[contextId, { modelId, authority: workAuthority }]]),
+    });
+
+    const result = await run({ operation: "read-page" });
+
+    expect(result).toMatchObject({ isError: true, result: { error: "profile-needs-a-person" } });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("rejects a profile other than project or personal", async () => {
+    const { run } = fixture();
+
+    expect(
+      await run({ operation: "navigate", url: "https://example.com/a", profile: "default" }),
+    ).toMatchObject({ isError: true, result: { error: "invalid-browser-input" } });
+  });
+});

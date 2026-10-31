@@ -58,6 +58,10 @@ import { SettingsNavigation, type SettingsNavigationItem } from "./SettingsNavig
 import { useSettingsSaved, type SettingsWriteResult } from "./useSettingsSaved";
 import { SidebarDestinationSettings } from "./SidebarDestinationSettings";
 import { PluginSettingsSection } from "./PluginSettingsSection";
+import { BrowserProfilesSection } from "../browser/BrowserProfilesSection";
+import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
+import type { RememberedBrowserProfileSite } from "@octant/contracts/shell";
+import { browserProfileKey } from "@octant/domain";
 import { ChatSettingsView } from "../chat/ChatSettingsView";
 import type { ChatController } from "../chat/useChatController";
 import type { CodeController } from "../code/useCodeController";
@@ -201,6 +205,8 @@ export interface SettingsViewProps {
   readonly localUsageHistoryClient?: LocalUsageHistoryClient;
   readonly diagnosticsExportClient?: DiagnosticsExportClient;
   readonly hostControlClient?: HostControlClient;
+  /** Settings › Data & privacy › Browser profiles; absent where the host keeps none. */
+  readonly browserAutomationClient?: Pick<BrowserAutomationClient, "manageProfiles">;
   /** Settings › Data & privacy › Public links; absent where the host has no such surface. */
   readonly canvasClient?: Pick<CanvasClient, "publicLinkSettings" | "setPublicLinkSettings">;
   /** Settings › Computer use › the monthly cap for desktops that bill; absent where the host has no route to it. */
@@ -1247,11 +1253,22 @@ function ActiveSectionContent({
         <div className="settings-section-stack" id="settings-permissions">
           <RememberedBrowserOriginsPanel
             origins={props.settings.rememberedBrowserOrigins}
+            profileSites={props.settings.rememberedBrowserProfileSites}
+            projectNames={props.projectNames ?? NO_PROJECT_NAMES}
             {...(focusedSetting === undefined ? {} : { focusedSetting })}
             onForget={(origin) =>
               props.onSettingsChange({
                 rememberedBrowserOrigins: props.settings.rememberedBrowserOrigins.filter(
                   (entry) => entry !== origin,
+                ),
+              })
+            }
+            onForgetProfileSite={(site) =>
+              props.onSettingsChange({
+                rememberedBrowserProfileSites: props.settings.rememberedBrowserProfileSites.filter(
+                  (entry) =>
+                    entry.origin !== site.origin ||
+                    browserProfileKey(entry.profile) !== browserProfileKey(site.profile),
                 ),
               })
             }
@@ -1288,6 +1305,12 @@ function ActiveSectionContent({
               </p>
             </section>
           )}
+          {props.browserAutomationClient === undefined ? null : (
+            <BrowserProfilesSection
+              client={props.browserAutomationClient}
+              {...(focusedSetting === undefined ? {} : { focusedSetting })}
+            />
+          )}
         </div>
       );
     case "skills":
@@ -1320,7 +1343,13 @@ function ActiveSectionContent({
  */
 function RememberedBrowserOriginsPanel(props: {
   readonly origins: ReadonlyArray<string>;
+  /** Sites remembered for one signed-in profile; the profile is shown beside each. */
+  readonly profileSites: ReadonlyArray<RememberedBrowserProfileSite>;
+  readonly projectNames: ReadonlyMap<string, string>;
   readonly onForget: (origin: string) => Promise<boolean> | boolean | void;
+  readonly onForgetProfileSite: (
+    site: RememberedBrowserProfileSite,
+  ) => Promise<boolean> | boolean | void;
   readonly focusedSetting?: string | undefined;
 }) {
   const [forgetting, setForgetting] = useState<string>();
@@ -1332,15 +1361,50 @@ function RememberedBrowserOriginsPanel(props: {
       setForgetting(undefined);
     }
   };
+  const forgetProfileSite = async (site: RememberedBrowserProfileSite) => {
+    const key = `${browserProfileKey(site.profile)}\0${site.origin}`;
+    setForgetting(key);
+    try {
+      await props.onForgetProfileSite(site);
+    } finally {
+      setForgetting(undefined);
+    }
+  };
   return (
     <SettingsSection
       description="Granted with “Always allow” on a thread’s Browser approval; forgetting one makes the next open ask again."
       title="Remembered websites"
     >
-      {props.origins.length === 0 ? (
+      {props.origins.length === 0 && props.profileSites.length === 0 ? (
         <SettingsState kind="empty">No remembered websites.</SettingsState>
       ) : (
         <div className="setgroup">
+          {props.profileSites.map((site) => {
+            const key = `${browserProfileKey(site.profile)}\0${site.origin}`;
+            const profileName =
+              site.profile.kind === "personal"
+                ? "Personal profile"
+                : `${props.projectNames.get(String(site.profile.projectId)) ?? "Project"} profile`;
+            return (
+              <SettingRow
+                description={`Browser acts as you on this site in the ${profileName}, without asking.`}
+                key={key}
+                label={`${site.origin} · ${profileName}`}
+                scope="host"
+                settingId="browser-site-approvals"
+              >
+                <OctantButton
+                  disabled={forgetting === key}
+                  onClick={() => void forgetProfileSite(site)}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  Forget
+                </OctantButton>
+              </SettingRow>
+            );
+          })}
           {props.origins.map((origin, index) => (
             <SettingRow
               description="Browser opens this site without asking."

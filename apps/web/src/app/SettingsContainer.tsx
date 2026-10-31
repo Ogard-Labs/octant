@@ -1,5 +1,6 @@
 import type { ThemeTypography } from "@octant/contracts/theme";
 import type { UsageQueryFilter } from "@octant/contracts/usage-rpc";
+import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import { memo, Suspense, useMemo } from "react";
 import type { ChatController } from "../chat/useChatController";
 import type { CodeController } from "../code/useCodeController";
@@ -29,6 +30,7 @@ export interface SettingsContainerProps {
   readonly availableFonts?: ReadonlyArray<string>;
   readonly backgroundImageLibrary: ReturnType<typeof useBackgroundImageLibrary>;
   readonly chatController: ChatController;
+  readonly browserAutomationClient?: Pick<BrowserAutomationClient, "manageProfiles">;
   readonly clients: ReturnType<typeof createLaunchedShellClients>;
   readonly codeController: CodeController;
   readonly controller: ReturnType<typeof useShellController>;
@@ -187,6 +189,9 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
       themeController={themeController}
       diagnosticsExportClient={diagnosticsExportClient}
       hostControlClient={hostControlClient}
+      {...(props.browserAutomationClient === undefined
+        ? {}
+        : { browserAutomationClient: props.browserAutomationClient })}
       {...(canvasClient === undefined ? {} : { canvasClient })}
       {...(desktopPaneClient === undefined ? {} : { desktopPaneClient })}
       {...(replicaStoreSettingsClient === undefined ? {} : { replicaStoreSettingsClient })}

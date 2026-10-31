@@ -509,8 +509,9 @@ which the computer's windows share like a browser's history, and never sent
 to the host; a running server's address is not repeated there, and choosing a row
 opens it. With neither, the start page invites an address. **Browser profiles.**
 A page is Private unless the person picks the Project or Personal profile from
-the control at the left of the address field; the toolbar's puzzle-piece button
-lists the profile's enabled extensions. The rules are in
+the control at the left of the address field, whose menu also signs out of a
+stored profile (the toolbar's extensions button is part of the not-yet-built
+extensions design). The Project browser dock has the same control. The rules are in
 [Browser profiles and extensions](browser-profiles.md). **Browser captures.** The Browser pane toolbar has a
 Screenshot button (a camera icon beside Open in default browser) that keeps the
 page's picture with the thread, and a thread that kept screenshots shows a

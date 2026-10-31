@@ -77,7 +77,7 @@ describe("octantSettingsRegistry", () => {
     ]);
     expect(section("data")?.label).toBe("Data & storage");
     expect(section("data")?.scope).toBe("host");
-    expect(ids("data")).toEqual(["data-map", "thread-retention"]);
+    expect(ids("data")).toEqual(["data-map", "browser-profiles", "thread-retention"]);
     expect(section("data")?.keywords).toMatch(/backup/);
     expect(section("data")?.keywords).toMatch(/retention/);
   });

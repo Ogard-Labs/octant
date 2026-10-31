@@ -202,7 +202,10 @@ that hosts the thread, not from a paired phone or browser.
 - Extensions stay quarantined until explicitly reviewed and trusted.
   Installation never implies trust, activation, enablement, or authority.
 - Browser automation uses per-thread incognito contexts with an origin
-  allowlist and credential-field protection.
+  allowlist and credential-field protection. A page is Private unless you put it
+  in a Project or Personal profile, which keeps its sign-in on this Mac until you
+  sign out. The agent asks you before it uses a signed-in site; a routine, a
+  subagent, a terminal CLI, and a paired device cannot open one.
 
 ### What the Claude runtime does on its own
 

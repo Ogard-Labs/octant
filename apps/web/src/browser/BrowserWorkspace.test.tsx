@@ -3,6 +3,7 @@ import {
   type BrowserAutomationClient,
 } from "@octant/client-runtime/browser-automation-client";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -1173,6 +1174,134 @@ describe("BrowserWorkspace", () => {
     const over = boundsInsideViewport({ left: 10, top: 40, right: 810.7, bottom: 620 }, 800, 600);
     expect(over.x + over.width).toBe(800);
     expect(over.y + over.height).toBe(600);
+  });
+
+  describe("Browser profiles", () => {
+    const tab = {
+      kind: "browser" as const,
+      id: "90000000-0000-4000-8000-000000000050" as any,
+      mode: "work" as const,
+      title: "Browser",
+      threadId: threadId as any,
+    };
+    const nativeBridge = {
+      getHostCapabilities: vi.fn(async () => ({ liveBrowserSupported: true }) as any),
+    } as any;
+
+    it("opens a new page Private unless the person chose a profile", async () => {
+      const browser = client();
+      render(<BrowserWorkspace client={browser} tab={tab} />);
+      await act(async () => undefined);
+
+      enterAddress("https://example.com");
+      fireEvent.click(screen.getByRole("button", { name: "Start browser" }));
+
+      await waitFor(() => expect(browser.create).toHaveBeenCalled());
+      const policy = vi.mocked(browser.create).mock.calls[0]?.[0].policy;
+      expect(policy?.profile).toBeUndefined();
+      expect(screen.getByRole("button", { name: "Browser profile: Private" })).toBeVisible();
+    });
+
+    it("puts the page in the profile the person picked, and keeps that pick for the Project", async () => {
+      const browser = client();
+      const { unmount } = render(
+        <BrowserWorkspace client={browser} hostBridge={nativeBridge} tab={tab} />,
+      );
+      await act(async () => undefined);
+      const user = userEvent.setup();
+
+      await user.click(screen.getByRole("button", { name: "Browser profile: Private" }));
+      await user.click(await screen.findByRole("menuitemradio", { name: "Personal" }));
+      enterAddress("https://example.com");
+      fireEvent.click(screen.getByRole("button", { name: "Start browser" }));
+
+      await waitFor(() => expect(browser.create).toHaveBeenCalled());
+      expect(vi.mocked(browser.create).mock.calls[0]?.[0].policy.profile).toEqual({
+        kind: "personal",
+      });
+
+      unmount();
+      render(<BrowserWorkspace client={client()} hostBridge={nativeBridge} tab={tab} />);
+      expect(
+        await screen.findByRole("button", { name: "Browser profile: Personal" }),
+      ).toBeVisible();
+    });
+
+    it("maps Project to this thread's own Project from the host's scope, never from the renderer", async () => {
+      const browser = client();
+      render(<BrowserWorkspace client={browser} hostBridge={nativeBridge} tab={tab} />);
+      await act(async () => undefined);
+      const user = userEvent.setup();
+
+      await user.click(screen.getByRole("button", { name: "Browser profile: Private" }));
+      await user.click(await screen.findByRole("menuitemradio", { name: "Project" }));
+      enterAddress("https://example.com");
+      fireEvent.click(screen.getByRole("button", { name: "Start browser" }));
+
+      await waitFor(() => expect(browser.create).toHaveBeenCalled());
+      expect(vi.mocked(browser.create).mock.calls[0]?.[0].policy.profile).toEqual({
+        kind: "project",
+        projectId: authority.projectId,
+      });
+    });
+
+    it("reopens the same address in the chosen profile as a new context when the page is open", async () => {
+      const browser = client();
+      vi.mocked(browser.inspectThread).mockResolvedValue({
+        status: "running",
+        threadId: threadId as any,
+        context: context as any,
+        observation: {
+          contextId: context.contextId,
+          actionId: context.actionId,
+          correlationId: context.correlationId,
+          authority,
+          url: "https://example.com/start",
+          revision: 1,
+          observedAt: "2026-07-27T20:01:00.000Z",
+          stale: false,
+        } as any,
+        evidence: [],
+      });
+      render(<BrowserWorkspace client={browser} hostBridge={nativeBridge} tab={tab} />);
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole("button", { name: "Browser profile: Private" }));
+      await user.click(await screen.findByRole("menuitemradio", { name: "Personal" }));
+
+      await waitFor(() => expect(browser.stop).toHaveBeenCalled());
+      await waitFor(() => expect(browser.create).toHaveBeenCalled());
+      expect(vi.mocked(browser.create).mock.calls[0]?.[0].policy.profile).toEqual({
+        kind: "personal",
+      });
+      expect(vi.mocked(browser.act).mock.calls.at(-1)?.[0]).toMatchObject({
+        kind: "navigate",
+        target: expect.stringContaining("example.com"),
+      });
+    });
+
+    it("says in words when the host refuses a profile page", async () => {
+      const browser = client();
+      vi.mocked(browser.create).mockResolvedValueOnce({
+        status: "failed",
+        threadId: threadId as any,
+        evidence: [],
+        failure: {
+          category: "unavailable",
+          reason: "profile-unavailable",
+          message: "Signed-in pages open only in the Octant app's own Browser.",
+        },
+      } as any);
+      globalThis.localStorage.setItem("octant.browser.profile.none", "personal");
+      render(<BrowserWorkspace client={browser} hostBridge={nativeBridge} tab={tab} />);
+      await act(async () => undefined);
+
+      enterAddress("https://example.com");
+      fireEvent.click(screen.getByRole("button", { name: "Start browser" }));
+
+      expect(
+        await screen.findByText("Signed-in pages open only in the Octant app's own Browser."),
+      ).toBeVisible();
+    });
   });
 });
 

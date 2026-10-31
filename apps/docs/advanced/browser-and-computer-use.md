@@ -40,6 +40,45 @@ page. Lifecycle and stop controls remain visible when a session needs them.
 The renderer requests lifecycle through authenticated routes; a denial creates
 no observation or evidence.
 
+### Browser profiles
+
+A Browser page is **Private** by default: its cookies and site data live in
+memory and are forgotten when the page closes. To stay signed in to a site,
+choose a profile from the control at the left of the address bar:
+
+| Profile      | Kept                            | Shared by                                         |
+| ------------ | ------------------------------- | ------------------------------------------------- |
+| **Private**  | Until the page closes           | That page and the tabs it opens                   |
+| **Project**  | On this Mac, until you sign out | Every page of this Work or Code Project           |
+| **Personal** | On this Mac, until you sign out | Every page, in any Project, that chooses Personal |
+
+- Sign in by typing into the page yourself. Octant saves no passwords and fills
+  none. Choosing another profile opens the same address again as a new page in
+  that profile; the old page closes and nothing it held carries over.
+- The control remembers your last choice for each Project, for pages you open.
+  It never changes a page the agent opened.
+- Project and Personal pages open only in the Octant app's own Browser. On a
+  host without the app they are refused with a message, never opened in a copy
+  that would disagree about who is signed in. Chat has no Browser, so it has no
+  profile.
+- **Sign out of this profile…** in the control's menu, or **Settings → Data &
+  privacy → Browser profiles**, closes every page of the profile and removes its
+  cookies, site storage, and cache after you confirm. The Settings list shows
+  each profile's size. Profiles are never in an export, a Canvas share, sync, a
+  backup, or diagnostics.
+
+**What the agent may do on a signed-in page.** A Project or Personal page is
+treated as signed in, because Octant cannot tell. The agent can ask for one by
+passing `profile` (`project` or `personal`) when it opens a page. Octant asks
+you first, naming the site and the profile: "Let the agent use github.com in
+the Personal profile?" Choosing **Always allow** remembers that site for that
+profile only, under **Settings → Permissions → Remembered websites**. A site you
+allowed Private does not cover a signed-in page, and one profile's grant does
+not cover another. A routine, a subagent, or a CLI typed into a thread terminal
+cannot open a signed-in page, and neither can a paired phone or browser, which
+sees only "Signed-in page — open it on this Mac." Plan mode refuses the Browser
+as it always did, and password and one-time-code fields stay protected.
+
 ### Browser captures
 
 When the agent takes a screenshot with its Browser, or you press **Screenshot**

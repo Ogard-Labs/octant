@@ -10,6 +10,7 @@ import type {
   BrowserObservation,
   BrowserThreadId,
   BrowserWorkspaceStatus,
+  StoredBrowserProfile,
   ThreadExternalContentTaint,
   ToolActionAuthority,
   ToolActionCancellation,
@@ -26,9 +27,12 @@ import {
   authorizeToolAction,
   browserCaptureTaker,
   canRequestToolCancellation,
+  browserProfileKey,
   evaluateBrowserAction,
-  evaluateProfileMode,
+  evaluateBrowserProfileUse,
+  storedBrowserProfile,
   type BrowserCaptureTaker,
+  type BrowserProfileCaller,
 } from "@octant/domain";
 import type {
   ExternalContentIngestionResult,
@@ -38,6 +42,7 @@ import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import type { KeepBrowserCaptureInput } from "./browserCaptureService";
 import {
   BrowserNavigationBlockedError,
+  BrowserProfileUnavailableError,
   type BrowserPointObservation,
   type BrowserRuntimePort,
 } from "./browserRuntimePort";
@@ -69,6 +74,12 @@ export interface BrowserAutomationServiceOptions {
   readonly captures?: {
     readonly keep: (input: KeepBrowserCaptureInput) => Promise<BrowserCaptureOutcome>;
   };
+  /**
+   * Whether a scope is the host acting for a routine, a goal loop, or a
+   * subagent's delivered result. Nobody sits there, so such a scope never opens
+   * a signed-in page.
+   */
+  readonly isUnattendedScope?: (windowId: WindowId) => boolean;
   readonly uuid: () => string;
   readonly clock: () => string;
   readonly now: () => number;
@@ -119,6 +130,7 @@ export class BrowserAutomationService {
     | ((input: RecordExternalContentIngestionInput) => ExternalContentIngestionResult)
     | undefined;
   readonly #captures: BrowserAutomationServiceOptions["captures"];
+  readonly #isUnattendedScope: (windowId: WindowId) => boolean;
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #now: () => number;
@@ -134,6 +146,7 @@ export class BrowserAutomationService {
       createBrowserToolCallAuthorityService(options.authority, options.clock);
     this.#recordExternalContentIngestion = options.recordExternalContentIngestion;
     this.#captures = options.captures;
+    this.#isUnattendedScope = options.isUnattendedScope ?? (() => false);
     this.#uuid = options.uuid;
     this.#clock = options.clock;
     this.#now = options.now;
@@ -167,6 +180,12 @@ export class BrowserAutomationService {
     readonly policy: BrowserContextPolicy;
     /** True when this Open needs a context of its own. See `OwnedContext`. */
     readonly dedicated?: boolean | undefined;
+    /**
+     * Who is behind the request, for a page in a stored profile. A paired device
+     * and a terminal grant name themselves; anything else is the person at a
+     * local window unless the scope is the host acting alone.
+     */
+    readonly profileCaller?: Extract<BrowserProfileCaller, "remote-device" | "terminal-grant">;
   }): Promise<BrowserAutomationSnapshot> {
     const dedicated = input.dedicated === true;
     const current = this.#current(input.windowId, input.threadId);
@@ -187,6 +206,8 @@ export class BrowserAutomationService {
       }
       return failedSnapshot(input.threadId, denied, "failed");
     }
+    const profileDenial = await this.#authorizeProfile(input);
+    if (profileDenial !== undefined) return failedSnapshot(input.threadId, profileDenial, "failed");
     // A dedicated Open never reconciles against the thread's shared context: it
     // must neither inherit that context's origin nor stop it to take the slot.
     if (!dedicated && current !== undefined) {
@@ -280,13 +301,16 @@ export class BrowserAutomationService {
         owned.cancelExpiry = this.#schedule(input.policy.sessionTimeoutMs, () => {
           void this.#expireContext(owned);
         });
-      } catch {
+      } catch (error) {
         if (owned.record.state === "creating") {
           owned.status = owned.abort.signal.aborted ? "interrupted" : "failed";
-          owned.failure = {
-            category: owned.abort.signal.aborted ? "interrupted" : "failed",
-            message: "The host could not create the isolated browser context.",
-          };
+          owned.failure =
+            error instanceof BrowserProfileUnavailableError
+              ? { category: "unavailable", reason: "profile-unavailable", message: error.message }
+              : {
+                  category: owned.abort.signal.aborted ? "interrupted" : "failed",
+                  message: "The host could not create the isolated browser context.",
+                };
           owned.record = stoppedRecord(
             owned.record,
             this.#clock(),
@@ -857,12 +881,6 @@ export class BrowserAutomationService {
     if (decision.kind === "deny" || decision.kind === "prompt") {
       return mapToolCallDenial(decision.reason, request);
     }
-    if (evaluateProfileMode(policy.profileMode, hostPolicy).kind !== "allowed") {
-      return {
-        category: "policy-denied",
-        message: "Existing-profile access is unavailable without an explicit host grant.",
-      };
-    }
     if (
       policy.allowedOrigins.length === 0 ||
       !policy.credentialFieldProtection ||
@@ -873,6 +891,55 @@ export class BrowserAutomationService {
       return { category: "policy-denied", message: "Browser context policy exceeds host limits." };
     }
     return undefined;
+  }
+
+  /**
+   * A stored profile holds sign-ins, so who may open a page in one is decided
+   * here, on the server, before any runtime is asked: a paired device, a
+   * routine, a subagent, and a terminal grant are refused, and so is a thread
+   * that is not the profile's Project's.
+   */
+  async #authorizeProfile(input: {
+    readonly windowId: WindowId;
+    readonly action: ToolActionRequest;
+    readonly policy: BrowserContextPolicy;
+    readonly profileCaller?: Extract<BrowserProfileCaller, "remote-device" | "terminal-grant">;
+  }): Promise<BrowserAutomationFailure | undefined> {
+    if (storedBrowserProfile(input.policy.profile) === undefined) return undefined;
+    const caller: BrowserProfileCaller = this.#isUnattendedScope(input.windowId)
+      ? "unattended"
+      : (input.profileCaller ?? "person");
+    const decision = evaluateBrowserProfileUse({
+      profile: input.policy.profile,
+      caller,
+      nativeBrowserAvailable: (await this.#runtime.nativeAvailable?.()) === true,
+      authority: input.action.authority,
+    });
+    if (decision.kind === "allowed") return undefined;
+    return decision.reason === "profile-unavailable"
+      ? { category: "unavailable", reason: decision.reason, message: decision.message }
+      : { category: "policy-denied", reason: decision.reason, message: decision.message };
+  }
+
+  /** The profile a live context keeps its site data in, if the host knows the context. */
+  profileOf(contextId: BrowserContextId): BrowserContextPolicy["profile"] {
+    return this.#contexts.get(contextId)?.record.policy.profile;
+  }
+
+  /**
+   * Stop every context that lives in one stored profile. Called when the person
+   * signs out of it: a page must not keep a sign-in that was just removed.
+   */
+  async closeProfile(profile: StoredBrowserProfile): Promise<void> {
+    const key = browserProfileKey(profile);
+    const closing = [...this.#contexts.values()]
+      .filter(
+        (owned) =>
+          browserProfileKey(owned.record.policy.profile) === key &&
+          (owned.record.state === "active" || owned.record.state === "creating"),
+      )
+      .map((owned) => this.#destroy(owned, "user-requested", "stale"));
+    await Promise.allSettled(closing);
   }
 
   async #queueAction<T>(owned: OwnedContext, action: () => Promise<T>): Promise<T> {

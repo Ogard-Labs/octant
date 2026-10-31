@@ -4,8 +4,10 @@ import type {
   BrowserThreadId,
 } from "@octant/contracts/browser-automation";
 import type { WindowId } from "@octant/contracts/shell";
+import { decodeStoredBrowserProfile } from "@octant/contracts/browser-profiles";
 import {
   BrowserNavigationBlockedError,
+  type BrowserProfileStorePort,
   type BrowserRuntimeObservation,
   type BrowserRuntimePort,
   type BrowserRuntimeAction,
@@ -58,6 +60,38 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
       return false;
     }
   }
+
+  nativeAvailable(): Promise<boolean> {
+    return this.available();
+  }
+
+  readonly profiles: BrowserProfileStorePort = {
+    list: async () => {
+      const payload = await this.#request<unknown>("/v1/profiles/list", {});
+      if (
+        typeof payload !== "object" ||
+        payload === null ||
+        !("profiles" in payload) ||
+        !Array.isArray(payload.profiles)
+      ) {
+        throw new Error("Octant desktop Browser broker rejected the request.");
+      }
+      return payload.profiles.flatMap((entry: unknown) => {
+        try {
+          const row = entry as { profile: unknown; sizeBytes: unknown };
+          const profile = decodeStoredBrowserProfile(row.profile);
+          return typeof row.sizeBytes === "number" && Number.isInteger(row.sizeBytes)
+            ? [{ profile, sizeBytes: Math.max(0, row.sizeBytes) }]
+            : [];
+        } catch {
+          return [];
+        }
+      });
+    },
+    clear: async (profile, scope) => {
+      await this.#request("/v1/profiles/clear", { profile, scope });
+    },
+  };
 
   async createContext(
     contextId: BrowserContextId,

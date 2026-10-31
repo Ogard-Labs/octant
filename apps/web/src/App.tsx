@@ -6631,6 +6631,7 @@ function LaunchedShell(
                 ? {}
                 : { availableFonts: props.availableFonts })}
               backgroundImageLibrary={backgroundImageLibrary}
+              {...(browserAutomationClient === undefined ? {} : { browserAutomationClient })}
               chatController={chatController}
               clients={launchedClients}
               codeController={codeController}

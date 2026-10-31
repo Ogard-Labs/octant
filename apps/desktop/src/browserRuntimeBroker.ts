@@ -1,8 +1,9 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { BrowserContextPolicy } from "@octant/contracts";
-import { MAX_BROWSER_TABS_PER_CONTEXT } from "@octant/contracts";
+import type { BrowserContextPolicy, BrowserProfileClearScope } from "@octant/contracts";
+import { decodeStoredBrowserProfile, MAX_BROWSER_TABS_PER_CONTEXT } from "@octant/contracts";
+import type { BrowserProfileStore } from "./browserProfileStore";
 import {
   BrowserNavigationBlockedError,
   type ReturnTypeOfBrowserSurfaceHost,
@@ -19,6 +20,8 @@ const ROUTES = new Set([
   "/v1/contexts/peek",
   "/v1/contexts/close",
   "/v1/contexts/close-all",
+  "/v1/profiles/list",
+  "/v1/profiles/clear",
 ]);
 
 export interface BrowserRuntimeBroker {
@@ -30,13 +33,14 @@ export interface BrowserRuntimeBroker {
 
 export async function startBrowserRuntimeBroker(
   host: ReturnTypeOfBrowserSurfaceHost,
+  profiles?: BrowserProfileStore,
 ): Promise<BrowserRuntimeBroker> {
   const token = randomBytes(32).toString("base64url");
   const goneContexts = new Set<string>();
   const removeGoneListener = host.onContextGone((contextId) => goneContexts.add(contextId));
   let brokerUrl: string | undefined;
   const server = createServer((incoming, outgoing) => {
-    void handleIncoming(incoming, brokerUrl, token, host, goneContexts).then(
+    void handleIncoming(incoming, brokerUrl, token, host, goneContexts, profiles).then(
       async (response) => {
         const headers: Record<string, string> = {};
         response.headers.forEach((value, name) => (headers[name] = value));
@@ -76,7 +80,7 @@ export async function startBrowserRuntimeBroker(
       return closing;
     },
     fetchForTest: (request: Request, peerAddress = "127.0.0.1") =>
-      handleBrokerRequest(request, peerAddress, token, host, goneContexts),
+      handleBrokerRequest(request, peerAddress, token, host, goneContexts, profiles),
   });
 }
 
@@ -86,6 +90,7 @@ async function handleIncoming(
   token: string,
   host: ReturnTypeOfBrowserSurfaceHost,
   goneContexts: Set<string>,
+  profiles: BrowserProfileStore | undefined,
 ): Promise<Response> {
   if (brokerUrl === undefined) return failure("unavailable", 503);
   const bytes = await readBody(incoming);
@@ -110,6 +115,7 @@ async function handleIncoming(
     token,
     host,
     goneContexts,
+    profiles,
     abort.signal,
   );
 }
@@ -120,6 +126,7 @@ async function handleBrokerRequest(
   token: string,
   host: ReturnTypeOfBrowserSurfaceHost,
   goneContexts: Set<string>,
+  profiles: BrowserProfileStore | undefined,
   signal?: AbortSignal,
 ): Promise<Response> {
   const url = new URL(request.url);
@@ -135,6 +142,19 @@ async function handleBrokerRequest(
   const body = await jsonBody(request);
   if (body === undefined) return failure("invalid-request", 400);
   try {
+    if (url.pathname === "/v1/profiles/list") {
+      if (profiles === undefined) return failure("profiles-unavailable", 409);
+      return Response.json({ profiles: await profiles.list() });
+    }
+    if (url.pathname === "/v1/profiles/clear") {
+      if (profiles === undefined) return failure("profiles-unavailable", 409);
+      const target = storedProfileOf(body.profile);
+      if (target === undefined || !isClearScope(body.scope)) {
+        return failure("invalid-request", 400);
+      }
+      await profiles.clear(target, body.scope);
+      return Response.json({ ok: true });
+    }
     if (url.pathname === "/v1/contexts/create") {
       if (!isUuid(body.contextId) || !isOwner(body.owner) || !isPolicy(body.policy)) {
         return failure("invalid-request", 400);
@@ -221,6 +241,7 @@ function isPolicy(value: unknown): boolean {
   return (
     isRecord(value) &&
     value.profileMode === "isolated" &&
+    (value.profile === undefined || storedOrPrivateProfile(value.profile)) &&
     Array.isArray(value.allowedOrigins) &&
     value.allowedOrigins.every((origin) => typeof origin === "string") &&
     value.credentialFieldProtection === true &&
@@ -229,6 +250,23 @@ function isPolicy(value: unknown): boolean {
     (value.maxConcurrentTabs as number) <= MAX_BROWSER_TABS_PER_CONTEXT &&
     typeof value.sessionTimeoutMs === "number"
   );
+}
+
+function storedOrPrivateProfile(value: unknown): boolean {
+  if (isRecord(value) && value.kind === "private" && Object.keys(value).length === 1) return true;
+  return storedProfileOf(value) !== undefined;
+}
+
+function storedProfileOf(value: unknown) {
+  try {
+    return decodeStoredBrowserProfile(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function isClearScope(value: unknown): value is BrowserProfileClearScope {
+  return value === "cookies" || value === "all";
 }
 
 function isOwner(value: unknown): value is { windowId: string; threadId: string } {
