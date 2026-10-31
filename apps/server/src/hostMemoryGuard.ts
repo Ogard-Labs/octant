@@ -141,6 +141,9 @@ export class HostMemoryGuard {
     }
     this.#pressure = pressure;
     this.#processMegabytes = processMegabytes;
+    // Saved before relief: a kill during cleanup must leave this reading, not
+    // the previous one or the last run's clean-exit marker, on disk.
+    if (!this.#stopped) await this.#persist(false);
     const now = this.#clock();
     if (
       pressure !== "normal" &&
@@ -150,7 +153,6 @@ export class HostMemoryGuard {
       this.#lastReliefAt = { at: now, pressure };
       await this.#relieve(pressure, source, now);
     }
-    if (!this.#stopped) await this.#persist(false);
   }
 
   async #relieve(

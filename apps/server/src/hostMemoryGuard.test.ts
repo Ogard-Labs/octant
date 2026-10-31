@@ -101,6 +101,30 @@ describe("HostMemoryGuard", () => {
     expect(guard.report().lastRelief?.source).toBe("process");
   });
 
+  it("saves the new reading before relief runs, so a kill during cleanup still leaves it behind", async () => {
+    const { guard, state, releaseIdle } = harness();
+    await guard.start();
+    let finishRelief: () => void = () => undefined;
+    releaseIdle.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishRelief = () => resolve({ idleRuntimesStopped: 0, idleSessionsReleased: 0 });
+        }),
+    );
+    state.signal = "critical";
+    state.rss = 4.5 * GIB;
+    const sampling = guard.sample();
+    await vi.waitFor(() => expect(releaseIdle).toHaveBeenCalledOnce());
+
+    expect(JSON.parse(await readFile(join(directory, "host-memory.json"), "utf8"))).toMatchObject({
+      cleanExit: false,
+      pressure: "critical",
+      processMegabytes: 4608,
+    });
+    finishRelief();
+    await sampling;
+  });
+
   it("keeps sampling when a relief step fails", async () => {
     const { guard, state, releaseIdle, logs } = harness();
     releaseIdle.mockRejectedValueOnce(new Error("provider close failed"));

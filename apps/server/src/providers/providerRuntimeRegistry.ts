@@ -514,11 +514,11 @@ export class ProviderRuntimeRegistry {
     readonly idleRuntimesStopped: number;
     readonly idleSessionsReleased: number;
   }> {
-    const idle = [...this.#runtimes.entries()].filter(
-      ([, entry]) => entry.refs === 0 && entry.closing === undefined,
+    const idle = [...this.#runtimes.values()].filter(
+      (entry) => entry.refs === 0 && entry.closing === undefined,
     );
     const [closed, idleSessionsReleased] = await Promise.all([
-      Promise.allSettled(idle.map(([instanceId, entry]) => this.#closeEntry(instanceId, entry))),
+      Promise.allSettled(idle.map((entry) => this.#closeEntry(entry))),
       this.#idleNativeSessions.releaseAll(),
     ]);
     return {
