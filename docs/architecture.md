@@ -59,7 +59,7 @@ apps gives nobody a reason to use it.
    access and merge, auto-merge, and merge whole stacks. Those apps also send
    telemetry by default, which Octant never does (principle 2).
 
-**Hard lines.** No setting, guardrail level, or provider review turns these
+**Hard lines.** No setting, guardrail level, or reviewer turns these
 off:
 
 - No telemetry, no usage data, no Octant cloud; nothing leaves unless the
@@ -1009,8 +1009,8 @@ approval-gated in every driver (or auto-accept-edits from Settings › Work).
 Allowed; not built yet — the driver changes the shared rule needs:
 
 - **Claude Code:** start the Work session with its shell tool, at the
-  thread's level as in Code (Guarded asks per command, Provider review is
-  its automatic mode, Trusted and Off run unattended).
+  thread's level as in Code (Guarded asks per command, Reviewed uses
+  its automatic mode or Octant Shield, Trusted and Off run unattended).
 - **Codex:** start and resume Work threads with `features.shell_tool` and
   `features.unified_exec` on and the approval policy and sandbox the level
   maps to in Code; stop declining `command` and `permissions` requests in
@@ -1022,7 +1022,7 @@ Allowed; not built yet — the driver changes the shared rule needs:
   person at Guarded instead of refusing them, and launch Work with exec and
   fork allowed under the same confinement as Code at that level. An agent
   whose shell runs in-process with no protocol request cannot be asked per
-  command, so at Guarded and Provider review it reports `unsupported` with
+  command, so at Guarded and Reviewed it reports `unsupported` with
   that reason, in Work as in Code, and runs only at Trusted and Off.
 - **Octant Harness:** give Work threads the shell port a Code harness thread
   has, under the same harness authority.
@@ -1043,7 +1043,7 @@ its own; the commands use the person's own SSH agent and configuration. At
 Guarded, the first connection to each host in a thread asks the person,
 naming the host, even where a remembered approval would cover the command
 otherwise. Network egress for shell commands follows the level: at Guarded
-and Provider review it follows the Project's egress rules, so a host those
+and Reviewed it follows the Project's egress rules, so a host those
 rules do not allow is refused; at Trusted and Off it is whatever the
 provider's own sandbox and the operating system allow.
 
@@ -1065,7 +1065,7 @@ none), and no setting turns them all off, so the driver reads the effective
 config and switches each named server off for the thread; a Chat thread whose
 servers cannot be listed does not start. Those are the person's own tool
 servers, so the rule is that a person may turn them on for Chat, per Project
-or thread, at Guarded and Provider review, and that they are on at Trusted
+or thread, at Guarded and Reviewed, and that they are on at Trusted
 and Off (allowed; not built yet). A server turned on runs with its own reach,
 which Chat's no-filesystem rule does not cover, and the switch says so. Octant-managed tools (research,
 Canvas) are unaffected; they run on the host, not in the provider's
@@ -1721,7 +1721,7 @@ hold for every action in it:
 Which path reaches the forge depends on the thread's
 [guardrail level](#security-and-authority):
 
-- **Guarded and Provider review.** Pull-request changes go through the
+- **Guarded and Reviewed.** Pull-request changes go through the
   pull-request tool, which is the only sanctioned path, and the shell's forge
   access is a known follow-up (below).
 - **Trusted and Off.** The provider's own `git` and forge command-line tool
@@ -1733,7 +1733,7 @@ Which path reaches the forge depends on the thread's
   see them before they run, and records what it could not see. Allowed; not
   built yet: today such a change is journaled only as a shell command.
 
-At Guarded and Provider review a known gap remains: a Code agent's shell can
+At Guarded and Reviewed a known gap remains: a Code agent's shell can
 reach forge credentials today. (At Trusted no runtime is confined by Octant,
 so a command can use the host's forge command-line login and Git credential
 helper; that reach is the person's choice at that level, as above.) Under
@@ -1744,7 +1744,7 @@ root (so `~/.config/gh` and `~/.ssh` are out of reach); whether a
 Keychain-backed credential helper is reachable there has not been measured.
 A push or pull-request change made through that gap is journaled only as a
 shell command, so none of the rules above applies to it. Closing the gap at
-Guarded and Provider review is a known follow-up.
+Guarded and Reviewed is a known follow-up.
 
 **Pull-request merge.** A person merges one open pull request from its review
 (`POST /api/code/project-pull-requests/merge`). The rules:
@@ -2474,7 +2474,7 @@ flowchart LR
   never clear it. Irreversible or authority-bearing actions on a tainted thread
   still require fresh confirmation after replay. That gate follows the
   thread's [guardrail level](#security-and-authority): on at Guarded and
-  Provider review, a warning that does not block at Trusted, and off at Off;
+  Reviewed, a warning that does not block at Trusted, and off at Off;
   a person turns it down for one thread or Project by setting that scope's
   level (allowed; not built yet: today it is on at every posture). The mark
   itself is recorded at every level, because the journal records what came
@@ -3018,7 +3018,7 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   specifications describe what is built today; each is marked against this
   rule. Where a native feature reaches beyond Octant's view, the
   [guardrail level](#security-and-authority) decides its default: at Guarded
-  and Provider review it is off until the person turns it on for the account,
+  and Reviewed it is off until the person turns it on for the account,
   Project, or thread; at Trusted and Off it is on, in Work and Code alike.
   Plan stays read-only and Chat's filesystem and shell stay withheld at
   every level. Octant still journals and shows a native child
@@ -3027,12 +3027,12 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   person marked trusted for that provider's own Project code in Octant; where
   the provider keeps its own folder-trust list, that list applies as well.
 
-  | Provider     | Today                                                                                                                                                                          | Rule                                                                                                                                                                                                     | Built                        |
-  | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
-  | Claude Code  | Own subagents off; `WebSearch` and `WebFetch` never offered and a session reporting them refused; Project skills off; no setting sources, so home config and skills never read | All on when the person allows: native subagents, web search and fetch, Project and home skills, home settings and a trusted Project's hooks, MCP servers, and plugins; automatic mode as Provider review | Provider review in Code only |
-  | Codex        | Own subagents off; Project skills disabled by path; in Chat every person-added tool server switched off by name                                                                | Own subagents, Project skills, and the person's tool servers on, Chat included; its own approval review as Provider review                                                                               | Provider review in Code only |
-  | Mistral Vibe | Project and home skills off; Project context off; runs through the ACP bridge only                                                                                             | Its own skills, a trusted Project's tools and MCP servers, and its auto-approve mode as Provider review; first-class with the same promise                                                               | No                           |
-  | OpenCode     | Shell and delegation denied in Work; Project skills off; Octant's denies outrank the person's saved OpenCode grants; approvals answered `once`, never `always`                 | The person's own OpenCode permission rules apply; "always" allowed; its delegation on; its skills on                                                                                                     | No                           |
+  | Provider     | Today                                                                                                                                                                          | Rule                                                                                                                                                                                                                 | Built                                        |
+  | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+  | Claude Code  | Own subagents off; `WebSearch` and `WebFetch` never offered and a session reporting them refused; Project skills off; no setting sources, so home config and skills never read | All on when the person allows: native subagents, web search and fetch, Project and home skills, home settings and a trusted Project's hooks, MCP servers, and plugins; automatic mode as Reviewed's default reviewer | Reviewed with its own reviewer, in Code only |
+  | Codex        | Own subagents off; Project skills disabled by path; in Chat every person-added tool server switched off by name                                                                | Own subagents, Project skills, and the person's tool servers on, Chat included; its own approval review as Reviewed's default reviewer                                                                               | Reviewed with its own reviewer, in Code only |
+  | Mistral Vibe | Project and home skills off; Project context off; runs through the ACP bridge only                                                                                             | Its own skills, a trusted Project's tools and MCP servers, and its auto-approve mode as Reviewed's default reviewer; first-class with the same promise                                                               | No                                           |
+  | OpenCode     | Shell and delegation denied in Work; Project skills off; Octant's denies outrank the person's saved OpenCode grants; approvals answered `once`, never `always`                 | The person's own OpenCode permission rules apply; "always" allowed; its delegation on; its skills on; Reviewed through Octant Shield                                                                                 | No                                           |
 
   Every other provider keeps the deny rules for Project code and skills under
   [Extensions and skills](#extensions-and-skills) until it is promoted the
@@ -6003,8 +6003,8 @@ listener per confined launch:
   configuration a repository ships. Thread and call rules may be granted by
   anyone who may already answer that thread's approvals, a paired device
   included under its existing clamps. Project rules need the person at a local
-  window whose workspace holds the Project, like remembered Full access. The
-  planned reviewer (0110) may answer a per-call `network-access` prompt on a
+  window whose workspace holds the Project, like remembered Full access.
+  [Octant Shield](#octant-shield) may answer a per-call `network-access` prompt on a
   thread that is not tainted. Its answer produces `call` rules for that one
   launch and nothing wider, journaled as `thread.egress-rule-granted@1` with
   the reviewer as the granting principal; it cannot grant a thread or Project
@@ -6271,8 +6271,9 @@ where it was or narrows it:
 - _What is not wired._ A child admitted with Full access whose parent has
   since narrowed to a posture that clamps it to `proxied` runs its commands
   unasked, so on a tainted parent they reach no host. A tainted proposal shows on the card and cannot
-  be granted there; the command confirmation is where it is granted. The
-  reviewer that may answer a per-call `network-access` prompt is not built.
+  be granted there; the command confirmation is where it is granted.
+  [Octant Shield](#octant-shield), the reviewer that may answer a per-call
+  `network-access` prompt, is not built.
   Each fails closed.
 
 **Failure modes.** Each fails closed:
@@ -6547,7 +6548,7 @@ same. This holds in Chat, Work, and Code.
   The Claude, Codex, Mistral Vibe, and OpenCode rows describe today's build.
   Under [Key providers run as themselves](#providers) their own Project and
   home skill loading is allowed: on at Trusted and Off, and on at Guarded and
-  Provider review once the person turns it on for the account, Project, or
+  Reviewed once the person turns it on for the account, Project, or
   thread (allowed; not built yet). A skill the provider loads that way is the
   provider's, not an Octant skill: it does not enter the activation ladder,
   and the catalog lists it as the provider's where the provider reports it.
@@ -6589,7 +6590,7 @@ same. This holds in Chat, Work, and Code.
   For Claude Code, Mistral Vibe, and OpenCode this denial is today's build,
   not the rule: in a Project the person trusted for that provider, a key
   provider loads the Project's hooks, MCP servers, and plugins as it would
-  outside Octant, on at Trusted and Off and on at Guarded and Provider review
+  outside Octant, on at Trusted and Off and on at Guarded and Reviewed
   once the person turns it on (allowed; not built yet;
   [Key providers run as themselves](#providers)). That code runs under the
   provider's own sandbox and the thread's level, and Octant reports that it
@@ -7234,12 +7235,12 @@ mechanisms are:
   for one action, because a narrower setting is the person's exception to the
   wider one. Off shows a one-time warning wherever it is first set.
 
-  | Level           | Who approves tool calls                                                      | Prompt-injection gate                                | Sandbox                                     | Git and pull requests                                                                  | Default for                                                               |
-  | --------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-  | Guarded         | The person, for anything with effects                                        | On: fresh confirmation after reading outside content | Octant's OS confinement plus the provider's | Opens and updates pull requests after asking; merges only when the person asked        | Ask first in the first-run picker; the fallback where Auto is unsupported |
-  | Provider review | The provider's own review model or harness; the person for what it escalates | On                                                   | Octant's plus the provider's                | As Guarded, with the provider's review standing in for the person's click              | Auto in the first-run picker, pre-selected where the provider supports it |
-  | Trusted         | Nobody inside the folder; the person for anything outside it                 | Warns, does not block                                | The provider's own sandbox                  | Opens, updates, and merges the pull requests the person asked for without asking again | Full access in the first-run picker, never pre-selected                   |
-  | Off             | Nobody                                                                       | Off                                                  | None beyond the operating system            | As Trusted, plus a plain force-push when the person asks for it                        | Not in the picker: a Settings switch under Full access, one-time warning  |
+  | Level    | Who approves tool calls                                                                                                | Prompt-injection gate                                | Sandbox                                     | Git and pull requests                                                                  | Default for                                                               |
+  | -------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+  | Guarded  | The person, for anything with effects                                                                                  | On: fresh confirmation after reading outside content | Octant's OS confinement plus the provider's | Opens and updates pull requests after asking; merges only when the person asked        | Ask first in the first-run picker; the fallback where no reviewer can run |
+  | Reviewed | A reviewer the person chooses: the provider's own or [Octant Shield](#octant-shield); the person for what it escalates | On                                                   | Octant's plus the provider's                | As Guarded, with the reviewer standing in for the person's click                       | Auto in the first-run picker, pre-selected                                |
+  | Trusted  | Nobody inside the folder; the person for anything outside it                                                           | Warns, does not block                                | The provider's own sandbox                  | Opens, updates, and merges the pull requests the person asked for without asking again | Full access in the first-run picker, never pre-selected                   |
+  | Off      | Nobody                                                                                                                 | Off                                                  | None beyond the operating system            | As Trusted, plus a plain force-push when the person asks for it                        | Not in the picker: a Settings switch under Full access, one-time warning  |
   - **Every level keeps the hard lines** in
     [Overview and principles](#overview-and-principles): Plan stays read-only,
     an agent never merges or force-pushes on its own initiative, no
@@ -7247,16 +7248,16 @@ mechanisms are:
     level, merge, and force-push. A level changes who answers and what Octant
     confines, never those.
   - **First run asks.** The first run asks once which mode new threads start
-    in. The picker lists, in this order: Auto (Recommended; the provider's own
-    reviewer; shown only where the provider supports it), Ask first
+    in. The picker lists, in this order: Auto (Recommended; Reviewed, with the
+    provider's own reviewer or Octant Shield), Ask first
     (Guarded), Accept edits (file edits inside the folder go through,
     commands ask), Plan (read-only), and Full access (Trusted: no prompts; the
     provider's own sandbox, or Octant's, still applies). Auto is pre-selected
-    and marked Recommended: when the person uses Claude or Codex, or any other
-    provider that has an auto mode, new threads default to Auto. The person
+    and marked Recommended, and is offered for every runtime that routes
+    approvals through Octant, so new threads default to Auto. The person
     can pick any other mode instead, and Full access is never the default.
-    Where Auto is unsupported for a thread's provider, that thread falls back
-    to Ask first and the picker says so. Off (no sandbox) is not in the
+    Where no reviewer can run for a thread (for example, no reachable Shield
+    model), that thread falls back to Ask first and the picker says why. Off (no sandbox) is not in the
     picker: it is a Settings switch under Full access, with a one-time
     warning. The answer becomes the default for every new thread, Work and
     Code; Settings › Access changes it, a Project may override it, and any
@@ -7281,20 +7282,22 @@ mechanisms are:
   auto-accept-edits is Guarded with project file writes waived. Plan is not a
   level: it is a mode of a thread at any level and is always read-only. A
   Code thread's `autoApprove` flag on a provider reporting
-  `harnessAutoReview` is Provider review (below). Remembered Full access is
+  `harnessAutoReview` is Reviewed (below). Remembered Full access is
   Trusted; session-only Full access is Trusted for that window's session, with
-  the Octant Harness exception below. Built today: Guarded, Provider review
+  the Octant Harness exception below. Built today: Guarded, Reviewed
   for Claude Code and Codex in Code, and Trusted as Full access, set per
   thread and remembered per Project. Allowed; not built yet: the single
   level setting with its global and Project defaults, the first-run
   question, the header indicator,
-  Provider review in Work and on Mistral Vibe and OpenCode, Trusted's
+  Reviewed in Work and on Mistral Vibe, Octant Shield, Trusted's
   warn-only injection gate (Full access still asks under taint today), and
   Off.
 
-- **Provider review.** Where a provider can approve its own tool calls, with
-  its model or harness judging each call or reply, Octant offers that as an
-  approval mode instead of always asking the person. Claude Code's automatic
+- **Reviewed.** A reviewer answers the prompts that would otherwise go to
+  the person: the provider's own, where it has one, or
+  [Octant Shield](#octant-shield) for any runtime that routes approvals
+  through Octant. The person chooses in Settings › Access; the provider's own
+  is the default where it exists, Shield everywhere else. Claude Code's automatic
   mode (`permissionMode: "auto"`, its model reviewing each call) and Codex's
   own approval review (`approvalsReviewer: "auto_review"`) are built for Code
   through `autoApprove`. Mistral Vibe's auto-approve mode is allowed; not
@@ -7311,12 +7314,14 @@ mechanisms are:
     reaches another thread's branch, and never writes in Plan; the host
     refuses those whatever the review answered.
   - **What it escalates goes to the person,** through the ordinary approval
-    path, and so does every call on a thread marked by outside content: the
-    injection gate stays on at this level, so delegation is off on a marked
-    thread, as described under Approvals below.
-  - **No emulation.** A provider without its own review reports the mode
-    `unsupported`, and the level is not offered for it. Octant never fakes a
-    provider's review with its own heuristics.
+    path. The injection gate stays on at this level: on a thread marked by
+    outside content the provider's own reviewer is withdrawn, as described
+    under Approvals below, and Shield cannot allow irreversible, publish, or
+    new-egress classes.
+  - **No emulation.** `harnessAutoReview` reports only a provider's own
+    review; a provider without one reports it `unsupported`. Shield is
+    Octant's reviewer under its own name, journaled as Shield, never
+    presented as the provider's.
 - **Approvals.** Independent categories — project file writes, shell commands,
   network access, external application observation or control, destructive
   actions, credential access, access outside the bound root, privilege or
@@ -7324,7 +7329,7 @@ mechanisms are:
   one MCP tool in one Project follows the rules in
   [Extensions and skills](#extensions-and-skills). Work and Code threads
   start in the mode the person picked at first run (Auto
-  pre-selected where the provider supports it, else Ask first), changeable
+  pre-selected, else Ask first where no reviewer can run), changeable
   per thread from the composer, per Project, or in Settings › Access (allowed; not built yet: today Code starts approval-gated and only
   a per-Project remembered Full access exists, and Work has neither);
   Plan mode is read-only; auto-accept-edits waives only project file writes;
@@ -7415,9 +7420,8 @@ mechanisms are:
   `octant project access <name> full-access` decision. The desktop-owned
   challenge invariant is preserved by not offering the grant the challenge
   cannot guard.
-  The native harness may swap a configured reviewer onto eligible shell
-  and network prompts when a host setting is on
-  (`docs/decisions/0110`); that planned path does not yet run.
+  [Octant Shield](#octant-shield) answers these prompts at Reviewed; it does
+  not yet run.
   Three provider tool requests denied in one Code turn end it as
   interrupted, with the reason journaled, so a provider cannot loop a
   person's refusals.
@@ -7709,8 +7713,8 @@ mechanisms are:
   | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | No turn runs                                                                                                                                                                                                                               |
 
   The columns are today's postures. On the
-  [guardrail levels](#security-and-authority): Guarded and Provider review run
-  the Plan and approval-gated columns unchanged, because a provider's review
+  [guardrail levels](#security-and-authority): Guarded and Reviewed run
+  the Plan and approval-gated columns unchanged, because a reviewer
   changes who answers, not the sandbox. Trusted is Full access, where Octant
   wraps no provider runtime and each runs in its own sandbox. Off would launch
   the runtime with its own sandbox off and no Octant wrapping, leaving only
@@ -7721,10 +7725,10 @@ mechanisms are:
   thread launches exactly as a Code thread at the same level would (allowed;
   not built yet for every runtime). Per runtime:
 
-  - **ACP, OpenCode, Pi:** wrapped at Guarded and Provider review, with
+  - **ACP, OpenCode, Pi:** wrapped at Guarded and Reviewed, with
     process exec and fork allowed and writes held to the Project root, so the
     shell runs confined; unwrapped at Trusted, in the runtime's own sandbox
-    where it has one; Off as above. Egress at Guarded and Provider review is
+    where it has one; Off as above. Egress at Guarded and Reviewed is
     the Project's egress rules rather than a blanket `allow`.
   - **Claude Agent SDK:** unwrapped as in Code's approval-gated posture; the
     runtime's own sandbox holds commands to the Project root, and its
@@ -8274,21 +8278,20 @@ mechanisms are:
   Code session at the same level:
 
   - **Claude Code** starts the Work session with its shell tool; Guarded asks
-    per command, Provider review is its automatic mode, Trusted and Off run
+    per command, Reviewed uses its automatic mode or Octant Shield, Trusted and Off run
     commands without asking.
   - **Codex** starts and resumes the Work thread with `features.shell_tool`
     and `features.unified_exec` on and its own approval policy for the level;
-    Provider review is its own approval review.
+    Reviewed uses its own approval review or Octant Shield.
   - **OpenCode** stops denying `bash` and `task` in Work; the person's own
-    OpenCode permission rules apply over the level. It has no provider
-    review, so that level reports `unsupported` and the person chooses
-    another.
-  - **Pi** starts with its shell tool; it has no provider review either.
+    OpenCode permission rules apply over the level. It has no reviewer of
+    its own, so Reviewed uses [Octant Shield](#octant-shield).
+  - **Pi** starts with its shell tool; Reviewed uses Octant Shield there too.
   - **ACP agents**, Mistral Vibe included, get their `execute` requests sent
-    to the person at Guarded instead of refused; Provider review exists only
-    where the agent has its own auto-approve mode (Mistral Vibe: allowed, not
-    built yet). An agent whose shell runs in-process without a protocol
-    request cannot be asked per command, so at Guarded and Provider review it
+    to the person at Guarded instead of refused; Reviewed uses the
+    agent's own auto-approve mode where it has one (Mistral Vibe: allowed, not
+    built yet) and Octant Shield otherwise. An agent whose shell runs in-process without a protocol
+    request cannot be asked per command, so at Guarded and Reviewed it
     reports `unsupported` with that reason, in Work and Code alike; at
     Trusted and Off it runs.
   - **Ollama, Harness endpoints, and outside harness endpoints** carry the
@@ -9632,6 +9635,125 @@ Terms or an explicit Anthropic exception. Until that is recorded, the rules
 in this document describe the build as it ships. The steps, the open questions, and the rejected alternatives live in
 [the remediation plan](plans/claude-inside-anthropics-terms.md).
 
+### Octant Shield
+
+Octant Shield is Octant's own automatic approval reviewer (maintainer
+decision, 2026-10-31; designed, not built). It answers the approval prompts
+that would otherwise go to the person, for every runtime that routes
+approvals through Octant: Octant Harness, Claude Code (`canUseTool`), Codex
+(app-server approval requests), OpenCode (`permission.asked`), ACP agents
+(`session/request_permission`, Mistral Vibe included), and Pi (through its
+extension). It is the reviewer `docs/decisions/0110` planned for the
+harness, extended to every runtime. Shield has two parts that never share
+input: the Watcher reads outside content and the Judge answers approvals.
+
+**Place in the levels.** At the Reviewed
+[guardrail level](#security-and-authority) the person chooses the reviewer:
+the provider's own, or Octant Shield. The picker label stays Auto, and Auto
+is offered for every runtime that routes approvals through Octant. The
+default reviewer is the provider's own where it has one (Claude Code, Codex,
+and Mistral Vibe's auto-approve mode) and Octant Shield everywhere else.
+Settings › Access sets "Auto reviewer: Provider's own / Octant Shield" as an
+account default with a Project override. Auto falls back to Ask first only
+when no reviewer can run, for example when no Shield model is reachable, and
+the picker says why.
+
+**Judge.** Each prompt passes three stages in order:
+
+1. **Hard lines and deny rules.** Anything outside Shield's authority goes to
+   the person or is refused; Shield never allows it. The malicious-call rules
+   below belong here.
+2. **Fast allow rules,** with no model call: reads and edits inside the bound
+   root, the Project's own test or build command, read-only Git, egress to a
+   safe network, and SSH to a registered server within its profile.
+3. **Model judgment** for everything else. The Judge sees only the person's
+   own messages in this thread, the pending call (tool, arguments, working
+   directory), the bound root, the level, the thread's taint state, and the
+   Watcher's labels. It never sees tool results, file contents, or fetched web
+   content, so text injected there cannot steer it. It answers allow, ask, or
+   deny with a one-sentence reason. A malformed answer, a timeout, or an
+   unreachable model means ask: Shield fails closed to the person.
+
+**Malicious calls.** Rules first, then the Judge, catch these, and they go to
+the person or are refused, never allowed by Shield: reading secrets followed
+by network egress, piping a download into a shell, obfuscated commands
+(encoded payloads, eval of fetched text), persistence (login items, launch
+agents, cron, shell startup files), credential and keychain access, mass
+deletion, rewriting history on a shared branch, and disabling security
+settings.
+
+**Authority limits.** Shield grants per call only. It never creates a
+standing rule or a thread or Project grant and never widens the OS sandbox
+past the thread's level; a `network-access` answer yields `call` rules only,
+as the [egress rules](#security-and-authority) state for the reviewer. Once a
+thread is tainted, Shield cannot allow irreversible, publish, or new-egress
+classes; those go to the person, as taint already withdraws the provider's
+own reviewer. After 3 denials in a row, or 20 in one thread, Shield pauses
+and the next call goes to the person.
+
+**Watcher.** The Watcher reads outside content as it enters the thread: tool
+results, fetched pages, files from outside the root, MCP results, and remote
+command output. It labels injection-shaped content: instructions aimed at the
+agent, hidden or encoded text, requests to exfiltrate, and fake authority. It
+can only raise: it marks the thread tainted, puts a visible marker on that
+tool row, and tells the Judge "tainted". It never allows anything. It runs at
+every level; at Trusted and Off it only records and marks, matching the
+injection gate there.
+
+**Safe networks.** The person names trusted places in Settings › Access
+(account default, Project override): hosts, domains, address ranges, and
+private-network tags. Egress to a trusted place passes by rule; anything else
+goes to the Judge at Reviewed and to the person at Guarded. Each decision is
+journaled per host.
+
+**Servers over SSH,** in Work and Code alike:
+
+- The person registers their own servers: a host alias from their SSH config,
+  a user, and an action profile (Read-only, Operate, or Admin).
+- Keys stay out of the agent. Octant hands the SSH session the person's SSH
+  agent socket or the credential broker; the agent never reads key files, and
+  Shield refuses reads of key paths.
+- SSH to a registered server passes by rule; to an unregistered host it goes
+  to the person.
+- Each remote command is judged like a local one, by the server's profile.
+  Read-only allows status, logs, disk, process, and service-status reads.
+  Operate adds service restarts, package updates, and deploys the person
+  described. Admin adds config edits. Destructive or lock-out actions
+  (firewall changes that can cut access, user or key removal, disk and
+  partition changes, deleting data, rebooting a production host) go to the
+  person at every level below Trusted.
+- Every remote command and its exit status is journaled with the host, and
+  remote output passes through the Watcher.
+- A per-server notes file (runbook) the person points to is given to the
+  agent as context, never as authority.
+
+**Model and privacy.** By default Shield uses the thread's own provider
+account with that provider's smallest model, so no new party sees the work.
+The person may pick another configured
+[model endpoint](design/model-endpoints.md), a local one included. Shield
+sends no telemetry, and its calls count against the existing spend ceilings.
+
+**Journal.** Every Shield decision is journaled with the reviewer, the model,
+the rule or reason, and the latency, and shows on the tool row in the
+transcript.
+
+**Inheritance.** Subagents inherit the parent's reviewer. A routine may run
+at Auto with Shield unattended; anything Shield escalates waits as an
+approval for the person.
+
+**Limits.** Shield sees only the calls a runtime asks about. What a runtime
+does without asking stays confined by the sandbox, which remains the hard
+wall. A model reviewer is not a guarantee.
+
+**Evaluation.** The repository keeps a fixture set of known-safe and
+known-unsafe calls, and a release with Shield requires measuring its
+false-allow rate on that set.
+
+**Build order.** (1) Octant Harness; (2) every runtime through the approval
+path; (3) the picker and Settings; (4) the Watcher; (5) safe networks; (6)
+the server registry and SSH. Work gets SSH under the rule that
+[Work and Code are guarded identically](#security-and-authority).
+
 ## Package map
 
 | Package                   | Responsibility                                                                                                                                          | Depends on                                                        |
@@ -9717,8 +9839,9 @@ Chat routines, the key providers' skill folders and extra skill folders added
 in Settings, and linked external secret stores are allowed and not built yet.
 The [guardrail levels](#security-and-authority) and the
 [key providers' native features](#providers) are in scope; of them only
-Guarded, Provider review for Claude Code and Codex in Code, and Trusted as
-Full access are built. A merge or force-push an agent starts on its own
+Guarded, Reviewed for Claude Code and Codex in Code, and Trusted as
+Full access are built; [Octant Shield](#octant-shield) is in scope and
+designed, not built. A merge or force-push an agent starts on its own
 initiative, and cloud scheduling, are not in scope. A self-hosted wake service
 that runs in the Octant server on a person's hub and wakes their own spokes is
 in scope under [Hub and spokes](design/hub-and-spokes.md#wake-service); an

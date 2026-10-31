@@ -636,8 +636,10 @@ First-run setup asks only what a first task needs — a usable provider, a
 Project folder, a model, and the
 [mode](docs/architecture.md#security-and-authority) new threads start in
 (Auto pre-selected and marked Recommended, then Ask first, Accept edits, Plan,
-and Full access, in that order; Auto is listed only where the provider
-supports it; the pick becomes the default for every new Work and Code thread
+and Full access, in that order; Auto uses the provider's own reviewer or
+[Octant Shield](docs/architecture.md#octant-shield), so it is listed for every
+runtime, and where no reviewer can run the picker shows it unavailable with
+the reason; the pick becomes the default for every new Work and Code thread
 until changed in Settings › Access; this question is allowed, not built yet) — and ends in one primary action, Start a task,
 that opens the new-task composer in that Project. Every step is optional from
 the first one. Opening setup focuses the current step's heading so a long
@@ -2098,8 +2100,14 @@ proceed. Native Code approvals keep their isolated host-owned document. The
 extension tool request names the plugin, its server, and the tool, and adds
 "Always allow in this Project" only when the host marks the call rememberable
 and the window is a local one. Settings › Permissions lists those answers by
-Project, each with Revoke, beside Remembered websites, and shows the global
-guardrail level with one-click change, which governs Work and Code alike.
+Project, each with Revoke, beside Remembered websites. Its Access section
+(Settings › Access) shows the global guardrail level with one-click change,
+which governs Work and Code alike, and, each as an account default a Project
+may override: **Auto reviewer** (Provider's own / Octant Shield), **Safe
+networks** (trusted hosts, domains, address ranges, and private-network tags),
+and **Servers** (registered SSH hosts, each with a Read-only, Operate, or Admin
+profile and an optional notes file). The rules behind them are in
+[Octant Shield](docs/architecture.md#octant-shield); allowed, not built yet.
 A Work Project's **Developer tools** switch is presentation, not a
 permission, so it lives on that Project's overview, not here
 ([Workspace](docs/design/workspace.md); allowed, not built yet). A Browser request from a
