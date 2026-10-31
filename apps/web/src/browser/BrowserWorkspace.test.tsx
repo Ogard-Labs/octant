@@ -804,7 +804,9 @@ describe("BrowserWorkspace", () => {
     const start = screen.getByRole("button", { name: "Start browser" });
     fireEvent.click(start);
     fireEvent.click(start);
-    expect(browser.resolve).toHaveBeenCalledOnce();
+    // One ask for the thread's Project when the tab opened, and one for the start
+    // that the second click did not duplicate.
+    await waitFor(() => expect(browser.resolve).toHaveBeenCalledTimes(2));
 
     release({ threadId, authority });
     await waitFor(() => expect(browser.create).toHaveBeenCalledOnce());
@@ -1279,6 +1281,89 @@ describe("BrowserWorkspace", () => {
       });
     });
 
+    it("remembers the choice per Project, so another Project's new tab starts Private", async () => {
+      const first = client();
+      const { unmount } = render(
+        <BrowserWorkspace client={first} hostBridge={nativeBridge} tab={tab} />,
+      );
+      await act(async () => undefined);
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: "Browser profile: Private" }));
+      await user.click(await screen.findByRole("menuitemradio", { name: "Personal" }));
+      expect(screen.getByRole("button", { name: "Browser profile: Personal" })).toBeVisible();
+      unmount();
+
+      const otherProject = client();
+      vi.mocked(otherProject.resolve).mockResolvedValue({
+        threadId,
+        authority: { ...authority, projectId: "30000000-0000-4000-8000-0000000000ff" },
+      } as any);
+      render(<BrowserWorkspace client={otherProject} hostBridge={nativeBridge} tab={tab} />);
+
+      await waitFor(() => expect(otherProject.resolve).toHaveBeenCalled());
+      await act(async () => undefined);
+      expect(screen.getByRole("button", { name: "Browser profile: Private" })).toBeVisible();
+
+      // The first Project still remembers its own choice.
+      const again = client();
+      render(<BrowserWorkspace client={again} hostBridge={nativeBridge} tab={tab} />);
+      expect(
+        (await screen.findAllByRole("button", { name: "Browser profile: Personal" })).length,
+      ).toBeGreaterThan(0);
+    });
+
+    it("follows a tab bound to one context onto the replacement a profile switch creates", async () => {
+      const browser = client();
+      const replacement = { ...context, contextId: "60000000-0000-4000-8000-0000000000aa" };
+      vi.mocked(browser.inspect).mockImplementation(
+        async ({ contextId }: { contextId: string }) =>
+          ({
+            status: "running",
+            threadId,
+            context: contextId === context.contextId ? context : replacement,
+            observation: {
+              contextId,
+              actionId: context.actionId,
+              correlationId: context.correlationId,
+              authority,
+              url: "https://example.com/start",
+              revision: 1,
+              observedAt: "2026-07-27T20:01:00.000Z",
+              stale: false,
+            },
+            evidence: [],
+          }) as any,
+      );
+      vi.mocked(browser.create).mockResolvedValue({
+        status: "running",
+        threadId,
+        context: replacement,
+        evidence: [],
+      } as any);
+      const onContextCreated = vi.fn();
+      render(
+        <BrowserWorkspace
+          client={browser}
+          hostBridge={nativeBridge}
+          onContextCreated={onContextCreated}
+          tab={{ ...tab, contextId: context.contextId as any }}
+        />,
+      );
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole("button", { name: "Browser profile: Private" }));
+      await user.click(await screen.findByRole("menuitemradio", { name: "Personal" }));
+
+      await waitFor(() => expect(browser.create).toHaveBeenCalled());
+      // The replacement is its own context: it never takes over the thread's shared one.
+      expect(vi.mocked(browser.create).mock.calls[0]?.[0].dedicated).toBe(true);
+      expect(onContextCreated).toHaveBeenCalledWith(replacement.contextId);
+      vi.mocked(browser.inspect).mockClear();
+      await waitFor(() => expect(browser.inspect).toHaveBeenCalled(), { timeout: 3_000 });
+      // Every later poll asks for the replacement, never the stopped context.
+      const asked = vi.mocked(browser.inspect).mock.calls.map(([input]) => input.contextId);
+      expect(new Set(asked)).toEqual(new Set([replacement.contextId]));
+    });
+
     it("says in words when the host refuses a profile page", async () => {
       const browser = client();
       vi.mocked(browser.create).mockResolvedValueOnce({
@@ -1291,7 +1376,7 @@ describe("BrowserWorkspace", () => {
           message: "Signed-in pages open only in the Octant app's own Browser.",
         },
       } as any);
-      globalThis.localStorage.setItem("octant.browser.profile.none", "personal");
+      globalThis.localStorage.setItem(`octant.browser.profile.${authority.projectId}`, "personal");
       render(<BrowserWorkspace client={browser} hostBridge={nativeBridge} tab={tab} />);
       await act(async () => undefined);
 

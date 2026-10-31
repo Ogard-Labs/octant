@@ -120,11 +120,47 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   );
   const [nativeSupported, setNativeSupported] = useState(false);
   // Where the next page keeps its site data. A new page opens Private unless the
-  // person chose otherwise for this Project, which the control remembers.
-  const profileKey = props.projectId === undefined ? "none" : String(props.projectId);
-  const [profileChoice, setProfileChoice] = useState<BrowserProfileChoice>(() =>
-    readRememberedProfileChoice(profileKey),
+  // person chose otherwise for this Project, which the control remembers. The
+  // Project is the thread's own, asked of the host: not every entry point to a
+  // Browser tab knows it, and a preference keyed by anything else would carry one
+  // Project's choice into another's.
+  const [profileKey, setProfileKey] = useState<string | undefined>(
+    props.projectId === undefined ? undefined : String(props.projectId),
   );
+  const [profileChoice, setProfileChoice] = useState<BrowserProfileChoice>(() =>
+    props.projectId === undefined
+      ? "private"
+      : readRememberedProfileChoice(String(props.projectId)),
+  );
+  const chosenByPerson = useRef(false);
+  // The context a profile switch created for a tab that was bound to another one.
+  const [replacementContextId, setReplacementContextId] = useState<BrowserContextId>();
+  const switchingProfile = useRef(false);
+  const threadIdForProfile = props.tab.threadId;
+  const modeForProfile = props.tab.mode;
+  const resolveForProfile = props.client.resolve;
+  useEffect(() => {
+    if (profileKey !== undefined || threadIdForProfile === undefined) return;
+    let current = true;
+    Promise.resolve()
+      .then(() =>
+        resolveForProfile.call(props.client, {
+          threadId: threadIdForProfile,
+          mode: modeForProfile,
+        }),
+      )
+      .then((resolved) => {
+        if (!current) return;
+        const key = String(resolved?.authority.projectId ?? "");
+        if (key === "") return;
+        setProfileKey(key);
+        if (!chosenByPerson.current) setProfileChoice(readRememberedProfileChoice(key));
+      })
+      .catch(() => undefined);
+    return () => {
+      current = false;
+    };
+  }, [modeForProfile, profileKey, props.client, resolveForProfile, threadIdForProfile]);
   const [remoteFocused, setRemoteFocused] = useState(false);
   // Pointing at the page is a separate gesture from using it: while it is on, a
   // click marks a spot to write about instead of clicking through to the page.
@@ -241,7 +277,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
 
   useEffect(() => {
     if (props.tab.threadId === undefined) return;
-    const contextId = props.tab.contextId ?? ownedContextId;
+    const contextId = replacementContextId ?? props.tab.contextId ?? ownedContextId;
     if (props.startFresh === true && contextId === undefined) {
       setStatus("ready");
       return;
@@ -323,7 +359,14 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       controller.abort();
       if (refreshTimer !== undefined) clearTimeout(refreshTimer);
     };
-  }, [ownedContextId, props.client, props.startFresh, props.tab.contextId, props.tab.threadId]);
+  }, [
+    ownedContextId,
+    props.client,
+    props.startFresh,
+    props.tab.contextId,
+    props.tab.threadId,
+    replacementContextId,
+  ]);
 
   if (props.tab.threadId === undefined) {
     return (
@@ -381,6 +424,9 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           sessionTimeoutMs: 300_000,
           ...(prepared?.acceptsLocalCertificate === true ? { acceptsLocalCertificate: true } : {}),
         },
+        // A tab bound to one context is replaced by a context of its own, never by
+        // whatever shared context the thread already holds.
+        ...(switchingProfile.current ? { dedicated: true } : {}),
       });
       setScope(resolved);
       update(next);
@@ -399,6 +445,12 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       }
       if (props.startFresh === true && next.context !== undefined) {
         setOwnedContextId(next.context.contextId);
+        props.onContextCreated?.(next.context.contextId);
+      }
+      if (switchingProfile.current && next.context !== undefined) {
+        // The tab now shows the replacement; polling the stopped context would
+        // swap the old page back in.
+        setReplacementContextId(next.context.contextId);
         props.onContextCreated?.(next.context.contextId);
       }
     } catch (error) {
@@ -590,13 +642,20 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
    * and the old context closes; nothing it held carries over.
    */
   async function chooseProfile(choice: BrowserProfileChoice): Promise<void> {
-    writeRememberedProfileChoice(profileKey, choice);
+    chosenByPerson.current = true;
+    if (profileKey !== undefined) writeRememberedProfileChoice(profileKey, choice);
     setProfileChoice(choice);
     if (!activeContext) return;
     const address = committedAddress ?? validTargetUrl(url);
     if (address === undefined) return;
     await stop(false);
-    await start(address, undefined, choice);
+    switchingProfile.current =
+      props.tab.contextId !== undefined || replacementContextId !== undefined;
+    try {
+      await start(address, undefined, choice);
+    } finally {
+      switchingProfile.current = false;
+    }
   }
 
   async function signOutOfProfile(): Promise<void> {
