@@ -248,6 +248,37 @@ user). If the process cannot be inspected, the owner counts as live and the
 start refuses. An ownership failure names the code, the artifact path, and the
 next step.
 
+**Memory pressure.** The server samples its own resident size and the
+system's memory-pressure signal every 15 seconds (every 5 while pressure
+lasts): the kernel's pressure level on macOS, and the available share of
+`/proc/meminfo` on Linux, where under 10% reads as low and under 5% as very
+low. A reading the platform cannot give is "unknown", which counts as no
+signal, never as normal pressure. The host process counts as pressure on its
+own once it holds 2 GiB (4 GiB for very low), or a quarter (a half) of a
+machine smaller than 8 GiB. On the first low reading, when pressure rises, and
+then at most once a minute while it lasts, the host eases itself in a fixed
+order: it logs the reading, stops provider runtimes whose last lease ended and
+sessions parked for reuse (the next turn starts them again), then trims caches
+it rebuilds on demand (SQLite's page cache and, under Bun, the heap). A running
+turn is never stopped; the report only counts how many were left running. The
+host-control status carries a `memory` report (level, the host's size in
+megabytes, the last relief as counts, and any unclean stop) and nothing named:
+no provider, thread, or path. The renderer shows it as one dismissible, quiet
+notice and as rows in Settings > Host, only when the host stopped something, when
+memory was very low, or after an unclean stop. Dismissal is local to the
+renderer. Nothing leaves the machine.
+
+The host keeps `host-memory.json` in its data directory (owner-only: the last
+pressure level, size, and time seen). Only a clean shutdown marks it clean, so
+the next start that finds it unmarked reports the previous process as stopped
+unexpectedly together with that last reading, without claiming a cause: a
+crash from memory looks like an unmarked file with a high last reading, and
+nothing more is inferred. The per-user service restarts a crashed host: the
+launchd job keeps the host alive after any exit but a successful one (30
+seconds apart), and the systemd unit restarts it on failure, which includes a
+kill by signal. A start that failed on configuration does not loop. No telemetry
+is involved at any step.
+
 **Language services.** Code editor language services and, later, a debugger
 run as confined children the server launches per checkout, under the
 [Language services](design/language-services.md) design accepted on 2026-10-26.

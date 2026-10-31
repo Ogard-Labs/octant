@@ -84,6 +84,18 @@ export class NativeSessionRuntimePool {
     await Promise.all(closes);
   }
 
+  /** Closes every parked session now and says how many closed cleanly. */
+  async releaseAll(): Promise<number> {
+    const closes: Promise<void>[] = [];
+    for (const [key, entry] of this.#idle) {
+      this.#idle.delete(key);
+      clearTimeout(entry.timer);
+      closes.push(this.#close(entry.resource));
+    }
+    const settled = await Promise.allSettled(closes);
+    return settled.filter((result) => result.status === "fulfilled").length;
+  }
+
   async close(): Promise<void> {
     this.#closed = true;
     for (const [key, entry] of this.#idle) {
