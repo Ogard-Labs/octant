@@ -6522,13 +6522,13 @@ function LaunchedShell(
    * control already uses, so a command is a second route to an action, never a
    * second authority for it.
    */
-  const activeCodeProject = projectController.projects.find(
+  const actionsProject = projectController.projects.find(
     (project) =>
       project.type === "code" && project.lifecycle === "active" && project.id === activeProjectId,
   );
   const activeProjectActions =
-    activeCodeProject?.type === "code"
-      ? (activeCodeProject.actions ?? NO_PROJECT_ACTIONS)
+    actionsProject?.type === "code"
+      ? (actionsProject.actions ?? NO_PROJECT_ACTIONS)
       : NO_PROJECT_ACTIONS;
   const octantCommands = buildOctantCommands({
     activeMode,
@@ -6563,20 +6563,20 @@ function LaunchedShell(
     skills: commandExtensions.skills,
     pluginServers: commandExtensions.pluginServers,
     appleProjects,
-    ...(activeCodeProject === undefined || activeProjectActions.length === 0
+    ...(actionsProject === undefined || activeProjectActions.length === 0
       ? {}
       : {
           projectActions: activeProjectActions.map((action) => ({
             actionId: String(action.id),
             name: action.name,
             command: action.command,
-            projectName: activeCodeProject.name,
+            projectName: actionsProject.name,
           })),
           onRunProjectAction: (commandAction: { readonly actionId: string }) => {
             const action = activeProjectActions.find(
               (candidate) => String(candidate.id) === commandAction.actionId,
             );
-            if (action !== undefined) void runProjectAction(activeCodeProject.id, action);
+            if (action !== undefined) void runProjectAction(actionsProject.id, action);
           },
         }),
     onOpenAppleProject: (project) => {
@@ -7251,10 +7251,10 @@ function LaunchedShell(
           settings={controller.settings?.voice ?? NO_VOICE_SETTINGS}
         >
           <OctantCommandProvider commands={octantCommands}>
-            {activeCodeProject === undefined ? null : (
+            {actionsProject === undefined ? null : (
               <ProjectActionButtons
                 actions={activeProjectActions}
-                onRun={(action) => void runProjectAction(activeCodeProject.id, action)}
+                onRun={(action) => void runProjectAction(actionsProject.id, action)}
               />
             )}
             <NeedsYouProvider source={needsYouSource}>
