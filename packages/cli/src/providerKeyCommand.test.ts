@@ -128,13 +128,17 @@ describe("octant provider key", () => {
     expect(await run(SET)).toBe(1);
     expect(err.join("")).toContain("org.freedesktop.secrets");
     expect(err.join("")).toContain("/usr/bin/secret-tool");
-    expect(err.join("")).toContain("octant server restart");
+    expect(err.join("")).toContain("without a restart");
   });
 
-  it("tells a Linux person whether the keyring is locked or has no Login keyring", async () => {
+  it("tells a Linux person why the keyring would not take the key", async () => {
     for (const [cause, words] of [
       ["locked", "keyring is locked"],
       ["no-login-collection", 'no "Login" keyring'],
+      ["no-service", "no keyring is running"],
+      ["no-tool", "secret-tool is not installed"],
+      ["denied", "refused access"],
+      ["timed-out", "did not answer"],
     ] as const) {
       const { err, run } = fixture(() => ({
         status: 503,

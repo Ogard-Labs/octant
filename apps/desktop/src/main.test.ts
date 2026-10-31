@@ -1200,10 +1200,22 @@ describe("provider API key host operations", () => {
     for (const [cause, words] of [
       ["locked", "Your keyring is locked"],
       ["no-login-collection", "no Login keyring"],
+      ["no-service", "No keyring is running"],
+      ["no-tool", "secret-tool program"],
+      ["denied", "refused Octant access"],
+      ["timed-out", "did not answer"],
     ] as const) {
       vi.mocked(store.set).mockRejectedValueOnce(new CredentialStoreFailure("unavailable", cause));
       await expect(call("add", providerInstanceId, FIRST, "Work")).rejects.toThrow(words);
     }
+    vi.mocked(store.set).mockRejectedValueOnce(new CredentialStoreFailure("unavailable"));
+    await expect(call("add", providerInstanceId, FIRST, "Work")).rejects.toThrow(
+      "could not reach a secure credential store",
+    );
+    vi.mocked(store.set).mockRejectedValueOnce(new CredentialStoreFailure("failed"));
+    await expect(call("add", providerInstanceId, FIRST, "Work")).rejects.toThrow(
+      "keyring refused to keep the key",
+    );
   });
 
   it("removes the last key by deleting the stored entry", async () => {

@@ -79,6 +79,7 @@ export {
   CredentialPurgeFailure,
   CredentialStoreFailure,
   type CredentialStoreFailureCause,
+  credentialStoreFailureCauseOf,
   type CredentialPurgeFailureCategory,
   type CredentialPurgeInput,
   type CredentialPurgeResult,
