@@ -154,6 +154,8 @@ A turn carries at most eight images, each up to 10 MB, alongside a written messa
 
 Type `#` in the composer to mention another thread as read-only context, the same bounded excerpt Chat uses. Dragging a sidebar thread onto the composer, or choosing **Attach as context** from that row's menu, attaches the same reference and does not send the draft. Type `@` to complete a path inside this Project's bound folder; the host refuses a path outside that root before reading it. Chat has no `@file` mention, because Chat Projects have no filesystem authority.
 
+In the macOS desktop app, the paperclip opens a menu: **Choose file…** or **Capture window…**. Capture window lists your open windows by title and attaches a picture of the one you choose, as an image like any other. The first time, Octant explains why macOS needs Screen Recording permission and asks only when you press **Continue**; if you turned it off, Octant opens System Settings instead. Octant reads a window only after you choose it, and the picture goes only to the thread you attach it to. The web app and the phone app do not offer it.
+
 ## Thread board
 
 Work has a server-authoritative [Thread board](/advanced/work-board) that

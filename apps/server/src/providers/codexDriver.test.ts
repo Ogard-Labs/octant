@@ -2519,15 +2519,11 @@ describe("Codex execution authority and approvals", () => {
     );
   });
 
-  it("never delegates the edit waiver to the harness reviewer", () => {
-    // `untrusted` turns every patch edit into a prompt. Codex's reviewer is
-    // thread-wide and risk-based, so delegating it on a posture that already
-    // waives project file writes would let the reviewer deny an edit 0018 says
-    // proceeds. Approval-gated has no waiver, so it may delegate.
+  it("lets the reviewer answer on both prompting postures when the thread asks for Auto", () => {
     expect(codexExecutionSettings("auto-accept-edits", true)).toEqual({
       approvalPolicy: "untrusted",
       sandbox: "read-only",
-      approvalsReviewer: "user",
+      approvalsReviewer: "auto_review",
     });
     expect(codexExecutionSettings("approval-gated", true)).toEqual({
       approvalPolicy: "untrusted",

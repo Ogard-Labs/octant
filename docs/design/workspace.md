@@ -146,6 +146,22 @@ sidebar timer never walks the checkout tree. Inactive modes and hidden windows
 pause those refreshes so background ticks do not contend with the next
 interaction.
 
+### Jump to the next waiting thread
+
+The `next-waiting-thread` keybinding (Mod+Shift+J by default) and the palette
+command **Jump to the next thread that needs you** open the next thread waiting
+on the person. The renderer reads the attention signals the sidebar and Inbox
+already render and adds no host read. Each thread counts once, at its strongest
+reason, in this order: approval, question, finished turn not yet looked at;
+within a reason, in the order the signals are listed. The jump goes to the entry
+after the open thread and wraps from the last to the first; when the open thread
+is not waiting it goes to the first, and when nothing waits it does nothing and
+the command is absent from the palette. A failed turn is not in the order: the
+thread listing reports no failure, and a status is never inferred from silence.
+A due follow-up is a reminder, not a waiting thread, and is left out. The
+Status arrangement's **Needs input** and **Ready for review** headings are the
+list-side counterpart, so no second priority group is added to the Projects tree.
+
 ### Sidebar thread status
 
 The sidebar speaks about what a thread is doing now with one vocabulary, in
@@ -409,6 +425,17 @@ through `GitHistoryReader` and the authenticated Code checkout-read boundary;
 its Git subprocesses are network-denied and its data is an ephemeral read,
 not a second journal. Pages anchor to immutable Git tips, and commit details
 compare immutable object IDs with an explicit parent for merges.
+A pull request opened in Review shows, under its header, an **Automatic
+actions** section with two switches: **Merge when ready** and **Auto-fix**.
+Each has one status line under its name that says what it is doing now (off,
+on and waiting on checks, reviews, or a conflict, merged, turned off by
+GitHub; on and watching, waiting while you type or while a turn runs, last
+woke the thread and which try, stopped and why). Auto-fix names the linked
+thread it wakes, the first linked one; with none linked it stays off and its
+hover reason says to link a thread. A refused or unsupported change keeps the
+switch where it was and says why in one alert line under the section. The
+review re-reads the switches every 20 seconds while open. Rules and limits are
+owned by [Architecture: modes](../architecture.md#modes-chat-work-and-code).
 The top-right control reveals the dock only when the active pane has a bound thread
 or a valid launchable tool. A new Code task's pane, before its thread exists, keeps
 the dock: its title band shows the common tools disabled ("Available once the task

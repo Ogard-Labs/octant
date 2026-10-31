@@ -456,6 +456,8 @@ describe("Claude execution policy", () => {
       allowDangerouslySkipPermissions: true,
       tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "AskUserQuestion", "TodoWrite"],
     });
+    expect(claudeExecutionOptions("approval-gated", true).permissionMode).toBe("auto");
+    expect(claudeExecutionOptions("auto-accept-edits", true).permissionMode).toBe("auto");
     expect(claudeExecutionOptions("approval-gated")).toEqual({
       permissionMode: "default",
       allowDangerouslySkipPermissions: false,

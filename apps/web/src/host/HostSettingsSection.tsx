@@ -43,6 +43,7 @@ import type { HostFederationLifecycle } from "@octant/client-runtime/host-federa
 import type { HostDataMap } from "@octant/contracts/host-data-map";
 import { HostDataMapView } from "./HostDataMap";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { formatMemoryEventTime, hostMemoryFact, hostReliefFact } from "./hostMemoryNotice";
 
 /**
  * The Settings host card for one local or headless
@@ -308,6 +309,27 @@ export function HostSettingsSection({
               // qualifier only appears when there is live work to attend to.
               value: `${status.work.active}${status.work.attentionRequired && status.work.active > 0 ? " (attention required)" : ""}`,
             },
+            ...(status.memory === undefined
+              ? []
+              : [
+                  { label: "Memory", value: hostMemoryFact(status.memory) },
+                  ...(status.memory.lastRelief === undefined
+                    ? []
+                    : [
+                        {
+                          label: "Last memory relief",
+                          value: hostReliefFact(status.memory.lastRelief),
+                        },
+                      ]),
+                  ...(status.memory.previousStop === undefined
+                    ? []
+                    : [
+                        {
+                          label: "Last unexpected stop",
+                          value: `${formatMemoryEventTime(status.memory.previousStop.lastSeenAt)}, host using ${status.memory.previousStop.processMegabytes} MB`,
+                        },
+                      ]),
+                ]),
           ]}
         />
       </SettingsSection>

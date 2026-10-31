@@ -179,8 +179,8 @@ export function makeSecretServiceCredentialStore(
     }
     try {
       return await execute(spec, limits);
-    } catch {
-      throw new CredentialStoreFailure("unavailable");
+    } catch (error) {
+      throw new CredentialStoreFailure("unavailable", executionCause(error));
     }
   };
 
@@ -194,7 +194,9 @@ export function makeSecretServiceCredentialStore(
     has: async (providerInstanceId) => {
       const result = await invoke("has", providerInstanceId);
       if (result.exitCode !== 0) {
-        if (result.stderr === "" || isMissingSecret(result.stderr)) return false;
+        if (secretStoreCause(result.stderr) === undefined) {
+          if (result.stderr === "" || isMissingSecret(result.stderr)) return false;
+        }
         throw commandFailure(result);
       }
       // secret-tool lookup prints the secret plus a newline; stored bytes do not include it.
@@ -207,7 +209,10 @@ export function makeSecretServiceCredentialStore(
     resolve: async (providerInstanceId) => {
       const result = await invoke("resolve", providerInstanceId);
       if (result.exitCode !== 0) {
-        if (result.stderr === "" || isMissingSecret(result.stderr)) {
+        if (
+          secretStoreCause(result.stderr) === undefined &&
+          (result.stderr === "" || isMissingSecret(result.stderr))
+        ) {
           throw new CredentialStoreFailure("missing");
         }
         throw commandFailure(result);
@@ -261,22 +266,52 @@ function isMissingSecret(stderr: string): boolean {
 }
 
 /**
- * secret-tool names a locked collection, and a session whose login keyring was
- * never created answers that the collection path does not exist; both read as
- * the same generic refusal unless the cause is kept.
+ * What the keyring said about why it refused. A locked collection, a session
+ * whose login keyring was never created, a service nobody started, a denied
+ * caller and a missing tool each read as the same generic refusal unless the
+ * cause is kept; the person's remedy differs for each.
+ *
+ * The order matters: a locked or missing collection names the service's own
+ * object path, so it is read before the words that mean no service answers.
  */
 function secretStoreCause(stderr: string): CredentialStoreFailureCause | undefined {
   if (/locked|unlock/i.test(stderr)) return "locked";
   if (/does not exist|no such (?:object|collection)|nosuchobject/i.test(stderr)) {
     return "no-login-collection";
   }
+  if (
+    /permission denied|access ?denied|not permitted|not allowed|org\.freedesktop\.dbus\.error\.accessdenied/i.test(
+      stderr,
+    )
+  ) {
+    return "denied";
+  }
+  if (
+    /serviceunknown|not provided by any \.service|namehasnoowner|name has no owner|not activatable|cannot autolaunch|d-bus|dbus|session bus|could not connect|failed to connect|connection refused|no such file or directory|org\.freedesktop\.secrets/i.test(
+      stderr,
+    )
+  ) {
+    return "no-service";
+  }
+  return undefined;
+}
+
+/**
+ * A failed launch, not a refusal: the program is not installed, or it started
+ * and never answered inside the limit (a keyring waiting on a prompt nobody
+ * can see, or a session bus nothing serves).
+ */
+function executionCause(error: unknown): CredentialStoreFailureCause | undefined {
+  const code =
+    typeof error === "object" && error !== null ? (error as { code?: unknown }).code : undefined;
+  const message = error instanceof Error ? error.message : "";
+  if (code === "ENOENT" || code === "EACCES" || /ENOENT/.test(message)) return "no-tool";
+  if (/timed out/i.test(message)) return "timed-out";
   return undefined;
 }
 
 function isSecretStoreUnavailable(stderr: string): boolean {
-  return /service|collection|keyring|locked|unlock|dbus|session bus|does not exist|no such object/i.test(
-    stderr,
-  );
+  return secretStoreCause(stderr) !== undefined || /service|collection|keyring/i.test(stderr);
 }
 
 const defaultProbeRunner: SecretServiceProbeRunner = {

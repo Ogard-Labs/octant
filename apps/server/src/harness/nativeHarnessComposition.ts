@@ -80,6 +80,14 @@ export interface NativeHarnessCompositionOptions {
    */
   readonly proxiedShell?: (scope: HarnessEgressScope) => NativeHarnessShellPort;
   /**
+   * Code only: the shell a Full access command runs on, outside Octant's OS
+   * sandbox with the network open, as Full access runs in the providers' own
+   * apps. Chosen per command with `proxiedShell`, so a posture lowered
+   * mid-turn puts the next command back in the sandbox. Without it Full
+   * access runs on `shell`.
+   */
+  readonly fullAccessShell?: NativeHarnessShellPort;
+  /**
    * A Code thread's access posture now, as the window running it holds it and
    * clamped to its running turn's, or nothing for a thread that is not one.
    * Without a window it is the stored posture clamped to the running turn's.
@@ -451,7 +459,10 @@ export function createNativeHarnessComposition(
           confirmed === undefined ? input : { ...input, confirmedHosts: confirmed },
         );
       }
-      const shell = network === "allow" ? options.shell : options.offlineShell;
+      // Open network is resolved only at Full access, so it is also the
+      // command that runs outside the sandbox.
+      const shell =
+        network === "allow" ? (options.fullAccessShell ?? options.shell) : options.offlineShell;
       return (shell ?? unavailableShell).run(input);
     },
   });

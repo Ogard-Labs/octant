@@ -44,10 +44,11 @@ off) has every tool call refused, and the model is told why so it can say so.
 A read never needs an approval; an edit, a write, or a command follows the
 thread's access posture. Once a thread has taken in outside content — a
 fetched page, search results, or a helper's reply — it asks before every
-edit, write, command, and page fetch, even under Full access. Reading,
+edit, write, command, and page fetch, unless the thread is at Full access,
+where outside content is only tagged. Reading,
 searching, and running commands in your own folder do not count as outside
 content. A web search on such a thread does not ask, because it only reaches
-the search endpoint you set; instead Octant refuses a query that looks like it
+the search endpoint you set; instead, below Full access, Octant refuses a query that looks like it
 carries data — a link, an email address, a key or other long random-looking
 token, an encoded or hex string, or more than 200 characters — and tells the
 model why, so it can ask a plain question instead. A short query can still
