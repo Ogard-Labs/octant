@@ -339,6 +339,12 @@ export const ExtensionCommand = Schema.Union(
     kind: Schema.Literal("resolve-npm-package"),
     packageName: boundedText(214),
     range: Schema.optional(boundedText(128)),
+    /**
+     * The installed package this lookup is an update of. The host then asks
+     * the registry that package was installed from, whatever the npm settings
+     * name now, and refuses a result that is not the same package.
+     */
+    updateOf: Schema.optional(ToolExtensionId),
   }).annotations(strict),
   /** Asks the registry an installed npm package came from whether a newer version exists. Installs nothing. */
   Schema.Struct({

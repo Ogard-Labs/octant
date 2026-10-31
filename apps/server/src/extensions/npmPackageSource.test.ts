@@ -38,6 +38,7 @@ import { ExtensionApiService } from "./extensionApiService";
 import { ExtensionLifecycleService, NOOP_EXTENSION_SUPERVISOR } from "./extensionLifecycleService";
 import { ExtensionPackageStore } from "./extensionPackageStore";
 import { NpmPackageSource } from "./npmPackageSource";
+import type { NpmRegistryConfigSources } from "./npmRegistryConfig";
 
 const now = "2026-10-31T12:00:00.000Z";
 const directories: Array<string> = [];
@@ -294,13 +295,15 @@ async function setup(options: { readonly fetchesAllowed?: () => boolean } = {}) 
     uuid: randomUUID,
     clock: () => now,
   });
+  // The person's npm settings, as the next lookup will read them.
+  let config: NpmRegistryConfigSources = { env: { npm_config_registry: registry.url } };
   const source = new NpmPackageSource({
     appVersion: "1.0.0",
     platform: "darwin",
     ...(options.fetchesAllowed === undefined
       ? {}
       : { isMarketplaceFetchAllowed: options.fetchesAllowed }),
-    readRegistryConfig: async () => ({ env: { npm_config_registry: registry.url } }),
+    readRegistryConfig: async () => config,
   });
   const api = new ExtensionApiService({
     lifecycle,
@@ -317,12 +320,16 @@ async function setup(options: { readonly fetchesAllowed?: () => boolean } = {}) 
       catalogStatus: () => "available",
     }),
   });
-  const resolve = (packageName: string, range?: string) =>
+  const resolve = (packageName: string, range?: string, updateOf?: string) =>
     api.execute({
       kind: "resolve-npm-package",
       packageName,
       ...(range === undefined ? {} : { range }),
+      ...(updateOf === undefined ? {} : { updateOf: updateOf as never }),
     });
+  const useConfig = (next: NpmRegistryConfigSources) => {
+    config = next;
+  };
   const install = async (result: ExtensionCommandResult) => {
     if (result.kind !== "package-inspected") throw new Error("expected an inspected package");
     const { entry } = result.preview;
@@ -344,6 +351,7 @@ async function setup(options: { readonly fetchesAllowed?: () => boolean } = {}) 
     source,
     api,
     resolve,
+    useConfig,
     install,
     packages,
   };
@@ -706,6 +714,141 @@ describe("installing a plugin from an npm registry", () => {
     });
     expect(updated.kind).toBe("extension-state-updated");
     expect(context.packages()[0]?.npm?.version).toBe("1.1.0");
+  });
+
+  it("compares an update with the npm version that was installed, not the plugin's own version", async () => {
+    const context = await setup();
+    // The plugin says 0.5.0 inside; the registry's release that carries it is 1.0.0.
+    const inner = (version: string) =>
+      buildGzipTar([
+        {
+          path: "package/plugin.json",
+          content: JSON.stringify({
+            $schema: AGENT_PLUGIN_TEST_SCHEMA,
+            name: "demo-plugin",
+            version: "0.5.0",
+            description: "Demo Agent Plugin.",
+            license: "MIT",
+          }),
+        },
+        { path: "package/skills/demo", kind: "directory" },
+        { path: "package/skills/demo/SKILL.md", content: `${demoSkill()}${version}\n` },
+      ]);
+    context.registry.publish("demo-plugin", {
+      releases: [{ version: "1.0.0", tarball: inner("1.0.0") }],
+    });
+    await context.install(await context.resolve("demo-plugin"));
+    const extensionId = context.packages()[0]?.extensionId;
+    if (extensionId === undefined) throw new Error("expected an installed package");
+
+    // The newest release is the one installed: nothing to offer, though 1.0.0 > 0.5.0.
+    expect(await context.api.execute({ kind: "check-npm-update", extensionId })).toEqual({
+      kind: "npm-update-checked",
+      extensionId,
+      installedVersion: "1.0.0",
+    });
+
+    // A release newer than the installed one is offered though the plugin says it is older.
+    context.registry.publish("demo-plugin", {
+      releases: [
+        { version: "1.0.0", tarball: inner("1.0.0") },
+        { version: "1.0.1", tarball: inner("1.0.1") },
+      ],
+    });
+    expect(await context.api.execute({ kind: "check-npm-update", extensionId })).toEqual({
+      kind: "npm-update-checked",
+      extensionId,
+      installedVersion: "1.0.0",
+      available: "1.0.1",
+    });
+  });
+
+  it("resolves an update from the registry the package was installed from, not the current settings", async () => {
+    const context = await setup();
+    const other = await startFakeRegistry();
+    context.registry.publish("demo-plugin", {
+      releases: [
+        { version: "1.0.0", tarball: agentPluginTarball("demo-plugin", "1.0.0") },
+        { version: "1.1.0", tarball: agentPluginTarball("demo-plugin", "1.1.0") },
+      ],
+    });
+    other.publish("demo-plugin", {
+      releases: [{ version: "9.9.9", tarball: agentPluginTarball("demo-plugin", "9.9.9") }],
+    });
+    const first = await context.resolve("demo-plugin", "1.0.0");
+    await context.install(first);
+    const installed = context.packages()[0];
+    if (installed === undefined) throw new Error("expected an installed package");
+
+    // The person's npm settings now name another registry.
+    context.useConfig({ env: { npm_config_registry: other.url } });
+    const registryRequestsBefore = context.registry.requests.length;
+    const next = await context.resolve("demo-plugin", "1.1.0", installed.extensionId);
+
+    expect(other.requests).toEqual([]);
+    expect(context.registry.requests.length).toBeGreaterThan(registryRequestsBefore);
+    if (next.kind !== "package-inspected") throw new Error("expected an inspected package");
+    expect(next.preview.entry.extensionId).toBe(installed.extensionId);
+    expect(next.preview.review.provenance.npm?.registry).toBe(context.registry.url);
+    const updated = await context.api.execute({
+      kind: "update-package",
+      extensionId: installed.extensionId,
+      packageId: next.preview.entry.packageId,
+      version: next.preview.entry.version,
+      digest: next.preview.entry.digest,
+    });
+    expect(updated.kind).toBe("extension-state-updated");
+    expect(context.packages()).toHaveLength(1);
+    expect(context.packages()[0]?.npm?.version).toBe("1.1.0");
+
+    // Without the installed package named, the same words follow the new settings
+    // and give a different package, which is why an update must name its target.
+    const elsewhere = await context.resolve("demo-plugin");
+    if (elsewhere.kind !== "package-inspected") throw new Error("expected an inspected package");
+    expect(elsewhere.preview.entry.extensionId).not.toBe(installed.extensionId);
+  });
+
+  it("refuses to resolve an update for a package that is not the one installed from npm", async () => {
+    const context = await setup();
+    context.registry.publish("demo-plugin", {
+      releases: [{ version: "1.0.0", tarball: agentPluginTarball("demo-plugin", "1.0.0") }],
+    });
+    context.registry.publish("other-plugin", {
+      releases: [{ version: "1.0.0", tarball: agentPluginTarball("other-plugin", "1.0.0") }],
+    });
+    await context.install(await context.resolve("demo-plugin"));
+    const installed = context.packages()[0];
+    if (installed === undefined) throw new Error("expected an installed package");
+    const before = context.registry.requests.length;
+
+    expect(
+      failureOf(await context.resolve("other-plugin", undefined, installed.extensionId)),
+    ).toEqual({
+      category: "invalid",
+      message: "That is not the package this plugin came from.",
+    });
+    expect(failureOf(await context.resolve("demo-plugin", undefined, randomUUID()))).toEqual({
+      category: "invalid",
+      message: "This package did not come from an npm registry.",
+    });
+    expect(context.registry.requests.length).toBe(before);
+  });
+
+  it("refuses a lookup, before any request, when the person's npm settings cannot be read", async () => {
+    const context = await setup();
+    context.registry.publish("private-plugin", {
+      releases: [{ version: "1.0.0", tarball: agentPluginTarball("private-plugin", "1.0.0") }],
+    });
+    context.useConfig({ env: {}, userConfigUnreadable: true });
+
+    const result = await context.resolve("private-plugin");
+
+    expect(failureOf(result)).toEqual({
+      category: "invalid",
+      message:
+        "Octant could not read the registry address from your npm configuration, so it fetched nothing rather than guess. An address that uses an environment variable is not read, and neither is a configuration file Octant cannot open.",
+    });
+    expect(context.registry.requests).toEqual([]);
   });
 
   it("answers a check on a package that did not come from npm", async () => {

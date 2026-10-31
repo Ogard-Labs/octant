@@ -171,10 +171,28 @@ export class ExtensionApiService {
         }
         case "resolve-npm-package": {
           if (this.#npm === undefined) return unsupportedCommand();
+          // An update looks in the registry its package was installed from,
+          // not the one the npm settings name now, so it cannot fetch another
+          // registry's package of the same name.
+          const target =
+            command.updateOf === undefined
+              ? undefined
+              : this.#lifecycle
+                  .snapshot()
+                  .packages.find((candidate) => candidate.extensionId === command.updateOf);
+          if (command.updateOf !== undefined) {
+            if (target?.npm === undefined) {
+              return failure("invalid", "This package did not come from an npm registry.");
+            }
+            if (target.npm.packageName !== command.packageName.trim()) {
+              return failure("invalid", "That is not the package this plugin came from.");
+            }
+          }
           const resolution = await this.#npm.resolve(
             {
               packageName: command.packageName,
               ...(command.range === undefined ? {} : { range: command.range }),
+              ...(target?.npm === undefined ? {} : { registry: target.npm.registry }),
             },
             signal,
           );
@@ -184,10 +202,17 @@ export class ExtensionApiService {
               npmSourceRefusalMessage(resolution),
             );
           }
-          return {
-            kind: "package-inspected",
-            preview: previewFor(this.#inspectResolved(resolution.resolved)),
-          };
+          const inspection = this.#inspectResolved(resolution.resolved);
+          if (
+            command.updateOf !== undefined &&
+            inspection.manifest.extensionId !== command.updateOf
+          ) {
+            return failure(
+              "invalid",
+              "That version is a different package from the one installed.",
+            );
+          }
+          return { kind: "package-inspected", preview: previewFor(inspection) };
         }
         case "check-npm-update": {
           if (this.#npm === undefined) return unsupportedCommand();
@@ -210,8 +235,10 @@ export class ExtensionApiService {
           return {
             kind: "npm-update-checked",
             extensionId: command.extensionId,
-            installedVersion: installed.version,
-            ...(compareNpmVersions(latest.version, installed.version) > 0
+            // The plugin's own version is whatever its author wrote; the npm
+            // release it was installed from is what `latest` is compared with.
+            installedVersion: installed.npm.version,
+            ...(compareNpmVersions(latest.version, installed.npm.version) > 0
               ? { available: latest.version as never }
               : {}),
           };

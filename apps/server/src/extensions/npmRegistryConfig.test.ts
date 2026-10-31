@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { chooseNpmRegistry, PUBLIC_NPM_REGISTRY } from "./npmRegistryConfig";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { chooseNpmRegistry, PUBLIC_NPM_REGISTRY, readUserNpmConfig } from "./npmRegistryConfig";
 
 const userConfigText = [
   "; a comment",
@@ -8,7 +11,70 @@ const userConfigText = [
   "@scoped:registry=https://scoped.example.test",
 ].join("\n");
 
+describe("reading the person's npm configuration file", () => {
+  const directories: Array<string> = [];
+  afterEach(async () => {
+    await Promise.all(
+      directories.splice(0).map(async (directory) => {
+        await chmod(join(directory, ".npmrc"), 0o600).catch(() => undefined);
+        await rm(directory, { recursive: true, force: true });
+      }),
+    );
+  });
+  const home = async () => {
+    const directory = await mkdtemp(join(tmpdir(), "octant-npmrc-"));
+    directories.push(directory);
+    return directory;
+  };
+
+  it("reads the file, and treats a missing one as none", async () => {
+    const directory = await home();
+    expect(await readUserNpmConfig(directory, {})).toEqual({});
+    await writeFile(join(directory, ".npmrc"), "registry=https://registry.example.test\n");
+    expect(await readUserNpmConfig(directory, {})).toEqual({
+      userConfigText: "registry=https://registry.example.test\n",
+    });
+  });
+
+  it("says a file that exists but cannot be read is unreadable, not absent", async () => {
+    const directory = await home();
+    await writeFile(join(directory, ".npmrc"), "registry=https://private.example.test\n");
+    await chmod(join(directory, ".npmrc"), 0o000);
+    // A directory where the file should be cannot be read either, whoever runs this.
+    const asDirectory = await home();
+    await mkdir(join(asDirectory, ".npmrc"));
+
+    expect(await readUserNpmConfig(asDirectory, {})).toEqual({ userConfigUnreadable: true });
+    if (process.getuid?.() !== 0) {
+      expect(await readUserNpmConfig(directory, {})).toEqual({ userConfigUnreadable: true });
+    }
+  });
+});
+
 describe("choosing the npm registry from the person's own configuration", () => {
+  it("refuses when the configuration file could not be read, instead of falling back to the public registry", () => {
+    expect(chooseNpmRegistry("demo", { env: {}, userConfigUnreadable: true })).toEqual({
+      status: "unreadable",
+    });
+    expect(chooseNpmRegistry("@scoped/demo", { env: {}, userConfigUnreadable: true })).toEqual({
+      status: "unreadable",
+    });
+    // An unscoped name is settled by the environment, which outranks the file.
+    expect(
+      chooseNpmRegistry("demo", {
+        env: { npm_config_registry: "https://env.example.test" },
+        userConfigUnreadable: true,
+      }),
+    ).toEqual({ status: "chosen", registry: "https://env.example.test" });
+    // A scoped name may be mapped by the file, which cannot be consulted.
+    expect(
+      chooseNpmRegistry("@scoped/demo", {
+        env: { npm_config_registry: "https://env.example.test" },
+        userConfigUnreadable: true,
+      }),
+    ).toEqual({ status: "unreadable" });
+  });
+
   it("uses the public registry when nothing names another", () => {
     expect(chooseNpmRegistry("demo", { env: {} })).toEqual({
       status: "chosen",

@@ -237,10 +237,13 @@ describe("installing a plugin from npm in Settings", () => {
 
     await user.click(screen.getByRole("button", { name: "Review version 1.1.0" }));
     expect(await screen.findByText("Review before updating")).toBeTruthy();
+    // The review names the installed package, so the host asks the registry it came
+    // from and not whichever one the npm settings name now.
     expect(fake.calls).toContainEqual({
       kind: "resolve-npm-package",
       packageName: "@example/demo",
       range: "1.1.0",
+      updateOf: extensionId,
     });
 
     await user.click(screen.getByRole("button", { name: "Confirm update" }));

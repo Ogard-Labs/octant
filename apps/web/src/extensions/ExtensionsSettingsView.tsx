@@ -665,6 +665,9 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
           kind: "resolve-npm-package",
           packageName: packageName.trim(),
           ...(range.trim() === "" ? {} : { range: range.trim() }),
+          // An update names the installed package, and the host then asks the
+          // registry that package came from.
+          ...(updateOf === undefined ? {} : { updateOf: updateOf as never }),
         });
         if (result.kind === "extension-command-failed") {
           setFailure({ category: result.failure.category, message: result.failure.message });
@@ -1306,6 +1309,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
               <form
                 aria-label="Install from npm"
                 className="extensions-settings__npm-lookup"
+                noValidate
                 onSubmit={(event) => {
                   event.preventDefault();
                   void lookUpNpm(npmName, npmRange);

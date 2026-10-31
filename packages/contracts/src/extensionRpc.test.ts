@@ -104,6 +104,11 @@ describe("extension RPC contracts", () => {
       "resolve-npm-package",
     );
     expect(() => decodeExtensionCommand({ ...lookup, registry: "https://example.test" })).toThrow();
+    // An update names the installed package; it never carries a registry of its own.
+    expect(decodeExtensionCommand({ ...lookup, updateOf: extensionId }).kind).toBe(
+      "resolve-npm-package",
+    );
+    expect(() => decodeExtensionCommand({ ...lookup, updateOf: "not-an-id" })).toThrow();
     expect(decodeExtensionCommand({ kind: "check-npm-update", extensionId }).kind).toBe(
       "check-npm-update",
     );

@@ -89,7 +89,12 @@ export type NpmLatestVersion =
 
 export interface NpmPackageSourcePort {
   resolve(
-    input: { readonly packageName: string; readonly range?: string },
+    input: {
+      readonly packageName: string;
+      readonly range?: string;
+      /** The registry an installed package was recorded with; it replaces the person's settings. */
+      readonly registry?: string;
+    },
     signal?: AbortSignal,
   ): Promise<NpmPackageResolution>;
   /** The version the registry an installed package came from tags `latest`. */
@@ -135,12 +140,21 @@ export class NpmPackageSource implements NpmPackageSourcePort {
   }
 
   async resolve(
-    input: { readonly packageName: string; readonly range?: string },
+    input: {
+      readonly packageName: string;
+      readonly range?: string;
+      readonly registry?: string;
+    },
     signal?: AbortSignal,
   ): Promise<NpmPackageResolution> {
     const packageName = input.packageName.trim();
     if (decodeNpmPackageName(packageName)._tag === "Left") return refuse("name-invalid");
-    const choice = chooseNpmRegistry(packageName, await this.#options.readRegistryConfig());
+    const choice = chooseNpmRegistry(
+      packageName,
+      input.registry === undefined
+        ? await this.#options.readRegistryConfig()
+        : { env: { npm_config_registry: input.registry } },
+    );
     if (choice.status === "unreadable") return refuse("registry-unreadable");
     if (choice.status === "insecure") return refuse("registry-insecure");
     return withMarketplaceRequest(signal, async (boundedSignal) => {
@@ -449,7 +463,7 @@ export function npmSourceRefusalMessage(refusal: NpmSourceRefusal): string {
     case "range-unreadable":
       return "Octant could not read that version. Use an exact version such as 1.2.3, a range such as ^1.2.0, or a tag such as latest.";
     case "registry-unreadable":
-      return "Your npm configuration names a registry address Octant cannot read, so it fetched nothing. An address that uses an environment variable is not read.";
+      return "Octant could not read the registry address from your npm configuration, so it fetched nothing rather than guess. An address that uses an environment variable is not read, and neither is a configuration file Octant cannot open.";
     case "registry-insecure":
       return "Your npm configuration names a registry over plain http. Octant reaches a registry only over https, or over http on this computer, so it fetched nothing.";
     case "fetches-off":

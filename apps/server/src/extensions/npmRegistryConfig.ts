@@ -21,6 +21,12 @@ export interface NpmRegistryConfigSources {
   readonly env: Readonly<Record<string, string | undefined>>;
   /** The text of the user's `.npmrc`, when there is one. */
   readonly userConfigText?: string | undefined;
+  /**
+   * The file exists but could not be read. Its scoped registries are then
+   * unknown, so a lookup that depends on them is refused instead of sent to
+   * the public registry.
+   */
+  readonly userConfigUnreadable?: boolean | undefined;
 }
 
 export function chooseNpmRegistry(
@@ -28,6 +34,16 @@ export function chooseNpmRegistry(
   sources: NpmRegistryConfigSources,
 ): NpmRegistryChoice {
   const scope = packageName.startsWith("@") ? packageName.slice(0, packageName.indexOf("/")) : "";
+  const fromEnvironmentFirst = (
+    sources.env.npm_config_registry ??
+    sources.env.NPM_CONFIG_REGISTRY ??
+    ""
+  ).trim();
+  // A file that cannot be read may name this package's registry. Only the
+  // environment's own registry settles an unscoped name without it.
+  if (sources.userConfigUnreadable === true && (scope !== "" || fromEnvironmentFirst === "")) {
+    return { status: "unreadable" };
+  }
   const settings = parseNpmrcRegistrySettings(sources.userConfigText ?? "");
   const fromEnvironment = (
     sources.env.npm_config_registry ??
@@ -80,15 +96,20 @@ function parseNpmrcRegistrySettings(text: string): ReadonlyMap<string, string> {
   return settings;
 }
 
-/** Reads the user's `.npmrc` named by `npm_config_userconfig`, or `~/.npmrc`; absent means none. */
+/**
+ * Reads the user's `.npmrc` named by `npm_config_userconfig`, or `~/.npmrc`. A
+ * file that is not there is none; a file that is there and cannot be read (no
+ * permission, an I/O error, a folder in its place) is unreadable, which is not
+ * the same as none.
+ */
 export async function readUserNpmConfig(
   home: string,
   env: Readonly<Record<string, string | undefined>>,
-): Promise<string | undefined> {
+): Promise<Pick<NpmRegistryConfigSources, "userConfigText" | "userConfigUnreadable">> {
   const path = (env.npm_config_userconfig ?? env.NPM_CONFIG_USERCONFIG ?? "").trim();
   try {
-    return await readFile(path === "" ? join(home, ".npmrc") : path, "utf8");
-  } catch {
-    return undefined;
+    return { userConfigText: await readFile(path === "" ? join(home, ".npmrc") : path, "utf8") };
+  } catch (error) {
+    return (error as { code?: unknown }).code === "ENOENT" ? {} : { userConfigUnreadable: true };
   }
 }

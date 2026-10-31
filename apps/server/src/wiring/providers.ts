@@ -884,7 +884,7 @@ export function wireProviders(deps: ProvidersDependencies) {
         isMarketplaceFetchAllowed,
         readRegistryConfig: async () => ({
           env: process.env,
-          userConfigText: await readUserNpmConfig(homedir(), process.env),
+          ...(await readUserNpmConfig(homedir(), process.env)),
         }),
       }),
       activation: {
