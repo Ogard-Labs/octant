@@ -38,6 +38,7 @@ import {
   changeProjectLifecycle,
   changeCodeProjectAccess,
   changeCodeProjectActions,
+  changeCodeProjectPermissionMode,
   changeCodeProjectDesktopRecipe,
   changeCodeProjectNewThreadWorkspace,
   changeCodeProjectPullRequestBackgroundRefresh,
@@ -699,6 +700,10 @@ export class ProjectService implements ProjectServiceApi {
           project = changeCodeProjectAccess(current, command.codeAccessPersistence, timestamp);
           kind = "code-project-access-changed";
           eventName = "project.code-access-changed@1";
+        } else if (command.kind === "change-code-project-permission-mode") {
+          project = changeCodeProjectPermissionMode(current, command.permissionMode, timestamp);
+          kind = "code-project-access-changed";
+          eventName = "project.code-permission-mode-changed@1";
         } else if (command.kind === "change-code-project-new-thread-workspace") {
           // The habit lives on the Project record, not in a local named
           // view, so every window sees the same default after this event.

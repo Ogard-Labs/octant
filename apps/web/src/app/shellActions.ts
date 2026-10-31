@@ -18,7 +18,7 @@ import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId, ProjectSummary } from "@octant/contracts/projects";
 import type {
   PermissionPersistence,
-  ProviderExecutionPolicy,
+  PermissionMode,
   ProviderInstanceId,
   ProviderModelId,
   ProviderModelOptionValues,
@@ -233,7 +233,7 @@ export type ShellActions = {
   >;
   readonly setDockStatesByThread: ThreadUtilityPresentation["setDockStatesByThread"];
   readonly setDraftError: Dispatch<SetStateAction<string | undefined>>;
-  readonly setDraftExecutionPolicy: Dispatch<SetStateAction<ProviderExecutionPolicy | undefined>>;
+  readonly setDraftPermissionMode: Dispatch<SetStateAction<PermissionMode | undefined>>;
   readonly setDraftModelId: Dispatch<SetStateAction<ProviderModelId | undefined>>;
   readonly setDraftPendingMessage: Dispatch<SetStateAction<string | undefined>>;
   readonly setDraftPermissionPersistence: Dispatch<
@@ -258,6 +258,7 @@ export type ShellActions = {
   readonly setProjectArchived: ProjectController["setArchived"];
   readonly setProjectColor: ProjectController["setColor"];
   readonly setProjectProviderPolicy: ProjectController["setProviderPolicy"];
+  readonly setProjectPermissionMode: ProjectController["setCodePermissionMode"];
   readonly setProjectBrandKit: ProjectController["setBrandKit"];
   readonly setProjectDesktopRecipe: ProjectController["setDesktopRecipe"];
   readonly setProjectActions: ProjectController["setActions"];

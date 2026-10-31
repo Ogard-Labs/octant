@@ -1,6 +1,7 @@
 import type { CanvasDesignBrand } from "@octant/contracts/canvas";
 import type { DesktopRecipe, LeasableDesktopProvider } from "@octant/contracts/desktop-lease";
 import type { AggregateVersion, UtcTimestamp } from "@octant/contracts/events";
+import type { PermissionMode } from "@octant/contracts/providers";
 import { designBrandTokenRefusal } from "./canvasDesignFrameKit";
 import { desktopNetworkAllowed } from "./desktopLeasePolicy";
 import {
@@ -225,8 +226,45 @@ export function changeCodeProjectAccess(
   if (project.codeAccessPersistence === codeAccessPersistence) {
     reject("invalid-lifecycle", "Code Project access persistence is already selected");
   }
+  // The older remembered-access switch speaks for the Project's whole mode
+  // when it is used, so a Project mode set earlier does not outrank it.
+  const { defaultPermissionMode: _previousMode, ...rest } = project;
   return {
-    ...project,
+    ...rest,
+    codeAccessPersistence,
+    version: nextVersion(project),
+    updatedAt,
+  };
+}
+
+/**
+ * Set the mode a Code Project's new threads start in, or return it to the
+ * Settings default. Remembered Full access follows the mode, so every reader
+ * of the older switch (the Project terminal, the CLI) agrees with it.
+ */
+export function changeCodeProjectPermissionMode(
+  project: Project,
+  permissionMode: PermissionMode | undefined,
+  updatedAt: UtcTimestamp,
+): CodeProject {
+  if (project.type !== "code") {
+    reject("binding-not-allowed", "Only Code Projects have a default mode");
+  }
+  const codeAccessPersistence: CodeAccessPersistence =
+    permissionMode === "full-access" ? "project-default" : "current-session";
+  // A Project that remembered Full access before Project modes existed has no
+  // mode of its own but still starts threads in Full access, so returning it to
+  // the Settings default is a change even though both modes are unset.
+  if (
+    project.defaultPermissionMode === permissionMode &&
+    project.codeAccessPersistence === codeAccessPersistence
+  ) {
+    reject("invalid-lifecycle", "This Project already starts threads in that mode");
+  }
+  const { defaultPermissionMode: _previousMode, ...rest } = project;
+  return {
+    ...rest,
+    ...(permissionMode === undefined ? {} : { defaultPermissionMode: permissionMode }),
     codeAccessPersistence,
     version: nextVersion(project),
     updatedAt,

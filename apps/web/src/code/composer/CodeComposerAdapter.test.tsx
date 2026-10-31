@@ -45,7 +45,7 @@ const defaultProps = {
   projectName: "My Repo",
   projectRoot: "/home/user/repo",
   baseBranch: "development",
-  defaultExecutionPolicy: "approval-gated" as const,
+  defaultPermissionMode: "ask-first" as const,
   defaultPermissionPersistence: "current-session" as const,
   providerGroups: [],
   onSelectProvider: () => {},
@@ -310,31 +310,34 @@ describe("CodeComposerAdapter", () => {
     expect(onCreateThread.mock.calls[0]?.[0].deliveryTarget.branchIntent).not.toBe("development");
   });
 
-  it("remembers the access posture for the Project from the access menu", async () => {
+  it("starts the thread in Auto where the provider has a reviewer, and shows Auto disabled with the reason where it has none", async () => {
     const user = userEvent.setup();
     const onCreateThread = vi.fn();
-    const onExecutionPolicyChange = vi.fn();
-    render(
+    const rendered = render(
       <CodeComposerAdapter
         {...defaultProps}
+        autoSupported
+        defaultPermissionMode="auto"
         onCreateThread={onCreateThread}
-        onExecutionPolicyChange={onExecutionPolicyChange}
       />,
     );
-
-    await user.click(screen.getByRole("button", { name: "Access policy" }));
-    await user.click(
-      await screen.findByRole("menuitemcheckbox", { name: "Remember for this Project" }),
-    );
-    expect(onExecutionPolicyChange).toHaveBeenCalledWith("approval-gated", "project-default");
-    await user.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: "Mode" })).toHaveTextContent("Auto");
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Ship it");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
-
     await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(1));
     expect(onCreateThread.mock.calls[0]?.[0]).toMatchObject({
-      permissionPersistence: "project-default",
+      executionPolicy: "approval-gated",
+      autoApprove: true,
     });
+    rendered.unmount();
+
+    render(<CodeComposerAdapter {...defaultProps} defaultPermissionMode="auto" />);
+    expect(screen.getByRole("button", { name: "Mode" })).toHaveTextContent("Ask first");
+    await user.click(screen.getByRole("button", { name: "Mode" }));
+    expect(await screen.findByRole("menuitemradio", { name: "Auto" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
   });
 
   it("shows Set up a provider on the Code start composer until a provider is ready", async () => {
@@ -399,10 +402,10 @@ describe("CodeComposerAdapter", () => {
     expect(container.querySelector('[class*="context-strip"]')).toBeNull();
   });
 
-  it("renders approval policy selector", () => {
+  it("renders the mode picker at the default mode", () => {
     const html = renderToStaticMarkup(<CodeComposerAdapter {...defaultProps} />);
-    expect(html).toContain("Ask for approvals");
-    expect(html).toContain("Access policy");
+    expect(html).toContain("Ask first");
+    expect(html).toContain('aria-label="Mode"');
   });
 
   it("renders disabled send button when empty", () => {
@@ -499,7 +502,7 @@ describe("CodeComposerAdapter", () => {
   it("omits the Start from origin control when no repository is selected", () => {
     const html = renderToStaticMarkup(
       <CodeComposerAdapter
-        defaultExecutionPolicy="approval-gated"
+        defaultPermissionMode="ask-first"
         defaultPermissionPersistence="current-session"
         onCancel={() => {}}
         onCreateThread={() => {}}
@@ -546,13 +549,13 @@ describe("CodeComposerAdapter interactions", () => {
     render(
       <CodeComposerAdapter
         {...defaultProps}
-        defaultExecutionPolicy="approval-gated"
+        defaultPermissionMode="ask-first"
         onCreateThread={onCreateThread}
       />,
     );
 
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Plan this change");
-    await user.click(screen.getByRole("button", { name: "Access policy" }));
+    await user.click(screen.getByRole("button", { name: "Mode" }));
     await user.click(await screen.findByRole("menuitemradio", { name: /Plan/ }));
     await user.click(screen.getByRole("button", { name: "Create thread" }));
 
@@ -567,24 +570,24 @@ describe("CodeComposerAdapter interactions", () => {
 
   it("keeps the chosen approval mode when the draft switches Project", async () => {
     const user = userEvent.setup();
-    const onExecutionPolicyChange = vi.fn();
+    const onPermissionModeChange = vi.fn();
     const rendered = render(
-      <CodeComposerAdapter {...defaultProps} onExecutionPolicyChange={onExecutionPolicyChange} />,
+      <CodeComposerAdapter {...defaultProps} onPermissionModeChange={onPermissionModeChange} />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Access policy" }));
+    await user.click(screen.getByRole("button", { name: "Mode" }));
     await user.click(await screen.findByRole("menuitemradio", { name: /Plan/ }));
-    expect(onExecutionPolicyChange).toHaveBeenCalledWith("plan", "current-session");
+    expect(onPermissionModeChange).toHaveBeenCalledWith("plan");
 
     rendered.unmount();
     render(
       <CodeComposerAdapter
         {...defaultProps}
-        defaultExecutionPolicy="plan"
-        onExecutionPolicyChange={onExecutionPolicyChange}
+        defaultPermissionMode="plan"
+        onPermissionModeChange={onPermissionModeChange}
       />,
     );
-    expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent("Plan");
+    expect(screen.getByRole("button", { name: "Mode" })).toHaveTextContent("Plan");
   });
 
   it("submits on Enter and cancels on Escape", async () => {
@@ -597,7 +600,7 @@ describe("CodeComposerAdapter interactions", () => {
       root.render(
         <CodeComposerAdapter
           projectId={"00000000-0000-0000-0000-000000000001" as any}
-          defaultExecutionPolicy="approval-gated"
+          defaultPermissionMode="ask-first"
           defaultPermissionPersistence="current-session"
           providerGroups={[]}
           onSelectProvider={() => {}}
@@ -639,7 +642,7 @@ describe("CodeComposerAdapter interactions", () => {
     await act(async () => {
       root.render(
         <CodeComposerAdapter
-          defaultExecutionPolicy="approval-gated"
+          defaultPermissionMode="ask-first"
           defaultPermissionPersistence="current-session"
           providerGroups={[]}
           onSelectProvider={() => {}}
@@ -677,7 +680,7 @@ describe("CodeComposerAdapter interactions", () => {
         <CodeComposerAdapter
           projectId={"00000000-0000-0000-0000-000000000001" as any}
           projectName="My Repo"
-          defaultExecutionPolicy="approval-gated"
+          defaultPermissionMode="ask-first"
           defaultPermissionPersistence="current-session"
           providerGroups={[]}
           onSelectProvider={() => {}}
@@ -715,7 +718,7 @@ describe("CodeComposerAdapter interactions", () => {
         <CodeComposerAdapter
           projectId={"00000000-0000-0000-0000-000000000001" as any}
           projectName="My Repo"
-          defaultExecutionPolicy="approval-gated"
+          defaultPermissionMode="ask-first"
           defaultPermissionPersistence="current-session"
           providerGroups={[]}
           onSelectProvider={() => {}}
@@ -1078,18 +1081,18 @@ describe("CodeComposerAdapter interactions", () => {
     const view = (
       <NewTaskDraftsContext.Provider value={drafts}>
         <NewTaskDraftScopeContext.Provider value="code:pane">
-          <CodeComposerAdapter {...defaultProps} defaultExecutionPolicy="full-access" />
+          <CodeComposerAdapter {...defaultProps} defaultPermissionMode="full-access" />
         </NewTaskDraftScopeContext.Provider>
       </NewTaskDraftsContext.Provider>
     );
     const rendered = render(view);
-    await user.click(screen.getByRole("button", { name: "Access policy" }));
+    await user.click(screen.getByRole("button", { name: "Mode" }));
     await user.click(await screen.findByRole("menuitemradio", { name: /Plan/ }));
-    expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent("Plan");
+    expect(screen.getByRole("button", { name: "Mode" })).toHaveTextContent("Plan");
 
     rendered.unmount();
     render(view);
 
-    expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent("Plan");
+    expect(screen.getByRole("button", { name: "Mode" })).toHaveTextContent("Plan");
   });
 });

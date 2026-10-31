@@ -13,6 +13,8 @@ import {
   type ComputerUseDesktopService,
 } from "./computerUseDesktopService";
 import { CUA_DRIVER_FILENAME, DEVICE_HELPER_FILENAME } from "./runtimePaths";
+import { createWindowCapture } from "./windowCapture";
+import { grabWindowFrame } from "./windowFrameGrab";
 import { createManagedToolService, type ManagedToolService } from "./managedToolService";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -31,6 +33,7 @@ import {
   nativeImage,
   nativeTheme,
   Notification,
+  desktopCapturer,
   powerMonitor,
   screen,
   session,
@@ -72,6 +75,7 @@ import { type AppVersion, isAppReleaseRing } from "@octant/contracts/app-updates
 import { decodeCodeOperationApprovalRequest } from "@octant/contracts/code-operations";
 import {
   DESKTOP_IPC_CHANNELS as IPC_CHANNELS,
+  KEYRING_ADVICE_MARKER,
   MAX_PROVIDER_CREDENTIAL_BYTES,
   PROVIDER_INSTANCE_ID_PATTERN,
   decodeCodeCheckoutOpenRequest,
@@ -137,6 +141,7 @@ import {
   resolveDesktopCredentialBackend,
   type DesktopCredentialBackend,
 } from "./desktopCredentialStore";
+import { keyringAdvice } from "@octant/domain/keyring-advice";
 import {
   HostIdentitySigningFailure,
   makeHostIdentitySigningService,
@@ -874,19 +879,12 @@ async function requireStoredApiKeys(
   return stored;
 }
 
-// Shown to the person as written, so preload.ts lists them too.
-const KEYRING_LOCKED_MESSAGE =
-  "Your keyring is locked. Unlock it (open Passwords and Keys and unlock Login), then try again.";
-const KEYRING_MISSING_MESSAGE =
-  "Your session has no Login keyring to keep keys in. Create one named Login in Passwords and Keys, set it as default, then try again.";
-
 function sanitizeApiKeyError(error: unknown): Error {
   if (error instanceof ApiKeyPoolError) return new Error(error.message);
-  if (error instanceof CredentialStoreFailure && error.cause === "locked") {
-    return new Error(KEYRING_LOCKED_MESSAGE);
-  }
-  if (error instanceof CredentialStoreFailure && error.cause === "no-login-collection") {
-    return new Error(KEYRING_MISSING_MESSAGE);
+  // Shown to the person as written, so preload.ts lets exactly these through.
+  if (error instanceof CredentialStoreFailure) {
+    const advice = keyringAdvice(error);
+    if (advice !== undefined) return new Error(`${KEYRING_ADVICE_MARKER}${advice}`);
   }
   return new Error("Octant could not update the provider API keys.");
 }
@@ -1640,28 +1638,28 @@ function lazyCredentialStore(): CredentialStore {
     set: async (providerInstanceId, credential) => {
       const backend = await getCredentialBackend();
       if (backend.store === undefined) {
-        throw new Error("unavailable");
+        throw new CredentialStoreFailure("unavailable");
       }
       await backend.store.set(providerInstanceId, credential);
     },
     has: async (providerInstanceId) => {
       const backend = await getCredentialBackend();
       if (backend.store === undefined) {
-        throw new Error("unavailable");
+        throw new CredentialStoreFailure("unavailable");
       }
       return await backend.store.has(providerInstanceId);
     },
     resolve: async (providerInstanceId) => {
       const backend = await getCredentialBackend();
       if (backend.store === undefined) {
-        throw new Error("unavailable");
+        throw new CredentialStoreFailure("unavailable");
       }
       return await backend.store.resolve(providerInstanceId);
     },
     delete: async (providerInstanceId) => {
       const backend = await getCredentialBackend();
       if (backend.store === undefined) {
-        throw new Error("unavailable");
+        throw new CredentialStoreFailure("unavailable");
       }
       await backend.store.delete(providerInstanceId);
     },
@@ -3540,6 +3538,40 @@ function installIpcHandlers(): void {
   });
   ipcMain.handle(IPC_CHANNELS.selectLocalPluginFolder, async (event) => {
     return await ownedWindowContext(event).localPluginFolderPicker(event);
+  });
+  // Window capture for the composer. Each step re-checks that the caller is
+  // this app's own top-level window; the renderer never names a screen or a
+  // file, only a window id the list just returned.
+  const windowCapture = createWindowCapture({
+    platform: process.platform,
+    screenAccess: () => systemPreferences.getMediaAccessStatus("screen"),
+    // Zero-size thumbnails: titles and ids only. A non-zero size would make
+    // Electron read every open window's pixels, not just the chosen one's.
+    windowSources: async () =>
+      await desktopCapturer.getSources({
+        types: ["window"],
+        thumbnailSize: { width: 0, height: 0 },
+        fetchWindowIcons: false,
+      }),
+    grabFrame: grabWindowFrame,
+    openScreenRecordingSettings: () =>
+      shell.openExternal(
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+      ),
+  });
+  ipcMain.handle(IPC_CHANNELS.windowCaptureList, async (event) => {
+    ownedTopLevelWindowContext(event);
+    return await windowCapture.list();
+  });
+  ipcMain.handle(IPC_CHANNELS.windowCapturePermission, async (event) => {
+    ownedTopLevelWindowContext(event);
+    return await windowCapture.requestPermission();
+  });
+  ipcMain.handle(IPC_CHANNELS.windowCaptureTake, async (event, windowId: unknown) => {
+    ownedTopLevelWindowContext(event);
+    if (typeof windowId !== "string" || windowId.length === 0 || windowId.length > 256)
+      throw new Error("Octant rejected an invalid window to capture.");
+    return await windowCapture.capture(windowId);
   });
   ipcMain.handle(IPC_CHANNELS.selectRuntimeBinary, async (event) => {
     return await ownedWindowContext(event).runtimeBinaryPicker(event);

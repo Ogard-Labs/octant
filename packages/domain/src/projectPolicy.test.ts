@@ -21,6 +21,7 @@ import {
   ProjectPolicyRejected,
   changeCodeProjectAccess,
   changeCodeProjectActions,
+  changeCodeProjectPermissionMode,
   changeCodeProjectDesktopRecipe,
   changeCodeProjectPullRequestBackgroundRefresh,
   changeProjectBrandKit,
@@ -182,6 +183,36 @@ describe("Project creation and lifecycle", () => {
     expect(() =>
       changeCodeProjectAccess(makeProject(ids.chat, "0/1"), "project-default", updatedAt),
     ).toThrow(ProjectPolicyRejected);
+  });
+
+  it("sets a Code Project's default mode and keeps its remembered Full access in step", () => {
+    const project = makeProject(ids.code, "0/1", { type: "code" });
+    const full = changeCodeProjectPermissionMode(project, "full-access", updatedAt);
+    expect(full).toMatchObject({
+      defaultPermissionMode: "full-access",
+      codeAccessPersistence: "project-default",
+      version: 2,
+    });
+    const followsSettings = changeCodeProjectPermissionMode(full, undefined, updatedAt);
+    expect(followsSettings).not.toHaveProperty("defaultPermissionMode");
+    expect(followsSettings.codeAccessPersistence).toBe("current-session");
+    expect(() => changeCodeProjectPermissionMode(full, "full-access", updatedAt)).toThrow(
+      ProjectPolicyRejected,
+    );
+    expect(() =>
+      changeCodeProjectPermissionMode(makeProject(ids.chat, "0/1"), "auto", updatedAt),
+    ).toThrow(ProjectPolicyRejected);
+    // A Project that remembered Full access before Project modes existed has no
+    // mode of its own; returning it to Settings must still clear the memory.
+    const legacyFull = changeCodeProjectAccess(project, "project-default", updatedAt);
+    expect(legacyFull).not.toHaveProperty("defaultPermissionMode");
+    expect(changeCodeProjectPermissionMode(legacyFull, undefined, updatedAt)).toMatchObject({
+      codeAccessPersistence: "current-session",
+    });
+    // The older remembered-access switch speaks for the whole mode when used.
+    expect(changeCodeProjectAccess(full, "current-session", updatedAt)).not.toHaveProperty(
+      "defaultPermissionMode",
+    );
   });
 
   it("enables background pull-request refresh on a Code Project and bumps its version", () => {

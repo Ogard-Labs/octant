@@ -3,7 +3,7 @@ import { CanvasDesignBrand } from "./canvasBrand";
 import { DesktopRecipe, DesktopRecipeKeyChange } from "./desktopLease";
 import { ActorId, AggregateVersion, EventActor, UtcTimestamp } from "./events";
 import { HostId } from "./host";
-import { ProviderInstanceId } from "./providers";
+import { PermissionMode, ProviderInstanceId } from "./providers";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -273,6 +273,13 @@ export const CodeProject = Schema.Struct({
   newThreadWorkspace: Schema.optional(CodeNewThreadWorkspace),
   pullRequestBackgroundRefresh: Schema.optional(CodeProjectPullRequestBackgroundRefresh),
   /**
+   * The mode this Project's new threads start in, overriding Settings. Absent
+   * follows Settings, except that a Project which remembered Full access
+   * before the field existed (`codeAccessPersistence: "project-default"`)
+   * starts in Full access, as it always did.
+   */
+  defaultPermissionMode: Schema.optional(PermissionMode),
+  /**
    * The disposable desktop this Project's threads lease from. Absent means no
    * recipe, so every lease command refuses `no-provider-configured`. A person
    * sets it from a local window; an agent cannot.
@@ -308,6 +315,7 @@ const CodeProjectSummary = Schema.Struct({
   codeAccessPersistence: CodeAccessPersistence,
   newThreadWorkspace: Schema.optional(CodeNewThreadWorkspace),
   pullRequestBackgroundRefresh: Schema.optional(CodeProjectPullRequestBackgroundRefresh),
+  defaultPermissionMode: Schema.optional(PermissionMode),
   desktopRecipe: Schema.optional(DesktopRecipe),
   actions: Schema.optional(ProjectActions),
   connectedRepository: Schema.optional(ConnectedGitHubRepository),
@@ -499,6 +507,12 @@ export const ProjectCommand = Schema.Union(
     kind: Schema.Literal("change-code-project-access"),
     ...ProjectCommandFields,
     codeAccessPersistence: CodeAccessPersistence,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-code-project-permission-mode"),
+    ...ProjectCommandFields,
+    /** Absent returns the Project to the Settings default. */
+    permissionMode: Schema.optional(PermissionMode),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-code-project-new-thread-workspace"),
@@ -705,6 +719,15 @@ export const ProjectBindingRelinked = Schema.Struct({ project: BoundProject }).a
 export type ProjectBindingRelinked = typeof ProjectBindingRelinked.Type;
 export const CodeProjectAccessChanged = Schema.Struct({ project: CodeProject }).annotations(strict);
 export type CodeProjectAccessChanged = typeof CodeProjectAccessChanged.Type;
+/**
+ * The Project's default mode changed. The payload is the whole Project, so a
+ * replay reads the level the Project's new threads start at without the
+ * Settings it overrode.
+ */
+export const CodeProjectPermissionModeChanged = Schema.Struct({
+  project: CodeProject,
+}).annotations(strict);
+export type CodeProjectPermissionModeChanged = typeof CodeProjectPermissionModeChanged.Type;
 /** Journaled so every window sees the same Project habit after a change. */
 export const CodeProjectNewThreadWorkspaceChanged = Schema.Struct({
   project: CodeProject,
@@ -765,6 +788,7 @@ export const PROJECT_EVENT_NAMES = [
   "project.lifecycle-changed@1",
   "project.binding-relinked@1",
   "project.code-access-changed@1",
+  "project.code-permission-mode-changed@1",
   "project.code-new-thread-workspace-changed@1",
   "project.code-pull-request-background-refresh-changed@1",
   "project.provider-policy-changed@1",
@@ -805,6 +829,9 @@ export const decodeProjectOrderChanged = Schema.decodeUnknownSync(ProjectOrderCh
 export const decodeProjectLifecycleChanged = Schema.decodeUnknownSync(ProjectLifecycleChanged);
 export const decodeProjectBindingRelinked = Schema.decodeUnknownSync(ProjectBindingRelinked);
 export const decodeCodeProjectAccessChanged = Schema.decodeUnknownSync(CodeProjectAccessChanged);
+export const decodeCodeProjectPermissionModeChanged = Schema.decodeUnknownSync(
+  CodeProjectPermissionModeChanged,
+);
 export const decodeCodeProjectNewThreadWorkspaceChanged = Schema.decodeUnknownSync(
   CodeProjectNewThreadWorkspaceChanged,
 );

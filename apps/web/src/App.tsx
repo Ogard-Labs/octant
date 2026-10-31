@@ -21,7 +21,12 @@ import { ImageJobChangeRevisionContext } from "./image/ImageJobChangeRevision";
 import type { ContextClient } from "@octant/client-runtime/context-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
-import { harnessAsksUnderSessionFullAccess, listEligibleImageProfiles } from "@octant/domain";
+import {
+  defaultPermissionModeFor,
+  listEligibleImageProfiles,
+  permissionModeOf,
+  threadAccessOf,
+} from "@octant/domain";
 import { SpeechCapabilityProvider } from "./voice/SpeechCapabilityContext";
 import { buildAutomationEditorCatalog } from "./automation/automationEditorCatalog";
 import type { ComputerUseClient } from "@octant/client-runtime/computer-use-client";
@@ -86,11 +91,7 @@ import {
   type CodeDeliveryOutcomeKind,
   type CodeTerminalId,
 } from "@octant/contracts/code";
-import {
-  decodeCodeApprovalId,
-  decodeCodeOperationId,
-  type CodeOperationApprovalRequest,
-} from "@octant/contracts/code-operations";
+import { decodeCodeOperationId } from "@octant/contracts/code-operations";
 import type { CodeComposerSubmitInput } from "./code/composer/CodeComposerAdapter";
 import { decodeContextSubjectRef, type ContextHealth } from "@octant/contracts/context";
 import {
@@ -389,10 +390,7 @@ import {
   navigatorConfigurationKey,
   useNavigatorAssistant,
 } from "./navigator/useNavigatorAssistant";
-import {
-  CODE_ACCESS_POSTURE_LABEL,
-  HARNESS_SESSION_FULL_ACCESS_LABEL,
-} from "./code/CodeAccessPicker";
+import { PERMISSION_MODE_LABEL } from "./code/PermissionModePicker";
 import { useThreadTurnMetrics } from "./threadStats/useThreadTurnMetrics";
 import { useContextController } from "./context/useContextController";
 import { useSessionCompaction } from "./context/useSessionCompaction";
@@ -913,7 +911,7 @@ function LaunchedShell(
       }));
     }
     if (mode === "code") {
-      setDraftExecutionPolicy(undefined);
+      setDraftPermissionMode(undefined);
       setDraftPermissionPersistence(undefined);
       setPendingDraftBranch(undefined);
     }
@@ -994,8 +992,8 @@ function LaunchedShell(
     readonly providerInstanceId: import("@octant/contracts/providers").ProviderInstanceId;
     readonly modelId: import("@octant/contracts/providers").ProviderModelId;
   }>();
-  const [draftExecutionPolicy, setDraftExecutionPolicy] = useState<
-    import("@octant/contracts/providers").ProviderExecutionPolicy | undefined
+  const [draftPermissionMode, setDraftPermissionMode] = useState<
+    import("@octant/contracts/providers").PermissionMode | undefined
   >();
   const [draftPermissionPersistence, setDraftPermissionPersistence] = useState<
     import("@octant/contracts/providers").PermissionPersistence | undefined
@@ -3395,8 +3393,12 @@ function LaunchedShell(
   const effectiveDraftModelId =
     activeMode === "work" ? workProviderChoice?.modelId : visibleDraftSelection?.modelId;
   const localHost = hosts.find((host) => String(host.hostId) === String(LOCAL_HOST_ID));
-  const codeDefaultExecutionPolicy =
-    codeController.bootstrap?.settings.defaultExecutionPolicy ?? "approval-gated";
+  const activeCodeProject =
+    projectController.activeProject?.type === "code" ? projectController.activeProject : undefined;
+  const codeDefaultPermissionMode = defaultPermissionModeFor({
+    project: activeCodeProject,
+    settings: codeController.bootstrap?.settings ?? { defaultExecutionPolicy: "approval-gated" },
+  });
   const agentProfiles = useAgentProfiles(agentProfileClient);
   // Editor catalog from Projects already loaded in App, approval-gated agent
   // profiles, and Code bootstrap / prepared checkout receipts when present.
@@ -4476,19 +4478,9 @@ function LaunchedShell(
       : workNavigation.bootstrap?.threads.find(
           (thread) => String(thread.id) === String(dockThreadId),
         );
-  const overviewCodeDriverKind = providerController.instances.find(
-    (instance) => String(instance.id) === String(overviewCodeThread?.providerInstanceId),
-  )?.driverKind;
   const overviewAccess =
     overviewCodeThread !== undefined
-      ? overviewCodeDriverKind !== undefined &&
-        harnessAsksUnderSessionFullAccess({
-          executionPolicy: overviewCodeThread.executionPolicy,
-          permissionPersistence: overviewCodeThread.permissionPersistence,
-          driverKind: overviewCodeDriverKind,
-        })
-        ? HARNESS_SESSION_FULL_ACCESS_LABEL
-        : CODE_ACCESS_POSTURE_LABEL[overviewCodeThread.executionPolicy]
+      ? PERMISSION_MODE_LABEL[permissionModeOf(overviewCodeThread)]
       : overviewWorkThread === undefined
         ? undefined
         : overviewWorkThread.access === "auto-accept-edits"
@@ -4676,7 +4668,7 @@ function LaunchedShell(
       setDockSidecarsByThread,
       setDockStatesByThread,
       setDraftError,
-      setDraftExecutionPolicy,
+      setDraftPermissionMode,
       setDraftModelId,
       setDraftPendingMessage,
       setDraftPermissionPersistence,
@@ -4697,6 +4689,7 @@ function LaunchedShell(
       setProjectArchived: projectController.setArchived,
       setProjectColor: projectController.setColor,
       setProjectProviderPolicy: projectController.setProviderPolicy,
+      setProjectPermissionMode: projectController.setCodePermissionMode,
       setProjectBrandKit: projectController.setBrandKit,
       setProjectDesktopRecipe: projectController.setDesktopRecipe,
       setProjectActions: projectController.setActions,
@@ -5864,7 +5857,6 @@ function LaunchedShell(
           ? {
               id: localProject.id,
               name: localProject.name,
-              remembersFullAccess: localProject.codeAccessPersistence === "project-default",
             }
           : undefined;
       if (project === undefined) {
@@ -5937,43 +5929,7 @@ function LaunchedShell(
         setDraftError(plan.message);
         return false;
       }
-      let command = plan.command;
-      const projectRemembersFullAccess =
-        input.executionPolicy === "full-access" &&
-        input.permissionPersistence === "project-default" &&
-        project.remembersFullAccess;
-      if (input.executionPolicy === "full-access" && !projectRemembersFullAccess) {
-        const requestApproval = props.hostBridge?.requestCodeOperationApproval;
-        const presentation = input.presentation;
-        if (requestApproval === undefined || presentation === undefined) {
-          setDraftError(
-            "Full access needs the native approval surface. Keep Ask for approvals, or remember Full access for this Project on the host with `octant project access <name> full-access` and choose Remember for this Project.",
-          );
-          return false;
-        }
-        const approvalRequest: CodeOperationApprovalRequest | undefined =
-          command.kind === "create-managed-code-thread"
-            ? { effect: { kind: "create-managed-code-thread-full-access", command } }
-            : command.kind === "create-code-thread"
-              ? { effect: { kind: "create-thread-full-access", thread: command.thread } }
-              : undefined;
-        if (approvalRequest === undefined) {
-          setDraftError("Full access could not be prepared for this Code thread.");
-          return false;
-        }
-        const approvalId = await requestApproval(approvalRequest, {
-          projectId: String(project.id),
-          composerId: presentation.composerId,
-        });
-        if (approvalId === undefined) {
-          setDraftError("Full access was not confirmed. Nothing was created.");
-          return false;
-        }
-        command =
-          command.kind === "create-managed-code-thread" || command.kind === "create-code-thread"
-            ? { ...command, approvalId: decodeCodeApprovalId(approvalId) }
-            : command;
-      }
+      const command = plan.command;
       const created = await codeController.execute(command);
       if (created?.kind !== "managed-thread-created" && created?.kind !== "thread-created") {
         setDraftError(
@@ -6279,6 +6235,10 @@ function LaunchedShell(
           modelId,
           executionPolicy:
             executionPolicy ?? codeController.bootstrap.settings.defaultExecutionPolicy,
+          ...(executionPolicy === undefined &&
+          codeController.bootstrap.settings.defaultAutoApprove === true
+            ? { autoApprove: true }
+            : {}),
           permissionPersistence:
             permissionPersistence ?? codeController.bootstrap.settings.defaultPermissionPersistence,
           deliveryTarget: {
@@ -6932,7 +6892,7 @@ function LaunchedShell(
                   clients={launchedClients}
                   codeBoardProjects={codeBoardProjects}
                   codeController={codeController}
-                  codeDefaultExecutionPolicy={codeDefaultExecutionPolicy}
+                  codeDefaultPermissionMode={codeDefaultPermissionMode}
                   codeProviderChoices={codeProviderChoices}
                   codeProviderGroups={codeProviderGroups}
                   codeThreadControllers={codeThreadControllers}
@@ -6950,7 +6910,7 @@ function LaunchedShell(
                   {...(dockSurface === undefined ? {} : { dockSurface })}
                   draftCreating={draftCreating}
                   {...(draftError === undefined ? {} : { draftError })}
-                  {...(draftExecutionPolicy === undefined ? {} : { draftExecutionPolicy })}
+                  {...(draftPermissionMode === undefined ? {} : { draftPermissionMode })}
                   {...(draftPendingMessage === undefined ? {} : { draftPendingMessage })}
                   {...(draftPermissionPersistence === undefined
                     ? {}
@@ -7202,6 +7162,19 @@ function LaunchedShell(
             codeModelGroups: codeProviderGroups,
             controller: firstRunController,
             onSelectModel: selectFirstRunModel,
+            autoSupportedFor: (providerInstanceId) =>
+              providerController.observedByInstance.get(providerInstanceId)?.capabilities
+                .harnessAutoReview === "supported",
+            onSetDefaultMode: async (mode) => {
+              const settings = codeController.bootstrap?.settings;
+              if (settings === undefined) return false;
+              const access = threadAccessOf(mode);
+              return codeController.updateSettings({
+                defaultExecutionPolicy: access.executionPolicy,
+                defaultPermissionPersistence: settings.defaultPermissionPersistence,
+                defaultAutoApprove: access.autoApprove,
+              });
+            },
             workEnabled: controller.settings?.workEnabled ?? true,
             workModel:
               workSettings.status === "unsupported" ? rawDraftSelection : firstRunWorkModel,

@@ -29,32 +29,76 @@ describe("CodeSettingsView", () => {
     expect(screen.getByRole("textbox", { name: "External editor executable" })).toBe(field);
     expect(field).toHaveValue("/unfinished");
     expect(field).toHaveFocus();
-    expect(screen.getByRole("combobox", { name: "Default Code access" })).toHaveTextContent("Plan");
+    expect(screen.getByRole("combobox", { name: "Default mode" })).toHaveTextContent("Plan");
   });
 
-  it("keeps a chosen default the moment it is chosen, with no Save step", async () => {
+  it("keeps a chosen default mode the moment it is chosen, with no Save step", async () => {
     const update = vi.fn(async () => true);
     render(<CodeSettingsView onUpdate={update} settings={settings as never} />);
 
-    expect(screen.getByText(/Access defaults apply only to new Code threads/i)).toBeVisible();
-    expect(screen.getByRole("combobox", { name: "Default Code access" })).toHaveTextContent(
-      "Ask for approvals",
-    );
-    expect(screen.getByRole("button", { name: "Session" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("combobox", { name: "Default mode" })).toHaveTextContent("Ask first");
     expect(screen.queryByRole("button", { name: /Save/i })).toBeNull();
 
     const user = userEvent.setup();
     await chooseSelectFieldOption(
       user,
-      screen.getByRole("combobox", { name: "Default Code access" }),
-      "Plan · read-only",
+      screen.getByRole("combobox", { name: "Default mode" }),
+      "Auto · Recommended",
     );
 
     expect(update).toHaveBeenCalledWith({
-      defaultExecutionPolicy: "plan",
+      defaultExecutionPolicy: "approval-gated",
       defaultPermissionPersistence: "current-session",
+      defaultAutoApprove: true,
       defaultDiffLayout: "unified",
     });
+  });
+
+  it("warns once before this machine's first Full access default, and has no Off switch", async () => {
+    const stored = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: (key: string, value: string) => void stored.set(key, value),
+    });
+    try {
+      const update = vi.fn(async () => true);
+      const user = userEvent.setup();
+      const { unmount } = render(
+        <CodeSettingsView onUpdate={update} settings={settings as never} />,
+      );
+      expect(screen.queryByRole("switch", { name: /sandbox/i })).toBeNull();
+
+      await chooseSelectFieldOption(
+        user,
+        screen.getByRole("combobox", { name: "Default mode" }),
+        "Full access",
+      );
+      expect(update).not.toHaveBeenCalled();
+      const warning = await screen.findByRole("dialog", { name: "Use Full access?" });
+      expect(warning).toHaveTextContent(
+        "Agents can change any file and run any command without asking, with no sandbox, so they can read your whole home folder, including SSH and cloud keys.",
+      );
+      await user.click(screen.getByRole("button", { name: "Use Full access" }));
+      expect(update).toHaveBeenLastCalledWith(
+        expect.objectContaining({ defaultExecutionPolicy: "full-access" }),
+      );
+      unmount();
+
+      // The second pick on this machine goes straight through.
+      const again = vi.fn(async () => true);
+      render(<CodeSettingsView onUpdate={again} settings={settings as never} />);
+      await chooseSelectFieldOption(
+        user,
+        screen.getByRole("combobox", { name: "Default mode" }),
+        "Full access",
+      );
+      expect(screen.queryByRole("dialog", { name: "Use Full access?" })).toBeNull();
+      expect(again).toHaveBeenCalledWith(
+        expect.objectContaining({ defaultExecutionPolicy: "full-access" }),
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("lets one Git requirement switch decide plain folders and threads without a Project", async () => {
@@ -114,17 +158,16 @@ describe("CodeSettingsView", () => {
       <CodeSettingsView onUpdate={async () => true} settings={settings as never} />,
     );
 
+    expect(screen.getByRole("heading", { name: "Access" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Thread defaults" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Editor" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "External editor" })).toBeVisible();
     expect(container.querySelector(".code-settings [data-slot='card']")).toBeNull();
     expect(container.querySelectorAll(".code-settings .settings-card-section--open")).toHaveLength(
-      3,
+      4,
     );
-    // The four-way access choice is a select like the Agents posture; only
-    // the two-way persistence choice stays segmented.
-    expect(screen.getByRole("combobox", { name: "Default Code access" })).toBeVisible();
-    expect(screen.getByRole("group", { name: "Default approval persistence" })).toBeVisible();
+    // The five-way mode choice is a select like the Agents posture.
+    expect(screen.getByRole("combobox", { name: "Default mode" })).toBeVisible();
     expect(screen.getByRole("group", { name: "Default diff layout" })).toBeVisible();
     expect(
       screen.getByRole("textbox", { name: "External editor executable" }).closest(".setrow"),

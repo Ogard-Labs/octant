@@ -566,22 +566,18 @@ export function codexExecutionSettings(
     // `commandActions` as `unknown` for a plain `> file` redirect, so "this
     // command only writes in-root" is not something either side can prove.
     //
-    // The reviewer is offered to `approval-gated` only (0138). Codex's reviewer
-    // is thread-wide, so it would answer the prompt an in-root patch edit
-    // raises — a write 0018 waives — and may deny it, turning the posture the
-    // user chose into a per-write verdict. 0138 is the scoped exception to
-    // 0104's rule that delegation reaches both prompting postures, and it
-    // records what that costs: this posture no longer delegates its command
-    // prompts either, because the reviewer cannot be scoped to a class. `user`
-    // is sent rather than nothing whenever delegation is off: omitting the
-    // field leaves a thread that once delegated still routing to the reviewer
-    // after taint, after the user turns it off, or on a resume under this
-    // posture.
+    // The reviewer answers both prompting postures (maintainer decision,
+    // 2026-10-31, ending the approval-gated-only exception). Codex's reviewer
+    // is thread-wide, so on auto-accept-edits it also answers the escalation
+    // an in-root patch edit raises, and may deny one: the person asked for
+    // its review there. `user` is sent rather than nothing whenever
+    // delegation is off: omitting the field leaves a thread that once
+    // delegated still routing to the reviewer after taint, after the user
+    // turns it off, or on a resume under this posture.
     return {
       approvalPolicy: "untrusted",
       sandbox: "read-only",
-      approvalsReviewer:
-        autoApprove === true && policy === "approval-gated" ? "auto_review" : "user",
+      approvalsReviewer: autoApprove === true ? "auto_review" : "user",
     };
   }
   return { approvalPolicy: "never", sandbox: "read-only", approvalsReviewer: "user" };
