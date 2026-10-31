@@ -109,9 +109,10 @@ export function MoveThreadToProjectDialog(props: MoveThreadToProjectDialogProps)
       </div>
       <p id={descriptionId}>
         &ldquo;{props.threadTitle}&rdquo; keeps its history and its access level, and stays a{" "}
-        {props.mode === "work" ? "Work task" : "Code thread"}. It can move to another {kind.project}{" "}
-        whose folder is{" "}
-        {props.mode === "work" ? "the same as, or contains, the folder it works in" : "the same"}.
+        {props.mode === "work" ? "Work task" : "Code thread"}.{" "}
+        {props.mode === "work"
+          ? "It can move to another Work Project whose folder is the same as, or contains, the folder it works in."
+          : "It can move to another Code Project bound to the same repository folder."}
       </p>
       {candidates.length === 0 ? (
         <p>
