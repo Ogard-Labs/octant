@@ -3047,6 +3047,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           sessionId: active.sessionId as never,
           requestId,
           approved: decision.verdict === "allow",
+          // Shield's answer covers this one call; nothing is remembered.
+          scope: "once",
         }),
       );
     } catch {

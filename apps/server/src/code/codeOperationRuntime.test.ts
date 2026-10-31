@@ -2243,6 +2243,7 @@ describe("CodeOperationRuntime", () => {
           sessionId,
           requestId: "provider-approval-9",
           approved: true,
+          scope: "once",
         }),
       );
       expect(approvalCall).toHaveBeenCalledWith({ sessionId, requestId: "provider-approval-9" });
@@ -2274,6 +2275,7 @@ describe("CodeOperationRuntime", () => {
           sessionId,
           requestId: "provider-approval-9",
           approved: false,
+          scope: "once",
         }),
       );
       expect((await frames()).some((event) => event.kind === "approval-requested")).toBe(false);

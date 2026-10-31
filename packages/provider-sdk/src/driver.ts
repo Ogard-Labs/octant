@@ -148,6 +148,15 @@ export interface ProviderApprovalAnswer {
   readonly sessionId: ProviderSessionId;
   readonly requestId: string;
   readonly approved: boolean;
+  /**
+   * `once`: the answer covers this one call. A driver neither remembers it for
+   * the session or the Project nor asks the runtime to, whatever the person's
+   * persistence setting says. Every automatic reviewer's answer (Octant
+   * Shield) and every answer on a child run's behalf carries it, so one
+   * automatic allow never authorizes a later call that nobody reviewed.
+   * Absent, the driver applies the person's persistence setting as before.
+   */
+  readonly scope?: "once";
 }
 
 export interface ProviderUserInputAnswer {

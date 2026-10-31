@@ -10142,7 +10142,12 @@ contents, a tool's output, and the runtime's own reason stay out. Codex's
 request to widen its own sandbox is a privilege change, which Shield hands to
 the person. An allow or deny goes straight back to the runtime for that one
 call and does not count toward the three refusals that end a turn; an ask is
-the ordinary approval. Claude Code and Codex keep their own reviewer at Auto
+the ordinary approval. Every automatic answer, and every answer on a child
+run's behalf, carries the seam's one-call scope (`ProviderApprovalAnswer.scope:
+"once"`): no driver remembers it for the session or the Project or asks the
+runtime to, whatever the person's persistence setting, so one allow never
+authorizes a later call nobody reviewed. An OpenCode v2 permission's
+`resources` are read as the paths, command, or address it targets. Claude Code and Codex keep their own reviewer at Auto
 by default, so Shield answers their prompts only once the person chooses it;
 Mistral Vibe's own auto-approve mode is not built, so Shield reviews it, as it
 reviews OpenCode, every other ACP agent, and Pi.

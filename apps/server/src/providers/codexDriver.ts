@@ -2000,7 +2000,12 @@ function makeConnection(
             return request(() =>
               client.respondApproval({
                 providerRequestId: pending.providerRequestId,
-                result: approvalResult(pending, input.approved, permissionPersistence(options)),
+                result: approvalResult(
+                  pending,
+                  input.approved,
+                  // A one-call answer is never accepted for the session.
+                  input.scope === "once" ? "project-default" : permissionPersistence(options),
+                ),
               }),
             ).pipe(
               Effect.catchAll((providerFailure) =>
