@@ -537,6 +537,21 @@ controls: the access chip carries its shield icon beside the label, the model
 button names the model with a chosen effort in muted ink, the microphone sits
 just before send, and send is the round accent-filled button with an up arrow.
 
+**Usage-limit warning.** On a start screen, when the chosen account has a window
+that is spent or at 80% used (the same levels the meters colour), a warning
+callout takes the full row above the context chips: which account, that it has
+reached or is close to its usage limit, and the reset time the provider gave.
+For each other ready account that has room (an observed window below the near
+level; an account with no observed window is never offered as having room) up to
+three `Use <account>` buttons follow, each choosing that account and its model
+(the current model when it lists it) exactly as the model menu would. Nothing
+switches on its own and the warning never blocks sending: the provider's own
+limit decides whether a turn runs. The model menu's rail lists accounts with
+room first and the ones at their limit last, in the person's own order within
+each, and marks a limited account with the danger dot and "Usage limit reached"
+(a near one with the warning dot and "Near usage limit"); a readiness problem
+takes the dot first.
+
 Work follow-up composers use the same attached context strip as Code, showing
 the project and working folder instead of Git controls. Full paths require a
 matching project binding revision; missing metadata never borrows another root.

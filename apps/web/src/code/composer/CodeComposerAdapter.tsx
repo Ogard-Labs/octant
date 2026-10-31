@@ -735,6 +735,12 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                 props.selectedProviderInstanceId === undefined
                   ? undefined
                   : String(props.selectedProviderInstanceId),
+              alternatives: {
+                groups: props.providerGroups,
+                onSelect: props.onSelectProvider,
+                selectedModelId:
+                  props.selectedModelId === undefined ? undefined : String(props.selectedModelId),
+              },
             }}
             startContext={
               <div className="composer-tray composer-tray--inside" aria-label="Thread context">

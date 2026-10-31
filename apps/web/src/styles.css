@@ -5218,7 +5218,8 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 }
 
 .composer-model-picker__rail-status--unavailable,
-.composer-model-picker__rail-status--incompatible {
+.composer-model-picker__rail-status--incompatible,
+.composer-model-picker__rail-status--limited {
   background: var(--octant-destructive);
 }
 
