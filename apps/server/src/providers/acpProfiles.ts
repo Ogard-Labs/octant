@@ -73,6 +73,13 @@ export interface AcpProcessProfile {
   readonly hostReadPaths?: ReadonlyArray<string>;
   /** The CLI starts a same-binary stdio server before serving ACP messages. */
   readonly requiresChildServer?: boolean;
+  /**
+   * The CLI reads `/Library/Keychains/System.keychain` to load TLS roots and
+   * aborts when the read is denied. On macOS a sandboxed launch below Full
+   * access may then read that one file, never write it or reach any other
+   * keychain path.
+   */
+  readonly readsSystemKeychain?: boolean;
   readonly environment: (input: {
     readonly managedHome: string;
     readonly executionPolicy: ProviderExecutionPolicy;
@@ -1181,6 +1188,12 @@ const fxProfile: AcpProviderProfile = {
     agentName: "fx",
     versionPattern: /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\r?\n?$/,
     minimumVersion: [0, 0, 13],
+    // fx 0.0.15 under the deny-default profile (measured 2026-10-28) aborted
+    // certificate loading on the denied System Keychain read instead of
+    // falling back to /etc/ssl/cert.pem, so it could not reach the Vercel AI
+    // Gateway. The file is world-readable on macOS and its item secrets are
+    // encrypted with the root-only /var/db/SystemKey, which stays denied.
+    readsSystemKeychain: true,
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
     guards: {
       // fx's default `permission_mode` is `auto`, and its ACP `code` mode maps
