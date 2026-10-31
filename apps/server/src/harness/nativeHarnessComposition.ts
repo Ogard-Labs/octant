@@ -386,6 +386,8 @@ export function createNativeHarnessComposition(
     readonly windowId?: string;
     /** A Code thread's checkout, the root Octant Shield judges its calls against. */
     readonly boundRoot?: string;
+    /** The Project's extra folders, which Shield judges as it judges the root. */
+    readonly extraRoots?: ReadonlyArray<string> | undefined;
   }): Pick<NativeHarnessToolPorts, "askUser" | "approvals" | "steering" | "callEnded"> => ({
     callEnded: (callId) => {
       confirmedCommandHosts.delete(callId);
@@ -443,6 +445,7 @@ export function createNativeHarnessComposition(
                   command: input.command,
                 }),
                 boundRoot: scope.boundRoot,
+                ...(scope.extraRoots === undefined ? {} : { extraRoots: scope.extraRoots }),
                 signal: input.signal,
               });
               if (decision !== undefined) {
@@ -683,6 +686,7 @@ export function createNativeHarnessComposition(
             lead: leadOf(thread),
             windowId,
             boundRoot: checkoutRoot,
+            ...(extraFolders === undefined ? {} : { extraRoots: extraFolders }),
           }),
           filesystem: new NativeHarnessFileSystem({
             root: checkoutRoot,

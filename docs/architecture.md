@@ -2520,7 +2520,9 @@ Git start in the main folder. Built.
   scope include them, OpenCode's session rules allow reaching them as a
   folder of the session rather than an outside directory, ACP and Pi
   profiles bind them, and the Octant Harness file tools accept an absolute
-  path in one. Plan reads them and writes none, as it does the main folder.
+  path in one, and Octant Shield's fast rules allow reads and edits in one
+  as in the main folder (its command rules keep to the main folder). Plan
+  reads them and writes none, as it does the main folder.
   Full access stays unwrapped. The deny rules for secrets and the
   `DEFAULT_DENY_READ_PATHS` refusal of ancestor roots apply to extra folders
   unchanged. A folder missing on disk at launch is left out of the profile
@@ -10181,7 +10183,8 @@ the picker says why.
    the person or is refused; Shield never allows it. The malicious-call rules
    below belong here.
 2. **Fast allow rules,** with no model call: reads and edits inside the bound
-   root, the Project's own test or build command, read-only Git, egress to a
+   root or one of the Project's extra folders, the Project's own test or build
+   command, read-only Git, egress to a
    safe network, and SSH to a registered server within its profile.
 3. **Model judgment** for everything else. The Judge sees only the person's
    own messages in this thread, the pending call (tool, arguments, working

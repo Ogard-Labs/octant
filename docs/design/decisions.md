@@ -581,7 +581,7 @@ A Work or Code Project has one main folder plus extra folders the person adds; e
 
 - Only a person adds or removes an extra folder, through a folder-picker receipt; each change is journaled with who and when and replays, and a Project made before the field existed has none.
 - An extra folder is never the home folder or above it, a system or credential folder, the main folder, or inside or around the main folder or another extra folder; a Project has at most 16.
-- The OS profiles, the provider sandboxes and approval scopes, and the Octant Harness file tools grant an extra folder exactly what they grant the main folder; Plan reads it without writing, and Full access stays unwrapped.
+- The OS profiles, the provider sandboxes and approval scopes, the Octant Harness file tools and Octant Shield's fast read and edit rules grant an extra folder exactly what they grant the main folder; Plan reads it without writing, and Full access stays unwrapped.
 - Each Work and Code turn names the extra folders to the agent.
 - Worktrees, checkouts, Git, terminals and Project actions stay in the main folder; an extra folder is a plain folder.
 - Not built yet: the `@file` picker, the Work Files and overview listings, Work artifact paths and Code search still address only the main folder.
