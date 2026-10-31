@@ -52,6 +52,14 @@ To redesign an existing website, ask the agent to open the page in the Browser a
 
 Work has no shell and no Git. The agent in a Work thread is never given a way to run commands, so it never asks you to approve one; changes to files in the Project still ask first. When Work work becomes software engineering, use a [promotion](/guide/promotions) to start a linked Code thread with explicit user approval.
 
+## Continue a terminal session
+
+A new Work task can start from a Claude Code or Codex session you had in a
+terminal in the same folder. Choose **Create from…**, then **Terminal**, and
+pick the session. The task shows that conversation as folded, read-only
+history, and the assistant reads it once at the start. The session stays on
+this Mac, and the task is marked as holding outside content.
+
 ## Work settings
 
 **Settings › Work** sets what a new Work thread starts with:

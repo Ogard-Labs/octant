@@ -123,6 +123,7 @@ import {
   waitUntilDocumentVisible,
 } from "../polling/documentVisibility";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
+import { ImportedTerminalHistory } from "../terminalSessions/ImportedTerminalHistory";
 import {
   LoadEarlierMessages,
   type LoadEarlierMessagesState,
@@ -1840,11 +1841,20 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         itemAt={workRowHappenedAt}
         itemKey={(row) => row.key}
         items={transcriptRows}
-        {...(earlierRow === undefined
-          ? {}
-          : {
-              lead: <LoadEarlierMessages onLoad={() => void loadEarlier()} state={earlierRow} />,
-            })}
+        lead={
+          <>
+            <ImportedTerminalHistory
+              threadId={String(props.threadId)}
+              {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+              {...(props.windowCapability === undefined
+                ? {}
+                : { windowCapability: props.windowCapability })}
+            />
+            {earlierRow === undefined ? null : (
+              <LoadEarlierMessages onLoad={() => void loadEarlier()} state={earlierRow} />
+            )}
+          </>
+        }
         listClassName="thread-column"
         {...(canvasClient === undefined
           ? {}

@@ -90,6 +90,7 @@ import type {
   GithubIssueContextRequest,
   LinearIssueContextRequest,
   MentionableThreadId,
+  TerminalSessionImportRequest,
 } from "@octant/contracts";
 import type { CodeCommand, CodeCommandResult, CodeWorktreeRef } from "@octant/contracts/code";
 import type { OctantHostBridge } from "../../shell/hostBridge";
@@ -215,6 +216,7 @@ export interface CodeComposerSubmitInput {
   readonly threadMentionIds?: ReadonlyArray<MentionableThreadId>;
   readonly issueContext?: GithubIssueContextRequest;
   readonly linearIssueContext?: LinearIssueContextRequest;
+  readonly terminalSession?: TerminalSessionImportRequest;
   /** Local draft identity used only to anchor a native approval view. */
   readonly presentation?: { readonly composerId: string };
 }

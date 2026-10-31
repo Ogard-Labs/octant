@@ -2,6 +2,7 @@ import {
   decodeMentionableThreadId,
   type GithubIssueContextRequest,
   type LinearIssueContextRequest,
+  type TerminalSessionImportRequest,
 } from "@octant/contracts";
 import type { CodeNewThreadWorkspace } from "@octant/contracts/projects";
 import type { PermissionPersistence, ProviderExecutionPolicy } from "@octant/contracts/providers";
@@ -17,6 +18,11 @@ export type NewTaskCreateFromSelection =
   | {
       readonly kind: "linear";
       readonly request: LinearIssueContextRequest;
+      readonly label: string;
+    }
+  | {
+      readonly kind: "terminal";
+      readonly request: TerminalSessionImportRequest;
       readonly label: string;
     };
 

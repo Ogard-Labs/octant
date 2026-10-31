@@ -51,6 +51,7 @@ import {
   type CodeWorktreeSourcePreviewPort,
   type ManagedCodeThreadCreationPort,
 } from "./codeService";
+import type { TerminalSessionImportPort } from "../terminalSessions/terminalSessionImports";
 import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
 
 const ids = {
@@ -1318,6 +1319,72 @@ describe("CodeService commands", () => {
       ).rejects.toMatchObject({ failure: { category: "unavailable" } });
       expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
     });
+  });
+
+  it("starts a thread from a terminal session in the Project's folder, marked before it exists, or refuses one from elsewhere", async () => {
+    const terminalSession = {
+      provider: "codex",
+      sessionId: "019f6f43-f063-7df2-8216-515b7f7bfe9a",
+    } as never;
+    const prepared = {
+      mark: {
+        sourceLabel: "terminal-session",
+        contentReference: "terminal-session-codex-019f6f43-f063-7df2-8216-515b7f7bfe9a",
+      },
+      imported: { title: "Changelog" } as never,
+    };
+    const terminalSessions = {
+      prepare: vi.fn<TerminalSessionImportPort["prepare"]>(async (_request, folder) =>
+        folder === "/repo"
+          ? { status: "ready", prepared }
+          : { status: "refused", message: "That terminal session was started in another folder." },
+      ),
+      journalImported: vi.fn<TerminalSessionImportPort["journalImported"]>(),
+    };
+    const record = vi.fn<NonNullable<CodeServiceOptions["recordExternalContentIngestion"]>>(() => ({
+      kind: "recorded",
+      taint: { externalContentIngested: true, ingestedSources: ["terminal-session"] },
+    }));
+    const command = {
+      kind: "create-code-thread",
+      thread: thread({ executionPolicy: "approval-gated" }),
+      terminalSession,
+    } as const;
+    const fixture = serviceFixture({
+      recordExternalContentIngestion: record,
+      threads: [],
+      project: rememberedFullAccessProject,
+      terminalSessions,
+    });
+
+    await expect(fixture.service.execute(ids.window, command)).resolves.toMatchObject({
+      kind: "thread-created",
+    });
+    expect(record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: ids.thread,
+        provenance: { origin: "external-content", sourceLabel: "terminal-session" },
+        contentReference: prepared.mark.contentReference,
+      }),
+    );
+    expect(record.mock.invocationCallOrder[0]).toBeLessThan(
+      fixture.persistence.journal.append.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(terminalSessions.journalImported).toHaveBeenCalledWith(String(ids.thread), prepared);
+
+    const elsewhere = serviceFixture({
+      recordExternalContentIngestion: record,
+      threads: [],
+      project: {
+        ...(rememberedFullAccessProject as object),
+        binding: { canonicalRoot: "/elsewhere" },
+      } as never,
+      terminalSessions,
+    });
+    await expect(elsewhere.service.execute(ids.window, command)).rejects.toMatchObject({
+      failure: { category: "invalid" },
+    });
+    expect(elsewhere.persistence.journal.append).not.toHaveBeenCalled();
   });
 
   it("leaves a thread that asks for less than its profile allows alone", async () => {
@@ -4337,6 +4404,7 @@ function serviceFixture(
     readonly forkMergeBack?: CodeServiceOptions["forkMergeBack"];
     readonly forkConversation?: CodeServiceOptions["forkConversation"];
     readonly recordExternalContentIngestion?: CodeServiceOptions["recordExternalContentIngestion"];
+    readonly terminalSessions?: TerminalSessionImportPort;
   } = {},
 ) {
   const threads = options.threads ?? [thread()];
@@ -4457,6 +4525,9 @@ function serviceFixture(
     ...(options.recordExternalContentIngestion === undefined
       ? {}
       : { recordExternalContentIngestion: options.recordExternalContentIngestion }),
+    ...(options.terminalSessions === undefined
+      ? {}
+      : { terminalSessions: options.terminalSessions }),
     ...(options.watcher === undefined
       ? {}
       : { watcher: options.watcher as unknown as NonNullable<CodeServiceOptions["watcher"]> }),

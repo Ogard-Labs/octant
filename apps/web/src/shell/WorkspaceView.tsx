@@ -500,6 +500,7 @@ export interface WorkspaceViewProps {
     permissionPersistence?: import("@octant/contracts/providers").PermissionPersistence,
     modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
     initiatingPaneId?: PaneId,
+    terminalSession?: import("@octant/contracts").TerminalSessionImportRequest,
   ) => boolean | void | Promise<boolean | void>;
   readonly githubPluginEnabled?: boolean;
   readonly linearClient?: import("@octant/client-runtime/integration-client").IntegrationClient;
@@ -1601,6 +1602,7 @@ function renderNonCodeTab(
             executionPolicy,
             permissionPersistence,
             modelOptionValues,
+            terminalSession,
           ) => {
             // Returning quietly here made a wired-up composer look dead: the user
             // pressed Create thread and nothing happened anywhere. A missing
@@ -1623,6 +1625,7 @@ function renderNonCodeTab(
               permissionPersistence,
               modelOptionValues,
               paneId,
+              terminalSession,
             );
           }}
           {...(props.onCreateProject === undefined

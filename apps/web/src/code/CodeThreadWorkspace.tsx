@@ -109,6 +109,7 @@ import { TerminalBrowserApprovalPrompt } from "./TerminalBrowserApprovalPrompt";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { LoadEarlierMessages } from "../transcript/LoadEarlierMessages";
+import { ImportedTerminalHistory } from "../terminalSessions/ImportedTerminalHistory";
 import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
 import { turnMenuTrigger, useFocusAfterTurnMenuCloses } from "../transcript/turnPanelFocus";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
@@ -1380,16 +1381,23 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           key={String(props.threadId)}
           listClassName="code-thread-workspace__transcript thread-column"
           {...(confirmingRestore === undefined ? {} : { pinnedKeys: [confirmingRestore] })}
-          {...(props.controller.earlierConversation === undefined
-            ? {}
-            : {
-                lead: (
-                  <LoadEarlierMessages
-                    onLoad={props.controller.loadEarlierConversation}
-                    state={props.controller.earlierConversation}
-                  />
-                ),
-              })}
+          lead={
+            <>
+              <ImportedTerminalHistory
+                threadId={String(props.threadId)}
+                {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+                {...(props.windowCapability === undefined
+                  ? {}
+                  : { windowCapability: props.windowCapability })}
+              />
+              {props.controller.earlierConversation === undefined ? null : (
+                <LoadEarlierMessages
+                  onLoad={props.controller.loadEarlierConversation}
+                  state={props.controller.earlierConversation}
+                />
+              )}
+            </>
+          }
           {...(canvasClient === undefined
             ? {}
             : {

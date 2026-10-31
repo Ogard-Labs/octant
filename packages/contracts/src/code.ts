@@ -4,6 +4,7 @@ import { AggregateVersion, GlobalSequence, UtcTimestamp } from "./events";
 import { ThreadRestFields } from "./threadRest";
 import { ThreadLiveTurnFields } from "./threadLiveTurn";
 import { GithubIssueContextRequest } from "./githubIssueContext";
+import { TerminalSessionImportRequest } from "./terminalSessions";
 import { LinearIssueContextRequest } from "./linearIssueContext";
 import { BindingRevisionId, ProjectId } from "./projects";
 import { ThreadWorkingDirectory } from "./workingDirectory";
@@ -545,6 +546,8 @@ export const CreateManagedCodeThreadCommand = Schema.Struct({
   approvalId: Schema.optional(CodeApprovalId),
   issueContext: Schema.optional(GithubIssueContextRequest),
   linearIssueContext: Schema.optional(LinearIssueContextRequest),
+  /** A terminal session in the Project's folder the thread starts from. */
+  terminalSession: Schema.optional(TerminalSessionImportRequest),
 })
   .annotations(strict)
   .pipe(
@@ -562,6 +565,8 @@ export const CreateCodeThreadCommand = Schema.Struct({
   approvalId: Schema.optional(CodeApprovalId),
   issueContext: Schema.optional(GithubIssueContextRequest),
   linearIssueContext: Schema.optional(LinearIssueContextRequest),
+  /** A terminal session in the Project's folder the thread starts from. */
+  terminalSession: Schema.optional(TerminalSessionImportRequest),
 }).annotations(strict);
 export type CreateCodeThreadCommand = typeof CreateCodeThreadCommand.Type;
 

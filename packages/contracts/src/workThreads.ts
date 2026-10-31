@@ -3,6 +3,7 @@ import { AggregateVersion, UtcTimestamp } from "./events";
 import { ThreadRestFields } from "./threadRest";
 import { ThreadLiveTurnFields } from "./threadLiveTurn";
 import { GithubIssueContextRequest } from "./githubIssueContext";
+import { TerminalSessionImportRequest } from "./terminalSessions";
 import { LinearIssueContextRequest } from "./linearIssueContext";
 import { HostId } from "./host";
 import { ThreadWorkingDirectory } from "./workingDirectory";
@@ -109,6 +110,8 @@ export const CreateWorkThreadCommand = Schema.Struct({
   workingDirectory: Schema.optional(ThreadWorkingDirectory),
   issueContext: Schema.optional(GithubIssueContextRequest),
   linearIssueContext: Schema.optional(LinearIssueContextRequest),
+  /** A terminal session in the Project's folder the thread starts from. */
+  terminalSession: Schema.optional(TerminalSessionImportRequest),
 }).annotations(strict);
 export type CreateWorkThreadCommand = typeof CreateWorkThreadCommand.Type;
 

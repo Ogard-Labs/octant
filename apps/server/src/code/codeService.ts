@@ -81,6 +81,7 @@ import {
   type EventEnvelope,
   type PermissionPersistence,
   type ProjectId,
+  type TerminalSessionImportRequest,
   type ProviderExecutionPolicy,
   type ProviderModelId,
   type ProviderModelOptionValues,
@@ -189,6 +190,10 @@ import {
   type InheritedExternalContentMark,
   type RecordExternalContentIngestion,
 } from "../context/inheritedExternalContentMark";
+import type {
+  PreparedTerminalSession,
+  TerminalSessionImportPort,
+} from "../terminalSessions/terminalSessionImports";
 
 const THREAD_ID_IN_USE_MESSAGE = "That thread ID is already in use.";
 const decodeEventId = Schema.decodeUnknownSync(EventId);
@@ -698,6 +703,7 @@ export interface CodeServiceOptions {
   readonly waitForThreadChange?: (signal: AbortSignal) => Promise<void>;
   readonly issueContext?: GithubIssueContextPort;
   readonly linearIssueContext?: LinearIssueContextPort;
+  readonly terminalSessions?: TerminalSessionImportPort;
   /**
    * The cached pull-request snapshot the sidebar joins linked pull requests
    * from. Optional for the same reason as `files.list`: a host that wired no
@@ -868,6 +874,7 @@ export class CodeService {
   readonly #liveTurns: LiveTurnRegistry | undefined;
   readonly #awaitsHarnessApproval: ((threadId: string) => boolean) | undefined;
   readonly #issueContext?: GithubIssueContextPort;
+  readonly #terminalSessions: TerminalSessionImportPort | undefined;
   readonly #linearIssueContext?: LinearIssueContextPort;
   /**
    * Content staged by `openFile` for the editor, keyed by the staged content
@@ -921,6 +928,7 @@ export class CodeService {
     if (options.issueContext !== undefined) {
       this.#issueContext = options.issueContext;
     }
+    this.#terminalSessions = options.terminalSessions;
     if (options.linearIssueContext !== undefined) {
       this.#linearIssueContext = options.linearIssueContext;
     }
@@ -1249,6 +1257,11 @@ export class CodeService {
           );
         }
         const preparedIssueContexts = await this.#requireCreateIssueContexts(command);
+        const terminalSession = await this.#requireTerminalSession(
+          command.terminalSession,
+          command.projectId,
+          inheritedMark,
+        );
         // The profile narrows the posture before any gate reads it, so a
         // profile that pulls the thread below Full access also removes the
         // confirmation Full access would have demanded.
@@ -1462,7 +1475,7 @@ export class CodeService {
             { kind: "checkout-observed", checkout },
           );
           checkoutJournaled = true;
-          this.#journalNewThread(thread.id, inheritedMark, () =>
+          this.#journalNewThread(thread.id, inheritedMark ?? terminalSession?.mark, () => {
             this.#append(
               "code-thread",
               thread.id,
@@ -1470,8 +1483,11 @@ export class CodeService {
               "code.thread-created@1",
               { kind: "thread-created", thread: durableThread },
               isRoutineHostScope(authenticatedWindowId) ? "system" : "local-user",
-            ),
-          );
+            );
+            if (terminalSession !== undefined) {
+              this.#terminalSessions?.journalImported(String(thread.id), terminalSession);
+            }
+          });
         } catch (bindingError) {
           if (checkoutJournaled) {
             // Compensate the orphan checkout so replay/projections stay clean.
@@ -1670,6 +1686,11 @@ export class CodeService {
           );
         }
         const preparedIssueContexts = await this.#requireCreateIssueContexts(command);
+        const terminalSession = await this.#requireTerminalSession(
+          command.terminalSession,
+          command.thread.projectId,
+          inheritedMark,
+        );
         let prepared;
         try {
           prepared = await this.#checkouts.observe(authenticatedWindowId, command.thread.projectId);
@@ -1760,12 +1781,15 @@ export class CodeService {
           thread.permissionPersistence === "current-session"
             ? decodeCodeThread({ ...thread, executionPolicy: "approval-gated" })
             : thread;
-        this.#journalNewThread(thread.id, inheritedMark, () =>
+        this.#journalNewThread(thread.id, inheritedMark ?? terminalSession?.mark, () => {
           this.#append("code-thread", thread.id, 0, "code.thread-created@1", {
             kind: "thread-created",
             thread: durableThread,
-          }),
-        );
+          });
+          if (terminalSession !== undefined) {
+            this.#terminalSessions?.journalImported(String(thread.id), terminalSession);
+          }
+        });
         if (
           thread.executionPolicy === "full-access" &&
           thread.permissionPersistence === "current-session"
@@ -3516,6 +3540,32 @@ export class CodeService {
       throw this.#failure(linearIssueContextFailureCategory(linear.reason), linear.message);
     }
     return { github, linear };
+  }
+
+  /**
+   * Reads the terminal session a new thread starts from, refusing one from
+   * another folder than the Project's. A fork or follow-up already starts
+   * from another thread's history, so it cannot also start from a session.
+   */
+  async #requireTerminalSession(
+    request: TerminalSessionImportRequest | undefined,
+    projectId: ProjectId,
+    inheritedMark: InheritedExternalContentMark | undefined,
+  ): Promise<PreparedTerminalSession | undefined> {
+    if (request === undefined) return undefined;
+    if (inheritedMark !== undefined) {
+      throw this.#failure(
+        "invalid",
+        "A thread made from another thread cannot also start from a terminal session.",
+      );
+    }
+    const project = this.#persistence.readProject?.(projectId);
+    if (this.#terminalSessions === undefined || project?.type !== "code") {
+      throw this.#failure("unavailable", "Terminal sessions are unavailable for this Project.");
+    }
+    const prepared = await this.#terminalSessions.prepare(request, project.binding.canonicalRoot);
+    if (prepared.status === "refused") throw this.#failure("invalid", prepared.message);
+    return prepared.prepared;
   }
 
   #bindCreateIssueContexts(

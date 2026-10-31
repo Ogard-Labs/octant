@@ -13,7 +13,11 @@ import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerA
 import { useExtensionDraftSelections } from "../chat/useExtensionDraftSelections";
 import { providerFamilyForThread } from "../providers/providerFamily";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
-import { decodeGithubIssueContextRequest } from "@octant/contracts";
+import {
+  decodeGithubIssueContextRequest,
+  type TerminalSessionImportRequest,
+  type TerminalSessionSummary,
+} from "@octant/contracts";
 import type { RepositoryIssueRow } from "../github/readIssuesAcrossRepositories";
 import type { OctantMode } from "@octant/contracts/modes";
 import {
@@ -105,6 +109,14 @@ import type { HomeCardDefinition } from "../home/homeCards";
 import type { OctantHostBridge } from "./hostBridge";
 import { WorkKindSwitch } from "./WorkKindSwitch";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import {
+  createTerminalSessionClient,
+  type TerminalSessionClient,
+} from "@octant/client-runtime/terminal-session-client";
+import {
+  CreateFromTerminalSessionPicker,
+  TERMINAL_SESSION_TOOL_NAMES,
+} from "../terminalSessions/CreateFromTerminalSessionPicker";
 
 // Cloning a repository from GitHub is a first-time step, not a start-screen
 // staple; its onboarding stays out of the first bundle.
@@ -175,6 +187,7 @@ export interface DraftThreadWorkspaceProps {
     executionPolicy?: ProviderExecutionPolicy,
     permissionPersistence?: PermissionPersistence,
     modelOptionValues?: ProviderModelOptionValues,
+    terminalSession?: TerminalSessionImportRequest,
   ) => boolean | void | Promise<boolean | void>;
   readonly onCreateCodeThread?: (
     input: CodeComposerSubmitInput,
@@ -354,7 +367,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     readonly revision: number;
   }>();
   const [createFromOpen, setCreateFromOpen] = useState(false);
-  const [createFromTab, setCreateFromTab] = useState<"github" | "linear">("github");
+  const [createFromTab, setCreateFromTab] = useState<"github" | "linear" | "terminal">("github");
   const fillPromptRequest = (text: string) =>
     setPromptRequest((current) => ({ text, revision: (current?.revision ?? 0) + 1 }));
   const adoptIssue = (row: RepositoryIssueRow) => {
@@ -403,10 +416,41 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     if (!issuesCreateAvailable && linearCreateAvailable) setCreateFromTab("linear");
     if (issuesCreateAvailable && !linearCreateAvailable) setCreateFromTab("github");
   }, [issuesCreateAvailable, linearCreateAvailable]);
+  // Terminal sessions live in a Project's folder on this Mac, so they are
+  // offered for a Work or Code Project the local window can reach.
+  const terminalSessionClient = useMemo(() => {
+    if (props.serverUrl === undefined || props.windowCapability === undefined) return undefined;
+    try {
+      return createTerminalSessionClient({
+        baseUrl: props.serverUrl,
+        fetch: globalThis.fetch,
+        windowCapability: props.windowCapability,
+      });
+    } catch {
+      return undefined;
+    }
+  }, [props.serverUrl, props.windowCapability]);
+  const terminalSessions =
+    terminalSessionClient !== undefined &&
+    selectedProjectId !== undefined &&
+    (props.mode === "work" || props.mode === "code")
+      ? { client: terminalSessionClient, projectId: selectedProjectId }
+      : undefined;
   const createFromControl =
     (issuesCreateAvailable && props.githubClient !== undefined) ||
-    (linearCreateAvailable && props.linearClient !== undefined) ? (
+    (linearCreateAvailable && props.linearClient !== undefined) ||
+    terminalSessions !== undefined ? (
       <CreateFromIssueControl
+        {...(terminalSessions === undefined ? {} : { terminalSessions })}
+        onSelectTerminal={(session) => {
+          setCreateFromSelection({
+            kind: "terminal",
+            request: { provider: session.provider, sessionId: session.sessionId },
+            label: `${TERMINAL_SESSION_TOOL_NAMES[session.provider]}: ${session.title}`,
+          });
+          fillPromptRequest("Continue where this session left off.");
+          setCreateFromOpen(false);
+        }}
         {...(props.githubClient === undefined || !issuesCreateAvailable
           ? {}
           : { githubClient: props.githubClient })}
@@ -440,7 +484,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
               selectedLabel: createFromSelection.label,
               ...(createFromSelection.kind === "github"
                 ? { selectedGithub: createFromSelection.request }
-                : { selectedLinear: createFromSelection.request }),
+                : createFromSelection.kind === "linear"
+                  ? { selectedLinear: createFromSelection.request }
+                  : { selectedTerminal: createFromSelection.request }),
             })}
       />
     ) : null;
@@ -448,6 +494,28 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     createFromSelection?.kind === "github" ? createFromSelection.request : undefined;
   const linearIssueContext =
     createFromSelection?.kind === "linear" ? createFromSelection.request : undefined;
+  const terminalSession =
+    createFromSelection?.kind === "terminal" ? createFromSelection.request : undefined;
+  // Every create path below names its arguments up to the ones it uses; a
+  // terminal session rides after all of them, so it is added here once.
+  const createThread: DraftThreadWorkspaceProps["onCreateThread"] = (...args) =>
+    terminalSession === undefined
+      ? props.onCreateThread(...args)
+      : props.onCreateThread(
+          args[0],
+          args[1],
+          args[2],
+          args[3],
+          args[4],
+          args[5],
+          args[6],
+          args[7],
+          args[8],
+          args[9],
+          args[10],
+          args[11],
+          terminalSession,
+        );
   const [selectedProjectLabel, setSelectedProjectLabel] = useState(
     props.projectId === undefined ? undefined : props.projectName,
   );
@@ -797,6 +865,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             ...input,
             ...(issueContext === undefined ? {} : { issueContext }),
             ...(linearIssueContext === undefined ? {} : { linearIssueContext }),
+            ...(terminalSession === undefined ? {} : { terminalSession }),
           };
           if (props.onCreateCodeThread !== undefined && selectedProjectId !== undefined) {
             return props.onCreateCodeThread(submitted, selectedProjectId);
@@ -804,7 +873,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           // Carry the outcome the user confirmed in the composer, and the
           // access posture they submitted with, so the fallback path never
           // re-derives a suggestion or falls back to a Project default.
-          return props.onCreateThread(
+          return createThread(
             submitted.prompt,
             selectedProjectId,
             submitted.deliveryTarget.outcomeKind,
@@ -872,7 +941,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             modelOptionValues,
           ) =>
             modelOptionValues !== undefined
-              ? props.onCreateThread(
+              ? createThread(
                   prompt,
                   selectedProjectId,
                   undefined,
@@ -887,7 +956,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                   modelOptionValues,
                 )
               : computerUseSelection !== undefined
-                ? props.onCreateThread(
+                ? createThread(
                     prompt,
                     selectedProjectId,
                     undefined,
@@ -899,7 +968,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                     extensionSelections,
                   )
                 : extensionSelections !== undefined && extensionSelections.length > 0
-                  ? props.onCreateThread(
+                  ? createThread(
                       prompt,
                       selectedProjectId,
                       undefined,
@@ -911,14 +980,8 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                       extensionSelections,
                     )
                   : issueContext === undefined && linearIssueContext === undefined
-                    ? props.onCreateThread(
-                        prompt,
-                        selectedProjectId,
-                        undefined,
-                        images,
-                        threadMentionIds,
-                      )
-                    : props.onCreateThread(
+                    ? createThread(prompt, selectedProjectId, undefined, images, threadMentionIds)
+                    : createThread(
                         prompt,
                         selectedProjectId,
                         undefined,
@@ -1002,7 +1065,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     };
     if (Object.keys(modelOptionValues).length > 0) {
       afterCreate(
-        props.onCreateThread(
+        createThread(
           trimmed,
           undefined,
           undefined,
@@ -1021,7 +1084,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     }
     if (extensionSelections.length > 0) {
       afterCreate(
-        props.onCreateThread(
+        createThread(
           trimmed,
           undefined,
           undefined,
@@ -1036,10 +1099,10 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
       return;
     }
     if (issueContext === undefined && linearIssueContext === undefined) {
-      void props.onCreateThread(trimmed);
+      void createThread(trimmed);
       return;
     }
-    void props.onCreateThread(
+    void createThread(
       trimmed,
       undefined,
       undefined,
@@ -1258,12 +1321,18 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
 function CreateFromIssueControl(props: {
   readonly githubClient?: GithubClient;
   readonly linearClient?: IntegrationClient;
+  readonly terminalSessions?: {
+    readonly client: TerminalSessionClient;
+    readonly projectId: ProjectId;
+  };
   readonly creating: boolean;
   readonly open: boolean;
-  readonly tab: "github" | "linear";
-  readonly onTabChange: (tab: "github" | "linear") => void;
+  readonly tab: "github" | "linear" | "terminal";
+  readonly onTabChange: (tab: "github" | "linear" | "terminal") => void;
   readonly selectedGithub?: GithubIssueContextRequest;
   readonly selectedLinear?: LinearIssueContextRequest;
+  readonly selectedTerminal?: TerminalSessionImportRequest;
+  readonly onSelectTerminal: (session: TerminalSessionSummary) => void;
   readonly selectedLabel?: string;
   readonly onSelectGithub: (issue: GithubIssueContextRequest, title: string) => void;
   readonly onSelectLinear: (
@@ -1275,14 +1344,19 @@ function CreateFromIssueControl(props: {
 }) {
   const showGithub = props.githubClient !== undefined;
   const showLinear = props.linearClient !== undefined;
+  const showTerminal = props.terminalSessions !== undefined;
   const activeTab =
     props.tab === "linear" && showLinear
       ? "linear"
       : props.tab === "github" && showGithub
         ? "github"
-        : showGithub
-          ? "github"
-          : "linear";
+        : props.tab === "terminal" && showTerminal
+          ? "terminal"
+          : showGithub
+            ? "github"
+            : showLinear
+              ? "linear"
+              : "terminal";
   const panel = (
     <div className="create-from-issue-control__panel">
       <div role="tablist" aria-label="Create from">
@@ -1310,6 +1384,18 @@ function CreateFromIssueControl(props: {
             Linear
           </OctantButton>
         ) : null}
+        {showTerminal ? (
+          <OctantButton
+            aria-selected={activeTab === "terminal"}
+            onClick={() => props.onTabChange("terminal")}
+            role="tab"
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            Terminal
+          </OctantButton>
+        ) : null}
       </div>
       {activeTab === "github" && props.githubClient !== undefined ? (
         <div role="tabpanel">
@@ -1331,6 +1417,17 @@ function CreateFromIssueControl(props: {
           />
         </div>
       ) : null}
+      {activeTab === "terminal" && props.terminalSessions !== undefined ? (
+        <div role="tabpanel">
+          <CreateFromTerminalSessionPicker
+            client={props.terminalSessions.client}
+            disabled={props.creating}
+            onSelect={props.onSelectTerminal}
+            projectId={props.terminalSessions.projectId}
+            {...(props.selectedTerminal === undefined ? {} : { selected: props.selectedTerminal })}
+          />
+        </div>
+      ) : null}
     </div>
   );
   // The picker floats over the page. Opened in place it grew the context
@@ -1347,7 +1444,9 @@ function CreateFromIssueControl(props: {
           open={props.open}
           side="bottom"
           sideOffset={8}
-          title="Create from an issue"
+          title={
+            showGithub || showLinear ? "Create from an issue or session" : "Create from a session"
+          }
           trigger={<>Create from…</>}
           triggerDisabled={props.creating}
           triggerLabel="Create from…"
@@ -1359,7 +1458,7 @@ function CreateFromIssueControl(props: {
           <span className="create-from-issue-control__selection">
             <span>{props.selectedLabel}</span>
             <OctantButton
-              aria-label="Remove selected issue"
+              aria-label="Remove what this thread starts from"
               disabled={props.creating}
               onClick={props.onClear}
               size="sm"

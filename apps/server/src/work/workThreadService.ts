@@ -56,6 +56,10 @@ import {
   type RecordExternalContentIngestion,
 } from "../context/inheritedExternalContentMark";
 import type {
+  PreparedTerminalSession,
+  TerminalSessionImportPort,
+} from "../terminalSessions/terminalSessionImports";
+import type {
   CompletedThreadArchiveInput,
   CompletedThreadArchiveOutcome,
 } from "../completedThreadArchiveSweep";
@@ -192,6 +196,7 @@ export interface WorkThreadServiceDependencies {
     canonicalRoot: string,
   ) => Promise<WorkStatusDatedItem | undefined>;
   readonly issueContext?: GithubIssueContextPort;
+  readonly terminalSessions?: TerminalSessionImportPort;
   readonly linearIssueContext?: LinearIssueContextPort;
   /**
    * Journals the outside-content mark a thread made from a marked thread
@@ -234,6 +239,7 @@ export class WorkThreadService {
   readonly #observeRuntime?: WorkThreadServiceDependencies["observeRuntime"];
   readonly #projectDueReminder?: WorkThreadServiceDependencies["projectDueReminder"];
   readonly #issueContext?: GithubIssueContextPort;
+  readonly #terminalSessions: TerminalSessionImportPort | undefined;
   readonly #linearIssueContext?: LinearIssueContextPort;
   readonly #recordExternalContentIngestion: RecordExternalContentIngestion | undefined;
 
@@ -258,6 +264,7 @@ export class WorkThreadService {
     if (dependencies.issueContext !== undefined) {
       this.#issueContext = dependencies.issueContext;
     }
+    this.#terminalSessions = dependencies.terminalSessions;
     if (dependencies.linearIssueContext !== undefined) {
       this.#linearIssueContext = dependencies.linearIssueContext;
     }
@@ -460,6 +467,28 @@ export class WorkThreadService {
             preparedLinearIssue.message,
           );
         }
+        const inheritedMark = executionContext?.inheritedMark;
+        let terminalSession: PreparedTerminalSession | undefined;
+        if (command.terminalSession !== undefined) {
+          // A follow-up already starts from another thread's text.
+          if (inheritedMark !== undefined) {
+            throw this.#failure(
+              "invalid",
+              "A thread made from another thread cannot also start from a terminal session.",
+            );
+          }
+          if (this.#terminalSessions === undefined) {
+            throw this.#failure("unavailable", "Terminal sessions are unavailable on this host.");
+          }
+          // The session must come from the Project's own folder; the reader
+          // refuses one started anywhere else.
+          const prepared = await this.#terminalSessions.prepare(
+            command.terminalSession,
+            project.binding.canonicalRoot,
+          );
+          if (prepared.status === "refused") throw this.#failure("invalid", prepared.message);
+          terminalSession = prepared.prepared;
+        }
         const created = decodeWorkThread({
           id: command.threadId,
           projectId: command.projectId,
@@ -485,16 +514,20 @@ export class WorkThreadService {
           journal: this.#persistence.journal,
           record: this.#recordExternalContentIngestion,
           threadId: String(created.id),
-          mark: executionContext?.inheritedMark,
+          mark: inheritedMark ?? terminalSession?.mark,
           correlationId: () => this.#uuid(),
-          journalThread: () =>
+          journalThread: () => {
             this.#append(
               created.id,
               0,
               "work.thread-created@1",
               { kind: "thread-created", thread: created },
               isRoutineHostScope(authenticatedWindowId) ? "system" : "local-user",
-            ),
+            );
+            if (terminalSession !== undefined) {
+              this.#terminalSessions?.journalImported(String(created.id), terminalSession);
+            }
+          },
         });
         if (journaled.status === "refused") {
           throw this.#failure("unavailable", INHERITED_MARK_REFUSAL);

@@ -61,6 +61,16 @@ typed text persist; staged attachments and extra selections do not, and the
 composer says so if they were dropped. Deleting or purging the thread removes
 its draft.
 
+## Continue a terminal session
+
+If you started something in Claude Code or Codex in a terminal, you can carry
+it into a new thread. In a new Code thread with a Project, choose
+**Create from…**, then **Terminal**, and pick a session from that Project's
+folder. Octant reads the session from this Mac and never uploads it. The
+thread starts with the conversation as folded, read-only history, and the
+assistant reads it once at the start. Tool runs from the old session are left
+out, and the thread is marked as holding outside content.
+
 ## Authority modes
 
 Code threads run in one of four server-enforced authority modes:
