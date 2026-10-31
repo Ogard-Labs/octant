@@ -732,3 +732,112 @@
 .extcard-fit__limit {
   color: var(--oct-meta);
 }
+
+/* Settings > Access > Safe networks: one row per trusted place or refused
+   host over hairlines, and the add form on a wrapping line. */
+.safe-networks {
+  display: grid;
+  gap: var(--oct-space-4);
+}
+
+.safe-networks__heading {
+  margin: 0 0 var(--oct-space-2);
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}
+
+.safe-networks__list {
+  display: grid;
+  gap: var(--oct-space-3);
+}
+
+.safe-networks__places,
+.safe-networks__refusals {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.safe-networks__place,
+.safe-networks__refusal {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2) var(--oct-space-3);
+  padding: var(--oct-space-2) 0;
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.safe-networks__places > :first-child,
+.safe-networks__refusals > :first-child {
+  border-top: 0;
+}
+
+.safe-networks__place > button:last-child,
+.safe-networks__refusal > button:last-child {
+  margin-left: auto;
+}
+
+.safe-networks__kind,
+.safe-networks__port,
+.safe-networks__detail,
+.safe-networks__hint,
+.safe-networks__empty {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.safe-networks__kind {
+  min-width: 15ch;
+}
+
+.safe-networks__value {
+  min-width: 0;
+  color: var(--oct-fg);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-sm);
+  overflow-wrap: anywhere;
+}
+
+.safe-networks__refused-mark {
+  color: var(--oct-warn-fg);
+  font-size: var(--oct-text-xs);
+}
+
+.safe-networks__empty,
+.safe-networks__hint {
+  margin: 0;
+  max-width: 560px;
+}
+
+.safe-networks__add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--oct-space-2) var(--oct-space-3);
+}
+
+.safe-networks__port-field {
+  max-width: 120px;
+}
+
+.safe-networks__actions {
+  display: flex;
+  gap: var(--oct-space-2);
+}
+
+.safe-networks__status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2) var(--oct-space-3);
+  margin: var(--oct-space-3) 0;
+}
+
+.safe-networks__status > p {
+  margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+}

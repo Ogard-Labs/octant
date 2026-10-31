@@ -3,6 +3,7 @@ import { Chunk, Effect, Stream } from "effect";
 import { describe, expect, test, vi } from "vitest";
 
 import {
+  claudeNativeQueryOptions,
   makeClaudeAgentSdkPort,
   type ClaudeAgentSdkBridge,
   type ClaudeAgentSdkQueryInvocation,
@@ -309,6 +310,24 @@ describe("Claude Agent SDK port", () => {
     },
   );
 
+  test("sends the sandbox's network to the session's egress proxy port and nothing else", async () => {
+    const harness = makeHarness();
+    const proxied = {
+      ...openInput,
+      sandbox: { ...openInput.sandbox, network: { httpProxyPort: 47004 } },
+    } as const;
+    await expect(
+      Effect.runPromise(Effect.scoped(harness.port.openQuery(proxied))),
+    ).resolves.toBeDefined();
+    expect(harness.invocation?.options).toMatchObject({
+      sandbox: { network: { httpProxyPort: 47004 } },
+    });
+    const options = harness.invocation?.options as
+      | { readonly sandbox?: { readonly network?: object } }
+      | undefined;
+    expect(Object.keys(options?.sandbox?.network ?? {})).toEqual(["httpProxyPort"]);
+  });
+
   test("accepts a structurally valid available output-style catalog without activating it", async () => {
     const harness = makeHarness();
     harness.query.initializationResult.mockResolvedValueOnce({
@@ -346,6 +365,20 @@ describe("Claude Agent SDK port", () => {
     [
       "an unsupported sandbox surface",
       { ...openInput, sandbox: { ...openInput.sandbox, network: { allowedDomains: ["*"] } } },
+    ],
+    [
+      "a network setting beside the proxy port",
+      {
+        ...openInput,
+        sandbox: {
+          ...openInput.sandbox,
+          network: { httpProxyPort: 47004, allowLocalBinding: true },
+        },
+      },
+    ],
+    [
+      "a proxy port that is not a port",
+      { ...openInput, sandbox: { ...openInput.sandbox, network: { httpProxyPort: 70_000 } } },
     ],
   ] as const)("rejects %s before allocating the SDK query", async (_name, candidate) => {
     const harness = makeHarness();
@@ -2689,5 +2722,262 @@ describe("Claude Agent SDK port", () => {
       message: "Claude initialized an unexpected runtime surface.",
     });
     expect(JSON.stringify(failed)).not.toContain("hidden");
+  });
+});
+
+describe("Claude running as itself", () => {
+  const ownSetup = {
+    subagents: true,
+    webTools: true,
+    skills: true,
+    toolServers: false,
+    hooks: true,
+    projectCode: false,
+  } as const;
+
+  test("reads no settings file, skill, or MCP server of the person's own until a session carries their setup", () => {
+    expect(claudeNativeQueryOptions(undefined)).toEqual({
+      settingSources: [],
+      skills: [],
+      strictMcpConfig: true,
+      settings: {},
+    });
+    expect(claudeNativeQueryOptions(ownSetup)).toEqual({
+      settingSources: ["user"],
+      skills: "all",
+      strictMcpConfig: true,
+      settings: { autoMemoryEnabled: false },
+    });
+    // Chat and Plan read the account's skills but run none of its hooks.
+    expect(claudeNativeQueryOptions({ ...ownSetup, hooks: false }).settings).toEqual({
+      disableAllHooks: true,
+      autoMemoryEnabled: false,
+    });
+    // A trusted Project's settings and MCP servers come only with its code.
+    expect(claudeNativeQueryOptions({ ...ownSetup, projectCode: true })).toMatchObject({
+      settingSources: ["user", "project", "local"],
+      strictMcpConfig: false,
+    });
+  });
+
+  test("opens the query with the person's own setup and a subagent's call reaches the gate", async () => {
+    const canUseTool = vi.fn(async () => ({ behavior: "allow" as const }));
+    const preToolUse = vi.fn(async () => ({ behavior: "ask" as const }));
+    const harness = makeHarness();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery({
+            ...openInput,
+            nativeSetup: ownSetup,
+            canUseTool,
+            preToolUse,
+          });
+          yield* Stream.runHead(query.messages);
+          expect(harness.invocation?.options).toMatchObject({
+            settingSources: ["user"],
+            skills: "all",
+            strictMcpConfig: true,
+            settings: { autoMemoryEnabled: false },
+          });
+          const permission = harness.invocation?.options.canUseTool;
+          const preTool = harness.invocation?.options.hooks.PreToolUse[0]?.hooks[0];
+          if (permission === undefined || preTool === undefined) {
+            throw new Error("Expected injected callbacks.");
+          }
+          const signal = new AbortController().signal;
+          yield* Effect.promise(() =>
+            permission(
+              "Read",
+              { path: "/repo/file.ts" },
+              { signal, toolUseID: "tool-child", requestId: "request-child", agentID: "agent-1" },
+            ),
+          );
+          yield* Effect.promise(() =>
+            preTool(
+              {
+                hook_event_name: "PreToolUse",
+                session_id: "session-1",
+                cwd: "/repo",
+                tool_name: "Read",
+                tool_input: { path: "/repo/file.ts" },
+                tool_use_id: "tool-child",
+                agent_id: "agent-1",
+              },
+              "tool-child",
+              { signal },
+            ),
+          );
+          expect(canUseTool).toHaveBeenCalledTimes(1);
+          expect(preToolUse).toHaveBeenCalledTimes(1);
+        }),
+      ),
+    );
+  });
+
+  test("reads a subagent's reply for the tools it calls only when subagents are on", async () => {
+    const childReply = {
+      type: "assistant",
+      session_id: "session-1",
+      parent_tool_use_id: "toolu-agent",
+      message: {
+        id: "assistant-child",
+        type: "message",
+        role: "assistant",
+        model: "claude-sonnet",
+        content: [
+          { type: "text", text: "child text Octant never keeps" },
+          { type: "tool_use", id: "toolu-search", name: "WebSearch", input: { query: "docs" } },
+        ],
+      },
+    };
+    const harness = makeHarness([safeRuntimeInitialization, childReply]);
+    const messages = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery({
+            ...openInput,
+            tools: [...openInput.tools, "Agent"],
+            nativeSetup: ownSetup,
+          });
+          return Chunk.toReadonlyArray(yield* Stream.runCollect(query.messages));
+        }),
+      ),
+    );
+    expect(messages[1]).toEqual({
+      kind: "child-assistant",
+      sessionId: "session-1",
+      parentToolUseId: "toolu-agent",
+      toolUses: [{ toolUseId: "toolu-search", toolName: "WebSearch", input: { query: "docs" } }],
+    });
+    expect(JSON.stringify(messages)).not.toContain("child text");
+
+    const failed = await failureOf(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* makeHarness([safeRuntimeInitialization, childReply]).port.openQuery(
+            openInput,
+          );
+          return yield* Stream.runDrain(query.messages);
+        }),
+      ),
+    );
+    expect(failed).toMatchObject({ category: "protocol" });
+  });
+
+  test("reads a subagent's task lifecycle, as the runtime reports it, only when subagents are on", async () => {
+    const lifecycle = [
+      safeRuntimeInitialization,
+      {
+        type: "system",
+        subtype: "task_started",
+        task_id: "task-agent-1",
+        tool_use_id: "toolu-agent",
+        description: "Read the release notes",
+        subagent_type: "general-purpose",
+        task_type: "local_agent",
+        prompt: "private subagent prompt",
+        uuid: "00000000-0000-4000-8000-0000000000a1",
+        session_id: "session-1",
+      },
+      {
+        type: "system",
+        subtype: "task_progress",
+        task_id: "task-agent-1",
+        tool_use_id: "toolu-agent",
+        description: "Read the release notes",
+        subagent_type: "general-purpose",
+        usage: { total_tokens: 1200, tool_uses: 2, duration_ms: 900 },
+        last_tool_name: "WebFetch",
+        uuid: "00000000-0000-4000-8000-0000000000a2",
+        session_id: "session-1",
+      },
+      {
+        type: "system",
+        subtype: "task_updated",
+        task_id: "task-agent-1",
+        patch: { status: "running", is_backgrounded: false },
+        uuid: "00000000-0000-4000-8000-0000000000a3",
+        session_id: "session-1",
+      },
+      {
+        type: "system",
+        subtype: "task_notification",
+        task_id: "task-agent-1",
+        tool_use_id: "toolu-agent",
+        status: "completed",
+        output_file: "/tmp/agent-output",
+        summary: "Found the notes.",
+        usage: { total_tokens: 2400, tool_uses: 3, duration_ms: 1800 },
+        skip_transcript: false,
+        uuid: "00000000-0000-4000-8000-0000000000a4",
+        session_id: "session-1",
+      },
+    ];
+    const messages = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* makeHarness(lifecycle).port.openQuery({
+            ...openInput,
+            tools: [...openInput.tools, "Agent"],
+            nativeSetup: ownSetup,
+          });
+          return Chunk.toReadonlyArray(yield* Stream.runCollect(query.messages));
+        }),
+      ),
+    );
+    expect(messages.slice(1).map((message) => message.kind === "task" && message.subtype)).toEqual([
+      "task_started",
+      "task_progress",
+      "task_updated",
+      "task_notification",
+    ]);
+    expect(JSON.stringify(messages)).not.toContain("private subagent prompt");
+
+    const refused = await failureOf(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* makeHarness(lifecycle).port.openQuery(openInput);
+          return yield* Stream.runDrain(query.messages);
+        }),
+      ),
+    );
+    expect(refused).toMatchObject({ category: "protocol" });
+  });
+
+  test("holds a person's or a trusted Project's MCP servers only in a session that loads the Project's code", async () => {
+    const withServer = {
+      ...safeRuntimeInitialization,
+      tools: [...safeRuntimeInitialization.tools, "mcp__linear__search"],
+      mcp_servers: [{ name: "linear", status: "connected" }],
+    };
+    const opened = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* makeHarness([withServer]).port.openQuery({
+            ...openInput,
+            nativeSetup: { ...ownSetup, projectCode: true },
+          });
+          return Chunk.toReadonlyArray(yield* Stream.runCollect(query.messages));
+        }),
+      ),
+    );
+    expect(opened[0]).toMatchObject({ kind: "initialized" });
+
+    const refused = await failureOf(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* makeHarness([withServer]).port.openQuery({
+            ...openInput,
+            nativeSetup: ownSetup,
+          });
+          return yield* Stream.runDrain(query.messages);
+        }),
+      ),
+    );
+    expect(refused).toEqual({
+      category: "protocol",
+      message: "Claude initialized an unexpected runtime surface.",
+    });
   });
 });
