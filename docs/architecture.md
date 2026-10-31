@@ -7626,7 +7626,7 @@ mechanisms are:
   - **Outside content is recorded only** at Full access: a quiet tag on the
     tool row, a small mark on the thread card, and the taint in the journal
     and export. It never prompts and never blocks
-    ([Octant Shield's Watcher](#octant-shield) does this tagging once built).
+    ([Octant Shield's Watcher](#octant-shield) does this tagging).
   - **The one-time warning** reads: agents can change any file and run any
     command without asking, with no sandbox, so they can read your whole
     home folder, including SSH and cloud keys.
@@ -10204,8 +10204,9 @@ in this document describe the build as it ships.
 Octant Shield is Octant's own automatic approval reviewer (maintainer
 decision, 2026-10-31). Its Judge is built for every runtime below, subagents
 included, with the picker and the Settings and Project choices (build order
-steps 1 to 3); the Watcher, safe networks, and the server registry are
-designed, not built. It answers the approval prompts
+steps 1 to 3), and its Watcher for the results Octant hands a model (step 4);
+safe networks and the server registry are designed, not built. It answers the
+approval prompts
 that would otherwise go to the person, for every runtime that routes
 approvals through Octant: Octant Harness, Claude Code (`canUseTool`), Codex
 (app-server approval requests), OpenCode (`permission.asked`), ACP agents
@@ -10393,6 +10394,35 @@ description names which reviewer answers. Where none can run (a disabled
 provider, a runtime that raises no approvals) Auto is listed unavailable with
 the reason and a thread set to it asks first.
 
+**Watcher as built.** The Watcher's detectors are pure policy in
+`packages/domain/src/shieldWatcherPolicy.ts`, and it calls no model: a model
+reading every result would spend on every call and would itself be what the
+injected text targets, while a detector that misses leaves the thread exactly
+as guarded as before. Its labels are instructions aimed at the agent
+(`agent-instructions`), hidden text (`hidden-text`: tag or bidi-override
+characters, a run of zero-width characters, or instructions in an HTML comment
+or hidden element), encoded text (`encoded-text`: base64 that decodes to
+prose, or an order to decode and run), a request to send secrets out
+(`exfiltration-request`), a false claim of authority (`fake-authority`), and a
+read of a path the secret guard protects (`secret-path-read`, raised only once
+the guard's list is handed to it). The host runs it over every successful
+result of an app-managed tool (the Octant Harness's tools and Octant's own
+tools for every runtime) and of a plugin MCP server, before the model reads
+it. Each label is journaled as an outside-content ingestion under the source
+`shield-watcher-<label>`, so it marks the thread even for a result that would
+not mark it otherwise (a file inside the root, a command's output), names the
+finding in the person's review of the mark, and is forgotten with the mark
+when the person clears it. The result goes on unchanged; a label that cannot
+be journaled withholds the result, as a mark that cannot be journaled does.
+The Judge's input carries the labels as kinds, never text, and a labelled
+thread counts as tainted. A Code tool row whose result was outside content
+carries the tag "Outside content", followed by what the Watcher found, in the
+warning role; at Full access the tag stays quiet. A Code board card carries a
+small mark while the thread is marked, in the warning role when a label was
+found. A runtime's own web search or fetch, whose result goes straight to its
+model, still marks the thread but is not read by the Watcher, and Chat and
+Work tool rows do not show the tag yet.
+
 **Build order.** (1) Octant Harness; (2) every runtime through the approval
 path; (3) the picker and Settings; (4) the Watcher; (5) safe networks; (6)
 the server registry and SSH. Work gets SSH under the rule that
@@ -10489,7 +10519,8 @@ The [guardrail levels](#security-and-authority) and the
 [key providers' native features](#providers) are in scope; of them only
 Guarded, Accept edits, Reviewed for Claude Code and Codex in Code, and
 Full access in Code are built; [Octant Shield](#octant-shield) is in scope,
-and its Judge is built for every runtime that routes approvals through Octant. A merge or force-push an agent starts on its own
+its Judge is built for every runtime that routes approvals through Octant, and
+its Watcher for the results Octant hands a model. A merge or force-push an agent starts on its own
 initiative, and cloud scheduling, are not in scope. A self-hosted wake service
 that runs in the Octant server on a person's hub and wakes their own spokes is
 in scope under [Hub and spokes](design/hub-and-spokes.md#wake-service); an

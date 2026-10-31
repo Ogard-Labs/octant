@@ -4521,6 +4521,9 @@ function normalizedOperationEvent(
               ? "started"
               : "running",
       ...(summary === undefined ? {} : { summary }),
+      ...(event.status === "completed" && event.outsideContent !== undefined
+        ? { outsideContent: event.outsideContent }
+        : {}),
     };
   }
   if (

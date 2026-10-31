@@ -2136,8 +2136,10 @@ access, a one-time warning asks to confirm, in the warning role: "Agents can
 change any file and run any command without asking, with no sandbox, so they
 can read your whole home folder, including SSH and cloud keys." It offers
 Cancel (focused) and Use Full access, and is not shown again for that scope.
-At Full access a tool row that read outside content carries a quiet tag and
-the thread card a small mark; neither prompts. The section also shows, each
+A Code tool row whose result was outside content carries an "Outside content"
+tag, followed by what Octant Shield's Watcher found in it in the warning role,
+and the thread's board card a small mark; at Full access the tag stays quiet.
+Neither prompts. The section also shows, each
 as an account default a Project
 may override: **Auto reviewer** (Provider's own / Octant Shield), **Safe
 networks** (trusted hosts, domains, address ranges, and private-network tags),

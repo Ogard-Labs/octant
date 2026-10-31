@@ -89,6 +89,7 @@ function foldToolEvent(
 ): ToolActivityRow {
   const summary = event.summary ?? previous?.summary;
   const published = event.published ?? previous?.published;
+  const outsideContent = event.outsideContent ?? previous?.outsideContent;
   return {
     kind: "tool",
     id: String(event.toolCallId),
@@ -96,6 +97,7 @@ function foldToolEvent(
     state: event.state,
     ...(summary === undefined ? {} : { summary }),
     ...(published === undefined ? {} : { published }),
+    ...(outsideContent === undefined ? {} : { outsideContent }),
   };
 }
 

@@ -71,6 +71,13 @@ describe("outside content source names", () => {
     expect(words).not.toMatch(/octant_|[a-z]+-[a-z]+/);
   });
 
+  it("names what Octant Shield's Watcher found in plain words", () => {
+    expect(describeSource("shield-watcher-agent-instructions")).toBe(
+      "Octant Shield found instructions aimed at the agent",
+    );
+    expect(describeSource("shield-watcher-not-a-label")).toBe(UNNAMED_OUTSIDE_SOURCE);
+  });
+
   it("never shows a label nobody has named as its raw identifier", () => {
     expect(describeSource("octant_something_new")).toBe(UNNAMED_OUTSIDE_SOURCE);
     expect(describeSource("brand-new-source")).toBe("Other outside content");

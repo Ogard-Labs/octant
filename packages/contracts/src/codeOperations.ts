@@ -40,7 +40,7 @@ import { ScaffoldDirectoryName, ScaffoldId, ScaffoldRun, ScaffoldRunId } from ".
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { UsageCost } from "./context";
 import { ProjectId } from "./projects";
-import { ShieldDecision } from "./shield";
+import { ShieldDecision, ToolOutsideContentMark } from "./shield";
 import { MAX_THREAD_TASKS_PER_TURN } from "./threadTasks";
 import { TerminalBrowserGrantOutcome } from "./terminalBrowserGrants";
 import {
@@ -1306,6 +1306,8 @@ const ToolEvent = Schema.Struct({
   summary: Schema.optional(boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES)),
   /** A page the call published outside this host; the transcript links to it. */
   published: Schema.optional(ThreadPublishedPage),
+  /** The call's result brought outside content into the thread; the row carries the mark. */
+  outsideContent: Schema.optional(ToolOutsideContentMark),
 }).annotations(strict);
 /**
  * The bounds a Code approval or question is journaled under. Exported so a
@@ -1725,6 +1727,7 @@ export const CodeConversationStep = Schema.Union(
     state: Schema.Literal("started", "running", "completed", "failed"),
     summary: Schema.optional(boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES)),
     published: Schema.optional(ThreadPublishedPage),
+    outsideContent: Schema.optional(ToolOutsideContentMark),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("reasoning"),
@@ -2368,6 +2371,13 @@ export const CodeBoardCard = Schema.Struct({
   blockingReason: Schema.optional(boundedNonEmptyText(MAX_CODE_BOARD_CARD_BLOCKING_REASON_BYTES)),
   followUp: Schema.Boolean,
   lastMeaningfulActivityAt: Schema.NullOr(UtcTimestamp),
+  /**
+   * The thread has read outside content since its mark was last cleared:
+   * `flagged` when Octant Shield's Watcher found injection-shaped content in
+   * it. Absent on an unmarked thread. The card carries a small mark; it never
+   * asks or blocks.
+   */
+  outsideContent: Schema.optional(Schema.Literal("read", "flagged")),
 }).annotations(strict);
 export type CodeBoardCard = typeof CodeBoardCard.Type;
 

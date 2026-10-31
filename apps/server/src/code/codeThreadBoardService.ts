@@ -161,12 +161,18 @@ export interface CodeBoardPlanProgressSource {
   read(threadId: CodeThreadId): CodeBoardCard["planProgress"];
 }
 
+/** Whether a thread has read outside content, and whether the Watcher flagged any. */
+export interface CodeBoardOutsideContentSource {
+  read(threadId: CodeThreadId): CodeBoardCard["outsideContent"];
+}
+
 export interface CodeThreadBoardServiceDependencies {
   readonly threads: CodeBoardThreadSource;
   readonly metadata: CodeThreadMetadataService;
   readonly runtime: CodeBoardRuntimeSource;
   readonly pullRequests: CodeBoardPullRequestSource;
   readonly planProgress?: CodeBoardPlanProgressSource;
+  readonly outsideContent?: CodeBoardOutsideContentSource;
   readonly clock?: () => string;
 }
 
@@ -184,6 +190,7 @@ export class CodeThreadBoardService {
   readonly #runtime: CodeBoardRuntimeSource;
   readonly #pullRequests: CodeBoardPullRequestSource;
   readonly #planProgress: CodeBoardPlanProgressSource;
+  readonly #outsideContent: CodeBoardOutsideContentSource | undefined;
   readonly #clock: () => string;
 
   constructor(dependencies: CodeThreadBoardServiceDependencies) {
@@ -192,6 +199,7 @@ export class CodeThreadBoardService {
     this.#runtime = dependencies.runtime;
     this.#pullRequests = dependencies.pullRequests;
     this.#planProgress = dependencies.planProgress ?? { read: () => ({ kind: "none" }) };
+    this.#outsideContent = dependencies.outsideContent;
     this.#clock = dependencies.clock ?? (() => new Date().toISOString());
   }
 
@@ -250,7 +258,15 @@ export class CodeThreadBoardService {
         const activity = runtimeByThread.get(String(entry.thread.id));
         if (activity === undefined) return undefined;
         const planProgress = this.#planProgress.read(entry.thread.id);
-        return buildCard(entry, metadata, activity, pullRequestSnapshot, planProgress);
+        const outsideContent = this.#outsideContent?.read(entry.thread.id);
+        return buildCard(
+          entry,
+          metadata,
+          activity,
+          pullRequestSnapshot,
+          planProgress,
+          outsideContent,
+        );
       })
       .filter((card): card is CodeBoardCard => card !== undefined);
 
@@ -288,6 +304,7 @@ function buildCard(
   activity: CodeBoardRuntimeActivity,
   pullRequestSnapshot: ThreadBoardPullRequestSnapshot,
   planProgress: CodeBoardCard["planProgress"],
+  outsideContent: CodeBoardCard["outsideContent"],
 ): CodeBoardCard {
   const pullRequestSummaries = joinCodeThreadBoardPullRequests({
     threadId: entry.thread.id,
@@ -328,6 +345,7 @@ function buildCard(
     ...(blockingReason === undefined ? {} : { blockingReason }),
     followUp: entry.followUp,
     lastMeaningfulActivityAt: metadata.lastMeaningfulActivityAt,
+    ...(outsideContent === undefined ? {} : { outsideContent }),
   };
 }
 
