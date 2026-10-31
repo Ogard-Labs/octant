@@ -267,6 +267,14 @@ not stop the server-owned session.
 **Pull requests** lists the active Project's open and draft requests from the
 cached snapshot and opens a selected row in Review in the same dock; the
 request named on a pane tab opens there too.
+When you ask, the agent can open the pull request for the thread's own
+branch, as a draft or ready for review, and stack it on another branch that
+already has an open pull request. It can also change that pull request's
+title and description, or mark a draft ready (or turn it back into a draft).
+It never chooses another branch, and it cannot merge or close anything. A
+thread that asks before acting shows you the exact change first; Full access
+goes ahead; Plan refuses. The thread's pull request shows in Review and on
+its card, stacked ones included.
 The sidebar follows the pane that last received pointer or keyboard input.
 Each thread remembers its open tools and selected tool.
 

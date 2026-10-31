@@ -320,6 +320,12 @@ describe("Code operation contracts", () => {
         idempotencyKey: "pr-create-001",
         authorization: { kind: "full-access" },
       },
+      {
+        kind: "update-pull-request",
+        ...scope,
+        draft: false,
+        authorization: { kind: "full-access" },
+      },
       { kind: "observe-pull-request", ...scope, maxDiffBytes: 262_144 },
       {
         kind: "create-review-finding",
@@ -417,6 +423,14 @@ describe("Code operation contracts", () => {
         headBranch: "evil",
         baseRepository: "other/repo",
         baseBranch: "main",
+      },
+      { kind: "update-pull-request", ...scope, authorization: { kind: "full-access" } },
+      {
+        kind: "update-pull-request",
+        ...scope,
+        number: 12,
+        title: "Another pull request",
+        authorization: { kind: "full-access" },
       },
       {
         kind: "create-review-finding",

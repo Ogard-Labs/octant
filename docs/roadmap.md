@@ -181,8 +181,9 @@ Intentionally out of scope; changing this requires an approved design change.
   nothing.
 - **Other pull-request mutation and agent-initiated merge** — force-push,
   review approval, comments, closing, and any merge an agent or remote client
-  starts. The person's own confirmed merge is the one exception
-  ([architecture](architecture.md#modes-chat-work-and-code)).
+  starts. The person's own confirmed merge and an agent opening or editing
+  its own thread's draft, ready, or stacked pull request on request are the
+  exceptions ([architecture](architecture.md#modes-chat-work-and-code)).
 - **Octant-operated cloud accounts or telemetry** — the product stays
   local-first and privacy-preserving by default.
 - **Auto-installing or auto-updating provider runtimes** — Octant detects

@@ -4479,6 +4479,71 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("changes a pull request only with an approval in an approval-gated thread", async () => {
+    let approved = false;
+    const update = vi.fn(async () => ({
+      status: "updated" as const,
+      draft: false,
+      pullRequest: {
+        number: 7,
+        url: "https://github.com/octant/octant/pull/7",
+        baseRepository: "octant/octant",
+        baseBranch: "feature/lexer",
+        headOwner: "octant",
+        headBranch: "feature/runtime",
+      },
+    }));
+    const fixture = runtimeFixture({
+      pullRequestTarget: true,
+      gitRemotes: [
+        {
+          name: "origin",
+          fetchUrl: "https://github.com/octant/octant.git",
+          pushUrl: "https://github.com/octant/octant.git",
+        },
+      ],
+      approvalValidator: () => approved,
+      pullRequestPort: {
+        ensure: async () => ({ status: "unavailable" }),
+        update,
+        observeReview: async () => ({ status: "unavailable" }),
+      },
+    });
+    const command = {
+      kind: "update-pull-request" as const,
+      operationId: operationId(130),
+      threadId,
+      checkoutId,
+      draft: false,
+    };
+
+    const refused = await fixture.runtime.execute(windowId, {
+      ...command,
+      authorization: { kind: "full-access" },
+    });
+    expect(refused).toMatchObject({ failure: { category: "waiting" } });
+    expect(update).not.toHaveBeenCalled();
+
+    approved = true;
+    const changed = await fixture.runtime.execute(windowId, {
+      ...command,
+      authorization: { kind: "approved", approvalId: operationId(131) },
+    });
+
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId, draft: false }),
+      expect.any(AbortSignal),
+    );
+    expect(changed).toMatchObject({
+      kind: "pull-request-state",
+      state: "existing",
+      number: 7,
+      baseBranch: "feature/lexer",
+      draft: false,
+    });
+    fixture.close();
+  });
+
   // A record whose work resolves inside the call could only ever say "already
   // finished", so the journal keeps none: the board reads runtime work, and a
   // read or an index edit is not runtime work.

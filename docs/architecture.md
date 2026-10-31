@@ -1499,10 +1499,40 @@ Work artifacts belong to the Project, not the thread, so the mark does not
 lock them; changes from the thread happen in turns, which it refuses. A turn
 already running when the mark lands finishes normally.
 
+**Agent-opened pull requests.** When the person asks, a Code thread's agent
+may open and change the pull request of the thread's own delivery branch
+through the provider-neutral `octant_pull_request` tool. The rules:
+
+- **What.** `create` opens it with a title and body, as a draft or ready for
+  review, against the delivery target's base, or stacked on another branch.
+  `update` changes its title, its body, or its draft state (ready for review,
+  or back to draft). Nothing else: no merge, close, reopen, review, or comment.
+- **Whose.** Only the thread's own branch. The tool takes no head and no
+  number; the host resolves the head from the thread's delivery target and
+  finds the pull request by that head, whatever its base.
+- **Stacking.** A base other than the delivery target's is accepted only when
+  that branch has an open pull request of its own in the same repository and
+  is not the thread's own branch; anything else is refused as `invalid-base`
+  before GitHub is asked to create. The delivery target itself does not
+  change, so a stacked pull request does not by itself match the confirmed
+  delivery branch for Done.
+- **Authority.** The same `create-pull-request` and `update-pull-request`
+  operations the person's own Create pull request uses, checked by the
+  operation service before `gh` runs. Plan refuses. An approval-gated or
+  auto-accept-edits thread asks the person in the thread with the exact
+  repository, base, head, draft state, title, and body; their answer becomes
+  a one-use approval bound to that command and the delivery target. Full
+  access runs it without asking.
+- **Record.** Each attempt journals the thread's operation result (number,
+  URL, base, head, and draft state when known) and its runtime-work unit, so
+  the thread's linked pull request and Review show it, stacked ones included.
+  The same `gh` login and stripped token environment as merge apply.
+
 **Pull-request merge.** The person at a local desktop window may merge one
 open pull request from its review (`POST /api/code/project-pull-requests/merge`).
-That is the only pull-request mutation Octant performs; approving, commenting,
-requesting changes, editing, closing, reopening, and force-pushing stay absent.
+Merge, the agent-opened changes above, and creation are the only pull-request
+mutations Octant performs; approving, commenting, requesting changes, closing,
+reopening, and force-pushing stay absent.
 The rules:
 
 - **Who.** Only a `local-window` principal. The route answers 403 to a paired
@@ -9184,7 +9214,8 @@ Connectors (MCP servers added by hand, imported from other tools on this Mac,
 signed in to, or chosen from the bundled catalog) are in scope under the
 [connector rules](#extensions-and-skills): user-added packages through the
 published seams and the credential broker, never a hosted service. The person's
-confirmed pull-request merge from a local window and host-local routines
+confirmed pull-request merge from a local window, agent-opened draft, ready,
+and stacked pull requests on the thread's own branch, and host-local routines
 (Automation Center) are in scope under the rules in
 [Modes](#modes-chat-work-and-code); other pull-request mutation,
 agent-initiated merge, and cloud scheduling are not. A self-hosted wake service

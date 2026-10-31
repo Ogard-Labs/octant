@@ -636,14 +636,44 @@ const MergeRun = Schema.Struct({
   authorization: GitAuthorization,
 }).annotations(strict);
 
+/**
+ * Open the pull request for the thread's own delivery branch. The head is
+ * always the host's resolved delivery branch; a caller chooses only the text,
+ * whether it opens as a draft, and, for a stacked pull request, a base other
+ * than the delivery target's — which the host accepts only when that branch
+ * has an open pull request of its own in the same repository.
+ */
 const CreatePullRequest = Schema.Struct({
   kind: Schema.Literal("create-pull-request"),
   ...OperationScope,
   title: boundedNonEmptyText(512),
   body: boundedText(MAX_CODE_OPERATION_TEXT_BYTES),
+  draft: Schema.optional(Schema.Boolean),
+  baseBranch: Schema.optional(GitBranchName),
   idempotencyKey: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9._:-]{1,255}$/)),
   authorization: GitAuthorization,
 }).annotations(strict);
+/**
+ * Change the open pull request of the thread's own delivery branch: its
+ * title, its body, or whether it is a draft (`draft: false` marks it ready
+ * for review). Merging, closing, and every other pull-request change stay
+ * out of reach.
+ */
+const UpdatePullRequest = Schema.Struct({
+  kind: Schema.Literal("update-pull-request"),
+  ...OperationScope,
+  title: Schema.optional(boundedNonEmptyText(512)),
+  body: Schema.optional(boundedText(MAX_CODE_OPERATION_TEXT_BYTES)),
+  draft: Schema.optional(Schema.Boolean),
+  authorization: GitAuthorization,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (command) =>
+        command.title !== undefined || command.body !== undefined || command.draft !== undefined,
+    ),
+  );
 const ObservePullRequest = Schema.Struct({
   kind: Schema.Literal("observe-pull-request"),
   ...OperationScope,
@@ -754,6 +784,7 @@ export const CODE_OPERATION_COMMAND_KINDS = [
   "commit-git",
   "push-git",
   "create-pull-request",
+  "update-pull-request",
   "observe-pull-request",
   "create-review-finding",
   "update-review-finding",
@@ -784,6 +815,7 @@ export const CodeOperationCommand = Schema.Union(
   DraftGitText,
   RestoreGitCheckpoint,
   CreatePullRequest,
+  UpdatePullRequest,
   ObservePullRequest,
   CreateReviewFinding,
   UpdateReviewFinding,
@@ -986,6 +1018,8 @@ const PullRequestResult = Schema.Union(
     headBranch: GitBranchName,
     baseRepository: boundedNonEmptyText(512),
     baseBranch: GitBranchName,
+    /** Whether GitHub holds it as a draft, when the host knows. */
+    draft: Schema.optional(Schema.Boolean),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("pull-request-state"),
@@ -1001,6 +1035,7 @@ const PullRequestResult = Schema.Union(
         "dirty",
         "not-mergeable",
         "no-remote",
+        "invalid-base",
       ),
     ),
   }).annotations(strict),
@@ -2355,6 +2390,7 @@ const APPROVAL_GATED_OPERATION_KINDS = new Set([
   "commit-git",
   "push-git",
   "create-pull-request",
+  "update-pull-request",
   "create-review-finding",
   "update-review-finding",
 ]);
