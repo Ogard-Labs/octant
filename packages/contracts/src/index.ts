@@ -105,6 +105,7 @@ export * from "./projects";
 export * from "./projectView";
 export * from "./sidebarThreadStatus";
 export * from "./settings";
+export * from "./shield";
 export * from "./acpAgentProfiles";
 export * from "./providers";
 export * from "./hostOAuth";
