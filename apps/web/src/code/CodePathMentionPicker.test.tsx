@@ -35,7 +35,6 @@ function Harness() {
   });
   useEffect(() => {
     mentions.sync("@plan", 5);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return (
     <output aria-label="candidates">{mentions.candidates.map((c) => c.path).join(",")}</output>

@@ -763,6 +763,24 @@ describe("Code language service reads for an agent", () => {
     });
   });
 
+  it("names a definition found from an extra folder by that folder's absolute path", async () => {
+    const { paths, test } = fake();
+    const extra = join(paths.root, "extra");
+    mkdirSync(extra);
+    writeFileSync(join(extra, "c.ts"), "export const c = 1;\n");
+    writeFileSync(join(extra, "a.ts"), "export const a = 1;\n");
+    test.state.extraFolders = [extra];
+
+    const read = await test.agent(join(extra, "c.ts"), { line: 0, character: 16 });
+
+    expect(read).toMatchObject({
+      status: "definition",
+      targets: expect.arrayContaining([
+        expect.objectContaining({ kind: "checkout-location", path: join(extra, "a.ts") }),
+      ]),
+    });
+  });
+
   it("never starts or reads through a server that runs repository tooling, even one a local approval covers", async () => {
     const { test, log } = fake(
       { launchClass: "repo-tooling" },

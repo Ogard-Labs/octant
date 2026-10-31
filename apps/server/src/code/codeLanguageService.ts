@@ -13,6 +13,7 @@ import type {
   ProjectId,
   WindowId,
 } from "@octant/contracts";
+import { decodeCodeProjectFilePath } from "@octant/contracts";
 import {
   MAX_CODE_LANGUAGE_DOCUMENT_TEXT_LENGTH,
   type CodeLanguageApprovalRequest,
@@ -408,7 +409,11 @@ export class CodeLanguageService {
       this.#release(record, document, String(request.fileId));
       return { status: "synced", ...scope };
     }
-    const served = await this.#serve(caller, authorized, document.path, "existing");
+    // The change goes to the server that owns the document: an extra folder's
+    // document is served from its own folder, not from the checkout.
+    const contained = await this.#containedRoot(caller, authorized, document.path);
+    if (contained.status === "refused") return contained;
+    const served = await this.#serve(caller, authorized, document.path, "existing", contained.root);
     if (served.status !== "served") return served;
     if (!fitsFrame(request.text)) return { status: "too-large", ...scope };
     document.text = request.text;
@@ -599,7 +604,17 @@ export class CodeLanguageService {
       roots: { checkoutRoot: record.rootPath, installRoot: record.component.installRoot },
       realpath: (path) => realpath(path),
     });
-    return { status: "definition", ...scope, targets };
+    // A server rooted in an extra folder places a target relative to that
+    // folder; the agent is told its absolute path, as it is told every extra
+    // folder file, so it cannot mistake the main checkout's file for it.
+    const named = record.extraFolder
+      ? targets.map((target) =>
+          target.kind === "checkout-location"
+            ? { ...target, path: decodeCodeProjectFilePath(`${record.rootPath}/${target.path}`) }
+            : target,
+        )
+      : targets;
+    return { status: "definition", ...scope, targets: named };
   }
 
   /**

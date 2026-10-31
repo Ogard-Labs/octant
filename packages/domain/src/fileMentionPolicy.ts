@@ -57,7 +57,8 @@ export function classifyFileMentionExtraFolderPath(
   | { readonly kind: "out-of-root" } {
   if (!raw.startsWith("/")) return { kind: "out-of-root" };
   for (const folder of extraFolders) {
-    const base = folder.replace(/\/+$/, "");
+    let base = folder;
+    while (base.endsWith("/")) base = base.slice(0, -1);
     if (!raw.startsWith(`${base}/`)) continue;
     const relative = classifyFileMentionRelativePath(raw.slice(base.length + 1));
     if (relative.kind === "in-root") return { kind: "in-folder", folder, path: relative.path };
