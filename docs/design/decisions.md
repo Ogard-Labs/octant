@@ -32,7 +32,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | Area                                                                                  | Decisions | Built   | Partly built | Designed, not built |
 | ------------------------------------------------------------------------------------- | --------- | ------- | ------------ | ------------------- |
 | [Principles and hard lines](#principles-and-hard-lines)                               | 5         | 4       | 1            | 0                   |
-| [Guardrails and review](#guardrails-and-review)                                       | 7         | 0       | 4            | 3                   |
+| [Guardrails and review](#guardrails-and-review)                                       | 8         | 0       | 5            | 3                   |
 | [Key providers](#key-providers)                                                       | 1         | 0       | 0            | 1                   |
 | [Release scope](#release-scope)                                                       | 4         | 1       | 3            | 0                   |
 | [Process topology and local trust](#process-topology-and-local-trust)                 | 6         | 6       | 0            | 0                   |
@@ -68,8 +68,8 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Hubs, relay and Nightly](#hubs-relay-and-nightly)                                    | 5         | 3       | 1            | 1                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
-| [Decided, pending a specification update](#decided-pending-a-specification-update)    | 5         | 0       | 0            | 5                   |
-| **All areas**                                                                         | **222**   | **172** | **35**       | **15**              |
+| [Decided, pending a specification update](#decided-pending-a-specification-update)    | 4         | 0       | 0            | 4                   |
+| **All areas**                                                                         | **222**   | **172** | **36**       | **14**              |
 
 ## Principles and hard lines
 
@@ -143,7 +143,7 @@ One setting says how much a thread's tool calls are guarded, with four levels: A
 - Ask first: the person approves anything with effects, under Octant's OS confinement plus the provider's own sandbox.
 - Accept edits: as Ask first, except file edits inside the folder go through.
 - Auto (Reviewed): a reviewer the person chooses, the provider's own or Octant Shield, answers prompts and escalates to the person what it will not allow.
-- Full access means no sandbox and no prompts, as in the providers' own apps; outside content is only recorded and marked, and every hard line still holds.
+- Full access means no sandbox and no prompts, as in the providers' own apps, except that the secret guard still keeps protected files out of reach; outside content is only recorded and marked, and every hard line still holds.
 - Any level can be set globally, per Project and per thread; the narrowest scope wins, and Full access shows a one-time warning the first time a machine or Project picks it.
 - Lowering is journaled with who, when, from which level and at which scope; the thread header shows the level in force and where it came from (not built yet).
 - Plan is an overlay on any level and always read-only; subagents start at their parent's level and never exceed it; a routine runs at the level its creator picked.
@@ -152,6 +152,20 @@ One setting says how much a thread's tool calls are guarded, with four levels: A
 - Not built yet: the shared levels in Work, Octant Shield, an ACP agent's own reviewer, and the thread header indicator. The guardrail-level list in the architecture still names some of the Code pieces as not built; its later Code access rules describe them as built.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Security and authority, Guardrail levels](../architecture.md#security-and-authority).
+
+### Secrets stay guarded at every level
+
+Secret files stay out of every agent's reach at every guardrail level, Full access included, with as little friction as the person's normal tools.
+
+- One operating-system deny list covers SSH private keys, cloud and tool credentials, keychain and password-manager files, browser login stores, Octant's own secrets, and other runtimes' sign-ins; SSH config, known_hosts, public keys and the login keychain stay readable, and a runtime keeps its own sign-in.
+- Below Full access the list joins every confined launch after its grants; at Full access every runtime and its commands run under a minimal allow-all profile whose only rules are those denials.
+- SSH works through the person's SSH agent, Git over HTTPS through the system credential helper, and keys through the credential broker, so agents use credentials without reading them.
+- The person adds paths in Settings › Permissions › Protected files; removing a built-in group needs an explicit confirm and is journaled.
+- A refused read by Octant's or Claude Code's file tools names the rule and the channel to use.
+- Known key formats and broker-issued values are redacted from runtime output, transcripts, the journal, exports and the service log.
+- Not built yet: the Watcher and Judge flagging protected-path reads and secret-then-network sequences, and short-lived cloud credentials from the broker.
+
+Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Secret guard](../architecture.md#secret-guard).
 
 ### First run asks which mode new threads start in
 
@@ -2573,16 +2587,6 @@ Status: Partly built. Since: 2026-10-28. Detail: [Disposable desktops: provider 
 ## Decided, pending a specification update
 
 The maintainer decided these rules on 2026-10-31. No current specification states them yet; each one's owner is "pending spec update", and the specification change that adopts it moves the entry into its area. Until then they are design direction, not built behaviour, and where one narrows a rule above (Full access means no sandbox), this entry is the newer decision.
-
-### Secrets stay guarded at every level
-
-Secret files and stores stay out of an agent's reach at every guardrail level, Full access included, with as little friction as the person's normal tools.
-
-- An operating-system deny list covers secret files at every level, extending the credential-file denial ACP agents already keep: private keys, cloud and tool credentials, keychain and password-manager files, browser login stores, and other tools' sign-ins.
-- SSH works through the person's SSH agent, Git through the system credential helper, and API keys through the credential broker, so agents use credentials without reading them.
-- Secret values are redacted everywhere Octant records or shows output: logs, the journal, exports and transcripts.
-
-Status: Designed, not built. Since: 2026-10-31. Detail: pending spec update (owner to be [Architecture: Security and authority](../architecture.md#security-and-authority)).
 
 ### Linked external secret stores
 
