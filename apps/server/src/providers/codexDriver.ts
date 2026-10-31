@@ -20,6 +20,7 @@ import {
   type ProviderToolDefinition,
   type ProviderTurnInput,
   type UtcTimestamp,
+  type ProviderApprovalCall,
 } from "@octant/contracts";
 import type {
   ProviderAcquireInput,
@@ -41,6 +42,7 @@ import {
   type CodexEventContext,
   type CodexPendingApproval,
 } from "./codexEventMapper";
+import { providerApprovalCall } from "./providerApprovalCall";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import {
   isAtLeastRelease,
@@ -1212,6 +1214,8 @@ function makeConnection(
     const sessions = new Map<ProviderSessionId, SessionState>();
     const sessionsByThread = new Map<string, SessionState>();
     const pendingApprovalOwners = new Map<string, ProviderSessionId>();
+    /** Each pending approval's call, for an automatic reviewer; never published. */
+    const approvalCalls = new Map<string, ProviderApprovalCall>();
     const abortedToolSignal = (() => {
       const controller = new AbortController();
       controller.abort();
@@ -1412,6 +1416,10 @@ function makeConnection(
           }
           state.pendingApprovals.set(item.approval.requestId, item.approval);
           pendingApprovalOwners.set(item.approval.requestId, state.sessionId);
+          if (message.kind === "request") {
+            const call = codexApprovalCall(item.approval.event, message.params);
+            if (call !== undefined) approvalCalls.set(item.approval.requestId, call);
+          }
           offer(item.approval.event);
           continue;
         }
@@ -1950,6 +1958,10 @@ function makeConnection(
           ),
           Effect.asVoid,
         ),
+      approvalCall: ({ sessionId, requestId }) =>
+        pendingApprovalOwners.get(requestId) === sessionId
+          ? approvalCalls.get(requestId)
+          : undefined,
       answerApproval: (input) =>
         stateFor(input.sessionId).pipe(
           Effect.flatMap((state) => {
@@ -1967,6 +1979,7 @@ function makeConnection(
               return Effect.fail(failure("protocol", "Codex session is already terminal."));
             }
             const pending = state.pendingApprovals.get(input.requestId);
+            approvalCalls.delete(input.requestId);
             if (
               pending === undefined ||
               pendingApprovalOwners.get(input.requestId) !== input.sessionId ||
@@ -1983,7 +1996,12 @@ function makeConnection(
             return request(() =>
               client.respondApproval({
                 providerRequestId: pending.providerRequestId,
-                result: approvalResult(pending, input.approved, permissionPersistence(options)),
+                result: approvalResult(
+                  pending,
+                  input.approved,
+                  // A one-call answer is never accepted for the session.
+                  input.scope === "once" ? "project-default" : permissionPersistence(options),
+                ),
               }),
             ).pipe(
               Effect.catchAll((providerFailure) =>
@@ -2190,4 +2208,22 @@ function isTerminal(event: ProviderRuntimeEvent): boolean {
 
 function defaultSleep(milliseconds: number): Promise<void> {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, milliseconds));
+}
+
+/**
+ * The call a Codex approval request is about, from its own params without the
+ * identifiers that only correlate it: a command and its working directory, a
+ * file change's grant root, or the permissions a sandbox widening asks for.
+ */
+function codexApprovalCall(
+  event: ProviderRuntimeEvent,
+  params: object,
+): ProviderApprovalCall | undefined {
+  if (event.kind !== "approval-request") return undefined;
+  const record = params as Record<string, unknown>;
+  return providerApprovalCall({
+    tool: event.action,
+    arguments: record,
+    workingDirectory: typeof record.cwd === "string" ? record.cwd : undefined,
+  });
 }

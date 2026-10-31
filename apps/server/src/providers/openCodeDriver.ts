@@ -18,6 +18,7 @@ import {
   type UtcTimestamp,
   decodeProviderFailure,
   decodeProviderProbeResult,
+  type ProviderApprovalCall,
 } from "@octant/contracts";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import {
@@ -28,7 +29,7 @@ import {
 import { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
 import type { PermissionRuleset, PermissionV2Ruleset, Provider } from "@opencode-ai/sdk/v2/types";
 import { Cause, Effect, Exit, Option, PubSub, Scope, Stream } from "effect";
-import { mapOpenCodeEvent, type OpenCodeEvent } from "./openCodeEventMapper";
+import { mapOpenCodeEvent, openCodeApprovalCall, type OpenCodeEvent } from "./openCodeEventMapper";
 import type { ManagedToolAnswer, ManagedToolCallContext } from "./managedMcpTools";
 import {
   createOpenCodeManagedToolsBridge,
@@ -114,6 +115,8 @@ interface SessionState {
   sourceId: string | undefined;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly approvals: Set<string>;
+  /** Each pending approval's call, for an automatic reviewer; never published. */
+  readonly approvalCalls: Map<string, ProviderApprovalCall>;
   /** Files each pending 2.x edit request would let change if the user approves it. */
   readonly pendingEditGrants: Map<string, ReadonlyArray<string>>;
   /**
@@ -2075,6 +2078,13 @@ function makeConnection(
             );
           }),
         ),
+      approvalCall: ({ sessionId, requestId }) => {
+        const source = sourceBySession.get(sessionId);
+        const state = source === undefined ? undefined : sessionsBySource.get(source);
+        return state?.sessionId === sessionId && state.approvals.has(requestId)
+          ? state.approvalCalls.get(requestId)
+          : undefined;
+      },
       answerApproval: (input) =>
         usableStateFor(input.sessionId).pipe(
           Effect.flatMap(([source, state]) => {
@@ -2107,7 +2117,8 @@ function makeConnection(
                           // other pending requests it covers. Octant keeps its
                           // own remembered approvals, so 2.x is only answered once.
                           input.approved
-                            ? runtimeKind !== "beta" &&
+                            ? input.scope !== "once" &&
+                              runtimeKind !== "beta" &&
                               (options.permissionPersistence?.() ?? "current-session") ===
                                 "project-default"
                               ? "always"
@@ -2223,6 +2234,7 @@ function newSessionState(
     sourceId: undefined,
     executionPolicy,
     approvals: new Set(),
+    approvalCalls: new Map(),
     pendingEditGrants: new Map(),
     unreportedEditGrants: [],
     questions: new Map(),
@@ -2490,6 +2502,11 @@ function mapAndOffer(
     }
     if (normalized.kind === "approval-request") {
       state.approvals.add(normalized.requestId);
+      const call =
+        event.type === "permission.asked" || event.type === "permission.v2.asked"
+          ? openCodeApprovalCall(normalized.action, event.properties)
+          : undefined;
+      if (call !== undefined) state.approvalCalls.set(normalized.requestId, call);
     }
     if (normalized.kind === "user-input-request") {
       const providerRequestId = normalized.requestId;

@@ -16,6 +16,7 @@ import {
   type ProviderSessionId,
   type ProviderToolAnswer,
   type ProviderToolDefinition,
+  type ProviderApprovalCall,
 } from "@octant/contracts";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import { outputStopReason } from "./outputStopReason";
@@ -132,6 +133,8 @@ interface PendingApproval {
   readonly providerRequestId: string | number;
   readonly allowOptionId: string;
   readonly rejectOptionId: string;
+  /** The pending call, for an automatic reviewer; never published. */
+  readonly call?: ProviderApprovalCall;
 }
 
 interface PendingQuestion {
@@ -1749,6 +1752,10 @@ function makeConnection(
             }),
           ),
         ),
+      approvalCall: ({ sessionId, requestId }) => {
+        const pending = sessions.get(sessionId)?.approvals.get(requestId);
+        return pending?.kind === "approval" ? pending.call : undefined;
+      },
       answerApproval: (input) =>
         stateFor(input.sessionId).pipe(
           Effect.flatMap((state) => {
@@ -1824,6 +1831,7 @@ function rememberPermission(state: SessionState, mapped: AcpMappedPermission): v
       providerRequestId: mapped.providerRequestId,
       allowOptionId: mapped.allowOptionId,
       rejectOptionId: mapped.rejectOptionId,
+      ...(mapped.call === undefined ? {} : { call: mapped.call }),
     });
   } else if (mapped.kind === "question") {
     state.questions.set(mapped.requestId, {

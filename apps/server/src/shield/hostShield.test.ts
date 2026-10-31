@@ -188,8 +188,20 @@ describe("Octant Shield as the host wires it", () => {
     expect(record).toHaveBeenCalledWith({ threadId, summary: "read", decision });
   });
 
-  it("routes prompts for the Octant Harness", () => {
-    expect(shieldRoutesApprovals("openai-compatible")).toBe(true);
-    expect(shieldRoutesApprovals("ollama")).toBe(true);
+  it("reviews every runtime that sends its prompts to Octant, and none that decides alone", () => {
+    for (const kind of [
+      "openai-compatible",
+      "ollama",
+      "claude",
+      "codex",
+      "opencode",
+      "pi",
+      "kilo",
+    ]) {
+      expect(shieldRoutesApprovals(kind as never), kind).toBe(true);
+    }
+    for (const kind of ["oh-my-pi", "openai-image"]) {
+      expect(shieldRoutesApprovals(kind as never), kind).toBe(false);
+    }
   });
 });
