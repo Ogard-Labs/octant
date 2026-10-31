@@ -12,6 +12,7 @@ import {
   type PermissionPersistence,
   type ProviderCapabilities,
   type ProviderExecutionPolicy,
+  type ProviderNativeSetup,
   type ProviderFailure,
   type ProviderInstanceId,
   type ProviderModel,
@@ -35,7 +36,7 @@ import {
   validateChatTurnInput,
 } from "@octant/provider-sdk/chat-conformance";
 import { Cause, Effect, Exit, Fiber, Option, PubSub, Scope, Stream } from "effect";
-import { isSanitizedFailure } from "./claudeAgentSdkDecoder";
+import { claudeOffersTool, isSanitizedFailure } from "./claudeAgentSdkDecoder";
 
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { claudeAuthorityInputDigest, waitForClaudeAuthorityValue } from "./claudeAuthority";
@@ -54,6 +55,7 @@ import {
 } from "./claudeAgentSdkPort";
 import {
   CLAUDE_CHECKLIST_TOOL,
+  CLAUDE_SUBAGENT_TOOL,
   mapClaudeMessage,
   mapClaudeToolRequest,
   type ClaudeEventContext,
@@ -160,6 +162,76 @@ export function claudeExecutionOptions(
     return { ...options, tools: [...options.tools, "Bash"] };
   }
   return options;
+}
+
+/** Claude Code's own web tools: each reads the web for the model, so each marks the thread. */
+const CLAUDE_WEB_TOOLS = new Set<string>(["WebSearch", "WebFetch"]);
+/**
+ * Claude Code's own tools that act only inside the session: starting one of
+ * its subagents, whose every tool call then passes this gate itself, and
+ * reading a skill's text. Neither touches a file, the shell, or the network.
+ */
+const CLAUDE_NATIVE_SESSION_TOOLS = new Set<string>([CLAUDE_SUBAGENT_TOOL, "Skill"]);
+
+/**
+ * The person's own Claude setup as this driver loads it. MCP servers start
+ * only with a trusted Project's code: the runtime has no switch that starts
+ * the account's servers without the Project's `.mcp.json` too, so the
+ * account's own tool servers alone are reported unsupported and left off.
+ */
+export function claudeNativeSetup(
+  setup: ProviderNativeSetup | undefined,
+): ProviderNativeSetup | undefined {
+  if (setup === undefined) return undefined;
+  return { ...setup, toolServers: false };
+}
+
+/** The tools a session adds for the person's own Claude setup. */
+export function claudeNativeTools(setup: ProviderNativeSetup | undefined): readonly string[] {
+  if (setup === undefined) return [];
+  return [
+    ...(setup.subagents ? [CLAUDE_SUBAGENT_TOOL] : []),
+    ...(setup.webTools ? [...CLAUDE_WEB_TOOLS] : []),
+    ...(setup.skills ? ["Skill"] : []),
+  ];
+}
+
+/**
+ * How the gate answers one of the person's own Claude tools: a subagent
+ * start or a skill read goes through at every posture, as it does in Claude
+ * Code itself; a web read and a call to a person's or Project's MCP server
+ * reach the network or code Octant did not write, so they ask below Full
+ * access like any other such call. Undefined for every other tool.
+ */
+function claudeNativeToolAnswer(
+  toolName: string,
+  setup: ProviderNativeSetup | undefined,
+): "unasked" | "ask" | undefined {
+  if (setup === undefined) return undefined;
+  if (CLAUDE_NATIVE_SESSION_TOOLS.has(toolName)) {
+    return (toolName === "Skill" ? setup.skills : setup.subagents) ? "unasked" : undefined;
+  }
+  if (CLAUDE_WEB_TOOLS.has(toolName)) return setup.webTools ? "ask" : undefined;
+  if (setup.projectCode && toolName.startsWith("mcp__") && !toolName.startsWith("mcp__octant__")) {
+    return "ask";
+  }
+  return undefined;
+}
+
+/**
+ * The launch environment for a session with subagents on: Octant's guards
+ * keep the SDK's built-in subagents off, which is also what Claude Code's
+ * own general-purpose and Explore subagents are, so that one guard goes.
+ * Every channel switch (telemetry, error reports, self-update, memory)
+ * stays as it was.
+ */
+function claudeNativeLaunchEnvironment(
+  environment: NodeJS.ProcessEnv,
+  setup: ProviderNativeSetup | undefined,
+): NodeJS.ProcessEnv {
+  if (setup?.subagents !== true) return environment;
+  const { CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS: _builtinAgentsOff, ...rest } = environment;
+  return rest;
 }
 
 /**
@@ -338,6 +410,16 @@ const availableCapabilities: ProviderCapabilities = {
   nativeChildAgents: "unsupported",
   harnessAutoReview: "supported",
   modelSwitch: "supported",
+  nativeSetup: {
+    subagents: "supported",
+    webTools: "supported",
+    skills: "supported",
+    // No switch starts the account's MCP servers without a Project's
+    // `.mcp.json` too; they start with a trusted Project's code.
+    toolServers: "unsupported",
+    hooks: "supported",
+    projectCode: "supported",
+  },
   // Each session owns its runtime process, so one can be killed alone.
   forceStop: "supported",
   ...unsupportedChatCapabilities,
@@ -1537,6 +1619,7 @@ function makeConnection(
         readonly modelOptionValues?: ProviderModelOptionValues;
         readonly singleUse?: boolean;
         readonly nativeArtifacts?: boolean;
+        readonly nativeSetup?: ProviderNativeSetup;
       },
       signal: AbortSignal,
       resumeSessionId?: string,
@@ -1646,11 +1729,18 @@ function makeConnection(
             );
           }
         }
-        const baseExecutionOptions = claudeExecutionOptions(
+        // The person's own Claude setup, as the host resolved it for this
+        // session; absent on every session before the person turned it on.
+        const nativeSetup = claudeNativeSetup(input.nativeSetup);
+        const policyExecutionOptions = claudeExecutionOptions(
           input.executionPolicy,
           input.autoApprove,
           mode,
         );
+        const baseExecutionOptions: ClaudeExecutionOptions = {
+          ...policyExecutionOptions,
+          tools: [...policyExecutionOptions.tools, ...claudeNativeTools(nativeSetup)],
+        };
         // Read at each launch: one launch per turn means the next turn after
         // the person turns the setting or the thread's choice off launches
         // with every guard again.
@@ -1884,7 +1974,13 @@ function makeConnection(
           }
           expireClaudePreToolGrants(activeState, Date.now());
           if (
-            !executionOptions.tools.includes(request.toolName) ||
+            !claudeOffersTool(
+              {
+                tools: executionOptions.tools,
+                ...(nativeSetup === undefined ? {} : { nativeSetup }),
+              },
+              request.toolName,
+            ) ||
             activeState.settledToolUseIds.has(request.toolUseId)
           ) {
             return deny("Claude tool request is outside the Project.");
@@ -1962,6 +2058,15 @@ function makeConnection(
             isPlanShellCommand(input.executionPolicy, request.toolName, executionOptions.tools)
               ? settledUnasked()
               : askThroughGrant();
+          // The person's own Claude tools name no file to confine: a subagent
+          // start and a skill read act inside the session, and a web read or
+          // an MCP server call asks below Full access.
+          const nativeAnswer = claudeNativeToolAnswer(request.toolName, nativeSetup);
+          if (nativeAnswer !== undefined) {
+            return nativeAnswer === "unasked" || input.executionPolicy === "full-access"
+              ? settledUnasked()
+              : askThroughGrant();
+          }
           if (input.executionPolicy === "full-access") {
             return decide();
           }
@@ -2012,9 +2117,12 @@ function makeConnection(
             .openQuery({
               binaryPath: options.binaryPath,
               projectRoot,
-              authEnvironment: offersArtifacts
-                ? claudeArtifactLaunchEnvironment(environment.environment)
-                : environment.environment,
+              authEnvironment: claudeNativeLaunchEnvironment(
+                offersArtifacts
+                  ? claudeArtifactLaunchEnvironment(environment.environment)
+                  : environment.environment,
+                nativeSetup,
+              ),
               model: input.modelId,
               ...(effort === undefined ? {} : { effort }),
               executionPolicy: input.executionPolicy,
@@ -2026,6 +2134,7 @@ function makeConnection(
               // the account's configuration directory.
               ...(input.singleUse === true ? { persistSession: false as const } : {}),
               tools: executionOptions.tools,
+              ...(nativeSetup === undefined ? {} : { nativeSetup }),
               ...(sandbox === undefined ? {} : { sandbox }),
               canUseTool,
               preToolUse,
@@ -2268,6 +2377,7 @@ function makeConnection(
                 ? {}
                 : { modelOptionValues: input.modelOptionValues }),
               ...(input.nativeArtifacts === true ? { nativeArtifacts: true } : {}),
+              ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
             },
             signal,
             input.resumeCursor.value,

@@ -239,7 +239,8 @@ The key providers run inside Octant as they run on their own, with their native 
 - A person turns it on for a key provider account (Run as itself) or trusts a Work or Code Project for a key provider (Trusted providers), only from a window on the host; both are journaled and the host resolves them for every session it starts or resumes.
 - A Project's own settings, hooks, MCP servers and plugins load only in a Project the person trusted for that provider, at every level.
 - A per-thread switch is not built yet.
-- Today's drivers still switch these native features off (not built yet).
+- Claude Code loads its own subagents (each shown as a child run, every call through the parent's gate), web search and fetch (asking below Full access, marking the thread), home skills, settings and hooks, and a trusted Project's settings, hooks, skills, MCP servers and plugins; its account's MCP servers start only with a trusted Project's.
+- The other key providers' drivers still switch these native features off (not built yet).
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Providers](../architecture.md#providers) and [Provider runtimes: Key providers](provider-runtimes.md#key-providers).
 
@@ -806,7 +807,7 @@ Browser observations, tool results and imported content append a journaled mark 
 - Irreversible or authority-bearing actions on a marked thread need fresh confirmation, even after replay; the closed tool catalogue flags each such entry.
 - At Full access in Code the mark is recorded only and never prompts or blocks; Work is not on the shared levels, so its gate holds as before.
 - A provider runtime's own web tools mark the thread when the adapter first reports the call, and a mark that cannot be recorded stops the turn.
-- Offering a key provider's own web tools when the person allows them is allowed (not built yet).
+- A key provider's own web tools are offered when the person allows them and still mark the thread (built for Claude Code, whose web reads ask below Full access; the other key providers' web tools were never switched off).
 
 Status: Partly built. Since: —. Detail: [Architecture: Persistence](../architecture.md#persistence).
 
@@ -1494,7 +1495,7 @@ Child runs receive equal-or-narrower authority than the parent, clamped server-s
 - Code children require a verified isolated worktree receipt, and a managed child's Canvas tools are bound to the workspace and Project the host resolved, never a path the model names.
 - A provider transport that cannot carry app-managed tools fails the start with a typed reason rather than dropping the tool.
 - A source turn may send at most three thread messages, and a target turn started by that tool is never offered the tool. _Here only._
-- Native subagents of the key providers are journaled and use the parent's approval path; a provider whose children would bypass it gets them only at Full access (not built yet; today each adapter turns native subagents off).
+- Native subagents of the key providers are journaled and use the parent's approval path; a provider whose children would bypass it gets them only at Full access (built for Claude Code; not built yet for the others, whose adapters keep native subagents off).
 
 Status: Partly built. Since: —. Detail: [Architecture: Security and authority, Subagents](../architecture.md#security-and-authority).
 
