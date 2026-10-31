@@ -21,3 +21,16 @@ export function windowCanAccessCodeProject(input: {
   if (bound == null) return false;
   return String(bound) === String(input.projectId) && input.hasActiveCodeProject(input.projectId);
 }
+
+/**
+ * Decide whether an authenticated window may reach a Work Project's terminal:
+ * the Work Project its own persisted workspace binds, never one a caller
+ * names, exactly as {@link windowCanAccessCodeProject} decides for Code.
+ */
+export function windowCanAccessWorkProject(input: {
+  readonly workspace: WindowWorkspace | undefined;
+  readonly projectId: ProjectId;
+}): boolean {
+  const bound = input.workspace?.contextByMode.work.projectId;
+  return bound != null && String(bound) === String(input.projectId);
+}

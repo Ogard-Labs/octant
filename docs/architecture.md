@@ -1045,8 +1045,14 @@ starts a Code session at the same level, and a Work turn journals `shell` and
   a routine, a delegated turn) runs the turn at the thread's level clamped to
   its own (`clampWorkAccess`).
 
-Allowed; not built yet: the per-Project **Developer tools** switch; an ACP
-agent whose shell runs in-process with no protocol request reporting
+- **Developer tools:** a Work Project's switch
+  (`change-work-project-developer-tools`, journaled as
+  `project.work-developer-tools-changed@1` with who and when on the Project)
+  is set only from a window on this host; a paired device is refused. It
+  shows the Project terminal and Project actions, the developer surfaces Work
+  has today; no thread's authority reads it.
+
+Allowed; not built yet: an ACP agent whose shell runs in-process with no protocol request reporting
 `unsupported` at Guarded and Reviewed and running only at Full access, in
 Work as in Code; and Octant Shield for the runtimes with no reviewer of their
 own, which ask first at Auto today.
@@ -8662,22 +8668,23 @@ access` agree); a thread's own change is journaled as
 - **Project terminals.** A person may open a terminal for a Code Project with
   no thread. It is the person's shell, not an agent's: no provider, tool call,
   AgentRun, or thread can address it, read its output, or type into it, and
-  nothing it prints enters a prompt. Today only an active Code Project has
-  one. A Work Project shows one once the person turns on its **Developer
-  tools** (allowed; not built yet), since a terminal is a developer surface,
-  not authority; Chat has no root. The shell runs at the
+  nothing it prints enters a prompt. An active Work or Code Project has one;
+  a Work window shows it once the person turns on the Project's **Developer
+  tools**, since a terminal is a developer surface, not authority (the host
+  serves a Work Project's terminal either way, as Work's shell is not the
+  switch's to grant). Chat has no root. The shell runs at the
   Project's bound root at its current binding revision (the Project's own
   folder, never a thread's managed worktree) through the same confinement a
   Code thread's terminal gets, with its own shell state and no credential
   references. Only the person at a local window whose workspace holds that
-  Code Project may start, attach to, type into, resize, or stop it. That is the
+  Work or Code Project may start, attach to, type into, resize, or stop it. That is the
   user-initiated terminal the Code policy already lets a local person open in
   an approval-gated thread without a prompt, so it asks for none and reaches no
   further than that thread's terminal. A paired device is refused outright:
   a remote Code terminal is gated as an agent, and a Project terminal has no
   thread to hold that approval. The shell runs under the posture a new thread
-  in the Project starts with, approval-gated or Full access where the Project
-  remembers it; Plan never applies, because nothing plans in it. The owning
+  in the Project starts with, approval-gated or Full access where a Code
+  Project remembers it (a Work Project's terminal is approval-gated); Plan never applies, because nothing plans in it. The owning
   window, Project, and binding revision are checked before every command, and
   another window cannot attach. Its lifecycle is journaled on its own
   `project-terminal` aggregate (`code.project-terminal-started@1`,
@@ -8688,14 +8695,15 @@ access` agree); a thread's own change is journaled as
   Project inactive or rebound ends the terminal the same way. A host restart
   ends a terminal still recorded as running as `host-restarted`, since its
   process did not survive.
-- **Project actions.** A Code Project keeps up to twelve named actions (for
-  example Run, Test, Dev) on its record: a name unique within the Project, a
-  one-line command, and a folder inside the bound root. The person saves the
-  whole list from the Project overview (`project.code-actions-changed@1`); a
+- **Project actions.** A Work or Code Project keeps up to twelve named
+  actions (for example Run, Test, Dev) on its record: a name unique within the
+  Project, a one-line command, and a folder inside the bound root. The person
+  saves the whole list from the Project overview
+  (`project.code-actions-changed@1`, `project.work-actions-changed@1`); a
   paired device is refused, because a saved line is later typed into the
-  person's own shell. An archived Project has none, and a Work Project has none
-  while Work's shell is withheld (today's build); once Work takes the shared
-  capability set, its actions follow the thread's guardrail level like Code's.
+  person's own shell. An archived Project has none. A Work Project's actions
+  appear once its Developer tools are on (maintainer decision, 2026-10-31:
+  Work has the shell, so Project actions come to Work Projects too).
   The host suggests
   actions from the root `package.json` scripts (with the package manager the
   lockfile names, leaving out install and publish hooks) and the root

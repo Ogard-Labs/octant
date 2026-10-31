@@ -38,6 +38,8 @@ import {
   changeProjectLifecycle,
   changeCodeProjectAccess,
   changeCodeProjectActions,
+  changeWorkProjectActions,
+  changeWorkProjectDeveloperTools,
   changeCodeProjectPermissionMode,
   changeCodeProjectDesktopRecipe,
   changeCodeProjectNewThreadWorkspace,
@@ -737,6 +739,21 @@ export class ProjectService implements ProjectServiceApi {
           project = changeWorkProjectStatusFile(current, command.statusFile, timestamp);
           kind = "work-project-status-file-changed";
           eventName = "project.work-status-file-changed@1";
+        } else if (command.kind === "change-work-project-developer-tools") {
+          // Only a window on this host reaches this command (the route
+          // refuses a paired device), so the person who turned it is the
+          // host's local user, recorded on the Project with the time.
+          project = changeWorkProjectDeveloperTools(
+            current,
+            { enabled: command.enabled, changedBy: actor },
+            timestamp,
+          );
+          kind = "work-project-developer-tools-changed";
+          eventName = "project.work-developer-tools-changed@1";
+        } else if (command.kind === "change-work-project-actions") {
+          project = changeWorkProjectActions(current, command.actions, timestamp);
+          kind = "work-project-actions-changed";
+          eventName = "project.work-actions-changed@1";
         } else if (command.kind === "change-project-brand-kit") {
           project = changeProjectBrandKit(current, command.brandKit, timestamp);
           kind = "project-brand-kit-changed";

@@ -93,15 +93,27 @@ export const ZenContainer = memo(function ZenContainer(props: ZenContainerProps)
     [codeThreads],
   );
 
+  // The window's Code Project, or else its Work Project once the person turned
+  // on that Project's Developer tools, which is what shows a Work terminal.
   const zenProjectTerminalTarget = useMemo(() => {
-    const projectId = workspace.contextByMode.code.projectId ?? undefined;
-    if (projectId === undefined) return undefined;
-    const project = allProjects.find(
-      (candidate) =>
-        String(candidate.id) === String(projectId) &&
-        candidate.type === "code" &&
-        candidate.lifecycle === "active",
-    );
+    const codeProjectId = workspace.contextByMode.code.projectId ?? undefined;
+    const workProjectId = workspace.contextByMode.work.projectId ?? undefined;
+    const project =
+      allProjects.find(
+        (candidate) =>
+          codeProjectId !== undefined &&
+          String(candidate.id) === String(codeProjectId) &&
+          candidate.type === "code" &&
+          candidate.lifecycle === "active",
+      ) ??
+      allProjects.find(
+        (candidate) =>
+          workProjectId !== undefined &&
+          String(candidate.id) === String(workProjectId) &&
+          candidate.type === "work" &&
+          candidate.developerTools?.enabled === true &&
+          candidate.lifecycle === "active",
+      );
     return project === undefined ? undefined : { projectId: project.id, name: project.name };
   }, [allProjects, workspace]);
 

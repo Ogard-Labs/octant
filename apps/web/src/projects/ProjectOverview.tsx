@@ -87,6 +87,8 @@ export interface ProjectOverviewProps {
   readonly windowCapability?: string;
   /** Absent when the host cannot accept the change; the setting is then not shown. */
   readonly onWorkStatusFileChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
+  /** Absent when the host cannot accept the change; the switch is then not shown. */
+  readonly onWorkDeveloperToolsChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
   readonly providerInstances?: ReadonlyArray<ProviderInstance>;
   readonly project: ProjectSummary;
   readonly projectClient?: ProjectClient;
@@ -444,7 +446,18 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 />
               </ProjectOverviewInspector>
             ) : null}
-            {props.project.type === "code" && props.onActionsChange !== undefined ? (
+            {props.project.type === "work" && props.onWorkDeveloperToolsChange !== undefined ? (
+              <WorkDeveloperToolsSetting
+                disabled={archived || connectionStale}
+                enabled={props.project.developerTools?.enabled === true}
+                onChange={(enabled) =>
+                  props.onWorkDeveloperToolsChange?.(props.project.id, enabled)
+                }
+              />
+            ) : null}
+            {(props.project.type === "code" ||
+              (props.project.type === "work" && props.project.developerTools?.enabled === true)) &&
+            props.onActionsChange !== undefined ? (
               <ProjectOverviewInspector
                 key={`${String(props.project.id)}-actions`}
                 label="Actions"
@@ -551,6 +564,43 @@ function WorkStatusFileSetting(props: {
           describedBy={descriptionId}
           disabled={props.disabled || pending}
           label="Keep a status file"
+          onCheckedChange={(enabled) => {
+            setPending(true);
+            void Promise.resolve(props.onChange(enabled)).finally(() => setPending(false));
+          }}
+        />
+      </div>
+    </section>
+  );
+}
+
+/**
+ * A Work Project's Developer tools switch: its Project terminal and actions
+ * appear when on. Work threads keep the shell and Git at their level either
+ * way, so the switch says that it only changes what the Project shows.
+ */
+function WorkDeveloperToolsSetting(props: {
+  readonly disabled: boolean;
+  readonly enabled: boolean;
+  readonly onChange: (enabled: boolean) => Promise<boolean> | undefined;
+}) {
+  const [pending, setPending] = useState(false);
+  const descriptionId = useId();
+  return (
+    <section className="project-overview-inspector">
+      <div className="project-overview-inspector__row">
+        <div>
+          <h3>Developer tools</h3>
+          <p id={descriptionId}>
+            Show this Project&apos;s terminal and its Run, Test and Dev actions. Tasks here can run
+            commands and Git at their mode either way; this only changes what you see.
+          </p>
+        </div>
+        <OctantSwitch
+          checked={props.enabled}
+          describedBy={descriptionId}
+          disabled={props.disabled || pending}
+          label="Show developer tools"
           onCheckedChange={(enabled) => {
             setPending(true);
             void Promise.resolve(props.onChange(enabled)).finally(() => setPending(false));

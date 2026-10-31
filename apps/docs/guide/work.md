@@ -52,7 +52,9 @@ To redesign an existing website, ask the agent to open the page in the Browser a
 
 Work and Code can do the same things. A Work thread gets the same shell, Git, command-line tools, `ssh` to your own machines, and provider tools as a Code thread, under the same mode: at **Ask first** and **Accept edits** you approve each command, at **Auto** the provider's own reviewer answers (a provider without one asks first), and at **Full access** nothing asks and nothing is sandboxed. Octant keeps no SSH keys; `ssh`, `scp`, and `rsync` run as ordinary commands with your own agent and settings, so at Ask first you approve them like any other command. Pick the mode from the shield button beside the model in the composer; the next turn runs at it. Work has no Plan mode. When Work work becomes software engineering with a delivery target, use a [promotion](/guide/promotions) to start a linked Code thread with explicit user approval.
 
-What differs is focus: Work shows documents, artifacts, local tasks, and its board, and keeps Git panels, pull requests, reviews, issue trackers, and worktrees out of sight until you turn on **Developer tools** in the Work Project's overview. A Work thread is still Done when you mark it Done. The Developer tools switch is not built yet.
+What differs is focus: Work shows documents, artifacts, local tasks, and its board, and keeps Git panels, pull requests, reviews, issue trackers, and worktrees out of sight until you turn on **Developer tools** in the Work Project's overview. A Work thread is still Done when you mark it Done.
+
+Turn on **Developer tools** in the Work Project's overview (under Access and limits) to show the Project's terminal and its **Actions**: named commands such as Build or Preview that you save once and run from the toolbar or the command palette, in the Project's own terminal at its folder. Only you can turn the switch on, from a window on this computer; Octant records when. It changes what the Project shows, not what its tasks may do.
 
 ## Work settings
 

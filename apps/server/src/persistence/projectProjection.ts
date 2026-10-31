@@ -20,6 +20,8 @@ import {
   decodeProjectRenamed,
   decodeWorkProjectStatusFileChanged,
   decodeProjectBrandKitChanged,
+  decodeWorkProjectDeveloperToolsChanged,
+  decodeWorkProjectActionsChanged,
   decodeCodeProjectActionsChanged,
   decodeCodeProjectDesktopRecipeChanged,
   type EventEnvelope,
@@ -180,6 +182,10 @@ const projectDecoders = {
     decodeProjectProviderPolicyChanged(payload).project,
   "project.work-status-file-changed@1": (payload: unknown) =>
     decodeWorkProjectStatusFileChanged(payload).project,
+  "project.work-developer-tools-changed@1": (payload: unknown) =>
+    decodeWorkProjectDeveloperToolsChanged(payload).project,
+  "project.work-actions-changed@1": (payload: unknown) =>
+    decodeWorkProjectActionsChanged(payload).project,
   "project.brand-kit-changed@1": (payload: unknown) =>
     decodeProjectBrandKitChanged(payload).project,
   "project.code-actions-changed@1": (payload: unknown) =>

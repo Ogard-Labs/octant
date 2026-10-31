@@ -36,6 +36,8 @@ import {
   CodeProjectPullRequestAutoFixRecorded,
   WorkProjectStatusFileChanged,
   ProjectBrandKitChanged,
+  WorkProjectDeveloperToolsChanged,
+  WorkProjectActionsChanged,
   CodeProjectActionsChanged,
   CodeProjectDesktopRecipeChanged,
   CodeCheckoutObserved,
@@ -373,6 +375,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED, 1, CodeProjectPullRequestAutoFixRecorded)
     .register("project.provider-policy-changed@1", 1, ProjectProviderPolicyChanged)
     .register("project.work-status-file-changed@1", 1, WorkProjectStatusFileChanged)
+    .register("project.work-developer-tools-changed@1", 1, WorkProjectDeveloperToolsChanged)
+    .register("project.work-actions-changed@1", 1, WorkProjectActionsChanged)
     .register("project.brand-kit-changed@1", 1, ProjectBrandKitChanged)
     .register("project.code-actions-changed@1", 1, CodeProjectActionsChanged)
     .register("project.code-desktop-recipe-changed@1", 1, CodeProjectDesktopRecipeChanged)
