@@ -107,4 +107,57 @@ describe("DesktopBrowserRuntime", () => {
       vi.useRealTimers();
     }
   });
+
+  describe("profile stores", () => {
+    const cookie = {
+      domain: ".example.com",
+      hostOnly: false,
+      name: "sid",
+      value: "SENTINEL-cookie-value-7f3a9c",
+      path: "/",
+      secure: true,
+      httpOnly: true,
+      sameSite: "lax" as const,
+    };
+
+    it("sends a cookie batch to the authenticated loopback broker and reads back counts", async () => {
+      const fetch = vi.fn(async () => Response.json({ imported: 1, skipped: 0 }));
+      const runtime = new DesktopBrowserRuntime({
+        brokerUrl: "http://127.0.0.1:41234/",
+        token: "broker-token",
+        fetch,
+      });
+
+      const result = await runtime.profiles.importCookies({ kind: "personal" }, [cookie]);
+
+      expect(result).toEqual({ imported: 1, skipped: 0 });
+      const call = fetch.mock.calls[0] as unknown as [string, RequestInit];
+      expect(call[0]).toBe("http://127.0.0.1:41234/v1/profiles/import-cookies");
+      expect(JSON.parse(String(call[1].body))).toEqual({
+        profile: { kind: "personal" },
+        cookies: [cookie],
+      });
+    });
+
+    it("fails with a fixed sentence that carries no cookie when the broker refuses or answers oddly", async () => {
+      for (const respond of [
+        () => new Response(JSON.stringify({ echoed: cookie.value }), { status: 400 }),
+        () => Response.json({ imported: "many" }),
+      ]) {
+        const runtime = new DesktopBrowserRuntime({
+          brokerUrl: "http://127.0.0.1:41234/",
+          token: "broker-token",
+          fetch: vi.fn(async () => respond()),
+        });
+
+        const failure = await runtime.profiles.importCookies({ kind: "personal" }, [cookie]).then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+
+        expect(String(failure)).toContain("rejected the request");
+        expect(String(failure)).not.toContain(cookie.value);
+      }
+    });
+  });
 });
