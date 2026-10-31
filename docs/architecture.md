@@ -200,9 +200,8 @@ The design rests on a small set of invariants that every package obeys:
   are not developers, such as plain-language approval prompts in Work; the
   authority never does. New threads start at the level the person picked at
   first run, and Plan mode is always read-only. Below Full access, Octant's
-  own tool launches are OS-confined; some provider runtimes are not yet
-  (Codex in every posture, Claude outside Plan) and rely on the runtime's own
-  sandbox, per the confinement matrix in
+  own tool launches are OS-confined; one provider runtime is not yet
+  (Claude outside Plan) and relies on the runtime's own sandbox, per the confinement matrix in
   [Security and authority](#security-and-authority). Today's drivers still
   withhold the shell and Git from Work and keep Work below Full access; Work
   at the shared level is allowed; not built yet
@@ -1004,9 +1003,10 @@ in-process shell can emit no protocol request at all (observed on Linux,
 where a Vibe Work turn ran real commands inside its jail), the ACP, OpenCode,
 and Pi runtimes launch confined in Work with process exec and fork denied;
 an ACP profile whose entrypoint spawns its own stdio server keeps fork. Work
-never runs at Full access today, so those launches are always wrapped; the
-Codex app-server and Claude postures Work uses are unwrapped and withhold
-the shell through the thread config and tool list instead. Octant's own
+never runs at Full access today, so those launches are always wrapped. The
+Codex app-server is wrapped too but keeps exec, which its own program needs;
+it and the Claude postures Work uses withhold the shell through the thread
+config and tool list instead. Octant's own
 harness gives Work no shell port, and file writes inside a Work Project stay
 approval-gated in every driver (or auto-accept-edits from Settings › Work).
 Allowed; not built yet — the driver changes the shared rule needs:
@@ -3176,9 +3176,9 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   [security and authority](#security-and-authority). An
   explicit API-key instance still receives only the
   broker-resolved key. Each Codex account has its own
-  long-lived app-server and never shares that process with another
-  account. Codex Plan uses Codex's own read-only sandbox, not an
-  OS wrap; the account `CODEX_HOME` is the only extra path that
+  app-server processes and never shares one with another
+  account. Below Full access each runs under Octant's profile, and
+  the account `CODEX_HOME` is the only extra path that
   launch receives. Extra Claude accounts are a
   maintainer-approved exception to the rule that a CLI uses its
   documented host profile and does not take a second login
@@ -7418,7 +7418,7 @@ mechanisms are:
   inherited with it. Claude runs `permissionMode: "auto"` with Octant's
   callbacks still registered. Codex sends `approvalsReviewer: "auto_review"`
   on approval-gated only (`codexExecutionSettings`): both prompting postures
-  run Codex `read-only`, so an in-root patch edit escalates, and Codex's
+  run Codex `untrusted`, so an in-root patch edit asks, and Codex's
   reviewer is thread-wide and keeps those requests from the host, so on
   auto-accept-edits it would answer — and could deny — the edit the posture
   waives. The waiver outranks the delegation, so a Codex auto-accept-edits
@@ -7719,9 +7719,8 @@ mechanisms are:
   journal compatibility.
   A provider runtime launch is wrapped when the process carries exactly one
   thread's authority. The state below, which `providerProcessConfinement.test.ts`
-  pins against this table, is the accepted one: provider runtimes keep their
-  own sandboxes (Codex in every posture, Claude outside Plan) and closing that
-  gap is not an open goal. Octant says so rather than promising a boundary it
+  pins against this table, is the accepted one: Claude keeps its own sandbox
+  outside Plan, and closing that gap is not an open goal. Octant says so rather than promising a boundary it
   does not draw; a runtime that can be wrapped without losing what it needs is
   taken as its own change. Full access never gets the deny-default
   profile. The one wrapper it can get is deny-only: an ACP profile with
@@ -7745,7 +7744,7 @@ mechanisms are:
   | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
   | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                             | `allow`                                          | Octant sandbox: no root write, no exec or fork                                                                                                                                                                                             |
   | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only | `allow` on Plan; not limited by Octant otherwise | Octant sandbox: project and checkout read-only; write only `sessions/` and this session's own transcript and folder; on macOS exec only zsh and listed read-only tools, which get no network and write only the launch temporary directory |
-  | Codex app-server (`codexProcess.ts`)                                      | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | Codex's own `read-only` sandbox                                                                                                                                                                                                            |
+  | Codex app-server (`codexProcess.ts`)                                      | Wrapped                         | Wrapped                                             | `allow`                                          | Octant sandbox: root read-only; writes only the account home (not its configuration) and a private temporary directory; Codex's own sandbox set to external                                                                                |
   | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | No turn runs                                                                                                                                                                                                                               |
 
   The columns are today's postures. On the
@@ -7769,28 +7768,46 @@ mechanisms are:
   - **Claude Agent SDK:** unwrapped as in Code's approval-gated posture; the
     runtime's own sandbox holds commands to the Project root, and its
     permission prompts carry each command to the person at Guarded.
-  - **Codex app-server:** unwrapped as in every posture; its
-    `workspace-write` sandbox and approvals carry the level. Its readable
-    roots still cover the whole disk, as stated below, so an SSH key under
-    `~/.ssh` is reachable from a command, which the person's own `ssh` needs
-    anyway.
+  - **Codex app-server:** wrapped at Guarded and Reviewed as in Code, with
+    the lease keyed by root, mode, and posture (below); the shell runs inside
+    Octant's profile, so `~/.ssh` is reachable only through the person's SSH
+    agent or a server registered with Octant Shield. Unwrapped at Full access.
   - **Octant Harness:** gives the Work thread the shell port a Code harness
     thread has, under the same harness authority, which still asks before
     every command whatever a window's session grant says.
 
-  Codex is unwrapped because its app-server is leased once per provider
-  instance: `providerRuntimeRegistry` keys runtimes by `instanceId`, so one
-  process carries every thread on that instance, each choosing its own root
-  and `sandbox` at `thread/start`. No profile is exact for all of them, and one
-  wide enough for all of them is not a boundary. Keying the lease by the
-  thread's root and execution policy, as an OpenCode connection is, would
-  change that, and nothing requires it. Claude's unwrapped postures rest on
-  the runtime's own sandbox for the same reason: its sign-in and tools need
-  reach that a deny-default profile would have to re-grant.
-  Codex's `read-only` sandbox reads the whole disk, so `~/.aws`, `~/.ssh`,
-  and every other file under `HOME` is reachable from a Codex command in
-  every posture. Octant therefore gives the Codex runtime no reusable cloud
-  credential the person did not configure for that account. The environment
+  Codex is wrapped because each app-server lease carries one thread's
+  authority: `providerRuntimeRegistry` keys a Codex lease by the thread's root,
+  mode, and posture, as an OpenCode connection is, and the driver leases the
+  process when a connection's first session names its posture. A second
+  session on that connection must name the same posture. Account and model
+  reads use a catalog lease bound to an empty private directory. Leases on one
+  root and posture are shared, an idle lease closes after 30 seconds, and an
+  instance keeps at most three idle leases. Measured with codex-cli 0.164.0 on
+  macOS 27.0.1: a lease (npm launcher plus app-server) holds about 100 MB
+  resident and starts under the profile in 130 to 260 ms. macOS refuses a
+  Seatbelt profile inside another (`sandbox_apply: Operation not permitted`),
+  so Codex's own sandbox cannot run inside Octant's. Each turn tells Codex the
+  sandbox is external (`externalSandbox`, network `restricted`), and both
+  prompting postures run `untrusted`, because under an external sandbox
+  `on-request` runs every command without asking. Approving a command no
+  longer lifts any sandbox: it runs inside Octant's profile. Under that
+  profile a Codex command cannot read `HOME` outside the root and the account
+  home, and cannot write the account home's configuration, `.env`, rules,
+  skills, hooks, plugins, prompts, or instructions. The runtime's own reach is
+  shared with its commands, so a command can still read the account's
+  sign-in, as it could before, and reaches the network on the same `allow`.
+  On macOS the profile also opens the preferences daemon, its shared memory,
+  and `com.apple.SecurityServer`, which Codex's managed-configuration read and
+  TLS client need (`CODEX_SEATBELT_SERVICE_RULES`). Linux uses the same
+  mapping under Bubblewrap and is not yet measured.
+  Claude's unwrapped postures rest on the runtime's own sandbox because its
+  sign-in and tools need reach that a deny-default profile would have to
+  re-grant.
+  At Full access a Codex command reaches the whole disk, `~/.aws` and `~/.ssh`
+  included, and the launch environment is the same in every posture. Octant
+  therefore gives the Codex runtime no reusable cloud credential the person
+  did not configure for that account. The environment
   Octant launches it with carries no AWS profile, shared-config location, or
   IAM key (Codex still loads the account home's own `.env`, which is that
   account's configuration), and an Amazon Bedrock sign-in is traced in
@@ -7810,24 +7827,25 @@ mechanisms are:
   reads Codex's credential store, so stored access keys count as that
   account's own sign-in just as a stored Bedrock key does. An AWS profile
   was the documented Bedrock route until 2026-10-26; nothing kept its files
-  from the commands, and admitting it again needs Codex wrapped or its
-  sandbox's readable roots narrowed.
+  from the commands. The wrapped postures now deny `~/.aws`, but Full access
+  does not, so the refusal stands.
   `providerProcessConfinement.test.ts` refuses a new module that launches
   without the shared builder unless it is named here. The ACP/OpenCode/Pi row has one
   carve-out from "no exec or fork". On macOS, an OpenCode 2 Chat, Plan or Work
   launch may fork and may exec exactly `/usr/bin/false`, which is its Git
   stand-in (described below). Oh My Pi's probe is a held gap, not
   an exception. Octant-owned tools those threads reach stay confined either
-  way. A runtime's own built-in tools (Codex's shell, Claude's Bash on the
-  postures that write) run under that runtime's sandbox, not Octant's.
+  way. A runtime's own built-in tools run under the sandbox its row names:
+  Codex's shell under Octant's, Claude's Bash on the postures that write under
+  Claude's own.
   A runtime's own built-in web search or page fetch appends
   `thread.external-content-ingested@1` where its adapter can observe it
   ([Persistence](#persistence), Provider runtimes' own web tools, lists which
   calls are observable), but the gate that mark applies to Octant's computer-use,
   MCP, and native-harness calls does not cover a tool the runtime executes
   itself. That boundary is accepted: the mark gates Octant's own tools only,
-  and Claude's and Codex's built-in tools run under the runtime's own sandbox
-  and approvals.
+  and Claude's and Codex's built-in tools run under their row's sandbox and
+  the runtime's approvals.
   A Claude launch sets no `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`
   umbrella: blanket-blocking every non-essential channel of the runtime's
   was stricter than Octant needs, so each channel that matters is kept off

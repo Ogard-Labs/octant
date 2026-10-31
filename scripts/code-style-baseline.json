@@ -61,7 +61,6 @@
     "apps/server/src/providers/openCodeDriver.ts": 1,
     "apps/server/src/providers/openCodeProcess.ts": 2,
     "apps/server/src/providers/piProcess.ts": 2,
-    "apps/server/src/providers/providerRuntimeRegistry.ts": 2,
     "apps/server/src/providers/providerService.ts": 1,
     "apps/server/src/remote/pairingDeviceLifecycleService.ts": 2,
     "apps/server/src/remote/privateListenerLifecycleController.ts": 2,
