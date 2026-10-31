@@ -882,7 +882,13 @@ as the composer; markdown headings inside it are labels
 then detail-size mono on the application ground. Tool rows are 28px each, the
 name at the body size and the state at the right as detail text with a 12px
 mark (spinner, check, cross), parted by hairlines and indented together; a
-settled turn folds them behind "N tool calls". A Code turn that changed files ends with one card, the only card in a reply: "N files changed while this ran", then a 28px row per path with the folder in the meta ink, the name in the primary ink, and the added and removed line counts in the diff inks at the right. It folds after five rows, says "Showing n of N" when the record is incomplete rather than summing rows it never saw, and never says who wrote a file. A turn paused on the person uses a neutral composer-adjacent request row with
+settled turn folds them behind "N tool calls". An approval Octant Shield
+answered is a 28px line among them, not a disclosure: a 14px shield mark
+(check, alert, or cross, the cross in the danger ink), "Octant Shield
+allowed", "asked you", or "denied", the call in detail-size mono, the
+one-sentence reason in the muted ink, and the rule or model and the latency
+at the right as detail text. It always names Shield, never the provider, and
+does not count as a tool call. A Code turn that changed files ends with one card, the only card in a reply: "N files changed while this ran", then a 28px row per path with the folder in the meta ink, the name in the primary ink, and the added and removed line counts in the diff inks at the right. It folds after five rows, says "Showing n of N" when the record is incomplete rather than summing rows it never saw, and never says who wrote a file. A turn paused on the person uses a neutral composer-adjacent request row with
 an icon and explicit answer controls. Follow-up composers use one compact
 hairline message surface across Chat, Work, and Code. Feedback above the toolbar
 appears only when it has content; empty feedback consumes no space. A held

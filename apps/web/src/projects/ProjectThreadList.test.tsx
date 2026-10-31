@@ -508,6 +508,44 @@ describe("ProjectThreadRows", () => {
     expect(onHandOffThread).toHaveBeenCalledWith("thread-one", "Controller foundation");
   });
 
+  it("moves a thread to another Project from its own right-click menu, only where the row can move", async () => {
+    const onMoveToProject = vi.fn();
+    const { unmount } = render(
+      <ProjectThreadRows
+        actions={{ onMoveToProject }}
+        onSelectThread={vi.fn()}
+        threads={[{ ...thread, projectId: "project-one" }]}
+      />,
+    );
+
+    await userEvent.pointer({
+      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      keys: "[MouseRight]",
+    });
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Move to Project…" }));
+
+    expect(onMoveToProject).toHaveBeenCalledWith(
+      "thread-one",
+      "Controller foundation",
+      "project-one",
+    );
+    unmount();
+
+    render(
+      <ProjectThreadRows
+        actions={{ onMoveToProject, onPinThread: vi.fn(), canMoveToProject: () => false }}
+        onSelectThread={vi.fn()}
+        threads={[thread]}
+      />,
+    );
+    await userEvent.pointer({
+      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      keys: "[MouseRight]",
+    });
+    await screen.findByRole("menuitem", { name: "Pin" });
+    expect(screen.queryByRole("menuitem", { name: "Move to Project…" })).toBeNull();
+  });
+
   it("offers no export when the host resolves no export client", async () => {
     render(
       <ProjectThreadRows

@@ -32,7 +32,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | Area                                                                                  | Decisions | Built   | Partly built | Designed, not built |
 | ------------------------------------------------------------------------------------- | --------- | ------- | ------------ | ------------------- |
 | [Principles and hard lines](#principles-and-hard-lines)                               | 5         | 4       | 1            | 0                   |
-| [Guardrails and review](#guardrails-and-review)                                       | 8         | 0       | 5            | 3                   |
+| [Guardrails and review](#guardrails-and-review)                                       | 8         | 0       | 6            | 2                   |
 | [Key providers](#key-providers)                                                       | 1         | 0       | 0            | 1                   |
 | [Release scope](#release-scope)                                                       | 4         | 1       | 3            | 0                   |
 | [Process topology and local trust](#process-topology-and-local-trust)                 | 6         | 6       | 0            | 0                   |
@@ -69,7 +69,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
 | [Decided, pending a specification update](#decided-pending-a-specification-update)    | 4         | 0       | 0            | 4                   |
-| **All areas**                                                                         | **222**   | **173** | **35**       | **14**              |
+| **All areas**                                                                         | **222**   | **173** | **36**       | **13**              |
 
 ## Principles and hard lines
 
@@ -149,7 +149,7 @@ One setting says how much a thread's tool calls are guarded, with four levels: A
 - Plan is an overlay on any level and always read-only; subagents start at their parent's level and never exceed it; a routine runs at the level its creator picked.
 - Older recorded "Trusted" or "Off" levels replay as Full access.
 - Built in Code: Ask first, Accept edits, Auto with the key CLI providers' own reviewers, Plan, and Full access with no sandbox and no prompts for every runtime, with a first-run default, a Settings › Code › Access default, a Project override, and the one-time warning.
-- Not built yet: the shared levels in Work, Octant Shield, an ACP agent's own reviewer, and the thread header indicator. The guardrail-level list in the architecture still names some of the Code pieces as not built; its later Code access rules describe them as built.
+- Not built yet: the shared levels in Work, Octant Shield outside the Octant Harness, an ACP agent's own reviewer, and the thread header indicator. The guardrail-level list in the architecture still names some of the Code pieces as not built; its later Code access rules describe them as built.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Security and authority, Guardrail levels](../architecture.md#security-and-authority).
 
@@ -163,7 +163,8 @@ Secret files stay out of every agent's reach at every guardrail level, Full acce
 - The person adds paths in Settings › Permissions › Protected files; removing a built-in group needs an explicit confirm and is journaled.
 - A refused read by Octant's or Claude Code's file tools names the rule and the channel to use.
 - Known key formats and broker-issued values are redacted from runtime output, transcripts, the journal, exports and the service log.
-- Not built yet: the Watcher and Judge flagging protected-path reads and secret-then-network sequences, and short-lived cloud credentials from the broker.
+- Octant Shield's Judge, built for the Octant Harness, sends a command that reaches a secret file to the person and refuses one that reads secrets then sends something off the computer.
+- Not built yet: the Watcher flagging protected-path reads, the Judge reading the person's protected list, and short-lived cloud credentials from the broker.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Secret guard](../architecture.md#secret-guard).
 
@@ -215,8 +216,10 @@ Octant Shield is Octant's own automatic approval reviewer for every runtime that
 - Shield uses the thread's own provider account and its smallest model by default, or another configured endpoint, sends no telemetry, counts against spend ceilings, and journals every decision.
 - A release with Shield requires measuring its false-allow rate on a fixture set of known-safe and known-unsafe calls.
 - Build order: the native harness, every runtime's approval path, the picker and Settings, the Watcher, safe networks, then the server registry and SSH.
+- Built: the Judge (rules, fast allow rules that read a command exactly as written, the model stage, fail-closed, brakes, per-call grants, taint limits, spend reservations with the review's usage recorded under the thread), answering the Octant Harness's approvals on a Code thread in Auto and its subagents', each decision journaled and shown on the transcript; the fixture set with a test of the rule stages and a false-allow measurement script.
+- Not built yet: the other runtimes' approval paths, the picker and Settings, the Watcher (so the Judge has no labels yet), safe networks, and the server registry; the false-allow rate of a real model is unmeasured.
 
-Status: Designed, not built. Since: 2026-10-31. Detail: [Architecture: Octant Shield](../architecture.md#octant-shield).
+Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Octant Shield](../architecture.md#octant-shield).
 
 ### Safe networks
 
@@ -469,6 +472,7 @@ Modes are server-enforced domain policy, not renderer flags. The shell shows two
 - A new-thread composer chooses Chat (no folder) or In a folder (a Work thread bound to a Project root). The choice only selects the create command, and nothing converts a thread between Chat and Work.
 - Chat binds a virtual, memory-scoped Project or none; Work binds exactly one OS-confined root; Code binds exactly one directory and selects a checkout inside it.
 - Memory is scoped to one Project and keeps source, kind, timestamps and supersession; moving it across Projects or modes is explicit and keeps provenance. _Here only._
+- Move to Project: a No-project Chat can be filed into a Chat Project, and a Work or Code thread into another Project of its own mode. The thread keeps its kind, history and guardrail level and gains no filesystem reach: a Work or Code thread moves only into an active Project whose folder is its own folder or contains it, and is refused while a turn runs or the thread waits on the person. A Code thread also needs its checkout to stay valid, so only a Project bound to the same repository folder is accepted. The server checks authority before the move, only a person can make it, and it is journaled with who and when.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
@@ -745,6 +749,7 @@ A turn stopped by an explicit provider usage-limit signal carries a provider-neu
 - The reset timer is an in-process host timer that continues through the ordinary turn-admission path, with no cloud wake and no billing automation.
 - A stale recovery settles as invalidated rather than firing against newer state.
 - Chat, Work and Code each cut a turn off after five minutes without a provider event, because a long tool call can leave a provider silent. _Here only._
+- A provider whose sessions each own a process offers Force stop in Chat ten seconds after a Stop that did not end the turn. It kills that attempt's process and nothing else, leaves the thread usable and resumable, and is refused for a provider that shares one process across threads (built for Claude; Work and Code turns not built yet).
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
@@ -1946,6 +1951,7 @@ Status: Built. Since: —. Detail: [Workspace: Boards and integrations](workspac
 A thread or Project can start from a forge issue, a tracker issue or a cloned repository, without write-back.
 
 - Creating from an issue attaches only its identity. The server reauthorizes, frames redacted text as external content and journals the ingestion. There is no write-back.
+- A local window may start a Work or Code thread from a Claude Code or Codex terminal session of the Project's own folder. Creating attaches only the provider and session id; the server rereads the session, refuses another folder, keeps only the person's and the assistant's words within a fixed bound, marks the thread with outside content before it exists, and journals the history with the thread so purging erases it. The first admitted turn hands the history to the model once, framed as outside data. A paired device cannot start one, and a thread starts from an issue or a session, never both. The provider's session is not resumed, nothing is uploaded, and nothing is written back.
 - Cloning verifies identity and origin before materializing, promotes atomically without overwriting, and issues a one-time binding receipt.
 
 Status: Built. Since: —. Detail: [Workspace: Boards and integrations](workspace.md#boards-and-integrations).

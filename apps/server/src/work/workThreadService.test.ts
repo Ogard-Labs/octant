@@ -1,6 +1,7 @@
 import {
   type AggregateVersion,
   type UtcTimestamp,
+  decodeThreadWorkingDirectory,
   decodeWorkThread,
   decodeProviderModel,
   decodeWorkThreadBootstrap,
@@ -18,6 +19,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
+import type { TerminalSessionImportPort } from "../terminalSessions/terminalSessionImports";
 import { WorkThreadProjection } from "./workThreadProjection";
 import {
   WorkThreadService,
@@ -276,6 +278,101 @@ describe("WorkThreadService", () => {
     ).rejects.toMatchObject({ failure: { category: "unavailable" } });
     expect(refused.persistence.journal.append).not.toHaveBeenCalled();
     expect(refused.projection.read(ids.thread)).toBeUndefined();
+  });
+
+  it("starts a thread from a terminal session in the Project's folder, marked before it exists, or refuses one from elsewhere", async () => {
+    const command = {
+      kind: "create-work-thread",
+      threadId: ids.thread,
+      projectId: ids.project,
+      title: "Draft brief",
+      providerInstanceId: ids.provider,
+      modelId: "model-a",
+      hostId: "local",
+      bindingRevisionId: ids.binding,
+      terminalSession: { provider: "claude", sessionId: "0b4c1f2e-1111-4111-8111-111111111111" },
+    } as const;
+    const prepared = {
+      mark: {
+        sourceLabel: "terminal-session",
+        contentReference: "terminal-session-claude-0b4c1f2e-1111-4111-8111-111111111111",
+      },
+      imported: { title: "Upload test flake" } as never,
+    };
+    const terminalSessions = {
+      prepare: vi.fn<TerminalSessionImportPort["prepare"]>(async (_request, folder) =>
+        folder === "/private/tmp/knowledge"
+          ? { status: "ready", prepared }
+          : { status: "refused", message: "That terminal session was started in another folder." },
+      ),
+      journalImported: vi.fn<TerminalSessionImportPort["journalImported"]>(),
+    };
+    const record = vi.fn<
+      NonNullable<WorkThreadServiceDependencies["recordExternalContentIngestion"]>
+    >(() => ({
+      kind: "recorded",
+      taint: { externalContentIngested: true, ingestedSources: ["terminal-session"] },
+    }));
+    const imported = serviceFixture({
+      threads: [],
+      recordExternalContentIngestion: record,
+      terminalSessions,
+    });
+
+    await expect(imported.service.execute(ids.window, command as never)).resolves.toMatchObject({
+      kind: "thread-created",
+    });
+    expect(record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: ids.thread,
+        provenance: { origin: "external-content", sourceLabel: "terminal-session" },
+        contentReference: prepared.mark.contentReference,
+      }),
+    );
+    expect(record.mock.invocationCallOrder[0]).toBeLessThan(
+      imported.persistence.journal.append.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(terminalSessions.journalImported).toHaveBeenCalledWith(String(ids.thread), prepared);
+    expect(imported.persistence.journal.transaction).toHaveBeenCalledTimes(1);
+
+    const elsewhere = serviceFixture({
+      threads: [],
+      project: { ...workProject(), binding: { canonicalRoot: "/private/tmp/other" } } as never,
+      recordExternalContentIngestion: record,
+      terminalSessions,
+    });
+    await expect(elsewhere.service.execute(ids.window, command as never)).rejects.toMatchObject({
+      failure: {
+        category: "invalid",
+        message: "That terminal session was started in another folder.",
+      },
+    });
+    expect(elsewhere.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("refuses a thread that starts from both an issue and a terminal session", async () => {
+    const terminalSessions = {
+      prepare: vi.fn<TerminalSessionImportPort["prepare"]>(),
+      journalImported: vi.fn<TerminalSessionImportPort["journalImported"]>(),
+    };
+    const fixture = serviceFixture({ threads: [], terminalSessions });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "create-work-thread",
+        threadId: ids.thread,
+        projectId: ids.project,
+        title: "Draft brief",
+        providerInstanceId: ids.provider,
+        modelId: "model-a",
+        hostId: "local",
+        bindingRevisionId: ids.binding,
+        issueContext: { owner: "octant", name: "octant", number: 7 },
+        terminalSession: { provider: "claude", sessionId: "0b4c1f2e-1111-4111-8111-111111111111" },
+      } as never),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(terminalSessions.prepare).not.toHaveBeenCalled();
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
   });
 
   it("attributes a routine's thread to the routine, not to an open window", async () => {
@@ -1243,6 +1340,7 @@ function serviceFixture(
     readonly projectDueReminder?: WorkThreadServiceDependencies["projectDueReminder"];
     readonly turns?: ReadonlyArray<WorkTurnState>;
     readonly recordExternalContentIngestion?: WorkThreadServiceDependencies["recordExternalContentIngestion"];
+    readonly terminalSessions?: TerminalSessionImportPort;
   } = {},
 ) {
   const projection = new WorkThreadProjection();
@@ -1338,6 +1436,9 @@ function serviceFixture(
     ...(options.recordExternalContentIngestion === undefined
       ? {}
       : { recordExternalContentIngestion: options.recordExternalContentIngestion }),
+    ...(options.terminalSessions === undefined
+      ? {}
+      : { terminalSessions: options.terminalSessions }),
   });
   return {
     service,
@@ -1392,6 +1493,154 @@ function thread(overrides: Partial<ReturnType<typeof decodeWorkThread>> = {}) {
     ...overrides,
   });
 }
+
+describe("moving a Work thread to another Project", () => {
+  const otherProject = decodeProjectId("72000000-0000-4000-8000-000000000011");
+  const otherBinding = "72000000-0000-4000-8000-000000000012";
+
+  function destination(folder: string, overrides: Partial<Project> = {}): Project {
+    const base = workProject();
+    if (base.type !== "work") throw new Error("fixture must be a Work Project");
+    return {
+      ...base,
+      id: otherProject,
+      name: "Elsewhere",
+      binding: { canonicalRoot: folder },
+      bindingHistory: [
+        {
+          ...base.bindingHistory[0]!,
+          revisionId: otherBinding as never,
+          currentBinding: { canonicalRoot: folder },
+        },
+      ],
+      ...overrides,
+    } as Project;
+  }
+
+  function moveFixture(
+    folder: string,
+    options: Parameters<typeof serviceFixture>[0] = {},
+    destinationOverrides: Partial<Project> = {},
+  ) {
+    const target = destination(folder, destinationOverrides);
+    const fixture = serviceFixture({
+      threads: [thread({ workingDirectory: decodeThreadWorkingDirectory("drafts") })],
+      accessibleProjects: [
+        { id: ids.project, type: "work", name: "Knowledge", lifecycle: "active" },
+        { id: otherProject, type: "work", name: "Elsewhere", lifecycle: "active" },
+      ],
+      ...options,
+    });
+    fixture.persistence.readProject.mockImplementation(((id: string) =>
+      String(id) === String(otherProject) ? target : workProject()) as never);
+    return fixture;
+  }
+
+  const move = (expectedVersion = 1) =>
+    ({
+      kind: "move-work-thread",
+      threadId: ids.thread,
+      expectedVersion,
+      projectId: otherProject,
+    }) as const;
+
+  it("files the thread into a Project bound to the same folder and journals who moved it", async () => {
+    const fixture = moveFixture("/private/tmp/knowledge");
+    const result = await fixture.service.execute(ids.window, move());
+
+    expect(result).toMatchObject({
+      kind: "thread-updated",
+      thread: {
+        projectId: otherProject,
+        bindingRevisionId: otherBinding,
+        workingDirectory: "drafts",
+        access: "ask-first",
+        title: "Draft brief",
+        version: 2,
+      },
+    });
+    expect(fixture.projection.read(ids.thread)?.projectId).toBe(otherProject);
+    const append = fixture.persistence.journal.append.mock.calls[0]?.[0];
+    expect(append?.events[0]).toMatchObject({
+      eventName: "work.thread-updated@1",
+      actor: { kind: "local-user" },
+      occurredAt: now,
+    });
+  });
+
+  it("keeps the thread in the same place when the Project's folder contains it", async () => {
+    const fixture = moveFixture("/private");
+    const result = await fixture.service.execute(ids.window, move());
+
+    expect(result).toMatchObject({
+      kind: "thread-updated",
+      thread: { projectId: otherProject, workingDirectory: "tmp/knowledge/drafts" },
+    });
+    expect(fixture.workingDirectories.resolve).toHaveBeenCalledWith(
+      "/private",
+      "tmp/knowledge/drafts",
+    );
+  });
+
+  it("refuses a Project bound to a different folder and changes nothing", async () => {
+    for (const folder of ["/private/tmp/other", "/private/tmp/knowledge/drafts"]) {
+      const fixture = moveFixture(folder);
+      await expect(fixture.service.execute(ids.window, move())).rejects.toMatchObject({
+        failure: { category: "invalid", message: /different folder/ },
+      });
+      expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+      expect(fixture.projection.read(ids.thread)?.projectId).toBe(ids.project);
+    }
+  });
+
+  it("refuses a Chat Project, a Project the window cannot see, and a thread that is running", async () => {
+    const chat = moveFixture("/private/tmp/knowledge", {}, { type: "chat" } as never);
+    await expect(chat.service.execute(ids.window, move())).rejects.toMatchObject({
+      failure: { message: /own kind/ },
+    });
+
+    const hidden = moveFixture("/private/tmp/knowledge", {
+      accessibleProjects: [
+        { id: ids.project, type: "work", name: "Knowledge", lifecycle: "active" },
+      ],
+    });
+    await expect(hidden.service.execute(ids.window, move())).rejects.toMatchObject({
+      failure: { message: /not available/ },
+    });
+
+    const running = moveFixture("/private/tmp/knowledge", {
+      observeRuntime: () => ({ executing: true, awaitingInput: false }),
+    });
+    await expect(running.service.execute(ids.window, move())).rejects.toMatchObject({
+      failure: { message: /running turn/ },
+    });
+    for (const fixture of [chat, hidden, running]) {
+      expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    }
+  });
+
+  it("refuses a move a routine makes as the host, and a stale version", async () => {
+    const routine = moveFixture("/private/tmp/knowledge");
+    await expect(routine.service.execute(ROUTINE_HOST_SCOPE_ID, move())).rejects.toMatchObject({
+      failure: { category: "unauthorized" },
+    });
+
+    const stale = moveFixture("/private/tmp/knowledge");
+    await expect(stale.service.execute(ids.window, move(7))).rejects.toMatchObject({
+      failure: { category: "stale" },
+    });
+  });
+
+  it("refuses a Project whose provider policy excludes the thread's provider", async () => {
+    const fixture = moveFixture("/private/tmp/knowledge", {}, {
+      providerPolicy: { mode: "whitelist", providerInstanceIds: [] },
+    } as never);
+    await expect(fixture.service.execute(ids.window, move())).rejects.toMatchObject({
+      failure: { category: "unauthorized" },
+    });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+});
 
 describe("completing and snoozing a Work thread", () => {
   const later = new Date(Date.parse(now) + 24 * 60 * 60 * 1_000).toISOString();

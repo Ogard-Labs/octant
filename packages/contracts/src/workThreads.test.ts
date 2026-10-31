@@ -127,6 +127,26 @@ describe("work thread contracts", () => {
         workingDirectory: "research/brief",
       }).kind,
     ).toBe("change-work-thread-working-directory");
+    expect(
+      decodeWorkThreadCommand({
+        kind: "move-work-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        projectId: ids.project,
+      }),
+    ).toEqual({
+      kind: "move-work-thread",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      projectId: ids.project,
+    });
+    expect(() =>
+      decodeWorkThreadCommand({
+        kind: "move-work-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).toThrow();
 
     const bootstrap = decodeWorkThreadBootstrap({ threads: [threadFixture] });
     expect(bootstrap.threads).toHaveLength(1);

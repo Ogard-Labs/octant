@@ -4579,6 +4579,7 @@ function LaunchedShell(
       markCodeFollowUp: codeController.markFollowUp,
       markCodeThreadRead: codeController.markThreadRead,
       mergeProjectPullRequest,
+      moveCodeThread: codeController.moveThread,
       moveProject: projectController.move,
       noteCanvasReferences,
       noteHandedOffDocument,
@@ -6051,6 +6052,7 @@ function LaunchedShell(
     permissionPersistence?: import("@octant/contracts/providers").PermissionPersistence,
     modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
     initiatingPaneId?: PaneId,
+    terminalSession?: import("@octant/contracts").TerminalSessionImportRequest,
   ): Promise<boolean | void> {
     const paneToReset =
       initiatingPaneId ??
@@ -6260,6 +6262,7 @@ function LaunchedShell(
         const created = await codeController.execute({
           kind: "create-code-thread",
           thread,
+          ...(terminalSession === undefined ? {} : { terminalSession }),
         });
         if (created?.kind !== "thread-created") {
           setDraftError("The Code thread could not be created.");
@@ -6336,6 +6339,7 @@ function LaunchedShell(
           workingDirectory: decodeThreadWorkingDirectory("."),
           ...(issueContext === undefined ? {} : { issueContext }),
           ...(linearIssueContext === undefined ? {} : { linearIssueContext }),
+          ...(terminalSession === undefined ? {} : { terminalSession }),
         });
         if (!("kind" in created) || created.kind !== "thread-created") {
           setDraftError("The task could not be created.");

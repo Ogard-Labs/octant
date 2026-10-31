@@ -175,6 +175,75 @@
   line-height: 1.45;
 }
 
+/* A session's tool and age are short and always read whole; the title gives
+   way first. Shrinking the meta clipped "16d ago" beside a long title; the
+   picker's shared meta rule loads after this sheet, hence the compound
+   selector. */
+.github-picker__option-meta.terminal-session-picker__meta {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* The terminal session a Work or Code thread started from: folded above the
+   thread's own turns, in the provenance tint, since it is a record of what
+   was said elsewhere rather than turns of this thread. */
+.imported-history {
+  margin: 0 0 20px;
+  color: var(--oct-muted);
+  background: var(--oct-surface-warm);
+  border-radius: var(--oct-radius-sm);
+  font-size: var(--oct-text-xs);
+  line-height: 1.45;
+}
+
+.imported-history__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-1) var(--oct-space-2);
+  padding: var(--oct-space-2) var(--oct-space-3);
+  cursor: pointer;
+}
+
+.imported-history__title {
+  min-width: 0;
+  color: var(--oct-fg);
+  overflow-wrap: anywhere;
+}
+
+.imported-history__meta {
+  color: var(--oct-meta);
+}
+
+.imported-history__note {
+  padding: 0 var(--oct-space-3);
+  margin: 0 0 var(--oct-space-2);
+}
+
+.imported-history__entries {
+  display: grid;
+  gap: var(--oct-space-3);
+  max-height: 60vh;
+  padding: var(--oct-space-2) var(--oct-space-3) var(--oct-space-3);
+  margin: 0;
+  overflow-y: auto;
+  list-style: none;
+  border-top: 1px solid var(--oct-border);
+}
+
+.imported-history__role {
+  display: block;
+  margin-bottom: var(--oct-space-1);
+  color: var(--oct-meta);
+}
+
+.imported-history__text {
+  margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 /* What a provider switch or a branch handed to the new session, under the
    divider that marks it. */
 .chat-transcript__handoff {

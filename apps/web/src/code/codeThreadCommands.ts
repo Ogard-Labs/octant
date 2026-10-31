@@ -1,5 +1,6 @@
 import type { UtcTimestamp } from "@octant/contracts";
 import type { CodeCommand, CodeThread, CodeThreadId } from "@octant/contracts/code";
+import type { ProjectId } from "@octant/contracts/projects";
 
 export function findCodeThread(
   threads: ReadonlyArray<CodeThread> | undefined,
@@ -14,6 +15,15 @@ export function renameCodeThread(thread: CodeThread, title: string): CodeCommand
     threadId: thread.id,
     expectedVersion: thread.version,
     title: title as never,
+  };
+}
+
+export function moveCodeThread(thread: CodeThread, projectId: ProjectId): CodeCommand {
+  return {
+    kind: "move-code-thread",
+    threadId: thread.id,
+    expectedVersion: thread.version,
+    projectId,
   };
 }
 
