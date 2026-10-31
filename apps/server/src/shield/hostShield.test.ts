@@ -2,7 +2,7 @@ import type { CodeThread, ProviderModelId } from "@octant/contracts";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type { ShieldCall } from "@octant/domain/shield-judge-policy";
 import { describe, expect, it, vi } from "vitest";
-import { createHostShield, shieldRoutesApprovals, type HostShieldDependencies } from "./hostShield";
+import { createHostShield, type HostShieldDependencies } from "./hostShield";
 
 const threadId = "00000000-0000-4000-8000-000000000061";
 const providerInstanceId = "00000000-0000-4000-8000-0000000000e6";
@@ -161,20 +161,26 @@ describe("Octant Shield as the host wires it", () => {
     expect(record).toHaveBeenCalledWith({ threadId, summary: "read", decision });
   });
 
-  it("reviews every runtime that sends its prompts to Octant, and none that decides alone", () => {
-    for (const kind of [
-      "openai-compatible",
-      "ollama",
-      "claude",
-      "codex",
-      "opencode",
-      "pi",
-      "kilo",
-    ]) {
-      expect(shieldRoutesApprovals(kind as never), kind).toBe(true);
-    }
-    for (const kind of ["oh-my-pi", "openai-image"]) {
-      expect(shieldRoutesApprovals(kind as never), kind).toBe(false);
-    }
+  it("reviews a key provider's thread once the person chose Octant Shield over its own reviewer", async () => {
+    const own = { providerCapabilities: () => ({ harnessAutoReview: "supported" as const }) };
+    const shield = hostShieldWith(thread(), { ...own, chosenReviewer: () => "octant-shield" });
+    expect(
+      await shield.review({ threadId, call: command("git status"), boundRoot: "/Users/dev/app" }),
+    ).toMatchObject({ reviewer: "octant-shield", verdict: "allow" });
+    const providerOwn = hostShieldWith(thread(), { ...own, chosenReviewer: () => "provider" });
+    expect(
+      await providerOwn.review({ threadId, call: command("git status"), boundRoot: "/Users/dev/app" }),
+    ).toBeUndefined();
+  });
+
+  it("judges with the person's chosen model instead of the thread's provider", () => {
+    const chosen = {
+      providerInstanceId: "00000000-0000-4000-8000-0000000000f1" as never,
+      modelId: "local-model" as never,
+    };
+    const resolveDriver = vi.fn(() => ({}) as ProviderDriver);
+    const shield = hostShieldWith(thread(), { chosenModel: () => chosen, resolveDriver });
+    expect(shield.availableFor(providerInstanceId as never)).toBe(true);
+    expect(resolveDriver).toHaveBeenCalledWith(chosen.providerInstanceId);
   });
 });

@@ -1533,6 +1533,15 @@ export class CodeService {
           ...((command.defaultAutoApprove ?? current.defaultAutoApprove) === true
             ? { defaultAutoApprove: true }
             : {}),
+          ...((command.autoReviewer ?? current.autoReviewer) === undefined
+            ? {}
+            : { autoReviewer: command.autoReviewer ?? current.autoReviewer }),
+          // Null returns Shield to each thread's own provider.
+          ...(command.shieldModel === null
+            ? {}
+            : (command.shieldModel ?? current.shieldModel) === undefined
+              ? {}
+              : { shieldModel: command.shieldModel ?? current.shieldModel }),
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });

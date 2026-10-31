@@ -22,6 +22,7 @@ import {
   changeCodeProjectAccess,
   changeCodeProjectActions,
   changeCodeProjectPermissionMode,
+  changeCodeProjectAutoReviewer,
   changeCodeProjectDesktopRecipe,
   changeCodeProjectPullRequestBackgroundRefresh,
   changeProjectBrandKit,
@@ -183,6 +184,15 @@ describe("Project creation and lifecycle", () => {
     expect(() =>
       changeCodeProjectAccess(makeProject(ids.chat, "0/1"), "project-default", updatedAt),
     ).toThrow(ProjectPolicyRejected);
+  });
+
+  it("sets a Code Project's Auto reviewer and returns it to Settings, refusing a non-change", () => {
+    const project = makeProject(ids.code, "0/1", { type: "code" });
+    const shield = changeCodeProjectAutoReviewer(project, "octant-shield", updatedAt);
+    expect(shield).toMatchObject({ autoReviewer: "octant-shield", version: project.version + 1 });
+    const back = changeCodeProjectAutoReviewer(shield, undefined, updatedAt);
+    expect(back).not.toHaveProperty("autoReviewer");
+    expect(() => changeCodeProjectAutoReviewer(back, undefined, updatedAt)).toThrow();
   });
 
   it("sets a Code Project's default mode and keeps its remembered Full access in step", () => {

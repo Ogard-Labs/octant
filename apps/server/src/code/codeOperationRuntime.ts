@@ -45,6 +45,7 @@ import {
   type CodeRuntimeWorkId,
   type CodeOperationResult,
   type CodeThread,
+  type AutoReviewer,
   type ShieldDecision,
   type ComputerUseDestinationSelection,
   type CodeThreadId,
@@ -554,6 +555,12 @@ export interface CodeOperationRuntimeOptions {
    * answering nothing for a thread, every prompt goes to the person.
    */
   readonly shield?: ShieldReviewPort;
+  /**
+   * The person's Auto reviewer for a thread (its Project's, else Settings').
+   * Octant Shield chosen means the provider's own reviewer stays off, so its
+   * prompts reach Octant.
+   */
+  readonly chosenAutoReviewer?: (thread: CodeThread) => AutoReviewer | undefined;
   /**
    * Resolves the cached provider capabilities for a thread's provider, so the
    * runtime can check `harnessAutoReview` without re-probing on every turn.
@@ -4056,6 +4063,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
    */
   #resolveHarnessAutoReview(thread: CodeThread): boolean {
     if (thread.autoApprove !== true) return false;
+    if (this.#options.chosenAutoReviewer?.(thread) === "octant-shield") return false;
     const capabilities = this.#options.resolveProviderCapabilities?.(thread);
     if (capabilities === undefined) return false;
     const taint = this.#options.readThreadExternalContentTaint?.(thread.id);

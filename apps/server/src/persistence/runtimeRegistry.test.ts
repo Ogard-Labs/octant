@@ -1202,6 +1202,10 @@ function projectEvents(): ReadonlyArray<readonly [string, unknown]> {
       "project.code-permission-mode-changed@1",
       { project: { ...codeProject, defaultPermissionMode: "auto" } },
     ],
+    [
+      "project.code-auto-reviewer-changed@1",
+      { project: { ...codeProject, autoReviewer: "octant-shield" } },
+    ],
     ["memory.entry-created@1", { entry }],
     [
       "memory.entry-superseded@1",
