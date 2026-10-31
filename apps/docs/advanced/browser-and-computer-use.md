@@ -296,9 +296,16 @@ Project has one, the pane says so instead of offering **Start desktop**. To
 set one, open the Code Project, then **Disposable desktop** → **Manage** in its
 settings:
 
-- **Provider** lists only the desktop providers this host has ready. On Linux
-  that is this host itself, offered once Bubblewrap, Xvfb, xdotool, and
-  ImageMagick are installed and Octant has restarted.
+- **Provider** lists the desktop providers this host offers. On Linux that
+  includes this host itself, once Bubblewrap, Xvfb, xdotool, and ImageMagick
+  are installed and Octant has restarted, and Cua Spaces; E2B is listed on
+  every host. A line under the list says where the provider runs, whose
+  account it uses, and whether it bills you. A provider that isn't set up
+  here shows **(needs setup)** and can't be chosen: E2B needs this computer
+  to have a credential store for your API key, and Cua Spaces needs its app
+  running and signed in on this computer. Nothing starts on a provider until
+  you save a recipe that names it, and a desktop that bills you still asks
+  you first.
 - **Runs on** appears for a provider that names where its desktops run, and
   picks where this Project's desktops run.
 - **Computer** appears when they run on one of your other computers, and
@@ -331,8 +338,7 @@ network access. **Remove recipe** asks first: removing it, or changing its
 provider, where it runs, its computer, or its key, ends the Project's running desktops. Only a window on the host
 itself can set or remove a recipe or enter its key, so **Disposable desktop**
 appears only there: a paired phone or browser doesn't show a Project's
-settings, and the host refuses a recipe change from either. This
-version offers no cloud provider yet, so the key field doesn't appear.
+settings, and the host refuses a recipe change from either.
 
 ## Picture in Picture
 

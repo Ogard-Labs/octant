@@ -125,6 +125,22 @@ export function createDesktopDaemonPort(options: DesktopDaemonPortOptions): Desk
 }
 
 /**
+ * Whether the daemon's socket is there and safe to connect to, without
+ * connecting. The Desktop settings use it to say a daemon-run provider needs
+ * setup, so the person's daemon is asked nothing until they start a desktop.
+ */
+export async function desktopDaemonSocketReady(
+  options: Pick<DesktopDaemonPortOptions, "daemon" | "homeDirectory" | "userId">,
+): Promise<boolean> {
+  const userId = options.userId ?? process.getuid?.();
+  if (userId === undefined) return false;
+  const home = options.homeDirectory ?? (await recordedHomeDirectory(userId));
+  if (home === undefined) return false;
+  const socket = await checkDaemonSocket(home, options.daemon().socketPath, userId);
+  return socket.status === "safe";
+}
+
+/**
  * The absolute home directory the user database records for `userId`, or
  * nothing when the lookup fails or its answer is not one record of that
  * user. The record is a `passwd` line: seven fields from `getent`, ten from

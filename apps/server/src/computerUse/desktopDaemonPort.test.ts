@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DesktopDaemonRequest } from "@octant/plugin-api/desktop-provider";
 import {
   createDesktopDaemonPort,
+  desktopDaemonSocketReady,
   recordedHomeDirectory,
   type DesktopDaemonPortOptions,
 } from "./desktopDaemonPort";
@@ -366,6 +367,23 @@ describe("desktop daemon port", () => {
       expect(seen).toEqual([]);
     },
   );
+
+  it("says whether the daemon's socket is there and safe without connecting to it", async () => {
+    const { home, socketPath, seen } = await daemonHome();
+    const ready = () =>
+      desktopDaemonSocketReady({
+        daemon: () => ({ socketPath: SOCKET, methods: METHODS }),
+        homeDirectory: home,
+        userId,
+      });
+    await expect(ready()).resolves.toBe(true);
+    chmodSync(socketPath, 0o660);
+    await expect(ready()).resolves.toBe(false);
+    chmodSync(socketPath, 0o600);
+    rmSync(socketPath);
+    await expect(ready()).resolves.toBe(false);
+    expect(seen).toEqual([]);
+  });
 
   it("answers a missing socket as the daemon being unreachable", async () => {
     const { socketPath, port } = await daemonHome();

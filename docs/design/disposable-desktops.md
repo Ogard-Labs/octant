@@ -12,7 +12,8 @@ server ([Architecture: security and authority](../architecture.md#security-and-a
 built, and slice 6 is built for E2B. Cua Spaces follows the
 [local-daemon design](#cua-spaces-through-the-local-daemon) accepted on
 2026-10-27: its daemon port and its driver for a Space on this machine or on
-the person's other machine are built, and no host offers it yet (see
+the person's other machine are built and, like E2B, offered for leasing (see
+[Built: offering E2B and Cua](#built-offering-e2b-and-cua), and
 [Built in Cua sub-slice 1](#built-in-cua-sub-slice-1),
 [Built in Cua sub-slice 2](#built-in-cua-sub-slice-2), and
 [Built in Cua sub-slice 3](#built-in-cua-sub-slice-3)). The maintainer
@@ -26,9 +27,8 @@ artifact transfer, the agent's binding of `octant_computer` to a lease, the
 Desktop pane, a Code Project's stored recipe with its settings editor, the
 cloud HTTPS port, the E2B driver, the local-daemon port, recipe
 placements, and the Cua driver for this machine and the person's other
-machine exist; no host offers E2B
-or Cua for leasing yet, so a recipe can name only the host-local provider
-(see
+machine exist, and a host offers E2B and, on Linux, Cua for leasing, each
+listing what it still needs set up, so a recipe can name any of them (see
 [Built in slice 1](#built-in-slice-1),
 [Built in slice 2](#built-in-slice-2),
 [Built in slice 3](#built-in-slice-3),
@@ -43,7 +43,7 @@ cannot have it ([Built: Cua follow-ups](#built-cua-follow-ups)). Recipe key
 entry is built too: a local window enters, replaces, and removes the key a
 cloud recipe's provider reads, kept only in the host credential store
 ([Built: recipe key entry](#built-recipe-key-entry)); it shows only for a
-provider the host offers, so no running host shows it until E2B is offered.
+provider the host offers, which now includes E2B.
 Billed cloud placements follow [decision C5](#expiry-and-teardown-when-the-daemons-host-may-die),
 accepted on 2026-10-28 behind a monthly spend cap: Cua's AWS, Google Cloud,
 and Modal placements, the cap, and the per-lease estimate are built against
@@ -51,7 +51,9 @@ recorded and fake providers only
 ([Built in Cua sub-slice 4](#built-in-cua-sub-slice-4)). Slice 4's
 real-provider smoke, slice 6's E2B live smoke, and Cua sub-slices 2 and 3's
 live smokes are still owed by the maintainer, and so is a billed placement's
-live run.
+live run; offering both providers ahead of those smokes was asked for by the
+maintainer on 2026-10-31, and the smokes stay the evidence for what a
+recording cannot show.
 
 **Name.** The product calls it a _disposable desktop_. "Computer" already names
 the Mac computer-use destination and the paired-host Computers card, and a
@@ -1142,13 +1144,14 @@ Rules this slice resolved:
   with it and only for that provider, re-checking authority, provider, and
   posture before the call. No other answer stands in for it. An agent still
   acquires nothing.
-- **Loaded for teardown, offered after the person opts in.** The E2B driver
+- **Loaded for teardown, offered, and enabled by the person.** The E2B driver
   is loaded on every host, so teardown and restart reconciliation reach any
-  E2B lease a host ever journaled. It is not effective: no host offers it for
-  leasing, reports it as a destination, or lets a recipe name it until the
-  maintainer's live smoke passes and the person opts in. The key entry the
-  person needs for it is built ([Built: recipe key entry](#built-recipe-key-entry)).
-  A billed provider is never on by default.
+  E2B lease a host ever journaled, and every host lists it for leasing
+  ([Built: offering E2B and Cua](#built-offering-e2b-and-cua)). Offering is
+  not enabling: a Project uses it only once a person saves a recipe that
+  names it with their own key (the key entry is built,
+  [Built: recipe key entry](#built-recipe-key-entry)), and every billed start
+  still asks the person first. A billed provider is never on by default.
 - **E2B.** The control plane is `api.e2b.app` with the key in `X-API-Key`.
   A desktop is a sandbox created from the recipe's template (E2B's public
   `desktop` template when it names none) through `POST /v2/sandboxes` with the
@@ -1243,8 +1246,9 @@ sub-slice 2, the driver for a Space on this machine
 the person's other machines
 ([Built in Cua sub-slice 3](#built-in-cua-sub-slice-3)), and sub-slice 4,
 the person's own clouds behind the spend cap
-([Built in Cua sub-slice 4](#built-in-cua-sub-slice-4)); no host offers it
-until the maintainer's live smokes pass.
+([Built in Cua sub-slice 4](#built-in-cua-sub-slice-4)); a Linux host offers
+it for leasing ([Built: offering E2B and Cua](#built-offering-e2b-and-cua)),
+and the maintainer's live smokes are still owed.
 
 ### What Cua offers now
 
@@ -1621,10 +1625,12 @@ where Cua documents no `network` `none`.
   feature, or the Space's `SystemService.GetCapabilities` reports another
   `cua.env.v1` protocol version. Windows has no Unix socket path here and
   offers no Cua provider.
-- The driver is loaded for teardown, and is effective only after the person
-  chooses it in a recipe, as E2B is. It is loaded on Linux hosts now and on
-  macOS once Cua is offered there, and only once the host has journaled a
-  Cua lease ([Built in Cua sub-slice 2](#built-in-cua-sub-slice-2)).
+- The driver is loaded for teardown and listed for leasing from the first
+  start, so a recipe can name it before any lease exists; a Project uses it
+  only after a person saves a recipe that does. It is loaded on Linux hosts
+  now and on macOS once Cua is offered there. The lease service still asks
+  the daemon nothing until a Cua lease is journaled
+  ([Built: offering E2B and Cua](#built-offering-e2b-and-cua)).
 - On macOS a Space gives a Mac without a screen its first desktop
   provider, but [artifact transfer](#built-in-slice-3) still refuses
   `path-unverifiable` there until a handle-path check exists for macOS. That
@@ -1869,14 +1875,15 @@ Rules this sub-slice resolved:
   `StartProcess` stream ends at once; a stream the daemon never ends times
   out.
 - **Octant asks the person's daemon nothing until it has a Cua lease.** The
-  driver is loaded on Linux hosts and joins the host's providers only once
-  the journal holds a Cua lease, so teardown reaches every Cua lease a host
-  ever journaled, and a host that never leased from Cua makes no call to
-  the socket, not even a restart listing. A listing makes the daemon wait
-  for Cua's relay, and a host that never chose Cua has nothing there to
-  find. macOS loads it once Cua is offered there. Since a recipe can name
-  only a provider the host lists, offering Cua must also list the driver
-  before any Cua lease exists.
+  driver is loaded on Linux hosts, so teardown reaches every Cua lease a host
+  ever journaled, and the lease service makes no restart listing for a
+  daemon-run provider until the journal holds a lease of it, so a host that
+  never leased from Cua makes no call to the socket. A listing makes the
+  daemon wait for Cua's relay, and a host that never chose Cua has nothing
+  there to find. The driver is listed from the first start rather than after
+  its first lease, because a recipe can name only a provider the host lists
+  and no first lease could otherwise happen. macOS loads it once Cua is
+  offered there.
 - **The daemon a lease used is recorded and kept.** The `requested` event
   records the declared socket path and the user id whose home holds it. A
   provider that declares a daemon is never leased on a host that has no user
@@ -1971,7 +1978,9 @@ the form `octant-<lease id>` is accepted, that a local Space reports no
 `cloud`, that `/home/user` exists in the guest and a launched program
 reaches its display, that each screenshot carries a `screenshot_id`, and
 whether the VM's screen matches the recipe's size (a frame larger than the
-recipe is refused). Until it passes, the driver is offered on no host.
+recipe is refused). A host offers the driver before it passes
+([Built: offering E2B and Cua](#built-offering-e2b-and-cua)); until it
+passes, those facts stay unconfirmed.
 
 ### Built in Cua sub-slice 3
 
@@ -2080,8 +2089,9 @@ is what confirms what a recording cannot: that `location` `host:<id>` takes
 the id `ListHosts` reports, that a Space there reports `network` `none`, its
 `host`, and its labels, that `GetSpaceRoute` answers `mesh` or `direct`, that
 `SetSpaceLifetime` and `DeleteSpace` reach it through this daemon, and that
-a complete `ListSpaces` lists it. Until both smokes pass, the driver is
-offered on no host.
+a complete `ListSpaces` lists it. A host offers the driver before both
+smokes pass ([Built: offering E2B and Cua](#built-offering-e2b-and-cua));
+until they pass, those facts stay unconfirmed.
 
 ### Built in Cua sub-slice 4
 
@@ -2172,8 +2182,9 @@ complete `ListSpaces` reach it. No smoke target for it is built.
 ### Built: Cua follow-ups
 
 The three follow-ups Cua sub-slice 3 named, none of which needs a smoke or a
-maintainer decision. No host offers Cua yet, so none is reachable in the
-running app until the live smokes pass.
+maintainer decision. A Linux host offers Cua now
+([Built: offering E2B and Cua](#built-offering-e2b-and-cua)), so each is
+reachable in the running app.
 
 - **Contract.** `DesktopMachineId` and `DesktopMachine` (`machineId`,
   `displayName`); `machine` on `DesktopRecipe`, `desktop.lease-requested@1`,
@@ -2276,10 +2287,9 @@ smokes; `cua-other-machine` now names the one machine its setup requires.
 ### Built: recipe key entry
 
 A person enters, replaces, and removes the API key a cloud recipe's provider
-reads, in the recipe editor of a local window. Offering E2B still waits on
-the maintainer's live smoke, so the key field shows only for a provider the
-host offers for leasing and no running host shows it yet; its tests offer a
-fake cloud provider.
+reads, in the recipe editor of a local window. The key field shows only for
+a provider the host offers for leasing, which now includes E2B; its tests
+offer a fake cloud provider.
 
 - **Contract.** `DesktopRecipeKeyChange` (`enter` with the key, or `remove`)
   as `key` on `change-code-project-desktop-recipe`; `DesktopRecipeKeyState`
@@ -2382,11 +2392,59 @@ key, a removed key, and a host with no store, with no console error, no
 horizontal overflow, and the typed key absent from the page after saving.
 
 Nothing here is owed by the maintainer beyond slice 6's E2B live smoke, which
-still gates offering E2B. Left for later: a key stored for a change that was
+is the evidence for what the recorded E2B API cannot show. Left for later: a key stored for a change that was
 not journaled stays in the store if deleting it fails too, since nothing
 names it and the store is never listed. The key field is a local window's
 like the rest of the editor, which no paired client mounts
 ([recipe storage](#built-recipe-storage)).
+
+### Built: offering E2B and Cua
+
+The host now lists the E2B driver on every host and the Cua driver on every
+Linux host, so a Project's recipe can name either and its threads can lease
+from it. The maintainer asked for this on 2026-10-31, ahead of the live
+smokes, which remain the evidence for what the recordings cannot show.
+
+- **Listed from the first start.** `bundledDesktopProviders`
+  (`apps/server/src/computerUse/bundledDesktopProviders.ts`) assembles the
+  loaded drivers: host-local when its programs were ready, E2B, and Cua. Cua
+  is no longer joined only after its first lease, which made a first lease
+  impossible. The lease service keeps its rule that a daemon-run provider is
+  asked nothing, not even a restart listing, until the journal holds a lease of
+  it, so listing the driver makes no call to the person's daemon.
+- **Offering is not enabling.** A Project uses a provider only after a person
+  saves a recipe that names it, and a cloud recipe also needs the person's own
+  key. A billed start still asks the person first, in every posture, and the
+  monthly cap still applies; none of that changed.
+- **Needs setup is reported and fails closed.** `LeasableDesktopProvider` has
+  an optional `needsSetup` (`no-credential-store` for a cloud provider on a
+  host with no credential store to keep its key; `daemon-not-connected` for a
+  daemon-run provider whose socket is not there). The host reads the socket
+  without connecting (`desktopDaemonSocketReady`), on start and every thirty
+  seconds, and treats it as missing until the first read. A listed provider
+  that needs setup refuses every start with `needs-setup` before any call to
+  the provider, the pane says so, and the project policy refuses a recipe that
+  moves to it; a recipe already on it may still be edited or removed.
+- **Settings and the Desktop pane.** The recipe editor lists every offered
+  provider, marks one that needs setup and disables choosing it, says in a
+  line what each provider is (where it runs, whose account, whether it bills),
+  and starts a new recipe from the first provider that is ready. The pane's
+  Start refusal for `needs-setup` points to those settings.
+- **Where the tool service exists.** The Computer tool service is created
+  wherever any desktop provider is offered, not only where host-local is
+  loaded, so a Mac with no screen of its own can bind a thread to a leased
+  cloud desktop. A Mac with a screen is unchanged.
+- **Evidence.** `desktopLeaseService.test.ts` lists both providers before
+  any lease, asks the daemon nothing until a lease is journaled, refuses a
+  start on a provider that needs setup with no provider call, still asks
+  before a billed start, and destroys the lease with its thread;
+  `desktopDaemonPort.test.ts` covers the socket reading;
+  `projectPolicy.test.ts` the recipe rule; the editor and model tests the
+  wording and the disabled choice. Rendered QA of the editor ran headless,
+  light and dark, for ready providers and for providers that need setup.
+- **Still owed by the maintainer.** The E2B live smoke, Cua sub-slices 2 and
+  3's live smokes, and a billed Cua run, which spends money
+  (`bun run desktop:cloud:smoke`). Offering Cua on macOS stays its own item.
 
 ## Rationale
 
@@ -2404,6 +2462,8 @@ rule.
 
 Source entry points: `apps/server/src/computerUse/desktopLeaseService.ts` and
 `computerUseDestination.ts` (lease service, destination reporting),
+`apps/server/src/computerUse/bundledDesktopProviders.ts` (which drivers a host
+lists and what each needs set up),
 `packages/contracts/src/desktopLease.ts`, `packages/domain/src/desktopLeasePolicy.ts`,
 `packages/plugin-api/src/desktopProvider.ts` and `desktopProviderConformance.ts`
 (the seam), `apps/server/src/computerUse/hostLocalDesktopLaunch.ts` (the
