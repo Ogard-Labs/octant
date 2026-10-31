@@ -7713,9 +7713,8 @@ mechanisms are:
   Allowed; not built yet: the single
   level setting with its global and Project defaults, the first-run
   question, the header indicator, the one-time warning,
-  Reviewed in Work and Mistral Vibe's own auto-approve mode, Octant Shield's
-  picker and Settings, and Full access without a sandbox or prompts for every
-  runtime.
+  Reviewed in Work and Mistral Vibe's own auto-approve mode, and Full access
+  without a sandbox or prompts for every runtime.
 
 - **Reviewed.** A reviewer answers the prompts that would otherwise go to
   the person: the provider's own, where it has one, or
@@ -9075,7 +9074,13 @@ access` agree); a thread's own change is journaled as
   on profile pages; a paired device sees only that a signed-in page exists. The
   person signs out of a profile (closing its pages and removing its storage) at a
   local window, and the host journals that it happened without naming a site or
-  a cookie. Browser extensions (approved design, not yet built) install only
+  a cookie. The person may also import another browser's cookies into one
+  profile, only by picking a browser and profile in Settings: the host reads a
+  copy of that browser's cookie database, asks macOS for the browser's cookie key
+  through its own Keychain prompt (a refusal imports nothing), verifies each
+  decrypted value against its host, and hands the cookies to the desktop app's
+  store without logging, journaling, or returning them; the journal records the
+  source, the profile, and counts. Browser extensions (approved design, not yet built) install only
   from an unpacked folder at a local window, start disabled, are enabled per
   profile, and never load into a Private page. Detail is in [Browser profiles and extensions](design/browser-profiles.md).
 - **Side Chat reads.** A Side Chat may read its source thread's transcript,
@@ -10225,9 +10230,9 @@ in this document describe the build as it ships.
 
 Octant Shield is Octant's own automatic approval reviewer (maintainer
 decision, 2026-10-31). Its Judge is built for every runtime below, subagents
-included (build order steps 1 and 2); the picker and Settings, the Watcher,
-safe networks, and the server registry are designed, not built. It answers the
-approval prompts
+included, with the picker and the Settings and Project choices (build order
+steps 1 to 3); the Watcher, safe networks, and the server registry are
+designed, not built. It answers the approval prompts
 that would otherwise go to the person, for every runtime that routes
 approvals through Octant: Octant Harness, Claude Code (`canUseTool`), Codex
 (app-server approval requests), OpenCode (`permission.asked`), ACP agents
@@ -10396,9 +10401,24 @@ run's behalf, carries the seam's one-call scope (`ProviderApprovalAnswer.scope:
 runtime to, whatever the person's persistence setting, so one allow never
 authorizes a later call nobody reviewed. An OpenCode v2 permission's
 `resources` are read as the paths, command, or address it targets. Claude Code and Codex keep their own reviewer at Auto
-by default, so Shield answers their prompts only once the person chooses it;
-Mistral Vibe's own auto-approve mode is not built, so Shield reviews it, as it
-reviews OpenCode, every other ACP agent, and Pi.
+by default; once the person chooses Shield for the account or the Project,
+the thread starts without the provider's reviewer, so its prompts reach
+Octant and Shield answers them. Mistral Vibe's own auto-approve mode is not
+built, so Shield reviews it, as it reviews OpenCode, every other ACP agent,
+and Pi.
+
+The choices are built for Code: Settings › Code › Access has **Auto
+reviewer** (Provider's own / Octant Shield, stored as `CodeSettings.autoReviewer`)
+and **Shield model** (each thread's provider with its smallest model, or any
+enabled provider's catalogued model, local ones included, stored as
+`CodeSettings.shieldModel`), and a Code Project's overview overrides the
+reviewer (`change-code-project-auto-reviewer`, journaled
+`project.code-auto-reviewer-changed@1`). The picker offers Auto, marked
+Recommended, wherever a reviewer can run: the provider's own, or Shield on a
+runtime that routes its approvals through Octant and is enabled; its
+description names which reviewer answers. Where none can run (a disabled
+provider, a runtime that raises no approvals) Auto is listed unavailable with
+the reason and a thread set to it asks first.
 
 **Build order.** (1) Octant Harness; (2) every runtime through the approval
 path; (3) the picker and Settings; (4) the Watcher; (5) safe networks; (6)

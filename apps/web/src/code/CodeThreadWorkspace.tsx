@@ -1,4 +1,5 @@
 import { threadCompactionSubject } from "../context/CompactionDivider";
+import type { AutoReview } from "./autoReview";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
 import type { ProviderModelOptionValues, ThreadDocumentDelivery } from "@octant/contracts";
 import {
@@ -164,6 +165,8 @@ export interface CodeThreadWorkspaceProps {
    * false or absent Auto is shown disabled with the reason.
    */
   readonly harnessAutoReviewSupported?: boolean;
+  /** Who answers the thread's prompts at Auto, or why nobody can. */
+  readonly autoReview?: AutoReview;
   readonly threadId: CodeThreadId;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
@@ -2050,6 +2053,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               ) : null}
               <PermissionModePicker
                 autoSupported={props.harnessAutoReviewSupported === true}
+                autoReview={props.autoReview}
                 disabled={accessChanging}
                 onChange={(next) => void changeMode(next)}
                 {...(profileName === undefined ? {} : { profileName })}
