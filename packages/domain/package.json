@@ -105,6 +105,7 @@
     "./tool-action-policy": "./src/toolActionPolicy.ts",
     "./tool-call-policy": "./src/toolCallPolicy.ts",
     "./tool-egress-policy": "./src/toolEgressPolicy.ts",
+    "./safe-network-policy": "./src/safeNetworkPolicy.ts",
     "./untrusted-content-policy": "./src/untrustedContentPolicy.ts",
     "./extension-tool-grant-policy": "./src/extensionToolGrantPolicy.ts",
     "./thread-work-policy": "./src/threadWorkPolicy.ts",

@@ -32,7 +32,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | Area                                                                                  | Decisions | Built   | Partly built | Designed, not built |
 | ------------------------------------------------------------------------------------- | --------- | ------- | ------------ | ------------------- |
 | [Principles and hard lines](#principles-and-hard-lines)                               | 5         | 4       | 1            | 0                   |
-| [Guardrails and review](#guardrails-and-review)                                       | 7         | 0       | 5            | 2                   |
+| [Guardrails and review](#guardrails-and-review)                                       | 7         | 0       | 6            | 1                   |
 | [Key providers](#key-providers)                                                       | 1         | 0       | 0            | 1                   |
 | [Release scope](#release-scope)                                                       | 4         | 1       | 3            | 0                   |
 | [Process topology and local trust](#process-topology-and-local-trust)                 | 6         | 6       | 0            | 0                   |
@@ -68,8 +68,8 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Hubs, relay and Nightly](#hubs-relay-and-nightly)                                    | 5         | 3       | 1            | 1                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
-| [Decided, pending a specification update](#decided-pending-a-specification-update)    | 4         | 0       | 0            | 4                   |
-| **All areas**                                                                         | **222**   | **174** | **35**       | **13**              |
+| [Decided, pending a specification update](#decided-pending-a-specification-update)    | 5         | 0       | 0            | 5                   |
+| **All areas**                                                                         | **222**   | **173** | **36**       | **13**              |
 
 ## Principles and hard lines
 
@@ -213,10 +213,15 @@ Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Octant Shield](.
 
 The person names trusted places (hosts, domains, address ranges, private-network tags) whose egress passes by rule.
 
-- Set in Settings › Access as an account default with a Project override.
+- Set in Settings › Access as an account default with a Project override; only a person at a local window changes them, and each list is journaled whole and replayed at startup.
 - Egress to anywhere else goes to the Judge at Reviewed and to the person at Guarded; each decision is journaled per host.
+- Network limits are a host setting in Settings › Access, off by default, journaled (`safe-networks.limits-set@1`), changed only at a local window, replayed at startup, and read at each runtime launch, so a change applies to the next launch. Safe networks stay editable either way, and the page says whether limits are on. Limits ship off until live provider turns have run through the proxy.
+- With limits on, below Full access every wrapped provider runtime runs on its own egress proxy and reaches only its provider's endpoints, its Project's egress rules and these places; Claude's command sandbox sends its network to the same proxy. Full access stays open network, and so does every runtime while limits are off.
+- A refused host is refused with the host named and listed under Recently refused, where the person can trust it.
+- No place or range may reach a link-local address, and a name nothing lists is refused before any lookup.
+- Built on macOS for provider runtimes, behind the Network limits switch (off by default). Not built yet: Linux runtimes (they keep open network), Claude's own process (Plan and its in-process web fetch), a composed reviewer (the hook is in place, so Auto goes to the person), safe networks for harness commands, and taint suspending places. No real runtime turn has run on its proxy yet.
 
-Status: Designed, not built. Since: 2026-10-31. Detail: [Architecture: Octant Shield](../architecture.md#octant-shield).
+Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Provider runtime network](../architecture.md#provider-runtime-network) and [Octant Shield](../architecture.md#octant-shield).
 
 ### Server SSH profiles
 
@@ -1119,7 +1124,7 @@ A harness command on an approval-gated or auto-accept-edits Code thread reaches 
 - Every rule expires, a child uses its parent's live rules, and rules never leave the host.
 - Rules arise only from answering a network-access approval, never from a model call, tool result or repository configuration. Project rules need a person at a local window.
 - Taint suspends standing rules, and bytes a proxied command receives from outside taint the thread. Learn mode turns refusals into proposals that grant nothing.
-- Provider runtimes that run their own tools in-process are outside this proxy.
+- Provider runtimes that run their own tools in-process run on a proxy of their own, decided by provider endpoints, Project rules and safe networks rather than thread rules.
 - The reviewer path for per-call network prompts is not built yet.
 
 Status: Built. Since: 2026-10-13. Detail: [Architecture: Harness tool egress rules](../architecture.md#harness-tool-egress-rules).
@@ -1336,7 +1341,7 @@ A provider runtime launch is wrapped when the process carries exactly one thread
 - One key provider's runtime is wrapped in Plan but keeps its own sandbox outside Plan; closing that gap is not an open goal.
 - A runtime used only for a readiness probe is unwrapped and starts no turn.
 - At Full access Octant wraps no provider runtime, so only the operating system's own protections remain; Plan's read-only enforcement is the same at every level.
-- A runtime that makes its own API call resolves provider-endpoints-only below Full access, which the OS profile materializes as plain network allow; the endpoint restriction holds only for Octant-brokered tools and harness commands.
+- A runtime that makes its own API call resolves provider-endpoints-only below Full access. On macOS, with Network limits on (they ship off), the runtime then runs on its own egress proxy, reaching its provider's endpoints, its Project's rules and the person's safe networks; on Linux the OS profile still materializes it as plain network allow.
 - A new module may not launch a provider process without the shared confinement builder unless the matrix names it.
 - Runtimes get no reusable cloud credential the person did not configure for that account; shared-config and default-chain cloud sign-in is refused.
 
