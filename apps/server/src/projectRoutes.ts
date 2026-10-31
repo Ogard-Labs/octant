@@ -226,13 +226,30 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
       // A saved action is a command the person later clicks to run in their own
       // shell, so only a window on the host writes the list.
       if (
-        command.kind === "change-code-project-actions" &&
+        (command.kind === "change-code-project-actions" ||
+          command.kind === "change-work-project-actions") &&
         readPrincipalRouteContext(request)?.principal.kind === "remote-device"
       ) {
         return response(
           {
             category: "unauthorized",
-            message: "A Code Project's actions are set on the host.",
+            message: "A Project's actions are set on the host.",
+          },
+          403,
+          origin,
+        );
+      }
+      // A Work Project's Developer tools switch is the person's, set at a
+      // window on this host and journaled as the host's local user with the
+      // time, so a paired device does not set it on their behalf.
+      if (
+        command.kind === "change-work-project-developer-tools" &&
+        readPrincipalRouteContext(request)?.principal.kind === "remote-device"
+      ) {
+        return response(
+          {
+            category: "unauthorized",
+            message: "A Work Project's Developer tools are turned on at the host.",
           },
           403,
           origin,

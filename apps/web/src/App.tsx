@@ -4706,6 +4706,7 @@ function LaunchedShell(
       setProjectDesktopRecipe: projectController.setDesktopRecipe,
       setProjectActions: projectController.setActions,
       setProjectWorkStatusFile: projectController.setWorkStatusFile,
+      setProjectWorkDeveloperTools: projectController.setWorkDeveloperTools,
       setProjectsListOpen,
       setRailPlaceholder,
       setRequestedAgentReview,
@@ -6537,12 +6538,17 @@ function LaunchedShell(
    * control already uses, so a command is a second route to an action, never a
    * second authority for it.
    */
+  // A Work Project offers its actions once the person turns on its Developer
+  // tools; that switch decides what the window shows, not what may run.
   const actionsProject = projectController.projects.find(
     (project) =>
-      project.type === "code" && project.lifecycle === "active" && project.id === activeProjectId,
+      (project.type === "code" ||
+        (project.type === "work" && project.developerTools?.enabled === true)) &&
+      project.lifecycle === "active" &&
+      project.id === activeProjectId,
   );
   const activeProjectActions =
-    actionsProject?.type === "code"
+    actionsProject?.type === "code" || actionsProject?.type === "work"
       ? (actionsProject.actions ?? NO_PROJECT_ACTIONS)
       : NO_PROJECT_ACTIONS;
   const octantCommands = buildOctantCommands({
