@@ -106,6 +106,43 @@ describe("revalidateAutomationAuthority", () => {
     ).toMatchObject({ kind: "blocked", reason: "authority-mismatch" });
   });
 
+  it("never runs a Work routine saved without the shell and Git every Work turn now holds", () => {
+    const withoutShell = {
+      filesystem: true,
+      shell: false,
+      git: false,
+      network: false,
+      tools: true,
+      subagents: false,
+      executionPolicy: "approval-gated",
+      permissionPersistence: "current-session",
+    } as const;
+    const definition = automationDefinitionFixture({
+      authorityProfile: {
+        profileId: AUTOMATION_TEST_IDS.authorityProfile,
+        profileVersion: 1,
+        requested: withoutShell,
+        effective: withoutShell,
+        effectiveAuthorityDigest: "automation-authority-digest",
+      },
+    } as never);
+    const run = automationRunForDefinition(definition);
+    expect(revalidateAutomationAuthority({ definition, run, facts: facts() })).toMatchObject({
+      kind: "blocked",
+      reason: "authority-mismatch",
+    });
+
+    // Saved again under a profile that grants them, it runs.
+    const saved = automationDefinitionFixture();
+    expect(
+      revalidateAutomationAuthority({
+        definition: saved,
+        run: automationRunForDefinition(saved),
+        facts: facts(),
+      }),
+    ).toMatchObject({ kind: "ok" });
+  });
+
   it("rejects Full access snapshots", () => {
     const definition = automationDefinitionFixture({
       authorityProfile: {

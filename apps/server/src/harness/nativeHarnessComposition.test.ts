@@ -445,7 +445,7 @@ describe("native harness composition", () => {
       expect(names(tools!)).toEqual(["todo-write", "context-remaining", "second-opinion"]);
     });
 
-    it("offers the task list, context-remaining and second-opinion in Work beside its folder tools", () => {
+    it("offers the task list, context-remaining and second-opinion in Work beside its folder tools and shell", () => {
       const tools = harness().composition.forWork({
         thread: workThread,
         projectRoot: "/nonexistent",
@@ -455,6 +455,7 @@ describe("native harness composition", () => {
         "read",
         "grep",
         "glob",
+        "bash",
         "edit",
         "write",
         "todo-write",
@@ -531,7 +532,7 @@ describe("native harness composition", () => {
       const web = ["web-fetch", "web-search"];
       expect({ chat, work, code }).toEqual({
         chat: lead,
-        work: ["read", "grep", "glob", "edit", "write", ...web, ...lead],
+        work: ["read", "grep", "glob", "bash", "edit", "write", ...web, ...lead, "goal-check"],
         code: ["read", "grep", "glob", "bash", "edit", "write", ...web, ...lead, "goal-check"],
       });
     });

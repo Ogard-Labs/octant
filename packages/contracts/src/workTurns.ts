@@ -9,6 +9,7 @@ import { AggregateVersion, UtcTimestamp } from "./events";
 import { HostId } from "./host";
 import { BindingRevisionId, ProjectId } from "./projects";
 import {
+  GuardrailLevel,
   ProviderInstanceId,
   ProviderModelId,
   ProviderSessionId,
@@ -100,14 +101,24 @@ export const WorkTurnAuthority = Schema.Struct({
 export type WorkTurnAuthority = typeof WorkTurnAuthority.Type;
 
 /**
- * Honest capability facts retained with every accepted Work turn. They make
- * the denied Code/shell/Git posture durable for reconnect and restart.
+ * How a Work turn could run commands or Git: `denied` on a turn accepted
+ * before Work shared Code's capability set, otherwise the guardrail level the
+ * turn ran at, which decides who approved each command.
+ */
+export const WorkTurnShellAuthority = Schema.Union(Schema.Literal("denied"), GuardrailLevel);
+export type WorkTurnShellAuthority = typeof WorkTurnShellAuthority.Type;
+
+/**
+ * Honest capability facts retained with every accepted Work turn, so the
+ * level a turn ran at survives reconnect and restart. `unconfined` is a turn
+ * at Full access, which runs with no OS sandbox; worktrees, pull requests and
+ * Code checkouts stay Code's.
  */
 export const WorkTurnCapabilityFacts = Schema.Struct({
   workspace: Schema.Literal("project-backed"),
-  confinement: Schema.Literal("project-root-confined"),
-  shell: Schema.Literal("denied"),
-  git: Schema.Literal("denied"),
+  confinement: Schema.Literal("project-root-confined", "unconfined"),
+  shell: WorkTurnShellAuthority,
+  git: WorkTurnShellAuthority,
   worktree: Schema.Literal("denied"),
   pullRequest: Schema.Literal("denied"),
   code: Schema.Literal("denied"),
@@ -475,6 +486,10 @@ export type WorkTurnUpdated = typeof WorkTurnUpdated.Type;
 export const WORK_TURN_EVENT_NAMES = ["work.turn-accepted@1", "work.turn-updated@1"] as const;
 export type WorkTurnEventName = (typeof WORK_TURN_EVENT_NAMES)[number];
 
+/**
+ * What a Work turn accepted before Work shared Code's capability set ran
+ * with; a turn journaled without facts replays as these.
+ */
 export const WORK_TURN_CAPABILITIES: WorkTurnCapabilityFacts = {
   workspace: "project-backed",
   confinement: "project-root-confined",

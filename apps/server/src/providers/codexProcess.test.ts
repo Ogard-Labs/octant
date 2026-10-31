@@ -739,6 +739,33 @@ describe("Codex launch confinement", () => {
     expect(prepared.status === "prepared" ? prepared.launch.command : undefined).toBe("/bin/sh");
   });
 
+  it.each(["approval-gated", "auto-accept-edits", "full-access"] as const)(
+    "launches a Work thread at %s under the confinement a Code thread at that level gets",
+    (executionPolicy) => {
+      const launchFor = (mode: "work" | "code") => {
+        const prepared: unknown[] = [];
+        const result = prepareCodexLaunch({
+          binaryPath: "/bin/sh",
+          args: ["-c", "true"],
+          authority: { kind: "thread", root: tmpdir(), mode, executionPolicy },
+          environment: { HOME: homedir() },
+          confinement: {
+            prepare: (input) => {
+              // The launch's own temporary directory differs on every call.
+              const { temporaryDirectory: _own, privateHomeAllowPaths: _paths, ...rest } = input;
+              prepared.push(rest);
+              return { command: input.executable, args: input.args };
+            },
+          },
+          platform: "darwin",
+        });
+        if (result.status === "prepared") result.launch.release();
+        return { status: result.status, prepared };
+      };
+      expect(launchFor("work")).toEqual(launchFor("code"));
+    },
+  );
+
   it("hands a Project's extra folders to the profile as the root's peers, at every wrapped level", () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-codex-root-")));
     const extra = realpathSync(mkdtempSync(join(tmpdir(), "octant-codex-extra-")));

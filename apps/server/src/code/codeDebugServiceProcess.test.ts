@@ -266,7 +266,7 @@ async function host(
   });
   const egressRules = new ToolEgressRules({
     journal,
-    readCodeThread: (threadId) =>
+    readThread: (threadId) =>
       threadId === String(thread().id) ? { projectId: String(thread().projectId) } : undefined,
     readThreadTaint: () => false,
     recordLaunchTaint: () => {

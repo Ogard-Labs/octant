@@ -2761,7 +2761,7 @@ describe("native harness tool egress grants and learn mode", () => {
     let elapsed = 0;
     const rules = new ToolEgressRules({
       journal: options.journal?.(base.journal) ?? base.journal,
-      readCodeThread: (threadId) =>
+      readThread: (threadId) =>
         threadId === String(egressThread) || threadId === String(egressOtherThread)
           ? { projectId: String(egressProject) }
           : undefined,

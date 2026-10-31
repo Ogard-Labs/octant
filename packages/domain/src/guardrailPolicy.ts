@@ -7,6 +7,8 @@ import type {
   ProviderExecutionPolicy,
   ToolActionAuthority,
   ToolNetworkEgressPolicy,
+  WorkAccess,
+  WorkTurnCapabilityFacts,
 } from "@octant/contracts";
 import { isNativeHarnessDriverKind } from "./providerPolicy";
 
@@ -145,6 +147,82 @@ export function threadAccessOf(mode: PermissionMode): {
 }
 
 /**
+ * The posture a Work thread's access stores. Work and Code share one
+ * capability set, so a Work level runs a session exactly as the same Code
+ * mode does; Work has no Plan overlay.
+ */
+export function workThreadAccessOf(access: WorkAccess): {
+  readonly executionPolicy: Exclude<ProviderExecutionPolicy, "plan">;
+  readonly autoApprove: boolean;
+} {
+  switch (access) {
+    case "ask-first":
+      return { executionPolicy: "approval-gated", autoApprove: false };
+    case "auto":
+      return { executionPolicy: "approval-gated", autoApprove: true };
+    case "auto-accept-edits":
+      return { executionPolicy: "auto-accept-edits", autoApprove: false };
+    case "full-access":
+      return { executionPolicy: "full-access", autoApprove: false };
+  }
+}
+
+/**
+ * Whether `access` asks for no more than `ceiling`. Ask first is within
+ * every level and Full access holds every level; Auto and Accept edits widen
+ * different things (who answers, and which writes ask), so neither holds the
+ * other.
+ */
+export function workAccessWithin(access: WorkAccess, ceiling: WorkAccess): boolean {
+  return access === ceiling || access === "ask-first" || ceiling === "full-access";
+}
+
+/**
+ * The level a turn runs at when its caller's authority (a goal-loop round, a
+ * routine, a delegation) is `ceiling`: the thread's own when the ceiling
+ * holds it, else the ceiling when the thread holds that, else Ask first.
+ */
+export function clampWorkAccess(thread: WorkAccess, ceiling: WorkAccess): WorkAccess {
+  if (workAccessWithin(thread, ceiling)) return thread;
+  if (workAccessWithin(ceiling, thread)) return ceiling;
+  return "ask-first";
+}
+
+/** The Work access a Code mode picker choice stands for; Plan has none. */
+export function workAccessOfPermissionMode(mode: PermissionMode): WorkAccess | undefined {
+  switch (mode) {
+    case "auto":
+      return "auto";
+    case "ask-first":
+      return "ask-first";
+    case "accept-edits":
+      return "auto-accept-edits";
+    case "full-access":
+      return "full-access";
+    case "plan":
+      return undefined;
+  }
+}
+
+/**
+ * What a Work turn records about the level it ran at: shell and Git follow
+ * the level as they do in Code, and a Full access turn runs with no OS
+ * sandbox. Worktrees, pull requests and Code checkouts stay Code's.
+ */
+export function workTurnCapabilityFacts(access: WorkAccess): WorkTurnCapabilityFacts {
+  const level = guardrailLevelOf(workThreadAccessOf(access));
+  return {
+    workspace: "project-backed",
+    confinement: level === "full-access" ? "unconfined" : "project-root-confined",
+    shell: level,
+    git: level,
+    worktree: "denied",
+    pullRequest: "denied",
+    code: "denied",
+  };
+}
+
+/**
  * The level a stored posture is at. Today's postures map onto it:
  * approval-gated and auto-accept-edits are Guarded, either one with the
  * provider's reviewer delegated is Provider review, and `full-access` is Full
@@ -279,15 +357,17 @@ export function shieldReviewsPrompts(input: {
 }
 
 /**
- * Approved egress defaults (2026-08-12): Work and Plan get none; Code at a
- * prompting posture gets provider endpoints only; Code at Full access is
- * unrestricted. The Seatbelt builder materializes it.
+ * Approved egress defaults (2026-08-12): Chat and Plan get none; Work and Code
+ * at a prompting posture get provider endpoints only; Work and Code at Full
+ * access are unrestricted. Work and Code are guarded identically
+ * (2026-10-31), so Work's egress follows the level as Code's does. The
+ * Seatbelt builder materializes it.
  */
 function guardrailEgress(
   mode: ToolActionAuthority["mode"],
   executionPolicy: ProviderExecutionPolicy,
 ): ToolNetworkEgressPolicy {
-  if (mode !== "code") return "none";
+  if (mode === "chat") return "none";
   if (executionPolicy === "plan") return "none";
   // Auto-accepting edits says nothing about the network, so it keeps exactly
   // the egress approval-gated Code already has.
