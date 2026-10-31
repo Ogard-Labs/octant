@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { CorrelationId, UtcTimestamp } from "./events";
+import { ProjectId } from "./projects";
 import { ToolActionAuthority, ToolActionId } from "./toolActions";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -35,11 +36,51 @@ export type BrowserCaptureId = typeof BrowserCaptureId.Type;
 export const BrowserThreadId = brandedUuid("BrowserThreadId");
 export type BrowserThreadId = typeof BrowserThreadId.Type;
 
-export const BrowserProfileMode = Schema.Literal("isolated", "existing-profile");
+/**
+ * `existing-profile` was a mode that would have opened the person's everyday
+ * browser profile. It is retired: the schema no longer decodes it, so no caller
+ * can ask for it. Reading cookies out of another browser is a separate, explicit
+ * import into an Octant profile, never a mode a page opens in.
+ */
+export const BrowserProfileMode = Schema.Literal("isolated");
 export type BrowserProfileMode = typeof BrowserProfileMode.Type;
+
+/**
+ * The store a Browser page keeps its cookies and site data in.
+ *
+ * Private is in memory and belongs to one browsing context. A Project profile
+ * is on disk and shared by every page of one Work or Code Project. The
+ * Personal profile is on disk and shared by every page that chooses it. Chat
+ * has no Browser, so no profile names a Chat Project.
+ */
+export const BrowserProfile = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("private") }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("project"), projectId: ProjectId }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("personal") }).annotations(strict),
+);
+export type BrowserProfile = typeof BrowserProfile.Type;
+
+/**
+ * Why the host would not put a page in a profile. Each is a value the pane
+ * shows in words, never a silent no-op: `profile-not-local` is a paired device,
+ * `profile-needs-a-person` is a routine, subagent, or terminal grant, and
+ * `profile-unavailable` is a Project that is archived or has its mode off, a
+ * host with no desktop Browser, or a store that is locked.
+ */
+export const BrowserProfileRefusalReason = Schema.Literal(
+  "profile-not-local",
+  "profile-needs-a-person",
+  "profile-unavailable",
+);
+export type BrowserProfileRefusalReason = typeof BrowserProfileRefusalReason.Type;
 
 export const BrowserContextPolicy = Schema.Struct({
   profileMode: BrowserProfileMode,
+  /**
+   * Where the page keeps its site data. Absent means Private, so a policy
+   * written before profiles existed keeps its isolated, ephemeral context.
+   */
+  profile: Schema.optional(BrowserProfile),
   allowedOrigins: Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048))),
   credentialFieldProtection: Schema.Boolean,
   maxConcurrentTabs: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(16)),
@@ -226,10 +267,12 @@ export const BrowserAutomationFailure = Schema.Union(
   Schema.Struct({
     category: Schema.Literal("unavailable"),
     message: Schema.NonEmptyTrimmedString,
+    reason: Schema.optional(BrowserProfileRefusalReason),
   }).annotations(strict),
   Schema.Struct({
     category: Schema.Literal("policy-denied"),
     message: Schema.NonEmptyTrimmedString,
+    reason: Schema.optional(BrowserProfileRefusalReason),
   }).annotations(strict),
   Schema.Struct({
     category: Schema.Literal("context-expired"),
@@ -258,6 +301,7 @@ export const decodeBrowserContextId = Schema.decodeUnknownSync(BrowserContextId)
 export const decodeBrowserThreadId = Schema.decodeUnknownSync(BrowserThreadId);
 export const decodeBrowserCaptureId = Schema.decodeUnknownSync(BrowserCaptureId);
 export const decodeBrowserProfileMode = Schema.decodeUnknownSync(BrowserProfileMode);
+export const decodeBrowserProfile = Schema.decodeUnknownSync(BrowserProfile);
 export const decodeBrowserContextPolicy = Schema.decodeUnknownSync(BrowserContextPolicy);
 export const decodeBrowserContextState = Schema.decodeUnknownSync(BrowserContextState);
 export const decodeBrowserPresentationKind = Schema.decodeUnknownSync(BrowserPresentationKind);

@@ -31,7 +31,8 @@ Users work across repositories and document projects with long-running threads, 
 - The interface must remain usable with many Projects and concurrent runs.
 - Tool regions must never obscure ownership or starve the active thread.
 - Unsupported, stale, denied, unavailable, and failed states must remain explicit.
-- The app-managed core tools stay provider-neutral. Beyond them, a first-class provider may offer a capability in full while every other provider gets a documented degraded form or reports the capability unsupported ([architecture](docs/architecture.md#overview-and-principles)).
+- The app-managed core tools stay provider-neutral. Beyond them, the first-class providers (Claude Code, Codex, Mistral Vibe, and OpenCode) are to run as themselves, with their native tools, subagents, skills, and hooks (most of that is not built yet; the architecture marks what is), while every other provider gets a documented degraded form or reports the capability unsupported ([architecture](docs/architecture.md#overview-and-principles)).
+- Guardrails are on by default and a person may lower them to Full access (no sandbox, no prompts) globally, per Project, or per thread; first run asks which mode new threads start in, pre-selects Auto, and never defaults to Full access; Work and Code share one capability set and differ in focus; Octant is never stricter than a key provider's own app. Privacy, signed updates, host-side authority checks, and the rule that an agent merges or force-pushes only when the person asked never change ([architecture](docs/architecture.md#overview-and-principles)).
 
 ## Brand Commitments
 
@@ -39,9 +40,8 @@ The product name is Octant. The interface should remain an original quiet graphi
 
 ## Evidence on Hand
 
-- Product and architecture contract: `docs/architecture.md`, `DESIGN.md`, and `docs/decisions/`; contributor contract: `AGENTS.md`.
+- Product and architecture contract: `docs/design/decisions.md` (every current decision and its requirements), `docs/architecture.md`, `DESIGN.md`, and `docs/design/`; contributor contract: `AGENTS.md`.
 - Current visual contract: `DESIGN.md`.
-- Approved workspace and dogfood plan: `docs/plans/ade-spine-and-first-run-review.md`.
 - Maintainer-supplied reference screenshots for sidebar, terminal, Environment, and overall workspace density.
 - No external customer claims, benchmarks, testimonials, or telemetry are available and none should be fabricated.
 

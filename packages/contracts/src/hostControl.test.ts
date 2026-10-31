@@ -4,7 +4,11 @@ import {
   decodeHostControlStatus,
   decodeHostLifecycleOutcome,
   decodeHostLifecycleRequest,
+  decodeHostMemoryLimits,
+  decodeHostMemoryLimitsChanged,
   decodeHostRestoreOutcome,
+  decodeSetHostMemoryLimitsOutcome,
+  decodeSetHostMemoryLimitsRequest,
   HOST_LIFECYCLE_ACTIONS,
 } from "./hostControl";
 
@@ -55,6 +59,58 @@ describe("HostControlStatus", () => {
       policy: { kind: "unavailable", reason: "Service policy could not be read." },
     });
     expect(decoded.policy.kind).toBe("unavailable");
+  });
+
+  it("decodes the memory report with a relief and a previous stop", () => {
+    const decoded = decodeHostControlStatus({
+      ...status,
+      memory: {
+        pressure: "elevated",
+        processMegabytes: 2300,
+        limits: { kind: "automatic" },
+        effectiveLimits: { pressuredMegabytes: 2048, criticalMegabytes: 4096 },
+        lastRelief: {
+          at: "2026-10-31T10:00:00.000Z",
+          pressure: "elevated",
+          source: "system",
+          idleProviderRuntimesStopped: 2,
+          idleSessionsReleased: 1,
+          cachesTrimmed: true,
+          activeTurnsKept: 1,
+        },
+        previousStop: {
+          lastSeenAt: "2026-10-31T09:00:00.000Z",
+          pressure: "critical",
+          processMegabytes: 4100,
+        },
+      },
+    });
+    expect(decoded.memory?.lastRelief?.idleProviderRuntimesStopped).toBe(2);
+    expect(decoded.memory?.previousStop?.pressure).toBe("critical");
+  });
+
+  it("refuses a memory report that names more than counts", () => {
+    expect(() =>
+      decodeHostControlStatus({
+        ...status,
+        memory: {
+          pressure: "normal",
+          processMegabytes: 300,
+          limits: { kind: "automatic" },
+          effectiveLimits: { pressuredMegabytes: 2048, criticalMegabytes: 4096 },
+          lastRelief: {
+            at: "2026-10-31T10:00:00.000Z",
+            pressure: "elevated",
+            source: "system",
+            idleProviderRuntimesStopped: 0,
+            idleSessionsReleased: 0,
+            cachesTrimmed: false,
+            activeTurnsKept: 0,
+            providers: ["codex"],
+          },
+        },
+      }),
+    ).toThrow();
   });
 
   it("rejects a maintenance service mode, excess properties, and negative counters", () => {
@@ -152,5 +208,74 @@ describe("HostRestoreOutcome", () => {
       guidance: "Stop the Octant host, then run the offline restore command with --confirm.",
     });
     expect(decoded.kind).toBe("refused-online");
+  });
+});
+
+describe("HostMemoryLimits", () => {
+  it("decodes automatic and a custom pair with the critical limit above the pressured one", () => {
+    expect(decodeHostMemoryLimits({ kind: "automatic" })).toEqual({ kind: "automatic" });
+    expect(decodeHostMemoryLimits({ kind: "custom", pressuredGb: 0.5, criticalGb: 64 })).toEqual({
+      kind: "custom",
+      pressuredGb: 0.5,
+      criticalGb: 64,
+    });
+  });
+
+  it.each([
+    [{ kind: "custom", pressuredGb: 4, criticalGb: 4 }],
+    [{ kind: "custom", pressuredGb: 6, criticalGb: 3 }],
+    [{ kind: "custom", pressuredGb: 0.25, criticalGb: 2 }],
+    [{ kind: "custom", pressuredGb: 2, criticalGb: 65 }],
+    [{ kind: "custom", pressuredGb: Number.NaN, criticalGb: 8 }],
+    [{ kind: "custom", pressuredGb: 2 }],
+    [{ kind: "automatic", pressuredGb: 2 }],
+  ])("refuses stored limits that are out of order, out of range, or incomplete: %j", (limits) => {
+    expect(() => decodeHostMemoryLimits(limits)).toThrow();
+  });
+
+  it("accepts any pair of numbers in a request so the policy can refuse it with a message", () => {
+    expect(
+      decodeSetHostMemoryLimitsRequest({
+        limits: { kind: "custom", pressuredGb: 90, criticalGb: 1 },
+      }),
+    ).toEqual({ limits: { kind: "custom", pressuredGb: 90, criticalGb: 1 } });
+    expect(() =>
+      decodeSetHostMemoryLimitsRequest({
+        limits: { kind: "custom", pressuredGb: "2", criticalGb: 4 },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeSetHostMemoryLimitsRequest({ limits: { kind: "automatic" }, extra: true }),
+    ).toThrow();
+  });
+
+  it("decodes a saved outcome and a refusal, and nothing in between", () => {
+    expect(
+      decodeSetHostMemoryLimitsOutcome({ kind: "saved", limits: { kind: "automatic" } }).kind,
+    ).toBe("saved");
+    expect(
+      decodeSetHostMemoryLimitsOutcome({
+        kind: "refused",
+        code: "out-of-range",
+        message: "Memory limits must be between 0.5 and 64 GB.",
+      }).kind,
+    ).toBe("refused");
+    expect(() =>
+      decodeSetHostMemoryLimitsOutcome({ kind: "refused", code: "unknown", message: "No." }),
+    ).toThrow();
+  });
+
+  it("records who changed the limits, when, and the values before and after", () => {
+    const change = {
+      kind: "memory-limits-changed",
+      previous: { kind: "automatic" },
+      next: { kind: "custom", pressuredGb: 3, criticalGb: 6 },
+      changedBy: "local-window",
+      changedAt: "2026-10-31T12:00:00.000Z",
+    };
+    expect(decodeHostMemoryLimitsChanged(change)).toEqual(change);
+    expect(() =>
+      decodeHostMemoryLimitsChanged({ ...change, changedBy: "remote-device" }),
+    ).toThrow();
   });
 });

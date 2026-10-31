@@ -37,6 +37,8 @@ import {
   MemoryPolicyRejected,
   changeProjectLifecycle,
   changeCodeProjectAccess,
+  changeCodeProjectActions,
+  changeCodeProjectPermissionMode,
   changeCodeProjectDesktopRecipe,
   changeCodeProjectNewThreadWorkspace,
   changeCodeProjectPullRequestBackgroundRefresh,
@@ -698,6 +700,10 @@ export class ProjectService implements ProjectServiceApi {
           project = changeCodeProjectAccess(current, command.codeAccessPersistence, timestamp);
           kind = "code-project-access-changed";
           eventName = "project.code-access-changed@1";
+        } else if (command.kind === "change-code-project-permission-mode") {
+          project = changeCodeProjectPermissionMode(current, command.permissionMode, timestamp);
+          kind = "code-project-access-changed";
+          eventName = "project.code-permission-mode-changed@1";
         } else if (command.kind === "change-code-project-new-thread-workspace") {
           // The habit lives on the Project record, not in a local named
           // view, so every window sees the same default after this event.
@@ -719,6 +725,10 @@ export class ProjectService implements ProjectServiceApi {
           );
           kind = "code-project-pull-request-background-refresh-changed";
           eventName = "project.code-pull-request-background-refresh-changed@1";
+        } else if (command.kind === "change-code-project-actions") {
+          project = changeCodeProjectActions(current, command.actions, timestamp);
+          kind = "code-project-actions-changed";
+          eventName = "project.code-actions-changed@1";
         } else if (command.kind === "change-project-provider-policy") {
           project = changeProjectProviderPolicy(current, command.policy, timestamp);
           kind = "project-provider-policy-changed";

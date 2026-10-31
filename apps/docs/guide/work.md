@@ -50,7 +50,9 @@ The sidebar **Thread board** is a server-derived view of Work threads as Ready, 
 
 To redesign an existing website, ask the agent to open the page in the Browser and take a screenshot. It can then build a Canvas design with the page as it is now beside a redesigned version. The before frame shows the screenshot the thread kept (a small picture, about 40 KB), and the agent draws the after frame itself; it never pulls the site's own images, styles, or fonts into a frame. Only screenshots this thread took are used. The Canvas preview shows them, but a share, a public link, and an export leave them out.
 
-Work has no shell and no Git. The agent in a Work thread is never given a way to run commands, so it never asks you to approve one; changes to files in the Project still ask first. When Work work becomes software engineering, use a [promotion](/guide/promotions) to start a linked Code thread with explicit user approval.
+Today Work has no shell and no Git. The agent in a Work thread is never given a way to run commands, so it never asks you to approve one; changes to files in the Project still ask first. When Work work becomes software engineering, use a [promotion](/guide/promotions) to start a linked Code thread with explicit user approval.
+
+Planned: Work and Code can do the same things. A Work thread gets the same shell, Git, command-line tools, `ssh` to your own machines, provider tools, subagents, and Full access as a Code thread, under the same guardrail level: at Guarded you approve each command and the first connection to each host; at Full access nothing asks. Octant keeps no SSH keys; `ssh` uses your own agent and settings. What differs is focus: Work shows documents, artifacts, local tasks, and its board, and keeps Git panels, pull requests, reviews, issue trackers, and worktrees out of sight until you turn on **Developer tools** in the Work Project's overview. A Work thread is still Done when you mark it Done. This is not built yet.
 
 ## Continue a terminal session
 
@@ -159,6 +161,8 @@ Paste or attach a PNG, JPEG, WebP, or GIF in the Work composer to send it with a
 A turn carries at most eight images, each up to 10 MB, alongside a written message. If the selected model does not read images, the composer says so at the paste instead of taking the file. The host checks the thread's own model again at send, so a turn never reaches a model with its pictures quietly dropped. Removing a chip before sending keeps that image off the turn.
 
 Type `#` in the composer to mention another thread as read-only context, the same bounded excerpt Chat uses. Dragging a sidebar thread onto the composer, or choosing **Attach as context** from that row's menu, attaches the same reference and does not send the draft. Type `@` to complete a path inside this Project's bound folder; the host refuses a path outside that root before reading it. Chat has no `@file` mention, because Chat Projects have no filesystem authority.
+
+In the macOS desktop app, the paperclip opens a menu: **Choose file…** or **Capture window…**. Capture window lists your open windows by title and attaches a picture of the one you choose, as an image like any other. The first time, Octant explains why macOS needs Screen Recording permission and asks only when you press **Continue**; if you turned it off, Octant opens System Settings instead. Octant reads a window only after you choose it, and the picture goes only to the thread you attach it to. The web app and the phone app do not offer it.
 
 ## Thread board
 

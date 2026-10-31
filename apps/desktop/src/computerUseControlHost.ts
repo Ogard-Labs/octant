@@ -39,6 +39,8 @@ const interpreterApps = new Set([
   "com.apple.ScriptEditor2",
   "com.apple.Automator",
 ]);
+/** The driver answered the call with a tool error; its text names the cause. */
+class DriverToolError extends Error {}
 const APP_ID = /^[A-Za-z0-9][A-Za-z0-9.-]{0,255}$/;
 const SESSION_MS = 5 * 60 * 1_000;
 const refused = (reason: string, message: string): ComputerControlResult => ({
@@ -145,7 +147,7 @@ export function createComputerUseControlHost(options: {
         const runtime = await options.runtime();
         const call = async (name: string, args: Readonly<Record<string, unknown>>) => {
           const response = await runtime.call(name, args, combined);
-          if (response.isError) throw new Error("The driver refused the request.");
+          if (response.isError) throw new DriverToolError(response.text);
           const data: unknown = JSON.parse(response.structuredJson ?? "{}");
           if (!record(data)) throw new Error("Driver response is invalid.");
           return { data, images: response.images };
@@ -189,6 +191,7 @@ export function createComputerUseControlHost(options: {
             pid,
             window_id: windowId,
             include_screenshot: true,
+            tree_format: "elements",
             max_dimension: 1280,
             max_elements: 512,
           });
@@ -390,10 +393,12 @@ export function createComputerUseControlHost(options: {
         const address = {
           pid: old.pid,
           window_id: old.windowId,
-          snapshot_id: before.observation.snapshotId,
           session: session.id,
           delivery_mode: "background",
-          ...("elementIndex" in command ? { element_index: command.elementIndex } : {}),
+          // A token names one snapshot row; a newer snapshot of the window stales it.
+          ...("elementIndex" in command
+            ? { element_token: `${before.observation.snapshotId}:${command.elementIndex}` }
+            : {}),
         };
         await call("start_session", { session: session.id });
         if (command.operation === "click")
@@ -418,7 +423,21 @@ export function createComputerUseControlHost(options: {
           after?.result ??
           refused("window-unavailable", "The window is no longer available for verification.")
         );
-      } catch {
+      } catch (error) {
+        // A text area or field has no press action: the driver reports
+        // kAXErrorActionUnsupported (-25206), which is the element's answer,
+        // not a driver outage, and the agent can act on it.
+        if (
+          !combined.aborted &&
+          command.operation === "click" &&
+          "elementIndex" in command &&
+          error instanceof DriverToolError &&
+          /-25206\b/.test(error.message)
+        )
+          return refused(
+            "action-unsupported",
+            "This element cannot be clicked in the background. To fill a text field, call type with its elementIndex; otherwise click a button or other control, or click with x and y from the screenshot.",
+          );
         return refused(
           combined.aborted ? "cancelled" : "driver-unavailable",
           combined.aborted

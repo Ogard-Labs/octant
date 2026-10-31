@@ -1,7 +1,7 @@
 /**
  * The artifact bundle a mirror writes.
  *
- * This is the 0029 document: identity in `octant`, the definition beside it,
+ * This is the artifact mirror's document: identity in `octant`, the definition beside it,
  * fixed header key order, two-space indentation, and a trailing newline. A
  * replica entry carries this document as its payload. It is not a second
  * bundle, and nothing here writes a file.

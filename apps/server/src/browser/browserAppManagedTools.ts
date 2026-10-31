@@ -5,13 +5,14 @@ import type {
   BrowserAutomationSnapshot,
   BrowserContextPolicy,
   BrowserThreadId,
+  StoredBrowserProfile,
   ProviderExecutionPolicy,
   ToolActionAuthority,
   ToolActionRequest,
   WindowId,
 } from "@octant/contracts";
 import { MAX_BROWSER_TABS_PER_CONTEXT, sameToolActionAuthority } from "@octant/contracts";
-import { isToolAllowedByAllowlist } from "@octant/domain";
+import { browserProfileKey, isToolAllowedByAllowlist, storedBrowserProfile } from "@octant/domain";
 import { withToolFamilyHelp, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { BrowserToolApprovalService } from "./browserToolApprovalService";
 
@@ -48,6 +49,7 @@ export interface BrowserAppManagedToolsOptions {
       readonly threadId: BrowserThreadId;
       readonly action: ToolActionRequest;
       readonly policy: BrowserContextPolicy;
+      readonly profileCaller?: "terminal-grant";
     }) => Promise<BrowserAutomationSnapshot>;
     readonly act: (input: {
       readonly windowId: WindowId;
@@ -60,7 +62,12 @@ export interface BrowserAppManagedToolsOptions {
     ) => Promise<BrowserAutomationSnapshot>;
   };
   readonly approvals?: Pick<BrowserToolApprovalService, "request"> &
-    Partial<Pick<BrowserToolApprovalService, "isRemembered">>;
+    Partial<Pick<BrowserToolApprovalService, "isRemembered" | "isUnattendedScope">>;
+  /**
+   * Set for a CLI the person typed into a thread terminal. It may drive the
+   * thread's Private pages only; a page in a signed-in profile needs a person.
+   */
+  readonly profileCaller?: "terminal-grant";
   readonly uuid: () => string;
 }
 
@@ -78,6 +85,8 @@ type BrowserToolInput =
   | {
       readonly operation: "navigate";
       readonly url: string;
+      /** Ask for a page in the Project's or the Personal profile; absent is Private. */
+      readonly profile?: "project" | "personal";
       readonly expectedObservationRevision?: number;
     }
   | {
@@ -167,6 +176,35 @@ export function createBrowserAppManagedTools(
           input.operation === "navigate" ? "invalid-browser-url" : "browser-navigation-required",
         );
       }
+      // A page's profile is fixed when it opens. An existing page keeps its own,
+      // and the agent cannot move it: stopping the browser and opening again is
+      // how a different profile is chosen, and the person is asked again.
+      const existingProfile = storedBrowserProfile(existing?.policy.profile);
+      if (
+        existing !== undefined &&
+        input.operation === "navigate" &&
+        input.profile !== undefined &&
+        browserProfileKey(existingProfile) !==
+          browserProfileKey(requestedProfile(input.profile, authority))
+      ) {
+        return failure("browser-profile-differs-stop-first");
+      }
+      const profile: StoredBrowserProfile | undefined =
+        existing !== undefined
+          ? existingProfile
+          : input.operation === "navigate" && input.profile !== undefined
+            ? requestedProfile(input.profile, authority)
+            : undefined;
+      if (input.operation === "navigate" && input.profile === "project" && profile === undefined) {
+        return failure("profile-unavailable");
+      }
+      if (
+        profile !== undefined &&
+        (options.profileCaller === "terminal-grant" ||
+          options.approvals?.isUnattendedScope?.(options.windowId) === true)
+      ) {
+        return failure("profile-needs-a-person");
+      }
       const existingBinding =
         existing === undefined ? undefined : options.modelBindings.get(String(existing.contextId));
       const contextApproved =
@@ -178,7 +216,7 @@ export function createBrowserAppManagedTools(
       // An existing context still asks when its binding no longer matches —
       // the remembered grant covers the page, not a new model driving it.
       const remembered =
-        existing === undefined && options.approvals?.isRemembered?.(origin) === true;
+        existing === undefined && options.approvals?.isRemembered?.(origin, profile) === true;
       if ((existing === undefined || !contextApproved) && !remembered) {
         if (options.approvals === undefined) return failure("browser-approval-required");
         const outcome = await options.approvals.request({
@@ -186,6 +224,7 @@ export function createBrowserAppManagedTools(
           threadId: String(options.threadId),
           authority,
           origin,
+          ...(profile === undefined ? {} : { profile }),
           ...(signal === undefined ? {} : { signal }),
         });
         if (outcome !== "approved") return failure(`browser-approval-${outcome}`);
@@ -207,7 +246,12 @@ export function createBrowserAppManagedTools(
           windowId: options.windowId,
           threadId: options.threadId,
           action: actionRequest(options, authority),
-          policy: { ...hostPolicy, allowedOrigins: [origin] },
+          policy: {
+            ...hostPolicy,
+            ...(profile === undefined ? {} : { profile }),
+            allowedOrigins: [origin],
+          },
+          ...(options.profileCaller === undefined ? {} : { profileCaller: options.profileCaller }),
         });
         snapshot = created;
         if (created.context?.state === "active") {
@@ -233,6 +277,7 @@ export function createBrowserAppManagedTools(
           threadId: String(options.threadId),
           authority,
           origin,
+          ...(profile === undefined ? {} : { profile }),
           ...(signal === undefined ? {} : { signal }),
         });
         if (outcome !== "approved") return failure(`browser-approval-${outcome}`);
@@ -267,6 +312,17 @@ export function createBrowserAppManagedTools(
     },
   };
   return withToolFamilyHelp(tools, BROWSER_TOOL_HELP);
+}
+
+/** The stored profile a `profile` argument names for this thread, if it has one. */
+function requestedProfile(
+  choice: "project" | "personal",
+  authority: ToolActionAuthority,
+): StoredBrowserProfile | undefined {
+  if (choice === "personal") return { kind: "personal" };
+  return authority.projectId === undefined
+    ? undefined
+    : { kind: "project", projectId: authority.projectId };
 }
 
 function modelIsCurrent(options: BrowserAppManagedToolsOptions): boolean {
@@ -383,8 +439,20 @@ function parseInput(value: string): BrowserToolInput | undefined {
       ...(typeof record.selector === "string" ? { selector: record.selector } : {}),
     };
   }
-  if (operation === "navigate" && only("url") && text("url", 4096))
-    return { ...common, operation, url: record.url as string };
+  if (operation === "navigate" && only("url", "profile") && text("url", 4096)) {
+    if (
+      record.profile !== undefined &&
+      record.profile !== "project" &&
+      record.profile !== "personal"
+    )
+      return undefined;
+    return {
+      ...common,
+      operation,
+      url: record.url as string,
+      ...(record.profile === undefined ? {} : { profile: record.profile }),
+    };
+  }
   if ((operation === "click" || operation === "wait") && only("selector") && text("selector", 4096))
     return { ...common, operation, selector: record.selector as string };
   if (

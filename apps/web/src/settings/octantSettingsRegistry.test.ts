@@ -27,6 +27,7 @@ describe("octantSettingsRegistry", () => {
       "github",
       "linear",
       "permissions",
+      "secret-stores",
       "data",
       "sync",
       "remote-access",
@@ -55,9 +56,11 @@ describe("octantSettingsRegistry", () => {
     expect(ids("host")).toEqual([
       "reset-layout",
       "reset-window-bounds",
+      "save-diagnostics",
       "export-diagnostics",
       "journal-growth",
       "host-automatic-startup",
+      "host-memory-limits",
       "host-backup",
       "host-lifecycle",
     ]);
@@ -75,9 +78,12 @@ describe("octantSettingsRegistry", () => {
       "browser-site-approvals",
       "tool-approvals",
     ]);
+    expect(section("secret-stores")?.label).toBe("Secret stores");
+    expect(section("secret-stores")?.scope).toBe("host");
+    expect(ids("secret-stores")).toEqual(["secret-store-link", "secret-store-check"]);
     expect(section("data")?.label).toBe("Data & storage");
     expect(section("data")?.scope).toBe("host");
-    expect(ids("data")).toEqual(["data-map", "thread-retention"]);
+    expect(ids("data")).toEqual(["data-map", "browser-profiles", "thread-retention"]);
     expect(section("data")?.keywords).toMatch(/backup/);
     expect(section("data")?.keywords).toMatch(/retention/);
   });
@@ -170,7 +176,6 @@ describe("octantSettingsRegistry", () => {
       "code-language-services",
       "project-view-switcher",
       "code-default-access",
-      "code-approval-persistence",
       "code-editor-executable",
       "code-editor-arguments",
       "open-in-applications",

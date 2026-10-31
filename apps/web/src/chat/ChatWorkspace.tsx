@@ -56,6 +56,7 @@ import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { ExtensionProviderFamily } from "@octant/contracts/extensions";
 import type { BrowserToolApproval } from "@octant/contracts/browser-automation-rpc";
+import { browserApprovalDetail, browserApprovalSummary } from "../browser/browserProfileCopy";
 import { useExtensionDraftSelections } from "./useExtensionDraftSelections";
 import { LinkedThreadParallelReviewFlow } from "../linkedThread/LinkedThreadParallelReviewFlow";
 import { useLinkedThreadParallelReview } from "../linkedThread/useLinkedThreadParallelReview";
@@ -1240,10 +1241,10 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               </>
             }
             className="chat-workspace__tool-approval thread-column"
-            detail="Shell and file access stay unchanged"
+            detail={browserApprovalDetail(pendingBrowserApproval)}
             error={browserApprovalMessage}
             label="Browser origin approval"
-            summary={`Allow Browser to open ${pendingBrowserApproval.origin}?`}
+            summary={browserApprovalSummary(pendingBrowserApproval)}
           />
         )}
         <ChatComposer

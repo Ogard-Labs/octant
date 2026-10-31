@@ -575,15 +575,10 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("code-default-access"),
-          label: "Default Code access",
+          label: "Default mode",
           scope: "app",
-          keywords: "access authority approval approvals full access ask read only new code thread",
-        },
-        {
-          id: settingId("code-approval-persistence"),
-          label: "Default approval persistence",
-          scope: "app",
-          keywords: "approval approvals persistence remember session project",
+          keywords:
+            "access mode auto ask first accept edits plan full access approval approvals reviewer new thread guardrail",
         },
         {
           id: settingId("code-editor-executable"),
@@ -977,6 +972,28 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
+      id: "secret-stores",
+      label: "Secret stores",
+      scope: "host",
+      keywords:
+        "secret stores 1password op command line vault item reference link unlink api key credential password manager keychain pointer fetch on use",
+      settings: [
+        {
+          id: settingId("secret-store-link"),
+          label: "Linked secret stores",
+          scope: "host",
+          keywords:
+            "link unlink 1password op cli secret store vault locked not installed password manager",
+        },
+        {
+          id: settingId("secret-store-check"),
+          label: "Check an item",
+          scope: "host",
+          keywords: "check item reference op vault found locked missing test",
+        },
+      ],
+    },
+    {
       id: "data",
       label: "Data & storage",
       scope: "host",
@@ -989,6 +1006,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "data map privacy stored location journal projections artifacts credentials keychain secret-service caches provider calls update checks marketplace",
+        },
+        {
+          id: settingId("browser-profiles"),
+          label: "Browser profiles",
+          scope: "host",
+          keywords:
+            "browser profiles sign out signed in cookies project personal private site data clear sign-in",
         },
         {
           id: settingId("thread-retention"),
@@ -1213,8 +1237,15 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           nativeRequired: "nativeBoundsAvailable",
         },
         {
+          id: settingId("save-diagnostics"),
+          label: "Save diagnostics",
+          scope: "host",
+          keywords:
+            "save diagnostics support bundle zip file host versions system log lines journal events names confinement guardrails process memory redacted send yourself",
+        },
+        {
           id: settingId("export-diagnostics"),
-          label: "Export diagnostics",
+          label: "Failure report",
           scope: "host",
           keywords:
             "export diagnostics evidence packet support redacted safe sealed receipt provider storage network remote auth migration confinement process cleanup",
@@ -1230,6 +1261,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Automatic startup",
           scope: "host",
           keywords: "automatic startup launch at login start",
+        },
+        {
+          id: settingId("host-memory-limits"),
+          label: "Memory limits",
+          scope: "host",
+          keywords:
+            "memory limits low very low pressure ram gigabytes gb automatic custom critical",
         },
         {
           id: settingId("host-backup"),

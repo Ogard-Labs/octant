@@ -10,6 +10,7 @@ import {
   UtcTimestamp,
   decodeShellCommand,
   type ProjectId,
+  type RememberedBrowserProfileSite,
   type ShellBootstrap,
   type ShellCommandResult,
   type ShellFailure,
@@ -30,6 +31,7 @@ import {
   defaultShellSettings,
   defaultWindowWorkspace,
   enabledModes,
+  isBrowserProfileSiteRemembered,
   normalizeEnvironmentPresentationState,
   reconcileWorkspaceWithSettings,
   replaceShellSettings,
@@ -148,6 +150,52 @@ export class ShellService implements ShellServiceApi {
       );
       const settings = this.#withJudgedDefaultFolder(
         { ...current, rememberedBrowserOrigins: merged },
+        current,
+      );
+      const committed = this.#persistence.journal.append({
+        aggregate: {
+          aggregateType: "shell-settings",
+          aggregateId: SHELL_SETTINGS_AGGREGATE_ID,
+        },
+        expectedVersion: input.expectedVersion,
+        events: [this.#pendingEvent("shell.settings-replaced", { settings })],
+      });
+      return { kind: "settings-replaced", settings, version: committed.aggregateVersion };
+    } catch (error) {
+      throw this.#mapFailure(error);
+    }
+  }
+
+  /**
+   * The signed-in counterpart of {@link rememberBrowserOrigins}: remembers a site
+   * for one stored Browser profile, never for the site alone.
+   */
+  rememberBrowserProfileSites(input: {
+    readonly windowId: WindowId;
+    readonly expectedVersion: AggregateVersion;
+    readonly sites: ReadonlyArray<RememberedBrowserProfileSite>;
+  }): ShellCommandResult {
+    this.#assertReady();
+    try {
+      if (!this.#registeredWindowIds.has(input.windowId)) {
+        throw new ShellServiceError({
+          category: "invalid",
+          message: "Shell command window is not registered with this server session.",
+        });
+      }
+      const current = this.#persistence.readShellSettings()?.settings ?? defaultShellSettings();
+      const merged = current.rememberedBrowserProfileSites.concat(
+        input.sites.filter(
+          (site) =>
+            !isBrowserProfileSiteRemembered(
+              current.rememberedBrowserProfileSites,
+              site.origin,
+              site.profile,
+            ),
+        ),
+      );
+      const settings = this.#withJudgedDefaultFolder(
+        { ...current, rememberedBrowserProfileSites: merged },
         current,
       );
       const committed = this.#persistence.journal.append({

@@ -69,6 +69,10 @@ export const DESKTOP_IPC_CHANNELS = {
   selectProjectRoot: "octant:project:select-root",
   selectLocalPluginFolder: "octant:extensions:select-local-plugin-folder",
   selectRuntimeBinary: "octant:providers:select-runtime-binary",
+  saveSupportBundle: "octant:diagnostics:save-support-bundle",
+  windowCaptureList: "octant:window-capture:list",
+  windowCapturePermission: "octant:window-capture:permission",
+  windowCaptureTake: "octant:window-capture:take",
   setProviderCredential: "octant:provider-credential:set",
   listProviderApiKeys: "octant:provider-api-key:list",
   addProviderApiKey: "octant:provider-api-key:add",
@@ -115,6 +119,14 @@ export const DESKTOP_IPC_CHANNELS = {
 
 /** The most a renderer may hand the host as a provider credential. */
 export const MAX_PROVIDER_CREDENTIAL_BYTES = 12 * 1_024;
+
+/**
+ * Marks a message the main process wrote from its own advice table for a
+ * keyring that would not take a key. The preload hands the window the sentence
+ * after the marker and nothing else a store said, and the window shows only
+ * sentences it recognises from the same table.
+ */
+export const KEYRING_ADVICE_MARKER = "keyring-advice: ";
 
 /** Provider instance ids as the bridge accepts them: a plain UUID, any version bits. */
 export const PROVIDER_INSTANCE_ID_PATTERN =

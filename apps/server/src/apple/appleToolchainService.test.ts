@@ -29,6 +29,7 @@ type ServiceConstructor = new (options: Record<string, unknown>) => {
   ): Promise<any>;
   cancel(request: ToolActionCancellation, context: ExecutionContext): Promise<boolean>;
   snapshot(context: ExecutionContext): any;
+  refreshedSnapshot(context: ExecutionContext): Promise<any>;
   noteOrientation(simulatorId: never, orientation: "portrait" | "landscape"): void;
   requestPaneOpen(
     context: ExecutionContext,
@@ -1003,6 +1004,50 @@ describe("AppleToolchainService lifecycle", () => {
         ),
       );
       expect(listReads).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows a Simulator created while the pane is open on the first poll that can see it, even when the poll lands a few milliseconds early", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-07-27T20:00:00.000Z"));
+      const created = "30000000-0000-4000-8000-000000000030";
+      let listed = false;
+      const base = discoveryExecutor();
+      const execute = vi.fn(async (input: Parameters<typeof base>[0]) => {
+        if (input.argv.join(" ") === "xcrun simctl list devices available --json" && listed) {
+          return processResult(
+            JSON.stringify({
+              devices: {
+                "com.apple.CoreSimulator.SimRuntime.iOS-18-5": [
+                  { name: "iPhone 16", udid: ids.simulator, state: "Booted", isAvailable: true },
+                  { name: "iPhone 18 Pro", udid: created, state: "Shutdown", isAvailable: true },
+                ],
+              },
+            }),
+          );
+        }
+        return base(input);
+      });
+      const service = new AppleToolchainService({
+        execute,
+        realpath: async (path: string) => path,
+        now: () => "2026-07-27T20:00:00.000Z",
+        newId: () => "30000000-0000-4000-8000-000000000012",
+      });
+      await service.discover(discoveryRequest, context);
+      // The pane's first read, straight after discovery, sees only the first device.
+      await service.refreshedSnapshot(context);
+      await vi.advanceTimersByTimeAsync(5_000);
+      listed = true;
+      // The pane polls every 15 s, and a tick may land slightly early.
+      await vi.advanceTimersByTimeAsync(14_990);
+      const polled = await service.refreshedSnapshot(context);
+      expect(polled.simulators).toContainEqual(
+        expect.objectContaining({ name: "iPhone 18 Pro", state: "shutdown" }),
+      );
     } finally {
       vi.useRealTimers();
     }

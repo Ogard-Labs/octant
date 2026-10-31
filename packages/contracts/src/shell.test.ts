@@ -95,6 +95,7 @@ const settings = {
   computerUse: { enabled: true, automaticUpdates: true },
   standaloneSkillActivations: {},
   rememberedBrowserOrigins: [],
+  rememberedBrowserProfileSites: [],
   userProfile: { accent: "indigo", avatar: { kind: "initials" } },
 } as const;
 
@@ -256,7 +257,7 @@ describe("shell bootstrap contracts", () => {
     } & typeof settings;
 
     // A store persisted before this setting shipped must decode to the
-    // workspace's prior always-solid look (docs/decisions/0047), never to
+    // workspace's prior always-solid look, never to
     // translucent.
     expect(decodeShellSettings(withoutWorkspaceMaterial).workspaceMaterial).toBe("opaque");
     expect(

@@ -23,6 +23,47 @@ stop the affected projection without rewriting history. Ambiguous recovery
 state is always **Waiting** or **recovery-required**, never **Done** or
 healthy.
 
+## Low memory
+
+Octant watches how much memory its host process uses and what your system says
+about memory pressure. It reads both on your machine only and sends nothing
+anywhere.
+
+When memory runs low, the host first stops what is only waiting: provider
+processes with no turn using them and sessions kept warm for a quick reply. It
+then frees caches it can rebuild. A running turn is never stopped; the notice
+tells you how many kept going. Your next message starts a stopped provider
+again, so the cost is a slower first reply.
+
+You see a short notice only when something was stopped or memory was very low.
+Settings, then Host, shows the current memory level, the host's size, and the
+last relief.
+
+### Memory limits
+
+The host counts its own size as low memory at one limit and as very low at a
+higher one. Settings, then Host, then Memory, has a **Memory limits** control:
+
+- **Automatic** (the default) uses 2 GB for low and 4 GB for very low, or a
+  quarter and a half of the memory on a Mac with less than 8 GB. The row shows
+  the sizes that apply on your Mac.
+- **Custom** lets you enter both sizes in GB, from 0.5 to 64. Very low must be
+  above low. Custom sizes apply exactly as you enter them, on any Mac.
+
+A change takes effect right away, without restarting Octant. If you enter sizes
+that are out of range or in the wrong order, Octant says why and keeps the
+limits you had. Only a window on the Mac that runs the host can change the
+limits; a paired phone or other device cannot see or change them. Each change
+is recorded in the journal with the time and the old and new sizes, so a
+rebuild of Octant's state brings the same limits back. The limits decide only
+when Octant frees idle work. They never stop a running turn.
+
+If the host ends without a clean stop, for example because the system ran out
+of memory, the per-user service starts it again. The next time Octant opens, it
+tells you the host stopped unexpectedly and shows the last memory reading it
+took. That reading is a hint, not a diagnosis: a normal reading means the cause
+is not known.
+
 ## Recovery tooling
 
 Operator commands cover the journal and projections:
@@ -37,6 +78,44 @@ only after a successful explicit rebuild. A confirmed thread purge is the
 separate data-lifecycle exception: it removes that thread's own journal
 events so a later rebuild cannot resurrect the transcript, and it records a
 tombstone rather than leaving a hole with no explanation.
+
+## Saving diagnostics to ask for help
+
+When something is wrong and you want someone to look, Octant can write one
+file about your host. Open **Settings › Host › Maintenance** and choose
+**Save diagnostics…**, or run this in a terminal on the same computer:
+
+```sh
+octant diagnostics export --out ~/Downloads/octant-diagnostics.zip
+octant diagnostics export --list
+```
+
+Before anything is written, Octant lists what the file will include and what it
+never includes. In Settings you then choose **Save file** or **Cancel**. In the
+desktop app **Save file** opens the usual save dialog, offering a dated name in
+Downloads; in a browser it downloads the file. In the terminal the same list prints first, and `--list` stops after it. `--out` takes a
+name ending in `.zip`, or a new or empty folder, and never overwrites.
+
+The file holds:
+
+- Octant and runtime versions, and your operating system, processor type, and memory.
+- Each enabled provider by kind: whether it is ready, signed in, and which
+  capabilities it reports. Not its name, address, or models.
+- The newest 200 host log lines, and the names and times of the newest 200
+  journal events. The events' contents stay out.
+- Your default guardrail level, how many Code threads run at each level, and the
+  sandbox tools Octant found.
+- Uptime, memory, processor time, and slow-statement counters.
+
+It never holds messages, prompts, replies, file contents, Project or thread
+names, API keys, tokens, or passwords. Your home folder shows as `~`. Octant
+sends the file nowhere: you read it, and you choose whether to send it. Octant
+records that you saved one, with the time and how you chose where (the desktop
+dialog, a browser download, or the kind of folder for the terminal), never the
+folder name or anything the file holds.
+
+This is separate from **Failure report** in the same place, which exports a
+redacted report about one failed operation, found by its correlation ID.
 
 ## User-level recovery
 

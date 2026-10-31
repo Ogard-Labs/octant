@@ -1,4 +1,5 @@
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
+import { defaultPermissionModeFor } from "@octant/domain/guardrail-policy";
 import type { CodeBoardCard, CodeBoardView } from "@octant/contracts";
 import type { CodeThreadId } from "@octant/contracts/code";
 import type { HostIdentity } from "@octant/contracts/host";
@@ -851,7 +852,9 @@ function CodeProjectQuickStart(props: {
             {...(props.baseRepository === undefined
               ? {}
               : { baseRepository: props.baseRepository })}
-            defaultExecutionPolicy="approval-gated"
+            defaultPermissionMode={defaultPermissionModeFor({
+              settings: props.controller.bootstrap.settings,
+            })}
             defaultPermissionPersistence={
               props.controller.bootstrap.settings.defaultPermissionPersistence
             }

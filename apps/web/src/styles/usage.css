@@ -521,7 +521,7 @@ p.provider-limits__warning {
 }
 
 /* Plan usage rings at the foot of the icon rail. Each ring takes its
-   provider's identity colour (0129: colour names identity), and a window near
+   provider's identity colour (colour names identity), and a window near
    or at its limit takes the danger ink so a spent week reads at a glance. */
 .rail-usage {
   display: flex;

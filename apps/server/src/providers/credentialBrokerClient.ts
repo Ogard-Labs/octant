@@ -1,5 +1,5 @@
 import type { CredentialPurgeAttempt } from "@octant/domain";
-import type { KeyRejection } from "@octant/host-runtime";
+import { credentialStoreFailureCauseOf, type KeyRejection } from "@octant/host-runtime";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const PURGE_FAILURE_KINDS = new Set(["locked", "unavailable", "indeterminate", "failed"]);
@@ -402,7 +402,9 @@ async function refusedCredential(response: Response): Promise<never> {
   }
   const cause =
     body !== null && typeof body === "object" ? (body as { cause?: unknown }).cause : undefined;
-  const knownCause = cause === "locked" || cause === "no-login-collection" ? cause : undefined;
+  const knownCause: string | undefined =
+    credentialStoreFailureCauseOf(cause) ??
+    (typeof cause === "string" && Object.hasOwn(LINKED_SECRET_MESSAGES, cause) ? cause : undefined);
   if (
     !isRecord(body) ||
     typeof body.error !== "string" ||
@@ -410,18 +412,32 @@ async function refusedCredential(response: Response): Promise<never> {
   ) {
     throw brokerFailure();
   }
+  // A key pointed at a linked secret store says what is wrong with that store,
+  // in words that name the store and never an item or a value.
+  const linkedMessage = knownCause === undefined ? undefined : LINKED_SECRET_MESSAGES[knownCause];
   if (body.error === "missing") {
     throw {
       category: "unauthenticated",
-      message: "The provider credential is missing or unavailable.",
+      message: linkedMessage ?? "The provider credential is missing or unavailable.",
     };
   }
   if (body.error === "unavailable" || body.error === "failed" || body.error === "invalid") {
     throw {
       category: "unavailable",
-      message: "The provider credential store is unavailable.",
+      message: linkedMessage ?? "The provider credential store is unavailable.",
       ...(knownCause === undefined ? {} : { cause: knownCause }),
     };
   }
   throw brokerFailure();
 }
+
+const LINKED_SECRET_MESSAGES: Readonly<Record<string, string>> = {
+  "linked-store-locked":
+    "The linked secret store is locked. Unlock it so Octant can read this provider's key.",
+  "linked-store-unavailable":
+    "The linked secret store could not be reached, so this provider's key could not be read.",
+  "linked-store-not-linked":
+    "This provider's key points at a secret store that is no longer linked. Link it again in Settings.",
+  "linked-item-missing":
+    "The item this provider's key points at was not found in the linked secret store.",
+};

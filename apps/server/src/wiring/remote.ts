@@ -26,6 +26,10 @@ import { createProviderCredentialRouteHandler } from "../providers/providerCrede
 import { makePushPlatformCredentialBrokerClient } from "../providers/credentialBrokerClient";
 import { ProviderServiceError } from "../providers/providerService";
 import { providerKeyJournal, reconcileProviderKeyChanges } from "../providers/providerKeyJournal";
+import { makeSecretStoreBrokerClient } from "../secretStores/secretStoreBrokerClient";
+import { secretStoresJournal } from "../secretStores/secretStoresJournal";
+import { createSecretStoresRouteHandler } from "../secretStores/secretStoresRoutes";
+import { createSecretStoresService } from "../secretStores/secretStoresService";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import {
   createExternalContentRouteHandler,
@@ -48,7 +52,11 @@ import {
   type LocalDeviceAdministrationPort,
 } from "../remote/localDeviceAdministrationRoutes";
 import { createHostControlRouteHandler } from "../hostControlRoutes";
+import { createSupportBundleRouteHandler } from "../supportBundleRoutes";
+import { readEventLoopLagCounters } from "../eventLoopLag";
+import { slowStatementTally } from "../persistence/slowStatementLog";
 import { desktopCredentialStore } from "../hostDataMap";
+import { HostMemoryLimitsService } from "../hostMemoryLimitsService";
 import { ThreadRetentionService } from "../threadRetentionService";
 import { createLiveHostExportService } from "../hostExportService";
 import { createAgentRemoteDelegation } from "../hub/agentRemoteDelegation";
@@ -182,7 +190,7 @@ export type RemoteDependencies = Pick<
   > &
   Pick<RoutesWiring, "authenticatedProductDispatch"> &
   Pick<FoundationsWiring, "workThreadProjection"> &
-  Pick<FoundationsWiring, "providerRuntimeRegistry"> &
+  Pick<FoundationsWiring, "hostMemoryGuard" | "providerRuntimeRegistry"> &
   Pick<CodeRuntimeWiring, "codeOperationRuntime">;
 
 const decodeAgentRunParentThreadId = Schema.decodeUnknownSync(AgentRunParentThreadId);
@@ -220,6 +228,7 @@ export function wireRemote(deps: RemoteDependencies) {
     generatedImageStore,
     debugConfigurationApprovals,
     debugService,
+    hostMemoryGuard,
     languageServerApprovals,
     onWorkTurnCancelled,
     options,
@@ -927,6 +936,33 @@ export function wireRemote(deps: RemoteDependencies) {
       }
     },
   });
+  // Linked secret stores: the broker holds each pointer and follows it at use;
+  // the host journals each link and each change to a key's reference.
+  const secretStoresRoutes = createSecretStoresRouteHandler({
+    service: createSecretStoresService({
+      broker:
+        options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+          ? undefined
+          : makeSecretStoreBrokerClient({
+              url: options.credentialBrokerUrl,
+              token: options.credentialBrokerToken,
+            }),
+      journal: secretStoresJournal({
+        journal: persistence.journal,
+        connection: persistence.connection,
+        uuid: randomUUID,
+        now: () => new Date().toISOString(),
+      }),
+      readProviderInstances: () => persistence.readProviderInstances(),
+      reprobe: async (windowId, instance) => {
+        await providerService.probe(windowId, instance.id, { fresh: true });
+      },
+    }),
+    windowAuthorityStore,
+    ...(options.allowedRendererHttpOrigin === undefined
+      ? {}
+      : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
+  });
   const privateListenerSetting = createPrivateListenerSetting(providerDataDirectory);
   const privateListenerAdministrationRoutes = createPrivateListenerAdministrationRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
@@ -1067,9 +1103,55 @@ export function wireRemote(deps: RemoteDependencies) {
     }),
     withThreadStanding: threadStandingFromMessageQueue(threadMessageQueue),
   });
+  const hostMemoryLimits = new HostMemoryLimitsService({
+    connection: persistence.connection,
+    journal: persistence.journal,
+    clock: () => new Date().toISOString(),
+    uuid: randomUUID,
+    // The guard reads the saved limits at every sample; this takes one now so
+    // a lowered limit acts at once instead of at the next scheduled reading.
+    onChanged: () => void hostMemoryGuard.sample().catch(() => undefined),
+  });
+  // Loopback administration chain only, beside host control: the bundle holds
+  // host-wide facts, so no remote device ever reaches it.
+  const supportBundleRoutes = createSupportBundleRouteHandler({
+    windowAuthorityStore,
+    ...(options.desktopBridgeSecret === undefined
+      ? {}
+      : { desktopBridgeSecret: options.desktopBridgeSecret }),
+    sources: () => ({
+      connection: persistence.connection,
+      journal: persistence.journal,
+      octantVersion: version,
+      providers: () => ({
+        instances: persistence.readProviderInstances(),
+        observed: providerRuntimeRegistry.observedStates(),
+      }),
+      ...(options.hostControl?.readServiceLog === undefined
+        ? {}
+        : { readHostLog: options.hostControl.readServiceLog }),
+      codeSettings: () => persistence.readCodeSettings()?.settings,
+      codeThreadPolicies: () =>
+        persistence.readCodeThreads().map((thread) => thread.executionPolicy),
+      platformCapabilities: options.platformCapabilities ?? [],
+      hostDiagnostics: composeHostDiagnostics,
+      hostHealth: () => {
+        const statements = slowStatementTally.read();
+        const lag = readEventLoopLagCounters();
+        return {
+          slowStatementCount: statements.count,
+          slowStatementWorstMs: statements.worstMs,
+          eventLoopLagCount: lag.count,
+          eventLoopLagWorstMs: lag.worstMs,
+        };
+      },
+    }),
+  });
   const hostControlRoutes = createHostControlRouteHandler({
     windowAuthorityStore,
     diagnostics: composeHostDiagnostics,
+    memory: () => hostMemoryGuard.report(),
+    memoryLimits: hostMemoryLimits,
     threadRetention,
     ...(options.hostControl?.servicePolicy === undefined
       ? {}
@@ -1084,6 +1166,9 @@ export function wireRemote(deps: RemoteDependencies) {
             dataDirectory: persistence.dataDirectory,
             homeDirectory: homedir(),
             platform: hostRuntimePlatform,
+            ...(process.env.OCTANT_BROWSER_PROFILES_DIRECTORY === undefined
+              ? {}
+              : { browserProfilesDirectory: process.env.OCTANT_BROWSER_PROFILES_DIRECTORY }),
             ...(options.credentialBrokerUrl !== undefined && hostRuntimePlatform === "darwin"
               ? { credentialStore: desktopCredentialStore() }
               : {}),
@@ -1147,6 +1232,7 @@ export function wireRemote(deps: RemoteDependencies) {
     delegationAdministrationRoutes,
     externalContentRoutes,
     hostControlRoutes,
+    supportBundleRoutes,
     hubAdministrationRoutes,
     localDeviceAdministrationRoutes,
     privateListenerAdministrationRoutes,
@@ -1154,6 +1240,7 @@ export function wireRemote(deps: RemoteDependencies) {
     privateListenerSetting,
     providerCredentialRoutes,
     remoteHost,
+    secretStoresRoutes,
   };
 }
 

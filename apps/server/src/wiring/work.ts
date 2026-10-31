@@ -532,7 +532,7 @@ export function wireWork(deps: WorkDependencies) {
                 rootIdentity: rooted.rootIdentity,
               };
             }
-            // ADR 0017: a Code Project may bind a non-Git folder. Mention
+            // A Code Project may bind a non-Git folder. Mention
             // confinement follows the authorized checkout directory rather
             // than requiring a Git observation.
             const project = persistence.readProject(view.thread.projectId);

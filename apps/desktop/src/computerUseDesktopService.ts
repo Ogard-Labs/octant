@@ -19,6 +19,7 @@ import {
   verifyComputerDriverBinary,
 } from "./computerUseDriverRelease";
 import {
+  computerDriverPermissions,
   computerUsePermissions,
   openComputerUsePermissionSettings,
   startComputerDriverRuntime,
@@ -147,12 +148,24 @@ export function createComputerUseDesktopService(options: {
 
   async function status(): Promise<ComputerUseStatus> {
     await initialize();
-    const permissions = supported
+    const host = supported
       ? await computerUsePermissions().catch(() => ({
           accessibility: false,
           screenRecording: false,
         }))
       : { accessibility: false, screenRecording: false };
+    // The driver, not Octant, acts, and macOS can refuse it while allowing
+    // Octant. Report what the driver holds once Octant's own grants allow
+    // starting it.
+    const driver =
+      settings.enabled &&
+      !replacing &&
+      state !== "unavailable" &&
+      host.accessibility &&
+      host.screenRecording
+        ? await getRuntime().then(computerDriverPermissions, () => undefined)
+        : undefined;
+    const permissions = driver ?? host;
     const update = updates.state();
     return {
       supported,
@@ -169,14 +182,19 @@ export function createComputerUseDesktopService(options: {
         ? { message: "Computer use requires the Apple Silicon macOS desktop app." }
         : state === "unavailable"
           ? { message: "The bundled computer-use driver is unavailable." }
-          : !permissions.accessibility || !permissions.screenRecording
+          : driver !== undefined && (!driver.accessibility || !driver.screenRecording)
             ? {
                 message:
-                  "Allow Octant in macOS Accessibility and Screen Recording, then recheck. Some permission changes require relaunching Octant.",
+                  "macOS allows Octant but refuses the computer-use driver it starts. This happens with unsigned Octant builds; install a signed Octant build, allow it in Accessibility and Screen Recording, then relaunch and recheck.",
               }
-            : update.message === undefined
-              ? {}
-              : { message: update.message }),
+            : !permissions.accessibility || !permissions.screenRecording
+              ? {
+                  message:
+                    "Allow Octant in macOS Accessibility and Screen Recording, then recheck. Some permission changes require relaunching Octant.",
+                }
+              : update.message === undefined
+                ? {}
+                : { message: update.message }),
     };
   }
   async function reserve(owner: ComputerUseOwner): Promise<boolean> {

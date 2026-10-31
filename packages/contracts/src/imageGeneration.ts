@@ -193,8 +193,7 @@ export const IMAGE_GENERATION_MAX_CUSTOM_SOURCES = 20;
 
 /**
  * A user-named (providerInstanceId, modelId) pair on an enabled
- * `openai-compatible-http` instance that may also generate images
- * (`docs/decisions/0085`). The instance's own base URL and credential are
+ * `openai-compatible-http` instance that may also generate images. The instance's own base URL and credential are
  * reused unchanged; nothing here can point at an arbitrary URL.
  */
 export const ImageGenerationCustomSource = Schema.Struct({

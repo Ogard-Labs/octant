@@ -1027,6 +1027,41 @@ describe("ProjectService", () => {
     );
   });
 
+  it("saves a Code Project's terminal actions as one journaled event and refuses a Work Project", async () => {
+    const fixture = fixtureService({ projects: [codeProject()] });
+    const actions = [
+      {
+        id: "92000000-0000-4000-8000-000000000001",
+        name: "Dev",
+        command: "bun run dev",
+        directory: "apps/web",
+      },
+    ];
+    const result = await fixture.service.executeProject(windowId, {
+      kind: "change-code-project-actions",
+      projectId: workId,
+      expectedVersion: 1,
+      actions,
+    } as never);
+    expect(result).toMatchObject({
+      kind: "code-project-actions-changed",
+      project: { actions, version: 2 },
+    });
+    expect(fixture.append.mock.calls[0]?.[0]?.events?.[0]?.eventName).toBe(
+      "project.code-actions-changed@1",
+    );
+
+    const work = fixtureService({ projects: [chatProject()] });
+    await expect(
+      work.service.executeProject(windowId, {
+        kind: "change-code-project-actions",
+        projectId: chatId,
+        expectedVersion: 1,
+        actions,
+      } as never),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+  });
+
   it("writes STATUS.md and never AGENTS.md into the folder when a Work Project opts into a status file", async () => {
     const folder = realpathSync(mkdtempSync(join(tmpdir(), "octant-status-opt-in-")));
     try {

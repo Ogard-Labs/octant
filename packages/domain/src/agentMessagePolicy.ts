@@ -2,7 +2,7 @@ import type { AgentMessageRefuseReason, OctantMode } from "@octant/contracts";
 import { MAX_AGENT_MESSAGE_BODY_BYTES } from "@octant/contracts";
 
 /**
- * Pure agent-to-agent messaging policy (decision 0063).
+ * Pure agent-to-agent messaging policy.
  *
  * Messaging is a server-owned capability: a sender petitions, the host admits,
  * clamps, journals, and delivers. The sender's petition carries text and

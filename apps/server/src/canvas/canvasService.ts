@@ -681,7 +681,7 @@ export class CanvasService {
   /**
    * Record a version another of this person's computers wrote, as this
    * Canvas's next version, or as its first one when it is not open in a
-   * thread here yet (0040: bind to a compatible thread).
+   * thread here yet (bind to a compatible thread).
    *
    * The content - title, blocks, sources, presentation - is adopted as given.
    * The provenance is never taken from the other computer: a first version

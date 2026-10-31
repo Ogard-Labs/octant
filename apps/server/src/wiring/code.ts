@@ -483,7 +483,6 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
     AuthorityWiring,
     | "bindingReceiptStore"
-    | "codeApprovalStore"
     | "codeSessionAuthority"
     | "liveTurns"
     | "machineChangeFeed"
@@ -527,7 +526,6 @@ export function wireCode(deps: CodeDependencies) {
     threadAwaitsHarnessApproval,
     bindingReceiptStore,
     cacheStats,
-    codeApprovalStore,
     codeBoardEventStore,
     codeEvidence,
     codeSessionAuthority,
@@ -716,7 +714,6 @@ export function wireCode(deps: CodeDependencies) {
           attachments: codeAttachments,
           uuid: randomUUID,
           clock: () => new Date().toISOString(),
-          approvals: codeApprovalStore,
           sessionAuthority: codeSessionAuthority,
           worktreeSourcePreview: {
             preview: (input, signal) => managedWorktreeSourcePreview(input, signal),

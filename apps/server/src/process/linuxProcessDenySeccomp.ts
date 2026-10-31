@@ -4,7 +4,7 @@
  * Bubblewrap applies the filter before it execve's the command, so this
  * program never denies execve. It denies process creation (fork/vfork and
  * non-thread clone, with clone3 returning ENOSYS so libc falls back) and
- * execveat (memfd and *at exec). See docs/decisions/0068.
+ * execveat (memfd and *at exec). See docs/architecture.md, "Security and authority".
  */
 
 const BPF_LD_W_ABS = 0x20;

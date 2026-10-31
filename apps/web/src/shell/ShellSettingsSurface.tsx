@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import type { WorkSettingsController } from "../work/useWorkSettings";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
+import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { DesktopPaneClient } from "@octant/client-runtime/desktop-pane-client";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
@@ -13,6 +14,7 @@ import type { HostControlClient } from "@octant/client-runtime/host-control-clie
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ReplicaMembershipClient } from "@octant/client-runtime/replica-membership-client";
 import type { ReplicaStoreSettingsClient } from "@octant/client-runtime/replica-store-settings-client";
+import type { SecretStoresClient } from "@octant/client-runtime/secret-stores-client";
 import type { ReplicaSyncStatusClient } from "@octant/client-runtime/replica-sync-status-client";
 import type { HostFederationLifecycle } from "@octant/client-runtime/host-federation-lifecycle";
 import type { UsageClient } from "@octant/client-runtime/usage-client";
@@ -69,9 +71,11 @@ export interface ShellSettingsSurfaceProps {
   readonly themeController: ThemeController;
   readonly diagnosticsExportClient: DiagnosticsExportClient;
   readonly hostControlClient: HostControlClient;
+  readonly browserAutomationClient?: Pick<BrowserAutomationClient, "manageProfiles">;
   readonly canvasClient?: Pick<CanvasClient, "publicLinkSettings" | "setPublicLinkSettings">;
   readonly desktopPaneClient?: Pick<DesktopPaneClient, "request">;
   readonly replicaStoreSettingsClient?: ReplicaStoreSettingsClient;
+  readonly secretStoresClient?: SecretStoresClient;
   readonly replicaMembershipClient?: ReplicaMembershipClient;
   readonly replicaSyncStatusClient?: ReplicaSyncStatusClient;
   readonly folderBrowseClient?: Pick<FolderBrowseClient, "browse">;
@@ -148,6 +152,9 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
               : { backgroundImageLibrary: props.backgroundImageLibrary })}
             diagnosticsExportClient={props.diagnosticsExportClient}
             hostControlClient={props.hostControlClient}
+            {...(props.browserAutomationClient === undefined
+              ? {}
+              : { browserAutomationClient: props.browserAutomationClient })}
             {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
             {...(props.desktopPaneClient === undefined
               ? {}
@@ -155,6 +162,9 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             {...(props.replicaStoreSettingsClient === undefined
               ? {}
               : { replicaStoreSettingsClient: props.replicaStoreSettingsClient })}
+            {...(props.secretStoresClient === undefined
+              ? {}
+              : { secretStoresClient: props.secretStoresClient })}
             {...(props.replicaMembershipClient === undefined
               ? {}
               : { replicaMembershipClient: props.replicaMembershipClient })}

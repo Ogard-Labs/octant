@@ -7,6 +7,33 @@ owns the driver interface, honest capability, credentials, and confinement
 ([Architecture: providers](../architecture.md#providers) and
 [security and authority](../architecture.md#security-and-authority)).
 
+## Key providers
+
+Claude Code, Codex, Mistral Vibe, and OpenCode run as themselves inside
+Octant ([Architecture: key providers run as themselves](../architecture.md#providers)).
+The switch-offs in the sections below are today's build. Each key provider's
+target wire behaviour, gated by the thread's
+[guardrail level](../architecture.md#security-and-authority) (off at Guarded
+and Reviewed until the person turns it on, on at Full access):
+
+| Provider     | Switched off today                                                                                                                   | Target                                                                                                                                                                                                   | Built                                        |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| Claude Code  | `settingSources: []`, `skills: []`, no subagent tool, `WebSearch` and `WebFetch` left out and refused                                | The person's setting sources (home and trusted Project), skills, plugins, hooks, and MCP servers; its subagent tool; `WebSearch` and `WebFetch`; `permissionMode: "auto"` as Reviewed's default reviewer | Reviewed with its own reviewer, in Code only |
+| Codex        | Its subagents; Project skills disabled by path; in Chat each named MCP server switched off                                           | Its subagents; Project skills; the person's MCP servers in Chat; `approvalsReviewer: "auto_review"` as Reviewed's default reviewer                                                                       | Reviewed with its own reviewer, in Code only |
+| Mistral Vibe | `VIBE_SKILL_PATHS="[]"`, `VIBE_DISABLED_SKILLS='["*"]'`, `VIBE_INCLUDE_PROJECT_CONTEXT="false"`                                      | Its own skills and Project context; a trusted Project's tools and MCP servers; its auto-approve mode as Reviewed's default reviewer, reported `unsupported` until mapped                                 | No                                           |
+| OpenCode     | Skills and project config off, `skill` denied; Work `shell` and `subagent` denied; Octant's denies outrank saved grants; `once` only | The person's own permission rules; "always" answers; its `subagent` delegation; its skills; `bash` and `task` in Work as in Code; Reviewed through Octant Shield                                         | No                                           |
+
+Plan's read-only rule, Chat's withheld filesystem and shell, and the
+provider's memory, telemetry, and self-update channels stay off at every
+level. Work and Code share one capability set, so each runtime starts a Work
+session with its shell at the thread's level exactly as it starts a Code
+session, as the
+[architecture's Work rules](../architecture.md#modes-chat-work-and-code)
+state per provider (allowed; not built yet: today every driver withholds the
+shell in Work). A native child run, a native
+web read, and a provider's review verdict are journaled where the runtime
+reports them; where it does not, the capability report says so.
+
 ## Claude Code
 
 For a selected Haiku model in Plan, the adapter supplies a query-local
@@ -146,7 +173,26 @@ option is absent) out of the session. The decoder tolerates the narrower list
 (the runtime may drop a requested tool, never add one), so a launch that lacks
 a requested tool still runs.
 
-## OpenCode
+## Codex
+
+Below Full access every Codex app-server runs under Octant's profile, and the
+[confinement matrix](../architecture.md#security-and-authority) owns what that
+profile allows and why. The wire mapping that follows from it:
+
+- A process carries one lease: a thread's root, mode, and posture, or a catalog
+  lease for account and model reads. The driver leases it when a connection's
+  first `thread/start` or `thread/resume` names the posture, and refuses a
+  different posture on the same connection as `unauthorized`.
+- `thread/start` keeps `sandbox: "read-only"`, and every `turn/start` sends
+  `sandboxPolicy: { type: "externalSandbox", networkAccess: "restricted" }`.
+  macOS refuses Codex's own Seatbelt inside Octant's, so Codex is told the
+  sandbox is outside it.
+- Approval-gated and auto-accept-edits send `approvalPolicy: "untrusted"`.
+  Under an external sandbox `on-request` runs every command without asking
+  (codex-rs `exec_policy.rs`, rust-v0.164.0); `untrusted` asks for each command
+  Codex does not know to be read-only and for every patch. Plan and Chat keep
+  `never`, so a write fails at the profile rather than at a prompt.
+- Full access keeps `danger-full-access` and an unwrapped process.
 
 The installed OpenCode binary's
 version selects its routes: 1.x keeps the legacy session API and its
@@ -190,17 +236,23 @@ the turn keeps running while OpenCode retries. Queueing, lifecycle, part start a
 usage totals report nothing (each step reports its own usage); any other
 event fails the turn closed with an error naming it. Approvals map
 through 2.0.22's `permission.asked` event and its reply route, whose body
-is `{decision}`. An approval is answered
+is `{decision}`. Today an approval is answered
 `once`, never `always`, even when approvals are remembered for the Project:
 `always` would save a grant in OpenCode's data directory, which it shares
-with the person's own use, outside Octant's revocation. Approval-gated on
+with the person's own use, outside Octant's revocation. The rule is that the
+person may answer `always` ([Key providers](#key-providers); allowed, not
+built yet): the answer is journaled, and the approval says that the grant
+lives in OpenCode's own store, where clearing it is the way to revoke it. Approval-gated on
 2.x honours permission grants the person saved in OpenCode itself for the
 same repository: OpenCode keys them by the repository's root commit, keeps
 them in its own data store (shared with the person's own use because
 provider credentials live there), and applies them as allow after Octant's
-rules. Octant's denies still win, so Plan and the Work shell and subagent
-denials hold, and Octant itself never writes such a grant because it
-answers approvals `once`. An edit allowed this way still fails the turn
+rules. Today Octant's denies still win, so Plan and the Work shell and
+subagent denials hold (the Work shell denial lifts in a Project with Shell
+and tools on; allowed, not built yet), and Octant itself never writes such a grant because
+it answers approvals `once`. The rule is that the person's OpenCode rules
+apply over Octant's level rules, with Plan and a mode's withheld tools still
+Octant's denies (allowed; not built yet). An edit allowed this way still fails the turn
 through the file-change check, after the write; a shell command allowed
 this way runs without an approval card. Clearing the saved grants in
 OpenCode restores the prompts. A 2.x reject settles every pending request
@@ -370,8 +422,7 @@ distribution.
 | `qoder`                   | Qoder CLI          | `npx @qoder-ai/qodercli --acp`                         | Blocked: registry quarantine (initialize fails)                                                     |
 | `vtcode`                  | VT Code            | `vtcode acp` (binary)                                  | Blocked: registry quarantine (missing Windows builds) until it is lifted                            |
 
-fx ships as an ACP profile (`fx`) but is not in the registry; see
-[fx-acp-compatibility.md](../fx-acp-compatibility.md).
+fx ships as an ACP profile (`fx`) but is not in the registry.
 
 fx is also withheld from users. `WITHHELD_BUNDLED_PROVIDER_DRIVERS` in
 `packages/plugin-host/src/bundledProviderDrivers.ts` holds its driver out of

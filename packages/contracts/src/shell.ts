@@ -5,6 +5,7 @@ import { ChatThreadId } from "./chat";
 import { CodeRelativePath, CodeTerminalId, CodeTestRunId, CodeThreadId } from "./code";
 import { WorkThreadId } from "./workThreads";
 import { BrowserContextId, BrowserThreadId } from "./browserAutomation";
+import { StoredBrowserProfile } from "./browserProfiles";
 import { AggregateVersion } from "./events";
 import { HostId, LOCAL_HOST_ID } from "./host";
 import { OctantMode } from "./modes";
@@ -486,6 +487,13 @@ export const StandaloneSkillActivationMap = Schema.Record({
 }).annotations(strict);
 export type StandaloneSkillActivationMap = typeof StandaloneSkillActivationMap.Type;
 
+/** One site remembered for one stored Browser profile; see `rememberedBrowserProfileSites`. */
+export const RememberedBrowserProfileSite = Schema.Struct({
+  origin: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
+  profile: StoredBrowserProfile,
+}).annotations(strict);
+export type RememberedBrowserProfileSite = typeof RememberedBrowserProfileSite.Type;
+
 export const ShellSettings = Schema.Struct({
   chatEnabled: Schema.Boolean,
   workEnabled: Schema.Boolean,
@@ -507,8 +515,8 @@ export const ShellSettings = Schema.Struct({
   lastContextSurface: Schema.NullOr(ContextSurfaceId),
   sidebarMaterial: Schema.Literal("system", "opaque"),
   /**
-   * Extends translucency from the sidebar to the workspace background
-   * (docs/decisions/0047). Only takes effect when the sidebar itself
+   * Extends translucency from the sidebar to the workspace background.
+   * Only takes effect when the sidebar itself
    * resolves translucent; a store persisted before this setting shipped
    * decodes to opaque, matching the workspace's prior always-solid look.
    */
@@ -567,7 +575,7 @@ export const ShellSettings = Schema.Struct({
   /**
    * Whether Octant may check for updates on its own. Off means no request is
    * made at all rather than a check whose answer is withheld — what leaves the
-   * machine is the point of the switch (`docs/decisions/0034`). A store
+   * machine is the point of the switch. A store
    * persisted before updates shipped decodes to on, which is the behaviour the
    * release notes describe.
    */
@@ -587,8 +595,8 @@ export const ShellSettings = Schema.Struct({
   /**
    * How long a put-away thread rests in the Put away shelf before the host
    * archives it. `null` means never. Archiving keeps everything and is the
-   * only thing this timer does; a purge still needs its own confirmation
-   * (`docs/decisions/0035`). A store persisted before completion shipped
+   * only thing this timer does; a purge still needs its own confirmation.
+   * A store persisted before completion shipped
    * decodes to the week the feature was introduced with.
    */
   completedThreadArchiveAfterDays: Schema.optionalWith(
@@ -602,7 +610,7 @@ export const ShellSettings = Schema.Struct({
    * its version, and a default here would overrule it — a preview build would
    * quietly move itself to stable the first time these settings loaded. Absent
    * means "nobody has chosen", which the host reads as "follow the ring you
-   * were built for" (`docs/decisions/0034`).
+   * were built for".
    */
   releaseRing: Schema.optional(AppReleaseRing),
   /** Enabled Open in applications, in the order shown by the native shell. */
@@ -687,6 +695,17 @@ export const ShellSettings = Schema.Struct({
    */
   rememberedBrowserOrigins: Schema.optionalWith(
     Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048))),
+    { default: () => [] },
+  ),
+  /**
+   * Sites the person approved with "always allow" on a page in a Project or
+   * Personal Browser profile. A pair, never an origin alone: a remembered
+   * Private origin does not cover a signed-in page, and a pair for one profile
+   * does not cover another. Grows only through the approval answer, like
+   * `rememberedBrowserOrigins`.
+   */
+  rememberedBrowserProfileSites: Schema.optionalWith(
+    Schema.Array(RememberedBrowserProfileSite).pipe(Schema.maxItems(1_024)),
     { default: () => [] },
   ),
 }).annotations(strict);

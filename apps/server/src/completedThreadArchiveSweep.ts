@@ -60,7 +60,7 @@ export interface CompletedThreadArchiveSweepSummary {
  * The host's own timer for completed threads: every pass archives the ones
  * whose completion is older than the window Settings names, in every mode.
  *
- * Archiving is the only thing this timer does. It never purges, and 0035's
+ * Archiving is the only thing this timer does. It never purges, and the
  * rule that a retention window never deletes on its own still stands: an
  * archived thread keeps its transcript, checkout, and journal. Passes never
  * overlap — the chain schedules the next only after this one returns — and a

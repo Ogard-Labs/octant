@@ -93,12 +93,16 @@ receives an explicit normalized path set.
   no GitHub token** and strips ambient token variables from ordinary Git
   commands. It never creates a fork automatically; you select an already
   configured writable head remote and the intended base repo and branch.
-- **Agents never merge or change a pull request.** Comments, approvals,
+- **Today, agents never merge or change a pull request.** Comments, approvals,
   request-changes, editing, closing, reopening, and **merge are denied to the
-  agent under every posture**. You can merge an open pull request yourself
+  agent under every posture**. Planned: an agent may merge, turn on
+  auto-merge, or merge a stack when you ask it to or allow it for the
+  Project, and you may merge from a paired device. You can merge an open pull request yourself
   from its review on the desktop: choose a method, then **Confirm merge**.
   Octant merges only the head you reviewed, refuses if it moved, and uses your
-  signed-in `gh`. A paired device cannot merge. Durable local review findings stay thread-owned; publishing
+  signed-in `gh`. A paired device cannot merge. You can also turn on
+  **Merge when ready** and **Auto-fix** there; see
+  [Automatic actions](#automatic-actions-on-a-pull-request). Durable local review findings stay thread-owned; publishing
   them to GitHub is a later phase.
 
 ## Authority matrix
@@ -147,6 +151,37 @@ Thread-scoped create and observe remain on the thread. A pull request's review
 can merge it after you confirm; nothing here approves, comments, closes, or
 force-pushes.
 
+### Automatic actions on a pull request
+
+A pull request's review has two switches under **Automatic actions**. Only you
+can turn them on, with a click in a desktop window on the computer running
+Octant; a paired phone or browser cannot.
+
+- **Merge when ready** asks GitHub to merge the pull request itself once its
+  required checks and reviews pass, using the merge method selected beside
+  **Merge**. It is pinned to the head you were looking at, so a push in between
+  makes GitHub refuse. If the repository does not allow auto-merge, the review
+  says it is unsupported and turns nothing on; enable **Allow auto-merge** in
+  the repository's GitHub settings first. The status line shows what it waits
+  on, when GitHub merged it, or when GitHub turned auto-merge off.
+- **Auto-fix** watches the pull request about once a minute while Octant runs.
+  When a required check fails, a reviewer leaves an unresolved comment, or the
+  branch conflicts with its base, it wakes the linked Code thread with one turn
+  that lists the failed checks with the end of their logs, the review comments,
+  and the conflict. That text comes from GitHub, so it is marked as outside
+  content and the thread's usual approvals apply. The agent is told to fix,
+  commit, and push on the branch, never force-push or rewrite history, and to
+  merge the base branch rather than rebase; it may reply to a review thread and
+  resolve it after fixing it.
+- Auto-fix tries at most three times per failure, then stops and marks the
+  thread for your follow-up. It waits while you are typing in that thread or a
+  turn is running there, and stops when the pull request merges or closes, the
+  thread is archived, the Project no longer connects the repository, or you
+  turn it off. After Octant restarts, it stays quiet until you open the pull
+  request's review again.
+
+Every switch change and every wake is recorded in Octant's journal.
+
 A Code thread's right sidebar can also host **Pull requests**: it lists the
 active Project's active rows from the same cached snapshot and opens a selected
 row in Review in the same dock. The pull request named on a pane tab opens
@@ -181,6 +216,25 @@ Linear bodies into threads.
 - [Code Thread Board](/advanced/code-board) for runtime-derived thread status
 - [Subagents](/advanced/subagents) for child runs in isolated worktrees
 - [Recovery and troubleshooting](/advanced/recovery) for inventory and conflict recovery
+
+## Review what only exists on this machine
+
+Open **Review** in the right sidebar of a Code thread, then choose **Local
+commits**. The list shows the commits on the thread's branch that its upstream
+does not have yet. A branch that was never pushed is compared with its base
+branch instead, and the list says which one it used. Select a commit to expand
+its diff. Octant reads this from the local checkout and never fetches, so it
+is only as current as the last fetch you made. The list holds the newest 100 commits; when there are more, the count reads
+"100+" and a note says older ones are not listed.
+
+## Ignore whitespace
+
+**Ignore whitespace** appears above the diff in **Working tree** and in a
+commit's diff. It asks Git to leave out changes that only move or re-indent
+text, which makes a reformatting easier to read past. Your choice is kept for
+every thread in this browser or app profile. The changed-path count at the top
+still includes files whose only change was whitespace, so it can be higher than
+the number of files shown.
 
 ## Browse Git history
 
