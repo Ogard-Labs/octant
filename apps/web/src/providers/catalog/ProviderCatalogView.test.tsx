@@ -339,7 +339,7 @@ describe("ProviderCatalogView", () => {
   it.each([
     [
       /^Codex CLI, /,
-      "Runs its own agent loop under its own sandbox, which Full access turns off. Octant does not confine it",
+      "Runs its own agent loop. Octant's sandbox confines it and approvals gate it, except on Full access",
     ],
     [
       /^Claude Code, /,

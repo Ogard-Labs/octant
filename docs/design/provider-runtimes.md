@@ -146,7 +146,26 @@ option is absent) out of the session. The decoder tolerates the narrower list
 (the runtime may drop a requested tool, never add one), so a launch that lacks
 a requested tool still runs.
 
-## OpenCode
+## Codex
+
+Below Full access every Codex app-server runs under Octant's profile, and the
+[confinement matrix](../architecture.md#security-and-authority) owns what that
+profile allows and why. The wire mapping that follows from it:
+
+- A process carries one lease: a thread's root, mode, and posture, or a catalog
+  lease for account and model reads. The driver leases it when a connection's
+  first `thread/start` or `thread/resume` names the posture, and refuses a
+  different posture on the same connection as `unauthorized`.
+- `thread/start` keeps `sandbox: "read-only"`, and every `turn/start` sends
+  `sandboxPolicy: { type: "externalSandbox", networkAccess: "restricted" }`.
+  macOS refuses Codex's own Seatbelt inside Octant's, so Codex is told the
+  sandbox is outside it.
+- Approval-gated and auto-accept-edits send `approvalPolicy: "untrusted"`.
+  Under an external sandbox `on-request` runs every command without asking
+  (codex-rs `exec_policy.rs`, rust-v0.164.0); `untrusted` asks for each command
+  Codex does not know to be read-only and for every patch. Plan and Chat keep
+  `never`, so a write fails at the profile rather than at a prompt.
+- Full access keeps `danger-full-access` and an unwrapped process.
 
 The installed OpenCode binary's
 version selects its routes: 1.x keeps the legacy session API and its

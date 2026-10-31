@@ -1,14 +1,16 @@
+import { spawnSync } from "node:child_process";
 import {
   accessSync,
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,14 +23,26 @@ import {
   codexAppServerArgs,
   codexProcessEnvironment,
   makeCodexProcessLive,
+  prepareCodexLaunch,
   probeCodexBinary,
   sanitizeCodexEnvironment,
+  type CodexLaunchAuthority,
   type CodexProbeOptions,
   type CodexProcessOptions,
 } from "./codexProcess";
-import type { ProcessConfinementPort } from "../process/seatbeltProfile";
+import {
+  makeProcessConfinementLive,
+  type ProcessConfinementPort,
+} from "../process/seatbeltProfile";
 
 const fakeCliPath = fileURLToPath(new URL("./fixtures/fakeCodexCli.ts", import.meta.url));
+// The lifecycle tests drive a fake CLI; the profile itself is covered below.
+const UNWRAPPED: CodexLaunchAuthority = {
+  kind: "thread",
+  root: tmpdir(),
+  mode: "code",
+  executionPolicy: "full-access",
+};
 const directories: string[] = [];
 
 /**
@@ -461,6 +475,7 @@ describe("CodexProcessPort", () => {
         makePort()
           .start({
             binaryPath: target.binaryPath,
+            authority: UNWRAPPED,
             environment: { ...process.env, CODEX_HOME: accountHome },
           })
           .pipe(Effect.asVoid),
@@ -485,7 +500,7 @@ describe("CodexProcessPort", () => {
     const connection = await Effect.runPromise(
       Effect.scoped(
         makePort({ inheritedEnvironment: environment })
-          .start({ binaryPath: target.binaryPath })
+          .start({ binaryPath: target.binaryPath, authority: UNWRAPPED })
           .pipe(
             Effect.tap(() =>
               Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 25))),
@@ -540,7 +555,12 @@ describe("CodexProcessPort", () => {
   it("classifies initialization timeout and early exit without exposing stderr", async () => {
     const timeout = fixture("initialize-timeout");
     const timeoutFailure = await failureOf(
-      Effect.scoped(makePort({ startupTimeoutMs: 50 }).start({ binaryPath: timeout.binaryPath })),
+      Effect.scoped(
+        makePort({ startupTimeoutMs: 50 }).start({
+          binaryPath: timeout.binaryPath,
+          authority: UNWRAPPED,
+        }),
+      ),
     );
     expect(timeoutFailure).toEqual({
       category: "unavailable",
@@ -554,7 +574,7 @@ describe("CodexProcessPort", () => {
         makePort({
           inheritedEnvironment: { ...process.env, PRIVATE_SECRET: "host-secret" },
           onDiagnostic: (message) => diagnostics.push(message),
-        }).start({ binaryPath: early.binaryPath }),
+        }).start({ binaryPath: early.binaryPath, authority: UNWRAPPED }),
       ),
     );
     expect(earlyFailure.category).toBe("unavailable");
@@ -571,7 +591,7 @@ describe("CodexProcessPort", () => {
         makePort({
           onDiagnostic: (message) => diagnostics.push(message),
           stderrBytes: 32,
-        }).start({ binaryPath: target.binaryPath }),
+        }).start({ binaryPath: target.binaryPath, authority: UNWRAPPED }),
       ),
     );
     expect(diagnostics).toContain("Codex app-server stderr captured (32 bytes, truncated).");
@@ -588,7 +608,7 @@ describe("CodexProcessPort", () => {
       const scope = await Effect.runPromise(Scope.make());
       const connection = await Effect.runPromise(
         makePort({ shutdownTimeoutMs: 50 })
-          .start({ binaryPath: target.binaryPath })
+          .start({ binaryPath: target.binaryPath, authority: UNWRAPPED })
           .pipe(Effect.provideService(Scope.Scope, scope)),
       );
       const processIds = await waitForPids(target.root, 2);
@@ -612,7 +632,7 @@ describe("CodexProcessPort", () => {
     const pid = await Effect.runPromise(
       Effect.scoped(
         makePort()
-          .start({ binaryPath: target.binaryPath })
+          .start({ binaryPath: target.binaryPath, authority: UNWRAPPED })
           .pipe(Effect.map((c) => c.pid)),
       ),
     );
@@ -627,6 +647,7 @@ describe("CodexProcessPort", () => {
         Effect.gen(function* () {
           const connection = yield* makePort({ shutdownTimeoutMs: 2_000 }).start({
             binaryPath: target.binaryPath,
+            authority: UNWRAPPED,
           });
           return yield* Effect.promise(() =>
             waitForPids(target.root, 2).then(() => connection.pid),
@@ -646,6 +667,7 @@ describe("CodexProcessPort", () => {
         Effect.gen(function* () {
           const connection = yield* makePort({ shutdownTimeoutMs: 50 }).start({
             binaryPath: target.binaryPath,
+            authority: UNWRAPPED,
           });
           pid = connection.pid;
           yield* Effect.promise(() =>
@@ -685,7 +707,10 @@ describe("CodexProcessPort", () => {
       Effect.scoped(
         Effect.gen(function* () {
           const fiber = yield* Effect.fork(
-            makePort({ startupTimeoutMs: 10_000 }).start({ binaryPath: target.binaryPath }),
+            makePort({ startupTimeoutMs: 10_000 }).start({
+              binaryPath: target.binaryPath,
+              authority: UNWRAPPED,
+            }),
           );
           yield* Effect.promise(() => waitForPids(target.root, 2));
           yield* Fiber.interrupt(fiber);
@@ -693,5 +718,97 @@ describe("CodexProcessPort", () => {
       ),
     );
     for (const pid of pids(target.root)) await expectMissing(pid);
+  });
+});
+
+describe("Codex launch confinement", () => {
+  it("launches Full access as the program itself, with no profile around it", () => {
+    const prepared = prepareCodexLaunch({
+      binaryPath: "/bin/sh",
+      args: ["-c", "true"],
+      authority: { kind: "thread", root: tmpdir(), mode: "code", executionPolicy: "full-access" },
+      environment: { HOME: homedir() },
+      confinement: {
+        prepare: () => {
+          throw new Error("Full access must not be confined.");
+        },
+      },
+      platform: process.platform,
+    });
+    expect(prepared.status === "prepared" ? prepared.launch.command : undefined).toBe("/bin/sh");
+  });
+
+  // Real `sandbox-exec`: what a command run by Codex can reach is whatever the
+  // app-server's own profile allows, because Codex runs its commands without a
+  // sandbox of its own inside Octant's. The fixture sits under the real home,
+  // since the profile's home rules are drawn from it.
+  describe.skipIf(process.platform !== "darwin")("under Seatbelt", () => {
+    const run = (
+      executionPolicy: "plan" | "approval-gated",
+      paths: { root: string; codexHome: string },
+      script: string,
+    ) => {
+      const prepared = prepareCodexLaunch({
+        binaryPath: "/bin/sh",
+        args: ["-c", script],
+        authority: { kind: "thread", root: paths.root, mode: "code", executionPolicy },
+        environment: { HOME: homedir(), PATH: "/usr/bin:/bin", CODEX_HOME: paths.codexHome },
+        confinement: makeProcessConfinementLive(),
+        platform: "darwin",
+      });
+      if (prepared.status === "refused") return { status: 1, output: prepared.failure.message };
+      try {
+        const result = spawnSync(prepared.launch.command, [...prepared.launch.args], {
+          cwd: prepared.launch.cwd,
+          env: prepared.launch.environment,
+          encoding: "utf8",
+          timeout: 10_000,
+        });
+        return { status: result.status, output: `${result.stdout}${result.stderr}` };
+      } finally {
+        prepared.launch.release();
+      }
+    };
+
+    it("refuses a command a file under HOME outside the thread's root and reads the root", () => {
+      const planted = mkdtempSync(join(homedir(), ".octant-codex-hostile-"));
+      try {
+        const root = join(planted, "project");
+        const codexHome = join(planted, "codex-home");
+        const secret = join(planted, ".ssh", "id_fixture");
+        mkdirSync(root);
+        mkdirSync(codexHome, { mode: 0o700 });
+        mkdirSync(join(planted, ".ssh"));
+        writeFileSync(secret, "PLANTED-KEY\n");
+        writeFileSync(join(root, "README.md"), "IN-ROOT\n");
+        writeFileSync(join(codexHome, "config.toml"), "# account\n");
+
+        for (const policy of ["plan", "approval-gated"] as const) {
+          const outside = run(policy, { root, codexHome }, `cat '${secret}'`);
+          expect(outside.status).not.toBe(0);
+          expect(outside.output).not.toContain("PLANTED-KEY");
+
+          const inside = run(policy, { root, codexHome }, `cat '${join(root, "README.md")}'`);
+          expect(inside).toMatchObject({ status: 0, output: "IN-ROOT\n" });
+
+          // The runtime keeps its sessions; what would change a later
+          // thread's authority stays out of reach of a command.
+          const account = run(
+            policy,
+            { root, codexHome },
+            `echo state > '${join(codexHome, "state")}' && echo kept-state; echo '[mcp_servers.x]' >> '${join(codexHome, "config.toml")}' && echo wrote-config`,
+          );
+          expect(account.output).toContain("kept-state");
+          expect(account.output).not.toContain("wrote-config");
+        }
+        expect(readFileSync(join(codexHome, "config.toml"), "utf8")).toBe("# account\n");
+
+        const write = `echo x > '${join(root, "written")}' && echo wrote-root`;
+        expect(run("plan", { root, codexHome }, write).output).not.toContain("wrote-root");
+        expect(run("approval-gated", { root, codexHome }, write).output).toContain("wrote-root");
+      } finally {
+        rmSync(planted, { recursive: true, force: true });
+      }
+    });
   });
 });

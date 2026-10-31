@@ -1,12 +1,33 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { accessSync, constants, mkdirSync, statSync } from "node:fs";
-import { delimiter, dirname, isAbsolute } from "node:path";
+import {
+  accessSync,
+  chmodSync,
+  constants,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  statSync,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { delimiter, dirname, isAbsolute, join } from "node:path";
 
-import type { ProviderFailure } from "@octant/contracts";
+import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts";
 import { Effect, type Scope } from "effect";
 
 import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
-import type { ProcessConfinementPort } from "../process/seatbeltProfile";
+import {
+  makeProcessConfinementLive,
+  ProcessConfinementError,
+  seatbeltDenyRule,
+  type ProcessConfinementPort,
+} from "../process/seatbeltProfile";
+import {
+  materializeOsNetworkEgress,
+  resolveProbeEgressPolicy,
+  resolveProviderRuntimeEgressPolicy,
+} from "../process/threadEgressPolicy";
 import { decodeInitializeResult } from "./codexProtocol";
 import {
   CodexRpcClientFailure,
@@ -28,9 +49,25 @@ export interface CodexAppServerConnection {
   readonly exited: Promise<void>;
 }
 
+/**
+ * What one app-server process carries. A thread lease is one root under one
+ * mode and posture, so Octant's profile can be exact for it; a catalog lease
+ * reads the account and models and runs no turn, so it gets a root of its own
+ * with nothing in it.
+ */
+export type CodexLaunchAuthority =
+  | { readonly kind: "catalog" }
+  | {
+      readonly kind: "thread";
+      readonly root: string;
+      readonly mode: "chat" | "work" | "code";
+      readonly executionPolicy: ProviderExecutionPolicy;
+    };
+
 export interface CodexProcessPort {
   readonly start: (input: {
     readonly binaryPath: string;
+    readonly authority: CodexLaunchAuthority;
     readonly environment?: NodeJS.ProcessEnv;
     readonly onProcessStarted?: ProviderProcessStartedListener;
   }) => Effect.Effect<CodexAppServerConnection, ProviderFailure, Scope.Scope>;
@@ -51,11 +88,10 @@ export interface CodexProcessOptions {
   readonly shutdownTimeoutMs?: number;
   readonly startupTimeoutMs?: number;
   readonly stderrBytes?: number;
-  /**
-   * Confinement for the version read only. 0142 records that the app-server
-   * itself is not wrapped, so this never names the runtime's confinement.
-   */
   readonly versionProbeConfinement?: ProcessConfinementPort;
+  /** Confinement for the app-server below Full access; defaults to the platform's. */
+  readonly confinement?: ProcessConfinementPort;
+  readonly platform?: NodeJS.Platform;
 }
 
 const DEFAULT_OCTANT_VERSION = "0.0.0";
@@ -556,19 +592,200 @@ export function probeCodexBinary(
   });
 }
 
+/**
+ * Files in the account home that change what later threads may do: its
+ * configuration (MCP servers, hooks, sandbox defaults), the variables Codex
+ * loads from `.env`, its exec-policy rules, and the skills and instructions
+ * every thread reads. The runtime writes its sessions, state databases, logs
+ * and sign-in refresh under the same home, so the home is writable and these
+ * are taken back out. A command under Codex's own `read-only` sandbox could
+ * not write them, and a thread under Octant's must not gain that.
+ */
+const CODEX_HOME_AUTHORITY_ENTRIES = [
+  ".env",
+  "AGENTS.md",
+  "AGENTS.override.md",
+  "config.toml",
+  "hooks.json",
+  "plugins",
+  "prompts",
+  "rules",
+  "skills",
+] as const;
+
+/**
+ * The macOS services the runtime asks for beyond the shared builder's grants.
+ * Measured with codex-cli 0.164.0 on macOS 27.0.1 against a ChatGPT sign-in:
+ * without the preferences daemon (both names) and a read of its shared
+ * memory, `account/read` failed with "failed to load workspace requirements"
+ * (Codex reads its managed configuration through preferences); without
+ * `com.apple.SecurityServer` it failed with "workspace routing discovery
+ * failed" (its TLS client consults it). Each grant was bisected away alone
+ * and the read failed again. None opens a file.
+ */
+const CODEX_SEATBELT_SERVICE_RULES = [
+  '(allow mach-lookup (global-name "com.apple.cfprefsd.daemon") (global-name "com.apple.cfprefsd.agent"))',
+  '(allow ipc-posix-shm-read-data (ipc-posix-name-prefix "apple.cfprefs."))',
+  '(allow mach-lookup (global-name "com.apple.SecurityServer"))',
+] as const;
+
+interface CodexLaunch {
+  readonly command: string;
+  readonly args: ReadonlyArray<string>;
+  readonly cwd: string | undefined;
+  readonly environment: NodeJS.ProcessEnv;
+  readonly release: () => void;
+}
+
+function existingRealPaths(paths: ReadonlyArray<string | undefined>): ReadonlyArray<string> {
+  const resolved = new Set<string>();
+  for (const path of paths) {
+    if (path === undefined || !isAbsolute(path) || !existsSync(path)) continue;
+    try {
+      resolved.add(realpathSync(path));
+    } catch {
+      // A path that disappears between the checks is left out rather than
+      // granted at a stale location.
+    }
+  }
+  return [...resolved];
+}
+
+/**
+ * Builds the app-server launch for one lease. Full access keeps the runtime
+ * unwrapped, as 0009 defines it. Every other posture, and the catalog lease,
+ * runs under Octant's deny-default profile: the thread's root (writable only
+ * where the posture writes), the account home, a private temporary directory,
+ * and the program itself. The rest of `HOME` is denied, which is what Codex's
+ * own `read-only` sandbox never did: it reads the whole disk.
+ */
+export function prepareCodexLaunch(input: {
+  readonly binaryPath: string;
+  readonly args: ReadonlyArray<string>;
+  readonly authority: CodexLaunchAuthority;
+  readonly environment: NodeJS.ProcessEnv;
+  readonly confinement: ProcessConfinementPort;
+  readonly platform: NodeJS.Platform;
+}):
+  | { readonly status: "prepared"; readonly launch: CodexLaunch }
+  | { readonly status: "refused"; readonly failure: ProviderFailure } {
+  const { authority } = input;
+  if (authority.kind === "thread" && authority.executionPolicy === "full-access") {
+    return {
+      status: "prepared",
+      launch: {
+        command: input.binaryPath,
+        args: input.args,
+        cwd: authority.root,
+        environment: input.environment,
+        release: () => undefined,
+      },
+    };
+  }
+  let temporaryDirectory: string | undefined;
+  const release = () => {
+    if (temporaryDirectory !== undefined) {
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+  };
+  try {
+    temporaryDirectory = realpathSync(mkdtempSync(join(tmpdir(), "octant-codex-")));
+    chmodSync(temporaryDirectory, 0o700);
+    const root = authority.kind === "thread" ? realpathSync(authority.root) : temporaryDirectory;
+    if (!statSync(root).isDirectory()) throw new Error("Codex root is not a directory.");
+    const mode = authority.kind === "thread" ? authority.mode : "chat";
+    const executionPolicy = authority.kind === "thread" ? authority.executionPolicy : "plan";
+    const home = input.environment.HOME ?? homedir();
+    const codexHome = input.environment.CODEX_HOME ?? join(home, ".codex");
+    const accountRoots = existingRealPaths([codexHome, input.environment.CODEX_SQLITE_HOME]);
+    const authorityEntries = existingRealPaths([codexHome]).flatMap((resolvedHome) =>
+      CODEX_HOME_AUTHORITY_ENTRIES.map((entry) => join(resolvedHome, entry)),
+    );
+    const programPaths = existingRealPaths([
+      input.binaryPath,
+      dirname(input.binaryPath),
+      codexPackageRoot(input.binaryPath),
+    ]);
+    const networkEgress = materializeOsNetworkEgress(
+      authority.kind === "thread"
+        ? resolveProviderRuntimeEgressPolicy({ mode, executionPolicy })
+        : resolveProbeEgressPolicy(),
+    );
+    const environment: NodeJS.ProcessEnv = { ...input.environment, TMPDIR: temporaryDirectory };
+    const launch = input.confinement.prepare({
+      executable: input.binaryPath,
+      args: input.args,
+      boundRoot: root,
+      temporaryDirectory,
+      networkEgress,
+      writeBoundRoot: !(executionPolicy === "plan" || mode === "chat"),
+      additionalWriteRoots: accountRoots,
+      readRoots: [...accountRoots, ...programPaths],
+      privateHomeAllowPaths: [root, temporaryDirectory, ...accountRoots, ...programPaths],
+      allowFileReadStar: true,
+      ...(input.environment.PATH === undefined
+        ? {}
+        : { interpreterSearchPath: input.environment.PATH }),
+      // Seatbelt applies the last matching rule, and the home's write grant is
+      // emitted after the builder's own denials, so on macOS these follow it
+      // as extra rules. Bubblewrap overlays each one read-only, and refuses a
+      // path that does not exist, which Seatbelt simply denies creating.
+      ...(input.platform === "darwin"
+        ? {
+            extraRules: [
+              ...CODEX_SEATBELT_SERVICE_RULES,
+              ...authorityEntries.map((path) => seatbeltDenyRule("file-write*", path)),
+            ],
+          }
+        : { additionalDenyWritePaths: authorityEntries.filter((path) => existsSync(path)) }),
+    });
+    return {
+      status: "prepared",
+      launch: { ...launch, cwd: root, environment, release },
+    };
+  } catch (error) {
+    release();
+    return {
+      status: "refused",
+      failure: failure(
+        error instanceof ProcessConfinementError && error.reason === "invalid-configuration"
+          ? "invalid-configuration"
+          : "incompatible",
+        error instanceof ProcessConfinementError
+          ? error.message
+          : "Codex process confinement could not be prepared.",
+      ),
+    };
+  }
+}
+
+/**
+ * The npm launcher (`bin/codex.js`) starts the platform binary vendored in the
+ * package beside it, so the launch has to read and execute inside that package.
+ * A native binary needs only itself.
+ */
+function codexPackageRoot(binaryPath: string): string | undefined {
+  try {
+    const program = realpathSync(binaryPath);
+    if (!program.endsWith(".js")) return undefined;
+    const packageRoot = dirname(dirname(program));
+    return existsSync(join(packageRoot, "package.json")) ? packageRoot : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function acquireCodexAppServer(
-  binaryPath: string,
+  launch: CodexLaunch,
   version: string,
   options: ResolvedCodexProcessOptions,
   onProcessStarted?: ProviderProcessStartedListener,
-  launchEnvironment?: NodeJS.ProcessEnv,
 ): Effect.Effect<ManagedCodexConnection, ProviderFailure> {
   return Effect.async<ManagedCodexConnection, ProviderFailure>((resume) => {
-    const child = spawn(binaryPath, codexAppServerArgs(version), {
+    const child = spawn(launch.command, [...launch.args], {
+      ...(launch.cwd === undefined ? {} : { cwd: launch.cwd }),
       detached: process.platform !== "win32",
-      env:
-        launchEnvironment ??
-        codexProcessEnvironment(binaryPath, options.inheritedEnvironment ?? process.env),
+      env: launch.environment,
       stdio: ["pipe", "pipe", "pipe"],
     });
     const terminateGroup = makeProcessTerminator(child, options.shutdownTimeoutMs);
@@ -604,6 +821,7 @@ function acquireCodexAppServer(
           await Promise.race([childExited, wait(25)]);
           await terminateGroup();
         } finally {
+          launch.release();
           child.stdin.destroy();
           await Promise.race([close.catch(() => undefined), wait(options.shutdownTimeoutMs)]);
         }
@@ -717,9 +935,11 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
     stderrBytes: options.stderrBytes,
     versionProbeConfinement: options.versionProbeConfinement,
   };
+  const platform = options.platform ?? process.platform;
+  const confinement = options.confinement ?? makeProcessConfinementLive({ platform });
 
   return {
-    start: ({ binaryPath, environment, onProcessStarted }) =>
+    start: ({ binaryPath, authority, environment, onProcessStarted }) =>
       Effect.suspend(() => {
         let terminate: (() => Promise<void>) | undefined;
         const launchEnvironment =
@@ -754,12 +974,20 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
                 ? {}
                 : { confinement: resolved.versionProbeConfinement }),
             });
-            const managed = yield* acquireCodexAppServer(
+            const prepared = prepareCodexLaunch({
               binaryPath,
+              args: codexAppServerArgs(probe.version),
+              authority,
+              environment: launchEnvironment ?? codexProcessEnvironment(binaryPath, process.env),
+              confinement,
+              platform,
+            });
+            if (prepared.status === "refused") return yield* Effect.fail(prepared.failure);
+            const managed = yield* acquireCodexAppServer(
+              prepared.launch,
               probe.version,
               { ...resolved, inheritedEnvironment: launchEnvironment },
               onProcessStarted,
-              launchEnvironment,
             );
             terminate = managed.terminate;
             return managed.connection;
