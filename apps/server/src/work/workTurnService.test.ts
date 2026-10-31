@@ -5,6 +5,7 @@ import {
   decodeProviderRuntimeEvent,
   decodeNativeHarnessSlotCandidate,
   EventActor,
+  type WorkAccess,
 } from "@octant/contracts";
 import { makeProviderCapacityScheduler } from "../context/contextRuntime";
 import { SessionCompactionService } from "../context/sessionCompaction";
@@ -230,7 +231,7 @@ describe("WorkTurnService", () => {
   });
 
   it("holds a goal-loop round ask-first on an auto-accept thread for as long as it runs", async () => {
-    for (const holdAskFirst of [true, false]) {
+    for (const accessCeiling of ["ask-first", "auto-accept-edits"] as const) {
       const release = deferred<void>();
       const seen: Array<string | undefined> = [];
       // The host hands the service the record the native harness reads.
@@ -250,12 +251,12 @@ describe("WorkTurnService", () => {
           },
         },
       });
-      await fixture.service.startFirstTurn(ids.window, startCommand(), { holdAskFirst });
+      await fixture.service.startFirstTurn(ids.window, startCommand(), { accessCeiling });
       await vi.waitFor(() => expect(seen).toHaveLength(3));
       release.resolve();
       await fixture.waitForIdle();
 
-      const expected = holdAskFirst ? "ask-first" : "auto-accept-edits";
+      const expected = accessCeiling;
       // The provider session and the native harness's edit check both answer
       // to the round, not the thread.
       expect(seen).toEqual([expected, expected, expected]);
@@ -1365,6 +1366,65 @@ describe("WorkTurnService", () => {
     });
     expect(run).not.toHaveBeenCalled();
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("runs a Work turn at its thread's level and records shell and Git at that level", async () => {
+    const levels: Array<{
+      readonly access: WorkAccess;
+      readonly shell: string;
+      readonly confinement: string;
+    }> = [
+      { access: "ask-first", shell: "guarded", confinement: "project-root-confined" },
+      { access: "auto-accept-edits", shell: "guarded", confinement: "project-root-confined" },
+      { access: "auto", shell: "provider-review", confinement: "project-root-confined" },
+      { access: "full-access", shell: "full-access", confinement: "unconfined" },
+    ];
+    for (const level of levels) {
+      const seen: Array<WorkAccess | undefined> = [];
+      const fixture = serviceFixture({
+        threadAccess: level.access,
+        turnRuntime: {
+          run: async (input) => {
+            seen.push(input.access);
+            return { kind: "completed", response: "Done" };
+          },
+        },
+      });
+      const result = await fixture.service.startFirstTurn(ids.window, startCommand());
+      await fixture.waitForIdle();
+      expect(result.kind).toBe("accepted");
+      if (result.kind !== "accepted") continue;
+      expect(seen).toEqual([level.access]);
+      expect(result.turn.capabilities).toMatchObject({
+        shell: level.shell,
+        git: level.shell,
+        confinement: level.confinement,
+        worktree: "denied",
+        pullRequest: "denied",
+        code: "denied",
+      });
+    }
+  });
+
+  it("never runs a turn above its caller's ceiling, a Full access thread included", async () => {
+    const seen: Array<WorkAccess | undefined> = [];
+    const fixture = serviceFixture({
+      threadAccess: "full-access",
+      turnRuntime: {
+        run: async (input) => {
+          seen.push(input.access);
+          return { kind: "completed", response: "Done" };
+        },
+      },
+    });
+    const result = await fixture.service.startFirstTurn(ids.window, startCommand(), {
+      accessCeiling: "auto-accept-edits",
+    });
+    await fixture.waitForIdle();
+    expect(seen).toEqual(["auto-accept-edits"]);
+    expect(result.kind === "accepted" && result.turn.capabilities.confinement).toBe(
+      "project-root-confined",
+    );
   });
 
   it("validates host, Project, binding, working directory, and confinement before launching", async () => {
@@ -3879,7 +3939,7 @@ function serviceFixture(
     readonly projectStatusFiles?: WorkProjectStatusFiles;
     readonly turnFileObserver?: WorkTurnServiceDependencies["turnFileObserver"];
     readonly readProviderModel?: WorkTurnServiceDependencies["persistence"]["readProviderModel"];
-    readonly threadAccess?: "ask-first" | "auto-accept-edits";
+    readonly threadAccess?: WorkAccess;
     readonly documentDelivery?: "canvas" | "native-artifacts";
     readonly onTurnRequested?: WorkTurnServiceDependencies["onTurnRequested"];
     readonly onTurnCancelled?: WorkTurnServiceDependencies["onTurnCancelled"];

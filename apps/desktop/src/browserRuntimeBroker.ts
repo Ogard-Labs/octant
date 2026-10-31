@@ -27,6 +27,7 @@ const ROUTES = new Set([
   "/v1/contexts/close-all",
   "/v1/profiles/list",
   "/v1/profiles/clear",
+  "/v1/extensions/sync",
   "/v1/profiles/import-cookies",
 ]);
 /** A batch of cookies is larger than any other request, and is bounded by count too. */
@@ -163,6 +164,14 @@ async function handleBrokerRequest(
       await profiles.clear(target, body.scope);
       return Response.json({ ok: true });
     }
+    if (url.pathname === "/v1/extensions/sync") {
+      if (profiles === undefined) return failure("profiles-unavailable", 409);
+      const target = storedProfileOf(body.profile);
+      const wanted = enabledExtensionsOf(body.extensions);
+      if (target === undefined || wanted === undefined) return failure("invalid-request", 400);
+      await profiles.syncExtensions(target, wanted);
+      return Response.json({ ok: true });
+    }
     if (url.pathname === "/v1/profiles/import-cookies") {
       if (profiles === undefined) return failure("profiles-unavailable", 409);
       const target = storedProfileOf(body.profile);
@@ -274,6 +283,28 @@ function isPolicy(value: unknown): boolean {
 function storedOrPrivateProfile(value: unknown): boolean {
   if (isRecord(value) && value.kind === "private" && Object.keys(value).length === 1) return true;
   return storedProfileOf(value) !== undefined;
+}
+
+/** The folders to load, each an absolute path under a folder the host named by id. */
+function enabledExtensionsOf(value: unknown) {
+  if (!Array.isArray(value) || value.length > 64) return undefined;
+  const wanted: Array<{ id: string; path: string; contentHash: string }> = [];
+  for (const entry of value) {
+    if (
+      !isRecord(entry) ||
+      typeof entry.id !== "string" ||
+      !/^[0-9a-f]{32}$/.test(entry.id) ||
+      typeof entry.path !== "string" ||
+      !entry.path.startsWith("/") ||
+      entry.path.includes("\0") ||
+      typeof entry.contentHash !== "string" ||
+      !/^[0-9a-f]{64}$/.test(entry.contentHash)
+    ) {
+      return undefined;
+    }
+    wanted.push({ id: entry.id, path: entry.path, contentHash: entry.contentHash });
+  }
+  return wanted;
 }
 
 function importedCookiesOf(value: unknown) {

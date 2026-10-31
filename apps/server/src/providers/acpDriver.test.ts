@@ -1783,11 +1783,11 @@ describe("ACP provider driver profile quirks", () => {
   });
 
   it.each([
-    ["execute", false],
+    ["execute", true],
     ["edit", true],
     ["other", true],
   ] as const)(
-    "in a Work session, whether a %s permission reaches a person: %s",
+    "in a Work session, whether a %s permission reaches a person as it does in Code: %s",
     async (toolKind, raised) => {
       const { driver, client } = fixture(kilo);
       await Effect.runPromise(

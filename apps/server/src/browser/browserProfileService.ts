@@ -214,6 +214,27 @@ export class BrowserProfileService {
     return decodeBrowserProfilesResult({ kind: "browser-profile-cleared", profile, scope });
   }
 
+  /**
+   * Removes a Project's profile store with the Project's other data, when the
+   * person's confirmed purge erases that Project. It closes the profile's pages,
+   * clears everything the desktop app kept, and journals the clear like a sign
+   * out. Without the desktop app running there is nothing to clear here; the
+   * store stays and Settings lists it as a Project that no longer exists, where
+   * the person can sign out of it.
+   */
+  async eraseProject(projectId: ProjectId): Promise<void> {
+    const store = this.#options.runtime.profiles;
+    if (store === undefined || (await this.#options.runtime.nativeAvailable?.()) !== true) return;
+    const profile: StoredBrowserProfile = { kind: "project", projectId };
+    try {
+      await this.#options.closePages(profile);
+      await store.clear(profile, "all");
+      this.#journalCleared(profile, "all");
+    } catch {
+      // The purge itself is done; a store that would not clear stays listed.
+    }
+  }
+
   #projectLabel(projectId: ProjectId): string {
     const project = this.#options.readProject(projectId);
     return project === undefined ? "A Project that no longer exists" : project.name;

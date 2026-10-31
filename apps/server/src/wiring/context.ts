@@ -41,6 +41,7 @@ export type ContextDependencies = Pick<ServerStart, "persistence"> &
   Pick<
     BrowserWiring,
     | "browserAutomationService"
+    | "browserExtensionService"
     | "browserProfileService"
     | "browserToolApprovalService"
     | "liveProjectBrowsers"
@@ -68,6 +69,7 @@ export function wireContext(deps: ContextDependencies) {
     configuredDriverOptions,
     contextHarness,
     liveProjectBrowsers,
+    browserExtensionService,
     browserProfileService,
     nativeHarnessHooks,
     persistence,
@@ -472,6 +474,7 @@ export function wireContext(deps: ContextDependencies) {
     windowCanOpenThread: windowCanOpenThreadById,
     projectBrowsers: liveProjectBrowsers,
     profiles: browserProfileService,
+    extensions: browserExtensionService,
     authority: browserAuthority,
     approvals: browserToolApprovalService,
     windowAuthorityStore,

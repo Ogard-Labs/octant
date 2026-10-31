@@ -202,10 +202,10 @@ The design rests on a small set of invariants that every package obeys:
   read-only. Below Full access, Octant's
   own tool launches are OS-confined; one provider runtime is not yet
   (Claude outside Plan) and relies on the runtime's own sandbox, per the confinement matrix in
-  [Security and authority](#security-and-authority). Today's drivers still
-  withhold the shell and Git from Work and keep Work below Full access; Work
-  at the shared level is allowed; not built yet
-  ([Modes](#modes-chat-work-and-code) lists the driver changes).
+  [Security and authority](#security-and-authority). Every driver starts a
+  Work session with its shell and Git at the thread's level, as in Code, and
+  Work threads reach Full access
+  ([Modes](#modes-chat-work-and-code) lists what each driver does).
 - **Core capabilities are app-managed.** Browser/computer use, tests, Apple
   validation, approvals, memory, and subagents are app-managed,
   provider-neutral capabilities. Core Apple development cannot depend on an
@@ -999,7 +999,7 @@ gate their domains: with one off, the composer offers only the other kind.
 | Mode     | Binds to                                                                                                                                                                                                                   | Authority                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Chat** | A virtual, memory-scoped Project, or no Project at all                                                                                                                                                                     | No filesystem or shell authority. Optional safe research tools; scratch space is isolated per thread.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| **Work** | One OS-confined main folder, plus any [extra folders](#projects-with-several-folders) the person adds                                                                                                                      | The shared capability set at the thread's [guardrail level](#security-and-authority): file reads and writes, shell, Git, local command-line tools, SSH to the person's own machines, provider-native tools, and subagents, as in Code. Focus: documents and artifacts with document adapters (docx, pptx, pdf, image), research with citations, local tasks, and the server-authoritative board; Done by a person. Developer surfaces stay hidden until the person turns them on for the Project (below). Today's build is narrower: confined reads and approval-gated writes (or auto-accept-edits), no shell or Git, never Full access; the shared level is allowed; not built yet.                                                               |
+| **Work** | One OS-confined main folder, plus any [extra folders](#projects-with-several-folders) the person adds                                                                                                                      | The shared capability set at the thread's [guardrail level](#security-and-authority): file reads and writes, shell, Git, local command-line tools, SSH to the person's own machines, provider-native tools, and subagents, as in Code. Focus: documents and artifacts with document adapters (docx, pptx, pdf, image), research with citations, local tasks, and the server-authoritative board; Done by a person. Developer surfaces stay hidden until the person turns them on for the Project (below).                                                                                                                                                                                                                                           |
 | **Code** | One main directory, ideally a repository root, plus any [extra folders](#projects-with-several-folders) the person adds; Code threads select a checkout (current checkout or a managed worktree) inside the main directory | The same shared capability set at the thread's guardrail level, which starts in the mode the person picked at first run (Auto pre-selected; Ask first where the provider has no Auto) or later set for the Project or in Settings › Code › Access; any thread switches mode from its composer. Plan mode is always read-only. Focus: Git, terminals, tests, pull requests, review, and managed subagents inside the bound root, with checkouts, managed worktrees, and the objective delivery target. Creating a Code Project may explicitly initialize Git in that folder so a Code thread can prepare a checkout immediately; if that initialization fails, creation is refused and no Project is journaled. Binding without Git remains allowed. |
 
 A No-project Chat thread can be filed into a Chat Project from its thread menu
@@ -1080,52 +1080,42 @@ show and which tools a thread starts with, never in what a thread may do:
   rather than in the composer. Every such default is presentation: a person
   reaches the same capability in Work with the same or fewer steps.
 
-Today's build is narrower than the rule, and each line below is what the
-code still does, marked against it. Work's shell and Git are withheld, not
-approval-gated, and each Work turn records `shell: "denied"`,
-`git: "denied"`. Each provider driver enforces that for a session acquired in
-Work mode: Claude and Pi start without their shell tool; OpenCode's session
-rules deny `bash` and its `task` delegation; Codex threads start and resume
-with `features.shell_tool` and `features.unified_exec` off, and a `command`
-or sandbox-widening `permissions` request that still arrives is declined at
-the agent; an ACP agent's `execute` permission request is refused at the
-agent (an agent that labels a command `other`, the kind Octant's own managed
-MCP tools also use, still reaches a person's approval). Because a provider's
-in-process shell can emit no protocol request at all (observed on Linux,
-where a Vibe Work turn ran real commands inside its jail), the ACP, OpenCode,
-and Pi runtimes launch confined in Work with process exec and fork denied;
-an ACP profile whose entrypoint spawns its own stdio server keeps fork. Work
-never runs at Full access today, so those launches are always wrapped. The
-Codex app-server is wrapped too but keeps exec, which its own program needs;
-it and the Claude postures Work uses withhold the shell through the thread
-config and tool list instead. Octant's own
-harness gives Work no shell port, and file writes inside a Work Project stay
-approval-gated in every driver (or auto-accept-edits from Settings › Work).
-Allowed; not built yet — the driver changes the shared rule needs:
+Each provider driver starts a session acquired in Work mode exactly as it
+starts a Code session at the same level, and a Work turn journals `shell` and
+`git` as the level it ran at (`guarded`, `provider-review`, or `full-access`;
+`denied` on a turn accepted before the shared rule was built), with
+`confinement` `unconfined` at Full access. Built per runtime:
 
-- **Claude Code:** start the Work session with its shell tool, at the
-  thread's level as in Code (Guarded asks per command, Reviewed uses
-  its automatic mode or Octant Shield, Full access runs unattended).
-- **Codex:** start and resume Work threads with `features.shell_tool` and
-  `features.unified_exec` on and the approval policy and sandbox the level
-  maps to in Code; stop declining `command` and `permissions` requests in
-  Work.
-- **OpenCode:** stop denying `bash` and `task` in Work; the person's own
-  OpenCode permission rules apply over the level, as in Code.
-- **Pi:** start with its shell tool.
-- **ACP agents, Mistral Vibe included:** send `execute` requests to the
-  person at Guarded instead of refusing them, and launch Work with exec and
-  fork allowed under the same confinement as Code at that level. An agent
-  whose shell runs in-process with no protocol request cannot be asked per
-  command, so at Guarded and Reviewed it reports `unsupported` with
-  that reason, in Work as in Code, and runs only at Full access.
-- **Octant Harness:** give Work threads the shell port a Code harness thread
-  has, under the same harness authority.
-- **Host:** let a Work thread take Full access and the shared level (today
-  its access comes only from Settings › Work, ask-first or
-  auto-accept-edits), drop the Work-only write gate, record Work turns'
-  `shell` and `git` at their level, and add the per-Project **Developer
-  tools** switch.
+- **Claude Code:** the Work session starts with its shell tool, at the
+  thread's level as in Code (Guarded asks per command, Reviewed uses its
+  automatic mode, Full access runs unattended).
+- **Codex:** Work threads start and resume with the shell features on and the
+  approval policy and sandbox the level maps to in Code; `command` and
+  `permissions` requests inside the root reach the person at Guarded. A Work
+  thread still starts with a project-doc budget of zero, so it does not read
+  the folder's agent brief.
+- **OpenCode:** the session rules no longer deny `bash` and `task` in Work;
+  the posture's rules apply as in Code.
+- **Pi:** the Work session starts with its shell tool.
+- **ACP agents, Mistral Vibe included:** an `execute` request reaches the
+  person at Guarded as in Code, and a Work launch gets the exec and fork a
+  Code launch at that level gets.
+- **Octant Harness:** a Work harness thread has the shell port a Code harness
+  thread has, on the network its level resolves, under the same harness
+  authority.
+- **Host:** a Work thread takes Auto, Ask first, Accept edits, or Full access
+  from Settings › Work when it is created and switches from its composer
+  (`change-work-thread-access`, journaled on the thread); raising a thread or
+  the Settings default to Full access is chosen at a local window, as in
+  Code. A caller with narrower authority than the thread (a goal-loop round,
+  a routine, a delegated turn) runs the turn at the thread's level clamped to
+  its own (`clampWorkAccess`).
+
+Allowed; not built yet: the per-Project **Developer tools** switch; an ACP
+agent whose shell runs in-process with no protocol request reporting
+`unsupported` at Guarded and Reviewed and running only at Full access, in
+Work as in Code; and Octant Shield for the runtimes with no reviewer of their
+own, which ask first at Auto today.
 
 A driver that cannot run a Work session at the level in force reports so and
 keeps the narrower behavior; it never runs commands under a weaker guard
@@ -1134,10 +1124,12 @@ than the level names.
 SSH to the person's own machines goes through the thread's shell, in Work
 and Code alike: a thread runs `ssh`, `scp`, or `rsync` as ordinary commands.
 Octant stores no SSH key, writes no SSH config, and adds no SSH transport of
-its own; the commands use the person's own SSH agent and configuration. At
-Guarded, the first connection to each host in a thread asks the person,
+its own; the commands use the person's own SSH agent and configuration. No
+mode bans them: in Work as in Code they are commands at the thread's level.
+At Guarded, the first connection to each host in a thread asks the person,
 naming the host, even where a remembered approval would cover the command
-otherwise. Network egress for shell commands follows the level: at Guarded
+otherwise (allowed; not built yet: today an `ssh` command asks at Guarded as
+every command does, without naming the host apart). Network egress for shell commands follows the level: at Guarded
 and Reviewed it follows the Project's egress rules, so a host those
 rules do not allow is refused; at Full access the network is open.
 
@@ -2025,8 +2017,11 @@ the thread it came from.
   agent profile: provider, model, policy, permission persistence) and an
   authority snapshot whose effective authority never widens the requested one
   and fits under the profile. Work routines take the shared capability set at
-  the routine's level, as Code routines do (allowed; not built yet: today a
-  Work routine gets no shell or Git authority). By
+  the routine's level, as Code routines do: a Work routine's authority
+  captures the shell and Git, and one saved without them (every Work routine
+  saved before Work had the shell) blocks at dispatch as `authority-mismatch`
+  until a person saves it again under a profile that grants them, because a
+  Work turn cannot withhold them and a routine never runs above its snapshot. By
   default Full access is not eligible, whether or not it was remembered
   elsewhere: the contract refuses it on the snapshot and dispatch blocks it as
   `full-access-ineligible`, and Code runs are created approval-gated. The
@@ -3316,7 +3311,7 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   | Claude Code  | With the setup off: own subagents off; `WebSearch` and `WebFetch` never offered and a session reporting them refused; Project skills off; no setting sources, so home config and skills never read | All on when the person allows: native subagents, web search and fetch, Project and home skills, home settings and a trusted Project's hooks, MCP servers, and plugins; automatic mode as Reviewed's default reviewer | Reviewed with its own reviewer, in Code only; subagents (shown as child runs), web search and fetch, home skills, home settings and hooks, and a trusted Project's settings, hooks, skills, MCP servers, and plugins. The account's own MCP servers start only with a trusted Project's, because `strictMcpConfig` governs both |
   | Codex        | Own subagents off; Project skills disabled by path; in Chat every person-added tool server switched off by name                                                                                    | Own subagents, Project skills, and the person's tool servers on, Chat included; its own approval review as Reviewed's default reviewer                                                                               | Reviewed with its own reviewer, in Code only                                                                                                                                                                                                                                                                                    |
   | Mistral Vibe | Project and home skills off; Project context off; runs through the ACP bridge only                                                                                                                 | Its own skills, a trusted Project's tools and MCP servers, and its auto-approve mode as Reviewed's default reviewer; first-class with the same promise                                                               | No                                                                                                                                                                                                                                                                                                                              |
-  | OpenCode     | Shell and delegation denied in Work; Project skills off; Octant's denies outrank the person's saved OpenCode grants; approvals answered `once`, never `always`                                     | The person's own OpenCode permission rules apply; "always" allowed; its delegation on; its skills on; Reviewed through Octant Shield                                                                                 | No                                                                                                                                                                                                                                                                                                                              |
+  | OpenCode     | Shell and delegation follow the level in Work as in Code; Project skills off; Octant's denies outrank the person's saved OpenCode grants; approvals answered `once`, never `always`                | The person's own OpenCode permission rules apply; "always" allowed; its delegation on; its skills on; Reviewed through Octant Shield                                                                                 | No                                                                                                                                                                                                                                                                                                                              |
 
   Every other provider keeps the deny rules for Project code and skills under
   [Extensions and skills](#extensions-and-skills) until it is promoted the
@@ -7684,9 +7679,7 @@ mechanisms are:
   - **Work and Code are guarded identically.** A level means the same in
     both modes: who approves each command, write, Git operation, and native
     tool, and what confines it. Work's focus hides developer surfaces, never
-    capability ([Modes](#modes-chat-work-and-code)). Allowed; not built yet:
-    today Work withholds the shell and Git at every level and never runs at
-    Full access.
+    capability ([Modes](#modes-chat-work-and-code)).
 
   Today's postures map onto the levels. Approval-gated is Guarded, and
   auto-accept-edits is Guarded with project file writes waived (Accept
@@ -7746,10 +7739,11 @@ mechanisms are:
   per thread from the composer, per Project, or in Settings › Access (allowed; not built yet: today Code starts approval-gated and only
   a per-Project remembered Full access exists, and Work has neither);
   Plan mode is read-only; auto-accept-edits waives only project file writes;
-  today a Work thread takes its access from Settings › Work when it is created —
-  ask-first (the default) or auto-accept-edits — and keeps it; the host sets
-  it, not the renderer, and a goal-loop round uses it only when the loop's own
-  ceiling allows auto-accept-edits too. A goal-loop round runs as the host,
+  today a Work thread takes its level from Settings › Work when it is created
+  (Auto, Ask first, the default, Accept edits, or Full access) and changes it
+  from its composer; the host sets it, not the renderer, and a goal-loop round
+  runs at it only up to the loop's own ceiling, which today allows at most
+  auto-accept-edits. A goal-loop round runs as the host,
   under the same per-process host scope a
   [routine](#modes-chat-work-and-code) runs under, never through a window: it
   runs with no window open, an open window lends it neither identity nor
@@ -7763,7 +7757,8 @@ mechanisms are:
   A goal-loop round marks a checkpoint before it starts when its thread has
   one to mark; a Work folder has none, because a checkpoint anchors a Chat
   turn or a Code operation, a Work turn's record of what changed in its folder
-  names paths without their contents, and today's Work holds no Git. A round without
+  names paths without their contents, and Octant keeps no Git checkpoint for
+  a Work folder. A round without
   a checkpoint runs only when its effective authority is approval-gated, so a
   person approves every write, and its recorded round carries no checkpoint
   id. Under auto-accept-edits, and under Plan (a Work round has no read-only
@@ -7847,9 +7842,10 @@ access` agree); a thread's own change is journaled as
   thread but cannot raise one to Full access or start one at Full access;
   the host refuses those at the route with "Full
   access is chosen in the Octant window on this host." `octant agent` keeps
-  sending Full access exactly when the Project remembers it. Work keeps its
-  own Settings › Work access (ask-first or auto-accept-edits) for now; the
-  shared levels in Work are a later change.
+  sending Full access exactly when the Project remembers it. A Work thread
+  takes the same levels without Plan: Settings › Work sets the one a new
+  thread starts at and its composer changes it
+  ([Modes](#modes-chat-work-and-code)).
   One provider-owned exception is accepted: on OpenCode 2.x, approval-gated
   honours permission grants the person saved in OpenCode itself for the same
   repository, so such an action runs without an Octant prompt. Octant's
@@ -8153,15 +8149,16 @@ access` agree); a thread's own change is journaled as
   ACP agents, Pi, and the Octant Harness run without Octant's OS sandbox,
   leaving only the operating system's own protections. Plan's read-only enforcement is the same at every level.
 
-  The rows are today's launches, and the Work rows withhold the shell. Under
-  the shared capability rule ([Modes](#modes-chat-work-and-code)) a Work
-  thread launches exactly as a Code thread at the same level would (allowed;
-  not built yet for every runtime). Per runtime:
+  A Work thread launches exactly as a Code thread at the same level would
+  ([Modes](#modes-chat-work-and-code)); the launch builders read the mode only
+  to tell Chat apart, and each runtime's process tests pin that by comparing
+  a Work launch with a Code launch at every level. Per runtime:
 
   - **ACP, OpenCode, Pi:** wrapped at Guarded and Reviewed, with
     process exec and fork allowed and writes held to the Project root, so the
-    shell runs confined; unwrapped at Full access, with no sandbox. Egress at Guarded and Reviewed is
-    the Project's egress rules rather than a blanket `allow`.
+    shell runs confined; unwrapped at Full access, with no sandbox. The
+    runtime's own egress is `allow` as in Code (allowed; not built yet: the
+    Project's egress rules for it rather than a blanket `allow`).
   - **Claude Agent SDK:** unwrapped as in Code's approval-gated posture; the
     runtime's own sandbox holds commands to the Project root, and its
     permission prompts carry each command to the person at Guarded.
@@ -8734,10 +8731,10 @@ access` agree); a thread's own change is journaled as
   - **Oh My Pi** lists models and starts no session; its driver refuses
     `acquire`, so it never reaches a picker.
 
-  Work at the shared level (allowed; not built yet for every provider) is
-  not a capability row: it changes the session a driver acquires, not what
-  the driver declares. Each provider then runs a Work session as it runs a
-  Code session at the same level:
+  Work at the shared level is not a capability row: it changes the session a
+  driver acquires, not what the driver declares. Each provider runs a Work
+  session as it runs a Code session at the same level (built; the Octant
+  Shield and in-process-shell parts are allowed, not built yet):
 
   - **Claude Code** starts the Work session with its shell tool; Guarded asks
     per command, Reviewed uses its automatic mode or Octant Shield, Full access runs
@@ -8762,7 +8759,7 @@ access` agree); a thread's own change is journaled as
   - **Oh My Pi** starts no session, so nothing changes.
 
   A driver that cannot run Work at the level in force reports so and keeps
-  today's withheld shell; it never runs commands under a weaker guard than
+  the narrower behavior; it never runs commands under a weaker guard than
   the level names.
 
   `providerFeatureMatrix.test.ts` pins this section: every
@@ -9070,9 +9067,15 @@ access` agree); a thread's own change is journaled as
   through its own Keychain prompt (a refusal imports nothing), verifies each
   decrypted value against its host, and hands the cookies to the desktop app's
   store without logging, journaling, or returning them; the journal records the
-  source, the profile, and counts. Browser extensions (approved design, not yet built) install only
-  from an unpacked folder at a local window, start disabled, are enabled per
-  profile, and never load into a Private page. Detail is in [Browser profiles and extensions](design/browser-profiles.md).
+  source, the profile, and counts. Purging a Project clears its profile with its
+  other data. Browser extensions install only from an unpacked Manifest V3
+  folder chosen with the native picker at a local window (the host copies it under
+  `browser-extensions/<id>/` and journals the install), start disabled, are
+  enabled per profile after the person reads what they can read and change, and
+  never load into a Private page; an update that asks for more turns off
+  everywhere until reconfirmed, and the desktop app loads them into the profile's
+  Electron session. A signed-in page's approval from a phone-started turn waits
+  for a local window, and a kept screenshot's record names the profile. Detail is in [Browser profiles and extensions](design/browser-profiles.md).
 - **Side Chat reads.** A Side Chat may read its source thread's transcript,
   state, and files; it never inherits the source's Work or Code execution
   authority. The file tools (`octant_side_chat_list_files`,

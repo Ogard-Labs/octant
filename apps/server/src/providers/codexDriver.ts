@@ -138,14 +138,15 @@ export interface CodexThreadResumeInput {
 }
 
 /**
- * Work has no shell or Git authority, so a Work thread starts with Codex's
- * shell tools switched off rather than offered and asked about. Declining
- * `command` approvals alone is not enough: measured against codex-cli 0.155.1
- * under the read-only sandbox, `echo` ran with no approval request at all,
- * because a command that only reads never escalates. With both features off
- * the same request answered that it had no shell, while a patch edit still
- * raised `item/fileChange/requestApproval`. A thread does not keep these
- * overrides across `thread/resume`, so they are sent there too.
+ * Chat has no shell, so a Chat thread starts with Codex's shell tools
+ * switched off rather than offered and asked about. Declining `command`
+ * approvals alone is not enough: measured against codex-cli 0.155.1 under the
+ * read-only sandbox, `echo` ran with no approval request at all, because a
+ * command that only reads never escalates. With both features off the same
+ * request answered that it had no shell, while a patch edit still raised
+ * `item/fileChange/requestApproval`. A thread does not keep these overrides
+ * across `thread/resume`, so they are sent there too. Work keeps the shell at
+ * its level, as Code does.
  */
 const CODEX_SHELL_OFF_CONFIG = {
   "features.shell_tool": false,
@@ -168,7 +169,6 @@ const CODEX_SHELL_OFF_CONFIG = {
  * every release with this protocol honors it.
  */
 const CODEX_WORK_CONFIG = {
-  ...CODEX_SHELL_OFF_CONFIG,
   project_doc_max_bytes: 0,
 } as const satisfies CodexThreadConfig;
 
@@ -1397,12 +1397,6 @@ function makeConnection(
           }
           if (
             state.executionPolicy === "plan" ||
-            // Work has no shell or Git authority. Under the read-only sandbox
-            // every shell write escalates as `command`, and a permissions
-            // request asks to widen that sandbox, so both are declined at
-            // the agent; only a Project-confined file change may reach a
-            // person.
-            (mode === "work" && item.approval.kind !== "file-change") ||
             // Chat has no filesystem or shell authority at all, so nothing
             // Codex asks for is anyone's to approve.
             mode === "chat" ||

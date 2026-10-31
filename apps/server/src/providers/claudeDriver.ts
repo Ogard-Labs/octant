@@ -150,13 +150,9 @@ export function claudeExecutionOptions(
   mode?: ProviderAcquireInput["mode"],
   platform: NodeJS.Platform = process.platform,
 ): ClaudeExecutionOptions {
+  // Work and Code share one capability set at the thread's level, so a Work
+  // session starts with Bash exactly as a Code session at that level does.
   const options = claudePolicyOptions(policy, autoApprove);
-  // Work has no shell or Git authority, so Claude is never offered Bash there
-  // rather than offered it and asked about each call: a person approving a
-  // command would hand a Work thread authority its mode does not have.
-  if (mode === "work") {
-    return { ...options, tools: options.tools.filter((tool) => tool !== "Bash") };
-  }
   // A Code Plan turn may run read-only commands where its sandbox can hold the
   // shell to them (see `claudePlanRunsCommands`). Plan has no approvals, so
   // the sandbox, not a person, is what keeps those commands read-only.
