@@ -52,6 +52,7 @@ import {
   type EventActor,
   type PendingRequest,
   type ProviderCapabilities,
+  type ProviderNativeSetup,
   type ProviderRuntimeEvent,
   type ProviderResumeCursor,
   type ProviderProbeResult,
@@ -575,6 +576,12 @@ export interface CodeOperationRuntimeOptions {
    * Absent means capabilities are unknown, so delegation is never enabled.
    */
   readonly resolveProviderCapabilities?: (thread: CodeThread) => ProviderCapabilities | undefined;
+  /**
+   * What the next session of this thread may load of the provider's own
+   * setup, from the account's switch, the Project's trust, and the thread's
+   * level. Absent keeps every native feature off.
+   */
+  readonly resolveProviderNativeSetup?: (thread: CodeThread) => ProviderNativeSetup | undefined;
   /** Reads the `#thread` mentions a turn names, on that turn's own principal. */
   readonly resolveThreadMentionContext?: CodeOperationServiceOptions["resolveThreadMentionContext"];
   /** Reads the `@file` mentions a turn names against this thread's bound root. */
@@ -3860,6 +3867,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const sentNow = (blocks: ReadonlyArray<ProviderContextBlock>) =>
       blocks.filter((block) => !heldKeys.has(`${block.kind}\u0000${block.text}`));
     const harnessAutoReviewEnabled = this.#resolveHarnessAutoReview(active.thread);
+    const nativeSetup = this.#options.resolveProviderNativeSetup?.(active.thread);
     const contextAccount: CodeTurnContextAccount = {
       carried: active.carriedSentContext,
       turn: estimateSentContextParts({
@@ -3998,6 +4006,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               }),
           ...(attachments === undefined ? {} : { attachments }),
           ...(harnessAutoReviewEnabled ? { harnessAutoReviewEnabled: true } : {}),
+          ...(nativeSetup === undefined ? {} : { nativeSetup }),
           signal: active.abort.signal,
           provider: {
             acquire: (acquireInput) => {

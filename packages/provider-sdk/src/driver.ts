@@ -9,6 +9,7 @@ import type {
   ProviderAuthenticationAttempt,
   ProviderModelId,
   ProviderModelOptionValues,
+  ProviderNativeSetup,
   ProviderProbeResult,
   ProviderResumeCursor,
   ProviderRuntimeEvent,
@@ -89,6 +90,14 @@ export interface ProviderSessionStart {
    * would name the tool for; absent never offers it.
    */
   readonly nativeArtifacts?: boolean;
+  /**
+   * What the runtime may load of its own in this session, as the host
+   * resolved it from the thread's level and mode, the account's switch, and
+   * the Project's trust. A driver turns on only the fields it reports
+   * supported in its `nativeSetup` capability and keeps every other one off;
+   * absent keeps all of them off.
+   */
+  readonly nativeSetup?: ProviderNativeSetup;
 }
 
 export interface ProviderSessionHandle {
@@ -118,6 +127,8 @@ export interface ProviderSessionResume {
    * would name the tool for; absent never offers it.
    */
   readonly nativeArtifacts?: boolean;
+  /** As on {@link ProviderSessionStart}; a resume states it again for the session it resumes. */
+  readonly nativeSetup?: ProviderNativeSetup;
 }
 
 export interface ProviderSessionCompactionRequest {

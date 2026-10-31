@@ -6,6 +6,7 @@ import {
   type ProviderContextBreakdown,
   type ProviderFailure,
   type ProviderInstanceId,
+  type ProviderNativeSetup,
   type ProviderRuntimeEvent,
   type ProviderResumeCursor,
   type ProviderUsageLimit,
@@ -190,6 +191,8 @@ export interface CodeTurnRunnerInput {
    * permission mode and Octant's own gate answers every prompt.
    */
   readonly harnessAutoReviewEnabled?: boolean;
+  /** What the session may load of the provider's own setup; absent keeps it all off. */
+  readonly nativeSetup?: ProviderNativeSetup;
   /**
    * Records that the runtime's own web search, page fetch, or hosted tool put
    * outside content in front of the model. Without it such a call stops the
@@ -369,6 +372,7 @@ export class CodeTurnRunner {
           : { modelOptionValues: input.thread.modelOptionValues }),
         executionPolicy: input.thread.executionPolicy,
         ...(input.harnessAutoReviewEnabled === true ? { autoApprove: true } : {}),
+        ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
         // The driver still offers its artifact tool only where it would name
         // it for this mode and posture.
         ...(input.thread.documentDelivery === "native-artifacts" ? { nativeArtifacts: true } : {}),

@@ -34,6 +34,7 @@ import {
   changeProjectBrandKit,
   changeProjectColor,
   changeProjectLifecycle,
+  changeProjectNativeProviders,
   changeWorkProjectStatusFile,
   compareProjectOrder,
   createProject,
@@ -1054,5 +1055,38 @@ describe("Project moves", () => {
       ids.work,
       ids.code,
     ]);
+  });
+});
+
+describe("a Project's trust in key providers", () => {
+  it("is set for a Work or Code Project, replaced as a whole list, and cleared by an empty one", () => {
+    for (const type of ["work", "code"] as const) {
+      const project = makeProject(type === "work" ? ids.work : ids.code, "0/1", { type });
+      const trusted = changeProjectNativeProviders(project, ["claude", "opencode"], updatedAt);
+      expect(trusted).toMatchObject({ nativeProviders: ["claude", "opencode"], version: 2 });
+      expect(decodeProject(trusted)).toEqual(trusted);
+      const cleared = changeProjectNativeProviders(trusted, [], updatedAt);
+      expect(cleared).not.toHaveProperty("nativeProviders");
+    }
+  });
+
+  it("refuses a Chat Project, which has no folder of its own code, and a list that changes nothing", () => {
+    expect(() =>
+      changeProjectNativeProviders(makeProject(ids.chat, "0/1"), ["codex"], updatedAt),
+    ).toThrow(ProjectPolicyRejected);
+    const trusted = changeProjectNativeProviders(
+      makeProject(ids.code, "0/1", { type: "code" }),
+      ["codex", "claude"],
+      updatedAt,
+    );
+    expect(() => changeProjectNativeProviders(trusted, ["claude", "codex"], updatedAt)).toThrow(
+      ProjectPolicyRejected,
+    );
+  });
+
+  it("names only key providers, each once, in the journal", () => {
+    const project = makeProject(ids.code, "0/1", { type: "code" });
+    expect(() => decodeProject({ ...project, nativeProviders: ["pi"] })).toThrow();
+    expect(() => decodeProject({ ...project, nativeProviders: ["codex", "codex"] })).toThrow();
   });
 });

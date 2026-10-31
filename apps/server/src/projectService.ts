@@ -47,6 +47,7 @@ import {
   changeCodeProjectPullRequestBackgroundRefresh,
   changeProjectColor,
   changeProjectProviderPolicy,
+  changeProjectNativeProviders,
   changeProjectBrandKit,
   changeWorkProjectStatusFile,
   createMemoryEntry,
@@ -782,6 +783,10 @@ export class ProjectService implements ProjectServiceApi {
           project = changeProjectProviderPolicy(current, command.policy, timestamp);
           kind = "project-provider-policy-changed";
           eventName = "project.provider-policy-changed@1";
+        } else if (command.kind === "change-project-native-providers") {
+          project = changeProjectNativeProviders(current, command.providers, timestamp);
+          kind = "project-native-providers-changed";
+          eventName = "project.native-providers-changed@1";
         } else if (command.kind === "change-work-project-status-file") {
           project = changeWorkProjectStatusFile(current, command.statusFile, timestamp);
           kind = "work-project-status-file-changed";

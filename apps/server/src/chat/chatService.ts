@@ -6,6 +6,7 @@ import {
   offersCanvasTool,
 } from "../canvas/canvasDeliveryInstructions";
 import { appToolHostLines } from "../providers/appToolHostLines";
+import { nativeSetupOption, sessionNativeSetup } from "../providers/providerNativeSetup";
 import { createHash } from "node:crypto";
 import {
   ActorId,
@@ -5910,6 +5911,13 @@ export class ChatService {
               estimatedTokens: input.prepared.context.snapshot.next.plan.plannedInputTokens,
               attachments: input.prepared.attachments,
               researchEnabled: input.thread.researchEnabled,
+              ...nativeSetupOption(
+                sessionNativeSetup(this.#persistence, {
+                  providerInstanceId,
+                  mode: "chat",
+                  executionPolicy: "approval-gated",
+                }),
+              ),
               researchRoute: input.prepared.researchRoute,
               ...(input.prepared.appManagedTools === undefined
                 ? {}

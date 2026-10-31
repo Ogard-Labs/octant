@@ -84,6 +84,7 @@ import type { HarnessStateWiring } from "./harnessState";
 import type { DevicesWiring } from "./devices";
 import type { BrowserWiring } from "./browser";
 import type { CanvasWiring } from "./canvas";
+import { sessionNativeSetup } from "../providers/providerNativeSetup";
 
 function withCodeOperationRuntime(
   service: CodeRouteService,
@@ -1012,6 +1013,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           readThreadExternalContentTaint(persistence.connection, String(threadId)),
         resolveProviderCapabilities: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities,
+        resolveProviderNativeSetup: (thread) =>
+          sessionNativeSetup(persistence, {
+            providerInstanceId: thread.providerInstanceId,
+            projectId: thread.projectId,
+            mode: "code",
+            executionPolicy: thread.executionPolicy,
+          }),
         // Planner tools resolve their designation on every call through the
         // services declared after this runtime; the closures run only once a
         // turn is live, well after startup finishes wiring them.
