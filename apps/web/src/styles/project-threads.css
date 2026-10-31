@@ -1614,6 +1614,12 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
     gap: var(--oct-space-1);
   }
 
+  /* The toolbar is a column here, so the identity's 320px basis would become a
+     320px-tall title area. */
+  .project-overview__identity {
+    flex-basis: auto;
+  }
+
   .project-overview__toolbar p,
   .project-overview__warning {
     text-align: left;
