@@ -441,19 +441,22 @@ distribution.
 
 fx ships as an ACP profile (`fx`) but is not in the registry.
 
-fx is also withheld from users. `WITHHELD_BUNDLED_PROVIDER_DRIVERS` in
-`packages/plugin-host/src/bundledProviderDrivers.ts` holds its driver out of
-the activation ladder, so discovery does not offer it, a new instance cannot be
-created, and no `fx` process starts, not even a version probe. A stored fx
-instance and its threads stay: it reports `unavailable` with reason
-`driver-not-admitted` and a message that names why. Measured 2026-10-28 on fx
-0.0.15, under the deny-default Seatbelt profile (System Keychain reads
-denied), fx's HTTP pool aborts certificate loading instead of falling back to
-`/etc/ssl/cert.pem`, so it cannot reach the Vercel AI Gateway and its model
-catalog drops to one model. Octant does not grant fx Keychain reads. Removing
-the table entry offers fx again; do that at the first stock fx release that
-falls back to `/etc/ssl/cert.pem`, and raise `minimumVersion` in `fxProfile` to
-that release at the same time.
+fx is offered. Measured 2026-10-28 on fx 0.0.15, under the deny-default
+Seatbelt profile, fx's HTTP pool aborts certificate loading when its read of
+`/Library/Keychains/System.keychain` is denied, instead of falling back to
+`/etc/ssl/cert.pem`, so it cannot reach the Vercel AI Gateway. `fxProfile`
+therefore sets `readsSystemKeychain`, and a sandboxed macOS launch below Full
+access gets one extra rule, `(allow file-read* (literal
+"/Library/Keychains/System.keychain"))`, emitted after the Keychain and built-in
+secret-file denials so neither overrides it; a path the person protects still
+does. No other profile sets it, nothing grants a
+write there, and the rest of `/Library/Keychains`, `~/Library/Keychains`, and
+`/var/db/SystemKey` stay denied. The file is world-readable on macOS and its
+item secrets are encrypted with the root-only SystemKey, so the read yields no
+secret. `WITHHELD_BUNDLED_PROVIDER_DRIVERS` in
+`packages/plugin-host/src/bundledProviderDrivers.ts` holds no driver; an entry
+there keeps a driver out of the activation ladder while stored instances and
+threads stay.
 
 ### Probe before a profile ships
 

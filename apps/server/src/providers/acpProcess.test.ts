@@ -8,6 +8,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1958,6 +1959,89 @@ describe("Kimi Code provider-owned profile", () => {
     const spawned = spawnRecord(target.root);
     expect(spawned?.cwd).toBe(root);
     expect(spawned?.args.at(-1)).toBe("acp");
+  });
+});
+
+describe("System Keychain read for fx", () => {
+  const systemKeychain = "/Library/Keychains/System.keychain";
+
+  async function fxProfileText(
+    profile: AcpProviderProfile,
+    executionPolicy: ProviderExecutionPolicy,
+  ) {
+    const target = fixture(profile);
+    const launch = await Effect.runPromise(
+      makeAcpConfinementLive({
+        platform: "darwin",
+        sandboxPath: target.sandboxPath,
+        temporaryDirectory: join(target.canonicalRoot, "tmp"),
+        hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+      }).prepare({
+        profile,
+        binaryPath: target.binaryPath,
+        root: target.canonicalRoot,
+        managedHome: join(target.canonicalRoot, "managed-home"),
+        mode: "code",
+        executionPolicy,
+        environment: { PATH: "/usr/bin" },
+      }),
+    );
+    return seatbeltProfile(launch);
+  }
+
+  it.each(["approval-gated", "auto-accept-edits"] as const)(
+    "lets fx at %s read the System Keychain file after every built-in denial, and write no Keychain",
+    async (executionPolicy) => {
+      const lines = (await fxProfileText(fx, executionPolicy)).trimEnd().split("\n");
+      const allow = `(allow file-read* (literal "${systemKeychain}"))`;
+      expect(lines.at(-1)).toBe(allow);
+      expect(lines).toContain('(deny file-read* (subpath "/Library/Keychains"))');
+      expect(
+        lines.filter((line) => line.includes("Keychains/") && line.startsWith("(allow")),
+      ).toEqual([allow]);
+      expect(
+        lines.some((line) => line.startsWith("(allow file-write") && line.includes("Keychains")),
+      ).toBe(false);
+    },
+  );
+
+  it.each(profiles.filter((profile) => profile.kind !== "fx"))(
+    "gives $displayName no System Keychain read",
+    async (profile) => {
+      if (profile.refuses?.("code", "approval-gated") !== undefined) return;
+      expect(await fxProfileText(profile, "approval-gated")).not.toContain("System.keychain");
+    },
+  );
+
+  it("lets a process under the fx profile read the System Keychain file and nothing else of the Keychains", async () => {
+    if (process.platform !== "darwin" || !existsSync(systemKeychain)) return;
+    const target = fixture(fx);
+    const launch = await Effect.runPromise(
+      makeAcpConfinementLive({
+        platform: "darwin",
+        sandboxPath: "/usr/bin/sandbox-exec",
+        temporaryDirectory: join(target.canonicalRoot, "tmp"),
+        hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+      }).prepare({
+        profile: fx,
+        binaryPath: target.binaryPath,
+        root: target.canonicalRoot,
+        managedHome: join(target.canonicalRoot, "managed-home"),
+        mode: "code",
+        executionPolicy: "approval-gated",
+        environment: { PATH: "/usr/bin" },
+      }),
+    );
+    const profile = seatbeltProfile(launch);
+    const run = (...command: ReadonlyArray<string>) =>
+      spawnSync("/usr/bin/sandbox-exec", ["-p", profile, "--", ...command], {
+        encoding: "utf8",
+      }).status;
+    expect(run("/usr/bin/head", "-c", "4", systemKeychain)).toBe(0);
+    expect(run("/bin/ls", "/Library/Keychains")).not.toBe(0);
+    expect(run("/usr/bin/head", "-c", "1", "/var/db/SystemKey")).not.toBe(0);
+    expect(run("/bin/ls", join(realpathSync(homedir()), "Library/Keychains"))).not.toBe(0);
+    expect(run("/bin/sh", "-c", `: >> ${systemKeychain}`)).not.toBe(0);
   });
 });
 

@@ -3687,16 +3687,23 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   and Plan before any process starts, runs its `ask` mode below Full access
   and `code` only on Full access, authenticates only with a broker-held AI
   Gateway API key, and cannot read or write the Project root's `AGENTS.md`,
-  `.mcp.json`, `.fx.json`, `.agents`, or `.claude/skills`. fx is currently
-  withheld (maintainer decision, 2026-10-29): measured 2026-10-28 on fx 0.0.15,
-  the deny-default Seatbelt profile denies System Keychain reads, and fx's HTTP
-  pool aborts certificate loading instead of falling back to
-  `/etc/ssl/cert.pem`, so it cannot reach the AI Gateway and its model catalog
-  drops to one model. Octant will not grant fx Keychain reads. Withheld means
-  the driver is not admitted on the activation ladder: discovery offers nothing,
-  no fx instance is created, no fx process starts, and a stored fx instance and
-  its threads are kept but report `driver-not-admitted` with that reason in
-  Settings. The gate lifts when a stock fx release has the fallback.
+  `.mcp.json`, `.fx.json`, `.agents`, or `.claude/skills`. fx is offered
+  (maintainer decision, 2026-10-31). Measured 2026-10-28 on fx 0.0.15, fx
+  loads TLS roots by reading `/Library/Keychains/System.keychain` and aborts
+  certificate loading when the deny-default Seatbelt profile denies it,
+  instead of falling back to `/etc/ssl/cert.pem`, so it could not reach the
+  AI Gateway. A sandboxed fx launch below Full access on macOS may therefore
+  read that one file. The rule is a literal read emitted after the Keychain and
+  built-in secret-file denials, so neither overrides it, while a path the
+  person protects in Settings still does; nothing grants a write
+  beneath `/Library`, and no other runtime gets it. The rest of
+  `/Library/Keychains`, the person's own `~/Library/Keychains`, every other
+  secret path, and `/var/db/SystemKey` stay denied. The risk is low: the file
+  is world-readable on macOS, and its item secrets are encrypted with the
+  root-only `/var/db/SystemKey`, so the read yields public certificates and
+  ciphertext. At Full access fx runs unsandboxed like every runtime. From
+  2026-10-29 to 2026-10-31 fx was withheld instead; the withheld-driver
+  mechanism remains and holds no driver.
   Generation itself is a journaled job with adapters for the dedicated image
   kinds `openai-image`, `gemini-native-image`, `bfl-image` (Black Forest Labs),
   and `ideogram-image`, and for an OpenAI-compatible custom image source, a
@@ -8950,8 +8957,7 @@ access` agree); a thread's own change is journaled as
     out and says so. They report no file changes or diffs, ask no user
     questions on Mistral Vibe and fx, resume only when the agent offers load or
     resume, and offer Octant's tools only on macOS when the agent serves HTTP
-    MCP. fx is also refused in Chat and Plan, and is withheld entirely for now
-    (see above), so the matrix rows for it apply once it is offered again.
+    MCP. fx is also refused in Chat and Plan.
   - **Ollama** carries the Octant Harness agent loop over the local service on
     literal loopback, like the harness endpoints: no provider approvals,
     questions, or file changes, Octant's tools per verified model (a model

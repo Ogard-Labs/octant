@@ -197,21 +197,12 @@ export type BundledProviderDriverActivationPatch = Partial<ExtensionActivationCo
  * process starts. Stored instances and their threads stay. Remove the entry to
  * offer the driver again.
  *
- * fx 0.0.15 under Octant's deny-default Seatbelt profile (denied System
- * Keychain reads, measured 2026-10-28): fx's HTTP pool aborts certificate
- * loading instead of falling back to /etc/ssl/cert.pem, so it cannot reach the
- * Vercel AI Gateway and its model catalog drops to one model. Octant does not
- * grant fx Keychain reads. Remove this entry at the first stock fx release that
- * falls back to /etc/ssl/cert.pem.
+ * None is withheld today. fx was, until Octant let its sandboxed launches read
+ * the System Keychain file it loads TLS roots from.
  */
 const WITHHELD_BUNDLED_PROVIDER_DRIVERS: Readonly<
   Partial<Record<ProviderDriverKind, { readonly reason: string }>>
-> = {
-  fx: {
-    reason:
-      "fx is not offered yet: the current fx release cannot load certificates inside Octant's sandbox, so it cannot reach the Vercel AI Gateway. Your fx provider and its threads are kept.",
-  },
-};
+> = {};
 
 /** Why Octant withholds this bundled driver, or undefined when it is offered. */
 export function bundledProviderDriverWithheldReason(
