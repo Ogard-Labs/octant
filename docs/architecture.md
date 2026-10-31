@@ -1556,8 +1556,46 @@ thread it creates could not do.
   must address a routine whose Project it can reach. A paired remote device may
   author only on its own host and within those Projects; its routines get the
   same ceiling. Automation-origin execution cannot create, edit, run, pause, or
-  archive a routine (`automation-recursion`), and no agent or provider tool
-  reaches the routes.
+  archive a routine (`automation-recursion`). No agent or provider tool reaches
+  the routes; the one way an agent takes part is the proposal below, and the
+  routine it leads to is still created by a person's principal.
+- **Proposed from a thread.** A Work or Code thread's agent may propose a
+  routine with the app-managed `octant_propose_routine` tool: a name, a task
+  prompt, a trigger (once at an explicit instant, every N minutes within the
+  bounds above, or weekly at a local time in an IANA zone), and a missed-run
+  policy. It names nothing else: the thread's own Project and mode are implied,
+  and the agent cannot choose another Project, a profile, a model, or any
+  authority. Chat is never offered the tool, a turn that runs as the host (a
+  routine's run, or a usage-limit resume) is refused it as
+  `automation-recursion`, and a Code turn in Plan is
+  refused it because Plan is read-only. A proposal creates nothing. The host
+  holds it for ten minutes as a confirmation card in the thread, listed and
+  answerable only by the window or paired device whose turn raised it; with
+  no such window open, or once it goes away, the proposal is withdrawn
+  unanswered. Confirm is the
+  `POST /api/automations/proposals/decide` route, under the same transport
+  principal and Project check as `commands`. On confirm the host builds the
+  definition from the thread's live facts (Project version and binding, the
+  Code thread's own available checkout, the thread's provider and model, and
+  an approval-gated profile that allows that model, the thread's own when it
+  qualifies) and creates it through the ordinary create command as the
+  confirming principal, so every ceiling and revalidation above applies
+  unchanged: filesystem and tools only, no network or subagents, Work without
+  shell or Git, Code asking first, and session-only permission kept
+  session-only. A thread that left its Project, an archived thread, a
+  Plan-posture Code thread, or an unavailable checkout refuses at confirm and
+  creates nothing. The first answer takes the proposal off the list, so a
+  retry cannot create a second routine. The call waits for the answer and
+  reports `confirmed` with the routine id, `declined`, `expired`, `cancelled`,
+  or the host's refusal. The tool rides the `appManagedTools` capability in
+  the matrix under [security and authority](#security-and-authority): a
+  provider or model without it is not offered the tool, and its degraded form
+  is the person creating the routine in Automation Center.
+- **Origin thread.** A routine confirmed from a proposal records the proposing
+  thread as `originThreadId` on its journaled definition. Only the host sets
+  it, never a command body, and later revisions keep it, so the projection
+  rebuilds the link on replay. It links the routine and the thread in the UI
+  and grants nothing.
 - **Asleep or offline.** The scheduler is an in-process timer in the running
   host over journaled definitions. Nothing wakes the computer or runs in a
   cloud today. A self-hosted wake service on a person's hub, which only wakes

@@ -588,3 +588,55 @@ html[data-octant-increased-contrast="true"] .thread-environment-dock__header,
 html[data-octant-increased-contrast="true"] .environment-card__rows {
   border: 1px solid var(--octant-border-strong);
 }
+
+/* Routines: the ones this thread's agent proposed, one block per routine with
+   its schedule under the name and its two actions beneath. */
+.environment-routines__list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--oct-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.environment-routine {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.environment-routine__head {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--oct-space-2);
+  font-size: var(--oct-text-xs);
+}
+
+.environment-routine__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-fg-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.environment-routines__state {
+  flex: none;
+  color: var(--oct-muted);
+}
+
+.environment-routine__schedule {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-body);
+}
+
+.environment-routine__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-1);
+}

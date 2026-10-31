@@ -46,6 +46,7 @@ const SOURCE_WORDS: Readonly<Record<string, string>> = {
   octant_create_image: "A generated image",
   octant_github: "GitHub issues, pull requests and projects",
   octant_offer_side_task: "A side task offer",
+  octant_propose_routine: "A proposed routine",
   octant_propose_thread: "A proposed thread",
   octant_side_chat_list_files: "Files listed for a side chat",
   octant_side_chat_read_file: "A file read for a side chat",

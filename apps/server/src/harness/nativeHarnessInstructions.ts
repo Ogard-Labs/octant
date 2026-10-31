@@ -55,6 +55,7 @@ const OCTANT_TOOL_PURPOSE: Readonly<Record<string, string>> = {
   octant_create_image: "generate an image; it costs money, so only when asked",
   octant_github: "read the repository's issues, pull requests, and projects",
   octant_offer_side_task: "offer the user a separate task for work outside this request",
+  octant_propose_routine: "propose a scheduled routine; the user confirms it before it exists",
   octant_propose_thread: "propose a new thread on the Project board",
   octant_terminal: "run long-lived processes such as dev servers and read their output",
   octant_threads: "see this Project's other threads: list them, read one, or wait for one to stop",

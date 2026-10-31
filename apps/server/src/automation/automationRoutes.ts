@@ -1,5 +1,9 @@
+import { randomUUID } from "node:crypto";
 import {
   decodeAutomationCommandResult,
+  decodeRoutineProposalDecision,
+  decodeRoutineProposalDecisionResult,
+  decodeRoutineProposalList,
   decodeAutomationId,
   decodeAutomationQueryResponse,
   decodeProjectId,
@@ -12,6 +16,7 @@ import {
   type AutomationId,
   type HostId,
   type ProjectId,
+  type RoutineProposal,
 } from "@octant/contracts";
 import { ClientPrincipalError } from "../clientPrincipal";
 import { resolvePrincipalRouteContext, type PrincipalRouteContext } from "../principalRouteContext";
@@ -20,6 +25,8 @@ import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import type { AutomationCommandService } from "./automationCommandService";
 import type { AutomationProjection } from "./automationProjection";
+import type { RoutineProposalService } from "./routineProposalService";
+import type { ThreadRoutineDraftResult } from "./threadRoutineDraft";
 
 const METHODS = "GET, POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
@@ -40,7 +47,17 @@ export interface AutomationRouteDependencies {
    * written against history the host never loaded.
    */
   readonly historyAvailable?: () => boolean;
+  /**
+   * Routines thread agents proposed. Listed and answered only by the window
+   * whose turn raised them; a confirm builds the routine from the thread's
+   * live facts and creates it through the same command path as `commands`.
+   */
+  readonly proposals?: {
+    readonly service: Pick<RoutineProposalService, "list" | "claim">;
+    readonly draft: (proposal: RoutineProposal) => ThreadRoutineDraftResult;
+  };
   readonly now?: () => number;
+  readonly uuid?: () => string;
 }
 
 /**
@@ -124,6 +141,19 @@ export function createAutomationRouteHandler(dependencies: AutomationRouteDepend
       }
       if (route === "commands" && request.method === "POST") {
         return await handleCommand(dependencies, context, body, origin);
+      }
+      if (route === "proposals" && request.method === "GET") {
+        return jsonResponse(
+          decodeRoutineProposalList({
+            kind: "routine-proposal-list",
+            proposals: dependencies.proposals?.service.list(context.scopeId) ?? [],
+          }),
+          200,
+          origin,
+        );
+      }
+      if (route === "proposals/decide" && request.method === "POST") {
+        return await handleProposalDecision(dependencies, context, body, origin);
       }
       return failureResponse("Automation request is invalid.", 400, origin);
     } catch {
@@ -343,6 +373,91 @@ async function handleCommand(
   } as AutomationCommand;
   const result = dependencies.commands.execute(command);
   return jsonResponse(decodeAutomationCommandResult(result), 200, origin);
+}
+
+/**
+ * A person's answer to a thread's routine proposal. The proposal leaves the
+ * waiting list on the first answer, so a retry cannot create a second
+ * routine. A confirm is a create by this request's own principal, held to the
+ * same Project check and command service as a create from the editor; only
+ * the host adds which thread proposed it.
+ */
+async function handleProposalDecision(
+  dependencies: AutomationRouteDependencies,
+  context: PrincipalRouteContext,
+  body: unknown,
+  origin: string | null,
+): Promise<Response> {
+  const proposals = dependencies.proposals;
+  let decision;
+  try {
+    decision = decodeRoutineProposalDecision(body);
+  } catch {
+    return failureResponse("Routine proposal decision is invalid.", 400, origin);
+  }
+  const claimed = proposals?.service.claim(context.scopeId, decision.proposalId);
+  if (proposals === undefined || claimed === undefined) {
+    return jsonResponse(
+      decodeRoutineProposalDecisionResult({ kind: "routine-proposal-gone" }),
+      200,
+      origin,
+    );
+  }
+  if (decision.decision === "decline") {
+    claimed.settle({ status: "declined" });
+    return jsonResponse(
+      decodeRoutineProposalDecisionResult({ kind: "routine-proposal-declined" }),
+      200,
+      origin,
+    );
+  }
+  const refuse = (failure: AutomationCommandFailure): Response => {
+    claimed.settle({ status: "not-created", message: failure.message });
+    return jsonResponse(decodeRoutineProposalDecisionResult(failure), 200, origin);
+  };
+  if (dependencies.historyAvailable?.() === false) {
+    return refuse(
+      commandFailure(
+        "unsupported",
+        "Automation history could not be loaded, so Automations cannot change.",
+      ),
+    );
+  }
+  const built = proposals.draft(claimed.proposal);
+  if (built.status === "refused") return refuse(commandFailure("invalid", built.message));
+  const create = {
+    kind: "create-automation",
+    automationId: decodeAutomationId((dependencies.uuid ?? randomUUID)()),
+    expectedVersion: 0,
+    definition: built.draft,
+  };
+  const accessible = await accessibleProjects(dependencies, context);
+  const denial = authorizeCommandProject(dependencies, create, accessible);
+  if (denial !== undefined) return refuse(denial);
+  const result = dependencies.commands.execute(
+    {
+      ...create,
+      principal: context.principal,
+      origin: { kind: "interactive" },
+    } as AutomationCommand,
+    { originThreadId: claimed.proposal.threadId },
+  );
+  if (result.kind !== "automation-created") {
+    return refuse(
+      result.kind === "automation-command-failed"
+        ? result
+        : commandFailure("invalid", "The routine was not created."),
+    );
+  }
+  claimed.settle({ status: "confirmed", automationId: result.automation.id });
+  return jsonResponse(
+    decodeRoutineProposalDecisionResult({
+      kind: "routine-proposal-confirmed",
+      automation: result.automation,
+    }),
+    200,
+    origin,
+  );
 }
 
 /**

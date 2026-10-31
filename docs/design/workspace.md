@@ -561,6 +561,21 @@ sending anything. Closing the tab leaves the desktop running. The host owns
 authority, frames, and attribution under the slice 5 rules there.
 Dock visibility and responsive presentation follow [DESIGN.md](../../DESIGN.md#shell-and-layout).
 
+### Routines
+
+A Work or Code thread's Environment has a Routines row when routines were
+created from that thread (the agent proposed them and the person confirmed;
+see the architecture's routine rules). Each lists its name, the schedule in
+plain words with the next run, and whether it is Active or Paused, with
+**Open in Automation Center** and **Pause** or **Resume**, which are the
+ordinary Automation commands. Other routines of the same Project are not
+listed here; Automation Center lists them. A thread with none shows no row.
+An agent's proposal waits as a confirmation card in the thread, like a tool
+approval: it states the name, the schedule and its time zone, the first run,
+the missed-run policy, that each run starts a new thread in this Project that
+asks before it changes anything, and the exact prompt, with **Create routine**
+and **Decline**.
+
 ### Subagents
 
 Environment belongs to a

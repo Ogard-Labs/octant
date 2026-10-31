@@ -69,7 +69,7 @@ import { publishedSnapshotRunRuntimeFor } from "../canvas/blocks/designRunningFr
 import { placeThreadCanvases, threadTurnSpans } from "../canvas/threadCanvasPlacement";
 import { useThreadCanvasCards } from "../canvas/useThreadCanvasCards";
 import type { HostId } from "@octant/contracts/host";
-import type { CodeClient, ThreadMentionClient } from "@octant/client-runtime";
+import type { AutomationClient, CodeClient, ThreadMentionClient } from "@octant/client-runtime";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import { useCodeAttachments } from "./useCodeAttachments";
 import type { CodeThreadControllers } from "./codeThreadControllers";
@@ -102,6 +102,7 @@ import {
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
+import { RoutineProposalPrompt } from "../automation/RoutineProposalPrompt";
 import { TerminalBrowserApprovalPrompt } from "./TerminalBrowserApprovalPrompt";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
@@ -252,6 +253,7 @@ export interface CodeThreadWorkspaceProps {
   readonly windowCapability?: string;
   readonly messageQueueClient?: ThreadMessageQueueClient;
   readonly extensionClient?: ExtensionClient;
+  readonly automationClient?: AutomationClient;
 }
 
 /**
@@ -1822,6 +1824,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       <ExtensionToolApprovalPrompt
         className="thread-column"
         client={props.extensionClient}
+        threadId={String(props.threadId)}
+        turnActive={busy}
+      />
+      <RoutineProposalPrompt
+        className="thread-column"
+        client={props.automationClient}
         threadId={String(props.threadId)}
         turnActive={busy}
       />

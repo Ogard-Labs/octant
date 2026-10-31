@@ -54,6 +54,7 @@ import type {
 import type { DeviceActionFailure } from "../device/deviceModel";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
+import type { AutomationClient } from "@octant/client-runtime";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import type { ImageGenerationProfileView } from "@octant/contracts";
@@ -124,6 +125,7 @@ export interface CodeWorkspaceProps {
   readonly controller: CodeController;
   readonly holdAccessNotice?: CodeThreadControllers["holdAccessNotice"];
   readonly extensionClient?: ExtensionClient;
+  readonly automationClient?: AutomationClient;
   readonly projectRemembersFullAccess?: boolean;
   readonly createUuid?: () => string;
   readonly projections?: CodeWorkspaceProjections;
@@ -213,6 +215,9 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
           ? {}
           : { holdAccessNotice: props.holdAccessNotice })}
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
+        {...(props.automationClient === undefined
+          ? {}
+          : { automationClient: props.automationClient })}
         {...(props.providerGroups === undefined ? {} : { providerGroups: props.providerGroups })}
         {...(props.harnessAutoReviewSupported === undefined
           ? {}

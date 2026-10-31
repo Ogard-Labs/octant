@@ -218,6 +218,12 @@ across every Project, are on the start screen's **Running services** card. Files
 Delivery, Agents, Browser, Review, iOS Simulator, and Android emulator stay in
 the dock.
 
+A Code thread's agent can also propose a scheduled routine, confirmed by you
+in the thread and listed under Routines here; see
+[Routines from a thread](/guide/work#routines-from-a-thread). A Code routine
+runs in this thread's checkout, asks before effects, and cannot be proposed
+from Plan.
+
 ## Managed worktrees
 
 Code can create managed git worktrees for isolated feature branches. New managed worktrees default to **Start from origin** when the selected branch has a usable remote. The server fetches the remote, resolves the exact object ID, and creates the worktree from that commit. The existing checkout is never mutated.

@@ -504,6 +504,12 @@ export const AutomationDefinition = Schema.Struct({
   blockedReason: Schema.optional(AutomationBlockReason),
   createdBy: AutomationAuthorPrincipal,
   updatedBy: AutomationAuthorPrincipal,
+  /**
+   * The Work or Code thread whose agent proposed this routine, when a person
+   * confirmed it from that thread. Set by the host at creation, never by a
+   * command body, and kept unchanged by every later revision.
+   */
+  originThreadId: Schema.optional(AutomationThreadId),
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
@@ -998,10 +1004,63 @@ export const AutomationSummary = Schema.Struct({
   trigger: AutomationTrigger,
   nextDueAt: Schema.NullOr(UtcTimestamp),
   latestRunLifecycle: Schema.optional(AutomationRunLifecycle),
+  /** See {@link AutomationDefinition}'s `originThreadId`. */
+  originThreadId: Schema.optional(AutomationThreadId),
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
 }).annotations(strict);
 export type AutomationSummary = typeof AutomationSummary.Type;
+
+// ── Routine proposals from a thread ────────────────────────────────────────
+
+export const ROUTINE_PROPOSAL_TOOL_NAME = "octant_propose_routine";
+
+export const RoutineProposalId = brandedUuid("RoutineProposalId");
+export type RoutineProposalId = typeof RoutineProposalId.Type;
+
+/**
+ * A routine a Work or Code thread's agent proposed, waiting for the person.
+ * It names only what the agent chose; the Project, mode, profile, and
+ * authority are the host's, resolved from the thread when the person confirms.
+ */
+export const RoutineProposal = Schema.Struct({
+  proposalId: RoutineProposalId,
+  threadId: AutomationThreadId,
+  mode: AutomationMode,
+  projectId: ProjectId,
+  displayName: boundedText(MAX_AUTOMATION_DISPLAY_NAME_LENGTH),
+  taskPrompt: boundedText(MAX_AUTOMATION_TASK_PROMPT_LENGTH),
+  trigger: AutomationTrigger,
+  missedRunPolicy: AutomationMissedRunPolicy,
+  /** The first time it would run, resolved by the host when it was proposed. */
+  firstRunAt: UtcTimestamp,
+  requestedAt: UtcTimestamp,
+}).annotations(strict);
+export type RoutineProposal = typeof RoutineProposal.Type;
+
+export const RoutineProposalList = Schema.Struct({
+  kind: Schema.Literal("routine-proposal-list"),
+  proposals: Schema.Array(RoutineProposal).pipe(Schema.maxItems(32)),
+}).annotations(strict);
+export type RoutineProposalList = typeof RoutineProposalList.Type;
+
+export const RoutineProposalDecision = Schema.Struct({
+  proposalId: RoutineProposalId,
+  decision: Schema.Literal("confirm", "decline"),
+}).annotations(strict);
+export type RoutineProposalDecision = typeof RoutineProposalDecision.Type;
+
+export const RoutineProposalDecisionResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("routine-proposal-confirmed"),
+    automation: AutomationDefinition,
+  }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("routine-proposal-declined") }).annotations(strict),
+  /** The proposal is no longer waiting: answered, expired, or withdrawn. */
+  Schema.Struct({ kind: Schema.Literal("routine-proposal-gone") }).annotations(strict),
+  AutomationCommandFailure,
+);
+export type RoutineProposalDecisionResult = typeof RoutineProposalDecisionResult.Type;
 
 export const AutomationQuery = Schema.Union(
   Schema.Struct({
@@ -1312,3 +1371,11 @@ export const decodeAutomationCommandResult = Schema.decodeUnknownSync(Automation
 export const decodeAutomationQuery = Schema.decodeUnknownSync(AutomationQuery);
 export const decodeAutomationQueryResponse = Schema.decodeUnknownSync(AutomationQueryResponse);
 export const decodeAutomationEvent = Schema.decodeUnknownSync(AutomationEvent);
+export const decodeAutomationThreadId = Schema.decodeUnknownSync(AutomationThreadId);
+export const decodeRoutineProposalId = Schema.decodeUnknownSync(RoutineProposalId);
+export const decodeRoutineProposal = Schema.decodeUnknownSync(RoutineProposal);
+export const decodeRoutineProposalList = Schema.decodeUnknownSync(RoutineProposalList);
+export const decodeRoutineProposalDecision = Schema.decodeUnknownSync(RoutineProposalDecision);
+export const decodeRoutineProposalDecisionResult = Schema.decodeUnknownSync(
+  RoutineProposalDecisionResult,
+);

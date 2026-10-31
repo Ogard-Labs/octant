@@ -160,6 +160,23 @@ citation, child-run, recovery, and delivery evidence. A thread is Done when
 you mark it Done; no evidence text is needed. Opening a card activates
 that Project and thread. Chat has no board.
 
+## Routines from a thread
+
+Ask the agent to do something later or on a schedule ("every Monday at 9,
+summarize last week's changes") and it can propose a routine. A card in the
+thread shows exactly what would run and when: the name, the schedule and time
+zone, the first run, what happens to runs missed while the computer is off,
+and the prompt each run starts with. Nothing exists until you choose **Create
+routine**; **Decline**, or no answer within ten minutes, creates nothing.
+
+A routine made this way belongs to the thread's Project. Each run starts a new
+thread there that asks before it changes anything, and a Work run has no shell
+or Git, whatever the proposal said. It appears under Routines in the thread's
+Environment, where you can pause, resume, or open it in Automation Center. A
+routine's own run cannot propose more routines. A provider that cannot use
+Octant's tools does not get this; create the routine in Automation Center
+instead.
+
 ## Next steps
 
 - [Work Thread Board](/advanced/work-board) for derived status, grouping, and marking a thread Done

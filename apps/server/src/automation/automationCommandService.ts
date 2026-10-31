@@ -9,6 +9,7 @@ import {
   type AutomationDefinition,
   type AutomationId,
   type AutomationRunId,
+  type AutomationThreadId,
   type AutomationTrigger,
   type AutomationWeeklyResolution,
   type UtcTimestamp,
@@ -43,6 +44,12 @@ export interface AutomationCommandServiceOptions {
   readonly clock: () => string;
 }
 
+/** Facts about a create that only the host can vouch for. */
+export interface AutomationProvenance {
+  /** The thread whose agent proposed the routine a person confirmed. */
+  readonly originThreadId: AutomationThreadId;
+}
+
 interface DueState {
   readonly nextDueAt: UtcTimestamp | null;
   readonly nextDueResolution?: AutomationWeeklyResolution;
@@ -71,7 +78,11 @@ export class AutomationCommandService {
     this.#clock = options.clock;
   }
 
-  execute(input: AutomationCommand): AutomationCommandResult {
+  /**
+   * `provenance` is what the host itself knows about a create, never part of
+   * the wire command: a route body cannot claim a thread proposed its routine.
+   */
+  execute(input: AutomationCommand, provenance?: AutomationProvenance): AutomationCommandResult {
     let command: AutomationCommand;
     try {
       command = decodeAutomationCommand(input);
@@ -91,7 +102,7 @@ export class AutomationCommandService {
     try {
       switch (command.kind) {
         case "create-automation":
-          return this.#create(command);
+          return this.#create(command, provenance);
         case "update-automation":
           return this.#update(command);
         case "pause-automation":
@@ -122,6 +133,7 @@ export class AutomationCommandService {
 
   #create(
     command: Extract<AutomationCommand, { readonly kind: "create-automation" }>,
+    provenance: AutomationProvenance | undefined,
   ): AutomationCommandResult {
     if (String(command.definition.hostId) !== this.#hostId) {
       return failure("unauthorized", "Automation definitions are owned by exactly one host.", {
@@ -144,6 +156,7 @@ export class AutomationCommandService {
         ...(paused ? { nextDueAt: null } : this.#dueState(command.definition.trigger)),
         createdBy: command.principal,
         updatedBy: command.principal,
+        ...(provenance === undefined ? {} : { originThreadId: provenance.originThreadId }),
         version: 1,
         createdAt: now,
         updatedAt: now,
@@ -178,6 +191,7 @@ export class AutomationCommandService {
           : { nextDueAt: null }),
         createdBy: current.createdBy,
         updatedBy: command.principal,
+        ...(current.originThreadId === undefined ? {} : { originThreadId: current.originThreadId }),
         version: current.version + 1,
         createdAt: current.createdAt,
         updatedAt: now,

@@ -57,6 +57,8 @@ import { ThreadHandOffService } from "../threadHandOffService";
 import { createBrowserAppManagedTools } from "../browser/browserAppManagedTools";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
+import { createRoutineProposalTools } from "../automation/routineProposalTools";
+import { isRoutineHostScope } from "../routineHostScope";
 import {
   defaultShellSettings,
   enabledModes,
@@ -96,6 +98,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "codeSessionAuthority"
     | "liveTurns"
     | "onWindowRevoked"
+    | "routineProposalService"
     | "windowAuthorityStore"
   > &
   Pick<
@@ -224,6 +227,7 @@ export function wireWork(deps: WorkDependencies) {
     runningWorkTurns,
     runtimeOutsideContentMarks,
     sideTaskFirstMessage,
+    routineProposalService,
     sideTasks,
     spendCeiling,
     threadAwaitsHarnessApproval,
@@ -380,6 +384,19 @@ export function wireWork(deps: WorkDependencies) {
               uuid: randomUUID,
               clock: () => new Date().toISOString(),
             });
+        const routineTools = !browserSupported
+          ? undefined
+          : createRoutineProposalTools({
+              windowId: input.windowId,
+              thread: {
+                id: String(input.thread.id),
+                mode: "work",
+                projectId: String(input.thread.projectId),
+              },
+              isAutomationOrigin: isRoutineHostScope(input.windowId),
+              proposals: routineProposalService,
+              now: Date.now,
+            });
         const agentsTools = !browserSupported
           ? undefined
           : agentsManagedToolsFor({
@@ -414,6 +431,7 @@ export function wireWork(deps: WorkDependencies) {
           native === undefined &&
           browser === undefined &&
           sideTaskTools === undefined &&
+          routineTools === undefined &&
           agentsTools === undefined &&
           computer === undefined &&
           canvasTools === undefined
@@ -424,6 +442,7 @@ export function wireWork(deps: WorkDependencies) {
           browser,
           computer,
           sideTaskTools,
+          routineTools,
           agentsTools,
           canvasTools,
         );
