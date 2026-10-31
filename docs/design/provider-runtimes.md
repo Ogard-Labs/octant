@@ -23,6 +23,14 @@ and Reviewed until the person turns it on, on at Full access):
 | Mistral Vibe | `VIBE_SKILL_PATHS="[]"`, `VIBE_DISABLED_SKILLS='["*"]'`, `VIBE_INCLUDE_PROJECT_CONTEXT="false"`       | Its own skills and Project context; a trusted Project's tools and MCP servers; its auto-approve mode as Reviewed's default reviewer, reported `unsupported` until mapped                                 | No                                           |
 | OpenCode     | Skills and project config off, `skill` denied; Octant's denies outrank saved grants; `once` only      | The person's own permission rules; "always" answers; its `subagent` delegation; its skills; `bash` and `task` in Work as in Code; Reviewed through Octant Shield                                         | No                                           |
 
+With the setup on, Claude Code starts with `settingSources: ["user"]` (plus
+`project` and `local` in a trusted Project), `skills: "all"`, and the `Agent`,
+`WebSearch`, `WebFetch`, and `Skill` tools, with every hook off by flag in Chat
+and Plan and `strictMcpConfig: false` only in a trusted Project. Codex starts
+with no `skills.config` rules, no per-name `mcp_servers` switch-off, and
+plugins and apps on in Chat, and at Full access with an app-server that has
+no subagent switches.
+
 Plan's read-only rule, Chat's withheld filesystem and shell, and the
 provider's memory, telemetry, and self-update channels stay off at every
 level. Work and Code share one capability set, so each runtime starts a Work
