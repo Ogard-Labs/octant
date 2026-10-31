@@ -9015,7 +9015,13 @@ access` agree); a thread's own change is journaled as
   on profile pages; a paired device sees only that a signed-in page exists. The
   person signs out of a profile (closing its pages and removing its storage) at a
   local window, and the host journals that it happened without naming a site or
-  a cookie. Browser extensions (approved design, not yet built) install only
+  a cookie. The person may also import another browser's cookies into one
+  profile, only by picking a browser and profile in Settings: the host reads a
+  copy of that browser's cookie database, asks macOS for the browser's cookie key
+  through its own Keychain prompt (a refusal imports nothing), verifies each
+  decrypted value against its host, and hands the cookies to the desktop app's
+  store without logging, journaling, or returning them; the journal records the
+  source, the profile, and counts. Browser extensions (approved design, not yet built) install only
   from an unpacked folder at a local window, start disabled, are enabled per
   profile, and never load into a Private page. Detail is in [Browser profiles and extensions](design/browser-profiles.md).
 - **Side Chat reads.** A Side Chat may read its source thread's transcript,

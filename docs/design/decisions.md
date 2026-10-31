@@ -2165,9 +2165,9 @@ Browser pages may keep sign-in in a Project or Personal profile. Private remains
 - On a profile page the agent needs a site approval for each origin and profile, for reading too. Credential fields stay protected.
 - Routines, subagents, paired devices and terminal grants are refused on profile pages.
 - An extension is installed and enabled only by a person at a local window. Install never enables, and no agent, plugin or skill can install or enable.
-- Today every Browser page is Private (not built yet).
+- Profiles, their storage, site approvals, the refusals, and sign out are built; extension install, per-profile enablement, and popups are not built yet.
 
-Status: Designed, not built. Since: —. Detail: [Browser profiles and extensions: Profiles](browser-profiles.md#profiles) and [The agent on a signed-in page](browser-profiles.md#the-agent-on-a-signed-in-page).
+Status: Partly built. Since: —. Detail: [Browser profiles and extensions: Profiles](browser-profiles.md#profiles) and [The agent on a signed-in page](browser-profiles.md#the-agent-on-a-signed-in-page).
 
 ### Terminal Browser grant
 
@@ -2616,9 +2616,10 @@ Status: Designed, not built. Since: 2026-10-31. Detail: [Architecture: Providers
 
 Browser pages can keep sign-ins in named profiles, and a person may import cookies from another browser into a profile.
 
-- The current Browser profiles design says Octant never imports another browser's profile; this decision replaces that sentence when the specification is updated.
+- Octant never opens another browser's profile in place; the person's explicit pick of a browser and one of its profiles is the only way its cookies reach a Project or Personal profile.
+- A Chromium-family browser's cookie key comes through the macOS Keychain prompt; a refusal imports nothing. Cookies are never logged, journaled, returned to a window, or sent off the Mac, and the journal records the source, the profile, and counts.
 
-Status: Designed, not built. Since: 2026-10-31. Detail: pending spec update (owner to be [Browser profiles and extensions](browser-profiles.md#profiles)).
+Status: Built. Since: 2026-10-31. Detail: [Browser profiles and extensions: Cookie import](browser-profiles.md#cookie-import).
 
 ### Local diagnostics export
 
