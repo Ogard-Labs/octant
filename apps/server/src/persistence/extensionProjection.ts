@@ -454,6 +454,7 @@ function projectPackageState(record: ProjectedExtensionRecord): ExtensionPackage
     source: manifest.source,
     compatibility: manifest.compatibility,
     activation: packageActivation,
+    ...(manifest.provenance.npm === undefined ? {} : { npm: manifest.provenance.npm }),
     ...(holdsProviderDriver(manifest) && publisherState(record) !== undefined
       ? { publisher: publisherState(record) }
       : {}),

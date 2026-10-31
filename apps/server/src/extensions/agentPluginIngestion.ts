@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { ExtensionSource } from "@octant/contracts/extensions";
+import type { ExtensionNpmSource, ExtensionSource } from "@octant/contracts/extensions";
 import {
   AGENT_PLUGINS_MCP_SCHEMA,
   AgentPluginsError,
@@ -32,6 +32,8 @@ export interface AgentPluginPackageInput {
   readonly entries: ReadonlyArray<ExtensionArchiveEntry>;
   readonly expectedDigest?: ResolvedExtensionPackage["expectedDigest"];
   readonly curationBinding?: AgentPluginCurationBinding;
+  /** Where the host fetched the bytes from when the source is an npm registry. */
+  readonly npm?: ExtensionNpmSource;
   readonly appVersion: string;
   readonly platform: NodeJS.Platform;
 }
@@ -217,6 +219,7 @@ export function normalizeAgentPluginPackage(
     source: { kind: "plugin-package", sourceRef },
     provenance: {
       ...(canonicalUrl === undefined ? {} : { canonicalUrl }),
+      ...(input.npm === undefined ? {} : { npm: input.npm }),
       publisher: publisher.slice(0, 256),
       ...(syntheticCommit === undefined ? {} : { sourceCommit: syntheticCommit }),
       ...(isReviewed && binding ? { sourceCommit: binding.sourceCommit } : {}),
