@@ -7674,9 +7674,9 @@ mechanisms are:
     soft there: Octant's own file tools (the Octant Harness's, the ACP
     client's host-side file operations, and Claude Code's through Octant's
     tool gate) still refuse a protected path with the same plain message,
-    [Octant Shield](#octant-shield)'s Judge and Watcher flag a read of a
+    [Octant Shield](#octant-shield)'s Judge and Watcher are to flag a read of a
     protected path and a secret-then-network sequence as journaled tags and
-    never block, and secret redaction stays on. Below Full access the list is
+    never block (allowed; not built yet), and secret redaction stays on. Below Full access the list is
     an OS rule on every confined launch.
   - **Outside content is recorded only** at Full access: a quiet tag on the
     tool row, a small mark on the thread card, and the taint in the journal

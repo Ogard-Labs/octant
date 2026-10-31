@@ -160,7 +160,7 @@ Below Full access, secret files stay out of every agent's reach by an operating-
 
 - One operating-system deny list covers SSH private keys, cloud and tool credentials, keychain and password-manager files, browser login stores, Octant's own secrets, and other runtimes' sign-ins; SSH config, known_hosts, public keys and the login keychain stay readable, and a runtime keeps its own sign-in.
 - Below Full access (Ask first, Accept edits, Auto, Plan) the list joins every confined launch after its grants. At Full access no launch is wrapped for any runtime, so Swift packages and headless Chrome work without flags.
-- At Full access Octant's own file tools still refuse protected paths with the same plain message, Octant Shield's Judge and Watcher flag protected-path reads and secret-then-network sequences as journaled tags and never block, and redaction stays on.
+- At Full access Octant's own file tools still refuse protected paths with the same plain message, Octant Shield's Judge and Watcher are to flag protected-path reads and secret-then-network sequences as journaled tags and never block (not built yet), and redaction stays on.
 - SSH works through the person's SSH agent, Git over HTTPS through the system credential helper, and keys through the credential broker, so agents use credentials without reading them.
 - The person adds paths in Settings › Permissions › Protected files; removing a built-in group needs an explicit confirm and is journaled.
 - A refused read by Octant's or Claude Code's file tools names the rule and the channel to use, at every level.
