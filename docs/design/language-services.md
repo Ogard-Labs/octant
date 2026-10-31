@@ -7,8 +7,12 @@ Code Project and thread authority. Architecture owns the boundaries it builds
 on: [process topology](../architecture.md#process-topology), the
 [sandbox and approvals](../architecture.md#security-and-authority), and the
 [extension activation ladder](../architecture.md#extensions-and-skills). The
-start gates this design answers are in
-[release-boundary holds](../release-boundary-holds.md#full-lsp--extension-host--debugger).
+start gates this design answers are the companion process model (separately
+launched, not an in-process Monaco expansion), how language-server and debug
+children sit under Code Project and thread authority, whether language tooling
+uses the existing plugin ladder or a distinct host, and that language services
+and debugger actions cannot escalate mode, Project, or thread authority or go
+around sandbox and approval policy.
 
 **Scope and delivery state.** The maintainer authorized this scope as
 post-preview work on 2026-10-26, when parked backlog work was unlocked. That

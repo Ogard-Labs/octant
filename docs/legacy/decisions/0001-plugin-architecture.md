@@ -198,7 +198,7 @@ through `/api/github/catalogue/reads`. Create-from-issue frames that same read
 and never writes back. That work must not take a shortcut a later GitHub plugin
 could not take, and it does not wait for step 5 extraction. Disabled GitHub
 contributes no Issues row. See
-[github-repository-onboarding-threat-model.md](../security/github-repository-onboarding-threat-model.md).
+[github-repository-onboarding-threat-model.md](../../security/github-repository-onboarding-threat-model.md).
 
 ### 4. Migration sequence
 

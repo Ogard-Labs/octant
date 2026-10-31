@@ -130,6 +130,6 @@ log. See [`docs/mobile-android-internal.md`](../../docs/mobile-android-internal.
 
 ## Design
 
-- Decision record: `docs/decisions/0013-remote-access-and-mobile.md`
-- Distribution decision: `docs/decisions/0147-internal-testflight-carries-the-existing-remote-client.md`
+- Design: `docs/architecture.md`, "Security and authority" (remote clients)
+- Distribution: `docs/mobile-testflight.md`
 - Threat model: `docs/security/mobile-remote-control-threat-model.md`

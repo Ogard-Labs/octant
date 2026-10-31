@@ -26,6 +26,7 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { openLocalControlSession, type OpenedLocalControlSession } from "./localControl";
 import { resolveProjectCliCommand, runProjectCliCommand } from "./projectCommand";
+import { resolveDiagnosticsCliCommand, runDiagnosticsCliCommand } from "./diagnosticsCommand";
 import { resolveAgentCliCommand, runAgentCliCommand } from "./agentCommand";
 import { runMcpCliCommand } from "./mcpCommand";
 import {
@@ -256,6 +257,23 @@ async function main(): Promise<number> {
           interactive: process.stdout.isTTY === true && process.stdin.isTTY === true,
         }),
       { startHost: true },
+    );
+  }
+  if (args.command === "diagnostics") {
+    const command = resolveDiagnosticsCliCommand(args.positional, args.flags);
+    if (command === undefined) {
+      printUsage();
+      return 1;
+    }
+    return await withLocalControlSession((session) =>
+      runDiagnosticsCliCommand({
+        command,
+        session,
+        cwd: process.cwd(),
+        home: homedir(),
+        stdout: process.stdout,
+        stderr: process.stderr,
+      }),
     );
   }
   if (args.command === "project") {
@@ -559,6 +577,7 @@ function printUsage(): void {
       "  octant harness slots [--json]",
       "  octant harness session <thread-id> [--json]",
       "  octant harness agents <thread-id> [<n>|<id>] [--json]",
+      "  octant diagnostics export (--out <folder or .zip> | --list)",
       "  octant project add <path> [--type work|code] [--name <name>]",
       "  octant project remove <name>",
       "  octant project rename <name> <new name>",

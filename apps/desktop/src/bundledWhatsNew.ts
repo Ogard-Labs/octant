@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
  *
  * Packaged next to the binary and read from disk. Opening What's new never
  * contacts a network; a missing or unreadable file is an empty state, not a
- * fetch (`docs/decisions/0061`).
+ * fetch.
  */
 export const BUNDLED_WHATS_NEW_FILENAME = "whats-new.txt" as const;
 export const WHATS_NEW_STATE_FILENAME = "octant-whats-new.json" as const;

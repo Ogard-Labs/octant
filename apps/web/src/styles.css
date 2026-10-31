@@ -5786,7 +5786,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   height: 100%;
 }
 
-/* The model picker is an open hairline list (0072): a provider header in the
+/* The model picker is an open hairline list: a provider header in the
    section-label role with its status as text, then one row per model. A row
    is selected by a fill, not a border, and nothing in it is blue. */
 .model-picker {
@@ -6025,7 +6025,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   margin-left: 0;
 }
 
-/* A disclosure row in the open section (0072): label, count, chevron over
+/* A disclosure row in the open section: label, count, chevron over
    a hairline, not a bordered box. */
 .agent-eligible-models {
   display: grid;

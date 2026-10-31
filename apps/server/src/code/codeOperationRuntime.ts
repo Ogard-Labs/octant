@@ -453,7 +453,7 @@ export interface CodeOperationRuntimeOptions {
   }) => AppManagedToolSet | undefined;
   /**
    * The agent-message tool set for this thread, when the host admits agent
-   * messaging (decision 0063). The service is server-owned; the tool only
+   * messaging. The service is server-owned; the tool only
    * petitions it. `readPosture` is the turn's access posture at the moment it
    * is asked, so a turn in Plan is neither offered the tool nor able to send.
    */
@@ -539,7 +539,7 @@ export interface CodeOperationRuntimeOptions {
   /**
    * Reads whether a thread has ingested untrusted external content. Used to
    * clamp harness-delegated approvals back to user-answered prompts when taint
-   * is present (0104). Absent means no taint reader is available, so
+   * is present. Absent means no taint reader is available, so
    * delegation is never enabled.
    */
   readonly readThreadExternalContentTaint?: (threadId: CodeThreadId) => {
@@ -3929,7 +3929,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
    * Computes whether the harness's native reviewer may answer approval prompts
    * for the next turn on this thread. Clamps to `false` when the thread has
    * ingested untrusted content, when the provider does not advertise the
-   * capability, or when the posture produces no prompts (0104).
+   * capability, or when the posture produces no prompts.
    */
   #resolveHarnessAutoReview(thread: CodeThread): boolean {
     if (thread.autoApprove !== true) return false;
@@ -3997,7 +3997,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
 
   /**
    * Journal what differs in the checkout between the capture this turn started
-   * from and the checkout as it stands (0141).
+   * from and the checkout as it stands.
    *
    * The starting capture is read back from the journal rather than carried in
    * memory, so a turn recovered after a restart settles against the same point

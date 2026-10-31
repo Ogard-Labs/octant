@@ -1,14 +1,16 @@
-import { readdir, readFile } from "node:fs/promises";
+import { access, readdir, readFile } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
  * Decision record gate.
  *
- * Current specifications own implementation rules. This gate preserves the
- * historical archive's identities, references, and index agreement so its
- * rationale remains discoverable. It does not compare code or specifications
- * with historical decisions and cannot establish design compliance.
+ * Current specifications own implementation rules, and the decisions overview
+ * (`docs/design/decisions.md`) lists them. The archive under
+ * `docs/legacy/decisions/` is history with no authority. This gate keeps the
+ * archive closed and internally consistent, and keeps current documents from
+ * citing it. It does not compare code or specifications with historical
+ * decisions and cannot establish design compliance.
  *
  * Rule A: a record's heading number matches its filename.
  * Rule B: a record declares a status the conventions allow, and a superseding
@@ -16,13 +18,18 @@ import { fileURLToPath } from "node:url";
  * Rule C: a record carries the required sections.
  * Rule D: the index and the records agree on number, title, and status, and
  *         names each number once.
- * Rule E: every record current specifications reference exists, including numbers a
- *         written range only implies.
+ * Rule E: current documents never cite a record. A rule still in force is
+ *         stated in its owning specification; a link back into the archive
+ *         would make history look like authority again (maintainer decision,
+ *         2026-10-31).
  * Rule F: every Markdown file in the directory is either the index or a record
  *         named the way the conventions require, and the numbers run without
  *         gaps.
  * Rule H: the archive is closed. A record numbered outside 0001 to the last
  *         archived one is refused; its rule belongs in the owning specification.
+ * Rule I: nothing is written to the archive's former location, `docs/decisions/`.
+ *         A branch cut before the move would otherwise add a record there that
+ *         every rule above, reading only the legacy folder, would miss.
  *
  * It cannot enforce that an agent read the record it was routed to. That stays a
  * review question; the gate's job is to make sure the record it would read says
@@ -39,10 +46,24 @@ export interface DecisionViolation {
   readonly reason: string;
 }
 
-const DECISIONS_DIRECTORY = "docs/decisions";
+const DECISIONS_DIRECTORY = "docs/legacy/decisions";
+const FORMER_DECISIONS_DIRECTORY = "docs/decisions";
+const LEGACY_DIRECTORY = "docs/legacy";
 const INDEX_PATH = `${DECISIONS_DIRECTORY}/README.md`;
-const SPECIFICATION_PATHS = ["AGENTS.md", "DESIGN.md", "docs/architecture.md"] as const;
-const DESIGN_DIRECTORY = "docs/design";
+const RECORD_PATH = /^docs\/legacy\/decisions\/(\d{4})-[a-z0-9-]+\.md$/;
+const ROOT_DOCUMENTS = [
+  "AGENTS.md",
+  "CONTRIBUTING.md",
+  "DESIGN.md",
+  "PRODUCT.md",
+  "README.md",
+] as const;
+const DOCS_DIRECTORY = "docs";
+// A record cited by path (`decisions/0034`, `../legacy/decisions/0034-…`), or
+// a link into the legacy folder other than its README, which says the folder
+// is history. Naming the folder in prose, as the contributor rules do, is not
+// a citation.
+const ARCHIVE_CITATION = /decisions\/\d{4}|\]\([^)]*legacy\/(?!README\.md)[^)]*\)/;
 const REQUIRED_SECTIONS = ["## Context", "## Decision", "## Consequences"] as const;
 const SIMPLE_STATUSES = new Set(["Proposed", "Accepted", "Deprecated"]);
 // New records kept landing after the specifications became the design authority,
@@ -76,14 +97,19 @@ export function findDecisionViolations(
     ...findMisnamedFiles(files),
     ...findNumberingGaps(records),
     ...findRecordsAfterClosure(records),
+    ...findRecordsAtFormerLocation(files),
     ...findMalformedRecords(records, numbers),
     ...findIndexDisagreements(
       records,
       files.find((file) => file.path === INDEX_PATH),
     ),
     ...files
-      .filter((file) => !file.path.startsWith(`${DECISIONS_DIRECTORY}/`))
-      .flatMap((file) => findUnroutableReferences(numbers, file)),
+      .filter(
+        (file) =>
+          !file.path.startsWith(`${LEGACY_DIRECTORY}/`) &&
+          !file.path.startsWith(`${FORMER_DECISIONS_DIRECTORY}/`),
+      )
+      .flatMap((file) => findArchiveCitations(file)),
   ];
 }
 
@@ -101,7 +127,7 @@ function findMisnamedFiles(files: ReadonlyArray<ScannedFile>): ReadonlyArray<Dec
         file.path.startsWith(`${DECISIONS_DIRECTORY}/`) &&
         file.path.endsWith(".md") &&
         file.path !== INDEX_PATH &&
-        !/^docs\/decisions\/\d{4}-[a-z0-9-]+\.md$/.test(file.path),
+        !RECORD_PATH.test(file.path),
     )
     .map((file) => ({
       path: file.path,
@@ -133,6 +159,18 @@ function findNumberingGaps(
           reason: `numbering skips ${missing.join(", ")} before reaching ${String(highest).padStart(4, "0")}`,
         },
       ];
+}
+
+/** Rule I: the archive's former folder stays empty. */
+function findRecordsAtFormerLocation(
+  files: ReadonlyArray<ScannedFile>,
+): ReadonlyArray<DecisionViolation> {
+  return files
+    .filter((file) => file.path.startsWith(`${FORMER_DECISIONS_DIRECTORY}/`))
+    .map((file) => ({
+      path: file.path,
+      reason: `the decision archive moved to ${DECISIONS_DIRECTORY} and is closed; put the rule and its rationale in the owning specification and the decisions overview`,
+    }));
 }
 
 /** Rule H: nothing is added to the archive. */
@@ -189,7 +227,7 @@ export function linesOutsideFences(content: string): ReadonlyArray<string> {
 
 function collectRecords(files: ReadonlyArray<ScannedFile>): ReadonlyArray<DecisionRecord> {
   return files.flatMap((file): ReadonlyArray<DecisionRecord> => {
-    const named = /^docs\/decisions\/(\d{4})-[a-z0-9-]+\.md$/.exec(file.path);
+    const named = RECORD_PATH.exec(file.path);
     if (named === null) return [];
     // Every check below reads the record outside its fenced examples, so a
     // record that documents the conventions is not judged by its own samples.
@@ -342,63 +380,49 @@ function parseIndexRows(content: string): ReadonlyArray<IndexRow> {
   return rows;
 }
 
-/** Rule E: current specifications retain working historical record references. */
-function findUnroutableReferences(
-  numbers: ReadonlySet<string>,
-  contract: ScannedFile | undefined,
-): ReadonlyArray<DecisionViolation> {
-  if (contract === undefined) return [];
-  const routing = linesOutsideFences(contract.content).join("\n");
-  const referenced = new Set(
-    [...routing.matchAll(/decisions\/(\d{4})/g)].map((match) => match[1] ?? ""),
-  );
-  // A written range routes an agent to every record between its ends, so those
-  // are references too. Checking only the two written numbers would let the
-  // middle of a range be deleted without the gate noticing.
-  for (const range of routing.matchAll(
-    /decisions\/(\d{4})`?\s*[–—-]\s*`?(?:docs\/)?decisions\/(\d{4})/g,
-  )) {
-    const from = Number(range[1]);
-    const to = Number(range[2]);
-    for (let number = from + 1; number < to; number += 1) {
-      referenced.add(String(number).padStart(4, "0"));
-    }
+/** Rule E: a current document states its rules instead of citing the archive. */
+function findArchiveCitations(document: ScannedFile): ReadonlyArray<DecisionViolation> {
+  return linesOutsideFences(document.content).flatMap((line): ReadonlyArray<DecisionViolation> => {
+    const citation = ARCHIVE_CITATION.exec(line);
+    return citation === null
+      ? []
+      : [
+          {
+            path: document.path,
+            reason: `cites the decision archive (\`${line.trim()}\`), which has no authority; state the rule or its reason in the owning specification`,
+          },
+        ];
+  });
+}
+
+async function readScanned(root: string, path: string): Promise<ScannedFile> {
+  return { path, content: await readFile(resolve(root, path), "utf8") };
+}
+
+async function markdownUnder(root: string, directory: string): Promise<ReadonlyArray<string>> {
+  try {
+    await access(resolve(root, directory));
+  } catch {
+    return [];
   }
-  return [...referenced]
-    .filter((number) => !numbers.has(number))
-    .map((number) => ({
-      path: contract.path,
-      reason: `routes to decision record ${number}, which does not exist`,
-    }));
+  const names = await readdir(resolve(root, directory), { recursive: true });
+  return names
+    .filter((name) => name.endsWith(".md"))
+    .map((name) =>
+      relative(root, resolve(root, directory, name))
+        .split("\\")
+        .join("/"),
+    );
 }
 
 async function collectFiles(root: string): Promise<ReadonlyArray<ScannedFile>> {
-  const names = await readdir(resolve(root, DECISIONS_DIRECTORY));
-  const records = await Promise.all(
-    names
-      .filter((name) => name.endsWith(".md"))
-      .map(async (name): Promise<ScannedFile> => {
-        const absolutePath = resolve(root, DECISIONS_DIRECTORY, name);
-        return {
-          path: relative(root, absolutePath).split("\\").join("/"),
-          content: await readFile(absolutePath, "utf8"),
-        };
-      }),
+  const archived = await markdownUnder(root, DECISIONS_DIRECTORY);
+  const former = await markdownUnder(root, FORMER_DECISIONS_DIRECTORY);
+  const current = (await markdownUnder(root, DOCS_DIRECTORY)).filter(
+    (path) => !path.startsWith(`${LEGACY_DIRECTORY}/`),
   );
-  const designNames = await readdir(resolve(root, DESIGN_DIRECTORY), { recursive: true });
-  const specificationPaths = [
-    ...SPECIFICATION_PATHS,
-    ...designNames
-      .filter((name) => name.endsWith(".md"))
-      .map((name) => `${DESIGN_DIRECTORY}/${name}`),
-  ];
-  const specifications = await Promise.all(
-    specificationPaths.map(async (path) => ({
-      path,
-      content: await readFile(resolve(root, path), "utf8"),
-    })),
-  );
-  return [...records, ...specifications];
+  const paths = [...archived, ...former, ...ROOT_DOCUMENTS, ...current];
+  return Promise.all(paths.map((path) => readScanned(root, path)));
 }
 
 async function main(): Promise<void> {

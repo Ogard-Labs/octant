@@ -79,6 +79,44 @@ separate data-lifecycle exception: it removes that thread's own journal
 events so a later rebuild cannot resurrect the transcript, and it records a
 tombstone rather than leaving a hole with no explanation.
 
+## Saving diagnostics to ask for help
+
+When something is wrong and you want someone to look, Octant can write one
+file about your host. Open **Settings › Host › Maintenance** and choose
+**Save diagnostics…**, or run this in a terminal on the same computer:
+
+```sh
+octant diagnostics export --out ~/Downloads/octant-diagnostics.zip
+octant diagnostics export --list
+```
+
+Before anything is written, Octant lists what the file will include and what it
+never includes. In Settings you then choose **Save file** or **Cancel**. In the
+desktop app **Save file** opens the usual save dialog, offering a dated name in
+Downloads; in a browser it downloads the file. In the terminal the same list prints first, and `--list` stops after it. `--out` takes a
+name ending in `.zip`, or a new or empty folder, and never overwrites.
+
+The file holds:
+
+- Octant and runtime versions, and your operating system, processor type, and memory.
+- Each enabled provider by kind: whether it is ready, signed in, and which
+  capabilities it reports. Not its name, address, or models.
+- The newest 200 host log lines, and the names and times of the newest 200
+  journal events. The events' contents stay out.
+- Your default guardrail level, how many Code threads run at each level, and the
+  sandbox tools Octant found.
+- Uptime, memory, processor time, and slow-statement counters.
+
+It never holds messages, prompts, replies, file contents, Project or thread
+names, API keys, tokens, or passwords. Your home folder shows as `~`. Octant
+sends the file nowhere: you read it, and you choose whether to send it. Octant
+records that you saved one, with the time and how you chose where (the desktop
+dialog, a browser download, or the kind of folder for the terminal), never the
+folder name or anything the file holds.
+
+This is separate from **Failure report** in the same place, which exports a
+redacted report about one failed operation, found by its correlation ID.
+
 ## User-level recovery
 
 - **Chat**: a failed or interrupted turn states why in the transcript. The

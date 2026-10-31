@@ -56,6 +56,7 @@ describe("octantSettingsRegistry", () => {
     expect(ids("host")).toEqual([
       "reset-layout",
       "reset-window-bounds",
+      "save-diagnostics",
       "export-diagnostics",
       "journal-growth",
       "host-automatic-startup",

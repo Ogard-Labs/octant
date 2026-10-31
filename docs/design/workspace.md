@@ -53,7 +53,7 @@ icon buttons (Work presents the Chat and Work domains together; see
 threads, and settings (the sidebar's anatomy is in [DESIGN.md](../../DESIGN.md#shell-and-layout)); an
 integrated borderless top chrome; a central workspace; and an optional right
 dock. Mode changes alter content, authority, default composition, and density,
-never the navigation grammar. See [decisions/0015-workspace-shell-model.md](../decisions/0015-workspace-shell-model.md).
+never the navigation grammar.
 
 **Home** leads the places: first in the icon rail, above Inbox, and among the
 sidebar's own actions when no rail stands beside it. It closes any reader and
@@ -215,8 +215,7 @@ thread a turn reopens or wakes it on the server. One host sweep archives
 completed threads of every mode once their completion is older than the
 `completedThreadArchiveAfterDays` shell setting (default seven days, `null`
 for never), re-deciding against each mode's authoritative record and
-journaling the ordinary thread update as the `system` actor. It archives only;
-see [decisions/0088-completed-and-snoozed-threads.md](../decisions/0088-completed-and-snoozed-threads.md).
+journaling the ordinary thread update as the `system` actor. It archives only.
 
 **Put away** is the only name people see for this state, beside the board's
 Done: the sidebar shelf, the row-menu action, the Review page action, the
@@ -305,8 +304,7 @@ so a later per-environment icon can replace it in place. Tab
 geometry and close-control presentation are shared with dock tools under
 [Content tabs](../../DESIGN.md#content-tabs).
 
-These tabs add no persisted layout or authority; see
-[decision 0156](../decisions/0156-content-opens-beside-the-conversation.md).
+These tabs add no persisted layout or authority.
 
 **Opening into tabs.** A single click on a sidebar thread opens it in the
 active pane in place: it takes over the pane's open tab unless that tab was
@@ -506,8 +504,7 @@ rather than given an assumed scope. Hand off
 own provider for a six-section hand-off document in one tool-free request,
 keeps it as a Canvas of the thread, and opens that Canvas in the dock; a
 running turn, an unready provider, or a thread outside a Project is refused as
-an ordinary answer (see
-[decisions/0080-hand-off-writes-a-canvas-from-the-export-cut.md](../decisions/0080-hand-off-writes-a-canvas-from-the-export-cut.md)). The dock follows the active
+an ordinary answer. The dock follows the active
 pane's thread and Project, restores that subject's open tools, and presents an
 explicit unavailable state when the newly active pane cannot describe the
 selected tool — never the previous pane's content. Hiding a Browser or Terminal
@@ -687,8 +684,7 @@ forest of parent threads and the runs they launched, and Graph can save that for
 cursor-readable and byte- and count-bounded, with explicit complete, stale, and
 unavailable states. Provider-native live transcripts remain unavailable unless
 their normalized provider capability supplies an equivalent host-authorized
-read; a host-retained final reply stays readable after completion. See
-[decisions/0050-bounded-live-child-conversation.md](../decisions/0050-bounded-live-child-conversation.md).
+read; a host-retained final reply stays readable after completion.
 
 Saved child-generation file comparisons open in the existing Review tool from
 Agents result history. The selection carries the parent, managed child and
@@ -723,10 +719,7 @@ concurrently, results reconcile in stable Project order, and every refresh path
 remains within preview bounds. The journal never stores that cache and never
 sees a per-poll event; it stores only the user's opt-in toggle and exact PR
 identities already produced by Code operations. The bounded list cache survives
-host restart and is cleared when GitHub authority is revoked (see
-[decisions/0064-pull-request-observation-cadence.md](../decisions/0064-pull-request-observation-cadence.md)
-and
-[decisions/0076-pull-request-snapshot-survives-restart.md](../decisions/0076-pull-request-snapshot-survives-restart.md)).
+host restart and is cleared when GitHub authority is revoked.
 
 **Answering from a Board card.** A Work or Code card whose thread waits on the
 person shows what it asks and the answers, so a column of waiting cards is

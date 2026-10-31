@@ -52,6 +52,9 @@ import {
   type LocalDeviceAdministrationPort,
 } from "../remote/localDeviceAdministrationRoutes";
 import { createHostControlRouteHandler } from "../hostControlRoutes";
+import { createSupportBundleRouteHandler } from "../supportBundleRoutes";
+import { readEventLoopLagCounters } from "../eventLoopLag";
+import { slowStatementTally } from "../persistence/slowStatementLog";
 import { desktopCredentialStore } from "../hostDataMap";
 import { HostMemoryLimitsService } from "../hostMemoryLimitsService";
 import { ThreadRetentionService } from "../threadRetentionService";
@@ -1109,6 +1112,41 @@ export function wireRemote(deps: RemoteDependencies) {
     // a lowered limit acts at once instead of at the next scheduled reading.
     onChanged: () => void hostMemoryGuard.sample().catch(() => undefined),
   });
+  // Loopback administration chain only, beside host control: the bundle holds
+  // host-wide facts, so no remote device ever reaches it.
+  const supportBundleRoutes = createSupportBundleRouteHandler({
+    windowAuthorityStore,
+    ...(options.desktopBridgeSecret === undefined
+      ? {}
+      : { desktopBridgeSecret: options.desktopBridgeSecret }),
+    sources: () => ({
+      connection: persistence.connection,
+      journal: persistence.journal,
+      octantVersion: version,
+      providers: () => ({
+        instances: persistence.readProviderInstances(),
+        observed: providerRuntimeRegistry.observedStates(),
+      }),
+      ...(options.hostControl?.readServiceLog === undefined
+        ? {}
+        : { readHostLog: options.hostControl.readServiceLog }),
+      codeSettings: () => persistence.readCodeSettings()?.settings,
+      codeThreadPolicies: () =>
+        persistence.readCodeThreads().map((thread) => thread.executionPolicy),
+      platformCapabilities: options.platformCapabilities ?? [],
+      hostDiagnostics: composeHostDiagnostics,
+      hostHealth: () => {
+        const statements = slowStatementTally.read();
+        const lag = readEventLoopLagCounters();
+        return {
+          slowStatementCount: statements.count,
+          slowStatementWorstMs: statements.worstMs,
+          eventLoopLagCount: lag.count,
+          eventLoopLagWorstMs: lag.worstMs,
+        };
+      },
+    }),
+  });
   const hostControlRoutes = createHostControlRouteHandler({
     windowAuthorityStore,
     diagnostics: composeHostDiagnostics,
@@ -1191,6 +1229,7 @@ export function wireRemote(deps: RemoteDependencies) {
     delegationAdministrationRoutes,
     externalContentRoutes,
     hostControlRoutes,
+    supportBundleRoutes,
     hubAdministrationRoutes,
     localDeviceAdministrationRoutes,
     privateListenerAdministrationRoutes,
