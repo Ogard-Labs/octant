@@ -176,7 +176,9 @@ Octant; a paired phone or browser cannot.
 - Auto-fix tries at most three times per failure, then stops and marks the
   thread for your follow-up. It waits while you are typing in that thread or a
   turn is running there, and stops when the pull request merges or closes, the
-  thread is archived, or you turn it off.
+  thread is archived, the Project no longer connects the repository, or you
+  turn it off. After Octant restarts, it stays quiet until you open the pull
+  request's review again.
 
 Every switch change and every wake is recorded in Octant's journal.
 

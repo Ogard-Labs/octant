@@ -133,4 +133,68 @@ describe("forge switch port", () => {
     expect(observation.failures[1]?.detail).toContain("src/a.ts:3");
     expect(observation.failures[1]?.detail).toContain("rev: Rename this");
   });
+
+  it("finds an unresolved review thread that sits past the first page", async () => {
+    const pageOf = (nodes: unknown[], endCursor: string | null) =>
+      JSON.stringify({
+        data: {
+          repository: {
+            pullRequest: {
+              reviewThreads: {
+                pageInfo: { hasNextPage: endCursor !== null, endCursor },
+                nodes,
+              },
+            },
+          },
+        },
+      });
+    const resolved = Array.from({ length: 50 }, (_, index) => ({
+      id: `RT_done_${String(index)}`,
+      isResolved: true,
+      isOutdated: false,
+      comments: { nodes: [] },
+    }));
+    const { run, port: forge } = port((arguments_) => {
+      if (arguments_[0] === "pr" && arguments_[1] === "view") {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            state: "OPEN",
+            headRefOid: "a1",
+            headRefName: "feature/x",
+            baseRefName: "main",
+            mergeable: "MERGEABLE",
+            autoMergeRequest: null,
+            reviewDecision: "REVIEW_REQUIRED",
+          }),
+        };
+      }
+      if (arguments_[0] === "pr" && arguments_[1] === "checks")
+        return { exitCode: 0, stdout: "[]" };
+      return arguments_.includes("after=CURSOR_1")
+        ? {
+            exitCode: 0,
+            stdout: pageOf(
+              [
+                {
+                  id: "RT_late",
+                  isResolved: false,
+                  isOutdated: false,
+                  path: "src/b.ts",
+                  line: 9,
+                  comments: { nodes: [{ author: { login: "rev" }, body: "Late comment" }] },
+                },
+              ],
+              null,
+            ),
+          }
+        : { exitCode: 0, stdout: pageOf(resolved, "CURSOR_1") };
+    });
+    const observation = await forge.observe(request, signal);
+    if (observation.status !== "observed") throw new Error("expected an observation");
+    expect(observation.failures.map((entry) => entry.failure)).toEqual([
+      { kind: "review-thread", key: "RT_late" },
+    ]);
+    expect(run.mock.calls.filter(([arguments_]) => arguments_[0] === "api")).toHaveLength(2);
+  });
 });

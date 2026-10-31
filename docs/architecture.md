@@ -1823,7 +1823,7 @@ person's click is the approval; nothing else turns either on.
   host refuses any other thread as `thread-not-linked`). While it is on, the
   host observes the pull request about once a minute: failed required checks
   (`gh pr checks --required`) with the tail of each failed job's log (at most
-  4 KB, four jobs), unresolved and not-outdated review threads with their
+  4 KB, four jobs), unresolved and not-outdated review threads (every page of them) with their
   comments, and a merge conflict with the base. On a new failure it wakes the
   thread with one provider turn, through the same host path a routine
   follow-up takes, so the thread's own access level and approvals apply. The
@@ -1838,13 +1838,21 @@ person's click is the approval; nothing else turns either on.
   base conflict. Each started wake spends one attempt on every failure it
   carried; at most three attempts per failure, after which Auto-fix stops
   (`attempt-limit`) and opens the thread's follow-up marker. The same failures
-  on the same head never wake twice. A wake waits while a turn runs or is
+  on the same head never start a second turn; a wake that started none (the
+  thread refused it, or the outside-content mark was refused) is tried again
+  on the next pass, spends no attempt, and journals an identical refusal once.
+  A wake waits while a turn runs or is
   ambiguous in the thread, while its session compacts, or for a minute after
   the person last typed in its composer (`POST /api/code/composer-activity`,
   sent by the composer at most every fifteen seconds); waiting is shown, never
   journaled. Auto-fix stops when the pull request merges or closes, when the
-  thread is archived, completed, or gone, or when the person turns it off.
-  Turning it on again starts a fresh attempt count.
+  thread is archived, completed, or gone, when the Project no longer connects
+  the pull request's repository (`authority-lost`), or when the person turns
+  it off. The host asks the Project check again before every pass, not only
+  at the click; a revoked GitHub login or a thread that no longer links to
+  the pull request holds Auto-fix quiet, and after a host restart it stays
+  quiet until a window shows the pull request again, because the connection
+  is a per-window fact. Turning it on again starts a fresh attempt count.
 - **Record.** Every switch change and every wake appends one event on the
   `code-project-pull-request-switches` aggregate type, each its own aggregate:
   `code.project-pull-request-merge-when-ready-recorded@1` (enabled with method

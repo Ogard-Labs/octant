@@ -104,6 +104,7 @@ export const CodeProjectPullRequestAutoFixStopReason = Schema.Literal(
   "merged",
   "closed",
   "thread-unavailable",
+  "authority-lost",
 );
 export type CodeProjectPullRequestAutoFixStopReason =
   typeof CodeProjectPullRequestAutoFixStopReason.Type;

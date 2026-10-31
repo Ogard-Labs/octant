@@ -122,6 +122,12 @@ export class CodeProjectPullRequestSwitchService {
   readonly #waitingOn = new Map<string, ReadonlyArray<CodeProjectPullRequestMergeWait>>();
   readonly #paused = new Map<string, CodeProjectPullRequestAutoFixPauseReason>();
   readonly #typedAt = new Map<string, number>();
+  /**
+   * The window whose Project connection vouches for each Auto-fix. Not
+   * journaled: after a restart Auto-fix stays quiet until a window shows the
+   * pull request again, because the repository connection is a per-window fact.
+   */
+  readonly #vouchingWindows = new Map<string, WindowId>();
   #ticking = false;
 
   constructor(options: {
@@ -156,6 +162,9 @@ export class CodeProjectPullRequestSwitchService {
     const authority = await this.#authority.authorizePullRequest(windowId, target);
     if (authority.status !== "authorized") {
       return this.#view(emptyPullRequestSwitchFold(target));
+    }
+    if (this.#fold(target).autoFix.status === "on") {
+      this.#vouchingWindows.set(pullRequestSwitchKey(target), windowId);
     }
     return this.#view(this.#fold(target));
   }
@@ -235,6 +244,7 @@ export class CodeProjectPullRequestSwitchService {
       return { status: "refused", reason: "thread-not-linked" };
     }
     this.#recordAutoFix(command.target, command.threadId, { kind: "enabled" }, "local-user");
+    this.#vouchingWindows.set(pullRequestSwitchKey(command.target), windowId);
     return { status: "applied", view: this.#view(this.#fold(command.target)) };
   }
 
@@ -256,14 +266,38 @@ export class CodeProjectPullRequestSwitchService {
       for (const fold of this.#folds.values()) {
         if (signal.aborted) return;
         if (fold.mergeWhenReady.status !== "on" && fold.autoFix.status !== "on") continue;
+        const autoFixMayAct = await this.#autoFixMayAct(fold);
+        if (fold.mergeWhenReady.status !== "on" && !autoFixMayAct) continue;
         const observation = await this.#forge.observe(forgeRequest(fold.target), signal);
         if (observation.status !== "observed") continue;
         this.#observeMergeWhenReady(fold.target, observation);
-        await this.#observeAutoFix(fold.target, observation);
+        if (autoFixMayAct) await this.#observeAutoFix(fold.target, observation);
       }
     } finally {
       this.#ticking = false;
     }
+  }
+
+  /**
+   * Whether Auto-fix may poll and wake now. The click that turned it on was
+   * authorized against the Project's repository connection at that moment, so
+   * each pass asks again: a repository that is no longer connected ends it,
+   * and a revoked GitHub login, a restart nobody has vouched since, or a
+   * thread that no longer links to the pull request holds it quiet.
+   */
+  async #autoFixMayAct(fold: PullRequestSwitchFold): Promise<boolean> {
+    if (fold.autoFix.status !== "on") return false;
+    const key = pullRequestSwitchKey(fold.target);
+    const windowId = this.#vouchingWindows.get(key);
+    if (windowId === undefined) return false;
+    const authority = await this.#authority.authorizePullRequest(windowId, fold.target);
+    if (authority.status === "not-authorized") {
+      this.#stopAutoFix(fold.target, decodeCodeThreadId(fold.autoFix.threadId), "authority-lost");
+      this.#vouchingWindows.delete(key);
+      return false;
+    }
+    if (authority.status === "disconnected") return false;
+    return authority.linkedThreadIds.includes(fold.autoFix.threadId);
   }
 
   #observeMergeWhenReady(
@@ -343,6 +377,17 @@ export class CodeProjectPullRequestSwitchService {
       result = (await this.#threads.startTurn(threadId, text).catch(() => false))
         ? "started"
         : "refused";
+    }
+    // A retry that fails the same way adds nothing to the record.
+    const previous = fold.lastWake;
+    if (
+      result !== "started" &&
+      previous !== undefined &&
+      previous.result === result &&
+      previous.headSha === observation.headSha &&
+      wakeSignature(previous.failures) === wakeSignature(decision.failures)
+    ) {
+      return;
     }
     this.#recordAutoFix(
       target,
@@ -529,6 +574,15 @@ export class CodeProjectPullRequestSwitchService {
       generatedAt: this.#clock(),
     });
   }
+}
+
+function wakeSignature(
+  failures: ReadonlyArray<{ readonly kind: string; readonly key: string }>,
+): string {
+  return failures
+    .map((failure) => `${failure.kind}:${failure.key}`)
+    .sort()
+    .join("\n");
 }
 
 function forgeRequest(target: CodeProjectPullRequestSwitchTarget): GhPullRequestSwitchRequest {

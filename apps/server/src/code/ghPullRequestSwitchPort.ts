@@ -13,7 +13,9 @@ import {
 
 /** Failed checks whose log Auto-fix fetches on one observation. */
 const MAX_LOGGED_CHECKS = 4;
-const MAX_REVIEW_THREADS = 50;
+const REVIEW_THREADS_PAGE = 50;
+/** Pages read before giving up, so a huge pull request cannot hold a pass open. */
+const MAX_REVIEW_THREAD_PAGES = 10;
 const MAX_COMMENT_BYTES = 2_048;
 
 export interface GhPullRequestSwitchRequest {
@@ -59,7 +61,7 @@ export type GhPullRequestSwitchObservation =
 
 const VIEW_FIELDS =
   "state,headRefOid,headRefName,baseRefName,mergeable,autoMergeRequest,reviewDecision";
-const REVIEW_THREADS_QUERY = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:${MAX_REVIEW_THREADS}){nodes{id isResolved isOutdated path line comments(first:10){nodes{author{login} body}}}}}}}`;
+const REVIEW_THREADS_QUERY = `query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:${REVIEW_THREADS_PAGE},after:$after){pageInfo{hasNextPage endCursor} nodes{id isResolved isOutdated path line comments(first:10){nodes{author{login} body}}}}}}}`;
 
 /**
  * The forge calls behind Merge when ready and Auto-fix, through the host's
@@ -292,48 +294,47 @@ export class GhPullRequestSwitchPort {
     request: GhPullRequestSwitchRequest,
     signal: AbortSignal,
   ): Promise<ReadonlyArray<GhAutoFixFailureDetail> | undefined> {
-    const result = await this.#run(
-      [
-        "api",
-        "graphql",
-        "-f",
-        `query=${REVIEW_THREADS_QUERY}`,
-        "-F",
-        `owner=${request.owner}`,
-        "-F",
-        `name=${request.name}`,
-        "-F",
-        `number=${request.number}`,
-      ],
-      signal,
-    );
-    if (result === undefined || result.exitCode !== 0) return undefined;
-    const nodes = readPath(parseJson(result.stdout), [
-      "data",
-      "repository",
-      "pullRequest",
-      "reviewThreads",
-      "nodes",
-    ]);
-    if (!Array.isArray(nodes)) return undefined;
     const threads: GhAutoFixFailureDetail[] = [];
-    for (const node of nodes) {
-      if (!isRecord(node) || typeof node.id !== "string" || node.id === "") continue;
-      if (node.isResolved === true || node.isOutdated === true) continue;
-      const comments = readPath(node, ["comments", "nodes"]);
-      const lines = (Array.isArray(comments) ? comments : []).filter(isRecord).map((comment) => {
-        const author = readPath(comment, ["author", "login"]);
-        const body = typeof comment.body === "string" ? comment.body : "";
-        return `${typeof author === "string" ? author : "someone"}: ${clampBytes(body, MAX_COMMENT_BYTES)}`;
-      });
-      const where =
-        typeof node.path === "string"
-          ? `${node.path}${typeof node.line === "number" ? `:${node.line}` : ""}`
-          : "the pull request";
-      threads.push({
-        failure: { kind: "review-thread", key: node.id.slice(0, 512) },
-        detail: `On ${where}:\n${lines.join("\n")}`,
-      });
+    let after: string | undefined;
+    // Resolved and outdated threads count against a page, so an unresolved one
+    // can sit past the first page: follow the cursor until there is enough to
+    // report or no more pages.
+    for (let page = 0; page < MAX_REVIEW_THREAD_PAGES; page += 1) {
+      const result = await this.#run(
+        [
+          "api",
+          "graphql",
+          "-f",
+          `query=${REVIEW_THREADS_QUERY}`,
+          "-F",
+          `owner=${request.owner}`,
+          "-F",
+          `name=${request.name}`,
+          "-F",
+          `number=${request.number}`,
+          ...(after === undefined ? [] : ["-f", `after=${after}`]),
+        ],
+        signal,
+      );
+      if (result === undefined || result.exitCode !== 0) return undefined;
+      const connection = readPath(parseJson(result.stdout), [
+        "data",
+        "repository",
+        "pullRequest",
+        "reviewThreads",
+      ]);
+      const nodes = readPath(connection, ["nodes"]);
+      if (!Array.isArray(nodes)) return undefined;
+      for (const node of nodes) {
+        const thread = reviewThreadFailure(node);
+        if (thread !== undefined) threads.push(thread);
+      }
+      if (threads.length >= MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_FAILURES) break;
+      const next = readPath(connection, ["pageInfo", "endCursor"]);
+      if (readPath(connection, ["pageInfo", "hasNextPage"]) !== true || typeof next !== "string") {
+        break;
+      }
+      after = next;
     }
     return threads;
   }
@@ -365,6 +366,25 @@ export class GhPullRequestSwitchPort {
       return undefined;
     }
   }
+}
+
+function reviewThreadFailure(node: unknown): GhAutoFixFailureDetail | undefined {
+  if (!isRecord(node) || typeof node.id !== "string" || node.id === "") return undefined;
+  if (node.isResolved === true || node.isOutdated === true) return undefined;
+  const comments = readPath(node, ["comments", "nodes"]);
+  const lines = (Array.isArray(comments) ? comments : []).filter(isRecord).map((comment) => {
+    const author = readPath(comment, ["author", "login"]);
+    const body = typeof comment.body === "string" ? comment.body : "";
+    return `${typeof author === "string" ? author : "someone"}: ${clampBytes(body, MAX_COMMENT_BYTES)}`;
+  });
+  const where =
+    typeof node.path === "string"
+      ? `${node.path}${typeof node.line === "number" ? `:${node.line}` : ""}`
+      : "the pull request";
+  return {
+    failure: { kind: "review-thread", key: node.id.slice(0, 512) },
+    detail: `On ${where}:\n${lines.join("\n")}`,
+  };
 }
 
 function classifyFailure(result: GhCommandResult):

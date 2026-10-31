@@ -84,6 +84,7 @@ function fixture(
     readonly linked?: ReadonlyArray<string>;
   } = {},
 ) {
+  let authority: "authorized" | "not-authorized" | "disconnected" = "authorized";
   const journal = options.journal ?? openJournal();
   let now = Date.parse("2026-10-31T10:00:00.000Z");
   let observation: GhPullRequestSwitchObservation = observed();
@@ -121,10 +122,10 @@ function fixture(
   const create = () =>
     new CodeProjectPullRequestSwitchService({
       authority: {
-        authorizePullRequest: async () => ({
-          status: "authorized",
-          linkedThreadIds: options.linked ?? [String(threadId)],
-        }),
+        authorizePullRequest: async () =>
+          authority === "authorized"
+            ? { status: "authorized", linkedThreadIds: options.linked ?? [String(threadId)] }
+            : { status: authority },
       },
       forge,
       threads,
@@ -141,6 +142,9 @@ function fixture(
     restart: create,
     observe: (next: GhPullRequestSwitchObservation) => {
       observation = next;
+    },
+    setAuthority: (value: "authorized" | "not-authorized" | "disconnected") => {
+      authority = value;
     },
     setTurnActive: (value: boolean) => {
       turnActive = value;
@@ -307,6 +311,69 @@ describe("Auto-fix", () => {
     expect((await f.service.query(windowId, target)).autoFix).toMatchObject({
       status: "on",
       lastWake: { result: "unmarked" },
+    });
+  });
+
+  it("stops without waking when the Project no longer connects the pull request's repository", async () => {
+    const f = fixture();
+    await f.service.setAutoFix(windowId, { kind: "enable", target, threadId }, "user");
+    f.setAuthority("not-authorized");
+    f.observe(observed({ failures: [lint] }));
+    await f.service.tick(signal);
+    expect(f.forge.observe).not.toHaveBeenCalled();
+    expect(f.threads.startTurn).not.toHaveBeenCalled();
+    expect(f.recorded(AUTO_FIX).at(-1)?.payload).toMatchObject({
+      change: { kind: "stopped", reason: "authority-lost" },
+    });
+    f.setAuthority("authorized");
+    expect((await f.service.query(windowId, target)).autoFix).toMatchObject({
+      status: "stopped",
+      reason: "authority-lost",
+    });
+  });
+
+  it("holds Auto-fix quiet while GitHub access is revoked, then resumes", async () => {
+    const f = fixture();
+    await f.service.setAutoFix(windowId, { kind: "enable", target, threadId }, "user");
+    f.setAuthority("disconnected");
+    f.observe(observed({ failures: [lint] }));
+    await f.service.tick(signal);
+    expect(f.threads.startTurn).not.toHaveBeenCalled();
+    f.setAuthority("authorized");
+    await f.service.tick(signal);
+    expect(f.threads.startTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not wake after a restart until a window shows the pull request again", async () => {
+    const f = fixture();
+    await f.service.setAutoFix(windowId, { kind: "enable", target, threadId }, "user");
+    const restarted = f.restart();
+    f.observe(observed({ failures: [lint] }));
+    await restarted.tick(signal);
+    expect(f.threads.startTurn).not.toHaveBeenCalled();
+    await restarted.query(windowId, target);
+    await restarted.tick(signal);
+    expect(f.threads.startTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("tries a refused wake again on the next pass without journaling the same refusal twice", async () => {
+    const f = fixture();
+    await f.service.setAutoFix(windowId, { kind: "enable", target, threadId }, "user");
+    f.threads.startTurn.mockResolvedValueOnce(false).mockResolvedValueOnce(false);
+    f.observe(observed({ failures: [lint] }));
+    await f.service.tick(signal);
+    await f.service.tick(signal);
+    expect(f.threads.startTurn).toHaveBeenCalledTimes(2);
+    const wakes = () =>
+      f
+        .recorded(AUTO_FIX)
+        .filter((event) => (event.payload as { change: { kind: string } }).change.kind === "woke");
+    expect(wakes()).toHaveLength(1);
+    await f.service.tick(signal);
+    expect(f.threads.startTurn).toHaveBeenCalledTimes(3);
+    expect(wakes()).toHaveLength(2);
+    expect((await f.service.query(windowId, target)).autoFix).toMatchObject({
+      lastWake: { result: "started", attempt: 1 },
     });
   });
 

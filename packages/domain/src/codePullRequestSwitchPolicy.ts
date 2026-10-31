@@ -179,8 +179,10 @@ export type PullRequestAutoFixDecision =
  * What Auto-fix does with one observation of its pull request.
  *
  * - A merged or closed pull request stops it.
- * - No failure, or the same failures on the same head it already woke for,
- *   is idle: the agent is on it, or nothing changed since.
+ * - No failure, or the same failures on the same head it already woke a turn
+ *   for, is idle: the agent is on it, or nothing changed since. A wake that
+ *   never started a turn (refused, or never sent) is tried again, because
+ *   the reason is usually transient.
  * - A failure that already spent the attempt limit stops it, so a fix that
  *   keeps failing goes back to the person instead of looping.
  * - Otherwise it wakes, unless the person is typing in the thread or a turn
@@ -199,6 +201,7 @@ export function decidePullRequestAutoFix(input: {
   if (observation.failures.length === 0) return { kind: "idle" };
   if (
     fold.lastWake !== undefined &&
+    fold.lastWake.result === "started" &&
     fold.lastWake.headSha === observation.headSha &&
     failureSignature(fold.lastWake.failures) === failureSignature(observation.failures)
   ) {

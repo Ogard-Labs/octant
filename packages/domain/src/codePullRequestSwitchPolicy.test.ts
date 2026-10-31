@@ -36,7 +36,7 @@ function woke(
   headSha: string,
   failures: ReadonlyArray<CodeProjectPullRequestAutoFixFailure>,
   attempt: number,
-  result: "started" | "refused" = "started",
+  result: "started" | "refused" | "unmarked" = "started",
 ): PullRequestSwitchEvent {
   return {
     kind: "auto-fix",
@@ -102,6 +102,19 @@ describe("pull-request Auto-fix policy", () => {
         ...quiet,
       }),
     ).toEqual({ kind: "wake", attempt: 1, failures: [lint] });
+  });
+
+  it("tries again on the same head when the previous wake never started a turn", () => {
+    for (const result of ["refused", "unmarked"] as const) {
+      const fold = replay([enabled, woke("a1", [lint], 1, result)]).autoFix;
+      expect(
+        decidePullRequestAutoFix({
+          fold,
+          observation: { state: "open", headSha: "a1", failures: [lint] },
+          ...quiet,
+        }),
+      ).toEqual({ kind: "wake", attempt: 1, failures: [lint] });
+    }
   });
 
   it("holds the wake while a turn runs or the person is typing", () => {

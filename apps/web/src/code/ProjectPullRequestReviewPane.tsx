@@ -621,6 +621,9 @@ function autoFixCopy(
     }
     if (state.reason === "merged") return "Stopped: the pull request merged.";
     if (state.reason === "closed") return "Stopped: the pull request was closed.";
+    if (state.reason === "authority-lost") {
+      return "Stopped: this Project is no longer connected to the pull request's repository.";
+    }
     return "Stopped: the thread is archived or no longer available.";
   }
   if (state.pausedFor === "person-typing") return "On. Waiting while you type in the thread.";
