@@ -45,6 +45,7 @@ import {
   type ChatComposerProps,
   type ChatComposerResearchBackend,
 } from "./ChatComposer";
+import { attemptCanForceStop } from "./attemptForceStop";
 import { ChatThreadActionsMenu } from "./ChatThreadActionsMenu";
 import { ChatTranscript } from "./ChatTranscript";
 import { canvasCardsForShownRun } from "./chatTranscriptWindow";
@@ -540,7 +541,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const forceStopOffered =
     stoppingAttemptId !== undefined &&
     stopGraceElapsed &&
-    providerState.observation?.capabilities.forceStop === "supported";
+    attemptCanForceStop(props.providerSnapshot, activeAttempt);
   // The host would refuse to clear a thread's outside-content mark in any of
   // these states; a paused queue with nothing waiting does not stop it.
   const threadBusy =
