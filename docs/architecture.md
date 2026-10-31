@@ -9488,6 +9488,11 @@ access` agree); a thread's own change is journaled as
     now (a locked store or missing item refuses and writes nothing), and never
     over a key the person stored: that refuses as `key-already-stored`, so the
     person removes it first. The pointer replaces only another pointer.
+    The host rereads the provider after the item check: a provider removed or
+    reconfigured meanwhile has already had its key cleared, so the new pointer is
+    deleted and the change refused (`provider-changed`), the same protection the
+    pasted-key route applies, so a delayed write never sends an old endpoint's
+    key to a new one.
     A connector's secret does the same: in Add an MCP server, a secret row
     marked "From 1Password" sends `linked: { store, reference }` with an empty
     value, the host points the generated secret id at the item (refusing the add
@@ -9523,7 +9528,11 @@ access` agree); a thread's own change is journaled as
     the schema rejects any other field. A change is made and then journaled; when
     the journal refuses, a link or a new reference is undone and the answer says
     nothing changed, and an unlink or clear that cannot be recorded says it was
-    made but not recorded.
+    made but not recorded. An earlier pointer is put back through the broker's
+    `restore`, which writes the pointer without reading its item (the item may be
+    gone or its store locked by then); if it cannot be put back, the new pointer
+    is removed and the answer says so, so an unjournaled pointer never stays
+    active.
 - **Organization sign-in on a host without the desktop app.** An Azure AI
   Foundry endpoint that signs in with a directory account and opted in to it
   (`deviceCodeSignIn`) signs in with a device code from

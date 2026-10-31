@@ -56,6 +56,13 @@ export interface SecretStoreBrokerClient {
     readonly store: SecretStoreKind;
     readonly reference: string;
   }) => Promise<{ readonly status: PointStatus } | SecretStoreBrokerDown>;
+  /** Puts a pointer back without reading its item, for undoing a change. */
+  readonly restore: (input: {
+    readonly namespace: SecretStoreNamespace;
+    readonly id: string;
+    readonly store: SecretStoreKind;
+    readonly reference: string;
+  }) => Promise<{ readonly status: PointStatus } | SecretStoreBrokerDown>;
   readonly reference: (input: {
     readonly namespace: SecretStoreNamespace;
     readonly id: string;
@@ -171,6 +178,15 @@ export function makeSecretStoreBrokerClient(
           status === "key-already-stored" ||
           (CHECK_STATUSES.includes(status) && status !== "found"))
         ? { status: status as PointStatus }
+        : DOWN;
+    },
+    restore: async ({ namespace, id, store, reference }) => {
+      const status = (await post("restore", { namespace, id, store, reference }))?.status;
+      return status === "pointed" ||
+        status === "key-already-stored" ||
+        status === "not-linked" ||
+        status === "invalid-reference"
+        ? { status }
         : DOWN;
     },
     reference: async ({ namespace, id }) => {

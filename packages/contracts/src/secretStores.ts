@@ -113,6 +113,7 @@ export const SecretStoreRefusalReason = Schema.Literal(
   "unknown-provider",
   "no-stored-key-authentication",
   "key-already-stored",
+  "provider-changed",
   "journal-unavailable",
 );
 export type SecretStoreRefusalReason = typeof SecretStoreRefusalReason.Type;
@@ -133,6 +134,8 @@ export const SECRET_STORE_REFUSAL_MESSAGES: Readonly<Record<SecretStoreRefusalRe
   "no-stored-key-authentication": "That provider does not use an API key or bearer token.",
   "key-already-stored":
     "That provider already has a stored key. Remove the key first, then point it at an item.",
+  "provider-changed":
+    "That provider was removed or reconfigured while the item was being checked, so the item was not kept.",
   "journal-unavailable": "The change could not be recorded, so nothing was changed.",
 };
 

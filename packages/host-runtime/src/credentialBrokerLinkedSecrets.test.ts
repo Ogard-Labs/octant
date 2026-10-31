@@ -256,6 +256,38 @@ describe("credential broker linked secret stores", { timeout: 30_000 }, () => {
     expect(h.provider.entries.has(instanceId)).toBe(false);
   });
 
+  it("restores an earlier pointer without reading its item, and never over a stored key or into an unlinked store", async () => {
+    const h = await harness();
+    await h.post("/v1/secret-stores/link", { store: "onepassword" });
+    const callsBefore = h.op.calls().length;
+    h.op.setMode("locked");
+    expect(await h.post("/v1/secret-stores/restore", point())).toEqual({
+      status: 200,
+      text: JSON.stringify({ status: "pointed" }),
+    });
+    // No item was read, though the store is locked.
+    expect(h.op.calls().length).toBe(callsBefore);
+    expect(h.provider.entries.get(instanceId)).toContain(REFERENCE);
+
+    h.provider.entries.set(instanceId, "sk-stored-by-person");
+    expect(JSON.parse((await h.post("/v1/secret-stores/restore", point())).text)).toEqual({
+      status: "key-already-stored",
+    });
+    expect(h.provider.entries.get(instanceId)).toBe("sk-stored-by-person");
+
+    h.provider.entries.delete(instanceId);
+    await h.post("/v1/secret-stores/unlink", { store: "onepassword" });
+    expect(JSON.parse((await h.post("/v1/secret-stores/restore", point())).text)).toEqual({
+      status: "not-linked",
+    });
+    expect(h.provider.entries.size).toBe(0);
+    expect(
+      JSON.parse(
+        (await h.post("/v1/secret-stores/restore", point(instanceId, "provider", "--help"))).text,
+      ),
+    ).toEqual({ status: "invalid-reference" });
+  });
+
   it("refuses to store a pasted value that would pass for a pointer", async () => {
     const h = await harness();
     const pasted = await h.post("/v1/credentials/set", {

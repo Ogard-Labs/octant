@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -93,13 +93,19 @@ function memoryStore(): CredentialStore & { readonly entries: Map<string, string
 
 /** A secret store tool the test controls: its lock, its items, and its calls. */
 function fakeTool() {
-  const state = { tool: "ready" as LinkedSecretToolState, items: new Map<string, string>() };
+  const state = {
+    tool: "ready" as LinkedSecretToolState,
+    items: new Map<string, string>(),
+    /** Runs while the broker reads an item, to change the world mid-check. */
+    onRead: undefined as (() => void) | undefined,
+  };
   const adapter: LinkedSecretStoreAdapter = {
     kind: "onepassword",
     label: "1Password",
     isValidReference: (reference) => reference.startsWith("op://"),
     probe: async () => state.tool,
     read: async (reference): Promise<LinkedSecretRead> => {
+      state.onRead?.();
       if (state.tool === "locked") return { status: "locked" };
       const value = state.items.get(reference);
       return value === undefined ? { status: "missing" } : { status: "read", value };
@@ -149,7 +155,11 @@ async function host(
     uuid: () => crypto.randomUUID(),
     now: () => NOW,
   });
-  const failing = { journalFails: options.journalFails ?? false };
+  const failing = {
+    journalFails: options.journalFails ?? false,
+    /** Runs when the journal refuses, before it throws. */
+    onRefuse: undefined as (() => void) | undefined,
+  };
   const reprobes: string[] = [];
   const instances = [
     gateway(),
@@ -162,7 +172,10 @@ async function host(
         : makeSecretStoreBrokerClient({ url: broker.url, token: broker.token }),
     journal: {
       record: (record) => {
-        if (failing.journalFails) throw new Error("journal down");
+        if (failing.journalFails) {
+          failing.onRefuse?.();
+          throw new Error("journal down");
+        }
         real.record(record);
       },
     },
@@ -204,6 +217,8 @@ async function host(
   };
   return {
     tool,
+    directory,
+    instances,
     store,
     broker,
     service,
@@ -363,6 +378,87 @@ describe("linked secret stores through the host", () => {
     });
     expect((await second.service.view()).kind).toBe("secret-stores-view");
     expect(await second.service.view()).toMatchObject({ stores: [{ linked: false }] });
+  });
+
+  it("deletes the pointer and refuses when the provider is removed or reconfigured while the item is checked", async () => {
+    const h = await host();
+    await h.service.linkStore(WINDOW, "onepassword");
+
+    // Reconfigured meanwhile: the old endpoint's key must not reach the new one.
+    h.tool.state.onRead = () => {
+      h.instances[0] = decodeProviderInstance({ ...gateway(), version: 2 });
+    };
+    const changed = await h.service.pointProviderKey(WINDOW, {
+      instanceId,
+      store: "onepassword",
+      reference: REFERENCE,
+    });
+    expect(changed).toMatchObject({ kind: "secret-stores-refused", reason: "provider-changed" });
+    expect(h.store.entries.has(GATEWAY_ID)).toBe(false);
+    expect(h.journalNames()).toEqual(["secret-store.linked"]);
+
+    // Removed meanwhile: a delayed write must not recreate the credential.
+    h.instances[0] = gateway();
+    h.tool.state.onRead = () => {
+      h.instances.splice(0, 1);
+    };
+    const removed = await h.service.pointProviderKey(WINDOW, {
+      instanceId,
+      store: "onepassword",
+      reference: REFERENCE,
+    });
+    expect(removed).toMatchObject({ kind: "secret-stores-refused" });
+    expect(h.store.entries.has(GATEWAY_ID)).toBe(false);
+    expect(h.reprobes).toEqual([]);
+  });
+
+  it("fails closed when the journal refuses and the earlier item can no longer be read to restore it", async () => {
+    const h = await host();
+    await h.service.linkStore(WINDOW, "onepassword");
+    await h.service.pointProviderKey(WINDOW, {
+      instanceId,
+      store: "onepassword",
+      reference: REFERENCE,
+    });
+    h.tool.state.items.set("op://Private/Second/credential", "second");
+    h.failing.journalFails = true;
+    // By the time the journal refuses, the earlier item is gone and the store is locked.
+    h.failing.onRefuse = () => {
+      h.tool.state.items.delete(REFERENCE);
+      h.tool.state.tool = "locked";
+    };
+    const refused = await h.service.pointProviderKey(WINDOW, {
+      instanceId,
+      store: "onepassword",
+      reference: "op://Private/Second/credential",
+    });
+    expect(refused).toMatchObject({ kind: "secret-stores-refused", reason: "journal-unavailable" });
+    // The earlier pointer is put back without reading its item, so the new,
+    // unjournaled one is not left active.
+    expect(h.store.entries.get(GATEWAY_ID)).toContain(REFERENCE);
+    expect(h.store.entries.get(GATEWAY_ID)).not.toContain("Second");
+  });
+
+  it("clears the pointer and says so when the earlier one cannot be restored either", async () => {
+    const h = await host();
+    await h.service.linkStore(WINDOW, "onepassword");
+    await h.service.pointProviderKey(WINDOW, {
+      instanceId,
+      store: "onepassword",
+      reference: REFERENCE,
+    });
+    h.tool.state.items.set("op://Private/Second/credential", "second");
+    h.failing.journalFails = true;
+    // The store is unlinked as the journal refuses, so putting the earlier pointer back is refused.
+    h.failing.onRefuse = () => writeFileSync(join(h.directory, "linked.json"), '{"stores":{}}');
+    const refused = await h.service.pointProviderKey(WINDOW, {
+      instanceId,
+      store: "onepassword",
+      reference: "op://Private/Second/credential",
+    });
+    expect(refused).toMatchObject({ kind: "secret-stores-refused", reason: "journal-unavailable" });
+    expect(refused).toMatchObject({ message: expect.stringContaining("removed") });
+    expect(h.store.entries.has(GATEWAY_ID)).toBe(false);
   });
 
   it("never replaces a key the person stored, and refuses a provider without a stored key", async () => {

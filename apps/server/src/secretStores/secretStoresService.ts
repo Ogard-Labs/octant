@@ -181,6 +181,16 @@ export function createSecretStoresService(
           return secretStoresRefusal("key-already-stored");
         if (pointed.status !== "pointed") return secretStoresRefusal(CHECK_REFUSAL[pointed.status]);
 
+        // Checking the item can take a while. If the provider was removed or
+        // reconfigured meanwhile, the service has already cleared its key; a
+        // pointer written now would bring the credential back for the old
+        // endpoint, so it is deleted and the change refused.
+        const current = provider(input.instanceId);
+        if (current === undefined || current.version !== instance.version) {
+          await broker.clear({ namespace: "provider", id });
+          return secretStoresRefusal("provider-changed");
+        }
+
         const recorded = journaled({
           name: "credential-reference.set",
           target: { kind: "provider-key", instanceId: instance.id },
@@ -190,18 +200,24 @@ export function createSecretStoresService(
           windowId,
         });
         if (!recorded) {
-          // Put back what was there: the earlier pointer, or nothing.
-          if (before.status === "linked") {
-            await broker.point({
-              namespace: "provider",
-              id,
-              store: before.store,
-              reference: before.reference,
-            });
-          } else {
-            await broker.clear({ namespace: "provider", id });
+          // Put back what was there: the earlier pointer, or nothing. The
+          // earlier pointer goes back without reading its item (it may be gone
+          // or its store locked by now). If it cannot be put back, the new,
+          // unjournaled pointer is removed rather than left active.
+          const restored =
+            before.status === "linked"
+              ? await broker.restore({ namespace: "provider", id, ...before })
+              : await broker.clear({ namespace: "provider", id });
+          if (restored.status === "pointed" || restored.status === "cleared") {
+            return secretStoresRefusal("journal-unavailable");
           }
-          return secretStoresRefusal("journal-unavailable");
+          const removed = await broker.clear({ namespace: "provider", id });
+          return secretStoresRefusal(
+            "journal-unavailable",
+            removed.status === "broker-unavailable"
+              ? "The change could not be recorded or undone. Remove this provider's secret store reference, then set it again."
+              : "The change could not be recorded and the earlier item could not be restored, so this provider's secret store reference was removed.",
+          );
         }
         reprobe(windowId, instance);
         return {

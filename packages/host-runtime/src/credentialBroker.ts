@@ -71,6 +71,7 @@ const ROUTES = new Set([
   "/v1/secret-stores/point",
   "/v1/secret-stores/reference",
   "/v1/secret-stores/clear",
+  "/v1/secret-stores/restore",
   "/v1/oauth/begin",
   "/v1/oauth/status",
   "/v1/oauth/refresh",
@@ -659,6 +660,29 @@ async function handleSecretStoreRoute(
       if (checked.status !== "found") return Response.json({ status: checked.status });
       // Pointing replaces a pointer, never a value the person stored: that
       // would destroy a key they cannot get back from here.
+      if (await target.has(id)) {
+        const current = await target.resolve(id);
+        if (!isLinkedSecretMaterial(current)) {
+          return Response.json({ status: "key-already-stored" });
+        }
+      }
+      await target.set(id, encodeLinkedSecretPointer({ store, reference: value.reference }));
+      return Response.json({ status: "pointed" });
+    }
+    if (operation === "restore") {
+      // Puts back a pointer that was just replaced. Unlike `point` it does not
+      // read the item: the earlier item may be gone or its store locked by now,
+      // and the pointer is data, not a value. It still needs a linked store, a
+      // valid reference, and a slot that holds a pointer or nothing, so it can
+      // never overwrite a stored key.
+      if (keys !== "id,namespace,reference,store" || !isLinkedSecretStoreKind(store)) {
+        return failure("invalid-request", 400);
+      }
+      if (typeof value.reference !== "string") return failure("invalid-request", 400);
+      if (!linked.isValidReference(store, value.reference)) {
+        return Response.json({ status: "invalid-reference" });
+      }
+      if (!(await linked.isLinked(store))) return Response.json({ status: "not-linked" });
       if (await target.has(id)) {
         const current = await target.resolve(id);
         if (!isLinkedSecretMaterial(current)) {
