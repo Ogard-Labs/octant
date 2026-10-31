@@ -54,6 +54,8 @@ export interface TerminalLaunchRequest {
   /** Only for a terminal started with a Browser grant; see {@link TerminalLauncher}. */
   readonly launcher?: TerminalLauncher;
   readonly executionPolicy?: TerminalLaunchInput["executionPolicy"];
+  /** The Project's other folders, bound like `cwd`; see {@link TerminalLaunchInput}. */
+  readonly extraFolders?: ReadonlyArray<string>;
 }
 
 export interface RestoredTerminalRecord {
@@ -235,6 +237,9 @@ export class TerminalService {
       ...(request.executionPolicy === undefined
         ? {}
         : { executionPolicy: request.executionPolicy }),
+      ...(request.extraFolders === undefined || request.extraFolders.length === 0
+        ? {}
+        : { extraFolders: request.extraFolders }),
     });
     const record: TerminalRecord = {
       terminalId: request.terminalId,

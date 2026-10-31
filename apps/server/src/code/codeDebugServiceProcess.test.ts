@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   TOOL_EGRESS_THREAD_AGGREGATE,
   decodeCodeCheckoutIdentity,
+  decodeCodeRelativePath,
   decodeCodeThread,
   decodeEventActor,
   type CodeThread,
@@ -48,6 +49,7 @@ import {
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
 import { deriveCodeFileId } from "./codeFileIdentity";
+import { withProjectExtraFolders } from "./codeProjectFolderRoot";
 import { CodeDebugService } from "./codeDebugService";
 import { DebugAdapterProcessPort, type DebugAdapterProcess } from "./debugAdapterProcess";
 import { DebugConfigurationApprovalStore } from "./debugConfigurationApprovals";
@@ -315,6 +317,7 @@ async function host(
     });
   const approvalStore = approvals();
   const windowGrant = { fullAccess: false };
+  const extraFolders: string[] = [];
   const service = new CodeDebugService({
     authority: {
       readThread: (threadId) =>
@@ -326,10 +329,17 @@ async function host(
       // grants it without remembering it.
       effectiveThread: (_scope, candidate) =>
         windowGrant.fullAccess ? { ...candidate, executionPolicy: "full-access" } : candidate,
-      resolveRoot: (_scope, candidate, current, relativePath) => ({
-        fileId: deriveCodeFileId(String(candidate.id), String(current.id), relativePath),
-        rootPath: checkout,
-        rootIdentity: { device: "1", inode: "1" },
+      resolveRoot: withProjectExtraFolders({
+        resolve: (_scope, candidate, current, relativePath) => ({
+          fileId: deriveCodeFileId(String(candidate.id), String(current.id), relativePath),
+          rootPath: checkout,
+          rootIdentity: { device: "1", inode: "1" },
+        }),
+        extraFolders: () => extraFolders,
+        probePath: decodeCodeRelativePath("package.json"),
+        fileId: (threadId, checkoutId, path) =>
+          deriveCodeFileId(threadId, checkoutId, path as never),
+        statIdentity: async () => ({ device: "2", inode: "2" }),
       }),
     },
     approvals: approvalStore,
@@ -394,6 +404,7 @@ async function host(
     threads,
     thread,
     windowGrant,
+    extraFolders,
     journal: {
       approvals: () => journaled(CODE_DEBUG_CONFIGURATION_AGGREGATE),
       sessions: () => journaled(CODE_DEBUG_SESSION_AGGREGATE),
@@ -655,6 +666,34 @@ describe("starting a debug session", () => {
     });
     // A restarted host still holds the confirmation the journal holds.
     expect(test.reloadedApprovals().approvals(test.thread().projectId)).toHaveLength(1);
+  });
+
+  it("starts a program that lives in an extra folder, and refuses one in a folder beside it", async () => {
+    const test = await host(passthrough);
+    await test.install(adapterFolder(test.root));
+    await test.enable();
+    const extra = join(test.root, "extra");
+    const beside = join(test.root, "beside");
+    for (const folder of [extra, beside]) {
+      mkdirSync(folder);
+      writeFileSync(join(folder, "main.js"), "// program\n");
+    }
+    test.extraFolders.push(extra);
+
+    const inExtra = test.configuration({ program: join(extra, "main.js"), cwd: extra });
+    expect(await test.approve(inExtra)).toMatchObject({ status: "approved" });
+    expect(await test.start(inExtra)).toMatchObject({ status: "started" });
+
+    expect(await test.approve(test.configuration({ program: join(beside, "main.js") }))).toEqual({
+      status: "refused",
+      reason: "configuration-invalid",
+    });
+    // Traversal out of the folder never decodes into a configuration.
+    expect(() => test.configuration({ program: `${extra}/../beside/main.js` })).toThrow();
+    // A working folder outside the folder the program lives in is refused too.
+    expect(
+      await test.approve(test.configuration({ program: join(extra, "main.js"), cwd: beside })),
+    ).toEqual({ status: "refused", reason: "configuration-invalid" });
   });
 
   it("proposes configurations from the repository's launch file without running anything", async () => {

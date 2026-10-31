@@ -2626,16 +2626,61 @@ Git start in the main folder. Built.
   so each Work and Code turn carries an instruction naming the extra folders
   by absolute path and saying that commands, Git and checkouts start in the
   main folder.
-- **Code.** Worktrees, checkouts, Git, pull requests, tests, language
-  services, debug adapters, terminals and Project actions stay keyed to the
+- **Code.** Worktrees, checkouts, Git and pull requests stay keyed to the
   main folder; an extra folder is a plain folder with no checkout
-  management. Octant's own shell port for the harness and the ACP client
-  file and terminal tools also keep the main folder's root.
-- **Not yet.** The host's own file surfaces address files by a path
-  relative to the main folder, so the `@file` picker, the Work Files and
-  overview listings, Work artifact paths, and Code search do not list or
-  resolve files in an extra folder yet. An agent reaches them through its
-  runtime's own tools.
+  management. Language services, debug sessions and repository tests do
+  cover an extra folder: a file there is named by its absolute path, and the
+  root authority places it in one of the Project's current extra folders (and
+  refuses any other absolute path) after resolving the checkout, so a window,
+  thread or checkout the main authority refuses reaches no extra folder. A
+  language server or debug adapter for such a file runs with the folder as its
+  own bound root, in a server keyed by the folder; the folder has no file
+  watch, and a debug session's breakpoints and stack frames belong to the
+  folder its program runs in, so one session never spans two folders. Test
+  discovery also reads each existing extra folder's `package.json` and
+  `.octant/tests.json`, with ids of their own and the folder's absolute path
+  as the working directory; a run starts there, with that folder as its root
+  for artifacts, and the sandbox binds the folder as it binds the checkout. Octant's own shell port
+  for the harness starts in the main folder but reads and writes each extra
+  folder as it does the main one, and the ACP client file and terminal tools
+  accept an absolute path or working directory inside an extra folder and
+  bind every Project folder for the command they launch; a path outside all
+  of them is refused.
+- **Terminals and Project actions.** A Project terminal starts in the main
+  folder unless the person picks an extra folder, and a saved action runs
+  under the folder they pick (the action's own directory is relative to it).
+  The host accepts only the main folder or a folder the Project record lists,
+  compared as the exact path, and refuses any other. Every Project terminal
+  binds all of the Project's folders that exist like the main folder, so the
+  shell can move between them; the pick only chooses where it starts. The
+  header's action buttons and the start screen's quick tools offer the pick
+  once a Project has an extra folder.
+- **Work files.** A path relative to the main folder is always the main
+  folder's; a file in an extra folder is named by its absolute path, and the
+  host honours an absolute path only inside one of the Project's current
+  extra folders, never anywhere else. The Work Files listing walks the main
+  folder and then each extra folder under the same confinement and bounds,
+  names an extra folder's entries by absolute path, and opens one through a
+  preview token that resolves to that folder. The Work overview's folder
+  list adds each extra folder's top level after the main folder's, sharing
+  the item limit and naming each by its last component, so it carries no
+  host path. A turn's record of the files that changed while it ran watches
+  every folder the same way, so a file written in an extra folder lists as
+  Work's own. Artifacts the host itself creates, revises or exports still
+  take a name with no path and live in the main folder.
+- **`@file` picker and Code search.** A mention is the main folder's relative
+  path or the absolute path of a file inside one of the Project's current
+  extra folders; the host reads an absolute path only there and reports any
+  other as out of root. The picker lists each existing extra folder with the
+  main folder under the same confinement and root identity checks, and the
+  Code picker offers those files by absolute path. Code search walks the
+  checkout and then each extra folder under the shared budgets, and a match
+  there carries its folder. The editor opens files of the checkout only, so
+  such a match is listed but not opened from the search dialog.
+- **Not yet.** Artifacts the host itself creates, revises or exports in Work
+  still live in the main folder, and the Code editor and explorer do not open
+  files of an extra folder. An agent reaches them through its runtime's own
+  tools.
 
 ## Agent task display
 

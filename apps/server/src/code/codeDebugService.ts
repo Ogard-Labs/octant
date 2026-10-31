@@ -56,11 +56,12 @@ import {
   type DebugConfigurationApproval,
   type DebugSessionHostPlatform,
   type PrincipalKind,
+  classifyFileMentionExtraFolderPath,
 } from "@octant/domain";
 import { readConfinedCodeFile } from "./codeConfinedFileRead";
 import { liveCodeTestSourcePort, type CodeTestSourcePort } from "./codeDirectoryPort";
 import { joinCodePath, resolveContainedPath } from "./codePathConfinement";
-import type { CodeFileRootResolution } from "./codeService";
+import { pathInResolvedRoot, type CodeFolderRootResolution } from "./codeProjectFolderRoot";
 import {
   DebugAdapterConnection,
   type DebugAdapterEvent,
@@ -138,7 +139,7 @@ export interface CodeDebugAuthority {
     thread: CodeThread,
     checkout: CodeCheckoutIdentity,
     relativePath: CodeRelativePath,
-  ) => Promise<CodeFileRootResolution | undefined> | CodeFileRootResolution | undefined;
+  ) => Promise<CodeFolderRootResolution | undefined> | CodeFolderRootResolution | undefined;
 }
 
 export interface CodeDebugCaller {
@@ -192,6 +193,8 @@ type Authorized =
 
 interface ResolvedPaths {
   readonly checkoutRoot: string;
+  /** Set when the program lives in an extra folder: the session runs there, as a plain folder. */
+  readonly extraFolder?: string;
   readonly program: string;
   readonly cwd: string;
 }
@@ -229,6 +232,7 @@ interface SessionRecord extends DebugTarget {
   readonly adapter: CodeDebugAdapterComponent;
   readonly network: "proxied" | "allow";
   readonly checkoutRoot: string;
+  readonly extraFolder?: string;
   /**
    * The window whose Start began it. Full access can be that window's own
    * session grant, so the posture a running session keeps is read through it.
@@ -429,6 +433,7 @@ export class CodeDebugService {
       adapter,
       network,
       checkoutRoot: paths.checkoutRoot,
+      ...(paths.extraFolder === undefined ? {} : { extraFolder: paths.extraFolder }),
       startedBy: caller.scopeId,
     });
     // Held from here, so a second Start on the thread is busy while this one
@@ -565,7 +570,7 @@ export class CodeDebugService {
         // The window's breakpoints apply to the program and every child, so
         // each connection gets them; the answer is the named one's.
         rememberBreakpoints(record, request.file);
-        const args = breakpointArguments(record.checkoutRoot, request.file);
+        const args = breakpointArguments(record, request.file);
         for (const other of [record, ...record.children.values()]) {
           if (other !== target) void other.connection?.request("setBreakpoints", args);
         }
@@ -596,6 +601,7 @@ export class CodeDebugService {
         if (answered.status !== "answered") return answered;
         const placed = await toStackFrames(answered.body, {
           checkoutRoot: record.checkoutRoot,
+          ...(record.extraFolder === undefined ? {} : { folderPrefix: record.extraFolder }),
           realpath: (path) => realpath(path),
         });
         return { status: "stack", ...placed };
@@ -797,7 +803,7 @@ export class CodeDebugService {
     authorized: Extract<Authorized, { status: "authorized" }>,
     configuration: CodeDebugConfiguration,
   ): Promise<ResolvedPaths | undefined> {
-    let root: CodeFileRootResolution | undefined;
+    let root: CodeFolderRootResolution | undefined;
     try {
       root = await this.#authority.resolveRoot(
         caller.scopeId,
@@ -809,22 +815,44 @@ export class CodeDebugService {
       root = undefined;
     }
     if (root === undefined) return undefined;
+    const extraFolder = root.relativePath === undefined ? {} : { extraFolder: root.rootPath };
     const program = await resolveContainedPath(
       this.#files,
       root.rootPath,
-      joinCodePath(root.rootPath, configuration.program),
+      joinCodePath(root.rootPath, pathInResolvedRoot(root, configuration.program)),
     );
     if (program === undefined || !program.stat.isFile) return undefined;
     if (configuration.cwd === undefined) {
-      return { checkoutRoot: root.rootPath, program: program.canonical, cwd: root.rootPath };
+      return {
+        checkoutRoot: root.rootPath,
+        ...extraFolder,
+        program: program.canonical,
+        cwd: root.rootPath,
+      };
     }
-    const cwd = await resolveContainedPath(
-      this.#files,
-      root.rootPath,
-      joinCodePath(root.rootPath, configuration.cwd),
-    );
+    // The working folder lies in the folder the program does: a relative one
+    // for the checkout, an absolute one for the extra folder.
+    if (String(configuration.cwd).startsWith("/") !== (root.relativePath !== undefined)) {
+      return undefined;
+    }
+    let cwdTarget: string;
+    if (root.relativePath === undefined) {
+      cwdTarget = joinCodePath(root.rootPath, configuration.cwd);
+    } else if (String(configuration.cwd) === root.rootPath) {
+      cwdTarget = root.rootPath;
+    } else {
+      const inside = classifyFileMentionExtraFolderPath(String(configuration.cwd), [root.rootPath]);
+      if (inside.kind !== "in-folder") return undefined;
+      cwdTarget = joinCodePath(root.rootPath, inside.path as CodeRelativePath);
+    }
+    const cwd = await resolveContainedPath(this.#files, root.rootPath, cwdTarget);
     if (cwd === undefined || !cwd.stat.isDirectory) return undefined;
-    return { checkoutRoot: root.rootPath, program: program.canonical, cwd: cwd.canonical };
+    return {
+      checkoutRoot: root.rootPath,
+      ...extraFolder,
+      program: program.canonical,
+      cwd: cwd.canonical,
+    };
   }
 
   #coveredConfigurations(
@@ -868,7 +896,7 @@ export class CodeDebugService {
     currentFile: CodeRelativePath | undefined,
   ): Promise<CodeDebugLaunchFileReading> {
     const path = decodeCodeRelativePath(LAUNCH_FILE_PATH);
-    let root: CodeFileRootResolution | undefined;
+    let root: CodeFolderRootResolution | undefined;
     try {
       root = await this.#authority.resolveRoot(
         caller.scopeId,
@@ -986,7 +1014,7 @@ export class CodeDebugService {
       if (!initializedLate) return false;
     }
     for (const file of request.breakpoints) {
-      await connection.request("setBreakpoints", breakpointArguments(paths.checkoutRoot, file));
+      await connection.request("setBreakpoints", breakpointArguments(record, file));
     }
     await connection.request("setExceptionBreakpoints", {
       filters: record.exceptionFilters
@@ -1344,7 +1372,7 @@ export class CodeDebugService {
       return;
     }
     for (const file of record.breakpoints.values()) {
-      await connection.request("setBreakpoints", breakpointArguments(record.checkoutRoot, file));
+      await connection.request("setBreakpoints", breakpointArguments(record, file));
     }
     await connection.request("setExceptionBreakpoints", {
       filters: child.exceptionFilters
@@ -1485,6 +1513,7 @@ function newRecord(input: {
   readonly adapter: CodeDebugAdapterComponent;
   readonly network: "proxied" | "allow";
   readonly checkoutRoot: string;
+  readonly extraFolder?: string;
   readonly startedBy: WindowId;
 }): SessionRecord {
   return {
@@ -1665,9 +1694,30 @@ export function fillLaunchArguments(
   return body;
 }
 
-function breakpointArguments(checkoutRoot: string, file: CodeDebugFileBreakpoints): unknown {
+/**
+ * A file's breakpoints belong to the session whose folder holds the file: a
+ * relative path to a checkout's session, an absolute one inside the extra
+ * folder to that folder's. Any other file gets none, so a session sets no
+ * breakpoint in a folder its program does not run in.
+ */
+function breakpointArguments(
+  session: { readonly checkoutRoot: string; readonly extraFolder?: string | undefined },
+  file: CodeDebugFileBreakpoints,
+): unknown {
+  const named = String(file.path);
+  const local =
+    session.extraFolder === undefined
+      ? named.startsWith("/")
+        ? undefined
+        : named
+      : classifyFileMentionExtraFolderPath(named, [session.extraFolder]);
+  const relative =
+    typeof local === "object" ? (local.kind === "in-folder" ? local.path : undefined) : local;
+  if (relative === undefined) {
+    return { source: { path: session.checkoutRoot }, breakpoints: [] };
+  }
   return {
-    source: { path: joinCodePath(checkoutRoot, file.path) },
+    source: { path: joinCodePath(session.checkoutRoot, relative as CodeRelativePath) },
     breakpoints: file.breakpoints.map((breakpoint) => ({
       line: breakpoint.line,
       ...(breakpoint.condition === undefined ? {} : { condition: breakpoint.condition }),

@@ -54,4 +54,30 @@ describe("Project action buttons", () => {
     expect(container).toBeEmptyDOMElement();
     expect(screen.queryByRole("group", { name: "Project actions" })).toBeNull();
   });
+
+  it("offers a folder choice only when the Project has an extra folder, and runs there", async () => {
+    const onRun = vi.fn();
+    const dev = action("Dev");
+    const host = slot();
+    const { rerender } = render(
+      <ProjectActionButtons actions={[dev]} mainFolder="/work/app" onRun={onRun} />,
+    );
+    expect(within(host).queryByRole("button", { name: "Folder to run actions in" })).toBeNull();
+
+    rerender(
+      <ProjectActionButtons
+        actions={[dev]}
+        extraFolders={["/work/notes"]}
+        mainFolder="/work/app"
+        onRun={onRun}
+      />,
+    );
+    await userEvent.click(within(host).getByRole("button", { name: "Dev" }));
+    expect(onRun).toHaveBeenLastCalledWith(dev);
+
+    await userEvent.click(within(host).getByRole("button", { name: "Folder to run actions in" }));
+    await userEvent.click(await screen.findByRole("menuitemradio", { name: "notes" }));
+    await userEvent.click(within(host).getByRole("button", { name: "Dev" }));
+    expect(onRun).toHaveBeenLastCalledWith(dev, "/work/notes");
+  });
 });

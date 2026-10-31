@@ -614,8 +614,11 @@ A Work or Code Project has one main folder plus extra folders the person adds; e
 - An extra folder is never the home folder or above it, a system or credential folder, the main folder, or inside or around the main folder or another extra folder; a Project has at most 16.
 - The OS profiles, the provider sandboxes and approval scopes, the Octant Harness file tools and Octant Shield's fast read and edit rules grant an extra folder exactly what they grant the main folder; Plan reads it without writing, and Full access stays unwrapped.
 - Each Work and Code turn names the extra folders to the agent.
-- Worktrees, checkouts, Git, terminals and Project actions stay in the main folder; an extra folder is a plain folder.
-- Not built yet: the `@file` picker, the Work Files and overview listings, Work artifact paths and Code search still address only the main folder.
+- Worktrees, checkouts and Git stay in the main folder; an extra folder is a plain folder. A Project terminal and a saved Project action start in the main folder by default and in any folder the Project lists when the person picks one; the host refuses any other path, and the terminal binds every listed folder like the main one.
+- Language services, debug sessions and repository tests cover an extra folder as a plain folder: a file there is named by absolute path, the host places it in one of the Project's current extra folders or refuses it, and a server, session or test run takes the folder as its own bound root.
+- A path relative to the main folder is always the main folder's; a file in an extra folder is named by its absolute path, which the host honours only inside one of the Project's current extra folders. The Work Files listing and a turn's record of changed files cover every folder, and the Work overview lists each extra folder's top level by its last component, with no host path.
+- The `@file` picker (Work and Code) lists and reads a file in an extra folder by its absolute path, only inside one of the Project's current extra folders; Code search covers the extra folders and marks each match with its folder; the harness shell and the ACP client file and terminal tools reach every Project folder.
+- Not built yet: Work artifacts the host creates still live in the main folder, and the Code editor and explorer do not open files of an extra folder.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Projects with several folders](../architecture.md#projects-with-several-folders).
 

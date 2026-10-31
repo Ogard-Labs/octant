@@ -26,6 +26,16 @@ const TerminalGeometry = {
   rows: Schema.Int.pipe(Schema.between(1, 500)),
 } as const;
 
+/**
+ * Which of the Project's folders a shell starts in or an action runs under:
+ * the real path of one extra folder, exactly as the Project lists it. Absent
+ * means the main folder. The host refuses any other path, so naming a folder
+ * grants nothing the Project's own list does not.
+ */
+const Folder = {
+  folder: Schema.optional(Schema.String.pipe(Schema.maxLength(4_096))),
+} as const;
+
 const Target = {
   projectId: ProjectId,
   terminalId: CodeTerminalId,
@@ -52,6 +62,7 @@ export const ProjectTerminalCommand = Schema.Union(
     kind: Schema.Literal("start"),
     ...Target,
     ...TerminalGeometry,
+    ...Folder,
   }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("attach"), ...Target }).annotations(strict),
   Schema.Struct({
@@ -80,6 +91,7 @@ export const ProjectTerminalCommand = Schema.Union(
     kind: Schema.Literal("run-action"),
     ...Target,
     actionId: ProjectActionId,
+    ...Folder,
   }).annotations(strict),
   /** Ask which commands the Project's own files suggest saving as actions. */
   Schema.Struct({

@@ -4900,8 +4900,14 @@ function LaunchedShell(
       projectTerminalClient,
       projectBrowserClient,
       ...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge }),
+      extraFolders: (projectId) => {
+        const owner = projectController.projects.find((project) => project.id === projectId);
+        return owner?.type === "code"
+          ? (owner.extraFolders ?? []).map((folder) => folder.canonicalRoot)
+          : [];
+      },
     }),
-    [projectBrowserClient, projectTerminalClient, props.hostBridge],
+    [projectBrowserClient, projectController.projects, projectTerminalClient, props.hostBridge],
   );
 
   function restoreWindowPlace(place: WindowPlace): Promise<boolean> {
@@ -6466,7 +6472,10 @@ function LaunchedShell(
    * holds, with no thread, and pins it. The host decides the root and whether
    * this window may open it; a refusal leaves the space as it was.
    */
-  async function addZenProjectTerminal(projectId: ProjectId): Promise<CodeTerminalId | undefined> {
+  async function addZenProjectTerminal(
+    projectId: ProjectId,
+    folder?: string,
+  ): Promise<CodeTerminalId | undefined> {
     const terminalId = decodeCodeTerminalId(crypto.randomUUID());
     // No card means no way back to a shell: a Project terminal has no thread
     // or listing to reopen it from, so one without a card stops rather than
@@ -6484,6 +6493,7 @@ function LaunchedShell(
         terminalId,
         columns: 100,
         rows: 30,
+        ...(folder === undefined ? {} : { folder }),
       });
     } catch {
       // The reply was lost, not necessarily the start.
@@ -6510,7 +6520,11 @@ function LaunchedShell(
    * line from the Project record and applies the terminal's own confinement
    * and approval posture, so this only names the action.
    */
-  async function runProjectAction(projectId: ProjectId, action: ProjectAction): Promise<void> {
+  async function runProjectAction(
+    projectId: ProjectId,
+    action: ProjectAction,
+    folder?: string,
+  ): Promise<void> {
     // Zen holds the card, so its space has to be loaded before a shell starts:
     // a shell with no card to show it would only be stopped again.
     if (!zen.active) await zen.enterZen();
@@ -6522,8 +6536,9 @@ function LaunchedShell(
             ? [element.terminalId]
             : [],
         ),
-        openTerminal: () => addZenProjectTerminal(projectId),
+        openTerminal: () => addZenProjectTerminal(projectId, folder),
         notify: setThreadExportNotice,
+        ...(folder === undefined ? {} : { folder }),
       },
       projectId,
       action,
@@ -7308,7 +7323,15 @@ function LaunchedShell(
             {actionsProject === undefined ? null : (
               <ProjectActionButtons
                 actions={activeProjectActions}
-                onRun={(action) => void runProjectAction(actionsProject.id, action)}
+                {...(actionsProject.type === "code"
+                  ? {
+                      mainFolder: actionsProject.binding.canonicalRoot,
+                      extraFolders: (actionsProject.extraFolders ?? []).map(
+                        (folder) => folder.canonicalRoot,
+                      ),
+                    }
+                  : {})}
+                onRun={(action, folder) => void runProjectAction(actionsProject.id, action, folder)}
               />
             )}
             <NeedsYouProvider source={needsYouSource}>

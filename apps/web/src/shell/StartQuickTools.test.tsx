@@ -42,8 +42,12 @@ function SplitDrafts(props: { readonly active: string; readonly withSecond: bool
   );
 }
 
-function renderTools(execute: ReturnType<typeof vi.fn>) {
+function renderTools(
+  execute: ReturnType<typeof vi.fn>,
+  extraFolders?: (id: typeof projectId) => ReadonlyArray<string>,
+) {
   const services = {
+    ...(extraFolders === undefined ? {} : { extraFolders }),
     hostId: LOCAL_HOST_ID,
     projectTerminalClient: { execute } as never,
     projectBrowserClient: { execute: vi.fn() } as never,
@@ -104,5 +108,20 @@ describe("StartQuickTools", () => {
     // The right draft starts its task and leaves; the left keeps its Project.
     rerender(<SplitDrafts active="code:left" withSecond={false} />);
     expect(dock).toHaveTextContent(String(projectId));
+  });
+
+  it("starts a terminal in an extra folder the Project lists, and in the main folder otherwise", async () => {
+    const user = userEvent.setup();
+    const execute = vi.fn(async () => ({
+      kind: "project-terminal",
+      terminal: { state: "running" },
+    }));
+    renderTools(execute, () => ["/work/notes"]);
+
+    await user.click(screen.getByRole("button", { name: "Terminal in notes" }));
+
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "start", folder: "/work/notes" }),
+    );
   });
 });

@@ -81,27 +81,46 @@ export type CodeRepositoryId = typeof CodeRepositoryId.Type;
 
 const textEncoder = new TextEncoder();
 export const MAX_CODE_RELATIVE_PATH_BYTES = 4_096;
+function isCodeRelativePath(value: string): boolean {
+  if (
+    value.length === 0 ||
+    value.includes("\0") ||
+    value.includes("\\") ||
+    value.startsWith("/") ||
+    value.endsWith("/") ||
+    value.normalize("NFC") !== value ||
+    textEncoder.encode(value).byteLength > MAX_CODE_RELATIVE_PATH_BYTES
+  ) {
+    return false;
+  }
+  return value
+    .split("/")
+    .every((component) => component !== "" && component !== "." && component !== "..");
+}
 export const CodeRelativePath = Schema.String.pipe(
-  Schema.filter((value) => {
-    if (
-      value.length === 0 ||
-      value.includes("\0") ||
-      value.includes("\\") ||
-      value.startsWith("/") ||
-      value.endsWith("/") ||
-      value.normalize("NFC") !== value ||
-      textEncoder.encode(value).byteLength > MAX_CODE_RELATIVE_PATH_BYTES
-    ) {
-      return false;
-    }
-    const components = value.split("/");
-    return components.every(
-      (component) => component !== "" && component !== "." && component !== "..",
-    );
-  }),
+  Schema.filter(isCodeRelativePath),
   Schema.brand("CodeRelativePath"),
 );
 export type CodeRelativePath = typeof CodeRelativePath.Type;
+
+/**
+ * A file named in a Code Project: relative to the checkout, or absolute inside
+ * one of the Project's extra folders. The schema cannot tell an extra folder
+ * from any other absolute path, so the host places an absolute path in one of
+ * the Project's extra folders before it opens or reads anything.
+ */
+export const CodeProjectFilePath = Schema.String.pipe(
+  Schema.filter((value) => {
+    if (value.startsWith("/")) {
+      return value.length > 1 && !value.startsWith("//") && isCodeRelativePath(value.slice(1));
+    }
+    return isCodeRelativePath(value);
+  }),
+  // The brand is shared on purpose: the type is the same path, and the places
+  // that join it to a root first place it in a folder.
+  Schema.brand("CodeRelativePath"),
+);
+export type CodeProjectFilePath = typeof CodeProjectFilePath.Type;
 
 const GitObjectId = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/));
 /**
@@ -1309,6 +1328,7 @@ export const decodeCodeAttachmentMediaType = Schema.decodeUnknownSync(CodeAttach
 export const decodeCodeAttachmentReference = Schema.decodeUnknownSync(CodeAttachmentReference);
 export const decodeCodeRuntimeWorkId = Schema.decodeUnknownSync(CodeRuntimeWorkId);
 export const decodeCodeRelativePath = Schema.decodeUnknownSync(CodeRelativePath);
+export const decodeCodeProjectFilePath = Schema.decodeUnknownSync(CodeProjectFilePath);
 export const decodeCodeCheckoutHead = Schema.decodeUnknownSync(CodeCheckoutHead);
 export const decodeCodeCheckoutIdentity = Schema.decodeUnknownSync(CodeCheckoutIdentity);
 export const decodeCodeThread = Schema.decodeUnknownSync(CodeThread);

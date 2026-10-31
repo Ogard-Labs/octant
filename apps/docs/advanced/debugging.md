@@ -112,6 +112,15 @@ holds what you confirmed and when each session started and ended. A
 diagnostics export counts the sessions started, and ended for each reason,
 over the last 14 days, and names none of them.
 
+## Extra folders
+
+A program in one of the Project's extra folders can be debugged: give its
+absolute path as the program, and the working folder, if you set one, as a
+folder inside the same extra folder. The session runs in that folder, so
+breakpoints and stack frames belong to the folder the program runs in, and a
+session never spans the main folder and an extra one. Anything outside the
+Project's folders is refused.
+
 ## Where it is not offered
 
 | The tool says                              | What it means                                                                 |
