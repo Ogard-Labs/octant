@@ -29,6 +29,7 @@ describe("SettingsSectionId", () => {
       "github",
       "linear",
       "permissions",
+      "access",
       "secret-stores",
       "data",
       "sync",

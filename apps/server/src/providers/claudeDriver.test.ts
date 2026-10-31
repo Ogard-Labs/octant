@@ -36,6 +36,7 @@ import { draftGitText } from "../code/codeGitDraftService";
 import { makeContextSummaryGenerator } from "../context/contextSummaryGenerator";
 import { completeOnceOutcome } from "../harness/nativeHarnessSingleShot";
 import { makeThreadHandOffCompletion } from "../threadHandOffCompletion";
+import type { ProviderRuntimeNetworkPort } from "../network/providerRuntimeNetwork";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000701");
 const otherInstanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000702");
@@ -196,6 +197,7 @@ function harness(
     readonly compactAnnounced?: boolean;
     readonly configDirectory?: string;
     readonly artifactDelivery?: () => boolean;
+    readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
     readonly makeEnvironmentScope?: (
       authentication: ClaudeAuthentication,
       options?: ClaudeEnvironmentScopeOptions,
@@ -330,6 +332,7 @@ function harness(
       ...(options.artifactDelivery === undefined
         ? {}
         : { artifactDelivery: options.artifactDelivery }),
+      ...(options.runtimeNetwork === undefined ? {} : { runtimeNetwork: options.runtimeNetwork }),
       process,
       sdk,
       credentialResolver,
@@ -572,6 +575,50 @@ describe("Claude execution policy", () => {
 
       await acquired.close();
     }
+  });
+
+  it("points the sandbox's network at the session's egress proxy where the host routes it, and releases it when the session ends", async () => {
+    const started: Array<{ readonly runtime: string; readonly autoReview: boolean | undefined }> =
+      [];
+    let released = 0;
+    const runtimeNetwork: ProviderRuntimeNetworkPort = {
+      start: async (input) => {
+        started.push({ runtime: input.runtime, autoReview: input.autoReview });
+        expect(input.authentication).toBe("none");
+        return {
+          status: "proxied",
+          endpoint: { kind: "loopback", port: 47005 },
+          environment: {},
+          release: async () => {
+            released += 1;
+          },
+        };
+      },
+    };
+    for (const executionPolicy of [
+      "approval-gated",
+      "auto-accept-edits",
+      "plan",
+      "full-access",
+    ] as const) {
+      const f = harness("subscription", "current-session", { runtimeNetwork });
+      const acquired = await acquire(f.driver);
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy, autoApprove: true }),
+      );
+      expect(f.opens[0]?.sandbox?.network).toEqual(
+        executionPolicy === "approval-gated" || executionPolicy === "auto-accept-edits"
+          ? { httpProxyPort: 47005 }
+          : undefined,
+      );
+      await Effect.runPromise(acquired.connection.stop(sessionId));
+      await acquired.close();
+    }
+    expect(started).toEqual([
+      { runtime: "claude-sandbox", autoReview: true },
+      { runtime: "claude-sandbox", autoReview: true },
+    ]);
+    expect(released).toBe(2);
   });
 
   it("grants a Project's extra folder what the root gets, in its sandbox and its tool gate", async () => {
