@@ -431,6 +431,15 @@ export function changeCodeProjectDesktopRecipe(
     if (provider === undefined) {
       reject("invalid-desktop-recipe", "That desktop provider isn't available on this host");
     }
+    // A provider the host lists but the person has not set up starts nothing,
+    // so a recipe may not move to it. One already on it may still be edited
+    // or removed.
+    if (
+      provider.needsSetup !== undefined &&
+      String(project.desktopRecipe?.providerId ?? "") !== String(recipe.providerId)
+    ) {
+      reject("invalid-desktop-recipe", "That desktop provider needs setup on this host first");
+    }
     // A placement decides locality and billing, and so the network and key
     // rules below. A provider that offers placements is leased only on one of
     // them; one that offers none is leased on its own terms.

@@ -183,7 +183,7 @@ export interface WorkThreadServiceDependencies {
   ) => WorkThreadRuntimeActivity | Promise<WorkThreadRuntimeActivity>;
   /**
    * Reads the most urgent dated line in a Work Project's `STATUS.md`, when
-   * one has passed or is near (decision 0119). Optional so unit tests that
+   * one has passed or is near. Optional so unit tests that
    * only exercise thread CRUD need not wire status files; an absent reader
    * leaves no follow-up marks on the navigation payload.
    */

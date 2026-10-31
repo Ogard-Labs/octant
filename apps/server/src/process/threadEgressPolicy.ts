@@ -16,7 +16,7 @@ import type { ProviderExecutionPolicy } from "@octant/contracts";
  * - Full access / explicit network approval → `unrestricted`
  *
  * Provider-owned runtimes that make their own API call are a scoped
- * exception (0132, extended by 0145): every posture but Full access resolves
+ * exception: every posture but Full access resolves
  * `provider-endpoints-only` through `resolveProviderRuntimeEgressPolicy`.
  * Tools keep these defaults, Plan included.
  */
@@ -125,8 +125,8 @@ export function resolveProbeEgressPolicy(): ThreadEgressPolicy {
  * The egress a provider runtime may have when it carries a turn.
  *
  * ACP, Pi, OpenCode, and Claude call their own control plane. The thread
- * defaults in 0009 would launch those agents with OS `none`, so the turn never
- * starts. This named policy is the scoped exception (0132, extended by 0145):
+ * defaults would launch those agents with OS `none`, so the turn never
+ * starts. This named policy is the scoped exception:
  * the runtime reaches provider endpoints on every posture including Plan, and
  * tools still follow the thread defaults, Plan included.
  *

@@ -1140,7 +1140,7 @@ WHERE json_type(thread_json, '$.initialTurn.requestId') = 'text'
 `;
 
 /*
- * Rootless threads were retired by decision 0037. The tables the two
+ * Rootless threads were retired. The tables the two
  * migrations above created are dropped rather than left behind: no projector
  * writes them and no read path queries them, so a stale copy could only ever
  * be mistaken for live state. The journal keeps the events themselves.

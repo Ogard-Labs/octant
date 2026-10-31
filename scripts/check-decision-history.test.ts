@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { findHistoryViolations, type RepositoryState, resolveBase } from "./check-decision-history";
 
 const ACCEPTED = "# 0001. Plugin architecture\n\n**Status:** Accepted\n\n## Decision\n\nWhat.\n";
-const PATH = "docs/decisions/0001-plugin-architecture.md";
+const PATH = "docs/legacy/decisions/0001-plugin-architecture.md";
+const FORMER_PATH = "docs/decisions/0001-plugin-architecture.md";
 
 function reasons(
   current: Readonly<Record<string, string>>,
@@ -89,8 +90,35 @@ describe("findHistoryViolations", () => {
     ).toHaveLength(1);
   });
 
+  it("accepts a record moved unchanged from the archive's former folder", () => {
+    expect(reasons({ [PATH]: ACCEPTED }, [{ path: FORMER_PATH, content: ACCEPTED }])).toEqual([]);
+  });
+
+  it("accepts a moved record whose outward links gained one level", () => {
+    const linked = `${ACCEPTED}\nSee [the model](../security/model.md).\n`;
+    expect(
+      reasons({ [PATH]: linked.replace("](../", "](../../") }, [
+        { path: FORMER_PATH, content: linked },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("refuses a record edited while it moved", () => {
+    expect(
+      reasons({ [PATH]: ACCEPTED.replace("What.", "Changed.") }, [
+        { path: FORMER_PATH, content: ACCEPTED },
+      ]),
+    ).toHaveLength(1);
+  });
+
+  it("refuses a record left behind in the former folder", () => {
+    expect(
+      reasons({ [FORMER_PATH]: ACCEPTED }, [{ path: FORMER_PATH, content: ACCEPTED }]),
+    ).toEqual(["is gone; the decision archive is closed, so its records keep their paths"]);
+  });
+
   it("refuses removing or renaming an archived record", () => {
-    expect(reasons({ "docs/decisions/0001-plugin-seams.md": ACCEPTED })).toEqual([
+    expect(reasons({ "docs/legacy/decisions/0001-plugin-seams.md": ACCEPTED })).toEqual([
       "is gone; the decision archive is closed, so its records keep their paths",
     ]);
   });

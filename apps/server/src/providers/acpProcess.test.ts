@@ -781,7 +781,7 @@ describe.each(denyDefaultProfiles)("ACP deny-default confinement ($displayName)"
     if (deniedPaths.length === 0) {
       expect(fullAccess).toMatchObject({ command: target.binaryPath, args });
     } else {
-      // 0006's static extension denials outlive Full access: a workspace
+      // The static extension denials outlive Full access: a workspace
       // instruction, project config, skill root, project MCP server, or the
       // runtime's own folder-trust list stays denied even when the rest of
       // the sandbox is opened.
@@ -1761,7 +1761,7 @@ describe("ACP probe confinement", () => {
         ),
       }),
     );
-    // Chat turns need the provider's own endpoints (0132). Process exec and
+    // Chat turns need the provider's own endpoints. Process exec and
     // bound-root writes stay denied; only the runtime's network changes.
     const profileText = seatbeltProfile(launch);
     expect(profileText).toContain("(allow network*)");

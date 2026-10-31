@@ -42,6 +42,7 @@ const MUTATIONS = {
   commit: true,
   push: true,
   "create-pr": true,
+  "update-pr": true,
   "merge-run": true,
   "managed-root": true,
   "pr-mutation": true,
@@ -114,6 +115,7 @@ describe("Code authority policy", () => {
         "commit",
         "push",
         "create-pr",
+        "update-pr",
       ] as const) {
         expect(decision(actor, "auto-accept-edits", operation)).toBe("prompt");
       }

@@ -80,8 +80,10 @@ class FakeRuntime {
   readonly closed: BrowserContextId[] = [];
   peeks = 0;
   presentation: "native-live" | "headless" = "headless";
+  native = true;
 
   readonly available = async () => true;
+  readonly nativeAvailable = async () => this.native;
   readonly createContext: BrowserRuntimePort["createContext"] = async (
     contextId,
     policy,
@@ -330,5 +332,107 @@ describe("Project browsers", () => {
       }),
     ).rejects.toThrow(/stale or unknown/);
     expect(runtime.actions).toHaveLength(1);
+  });
+});
+
+describe("Project browser profiles", () => {
+  const openIn = (profile: "private" | "project" | "personal", url = "https://example.com/start") =>
+    ({ kind: "open", projectId, url, profile }) as const;
+
+  it("opens a page in this Project's own profile and says so in the view", async () => {
+    const { service, runtime } = harness();
+
+    const result = await service.execute(windowId, "local-window", openIn("project"));
+
+    expect(result).toMatchObject({
+      kind: "project-browser",
+      browser: { context: { profile: "project" } },
+    });
+    expect(runtime.created[0]?.policy.profile).toEqual({ kind: "project", projectId });
+  });
+
+  it("opens a page in the Personal profile", async () => {
+    const { service, runtime } = harness();
+
+    await service.execute(windowId, "local-window", openIn("personal"));
+
+    expect(runtime.created[0]?.policy.profile).toEqual({ kind: "personal" });
+  });
+
+  it("keeps a page Private unless the person chose a profile", async () => {
+    const { service, runtime } = harness();
+
+    await service.execute(windowId, "local-window", open());
+
+    expect(runtime.created[0]?.policy.profile).toBeUndefined();
+  });
+
+  it("refuses a profile page with profile-unavailable when no desktop Browser holds the store", async () => {
+    const { service, runtime } = harness();
+    runtime.native = false;
+
+    const result = await service.execute(windowId, "local-window", openIn("personal"));
+
+    expect(refusal(result)).toBe("profile-unavailable");
+    expect(runtime.created).toEqual([]);
+    // A Private page still opens headless, as it always did.
+    expect((await service.execute(windowId, "local-window", openIn("private"))).kind).toBe(
+      "project-browser",
+    );
+  });
+
+  it("opens the same address in a new context when the person switches profile, closing the old one", async () => {
+    const { service, runtime } = harness();
+    await service.execute(windowId, "local-window", openIn("private"));
+
+    const switched = await service.execute(windowId, "local-window", openIn("project"));
+
+    expect(runtime.created).toHaveLength(2);
+    expect(runtime.closed).toEqual([runtime.created[0]?.contextId]);
+    expect(runtime.created[1]?.contextId).not.toBe(runtime.created[0]?.contextId);
+    expect(switched).toMatchObject({ browser: { context: { profile: "project" } } });
+  });
+
+  it("keeps the page the person was on when a profile switch is refused", async () => {
+    const { service, runtime } = harness();
+    await service.execute(windowId, "local-window", openIn("private"));
+    runtime.native = false;
+
+    expect(refusal(await service.execute(windowId, "local-window", openIn("project")))).toBe(
+      "profile-unavailable",
+    );
+
+    expect(runtime.closed).toEqual([]);
+    expect(
+      await service.execute(windowId, "local-window", { kind: "current", projectId }),
+    ).toMatchObject({
+      browser: { context: { state: "active" } },
+    });
+  });
+
+  it("closes every page of a profile when the person signs out of it, and leaves Private pages alone", async () => {
+    const { service, runtime } = harness();
+    await service.execute(windowId, "local-window", openIn("personal"));
+    const created = runtime.created[0]?.contextId;
+
+    await service.closeProfile({ kind: "personal" });
+
+    expect(runtime.closed).toEqual([created]);
+    expect(
+      await service.execute(windowId, "local-window", { kind: "current", projectId }),
+    ).toMatchObject({ browser: { projectId: ids.project } });
+
+    await service.execute(windowId, "local-window", openIn("private"));
+    await service.closeProfile({ kind: "personal" });
+    expect(runtime.closed).toHaveLength(1);
+  });
+
+  it("never opens a profile page for a paired device", async () => {
+    const { service, runtime } = harness();
+
+    expect(refusal(await service.execute(windowId, "remote-device", openIn("personal")))).toBe(
+      "unauthorized",
+    );
+    expect(runtime.created).toEqual([]);
   });
 });

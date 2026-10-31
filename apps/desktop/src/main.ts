@@ -49,6 +49,9 @@ import {
 import {
   CredentialStoreFailure,
   deriveHostRuntimeHostId,
+  isLinkedSecretMaterial,
+  linkedSecretStoresStatePath,
+  makeLinkedSecretStores,
   prepareHostRuntimePaths,
   readHostInfoReceipt,
   resolveHostRuntimePaths,
@@ -112,6 +115,7 @@ import {
   type ReturnTypeOfBrowserSurfaceHost,
 } from "./browserSurfaceHost";
 import { startBrowserRuntimeBroker, type BrowserRuntimeBroker } from "./browserRuntimeBroker";
+import { createBrowserProfileStore } from "./browserProfileStore";
 import { openCodeExternalEditorFromServer } from "./codeExternalEditor";
 import {
   detectOpenInApplications,
@@ -168,6 +172,7 @@ import {
 import { createBrowserLaunchLink } from "./browserLaunchLink";
 import { createLocalPluginFolderPicker } from "./localPluginFolderPicker";
 import { createRuntimeBinaryPicker } from "./runtimeBinaryPicker";
+import { createSupportBundleSaver } from "./supportBundleSaver";
 import {
   createSingleFlight,
   assertAutomaticHostStartupEnabled,
@@ -746,6 +751,11 @@ export function installProviderCredentialIpcHandlers(options: {
   options.handle(IPC_CHANNELS.setProviderCredential, async (event, instanceId, credential) => {
     authorize(event);
     const validated = validateProviderCredentialRequest(instanceId, credential);
+    // A pointer changes only through the journaled secret-store routes, so a
+    // pasted key never silently replaces one.
+    if (await holdsLinkedReference(options.store, validated.providerInstanceId)) {
+      throw new Error(LINKED_REFERENCE_MESSAGE);
+    }
     try {
       await options.store.set(validated.providerInstanceId, validated.credential);
     } catch {
@@ -764,6 +774,9 @@ export function installProviderCredentialIpcHandlers(options: {
   options.handle(IPC_CHANNELS.clearProviderCredential, async (event, instanceId) => {
     authorize(event);
     const providerInstanceId = validateProviderInstanceId(instanceId);
+    if (await holdsLinkedReference(options.store, providerInstanceId)) {
+      throw new Error(LINKED_REFERENCE_MESSAGE);
+    }
     try {
       await options.store.delete(providerInstanceId);
     } catch {
@@ -777,7 +790,8 @@ export function installProviderCredentialIpcHandlers(options: {
     const providerInstanceId = validateProviderInstanceId(instanceId);
     return queueApiKeyOperation(async () => {
       const stored = await readStoredApiKeys(options.store, providerInstanceId);
-      return stored === undefined ? [] : listApiKeys(stored);
+      // A linked reference is not a list of keys; Settings shows it apart.
+      return stored === undefined || isLinkedSecretMaterial(stored) ? [] : listApiKeys(stored);
     });
   });
   options.handle(IPC_CHANNELS.addProviderApiKey, async (event, instanceId, credential, label) => {
@@ -786,6 +800,9 @@ export function installProviderCredentialIpcHandlers(options: {
     const requestedLabel = label === undefined ? undefined : validateApiKeyLabel(label);
     return queueApiKeyOperation(async () => {
       const stored = await readStoredApiKeys(options.store, validated.providerInstanceId);
+      if (stored !== undefined && isLinkedSecretMaterial(stored)) {
+        throw new ApiKeyPoolError("linked-secret");
+      }
       const added = addApiKey(stored, { secret: validated.credential, label: requestedLabel });
       await options.store.set(validated.providerInstanceId, added.stored);
       return added.key;
@@ -870,12 +887,28 @@ async function readStoredApiKeys(
   return store.resolve(providerInstanceId);
 }
 
+const LINKED_REFERENCE_MESSAGE =
+  "This provider's key comes from a linked secret store. Remove the link in Settings first.";
+
+async function holdsLinkedReference(
+  store: CredentialStore,
+  providerInstanceId: string,
+): Promise<boolean> {
+  try {
+    const stored = await readStoredApiKeys(store, providerInstanceId);
+    return stored !== undefined && isLinkedSecretMaterial(stored);
+  } catch {
+    return false;
+  }
+}
+
 async function requireStoredApiKeys(
   store: CredentialStore,
   providerInstanceId: string,
 ): Promise<string> {
   const stored = await readStoredApiKeys(store, providerInstanceId);
   if (stored === undefined) throw new ApiKeyPoolError("unknown-key");
+  if (isLinkedSecretMaterial(stored)) throw new ApiKeyPoolError("linked-secret");
   return stored;
 }
 
@@ -1275,6 +1308,7 @@ interface DesktopWindowContext extends DesktopWindowIdentity {
   readonly picker: ReturnType<typeof createProjectRootPicker>;
   readonly localPluginFolderPicker: ReturnType<typeof createLocalPluginFolderPicker>;
   readonly runtimeBinaryPicker: ReturnType<typeof createRuntimeBinaryPicker>;
+  readonly supportBundleSaver: ReturnType<typeof createSupportBundleSaver>;
   readonly presentationController: WindowPresentationController;
   readonly refreshAuthorityAfterHostRestart: (host: LocalHostDescriptor) => Promise<void>;
 }
@@ -1680,6 +1714,7 @@ async function startDesktopCredentialBroker(): Promise<CredentialBroker | undefi
     backend.mcpServerCredentials,
     backend.desktopProviderCredentials,
     backend.pushPlatformCredentials,
+    makeLinkedSecretStores({ statePath: linkedSecretStoresStatePath(desktopDataDirectory) }),
   );
 }
 
@@ -1709,6 +1744,11 @@ async function attachExistingLocalHost(): Promise<LocalHostDescriptor | undefine
     instanceId: attachment.probe.instanceId,
     ownership: "managed",
   };
+}
+
+/** Where Electron keeps the persistent stores of the Project and Personal Browser profiles. */
+function browserProfilesDirectory(): string {
+  return join(app.getPath("userData"), "Partitions");
 }
 
 async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
@@ -1749,7 +1789,15 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
           webPreferences: { partition, ...webPreferences },
         }) as unknown as BrowserSurfaceViewPort,
     });
-    const nextBrowserRuntimeBroker = await startBrowserRuntimeBroker(browserSurfaceHost);
+    const surfaceHost = browserSurfaceHost;
+    const nextBrowserRuntimeBroker = await startBrowserRuntimeBroker(
+      surfaceHost,
+      createBrowserProfileStore({
+        partitionsDirectory: browserProfilesDirectory(),
+        sessionFor: (partition) => session.fromPartition(partition),
+        closeProfilePages: (profile) => surfaceHost.closeProfileContexts(profile),
+      }),
+    );
     startingBrowserBroker = nextBrowserRuntimeBroker;
     const nextComputerService = createComputerUseDesktopService({
       bundledPath: resolveDesktopNativeHelperPath(
@@ -1815,6 +1863,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
         const spec = serverSpawnSpec({
           browserBrokerToken: nextBrowserRuntimeBroker.token,
           browserBrokerUrl: nextBrowserRuntimeBroker.url,
+          browserProfilesDirectory: browserProfilesDirectory(),
           computerUseBrokerUrl: nextComputerBroker.url,
           computerUseBrokerToken: nextComputerBroker.token,
           ...(nextDeviceBroker === undefined
@@ -2209,6 +2258,27 @@ async function createWindow(): Promise<void> {
         windowId: state.windowId,
       });
 
+      const supportBundleSaver = createSupportBundleSaver<BrowserWindow>({
+        desktopBridgeSecret,
+        dialog: {
+          showSaveDialog: async (owner, options) => {
+            const chosen = await dialog.showSaveDialog(owner, {
+              title: options.title,
+              defaultPath: options.defaultPath,
+              buttonLabel: options.buttonLabel,
+              filters: [...options.filters],
+              properties: [...options.properties],
+            });
+            return { canceled: chosen.canceled, filePath: chosen.filePath ?? "" };
+          },
+        },
+        defaultDirectory: app.getPath("downloads"),
+        resolveOwnedWindow: (sender) => {
+          const owner = BrowserWindow.fromWebContents(sender as Electron.WebContents);
+          return owner !== null && owner === window ? owner : undefined;
+        },
+        serverUrl,
+      });
       let resolvedMaterial: ResolvedSidebarMaterial = presentation.material;
       let resolvedSidebarVibrancy: "sidebar" | null = presentation.vibrancy;
       const controller = createWindowPresentationController({
@@ -2247,6 +2317,7 @@ async function createWindow(): Promise<void> {
         picker: projectRootPicker,
         localPluginFolderPicker,
         runtimeBinaryPicker,
+        supportBundleSaver,
         presentationController: controller,
         refreshAuthorityAfterHostRestart: createProjectWindowAuthorityRefresh(
           host.instanceId,
@@ -2457,6 +2528,27 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           serverUrl,
           windowId,
         });
+        const supportBundleSaver = createSupportBundleSaver<BrowserWindow>({
+          desktopBridgeSecret,
+          dialog: {
+            showSaveDialog: async (owner, options) => {
+              const chosen = await dialog.showSaveDialog(owner, {
+                title: options.title,
+                defaultPath: options.defaultPath,
+                buttonLabel: options.buttonLabel,
+                filters: [...options.filters],
+                properties: [...options.properties],
+              });
+              return { canceled: chosen.canceled, filePath: chosen.filePath ?? "" };
+            },
+          },
+          defaultDirectory: app.getPath("downloads"),
+          resolveOwnedWindow: (sender) => {
+            const owner = BrowserWindow.fromWebContents(sender as Electron.WebContents);
+            return owner !== null && owner === window ? owner : undefined;
+          },
+          serverUrl,
+        });
         let resolvedMaterial: ResolvedSidebarMaterial = presentation.material;
         let resolvedSidebarVibrancy: "sidebar" | null = presentation.vibrancy;
         const controller = createWindowPresentationController({
@@ -2498,6 +2590,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           picker,
           localPluginFolderPicker,
           runtimeBinaryPicker,
+          supportBundleSaver,
           presentationController: controller,
           refreshAuthorityAfterHostRestart: createProjectWindowAuthorityRefresh(
             initialAuthorityInstanceId,
@@ -3575,6 +3668,9 @@ function installIpcHandlers(): void {
   });
   ipcMain.handle(IPC_CHANNELS.selectRuntimeBinary, async (event) => {
     return await ownedWindowContext(event).runtimeBinaryPicker(event);
+  });
+  ipcMain.handle(IPC_CHANNELS.saveSupportBundle, async (event) => {
+    return await ownedWindowContext(event).supportBundleSaver(event);
   });
   ipcMain.handle(IPC_CHANNELS.sidebarMaterialPreference, (event, preference: unknown) => {
     const context = ownedWindowContext(event);

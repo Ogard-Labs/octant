@@ -16,7 +16,7 @@ describe("a card's material", () => {
     render(<OctantCard aria-label="Frosted" variant="glass" />);
     const card = screen.getByLabelText("Frosted");
     expect(card).toHaveAttribute("data-variant", "glass");
-    // The ladder has one definition (octant.css, 0107). A second copy in
+    // The ladder has one definition (octant.css). A second copy in
     // utilities here is what this asserts against.
     expect(card.className).not.toContain("bg-card");
     expect(card.className).not.toContain("ring-");

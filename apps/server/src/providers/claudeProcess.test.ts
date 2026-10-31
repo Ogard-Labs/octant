@@ -503,7 +503,7 @@ describe("Claude runtime confinement", () => {
     // Keychain, which it does by starting `/usr/bin/security`.
     expect(launch.allowProcessFork).toBe(process.platform === "darwin");
     // The runtime answers a Plan turn by calling its own control plane, which a
-    // `none` egress would refuse before the first token (0132, 0145).
+    // `none` egress would refuse before the first token.
     expect(launch.networkEgress).toBe("allow");
   });
 

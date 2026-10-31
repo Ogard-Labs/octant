@@ -4,7 +4,8 @@ import type {
   UserAddedMcpServerRequest,
 } from "@octant/contracts/extension-rpc";
 import { Plus, X } from "lucide-react";
-import { useId, useState, type FormEvent } from "react";
+import { useEffect, useId, useState, type FormEvent } from "react";
+import { useSecretStoresClient } from "../settings/SecretStoresClientContext";
 import { thisComputerName, useHostPlatform } from "../platform";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
@@ -21,6 +22,8 @@ interface ValueRow {
   readonly name: string;
   readonly value: string;
   readonly secret: boolean;
+  /** The value is an item reference in a linked secret store, not a value. */
+  readonly fromStore: boolean;
 }
 
 export interface AddMcpServerDialogProps {
@@ -67,6 +70,26 @@ export function AddMcpServerDialog(props: AddMcpServerDialogProps) {
 function AddMcpServerForm(props: Omit<AddMcpServerDialogProps, "open">) {
   const ids = useId();
   const hostPlatform = useHostPlatform();
+  const secretStores = useSecretStoresClient();
+  // The first linked store, if any: a secret may name an item in it instead
+  // of holding a value.
+  const [linkedStore, setLinkedStore] = useState<{ kind: "onepassword"; label: string }>();
+  useEffect(() => {
+    let current = true;
+    void secretStores?.read().then(
+      (result) => {
+        if (!current || result.kind !== "secret-stores-view") return;
+        const linked = result.stores.find((store) => store.linked);
+        setLinkedStore(
+          linked === undefined ? undefined : { kind: linked.kind, label: linked.label },
+        );
+      },
+      () => undefined,
+    );
+    return () => {
+      current = false;
+    };
+  }, [secretStores]);
   const [kind, setKind] = useState<ServerKind>("stdio");
   const [name, setName] = useState("");
   const [command, setCommand] = useState("");
@@ -87,7 +110,7 @@ function AddMcpServerForm(props: Omit<AddMcpServerDialogProps, "open">) {
   const [submitting, setSubmitting] = useState(false);
 
   const addRow = () => {
-    setRows([...rows, { id: nextRowId, name: "", value: "", secret: false }]);
+    setRows([...rows, { id: nextRowId, name: "", value: "", secret: false, fromStore: false }]);
     setNextRowId(nextRowId + 1);
   };
   const changeRow = (id: number, patch: Partial<Omit<ValueRow, "id">>) =>
@@ -99,8 +122,17 @@ function AddMcpServerForm(props: Omit<AddMcpServerDialogProps, "open">) {
     const trimmedName = name.trim();
     if (trimmedName.length === 0) return setProblem("Give the server a name.");
     const values = rows
-      .map((row) => ({ name: row.name.trim(), value: row.value, secret: row.secret }))
-      .filter((row) => row.name.length > 0 || row.value.length > 0);
+      .map((row) =>
+        row.fromStore && row.secret && linkedStore !== undefined
+          ? {
+              name: row.name.trim(),
+              value: "",
+              secret: true,
+              linked: { store: linkedStore.kind, reference: row.value.trim() },
+            }
+          : { name: row.name.trim(), value: row.value, secret: row.secret },
+      )
+      .filter((row) => row.name.length > 0 || row.value.length > 0 || row.linked?.reference.length);
     const unnamed = values.find((row) => row.name.length === 0);
     if (unnamed !== undefined) {
       return setProblem(
@@ -253,22 +285,39 @@ function AddMcpServerForm(props: Omit<AddMcpServerDialogProps, "open">) {
                   value={row.name}
                 />
                 <OctantInput
-                  aria-label="Value"
+                  aria-label={row.fromStore ? "Item reference" : "Value"}
                   autoComplete="off"
                   className="settings-view__text-input"
                   onChange={(event) => changeRow(row.id, { value: event.currentTarget.value })}
+                  placeholder={row.fromStore ? "op://Vault/Item/field" : undefined}
                   spellCheck={false}
-                  type={row.secret ? "password" : "text"}
+                  type={row.secret && !row.fromStore ? "password" : "text"}
                   value={row.value}
                 />
                 <label className="mcp-server-values__secret">
                   <OctantCheckbox
                     checked={row.secret}
                     disabled={!props.secretsAvailable}
-                    onChange={(event) => changeRow(row.id, { secret: event.currentTarget.checked })}
+                    onChange={(event) =>
+                      changeRow(row.id, {
+                        secret: event.currentTarget.checked,
+                        ...(event.currentTarget.checked ? {} : { fromStore: false }),
+                      })
+                    }
                   />
                   <span>Secret</span>
                 </label>
+                {linkedStore !== undefined && row.secret ? (
+                  <label className="mcp-server-values__secret">
+                    <OctantCheckbox
+                      checked={row.fromStore}
+                      onChange={(event) =>
+                        changeRow(row.id, { fromStore: event.currentTarget.checked, value: "" })
+                      }
+                    />
+                    <span>From {linkedStore.label}</span>
+                  </label>
+                ) : null}
                 <OctantIconButton
                   label="Remove"
                   onClick={() => removeRow(row.id)}

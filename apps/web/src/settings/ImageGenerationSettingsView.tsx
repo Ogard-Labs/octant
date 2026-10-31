@@ -45,8 +45,7 @@ function sourceKey(source: {
 
 /**
  * Image generation settings section: any number of (provider, model) pairs on
- * an OpenAI-compatible instance that may also generate images
- * (`docs/decisions/0085`). Unlike Voice's two named slots, this is a bounded
+ * an OpenAI-compatible instance that may also generate images. Unlike Voice's two named slots, this is a bounded
  * list — a person may register Recraft for one model and an Azure OpenAI
  * deployment for another, alongside any dedicated OpenAI Image or Gemini
  * Image profile.

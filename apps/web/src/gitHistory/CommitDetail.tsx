@@ -4,7 +4,9 @@ import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts/code";
 import type { GitHistoryDetail } from "@octant/contracts/git-history";
 import { parseUnifiedDiff, type ParsedDiffFile } from "../code/unifiedDiff";
 import { UnifiedDiffList } from "../code/UnifiedDiffList";
+import { useCodeDiffIgnoreWhitespace } from "../code/codeDiffWhitespacePreference";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { ShellState } from "../shell/ShellState";
@@ -30,6 +32,7 @@ export function CommitDetail(props: {
   const [retry, setRetry] = useState(0);
   const [layout, setLayout] = useState("unified");
   const [fileId, setFileId] = useState("");
+  const [ignoreWhitespace, setIgnoreWhitespace] = useCodeDiffIgnoreWhitespace();
   useEffect(() => {
     const controller = new AbortController();
     setDetail(undefined);
@@ -42,6 +45,7 @@ export function CommitDetail(props: {
           checkoutId: props.checkoutId,
           oid: props.oid,
           parent,
+          ...(ignoreWhitespace ? { ignoreWhitespace: true } : {}),
         },
         controller.signal,
       )
@@ -60,7 +64,7 @@ export function CommitDetail(props: {
         },
       );
     return () => controller.abort();
-  }, [props.reader, props.threadId, props.checkoutId, props.oid, parent, retry]);
+  }, [props.reader, props.threadId, props.checkoutId, props.oid, parent, retry, ignoreWhitespace]);
   const files = useMemo(() => parseUnifiedDiff(detail?.diff ?? ""), [detail?.diff]);
   const selected = files.find((file) => file.id === fileId) ?? files[0];
   return (
@@ -71,6 +75,7 @@ export function CommitDetail(props: {
         </OctantButton>
         <code title={props.oid}>{props.oid.slice(0, 10)}</code>
       </div>
+      <WhitespaceToggle value={ignoreWhitespace} onChange={setIgnoreWhitespace} />
       {message === undefined ? null : (
         <OctantAlert className="git-history__notice" tone="warning">
           {message}
@@ -190,6 +195,21 @@ export function CommitDetail(props: {
         </>
       )}
     </section>
+  );
+}
+
+export function WhitespaceToggle(props: {
+  readonly value: boolean;
+  readonly onChange: (value: boolean) => void;
+}) {
+  return (
+    <label className="check">
+      <OctantCheckbox
+        checked={props.value}
+        onChange={(event) => props.onChange(event.target.checked)}
+      />
+      <span>Ignore whitespace</span>
+    </label>
   );
 }
 

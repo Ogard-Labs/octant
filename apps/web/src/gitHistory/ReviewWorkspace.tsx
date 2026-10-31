@@ -2,6 +2,7 @@ import { lazy, Suspense, useMemo, useState } from "react";
 import { createGitHistoryClient } from "@octant/client-runtime/git-history-client";
 import type { DockReviewToolProps } from "../shell/DockReviewTool";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
+import { LocalCommitsPanel } from "./LocalCommitsPanel";
 import { SavedAgentReview, type AgentResultReviewRequest } from "./SavedAgentReview";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { ShellState } from "../shell/ShellState";
@@ -47,6 +48,7 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
 function BoundReview(props: DockReviewToolProps) {
   const [view, setView] = useState("changes");
   const [openedHistory, setOpenedHistory] = useState(false);
+  const [openedLocal, setOpenedLocal] = useState(false);
   const reader = useMemo(
     () =>
       props.serverUrl === undefined || props.windowCapability === undefined
@@ -69,10 +71,12 @@ function BoundReview(props: DockReviewToolProps) {
             if (selected) {
               setView(selected);
               if (selected === "history") setOpenedHistory(true);
+              if (selected === "local") setOpenedLocal(true);
             }
           }}
         >
           <OctantToggleGroupItem value="changes">Working tree</OctantToggleGroupItem>
+          <OctantToggleGroupItem value="local">Local commits</OctantToggleGroupItem>
           <OctantToggleGroupItem value="history">History</OctantToggleGroupItem>
         </OctantToggleGroup>
       </div>
@@ -81,6 +85,23 @@ function BoundReview(props: DockReviewToolProps) {
           <WorkingTree {...props} />
         </Suspense>
       </div>
+      {openedLocal ? (
+        <div className="git-history__list" hidden={view !== "local"}>
+          {reader === undefined || props.checkoutId === undefined ? (
+            <ShellState
+              state="neutral"
+              title="Local commits are unavailable"
+              message="Reconnect to this checkout to see its local commits."
+            />
+          ) : (
+            <LocalCommitsPanel
+              reader={reader}
+              threadId={props.threadId}
+              checkoutId={props.checkoutId}
+            />
+          )}
+        </div>
+      ) : null}
       {openedHistory ? (
         <div className="git-history__list" hidden={view !== "history"}>
           {reader === undefined || props.checkoutId === undefined ? (

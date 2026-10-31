@@ -16,6 +16,10 @@ export type ProjectBrowserMode = typeof ProjectBrowserMode.Type;
 
 const PageAddress = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096));
 
+/** The profile a person picks for a page; the host adds the Project it belongs to. */
+export const BrowserProfileChoice = Schema.Literal("private", "project", "personal");
+export type BrowserProfileChoice = typeof BrowserProfileChoice.Type;
+
 /**
  * A person's command to the browser a Work or Code Project owns without a
  * thread.
@@ -30,6 +34,12 @@ export const ProjectBrowserCommand = Schema.Union(
     kind: Schema.Literal("open"),
     projectId: ProjectId,
     url: PageAddress,
+    /**
+     * Which store the page keeps its site data in. The host turns "project"
+     * into this Project's own profile, so a caller cannot name another
+     * Project's. Absent means Private.
+     */
+    profile: Schema.optional(BrowserProfileChoice),
   }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("current"), projectId: ProjectId }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("stop"), projectId: ProjectId }).annotations(strict),
@@ -62,6 +72,7 @@ export const ProjectBrowserView = Schema.Struct({
       contextId: BrowserContextId,
       state: BrowserContextState,
       presentation: Schema.optional(BrowserPresentationKind),
+      profile: Schema.optional(BrowserProfileChoice),
     }).annotations(strict),
   ),
   page: Schema.optional(ProjectBrowserPage),
@@ -80,6 +91,9 @@ export const ProjectBrowserRefusalReason = Schema.Literal(
   "unavailable",
   "invalid",
   "authority-revoked",
+  // The page asked for a profile the host cannot open: a Browser that is not
+  // the desktop app's own, or a Project whose store is locked.
+  "profile-unavailable",
 );
 export type ProjectBrowserRefusalReason = typeof ProjectBrowserRefusalReason.Type;
 

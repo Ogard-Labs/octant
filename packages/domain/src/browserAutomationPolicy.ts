@@ -86,16 +86,6 @@ const SUPPORTED_BROWSER_KEYS = new Set([
   "PageDown",
 ]);
 
-export function evaluateProfileMode(
-  requestedMode: "isolated" | "existing-profile",
-  policy: BrowserContextPolicy,
-): BrowserPolicyDecision {
-  if (requestedMode === "existing-profile" && policy.profileMode !== "existing-profile") {
-    return { kind: "denied", reason: "Existing-profile mode requires explicit opt-in in policy." };
-  }
-  return { kind: "allowed" };
-}
-
 export function canRecordBrowserObservation(
   observation: BrowserObservation,
   context: BrowserContextRecord,

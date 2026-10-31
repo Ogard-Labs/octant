@@ -382,6 +382,34 @@ describe("Project creation and lifecycle", () => {
       ).toThrow(ProjectPolicyRejected);
     });
 
+    it("refuses a recipe moving to a provider that needs setup, and lets one already on it be edited or removed", () => {
+      const cloud = decodeLeasableDesktopProvider({
+        providerId: "e2b",
+        displayName: "E2B",
+        locality: "cloud",
+        billed: true,
+        needsSetup: "no-credential-store",
+      });
+      const keyed = {
+        ...recipe,
+        providerId: cloud.providerId,
+        hourlyCostUsdCents: 25,
+        credentialRef: decodeDesktopCredentialRef("5f0c6f7e-7b0a-4d43-9a3c-2f1d8f4e6a10"),
+      };
+      const project = makeProject(ids.code, "0/1", { type: "code" });
+      expect(() => changeCodeProjectDesktopRecipe(project, keyed, [cloud], updatedAt)).toThrow(
+        ProjectPolicyRejected,
+      );
+      const onCloud = { ...project, desktopRecipe: keyed } as typeof project;
+      const edited = { ...keyed, idleMinutes: 30 };
+      expect(
+        changeCodeProjectDesktopRecipe(onCloud, edited, [cloud], updatedAt).desktopRecipe,
+      ).toEqual(edited);
+      expect(changeCodeProjectDesktopRecipe(onCloud, null, [cloud], updatedAt)).not.toHaveProperty(
+        "desktopRecipe",
+      );
+    });
+
     it("keeps a cloud recipe only when it names a credential, and lets it reach the network", () => {
       const cloud = decodeLeasableDesktopProvider({
         providerId: "e2b",

@@ -3,7 +3,7 @@
 
    Repoints the design system's --oct-* colour and font tokens at the
    runtime theme the app's users actually picked. The authority order is
-   the one docs/decisions/0016 states: `--octant-*` (packages/theme via
+   the one DESIGN.md states: `--octant-*` (packages/theme via
    ThemeSettingsProvider / TypographyProvider) is the single source of
    visual truth; `--oct-*` is a consumer, exactly like shadcn-theme.css.
 
@@ -125,10 +125,10 @@
   /* ─── focus and scrim ───────────────────────────────────────────────
      The focus role stays available to imported themes and accent tints, but
      it is never painted as the indicator: a themed focus colour would put a
-     coloured halo back around every control (0094).
+     coloured halo back around every control.
 
-     The edge keyboard focus does paint is mixed from the foreground instead
-     (0105). Because the mix keeps its alpha, it composites against whatever
+     The edge keyboard focus does paint is mixed from the foreground instead.
+     Because the mix keeps its alpha, it composites against whatever
      surface the control sits on and holds about 4.9:1 there in both schemes,
      which a fixed hex could not do across the workspace, the sidebar, and the
      control fill at once. */

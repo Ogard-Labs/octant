@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { findDecisionViolations, type ScannedFile } from "./check-decisions";
 
 function record(number: string, slug: string, body: string): ScannedFile {
-  return { path: `docs/decisions/${number}-${slug}.md`, content: body };
+  return { path: `docs/legacy/decisions/${number}-${slug}.md`, content: body };
 }
 
 function wellFormed(number: string, title: string, status = "Accepted"): string {
@@ -28,7 +28,7 @@ function wellFormed(number: string, title: string, status = "Accepted"): string 
 
 function index(...rows: ReadonlyArray<string>): ScannedFile {
   return {
-    path: "docs/decisions/README.md",
+    path: "docs/legacy/decisions/README.md",
     content: ["## Index", "", "| ADR | Title | Status |", "| --- | --- | --- |", ...rows, ""].join(
       "\n",
     ),
@@ -117,14 +117,20 @@ describe("findDecisionViolations", () => {
     ).toEqual(["0001 is missing from the index", "0002 is indexed but has no record"]);
   });
 
-  it("rejects a contract that routes to a record that does not exist", () => {
+  it("refuses a record written to the archive's former folder", () => {
     expect(
-      reasons([
+      findDecisionViolations([
         record("0001", "plugin-architecture", wellFormed("0001", "Plugin architecture")),
         index(row("0001", "plugin-architecture", "Plugin architecture")),
-        { path: "AGENTS.md", content: "| Sandbox | `docs/decisions/0009` |\n" },
+        { path: "docs/decisions/0165-a-new-rule.md", content: wellFormed("0165", "A new rule") },
       ]),
-    ).toEqual(["routes to decision record 0009, which does not exist"]);
+    ).toEqual([
+      {
+        path: "docs/decisions/0165-a-new-rule.md",
+        reason:
+          "the decision archive moved to docs/legacy/decisions and is closed; put the rule and its rationale in the owning specification and the decisions overview",
+      },
+    ]);
   });
 
   it("refuses a record added after the archive closed", () => {
@@ -132,10 +138,10 @@ describe("findDecisionViolations", () => {
       findDecisionViolations([
         record("0165", "a-new-rule", wellFormed("0165", "A new rule")),
         index(row("0165", "a-new-rule", "A new rule")),
-      ]).filter((violation) => violation.path === "docs/decisions/0165-a-new-rule.md"),
+      ]).filter((violation) => violation.path === "docs/legacy/decisions/0165-a-new-rule.md"),
     ).toEqual([
       {
-        path: "docs/decisions/0165-a-new-rule.md",
+        path: "docs/legacy/decisions/0165-a-new-rule.md",
         reason:
           "the decision archive closed at 0164 and holds only 0001 to that number; put the rule and its rationale in the owning specification",
       },
@@ -146,24 +152,60 @@ describe("findDecisionViolations", () => {
       findDecisionViolations([
         record("0000", "a-new-rule", wellFormed("0000", "A new rule")),
         index(row("0000", "a-new-rule", "A new rule")),
-      ]).filter((violation) => violation.path === "docs/decisions/0000-a-new-rule.md"),
+      ]).filter((violation) => violation.path === "docs/legacy/decisions/0000-a-new-rule.md"),
     ).toHaveLength(1);
   });
 });
 
-describe("current specification references", () => {
+describe("current documents citing the archive", () => {
   it.each([
-    ["docs/architecture.md", "[history](decisions/0009-missing.md)"],
-    ["DESIGN.md", "`docs/decisions/0009`"],
-    ["docs/design/workspace.md", "[history](../decisions/0009-missing.md)"],
-  ])("reports missing history from %s", (path, content) => {
+    ["docs/architecture.md", "[history](legacy/decisions/0001-plugin-architecture.md)"],
+    ["DESIGN.md", "`docs/decisions/0001`"],
+    ["docs/design/workspace.md", "[history](../legacy/decisions/0001-plugin-architecture.md)"],
+    ["AGENTS.md", "| Sandbox | `docs/legacy/decisions/0009` |"],
+    ["docs/design/canvas.md", "See the [old plan](../legacy/plans/a-plan.md)."],
+  ])("refuses a citation in %s, even of a record that exists", (path, content) => {
     expect(
       findDecisionViolations([
         record("0001", "plugin-architecture", wellFormed("0001", "Plugin architecture")),
         index(row("0001", "plugin-architecture", "Plugin architecture")),
         { path, content },
       ]),
-    ).toEqual([{ path, reason: "routes to decision record 0009, which does not exist" }]);
+    ).toEqual([
+      {
+        path,
+        reason: `cites the decision archive (\`${content}\`), which has no authority; state the rule or its reason in the owning specification`,
+      },
+    ]);
+  });
+
+  it("lets a document name the legacy folder and link its README", () => {
+    expect(
+      reasons([
+        record("0001", "plugin-architecture", wellFormed("0001", "Plugin architecture")),
+        index(row("0001", "plugin-architecture", "Plugin architecture")),
+        { path: "docs/design/README.md", content: "History: [legacy](../legacy/README.md).\n" },
+        { path: "AGENTS.md", content: "The archive in `docs/legacy/decisions/` is closed.\n" },
+        { path: "docs/design/decisions.md", content: "[Decisions](decisions.md#modes)\n" },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("lets the archive cite itself", () => {
+    expect(
+      reasons([
+        record(
+          "0002",
+          "second",
+          wellFormed("0002", "Second").replace(
+            "Why.",
+            "See [0001](0001-first.md) and docs/decisions/0001.",
+          ),
+        ),
+        record("0001", "first", wellFormed("0001", "First")),
+        index(row("0001", "first", "First"), row("0002", "second", "Second")),
+      ]),
+    ).toEqual([]);
   });
 });
 
@@ -173,8 +215,11 @@ describe("findDecisionViolations, on the gaps a weaker gate leaves", () => {
     // the missing index row this gate exists to catch would pass unnoticed.
     expect(
       reasons([
-        { path: "docs/decisions/0001-first.md", content: wellFormed("0001", "First") },
-        { path: "docs/decisions/0002-new_feature.md", content: wellFormed("0002", "Second") },
+        { path: "docs/legacy/decisions/0001-first.md", content: wellFormed("0001", "First") },
+        {
+          path: "docs/legacy/decisions/0002-new_feature.md",
+          content: wellFormed("0002", "Second"),
+        },
         index(row("0001", "first", "First")),
       ]),
     ).toContain("is not named `00NN-short-slug.md`, so no rule here can see it");
@@ -228,7 +273,7 @@ describe("findDecisionViolations, on the gaps a weaker gate leaves", () => {
     );
     expect(
       reasons([
-        { path: "docs/decisions/0001-first.md", content: doubled },
+        { path: "docs/legacy/decisions/0001-first.md", content: doubled },
         index(row("0001", "first", "First", "Proposed")),
       ]),
     ).toContain("declares a status 2 times");
@@ -249,9 +294,9 @@ describe("findDecisionViolations, on the gaps a weaker gate leaves", () => {
     ].join("\n");
     expect(
       reasons([
-        { path: "docs/decisions/0001-first.md", content: documented },
+        { path: "docs/legacy/decisions/0001-first.md", content: documented },
         {
-          path: "docs/decisions/README.md",
+          path: "docs/legacy/decisions/README.md",
           content: [
             "## Index",
             "",
@@ -287,25 +332,9 @@ describe("findDecisionViolations, on the gaps a weaker gate leaves", () => {
     ].join("\n");
     expect(
       reasons([
-        { path: "docs/decisions/0001-first.md", content: documented },
+        { path: "docs/legacy/decisions/0001-first.md", content: documented },
         index(row("0001", "first", "First")),
       ]),
     ).toEqual([]);
-  });
-
-  it("checks the numbers a written range only implies", () => {
-    // Both written ends exist, so only the implied middle can fail here. That is
-    // exactly the reference the plain matcher cannot see.
-    expect(
-      reasons([
-        record("0001", "first", wellFormed("0001", "First")),
-        record("0003", "third", wellFormed("0003", "Third")),
-        index(row("0001", "first", "First"), row("0003", "third", "Third")),
-        {
-          path: "AGENTS.md",
-          content: "| Area | `docs/decisions/0001`–`docs/decisions/0003` |\n",
-        },
-      ]),
-    ).toContain("routes to decision record 0002, which does not exist");
   });
 });

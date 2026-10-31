@@ -6,7 +6,7 @@ provider. It authorizes no Octant-owned OAuth flow, no new transport, and no
 exception to 0009's confinement.
 
 Current state: Octant no longer offers fx until a stock fx release can load
-certificates under its sandbox; see [Provider runtimes](design/provider-runtimes.md).
+certificates under its sandbox; see [Provider runtimes](../design/provider-runtimes.md).
 This note stays as history.
 
 ## Pin

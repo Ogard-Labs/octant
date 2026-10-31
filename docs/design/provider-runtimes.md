@@ -420,8 +420,7 @@ distribution.
 | `qoder`                   | Qoder CLI          | `npx @qoder-ai/qodercli --acp`                         | Blocked: registry quarantine (initialize fails)                                                     |
 | `vtcode`                  | VT Code            | `vtcode acp` (binary)                                  | Blocked: registry quarantine (missing Windows builds) until it is lifted                            |
 
-fx ships as an ACP profile (`fx`) but is not in the registry; see
-[fx-acp-compatibility.md](../fx-acp-compatibility.md).
+fx ships as an ACP profile (`fx`) but is not in the registry.
 
 fx is also withheld from users. `WITHHELD_BUNDLED_PROVIDER_DRIVERS` in
 `packages/plugin-host/src/bundledProviderDrivers.ts` holds its driver out of

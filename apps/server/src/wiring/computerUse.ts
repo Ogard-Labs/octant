@@ -41,7 +41,11 @@ import {
 } from "../computerUse/desktopLeaseService";
 import { createHostLocalDesktopLaunch } from "../computerUse/hostLocalDesktopLaunch";
 import { createDesktopHttpsPort } from "../computerUse/desktopHttpsPort";
-import { createDesktopDaemonPort } from "../computerUse/desktopDaemonPort";
+import {
+  createDesktopDaemonPort,
+  desktopDaemonSocketReady,
+} from "../computerUse/desktopDaemonPort";
+import { bundledDesktopProviders } from "../computerUse/bundledDesktopProviders";
 import { leasableProvidersOf } from "../computerUse/computerUseDestination";
 import { readProjectDesktopRecipe } from "../computerUse/projectDesktopRecipe";
 import {
@@ -60,7 +64,6 @@ import {
 import {
   createCuaDesktopProvider,
   CUA_DESKTOP_DAEMON,
-  CUA_DESKTOP_PROVIDER_ID,
 } from "../plugins/cuaDesktop/cuaDesktopProvider";
 import { makeDesktopProviderCredentialBrokerClient } from "../providers/credentialBrokerClient";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -164,16 +167,13 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
             persistence.desktopLeaseProjection.get(leaseId)?.lease.state === "provisioning",
         })
       : undefined;
-  const hostLocalDesktops =
+  const hostLocalDesktop =
     hostLocalDesktopLaunch === undefined
-      ? []
-      : [
-          {
-            provider: createHostLocalDesktopProvider(hostLocalDesktopLaunch),
-            effective:
-              hostLocalDesktopLaunch.readiness(HOST_LOCAL_DESKTOP_PROGRAMS).status === "ready",
-          },
-        ];
+      ? undefined
+      : {
+          provider: createHostLocalDesktopProvider(hostLocalDesktopLaunch),
+          ready: hostLocalDesktopLaunch.readiness(HOST_LOCAL_DESKTOP_PROGRAMS).status === "ready",
+        };
   // A cloud driver reaches its provider only through this port: its own
   // declared hosts, and the person's key from the desktop-provider namespace
   // of the credential broker, attached only for a credential reference one of
@@ -198,38 +198,40 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
           ),
       credential: async (ref) => desktopProviderCredentials?.resolve(String(ref)),
     });
-  // The bundled E2B driver is loaded on every host, so teardown and restart
-  // reconciliation reach any E2B lease a host ever journaled. No host offers
-  // it for leasing yet, so no recipe may name it: a billed provider waits for
-  // the person's own opt-in and its key entry.
-  const cloudDesktops = [
-    {
-      provider: createE2bDesktopProvider(
-        cloudDesktopPort(E2B_DESKTOP_PROVIDER_ID, E2B_DESKTOP_HOSTS),
-      ),
-      effective: false,
-    },
-  ];
+  // The bundled E2B driver is loaded and offered on every host. Offering is
+  // not enabling: a person opts in by saving a recipe that names it with
+  // their own key, and a host with no credential store lists it as needing
+  // setup. Every billed start still asks the person first.
+  const e2bDesktop = createE2bDesktopProvider(
+    cloudDesktopPort(E2B_DESKTOP_PROVIDER_ID, E2B_DESKTOP_HOSTS),
+  );
   // The bundled Cua Spaces driver reaches the person's own `cua daemon` only
   // through the host's daemon port, on the socket and methods it declares.
-  // It is loaded on Linux for teardown and offered nowhere until the
-  // maintainer's live smoke passes. Octant asks the person's daemon nothing,
-  // not even a restart listing, until this host has journaled a Cua lease:
-  // a listing makes the daemon wait for Cua's relay, and a person who never
-  // chose Cua in Octant has nothing of Octant's there to find.
+  // It is listed from the first start, so a recipe can name it before any
+  // lease exists. The lease service asks the daemon nothing, not even a
+  // restart listing, until this host has journaled a Cua lease, and whether
+  // the daemon is there is read from its socket without connecting.
   const cuaDesktop =
     process.platform === "linux"
       ? createCuaDesktopProvider(createDesktopDaemonPort({ daemon: () => CUA_DESKTOP_DAEMON }))
       : undefined;
-  const cuaLeaseJournaled = () =>
-    persistence.desktopLeaseProjection
-      .list()
-      .some((record) => String(record.lease.providerId) === String(CUA_DESKTOP_PROVIDER_ID));
-  const loadedDesktopProviders = [...hostLocalDesktops, ...cloudDesktops];
-  const desktopProviders = () =>
-    cuaDesktop === undefined || !cuaLeaseJournaled()
-      ? loadedDesktopProviders
-      : [...loadedDesktopProviders, { provider: cuaDesktop, effective: false }];
+  let cuaDaemonReady = false;
+  const refreshCuaDaemonReady = () => {
+    if (cuaDesktop === undefined) return;
+    void desktopDaemonSocketReady({ daemon: () => CUA_DESKTOP_DAEMON })
+      .catch(() => false)
+      .then((ready) => {
+        cuaDaemonReady = ready;
+      });
+  };
+  refreshCuaDaemonReady();
+  const desktopProviders = bundledDesktopProviders({
+    ...(hostLocalDesktop === undefined ? {} : { hostLocal: hostLocalDesktop }),
+    cloud: e2bDesktop,
+    ...(cuaDesktop === undefined ? {} : { daemon: cuaDesktop }),
+    credentialStore: () => desktopProviderCredentials !== undefined,
+    daemonReady: () => cuaDaemonReady,
+  });
   const desktopLeases = createDesktopLeaseService({
     journal: persistence.journal,
     projection: persistence.desktopLeaseProjection,
@@ -367,7 +369,10 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
   const stopDesktopLeaseCommits = persistence.journal.subscribeCommitted(() =>
     queueMicrotask(sweepDesktopLeases),
   );
-  const desktopLeaseTimer = setInterval(sweepDesktopLeases, DESKTOP_LEASE_SWEEP_INTERVAL_MS);
+  const desktopLeaseTimer = setInterval(() => {
+    refreshCuaDaemonReady();
+    sweepDesktopLeases();
+  }, DESKTOP_LEASE_SWEEP_INTERVAL_MS);
   desktopLeaseTimer.unref();
   const stopDesktopLeases = () => {
     stopDesktopLeaseCommits();
@@ -375,12 +380,13 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
   };
   // The tool service exists wherever a send can bind a destination: this
   // Mac's screen, or a desktop a Linux host can lease.
+  const leasingOffered = desktopProviders().some((entry) => entry.effective);
   const computerUseTools =
-    computerUseDesktop === undefined && hostLocalDesktops.length === 0
+    computerUseDesktop === undefined && !leasingOffered
       ? undefined
       : createComputerUseToolService({
           ...(computerUseDesktop === undefined ? {} : { desktop: computerUseDesktop }),
-          ...(hostLocalDesktops.length === 0
+          ...(!leasingOffered
             ? {}
             : {
                 leases: createLeasedComputerUsePort(

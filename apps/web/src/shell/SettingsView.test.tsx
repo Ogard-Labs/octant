@@ -1498,6 +1498,48 @@ describe("SettingsView", () => {
     expect(await screen.findByText(/00000000-0000-4000-8000-0000000000aa/)).toBeInTheDocument();
   });
 
+  it("offers Save diagnostics on the Host page beside the failure report", async () => {
+    const diagnosticsExportClient = {
+      readJournalGrowth: vi.fn(async () => new Promise<never>(() => undefined)),
+      exportEvidence: vi.fn(),
+      readSupportBundlePreview: vi.fn(),
+      exportSupportBundle: vi.fn(),
+    };
+    renderSettings({ diagnosticsExportClient: diagnosticsExportClient as never });
+    navigateTo("Host");
+    expect(screen.getByRole("button", { name: "Save diagnostics…" })).toBeEnabled();
+    expect(screen.getByText("Failure report")).toBeInTheDocument();
+    expect(diagnosticsExportClient.readSupportBundlePreview).not.toHaveBeenCalled();
+  });
+
+  it("saves diagnostics through the desktop bridge's native dialog when it has one", async () => {
+    const diagnosticsExportClient = {
+      readJournalGrowth: vi.fn(async () => new Promise<never>(() => undefined)),
+      exportEvidence: vi.fn(),
+      readSupportBundlePreview: vi.fn(async () => ({
+        bundleVersion: 1,
+        generatedAt: "2026-10-31T10:00:00.000Z",
+        sections: [],
+        neverIncluded: ["Messages, prompts, replies, or notes."],
+      })),
+      exportSupportBundle: vi.fn(),
+    };
+    const saveSupportBundle = vi.fn(async () => ({
+      kind: "saved" as const,
+      fileName: "octant-diagnostics-20261031.zip",
+    }));
+    renderSettings({
+      diagnosticsExportClient: diagnosticsExportClient as never,
+      hostBridge: { saveSupportBundle } as never,
+    });
+    navigateTo("Host");
+    fireEvent.click(screen.getByRole("button", { name: "Save diagnostics…" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Save file" }));
+
+    expect(await screen.findByText(/Saved octant-diagnostics-20261031\.zip/)).toBeInTheDocument();
+    expect(diagnosticsExportClient.exportSupportBundle).not.toHaveBeenCalled();
+  });
+
   it("mounts the Skills & Extensions settings view when an extension client is provided", async () => {
     const extensionClient = {
       snapshot: vi.fn(async () => ({

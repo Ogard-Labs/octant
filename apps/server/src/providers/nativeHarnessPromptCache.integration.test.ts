@@ -21,7 +21,7 @@ import { nativeHarnessInstructions } from "../harness/nativeHarnessInstructions"
 
 /**
  * Real-endpoint proof that the harness keeps a prompt cache warm across the
- * steps of one tool turn (decision 0067). Opt-in: set the smoke flag and the
+ * steps of one tool turn. Opt-in: set the smoke flag and the
  * credentials for the endpoint, or the case is skipped — missing credentials
  * remain a named blocker, never a false pass. Every request after the first
  * must report cache-read tokens covering the prefix the first request sent.

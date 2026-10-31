@@ -53,7 +53,7 @@ icon buttons (Work presents the Chat and Work domains together; see
 threads, and settings (the sidebar's anatomy is in [DESIGN.md](../../DESIGN.md#shell-and-layout)); an
 integrated borderless top chrome; a central workspace; and an optional right
 dock. Mode changes alter content, authority, default composition, and density,
-never the navigation grammar. See [decisions/0015-workspace-shell-model.md](../decisions/0015-workspace-shell-model.md).
+never the navigation grammar.
 
 **Home** leads the places: first in the icon rail, above Inbox, and among the
 sidebar's own actions when no rail stands beside it. It closes any reader and
@@ -215,8 +215,7 @@ thread a turn reopens or wakes it on the server. One host sweep archives
 completed threads of every mode once their completion is older than the
 `completedThreadArchiveAfterDays` shell setting (default seven days, `null`
 for never), re-deciding against each mode's authoritative record and
-journaling the ordinary thread update as the `system` actor. It archives only;
-see [decisions/0088-completed-and-snoozed-threads.md](../decisions/0088-completed-and-snoozed-threads.md).
+journaling the ordinary thread update as the `system` actor. It archives only.
 
 **Put away** is the only name people see for this state, beside the board's
 Done: the sidebar shelf, the row-menu action, the Review page action, the
@@ -305,8 +304,7 @@ so a later per-environment icon can replace it in place. Tab
 geometry and close-control presentation are shared with dock tools under
 [Content tabs](../../DESIGN.md#content-tabs).
 
-These tabs add no persisted layout or authority; see
-[decision 0156](../decisions/0156-content-opens-beside-the-conversation.md).
+These tabs add no persisted layout or authority.
 
 **Opening into tabs.** A single click on a sidebar thread opens it in the
 active pane in place: it takes over the pane's open tab unless that tab was
@@ -425,6 +423,14 @@ through `GitHistoryReader` and the authenticated Code checkout-read boundary;
 its Git subprocesses are network-denied and its data is an ephemeral read,
 not a second journal. Pages anchor to immutable Git tips, and commit details
 compare immutable object IDs with an explicit parent for merges.
+Review also owns Local commits: the commits on the thread's branch that its
+upstream does not have, or that its base branch does not have when it has no
+upstream, each opening to its own diff. The host picks the comparison and
+names it in the view; it never fetches. A listing holds the newest 100
+commits and says when older ones are not shown. **Ignore whitespace** is one
+per-person choice, kept in the browser profile and followed by every mounted view, that the Working tree and
+commit diffs apply by asking Git for `-w`. It changes only the diff text: the
+changed-path list, line totals and checkout state token are unchanged.
 A pull request opened in Review shows, under its header, an **Automatic
 actions** section with two switches: **Merge when ready** and **Auto-fix**.
 Each has one status line under its name that says what it is doing now (off,
@@ -506,8 +512,7 @@ rather than given an assumed scope. Hand off
 own provider for a six-section hand-off document in one tool-free request,
 keeps it as a Canvas of the thread, and opens that Canvas in the dock; a
 running turn, an unready provider, or a thread outside a Project is refused as
-an ordinary answer (see
-[decisions/0080-hand-off-writes-a-canvas-from-the-export-cut.md](../decisions/0080-hand-off-writes-a-canvas-from-the-export-cut.md)). The dock follows the active
+an ordinary answer. The dock follows the active
 pane's thread and Project, restores that subject's open tools, and presents an
 explicit unavailable state when the newly active pane cannot describe the
 selected tool — never the previous pane's content. Hiding a Browser or Terminal
@@ -546,8 +551,9 @@ which the computer's windows share like a browser's history, and never sent
 to the host; a running server's address is not repeated there, and choosing a row
 opens it. With neither, the start page invites an address. **Browser profiles.**
 A page is Private unless the person picks the Project or Personal profile from
-the control at the left of the address field; the toolbar's puzzle-piece button
-lists the profile's enabled extensions. The rules are in
+the control at the left of the address field, whose menu also signs out of a
+stored profile (the toolbar's extensions button is part of the not-yet-built
+extensions design). The Project browser dock has the same control. The rules are in
 [Browser profiles and extensions](browser-profiles.md). **Browser captures.** The Browser pane toolbar has a
 Screenshot button (a camera icon beside Open in default browser) that keeps the
 page's picture with the thread, and a thread that kept screenshots shows a
@@ -687,8 +693,7 @@ forest of parent threads and the runs they launched, and Graph can save that for
 cursor-readable and byte- and count-bounded, with explicit complete, stale, and
 unavailable states. Provider-native live transcripts remain unavailable unless
 their normalized provider capability supplies an equivalent host-authorized
-read; a host-retained final reply stays readable after completion. See
-[decisions/0050-bounded-live-child-conversation.md](../decisions/0050-bounded-live-child-conversation.md).
+read; a host-retained final reply stays readable after completion.
 
 Saved child-generation file comparisons open in the existing Review tool from
 Agents result history. The selection carries the parent, managed child and
@@ -723,10 +728,7 @@ concurrently, results reconcile in stable Project order, and every refresh path
 remains within preview bounds. The journal never stores that cache and never
 sees a per-poll event; it stores only the user's opt-in toggle and exact PR
 identities already produced by Code operations. The bounded list cache survives
-host restart and is cleared when GitHub authority is revoked (see
-[decisions/0064-pull-request-observation-cadence.md](../decisions/0064-pull-request-observation-cadence.md)
-and
-[decisions/0076-pull-request-snapshot-survives-restart.md](../decisions/0076-pull-request-snapshot-survives-restart.md)).
+host restart and is cleared when GitHub authority is revoked.
 
 **Answering from a Board card.** A Work or Code card whose thread waits on the
 person shows what it asks and the answers, so a column of waiting cards is

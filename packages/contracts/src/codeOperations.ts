@@ -407,6 +407,8 @@ const ObserveGit = Schema.Struct({
   ...OperationScope,
   gitOperationId: CodeGitOperationId,
   maxDiffBytes: Schema.Int.pipe(Schema.between(1, 1024 * 1024)),
+  /** Read the diff with Git's `-w`; only the diff text changes, never the checkout state. */
+  ignoreWhitespace: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 const StageGit = Schema.Struct({
   kind: Schema.Literal("stage-git"),
@@ -613,6 +615,7 @@ const ReviewRun = Schema.Struct({
   ...OperationScope,
   gitOperationId: CodeGitOperationId,
   maxDiffBytes: Schema.Int.pipe(Schema.between(1, 1024 * 1024)),
+  ignoreWhitespace: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 
 /**
@@ -636,14 +639,44 @@ const MergeRun = Schema.Struct({
   authorization: GitAuthorization,
 }).annotations(strict);
 
+/**
+ * Open the pull request for the thread's own delivery branch. The head is
+ * always the host's resolved delivery branch; a caller chooses only the text,
+ * whether it opens as a draft, and, for a stacked pull request, a base other
+ * than the delivery target's — which the host accepts only when that branch
+ * has an open pull request of its own in the same repository.
+ */
 const CreatePullRequest = Schema.Struct({
   kind: Schema.Literal("create-pull-request"),
   ...OperationScope,
   title: boundedNonEmptyText(512),
   body: boundedText(MAX_CODE_OPERATION_TEXT_BYTES),
+  draft: Schema.optional(Schema.Boolean),
+  baseBranch: Schema.optional(GitBranchName),
   idempotencyKey: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9._:-]{1,255}$/)),
   authorization: GitAuthorization,
 }).annotations(strict);
+/**
+ * Change the open pull request of the thread's own delivery branch: its
+ * title, its body, or whether it is a draft (`draft: false` marks it ready
+ * for review). Merging, closing, and every other pull-request change stay
+ * out of reach.
+ */
+const UpdatePullRequest = Schema.Struct({
+  kind: Schema.Literal("update-pull-request"),
+  ...OperationScope,
+  title: Schema.optional(boundedNonEmptyText(512)),
+  body: Schema.optional(boundedText(MAX_CODE_OPERATION_TEXT_BYTES)),
+  draft: Schema.optional(Schema.Boolean),
+  authorization: GitAuthorization,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (command) =>
+        command.title !== undefined || command.body !== undefined || command.draft !== undefined,
+    ),
+  );
 const ObservePullRequest = Schema.Struct({
   kind: Schema.Literal("observe-pull-request"),
   ...OperationScope,
@@ -754,6 +787,7 @@ export const CODE_OPERATION_COMMAND_KINDS = [
   "commit-git",
   "push-git",
   "create-pull-request",
+  "update-pull-request",
   "observe-pull-request",
   "create-review-finding",
   "update-review-finding",
@@ -784,6 +818,7 @@ export const CodeOperationCommand = Schema.Union(
   DraftGitText,
   RestoreGitCheckpoint,
   CreatePullRequest,
+  UpdatePullRequest,
   ObservePullRequest,
   CreateReviewFinding,
   UpdateReviewFinding,
@@ -986,6 +1021,8 @@ const PullRequestResult = Schema.Union(
     headBranch: GitBranchName,
     baseRepository: boundedNonEmptyText(512),
     baseBranch: GitBranchName,
+    /** Whether GitHub holds it as a draft, when the host knows. */
+    draft: Schema.optional(Schema.Boolean),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("pull-request-state"),
@@ -1001,6 +1038,7 @@ const PullRequestResult = Schema.Union(
         "dirty",
         "not-mergeable",
         "no-remote",
+        "invalid-base",
       ),
     ),
   }).annotations(strict),
@@ -2027,11 +2065,11 @@ export const CodeThreadMetadataRecoveryReason = Schema.Literal(
 export type CodeThreadMetadataRecoveryReason = typeof CodeThreadMetadataRecoveryReason.Type;
 
 /**
- * A board card's plan-completion count (0051): how many of the thread's live
+ * A board card's plan-completion count: how many of the thread's live
  * plan's steps are done, out of how many the plan carries. `none` covers a
- * thread with no live plan (0027 keeps at most one). Only the count crosses
+ * thread with no live plan (a thread keeps at most one). Only the count crosses
  * onto the board; step titles, rationale, and per-step status stay in the
- * thread's own Plan dock (0044).
+ * thread's own Plan dock.
  */
 export const CodeBoardPlanProgress = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("none") }).annotations(strict),
@@ -2355,6 +2393,7 @@ const APPROVAL_GATED_OPERATION_KINDS = new Set([
   "commit-git",
   "push-git",
   "create-pull-request",
+  "update-pull-request",
   "create-review-finding",
   "update-review-finding",
 ]);

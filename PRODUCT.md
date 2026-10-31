@@ -40,9 +40,8 @@ The product name is Octant. The interface should remain an original quiet graphi
 
 ## Evidence on Hand
 
-- Product and architecture contract: `docs/architecture.md`, `DESIGN.md`, and `docs/decisions/`; contributor contract: `AGENTS.md`.
+- Product and architecture contract: `docs/design/decisions.md` (every current decision and its requirements), `docs/architecture.md`, `DESIGN.md`, and `docs/design/`; contributor contract: `AGENTS.md`.
 - Current visual contract: `DESIGN.md`.
-- Approved workspace and dogfood plan: `docs/plans/ade-spine-and-first-run-review.md`.
 - Maintainer-supplied reference screenshots for sidebar, terminal, Environment, and overall workspace density.
 - No external customer claims, benchmarks, testimonials, or telemetry are available and none should be fabricated.
 

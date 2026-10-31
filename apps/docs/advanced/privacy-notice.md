@@ -46,6 +46,12 @@ On the host, Octant holds:
 - **Secrets in the credential store** — the API keys you entered and the key
   a direct endpoint sign-in issued. They sit in the macOS Keychain (the
   Secret Service on Linux) behind those references, never in the journal.
+- **Linked secret stores** — which store you linked and when, in a small file
+  under the host data directory, and the address of each item you pointed a
+  key at (kept in the credential store behind the same reference). An address
+  names an item and is not a secret. The key it points at is fetched from your
+  password manager when a request needs it and is never stored, logged, or
+  journaled by Octant.
 - **Installed extension packages** under the host data directory.
 - **Logs** under the host logs directory.
 

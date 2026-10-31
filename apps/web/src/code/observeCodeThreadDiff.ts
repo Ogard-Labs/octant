@@ -12,6 +12,11 @@ export interface CodeDiffScope {
   readonly threadId: CodeThreadId;
 }
 
+export interface CodeDiffReadOptions {
+  /** Ask Git to leave whitespace-only changes out of the diff text. */
+  readonly ignoreWhitespace?: boolean;
+}
+
 /**
  * What a thread changed: the checkout's local changes and, when the checkout
  * is clean, the branch diff a finished run produced.
@@ -24,6 +29,7 @@ export async function observeCodeThreadDiff(
   client: Pick<CodeClient, "executeOperation">,
   nextUuid: () => string,
   scope: CodeDiffScope,
+  options: CodeDiffReadOptions = {},
 ): Promise<CodeDiffProjection> {
   try {
     const checkout = await client.executeOperation({
@@ -31,6 +37,7 @@ export async function observeCodeThreadDiff(
       operationId: nextUuid() as never,
       gitOperationId: nextUuid() as never,
       maxDiffBytes: MAX_DIFF_BYTES,
+      ...(options.ignoreWhitespace === true ? { ignoreWhitespace: true } : {}),
       ...scope,
     });
     if (checkout.kind === "operation-failed") {
@@ -45,7 +52,7 @@ export async function observeCodeThreadDiff(
     if (checkout.changedPaths.length > 0) {
       return { state: "available", observation: checkout, ...scope };
     }
-    const run = await readRunReview(client, nextUuid, scope);
+    const run = await readRunReview(client, nextUuid, scope, options);
     if (run !== undefined && run.outcome.changedPaths.length > 0) {
       return { state: "run", run, ...scope };
     }
@@ -62,6 +69,7 @@ async function readRunReview(
   client: Pick<CodeClient, "executeOperation">,
   nextUuid: () => string,
   scope: CodeDiffScope,
+  options: CodeDiffReadOptions,
 ): Promise<RunReviewed | undefined> {
   try {
     const result = await client.executeOperation({
@@ -69,6 +77,7 @@ async function readRunReview(
       operationId: nextUuid() as never,
       gitOperationId: nextUuid() as never,
       maxDiffBytes: MAX_DIFF_BYTES,
+      ...(options.ignoreWhitespace === true ? { ignoreWhitespace: true } : {}),
       ...scope,
     });
     return result.kind === "run-reviewed" ? result : undefined;

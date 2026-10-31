@@ -111,7 +111,7 @@ export interface SeatbeltProfileInput {
    * an ancestor: a project bound to the data directory's parent re-allows
    * the whole subtree through its `cwd` read root, so a grant-level
    * omission is not enough. Only a directory this launch carries as an
-   * `additionalWriteRoots` entry is re-allowed after the denial (0160).
+   * `additionalWriteRoots` entry is re-allowed after the denial.
    */
   readonly isolatedRoots?: ReadonlyArray<string>;
   readonly privateHomeAllowPaths?: ReadonlyArray<string>;
@@ -788,7 +788,7 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     // launch bound to an ancestor re-allowed the whole subtree through its
     // `cwd` read root, so leaving it merely ungranted kept it reachable — a
     // project bound to the data directory's parent could read another
-    // thread's raw screen capture for the capture's lifetime (0160). The one
+    // thread's raw screen capture for the capture's lifetime. The one
     // launch that carries the same directory in `additionalWriteRoots` is
     // re-allowed just below and stays the only writer.
     ...uniqueAbsolutePaths(isolatedRoots.flatMap((path) => resolvedRootForms(path))).flatMap(

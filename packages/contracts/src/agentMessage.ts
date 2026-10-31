@@ -4,7 +4,7 @@ import { CorrelationId, UtcTimestamp } from "./events";
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
- * Structured agent-to-agent messages (decision 0063).
+ * Structured agent-to-agent messages.
  *
  * Messaging is a server-owned capability, not a peer socket: a sender
  * petitions, the host admits, clamps, journals, and delivers. Every event
