@@ -161,6 +161,23 @@ and is asked to change only that part. The comment shows **Sent to agent**, then
 missing when the thread cannot be reached or when you are viewing an older
 version of the Canvas. The turn follows the thread's own permissions.
 
+## Stop, and Force stop
+
+**Stop** asks the response to end. If it has not ended ten seconds later, a
+**Force stop** button appears beside it. Force stop kills the process behind that
+one response and nothing else: the conversation stays usable, and you can send
+another message to carry on. It is offered for providers that run each
+conversation in its own process (Claude). Codex and OpenCode share one process
+across conversations, so they show only Stop.
+
+## Move to a Project
+
+A Chat that is not in a Project can be filed into one: open **Thread actions**
+and choose **Move to Project…**, then pick a Chat Project or name a new one. The
+conversation stays a Chat with its history. It gains no folder access; the
+Project's memory applies to the messages you send next. A Chat already in a
+Project has no move item.
+
 ## Export
 
 These actions live in the thread header's **Thread actions** menu (the ⋯

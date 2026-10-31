@@ -183,6 +183,8 @@ const capabilities = {
   // current model first (then the cursor's binding, then the session record),
   // and every prompt names it, so the session never silently runs the old one.
   modelSwitch: "supported",
+  // One server process serves every thread, so killing it ends them all.
+  forceStop: "unsupported",
   ...unsupportedChatCapabilities,
   appManagedTools: "unsupported",
 } as const;

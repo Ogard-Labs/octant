@@ -68,6 +68,8 @@ import { decodeBrowserThreadId, decodeImageGenerationScopeId } from "@octant/con
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type { ThreadHandOffOutcome } from "@octant/contracts/thread-hand-off";
 import type { HostId } from "@octant/contracts/host";
+import type { ProjectId } from "@octant/contracts/projects";
+import type { MoveToProjectChoice } from "./MoveToProjectDialog";
 import { activeChatTurns } from "@octant/domain/chat-policy";
 import { CanvasCreatePanel } from "../canvas/CanvasCreatePanel";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
@@ -119,6 +121,11 @@ export interface ChatWorkspaceProps {
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
   /** Told which Canvas the host wrote when the thread is handed off. */
   readonly onThreadHandedOff?: (threadId: string, outcome: ThreadHandOffOutcome) => void;
+  /** The Chat Projects a No-project thread may be filed into, and how to make a new one. */
+  readonly moveToProject?: {
+    readonly projects: ReadonlyArray<MoveToProjectChoice>;
+    readonly onCreateProject?: (name: string) => Promise<ProjectId | undefined>;
+  };
   /** The Canvas cards the host lists for this thread, each time they are read. */
   readonly onCanvasReferencesObserved?: (
     threadId: string,
@@ -515,6 +522,25 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const providerState = providerPresentation(props.providerSnapshot, view);
   const activeAttempt = latestActiveAttempt(view);
   const isSending = activeAttempt !== undefined;
+  // Force stop appears when a Stop pressed on this attempt has not ended it
+  // after the grace period, and only for a provider that can kill one turn's
+  // process alone; any other provider keeps just Stop.
+  const [stopRequestedFor, setStopRequestedFor] = useState<string | undefined>(undefined);
+  const [stopGraceElapsed, setStopGraceElapsed] = useState(false);
+  const stoppingAttemptId =
+    activeAttempt !== undefined && stopRequestedFor === String(activeAttempt.id)
+      ? stopRequestedFor
+      : undefined;
+  useEffect(() => {
+    setStopGraceElapsed(false);
+    if (stoppingAttemptId === undefined) return;
+    const timer = setTimeout(() => setStopGraceElapsed(true), FORCE_STOP_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [stoppingAttemptId]);
+  const forceStopOffered =
+    stoppingAttemptId !== undefined &&
+    stopGraceElapsed &&
+    providerState.observation?.capabilities.forceStop === "supported";
   // The host would refuse to clear a thread's outside-content mark in any of
   // these states; a paused queue with nothing waiting does not stop it.
   const threadBusy =
@@ -862,6 +888,25 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           <header className="chat-workspace__header">
             <h1 className="sr-only">{view.thread.title}</h1>
             <ChatThreadActionsMenu
+              {...(props.moveToProject === undefined
+                ? {}
+                : {
+                    moveToProject: {
+                      projects: props.moveToProject.projects,
+                      ...(props.moveToProject.onCreateProject === undefined
+                        ? {}
+                        : { onCreateProject: props.moveToProject.onCreateProject }),
+                      onMove: async (projectId: ProjectId) => {
+                        const result = await props.controller.execute({
+                          kind: "move-chat-thread",
+                          threadId: view.thread.id,
+                          expectedVersion: view.thread.version,
+                          projectId,
+                        });
+                        return result?.kind === "thread-updated";
+                      },
+                    },
+                  })}
               connectionStatus={
                 props.controller.status === "disconnected" ? "disconnected" : "connected"
               }
@@ -1560,6 +1605,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             ? {}
             : {
                 onStop: () => {
+                  setStopRequestedFor(String(activeAttempt.id));
                   void props.controller.execute({
                     kind: "interrupt-chat-turn",
                     threadId: view.thread.id,
@@ -1568,6 +1614,19 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                     attemptId: activeAttempt.id,
                   });
                 },
+                ...(forceStopOffered
+                  ? {
+                      onForceStop: () => {
+                        void props.controller.execute({
+                          kind: "force-stop-chat-turn",
+                          threadId: view.thread.id,
+                          expectedVersion: view.thread.version,
+                          turnId: activeAttempt.turnId,
+                          attemptId: activeAttempt.id,
+                        });
+                      },
+                    }
+                  : {}),
               })}
           poolControl={
             <ComposerPoolControl
@@ -1698,6 +1757,9 @@ function branchTitle(sourceTitle: string): string {
   const base = trimmed.length === 0 ? "Chat" : trimmed;
   return `${base.slice(0, 200 - suffix.length)}${suffix}`;
 }
+
+/** How long a Stop may take before the person is offered Force stop. */
+const FORCE_STOP_AFTER_MS = 10_000;
 
 function latestActiveAttempt(view: ChatThreadView): ChatAttempt | undefined {
   for (let turnIndex = view.turns.length - 1; turnIndex >= 0; turnIndex -= 1) {

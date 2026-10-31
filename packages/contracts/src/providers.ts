@@ -1411,6 +1411,13 @@ export const ProviderCapabilities = Schema.Struct({
    */
   modelSwitch: Schema.optional(ProviderCapabilitySupport),
   /**
+   * Whether one session's runtime process can be killed on its own, through
+   * the connection's `forceStop`. A runtime that serves several threads from
+   * one process reports `unsupported`, since killing it would end the others.
+   * Absent reads as unsupported.
+   */
+  forceStop: Schema.optional(ProviderCapabilitySupport),
+  /**
    * Whether the runtime compacts a session it holds when asked, per mode,
    * through the connection's `compact`: `unavailable` when this install is too
    * old for the request. Absent reads as unsupported in every mode. A host

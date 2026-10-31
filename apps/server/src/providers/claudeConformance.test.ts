@@ -258,6 +258,7 @@ class ConformanceQuery implements ClaudeQueryPort {
     compactAnnounced: true,
   };
   readonly supportedModels = () => Effect.succeed(this.initialization.models);
+  readonly forceKill = () => Effect.void;
   /** Released before `/compact` is answered; a subclass holds it open. */
   protected compactionHold: Promise<void> = Promise.resolve();
   /** `/compact` as the runtime answers it: the cut and its status. */
