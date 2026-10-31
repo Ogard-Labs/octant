@@ -25,6 +25,7 @@ import {
 import { localHostDisplayName } from "@octant/client-runtime";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type {
+  PermissionMode,
   PermissionPersistence,
   ProviderExecutionPolicy,
   ProviderInstanceId,
@@ -184,12 +185,11 @@ export interface DraftThreadWorkspaceProps {
     command: CodeCommand,
     signal?: AbortSignal,
   ) => Promise<CodeCommandResult | undefined>;
-  readonly defaultExecutionPolicy?: ProviderExecutionPolicy;
+  readonly defaultPermissionMode?: PermissionMode;
   readonly defaultPermissionPersistence?: PermissionPersistence;
-  readonly onExecutionPolicyChange?: (
-    policy: ProviderExecutionPolicy,
-    persistence: PermissionPersistence,
-  ) => void;
+  readonly onPermissionModeChange?: (mode: PermissionMode) => void;
+  /** Whether the selected provider has a reviewer of its own, so Auto applies. */
+  readonly autoSupported?: boolean;
   readonly onAttachFolder?: () => void;
   readonly onOpenCodeSettings?: () => void;
   /** Opens Providers & Models from the start composer while none is ready. */
@@ -740,11 +740,12 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         {...(props.branchName === undefined ? {} : { branchName: props.branchName })}
         newThreadWorkspace={newThreadWorkspace}
         {...(worktreeRemoteFacts === undefined ? {} : { worktreeRemoteFacts })}
-        defaultExecutionPolicy={props.defaultExecutionPolicy ?? "approval-gated"}
+        defaultPermissionMode={props.defaultPermissionMode ?? "ask-first"}
         defaultPermissionPersistence={props.defaultPermissionPersistence ?? "current-session"}
-        {...(props.onExecutionPolicyChange === undefined
+        {...(props.onPermissionModeChange === undefined
           ? {}
-          : { onExecutionPolicyChange: props.onExecutionPolicyChange })}
+          : { onPermissionModeChange: props.onPermissionModeChange })}
+        {...(props.autoSupported === true ? { autoSupported: true } : {})}
         projectSetup={
           selectedProjectId === undefined && compatibleProjects.length === 0 ? (
             <div aria-label="Set up a Code project" className="code-home__project-setup">

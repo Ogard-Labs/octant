@@ -575,15 +575,10 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("code-default-access"),
-          label: "Default Code access",
+          label: "Default mode",
           scope: "app",
-          keywords: "access authority approval approvals full access ask read only new code thread",
-        },
-        {
-          id: settingId("code-approval-persistence"),
-          label: "Default approval persistence",
-          scope: "app",
-          keywords: "approval approvals persistence remember session project",
+          keywords:
+            "access mode auto ask first accept edits plan full access approval approvals reviewer new thread guardrail",
         },
         {
           id: settingId("code-editor-executable"),

@@ -5,9 +5,9 @@ description: "Complete the first-run flow: configure a provider, create a Projec
 # First Run
 
 After launching Octant for the first time, the welcome surface asks only what
-your first task needs, in three steps: **Providers** (what this computer can
-reach), **Project** (the folder the task works in), and **Model** (the model it
-starts with). Every step is optional. **Skip setup** is available from the
+your first task needs, in four steps: **Providers** (what this computer can
+reach), **Project** (the folder the task works in), **Model** (the model it
+starts with), and **Mode** (how much agents may do before they ask). Every step is optional. **Skip setup** is available from the
 first step and keeps answers that have already been saved. Quitting without
 completing or skipping leaves first run pending. If Octant could not save one
 of your answers it tells you, and pressing Skip setup or the primary action
@@ -110,15 +110,32 @@ not change access permissions.
 The selected root is validated to exist. The renderer receives an opaque,
 single-use receipt rather than the raw path.
 
+## Choose a mode
+
+The Mode step asks once which mode new threads start in:
+
+- **Auto** (Recommended): the provider's own reviewer approves each action.
+  It is pre-selected when the provider you start with has one (Claude and
+  Codex do). Where it has none, Auto is shown unavailable with the reason,
+  and **Ask first** is pre-selected instead.
+- **Ask first**: agents ask before commands and file changes.
+- **Accept edits**: file edits inside the folder go through; commands ask.
+- **Plan**: read-only.
+- **Full access**: no sandbox and no prompts. Picking it shows a one-time
+  warning. Never pre-selected.
+
+Continue records the selected mode, pre-selected or not. You can change it
+later in **Settings → Code → Access**, set a different one for a Project, or
+switch any thread from its composer.
+
 ## Start a task
 
 When the readiness view shows a provider, a Project, and a mode-valid model,
 press **Start a task**. Octant records first run as completed and opens the
 new-task composer in that Project. Nothing is sent until you send it.
 
-The thread starts in the authority mode you selected: **Full access**,
-**Approval-gated**, or **Plan** (read-only). Code threads start approval-gated
-unless you explicitly remember Full access.
+The thread starts in the mode you chose in the Mode step, or the one its
+Project chose.
 
 Planned: first run asks once which mode new threads start in. The list is Auto
 (Recommended), Ask first, Accept edits, Plan, and Full access. In Auto a

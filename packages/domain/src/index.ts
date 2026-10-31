@@ -13,6 +13,7 @@ export * from "./providerSessionReaping";
 export * from "./chatProviderFallbackPolicy";
 export * from "./chatMessageParts";
 export * from "./codePolicy";
+export * from "./guardrailPolicy";
 export * from "./threadBoardPolicy";
 export * from "./turnDecisionPolicy";
 export * from "./keybindings";

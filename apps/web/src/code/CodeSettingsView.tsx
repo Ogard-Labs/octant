@@ -1,5 +1,6 @@
 import type { CodeDiffLayout, CodeSettings } from "@octant/contracts/code";
-import type { SettingsSettingId } from "@octant/contracts";
+import type { PermissionMode, SettingsSettingId } from "@octant/contracts";
+import { permissionModeOf, threadAccessOf } from "@octant/domain/guardrail-policy";
 import { useRef, useState } from "react";
 import { SettingRow, SettingsSection } from "../settings/primitives";
 import { OctantFieldError } from "../ui/base/OctantField";
@@ -8,10 +9,13 @@ import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
+import { useFullAccessWarning } from "./FullAccessWarning";
+import { PERMISSION_MODE_OPTIONS } from "./PermissionModePicker";
 
 export interface CodeSettingsUpdate {
   readonly defaultExecutionPolicy: CodeSettings["defaultExecutionPolicy"];
   readonly defaultPermissionPersistence: CodeSettings["defaultPermissionPersistence"];
+  readonly defaultAutoApprove?: boolean;
   readonly externalEditor?: NonNullable<CodeSettings["externalEditor"]>;
   readonly requireGitRepository?: boolean;
   readonly defaultDiffLayout?: CodeDiffLayout;
@@ -19,8 +23,7 @@ export interface CodeSettingsUpdate {
 }
 
 interface CodeSettingsDraft {
-  readonly executionPolicy: CodeSettings["defaultExecutionPolicy"];
-  readonly permissionPersistence: CodeSettings["defaultPermissionPersistence"];
+  readonly permissionMode: PermissionMode;
   readonly requireGitRepository: boolean;
   readonly defaultDiffLayout: CodeDiffLayout;
   readonly executable: string;
@@ -34,7 +37,7 @@ export interface CodeSettingsViewProps {
 }
 
 /** The section holding the control a change came from. */
-type CodeSettingsSectionId = "thread-defaults" | "editor" | "external-editor";
+type CodeSettingsSectionId = "access" | "thread-defaults" | "editor" | "external-editor";
 
 /**
  * Why the last change was not kept. A refusal is said in the section whose
@@ -49,21 +52,21 @@ interface CodeSettingsFeedback {
   readonly message: string;
 }
 
-const ACCESS_OPTIONS: ReadonlyArray<{
-  readonly id: CodeSettings["defaultExecutionPolicy"];
-  readonly label: string;
-}> = [
-  { id: "approval-gated", label: "Ask for approvals" },
-  { id: "auto-accept-edits", label: "Auto-accept edits" },
-  { id: "plan", label: "Plan · read-only" },
-  { id: "full-access", label: "Full access" },
-];
+const MODE_OPTIONS = PERMISSION_MODE_OPTIONS.map((option) => ({
+  id: option.id,
+  label: option.id === "auto" ? "Auto · Recommended" : option.label,
+}));
+
+function permissionModeOfSettings(settings: CodeSettings): PermissionMode {
+  return permissionModeOf({
+    executionPolicy: settings.defaultExecutionPolicy,
+    autoApprove: settings.defaultAutoApprove,
+  });
+}
 
 export function CodeSettingsView(props: CodeSettingsViewProps) {
-  const [executionPolicy, setExecutionPolicy] = useState(props.settings.defaultExecutionPolicy);
-  const [permissionPersistence, setPermissionPersistence] = useState(
-    props.settings.defaultPermissionPersistence,
-  );
+  const [permissionMode, setPermissionMode] = useState(permissionModeOfSettings(props.settings));
+  const fullAccessWarning = useFullAccessWarning("machine");
   const [requireGitRepository, setRequireGitRepository] = useState(
     props.settings.requireGitRepository,
   );
@@ -80,14 +83,9 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
   const [previousSettings, setPreviousSettings] = useState(props.settings);
   if (previousSettings !== props.settings) {
     setPreviousSettings(props.settings);
-    setExecutionPolicy((current) =>
-      current === previousSettings.defaultExecutionPolicy
-        ? props.settings.defaultExecutionPolicy
-        : current,
-    );
-    setPermissionPersistence((current) =>
-      current === previousSettings.defaultPermissionPersistence
-        ? props.settings.defaultPermissionPersistence
+    setPermissionMode((current) =>
+      current === permissionModeOfSettings(previousSettings)
+        ? permissionModeOfSettings(props.settings)
         : current,
     );
     setRequireGitRepository((current) =>
@@ -133,11 +131,8 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     change: Partial<CodeSettingsDraft> & { readonly bundledLanguageServer?: boolean },
   ) {
     const host = hostSettings.current;
-    if (change.executionPolicy !== undefined) {
-      setExecutionPolicy(host.defaultExecutionPolicy);
-    }
-    if (change.permissionPersistence !== undefined) {
-      setPermissionPersistence(host.defaultPermissionPersistence);
+    if (change.permissionMode !== undefined) {
+      setPermissionMode(permissionModeOfSettings(host));
     }
     if (change.requireGitRepository !== undefined) {
       setRequireGitRepository(host.requireGitRepository);
@@ -161,8 +156,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     change: Partial<CodeSettingsDraft> & { readonly bundledLanguageServer?: boolean },
   ) {
     const draft: CodeSettingsDraft = {
-      executionPolicy,
-      permissionPersistence,
+      permissionMode,
       requireGitRepository,
       defaultDiffLayout,
       executable,
@@ -192,9 +186,13 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     }
     let updated = false;
     try {
+      const access = threadAccessOf(draft.permissionMode);
       updated = await props.onUpdate({
-        defaultExecutionPolicy: draft.executionPolicy,
-        defaultPermissionPersistence: draft.permissionPersistence,
+        defaultExecutionPolicy: access.executionPolicy,
+        defaultPermissionPersistence: hostSettings.current.defaultPermissionPersistence,
+        // The host keeps what it stored when a change leaves these out, so
+        // only an Access change carries them.
+        ...(change.permissionMode === undefined ? {} : { defaultAutoApprove: access.autoApprove }),
         requireGitRepository: draft.requireGitRepository,
         defaultDiffLayout: draft.defaultDiffLayout,
         // The host keeps the stored switch when a change leaves it out, so
@@ -222,49 +220,40 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     <section aria-label="Code defaults" className="code-settings">
       <h2 className="sr-only">Code defaults</h2>
       <SettingsSection
-        description="Access defaults apply only to new Code threads. Existing threads keep their access. The diff layout default is used until a thread has its own choice."
-        title="Thread defaults"
+        description="The mode new threads start in. A Project can choose its own, and any thread can switch from its composer. Existing threads keep their mode."
+        title="Access"
       >
         <div className="setgroup">
           <SettingRow
-            description="The authority a new Code thread requests at creation."
-            label="Default Code access"
+            description="Auto lets the provider's own reviewer approve each action; where a provider has none, threads ask first."
+            label="Default mode"
             scope="mode"
             settingId="code-default-access"
           >
             <OctantSelectField
-              aria-label="Default Code access"
+              aria-label="Default mode"
               className="settings-view__select window-no-drag"
               onValueChange={(value) => {
-                const option = ACCESS_OPTIONS.find((candidate) => candidate.id === value);
+                const option = MODE_OPTIONS.find((candidate) => candidate.id === value);
                 if (option === undefined) return;
-                setExecutionPolicy(option.id);
-                void commit("thread-defaults", { executionPolicy: option.id });
+                fullAccessWarning.guard(option.id, () => {
+                  setPermissionMode(option.id);
+                  void commit("access", { permissionMode: option.id });
+                });
               }}
-              options={ACCESS_OPTIONS}
-              value={executionPolicy}
+              options={MODE_OPTIONS}
+              value={permissionMode}
             />
           </SettingRow>
-          <SettingRow
-            description="Whether approvals end with the session or follow the Project default."
-            label="Default approval persistence"
-            scope="mode"
-            settingId="code-approval-persistence"
-          >
-            <OctantToggleGroup<CodeSettings["defaultPermissionPersistence"]>
-              aria-label="Default approval persistence"
-              onValueChange={(value) => {
-                const selected = value[0];
-                if (selected === undefined) return;
-                setPermissionPersistence(selected);
-                void commit("thread-defaults", { permissionPersistence: selected });
-              }}
-              value={[permissionPersistence]}
-            >
-              <OctantToggleGroupItem value="current-session">Session</OctantToggleGroupItem>
-              <OctantToggleGroupItem value="project-default">Project</OctantToggleGroupItem>
-            </OctantToggleGroup>
-          </SettingRow>
+        </div>
+        <CodeSettingsFeedbackSlot feedback={feedback} section="access" />
+      </SettingsSection>
+      {fullAccessWarning.dialog}
+      <SettingsSection
+        description="The diff layout default is used until a thread has its own choice."
+        title="Thread defaults"
+      >
+        <div className="setgroup">
           <SettingRow
             description="Off lets a Code thread start in a plain folder, the default folder included; branches, diffs, and pull requests stay unavailable there."
             label="Code needs a Git repository"
