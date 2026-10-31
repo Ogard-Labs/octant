@@ -441,6 +441,8 @@ interface ClaudePreToolGrant {
 interface ClaudePendingApprovalState extends ClaudePendingApproval {
   readonly decision: DeferredValue<ClaudeToolDecision>;
   readonly reuseKey: string;
+  /** The pending call for an automatic reviewer; never published. */
+  readonly call?: ProviderApprovalCall | undefined;
 }
 
 interface ClaudePendingQuestionState extends ClaudePendingQuestion {
@@ -1824,6 +1826,10 @@ function makeConnection(
             ...mapped.request,
             decision: deferred<ClaudeToolDecision>(),
             reuseKey,
+            call: providerApprovalCall({
+              tool: mapped.request.toolName,
+              arguments: request.input,
+            }),
           };
           activeState.pendingApprovals.set(pending.requestId, pending);
           publish(pending.event);
@@ -2476,6 +2482,8 @@ function makeConnection(
           }
           await release(state);
         }),
+      approvalCall: ({ sessionId, requestId }) =>
+        sessions.get(sessionId)?.pendingApprovals.get(requestId)?.call,
       answerApproval: (answer) =>
         Effect.suspend(() => {
           const state = sessions.get(answer.sessionId);

@@ -1847,6 +1847,10 @@ function collectSessionEvents(
                           (await input.interactions?.approve?.({
                             run: input.run,
                             event,
+                            call: connection.approvalCall?.({
+                              sessionId: input.sessionId,
+                              requestId: event.requestId,
+                            }),
                             signal: interactionSignal,
                           })) ?? false
                         );

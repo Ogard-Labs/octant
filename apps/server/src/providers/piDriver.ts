@@ -694,14 +694,17 @@ function makeConnection(
           void state.client.respondToUi(uiId, { confirmed: false });
           return protocolFailure(state, "Pi approval identity was repeated.");
         }
-        state.approvals.set(requestId, { uiId, toolCallId });
         const call = providerApprovalCall({ tool: toolName, arguments: tool.args });
+        state.approvals.set(requestId, {
+          uiId,
+          toolCallId,
+          ...(call === undefined ? {} : { call }),
+        });
         emit(state, {
           kind: "approval-request",
           requestId,
           action: toolName,
           description: `Allow Pi ${toolName} for this session?`,
-          ...(call === undefined ? {} : { call }),
         });
         return;
       }

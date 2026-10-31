@@ -1,4 +1,5 @@
 import type {
+  ProviderApprovalCall,
   ContextCompactionRefusalReason,
   ProviderDriverKind,
   ProviderExecutionPolicy,
@@ -264,6 +265,18 @@ export interface ProviderConnection {
   readonly interrupt: (sessionId: ProviderSessionId) => Effect.Effect<void, ProviderFailure>;
   readonly stop: (sessionId: ProviderSessionId) => Effect.Effect<void, ProviderFailure>;
   readonly answerApproval: (input: ProviderApprovalAnswer) => Effect.Effect<void, ProviderFailure>;
+  /**
+   * The pending call behind an approval request this connection raised and
+   * has not had answered, for an automatic reviewer on the host: its tool, the
+   * argument fields a reviewer judges with credentials redacted, and where it
+   * runs. Never put on an event, journaled, or shown. Absent, or answering
+   * nothing, when the runtime cannot say; the reviewer then judges by the
+   * request's description alone.
+   */
+  readonly approvalCall?: (input: {
+    readonly sessionId: ProviderSessionId;
+    readonly requestId: string;
+  }) => ProviderApprovalCall | undefined;
   readonly answerUserInput: (
     input: ProviderUserInputAnswer,
   ) => Effect.Effect<void, ProviderFailure>;

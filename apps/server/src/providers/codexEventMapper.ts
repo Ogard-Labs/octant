@@ -19,7 +19,6 @@ import {
   type UnmodeledThreadItem,
 } from "./codexProtocol";
 import { outsideContentTarget } from "./outsideContentRead";
-import { providerApprovalCall } from "./providerApprovalCall";
 import { rateLimitWindowId } from "./rateLimitWindowIdentity";
 
 const STREAM_CHUNK_CHARACTERS = 65_536;
@@ -550,22 +549,11 @@ function approval(
       : message.method === "item/fileChange/requestApproval"
         ? "file change"
         : "permissions";
-  // What the call proposes, without the identifiers that only correlate it.
-  const { threadId: _thread, turnId: _turn, itemId: _item, ...proposed } = message.params;
-  const call = providerApprovalCall({
-    tool: action,
-    arguments: proposed,
-    workingDirectory:
-      "cwd" in message.params && typeof message.params.cwd === "string"
-        ? message.params.cwd
-        : undefined,
-  });
   const approvalEvent = mappedEvent(context, {
     kind: "approval-request",
     requestId,
     action,
     description: "Approval is required for this action.",
-    ...(call === undefined ? {} : { call }),
   });
   const base = {
     requestId,

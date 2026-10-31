@@ -440,7 +440,8 @@ export function mapAcpPermissionRequest(
       requestId,
       action: toolKind,
       description: title,
-      ...withCall(
+    }),
+    ...withCall(
         providerApprovalCall({
           tool: toolKind,
           arguments: {
@@ -456,7 +457,6 @@ export function mapAcpPermissionRequest(
           },
         }),
       ),
-    }),
   };
 }
 

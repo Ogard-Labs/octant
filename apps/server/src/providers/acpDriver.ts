@@ -1829,6 +1829,7 @@ function rememberPermission(state: SessionState, mapped: AcpMappedPermission): v
       providerRequestId: mapped.providerRequestId,
       allowOptionId: mapped.allowOptionId,
       rejectOptionId: mapped.rejectOptionId,
+      ...(mapped.call === undefined ? {} : { call: mapped.call }),
     });
   } else if (mapped.kind === "question") {
     state.questions.set(mapped.requestId, {

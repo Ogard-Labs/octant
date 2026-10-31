@@ -443,7 +443,6 @@ export function mapOpenCodeEvent(
               requestId,
               action,
               description: "Approval is required for this action.",
-              ...openCodeApprovalCall(action, event.properties),
             }),
           ];
     }
@@ -458,7 +457,6 @@ export function mapOpenCodeEvent(
               requestId,
               action,
               description: "Approval is required for this action.",
-              ...openCodeApprovalCall(action, event.properties),
             }),
           ];
     }
@@ -565,10 +563,10 @@ export function mapOpenCodeEvent(
  * The pending call an OpenCode permission names, for an automatic reviewer:
  * its patterns and the metadata it carries (a command, a path).
  */
-function openCodeApprovalCall(
+export function openCodeApprovalCall(
   action: string,
   properties: object,
-): { readonly call?: NonNullable<ReturnType<typeof providerApprovalCall>> } {
+): ReturnType<typeof providerApprovalCall> {
   const record = properties as Record<string, unknown>;
   const metadata =
     typeof record.metadata === "object" && record.metadata !== null ? record.metadata : {};
@@ -576,5 +574,5 @@ function openCodeApprovalCall(
     tool: action,
     arguments: { ...metadata, ...(record.patterns === undefined ? {} : { patterns: record.patterns }) },
   });
-  return call === undefined ? {} : { call };
+  return call;
 }

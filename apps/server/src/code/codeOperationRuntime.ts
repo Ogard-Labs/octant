@@ -2987,10 +2987,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
    * this thread. An allow or deny goes straight back to the provider for this
    * one call and nobody is asked; an ask, or a thread Shield does not review,
    * becomes the ordinary approval for the person. Shield's decision is
-   * journaled beside the tool rows either way. The runtime replaced the
-   * checkout path with a placeholder in what it reported; it is put back here
-   * so Shield judges real paths against the bound root, while secrets stay
-   * redacted.
+   * journaled beside the tool rows either way. The pending call comes from the
+   * connection, never from the event: the event's text had the checkout path
+   * replaced with a placeholder, which is put back so its description reads
+   * as the runtime wrote it.
    */
   async #reviewProviderApproval(active: ActiveTurn, event: CodeTurnEvent): Promise<void> {
     const shield = this.#options.shield;
@@ -3002,14 +3002,23 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const restore = (text: string | undefined) =>
       text?.replaceAll("[CHECKOUT]", active.checkoutRoot);
     const summary = event.text ?? "Provider approval requested.";
+    let call: ReturnType<NonNullable<ProviderConnection["approvalCall"]>>;
+    try {
+      call = active.connection.approvalCall?.({
+        sessionId: active.sessionId as never,
+        requestId,
+      });
+    } catch {
+      call = undefined;
+    }
     let decision: ShieldDecision | undefined;
     try {
       decision = await shield.review({
         threadId: String(active.thread.id),
         call: shieldCallFromProviderRequest({
-          tool: event.call?.tool ?? "provider-action",
-          input: restore(event.call?.input),
-          workingDirectory: restore(event.call?.workingDirectory),
+          tool: call?.tool ?? "provider-action",
+          input: call?.input,
+          workingDirectory: call?.workingDirectory,
           description: restore(summary) ?? summary,
           boundRoot: active.checkoutRoot,
         }),

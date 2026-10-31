@@ -1416,6 +1416,10 @@ function makeConnection(
           }
           state.pendingApprovals.set(item.approval.requestId, item.approval);
           pendingApprovalOwners.set(item.approval.requestId, state.sessionId);
+          if (message.kind === "request") {
+            const call = codexApprovalCall(item.approval.event, message.params);
+            if (call !== undefined) approvalCalls.set(item.approval.requestId, call);
+          }
           offer(item.approval.event);
           continue;
         }
@@ -1971,6 +1975,7 @@ function makeConnection(
               return Effect.fail(failure("protocol", "Codex session is already terminal."));
             }
             const pending = state.pendingApprovals.get(input.requestId);
+            approvalCalls.delete(input.requestId);
             if (
               pending === undefined ||
               pendingApprovalOwners.get(input.requestId) !== input.sessionId ||
