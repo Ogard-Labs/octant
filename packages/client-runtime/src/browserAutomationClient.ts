@@ -33,6 +33,11 @@ import {
   BrowserCapturesResponse,
 } from "@octant/contracts/browser-capture";
 import {
+  BrowserExtensionsResult,
+  decodeBrowserExtensionsCommand,
+  type BrowserExtensionsCommand,
+} from "@octant/contracts/browser-extensions";
+import {
   BrowserProfilesResult,
   decodeBrowserProfilesCommand,
   type BrowserProfilesCommand,
@@ -89,6 +94,11 @@ export interface BrowserAutomationClient {
    * Sign out of, or list, the stored Browser profiles. A refusal is a result,
    * so the pane can say in words why a profile was not cleared.
    */
+  /** Browser extensions: list, install from a picked folder, enable per profile, remove. */
+  manageExtensions?(
+    command: BrowserExtensionsCommand,
+    signal?: AbortSignal,
+  ): Promise<BrowserExtensionsResult>;
   manageProfiles?(
     command: BrowserProfilesCommand,
     signal?: AbortSignal,
@@ -200,6 +210,14 @@ export function createBrowserAutomationClient(
         "/api/browser/captures/take",
         decodeBrowserCaptureTakeCommand(input),
         decodeHostAnswer(BrowserAutomationSnapshot),
+        signal,
+      ),
+    manageExtensions: (command, signal) =>
+      post(
+        options,
+        "/api/browser/extensions",
+        decodeBrowserExtensionsCommand(command),
+        decodeHostAnswer(BrowserExtensionsResult),
         signal,
       ),
     manageProfiles: (command, signal) =>

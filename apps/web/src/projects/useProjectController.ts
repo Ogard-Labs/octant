@@ -1,4 +1,5 @@
-import type { PermissionMode } from "@octant/contracts/providers";
+import type { KeyProviderDriverKinds, PermissionMode } from "@octant/contracts/providers";
+import type { AutoReviewer } from "@octant/contracts/shield";
 import {
   decodeBindingReceiptId,
   decodeMemoryEntryId,
@@ -29,6 +30,12 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import { failureMessage } from "../lib/failureMessage";
 
 const PROJECT_UNAVAILABLE = "Octant Project service is unavailable.";
+const PROJECT_CHANGED_ELSEWHERE = "The Project changed in another window. Review it and try again.";
+
+/** Whether a command changed the Project, or why the host refused it. */
+export type ProjectChange =
+  | { readonly status: "changed" }
+  | { readonly status: "refused"; readonly message: string };
 
 export type ProjectControllerStatus = "loading" | "ready" | "disconnected" | "conflict-reload";
 export type ProjectSearchStatus = "idle" | "searching" | "success" | "error";
@@ -187,23 +194,34 @@ export function useProjectController(options: ProjectControllerOptions) {
     command: Parameters<ProjectClient["executeProject"]>[0],
     successMessage: string,
   ): Promise<boolean> {
+    return (await executeReporting(command, successMessage)).status === "changed";
+  }
+
+  /**
+   * Like {@link execute}, but answers why a command did not change the Project,
+   * for a view that shows the reason next to the control the person used.
+   */
+  async function executeReporting(
+    command: Parameters<ProjectClient["executeProject"]>[0],
+    successMessage: string,
+  ): Promise<ProjectChange> {
     setErrorMessage(undefined);
     try {
       await fallbackClient.executeProject(command);
       await load("retry");
-      if (!mounted.current) return false;
+      if (!mounted.current) return { status: "refused", message: PROJECT_UNAVAILABLE };
       announce(successMessage);
-      return true;
+      return { status: "changed" };
     } catch (error) {
-      if (!mounted.current) return false;
+      if (!mounted.current) return { status: "refused", message: PROJECT_UNAVAILABLE };
       if (failureCategory(error) === "conflict") {
         await load("conflict");
-        return false;
+        return { status: "refused", message: PROJECT_CHANGED_ELSEWHERE };
       }
       const message = failureMessage(error, PROJECT_UNAVAILABLE);
       setErrorMessage(message);
       announce(message);
-      return false;
+      return { status: "refused", message };
     }
   }
 
@@ -248,6 +266,25 @@ export function useProjectController(options: ProjectControllerOptions) {
         ...(permissionMode === undefined ? {} : { permissionMode }),
       },
       "Code Project default mode updated.",
+    );
+  }
+
+  /** Record who answers a Code Project's prompts at Auto; absent follows Settings. */
+  async function setCodeAutoReviewer(
+    projectId: ProjectId,
+    autoReviewer: AutoReviewer | undefined,
+  ): Promise<boolean> {
+    const project = projectById.get(projectId);
+    if (project?.type !== "code") return false;
+    if (project.autoReviewer === autoReviewer) return true;
+    return execute(
+      {
+        kind: "change-code-project-auto-reviewer",
+        projectId,
+        expectedVersion: project.version,
+        ...(autoReviewer === undefined ? {} : { autoReviewer }),
+      },
+      "Code Project Auto reviewer updated.",
     );
   }
 
@@ -432,6 +469,28 @@ export function useProjectController(options: ProjectControllerOptions) {
     );
   }
 
+  /** Sets which key providers run as themselves in this Work or Code Project. */
+  async function setNativeProviders(
+    projectId: ProjectId,
+    providers: KeyProviderDriverKinds,
+  ): Promise<boolean> {
+    const project = projectById.get(projectId);
+    if (project === undefined || project.type === "chat") return false;
+    const current = project.nativeProviders ?? [];
+    if (current.length === providers.length && current.every((kind) => providers.includes(kind))) {
+      return true;
+    }
+    return execute(
+      {
+        kind: "change-project-native-providers",
+        projectId,
+        expectedVersion: project.version,
+        providers,
+      },
+      "Project trust updated.",
+    );
+  }
+
   async function create(
     type: ProjectType,
     name: string,
@@ -563,6 +622,46 @@ export function useProjectController(options: ProjectControllerOptions) {
         receiptId: decodeBindingReceiptId(receiptId),
       },
       "Project root relinked.",
+    );
+  }
+
+  /**
+   * Add the folder a picker receipt names to a Work or Code Project beside its
+   * main folder. The host refuses the home folder, system and credential
+   * folders, and any folder that overlaps one the Project already has.
+   */
+  async function addExtraFolder(projectId: ProjectId, receiptId: string): Promise<ProjectChange> {
+    const project = projectById.get(projectId);
+    if (project === undefined || project.type === "chat") {
+      return { status: "refused", message: "Only a Work or Code Project can have extra folders." };
+    }
+    return executeReporting(
+      {
+        kind: "add-project-extra-folder",
+        projectId,
+        expectedVersion: project.version,
+        receiptId: decodeBindingReceiptId(receiptId),
+      },
+      "Folder added to the Project.",
+    );
+  }
+
+  async function removeExtraFolder(
+    projectId: ProjectId,
+    canonicalRoot: string,
+  ): Promise<ProjectChange> {
+    const project = projectById.get(projectId);
+    if (project === undefined || project.type === "chat") {
+      return { status: "refused", message: "Only a Work or Code Project can have extra folders." };
+    }
+    return executeReporting(
+      {
+        kind: "remove-project-extra-folder",
+        projectId,
+        expectedVersion: project.version,
+        canonicalRoot,
+      },
+      "Folder removed from the Project.",
     );
   }
 
@@ -759,6 +858,8 @@ export function useProjectController(options: ProjectControllerOptions) {
     projects,
     refreshAvailability: () => load("refresh"),
     relink,
+    addExtraFolder,
+    removeExtraFolder,
     rename,
     retry: () => load("retry"),
     retryMemory: loadMemory,
@@ -771,8 +872,10 @@ export function useProjectController(options: ProjectControllerOptions) {
     setColor,
     setCodeNewThreadWorkspace,
     setCodePermissionMode,
+    setCodeAutoReviewer,
     setCodePullRequestBackgroundRefresh,
     setProviderPolicy,
+    setNativeProviders,
     setBrandKit,
     setDesktopRecipe,
     setActions,

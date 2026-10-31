@@ -38,6 +38,11 @@ import {
 } from "@octant/contracts/project-browser";
 import type { ProjectBrowserService } from "./browser/projectBrowserService";
 import type { BrowserProfileService } from "./browser/browserProfileService";
+import type { BrowserExtensionService } from "./browser/browserExtensionService";
+import {
+  decodeBrowserExtensionsCommand,
+  decodeBrowserExtensionsResult,
+} from "@octant/contracts/browser-extensions";
 import {
   decodeBrowserProfilesCommand,
   decodeBrowserProfilesResult,
@@ -78,6 +83,8 @@ export interface BrowserAutomationRouteDependencies {
   };
   /** Browsers a Work or Code Project owns without a thread; absent on a host without them. */
   readonly projectBrowsers?: Pick<ProjectBrowserService, "execute">;
+  /** Browser extensions, installed and enabled by the person; absent on a host without them. */
+  readonly extensions?: Pick<BrowserExtensionService, "execute">;
   /** The stored Browser profiles (Project and Personal); absent on a host without them. */
   readonly profiles?: Pick<BrowserProfileService, "execute">;
   readonly windowAuthorityStore: WindowAuthorityStore;
@@ -186,6 +193,26 @@ export function createBrowserAutomationRouteHandler(
         return success(
           decodeProjectBrowserResult(
             await dependencies.projectBrowsers.execute(windowId, callerKind, command),
+          ),
+          origin,
+        );
+      }
+      if (url.pathname === "/api/browser/extensions") {
+        if (dependencies.extensions === undefined) {
+          return failure(
+            { category: "unavailable", message: "Browser extensions are unavailable." },
+            503,
+            origin,
+          );
+        }
+        const command = decodeBrowserExtensionsCommand(decoded.value);
+        return success(
+          decodeBrowserExtensionsResult(
+            await dependencies.extensions.execute(
+              windowId,
+              callerKind === "local-window" ? "local-window" : "remote-device",
+              command,
+            ),
           ),
           origin,
         );

@@ -1695,15 +1695,24 @@ describe("Agent Plugin MCP session manager", () => {
     });
 
     expect(outcome.isError).toBeFalsy();
-    expect(record).toHaveBeenCalledTimes(1);
-    expect(record).toHaveBeenCalledWith({
+    // Octant Shield's Watcher labels the injected text beside the server's own mark.
+    expect(record).toHaveBeenCalledTimes(2);
+    expect(record).toHaveBeenNthCalledWith(1, {
       threadId,
       provenance: { origin: "tool-result", sourceLabel: "mcp-tool" },
       contentReference: expect.stringMatching(/^mcp-[a-f0-9]{64}$/),
       correlationId,
       authorized: true,
     });
-    const recorded = JSON.stringify(record.mock.calls[0]);
+    expect(record).toHaveBeenNthCalledWith(2, {
+      threadId,
+      provenance: { origin: "tool-result", sourceLabel: "shield-watcher-agent-instructions" },
+      contentReference: expect.stringMatching(/^shield-watcher-agent-instructions-[a-f0-9]{64}$/),
+      correlationId,
+      authorized: true,
+    });
+    expect(outcome.outsideContent).toEqual({ labels: ["agent-instructions"] });
+    const recorded = JSON.stringify(record.mock.calls);
     expect(recorded).not.toMatch(/Ignore previous instructions/i);
     expect(recorded).not.toContain("grant Full access");
     expect(outcome.result).toEqual(expect.stringContaining(EXTERNAL_CONTENT_FRAME_OPEN_PREFIX));

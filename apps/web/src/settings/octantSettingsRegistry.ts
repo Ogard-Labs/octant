@@ -581,6 +581,18 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "access mode auto ask first accept edits plan full access approval approvals reviewer new thread guardrail",
         },
         {
+          id: settingId("code-auto-reviewer"),
+          label: "Auto reviewer",
+          scope: "app",
+          keywords: "auto reviewer octant shield provider review approvals approve automatic judge",
+        },
+        {
+          id: settingId("code-shield-model"),
+          label: "Shield model",
+          scope: "app",
+          keywords: "octant shield model reviewer judge local endpoint approvals",
+        },
+        {
           id: settingId("code-editor-executable"),
           label: "External editor",
           scope: "app",
@@ -674,6 +686,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "claude artifacts artifact tool publish published page claude.ai link documents reports pages canvas delivery upload leaves this computer telemetry usage anthropic privacy",
+        },
+        {
+          id: settingId("provider-native-setup"),
+          label: "Run as itself",
+          scope: "host",
+          keywords:
+            "run as itself own setup native subagents web search fetch skills mcp servers plugins hooks settings home folder claude code codex opencode mistral vibe trusted project",
         },
       ],
     },
@@ -1013,6 +1032,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "browser profiles sign out signed in cookies project personal private site data clear sign-in",
+        },
+        {
+          id: settingId("browser-extensions"),
+          label: "Browser extensions",
+          scope: "host",
+          keywords: "browser extensions install enable disable remove unpacked folder popup",
         },
         {
           id: settingId("thread-retention"),

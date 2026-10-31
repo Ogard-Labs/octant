@@ -151,6 +151,12 @@ describe("BrowserRuntimeBroker profiles", () => {
     return {
       list: vi.fn(async () => [{ profile: { kind: "personal" as const }, sizeBytes: 12 }]),
       clear: vi.fn(async () => undefined),
+      syncExtensions: vi.fn(async () => undefined),
+      extensionPage: vi.fn(() => undefined),
+      importCookies: vi.fn(async (_profile: unknown, cookies: ReadonlyArray<unknown>) => ({
+        imported: cookies.length,
+        skipped: 0,
+      })),
     };
   }
   const post = (broker: { url: string; token: string }, path: string, body: unknown) =>
@@ -208,6 +214,37 @@ describe("BrowserRuntimeBroker profiles", () => {
     }
   });
 
+  it("loads the extensions the server names into a stored profile, and refuses anything else", async () => {
+    const profiles = store();
+    const broker = await startBrowserRuntimeBroker(host() as never, profiles);
+    try {
+      const entry = {
+        id: "a".repeat(32),
+        path: "/data/browser-extensions/x",
+        contentHash: "b".repeat(64),
+      };
+      const ok = await broker.fetchForTest(
+        post(broker, "v1/extensions/sync", { profile: { kind: "personal" }, extensions: [entry] }),
+      );
+      expect(ok.status).toBe(200);
+      expect(profiles.syncExtensions).toHaveBeenCalledWith({ kind: "personal" }, [entry]);
+
+      for (const body of [
+        { profile: { kind: "private" }, extensions: [] },
+        { profile: { kind: "personal" }, extensions: [{ ...entry, path: "relative/folder" }] },
+        { profile: { kind: "personal" }, extensions: [{ ...entry, id: "../../x" }] },
+        { profile: { kind: "personal" }, extensions: [{ ...entry, contentHash: "short" }] },
+        { profile: { kind: "personal" }, extensions: "all" },
+      ]) {
+        const response = await broker.fetchForTest(post(broker, "v1/extensions/sync", body));
+        expect(response.status).toBe(400);
+      }
+      expect(profiles.syncExtensions).toHaveBeenCalledOnce();
+    } finally {
+      await broker.close();
+    }
+  });
+
   it("says plainly that profiles are unavailable when the app keeps none", async () => {
     const broker = await startBrowserRuntimeBroker(host() as never);
     try {
@@ -243,6 +280,82 @@ describe("BrowserRuntimeBroker profiles", () => {
       expect((await create({ kind: "personal", partition: "x" })).status).toBe(400);
       expect((await create({ kind: "everyone" })).status).toBe(400);
       expect(surface.createContext).toHaveBeenCalledOnce();
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("imports a bounded batch of well-formed cookies and refuses anything else", async () => {
+    const profiles = store();
+    const broker = await startBrowserRuntimeBroker(host() as never, profiles);
+    const cookie = {
+      domain: ".example.com",
+      hostOnly: false,
+      name: "sid",
+      value: "v",
+      path: "/",
+      secure: true,
+      httpOnly: true,
+      sameSite: "lax",
+    };
+    try {
+      const ok = await broker.fetchForTest(
+        post(broker, "v1/profiles/import-cookies", {
+          profile: { kind: "personal" },
+          cookies: [cookie],
+        }),
+      );
+      expect(await ok.json()).toEqual({ imported: 1, skipped: 0 });
+      expect(profiles.importCookies).toHaveBeenCalledWith({ kind: "personal" }, [cookie]);
+
+      for (const body of [
+        { profile: { kind: "private" }, cookies: [cookie] },
+        { profile: { kind: "personal" }, cookies: [{ ...cookie, sameSite: "whatever" }] },
+        { profile: { kind: "personal" }, cookies: [{ ...cookie, extra: true }] },
+        { profile: { kind: "personal" }, cookies: Array.from({ length: 201 }, () => cookie) },
+        { profile: { kind: "personal" } },
+      ]) {
+        const refused = await broker.fetchForTest(post(broker, "v1/profiles/import-cookies", body));
+        expect(refused.status).toBe(400);
+      }
+      expect(profiles.importCookies).toHaveBeenCalledOnce();
+
+      const unauthorized = await broker.fetchForTest(
+        request(
+          broker.url,
+          "wrong",
+          { profile: { kind: "personal" }, cookies: [cookie] },
+          "v1/profiles/import-cookies",
+        ),
+      );
+      expect(unauthorized.status).toBe(401);
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("takes a larger body for a cookie batch than for any other route", async () => {
+    const profiles = store();
+    const broker = await startBrowserRuntimeBroker(host() as never, profiles);
+    try {
+      const big = {
+        profile: { kind: "personal" },
+        cookies: Array.from({ length: 100 }, (_, index) => ({
+          domain: ".example.com",
+          hostOnly: false,
+          name: `c${String(index)}`,
+          value: "v".repeat(2_000),
+          path: "/",
+          secure: true,
+          httpOnly: true,
+          sameSite: "lax",
+        })),
+      };
+      expect(JSON.stringify(big).length).toBeGreaterThan(96 * 1024);
+
+      const response = await broker.fetchForTest(post(broker, "v1/profiles/import-cookies", big));
+
+      expect(response.status).toBe(200);
     } finally {
       await broker.close();
     }

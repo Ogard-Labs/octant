@@ -98,8 +98,13 @@ export type NativeHarnessFileSystemPort = Pick<
 >;
 
 export interface NativeHarnessFileSystemOptions {
-  /** Absolute, already-canonical root every path is confined to. */
+  /** Absolute, already-canonical root relative paths resolve against. */
   readonly root: string;
+  /**
+   * The Project's extra folders, absolute and canonical. A path in one is
+   * inside the Project exactly as a path in `root` is.
+   */
+  readonly extraRoots?: ReadonlyArray<string>;
   readonly maxFileBytes?: number;
 }
 
@@ -117,6 +122,7 @@ export interface NativeHarnessFileSystemOptions {
  */
 export class NativeHarnessFileSystem {
   readonly #root: string;
+  readonly #extraRoots: ReadonlyArray<string>;
   readonly #maxFileBytes: number;
   readonly #readMarks = new Map<string, string>();
 
@@ -125,6 +131,10 @@ export class NativeHarnessFileSystem {
       throw new Error("Native harness file system root must be absolute.");
     }
     this.#root = options.root.replace(/\/+$/, "");
+    if ((options.extraRoots ?? []).some((root) => !isAbsolute(root))) {
+      throw new Error("Native harness file system extra roots must be absolute.");
+    }
+    this.#extraRoots = (options.extraRoots ?? []).map((root) => root.replace(/\/+$/, ""));
     this.#maxFileBytes = options.maxFileBytes ?? 5 * 1024 * 1024;
   }
 
@@ -433,7 +443,7 @@ export class NativeHarnessFileSystem {
     } catch {
       return undefined;
     }
-    return classifyPathContainment(this.#root, canonical) === "contained" ? canonical : undefined;
+    return this.#inProject(canonical) ? canonical : undefined;
   }
 
   async #containedForWrite(candidate: string): Promise<string | undefined> {
@@ -458,7 +468,7 @@ export class NativeHarnessFileSystem {
         const contained = await this.#contained(ancestor);
         if (contained === undefined) return undefined;
         const target = join(contained, ...trailing.reverse());
-        return classifyPathContainment(this.#root, target) === "contained" ? target : undefined;
+        return this.#inProject(target) ? target : undefined;
       }
       trailing.push(ancestor.slice(dirname(ancestor).length + 1));
       ancestor = dirname(ancestor);
@@ -466,7 +476,16 @@ export class NativeHarnessFileSystem {
     return undefined;
   }
 
+  #inProject(canonical: string): boolean {
+    return [this.#root, ...this.#extraRoots].some(
+      (root) => classifyPathContainment(root, canonical) === "contained",
+    );
+  }
+
   #display(canonical: string): string {
+    // A file in an extra folder is named by its absolute path, since a path
+    // relative to the root would read as climbing out of it.
+    if (classifyPathContainment(this.#root, canonical) !== "contained") return canonical;
     const rel = relative(this.#root, canonical);
     return rel === "" ? "." : rel.split(sep).join("/");
   }

@@ -53,6 +53,9 @@ export function BrowserPreviewThumbnail(props: BrowserPreviewThumbnailProps) {
   const pageTitle = observation?.title;
   const pageHost = hostOf(observation?.url);
   const caption = pageTitle ?? pageHost;
+  // A signed-in page acts as the person's account, so the preview names the
+  // profile it lives in beside the page.
+  const profileName = profileNameOf(props.snapshot.context?.policy.profile);
   const pages = props.snapshot.contexts?.length ?? 1;
   const aspect = aspectOf(observation?.viewport);
 
@@ -145,7 +148,9 @@ export function BrowserPreviewThumbnail(props: BrowserPreviewThumbnailProps) {
     >
       <OctantButton
         aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight"
-        aria-label={caption === undefined ? "Open Browser" : `Open Browser: ${caption}`}
+        aria-label={`${caption === undefined ? "Open Browser" : `Open Browser: ${caption}`}${
+          profileName === undefined ? "" : `, ${profileName} profile`
+        }`}
         className="browser-pip__open"
         onClick={onClick}
         onKeyDown={onKeyDown}
@@ -163,6 +168,9 @@ export function BrowserPreviewThumbnail(props: BrowserPreviewThumbnailProps) {
             <img alt="" className="browser-pip__picture" draggable={false} src={picture} />
           )}
         </span>
+        {profileName === undefined ? null : (
+          <span className="browser-pip__profile">{profileName}</span>
+        )}
         {caption === undefined ? null : <span className="browser-pip__caption">{caption}</span>}
         {pages > 1 ? <span className="browser-pip__count">{pages}</span> : null}
       </OctantButton>
@@ -259,4 +267,12 @@ function storeCorner(corner: BrowserPreviewCorner) {
   } catch {
     // The corner is a convenience; a blocked store only forgets it.
   }
+}
+
+/** The name of the stored profile a page lives in; a Private page has none worth naming. */
+function profileNameOf(
+  profile: NonNullable<BrowserAutomationSnapshot["context"]>["policy"]["profile"],
+): string | undefined {
+  if (profile === undefined || profile.kind === "private") return undefined;
+  return profile.kind === "personal" ? "Personal" : "Project";
 }

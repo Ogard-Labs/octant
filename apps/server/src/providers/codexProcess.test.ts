@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -764,6 +765,43 @@ describe("Codex launch confinement", () => {
       expect(launchFor("work")).toEqual(launchFor("code"));
     },
   );
+
+  it("hands a Project's extra folders to the profile as the root's peers, at every wrapped level", () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-codex-root-")));
+    const extra = realpathSync(mkdtempSync(join(tmpdir(), "octant-codex-extra-")));
+    const missing = join(extra, "removed-since");
+    try {
+      for (const executionPolicy of ["plan", "approval-gated"] as const) {
+        let seen: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
+        const prepared = prepareCodexLaunch({
+          binaryPath: "/bin/sh",
+          args: ["-c", "true"],
+          authority: {
+            kind: "thread",
+            root,
+            extraFolders: [extra, missing],
+            mode: "code",
+            executionPolicy,
+          },
+          environment: { HOME: homedir() },
+          confinement: {
+            prepare: (input) => {
+              seen = input;
+              return { command: input.executable, args: input.args };
+            },
+          },
+          platform: process.platform,
+        });
+        if (prepared.status === "prepared") prepared.launch.release();
+        expect(seen?.boundRoot).toBe(root);
+        expect(seen?.extraBoundRoots).toEqual([extra]);
+        expect(seen?.writeBoundRoot).toBe(executionPolicy !== "plan");
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(extra, { recursive: true, force: true });
+    }
+  });
 
   // Real `sandbox-exec`: what a command run by Codex can reach is whatever the
   // app-server's own profile allows, because Codex runs its commands without a

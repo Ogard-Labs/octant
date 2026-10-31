@@ -2396,6 +2396,68 @@ describe("ProviderService", () => {
     ).rejects.toMatchObject({ failure: { category: "unsupported" } });
   });
 
+  it("journals a person letting a key provider run as itself without stopping its sessions, and refuses other providers", async () => {
+    const piId = decodeProviderInstanceId("70000000-0000-4000-8000-0000000000aa");
+    const fixture = serviceFixture({
+      instances: [
+        claudeProvider(),
+        decodeProviderInstance({
+          id: piId,
+          displayName: "Pi",
+          driverKind: "pi",
+          configuration: { kind: "pi-rpc", binaryPath: "/opt/homebrew/bin/pi" },
+          enabled: true,
+          environmentPolicy: "inherit-host",
+          version: 1,
+          createdAt: "2026-07-14T10:00:00.000Z",
+          updatedAt: "2026-07-14T10:00:00.000Z",
+        }),
+      ],
+    });
+    fixture.runtime.setObservedState(observation());
+    fixture.runtime.setActiveSessionCount(instanceId, 1);
+    const invalidate = vi.spyOn(fixture.runtime, "invalidateRuntime");
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "set-provider-native-setup",
+        instanceId,
+        expectedVersion: 1,
+        enabled: true,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-updated", instance: { nativeSetup: true } });
+    expect(fixture.append).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        events: [
+          expect.objectContaining({ eventName: "provider.instance-native-setup-changed@1" }),
+        ],
+      }),
+    );
+    expect(fixture.persistence.readProviderInstance(instanceId)).toMatchObject({
+      nativeSetup: true,
+    });
+    expect(invalidate).not.toHaveBeenCalled();
+
+    const off = await fixture.service.execute(windowId, {
+      kind: "set-provider-native-setup",
+      instanceId,
+      expectedVersion: 2,
+      enabled: false,
+    });
+    expect(off.kind === "provider-updated" ? off.instance : undefined).not.toHaveProperty(
+      "nativeSetup",
+    );
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "set-provider-native-setup",
+        instanceId: piId,
+        expectedVersion: 1,
+        enabled: true,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unsupported" } });
+  });
+
   it("assigns a separate Claude-owned directory to each additional Claude account", async () => {
     const fixture = serviceFixture();
     await fixture.service.execute(windowId, {

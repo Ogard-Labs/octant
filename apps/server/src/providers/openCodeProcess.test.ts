@@ -643,7 +643,7 @@ describe("OpenCodeProcessPort", () => {
       { reserveLoopbackPort: async () => 43123, ...dependencies },
     );
 
-  it("passes the explicit mode and policy to the OS confinement port before spawning", async () => {
+  it("passes the explicit mode, policy and extra folders to the OS confinement port before spawning", async () => {
     const fixture = profileRecordingWrapper("isolation-supported");
     // The configured path is a launcher link; the kernel needs read-metadata on
     // the link's directory before it can resolve to the realpath the profile
@@ -668,6 +668,7 @@ describe("OpenCodeProcessPort", () => {
         }).start({
           binaryPath: linkedBinary,
           cwd: fixture.root,
+          extraFolders: ["/tmp/octant-opencode-notes"],
           mode: "work",
           executionPolicy: "plan",
         }),
@@ -675,6 +676,8 @@ describe("OpenCodeProcessPort", () => {
     );
     expect(captured).toMatchObject({
       boundRoot: realpathSync(fixture.root),
+      // An extra folder is bound beside the root and read-only with it in Plan.
+      extraBoundRoots: ["/tmp/octant-opencode-notes"],
       // Plan withholds writing and running something, not the model call the
       // agent makes to produce the plan.
       networkEgress: "allow",

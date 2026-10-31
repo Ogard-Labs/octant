@@ -2,18 +2,17 @@ import { randomUUID } from "node:crypto";
 import {
   decodeCodeThreadId,
   decodeSpendCeilingReservationId,
+  type AutoReviewer,
   type CodeThread,
   type ProviderCapabilities,
-  type ProviderDriverKind,
   type ProviderExecutionPolicy,
   type ProviderInstanceId,
   type ProviderModelId,
   type ShieldDecision,
   type ShieldModelChoice,
+  type ShieldWatcherLabel,
   type TurnUsage,
 } from "@octant/contracts";
-import { isAcpAgentKind } from "@octant/contracts";
-import { isNativeHarnessDriverKind } from "@octant/domain";
 import { shieldReviewsPrompts } from "@octant/domain/guardrail-policy";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type { SpendCeilingService } from "../spendCeilingService";
@@ -43,10 +42,14 @@ export interface HostShieldDependencies {
   ) => ReadonlyArray<{ readonly id: ProviderModelId; readonly displayName: string }> | undefined;
   readonly resolveDriver: (providerInstanceId: ProviderInstanceId) => ProviderDriver | undefined;
   readonly tainted: (threadId: string) => boolean;
+  /** What the Watcher found in what the thread read: kinds only, never text. */
+  readonly watcherLabels: (threadId: string) => ReadonlyArray<ShieldWatcherLabel>;
   /** The thread's own turn prompts, oldest first: what the person wrote. */
   readonly personMessages: (threadId: CodeThread["id"], limit: number) => ReadonlyArray<string>;
   /** The person's chosen Shield model, when they picked one. */
   readonly chosenModel?: () => ShieldModelChoice | undefined;
+  /** The person's Auto reviewer for a thread: its Project's, else Settings'. */
+  readonly chosenReviewer?: (thread: CodeThread) => AutoReviewer | undefined;
   readonly spendCeiling?: Pick<SpendCeilingService, "admit" | "settle" | "abandon">;
   /**
    * Records what one review's model call used under the reviewed thread, so
@@ -120,6 +123,7 @@ export function createHostShield(deps: HostShieldDependencies): HostShield {
         if (thread === undefined || thread.lifecycle !== "active") return undefined;
         const executionPolicy = deps.readTurnExecutionPolicy?.(threadId) ?? thread.executionPolicy;
         const reviews = shieldReviewsPrompts({
+          reviewer: deps.chosenReviewer?.(thread),
           access: { executionPolicy, autoApprove: thread.autoApprove },
           capabilities: {
             providerReview:
@@ -139,6 +143,7 @@ export function createHostShield(deps: HostShieldDependencies): HostShield {
         };
       },
       tainted: deps.tainted,
+      watcherLabels: deps.watcherLabels,
       personMessages: (threadId) => {
         const thread = readThread(threadId);
         return thread === undefined
@@ -211,20 +216,4 @@ function shieldSpend(
   };
 }
 
-/**
- * Runtimes whose approval prompts reach Octant before the call runs, so
- * Shield can answer them: the Octant Harness, whose tool calls pass Octant's
- * approval path, Claude Code (`canUseTool`), Codex (app-server approval
- * requests), OpenCode (`permission.asked`), every ACP agent
- * (`session/request_permission`), and Pi (its extension's confirmation).
- */
-export function shieldRoutesApprovals(driverKind: ProviderDriverKind): boolean {
-  if (isNativeHarnessDriverKind(driverKind)) return true;
-  if (isAcpAgentKind(driverKind)) return true;
-  return (
-    driverKind === "claude" ||
-    driverKind === "codex" ||
-    driverKind === "opencode" ||
-    driverKind === "pi"
-  );
-}
+export { shieldRoutesApprovals } from "@octant/domain/guardrail-policy";

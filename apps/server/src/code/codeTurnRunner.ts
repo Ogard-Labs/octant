@@ -6,14 +6,17 @@ import {
   type ProviderContextBreakdown,
   type ProviderFailure,
   type ProviderInstanceId,
+  type ProviderNativeSetup,
   type ProviderRuntimeEvent,
   type ProviderResumeCursor,
   type ProviderUsageLimit,
   type ThreadPublishedPage,
+  type ToolOutsideContentMark,
   type TurnStopReason,
   type UsageCost,
 } from "@octant/contracts";
 import { ledgerUsageCost, observeTurnMetrics, startTurnMetrics } from "@octant/domain";
+import { outsideContentRecordedOnly } from "@octant/domain/guardrail-policy";
 import { Effect, Fiber, Scope, Stream } from "effect";
 import type {
   ProviderAcquireInput,
@@ -132,6 +135,8 @@ export interface CodeTurnEvent {
   readonly toolName?: string;
   /** A page a finished tool call published outside this host. */
   readonly published?: ThreadPublishedPage;
+  /** The finished call's result brought outside content into the thread. */
+  readonly outsideContent?: ToolOutsideContentMark;
   readonly status?: string;
   readonly path?: string;
   readonly change?: string;
@@ -162,6 +167,8 @@ export interface CodeTurnRunnerInput {
   readonly thread: CodeThread;
   readonly sessionId: ProviderRuntimeEvent["sessionId"];
   readonly checkoutRoot: string;
+  /** The Project's extra folders, granted what the checkout is granted. */
+  readonly extraFolders?: ReadonlyArray<string>;
   readonly prompt: string;
   readonly resumeCursor?: ProviderResumeCursor;
   readonly onSessionReady?: (handle: ProviderSessionHandle) => Effect.Effect<void, CodeTurnFailure>;
@@ -188,6 +195,8 @@ export interface CodeTurnRunnerInput {
    * permission mode and Octant's own gate answers every prompt.
    */
   readonly harnessAutoReviewEnabled?: boolean;
+  /** What the session may load of the provider's own setup; absent keeps it all off. */
+  readonly nativeSetup?: ProviderNativeSetup;
   /**
    * Records that the runtime's own web search, page fetch, or hosted tool put
    * outside content in front of the model. Without it such a call stops the
@@ -342,6 +351,9 @@ export class CodeTurnRunner {
           instanceId: input.thread.providerInstanceId,
           mode: "code",
           projectRoot: input.checkoutRoot,
+          ...(input.extraFolders === undefined || input.extraFolders.length === 0
+            ? {}
+            : { extraFolders: input.extraFolders }),
           permissionPersistence: input.thread.permissionPersistence,
         })
         .pipe(Effect.catchAll((providerFailure) => failForProvider(providerFailure, fail)));
@@ -364,6 +376,7 @@ export class CodeTurnRunner {
           : { modelOptionValues: input.thread.modelOptionValues }),
         executionPolicy: input.thread.executionPolicy,
         ...(input.harnessAutoReviewEnabled === true ? { autoApprove: true } : {}),
+        ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
         // The driver still offers its artifact tool only where it would name
         // it for this mode and posture.
         ...(input.thread.documentDelivery === "native-artifacts" ? { nativeArtifacts: true } : {}),
@@ -604,6 +617,20 @@ export class CodeTurnRunner {
                       text: answer.isError
                         ? appManagedActionFailureText(execution.result)
                         : "App-managed action completed.",
+                      ...(answer.isError || execution.outsideContent === undefined
+                        ? {}
+                        : {
+                            outsideContent: {
+                              labels: execution.outsideContent.labels,
+                              // At Full access the mark is recorded only: a quiet tag.
+                              ...(outsideContentRecordedOnly({
+                                mode: "code",
+                                executionPolicy: input.thread.executionPolicy,
+                              })
+                                ? { recordedOnly: true as const }
+                                : {}),
+                            },
+                          }),
                     });
                     return;
                   }

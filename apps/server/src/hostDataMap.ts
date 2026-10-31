@@ -46,6 +46,7 @@ const CACHE_DIRECTORIES: ReadonlyArray<{ readonly name: string; readonly relativ
   { name: "Agent-run workspace receipts", relative: "agent-run-workspace-receipts" },
   { name: "Managed worktree receipts", relative: "managed-worktree-receipts" },
   { name: "Installed extensions", relative: "extensions" },
+  { name: "Browser extensions", relative: "browser-extensions" },
   // The desktop app installs the computer-use driver here, and the host keeps
   // its runtime receipts under it, so a person inspecting the store sees it.
   { name: "Computer use driver", relative: "computer-use" },

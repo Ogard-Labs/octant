@@ -1,6 +1,7 @@
 export * from "./browserAutomationPolicy";
 export * from "./browserCapturePolicy";
 export * from "./browserProfilePolicy";
+export * from "./browserExtensionPolicy";
 export * from "./computerUsePolicy";
 export * from "./desktopLeasePolicy";
 export * from "./validationCompositionPolicy";
@@ -128,6 +129,7 @@ export * from "./navigatorAssistantPolicy";
 export * from "./providerAccountProfile";
 export * from "./providerAccountPlanUsage";
 export * from "./providerPolicy";
+export * from "./providerNativeSetupPolicy";
 export * from "./providerCatalogPolicy";
 export * from "./researchPolicy";
 export * from "./shellPolicy";
