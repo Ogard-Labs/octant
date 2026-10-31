@@ -6,6 +6,7 @@ import {
   type MovableThreadMode,
 } from "@octant/domain/thread-project-move-policy";
 import { useId, useState } from "react";
+import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 
@@ -125,16 +126,17 @@ export function MoveThreadToProjectDialog(props: MoveThreadToProjectDialogProps)
             const reasonId = `${descriptionId}-${String(project.id)}`;
             return (
               <li key={String(project.id)}>
-                <button
+                <OctantButton
                   aria-describedby={reason === undefined ? undefined : reasonId}
                   className="move-thread__choice"
                   disabled={busy || reason !== undefined}
                   onClick={() => void move(String(project.id))}
                   type="button"
+                  variant="outline"
                 >
                   <span className="move-thread__name">{project.name}</span>
                   <span className="move-thread__folder">{bound(project)}</span>
-                </button>
+                </OctantButton>
                 {reason === undefined ? null : (
                   <span className="move-thread__reason" id={reasonId}>
                     {reason}
@@ -145,7 +147,7 @@ export function MoveThreadToProjectDialog(props: MoveThreadToProjectDialogProps)
           })}
         </ul>
       )}
-      {refusal === undefined ? null : <p role="alert">{refusal}</p>}
+      {refusal === undefined ? null : <OctantAlert tone="danger">{refusal}</OctantAlert>}
       <div className="project-dialog__actions">
         <OctantButton disabled={busy} onClick={() => props.onClose()} type="button" variant="ghost">
           Cancel

@@ -1,5 +1,6 @@
 import type { ProjectId } from "@octant/contracts/projects";
 import { useId, useState } from "react";
+import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -111,7 +112,9 @@ export function MoveToProjectDialog(props: MoveToProjectDialogProps) {
         </form>
       )}
       {failed ? (
-        <p role="alert">The conversation could not be moved. Nothing changed; try again.</p>
+        <OctantAlert tone="danger">
+          The conversation could not be moved. Nothing changed; try again.
+        </OctantAlert>
       ) : null}
     </OctantDialog>
   );

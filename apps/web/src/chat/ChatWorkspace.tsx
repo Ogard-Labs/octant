@@ -448,6 +448,23 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             props.onCanvasReferencesObserved?.(String(view.thread.id), cards),
         }),
   });
+  // Force stop appears when a Stop pressed on this attempt has not ended it
+  // after the grace period, and only for a provider that can kill one turn's
+  // process alone; any other provider keeps just Stop. These hooks sit above
+  // the unloaded-view return so their order never changes between renders.
+  const [stopRequestedFor, setStopRequestedFor] = useState<string | undefined>(undefined);
+  const [stopGraceElapsed, setStopGraceElapsed] = useState(false);
+  const runningAttempt = view === undefined ? undefined : latestActiveAttempt(view);
+  const stoppingAttemptId =
+    runningAttempt !== undefined && stopRequestedFor === String(runningAttempt.id)
+      ? stopRequestedFor
+      : undefined;
+  useEffect(() => {
+    setStopGraceElapsed(false);
+    if (stoppingAttemptId === undefined) return;
+    const timer = setTimeout(() => setStopGraceElapsed(true), FORCE_STOP_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [stoppingAttemptId]);
   if (view === undefined) {
     return (
       <section aria-label="Chat workspace" className="chat-workspace">
@@ -523,21 +540,6 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const providerState = providerPresentation(props.providerSnapshot, view);
   const activeAttempt = latestActiveAttempt(view);
   const isSending = activeAttempt !== undefined;
-  // Force stop appears when a Stop pressed on this attempt has not ended it
-  // after the grace period, and only for a provider that can kill one turn's
-  // process alone; any other provider keeps just Stop.
-  const [stopRequestedFor, setStopRequestedFor] = useState<string | undefined>(undefined);
-  const [stopGraceElapsed, setStopGraceElapsed] = useState(false);
-  const stoppingAttemptId =
-    activeAttempt !== undefined && stopRequestedFor === String(activeAttempt.id)
-      ? stopRequestedFor
-      : undefined;
-  useEffect(() => {
-    setStopGraceElapsed(false);
-    if (stoppingAttemptId === undefined) return;
-    const timer = setTimeout(() => setStopGraceElapsed(true), FORCE_STOP_AFTER_MS);
-    return () => clearTimeout(timer);
-  }, [stoppingAttemptId]);
   const forceStopOffered =
     stoppingAttemptId !== undefined &&
     stopGraceElapsed &&

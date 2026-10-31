@@ -803,26 +803,13 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  justify-content: flex-start;
   gap: 2px;
   width: 100%;
+  height: auto;
   padding: var(--oct-space-2) var(--oct-space-3);
-  color: var(--oct-fg);
-  background: var(--oct-surface);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
-  cursor: pointer;
-  font: inherit;
-  font-size: var(--oct-text-sm);
+  white-space: normal;
   text-align: left;
-}
-
-.move-thread__choice:hover:not(:disabled) {
-  background: var(--octant-control-hover);
-}
-
-.move-thread__choice:disabled {
-  cursor: default;
-  opacity: 0.6;
 }
 
 .move-thread__folder,
