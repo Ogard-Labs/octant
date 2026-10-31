@@ -206,6 +206,7 @@ import { useDesktopWindowAuthority } from "./shell/useDesktopWindowAuthority";
 import { buildInboxAttentionItems } from "./inbox/inboxModel";
 import { loadAssignedLinearIssues as fetchAssignedLinearIssues } from "./inbox/loadAssignedLinearIssues";
 import { collectThreadAttentionSignals } from "./notifications/collectThreadAttention";
+import { nextWaitingThread } from "./notifications/nextWaitingThread";
 import { evaluateThreadAttention } from "./notifications/threadAttention";
 import { useThreadAttentionNotifications } from "./notifications/useThreadAttentionNotifications";
 import { useShellController, type NativeShellHost } from "./shell/useShellController";
@@ -279,6 +280,7 @@ import {
   writeSidebarCollapsed,
 } from "./shell/useShellPresentation";
 import { useHomeShortcut } from "./shell/useHomeShortcut";
+import { useJumpToWaitingShortcut } from "./shell/useJumpToWaitingShortcut";
 import { useSidebarToggleShortcut } from "./shell/useSidebarToggleShortcut";
 import { PlanUsageProvider } from "./usage/PlanUsageContext";
 import { RailUsageRings } from "./usage/RailUsageRings";
@@ -2132,6 +2134,19 @@ function LaunchedShell(
       codeController.navigation,
     ],
   );
+  // The jump reads the signals the sidebar and Inbox already render, so it
+  // opens exactly the threads they mark as waiting.
+  const nextWaiting = nextWaitingThread(attentionSignals, watchedThreadId);
+  const jumpToNextWaiting = (): void => {
+    if (nextWaiting === undefined) return;
+    openCommandThread({
+      threadId: nextWaiting.threadId,
+      title: nextWaiting.title,
+      mode: nextWaiting.source,
+      ...(nextWaiting.projectId === undefined ? {} : { projectId: nextWaiting.projectId }),
+    });
+  };
+  useJumpToWaitingShortcut(jumpToNextWaiting);
   useThreadAttentionNotifications({
     ...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge }),
     signals: attentionSignals,
@@ -6575,6 +6590,7 @@ function LaunchedShell(
     onOpenSearch: openThreadSearch,
     onOpenSettings: () => void controller.openSettings(),
     onOpenReview: openReview,
+    ...(nextWaiting === undefined ? {} : { onJumpToNextWaiting: jumpToNextWaiting }),
     onOpenZen: () => {
       if (zen.active) zen.exitZen();
       else void zen.enterZen();

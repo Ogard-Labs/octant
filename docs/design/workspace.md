@@ -82,8 +82,18 @@ posture as quiet text (it is a standing setting, not a state or a control, so
 it takes no chip), and facts on one line beneath it, then Details. A Work
 Project's thread list takes the same labelled card. Settings
 rows split into **Context** (Memory, Brand kit, Canvases) and **Access and
-limits** (Provider access, Disposable desktop, Status file, Spend ceiling); a
-group with no rows is not drawn. Over an application ground the cards keep the
+limits** (Provider access, Guardrail level, Developer tools on a Work
+Project, Disposable desktop, Status file, Spend ceiling); a group with no
+rows is not drawn. **Guardrail level** shows the level the Project's threads
+start at and where it came from, changeable in one click, and is the same row
+in Work and Code. **Developer tools** is the Work Project's switch for
+showing developer surfaces (Git panels, pull request and review surfaces,
+issue-tracker integrations, the worktree and checkout pickers, and the
+Project terminal), off by default, set only by a person. Its row says it
+changes what the Project shows, not what its threads may do: a Work thread
+has the same shell, Git, and tools as a Code thread at the same level either
+way ([Modes](../architecture.md#modes-chat-work-and-code); allowed, not built
+yet). Code Projects have no such row, since Code always shows them. Over an application ground the cards keep the
 opaque card step even under Glass, and the header's text takes the start
 screen's page-colour glow: set straight on the ground, the overview's rows
 read through the ground's letters (October 2026).
@@ -135,6 +145,22 @@ recover them; available and unavailable checkouts are not re-probed, and the
 sidebar timer never walks the checkout tree. Inactive modes and hidden windows
 pause those refreshes so background ticks do not contend with the next
 interaction.
+
+### Jump to the next waiting thread
+
+The `next-waiting-thread` keybinding (Mod+Shift+J by default) and the palette
+command **Jump to the next thread that needs you** open the next thread waiting
+on the person. The renderer reads the attention signals the sidebar and Inbox
+already render and adds no host read. Each thread counts once, at its strongest
+reason, in this order: approval, question, finished turn not yet looked at;
+within a reason, in the order the signals are listed. The jump goes to the entry
+after the open thread and wraps from the last to the first; when the open thread
+is not waiting it goes to the first, and when nothing waits it does nothing and
+the command is absent from the palette. A failed turn is not in the order: the
+thread listing reports no failure, and a status is never inferred from silence.
+A due follow-up is a reminder, not a waiting thread, and is left out. The
+Status arrangement's **Needs input** and **Ready for review** headings are the
+list-side counterpart, so no second priority group is added to the Projects tree.
 
 ### Sidebar thread status
 

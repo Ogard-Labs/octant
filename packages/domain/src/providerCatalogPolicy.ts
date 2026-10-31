@@ -145,13 +145,11 @@ export function providerCatalogCapabilities(
 }
 
 /**
- * Codex keeps one app-server for every thread on an instance, so no profile
- * fits it; Claude's postures that write rest on its own sandbox settings.
- * Every other runtime launches wrapped. `providerProcessConfinement.test.ts`
- * holds this to the matrix.
+ * Claude's postures that write rest on its own sandbox settings. Every other
+ * runtime launches wrapped. `providerProcessConfinement.test.ts` holds this to
+ * the matrix.
  */
 function runtimeSandbox(driverKind: ProviderDriverKind): ProviderCatalogSandbox {
-  if (driverKind === "codex") return "runtime";
   if (driverKind === "claude") return "octant-in-plan";
   return "octant";
 }
