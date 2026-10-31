@@ -57,7 +57,9 @@ export type ThreadMoveDecision =
 const CLOSED_LIFECYCLES: ReadonlySet<string> = new Set(["archived", "deleting", "deleted"]);
 
 function trimTrailingSlash(folder: string): string {
-  return folder.length > 1 ? folder.replace(/\/+$/, "") || "/" : folder;
+  let end = folder.length;
+  while (end > 1 && folder.charCodeAt(end - 1) === 47) end -= 1;
+  return folder.slice(0, end);
 }
 
 /** Whether `outer` is `inner` or one of its ancestors, compared by whole path components. */
