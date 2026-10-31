@@ -292,6 +292,22 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     setDraft(text);
     props.controller.setPendingDraft?.(text, text.length);
   });
+  // Auto-fix holds its wake back while the person composes here. The host
+  // keeps a note for a minute, so one every fifteen seconds is enough.
+  const composerActivityAtRef = useRef(0);
+  const codeClient = props.controller.client;
+  useEffect(() => {
+    if (draft.trim() === "" || codeClient?.noteComposerActivity === undefined) return;
+    const now = Date.now();
+    if (now - composerActivityAtRef.current < 15_000) return;
+    composerActivityAtRef.current = now;
+    // A pause hint must never disturb typing, so even a synchronous throw is
+    // kept out of the render.
+    const threadId = props.threadId;
+    void Promise.resolve()
+      .then(() => codeClient.noteComposerActivity?.(threadId))
+      .catch(() => undefined);
+  }, [codeClient, draft, props.threadId]);
   const compacting = useComposerCompacting();
   // User edits are counted separately from the internal clear performed when
   // an acknowledged message leaves the composer, so an async mention lookup cannot

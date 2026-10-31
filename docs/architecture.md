@@ -1501,9 +1501,10 @@ already running when the mark lands finishes normally.
 
 **Pull-request merge.** The person at a local desktop window may merge one
 open pull request from its review (`POST /api/code/project-pull-requests/merge`).
-That is the only pull-request mutation Octant performs; approving, commenting,
-requesting changes, editing, closing, reopening, and force-pushing stay absent.
-The rules:
+Besides it, the person may turn on **Merge when ready** and **Auto-fix** for a
+Code thread's pull request (rules below). Octant itself never approves,
+comments, requests changes, edits, closes, reopens, or force-pushes.
+The merge rules:
 
 - **Who.** Only a `local-window` principal. The route answers 403 to a paired
   remote device before decoding the command, and the server service refuses
@@ -1535,6 +1536,69 @@ The rules:
   observes Merged. The outcome also drops the cached detail and list rows. A
   thread linked to the pull request reaches Done only through the ordinary
   observed-state rule, never from this record.
+
+**Merge when ready and Auto-fix.** A Code thread's pull request review carries
+two switches (`POST /api/code/project-pull-requests/merge-when-ready` and
+`/auto-fix`; `POST /api/code/project-pull-requests/switches` reads them). The
+person's click is the approval; nothing else turns either on.
+
+- **Who.** The same as a merge: only a `local-window` principal. Both routes
+  answer 403 to a paired device before decoding, the service refuses any
+  initiator other than `user` as `not-authorized`, and it refuses unless the
+  Project is connected on this window and resolves to exactly that github.com
+  repository. No provider, agent tool, plugin, or routine can reach them.
+  Reading the switches needs only that Project check.
+- **Merge when ready** turns on the forge's own auto-merge: `gh pr merge <n>
+--auto --<method> --match-head-commit <head the person saw>`. The host first
+  reads the repository's settings; when the repository does not allow
+  auto-merge it answers `unsupported` (`auto-merge-not-allowed`) and turns
+  nothing on. It never imitates auto-merge with a loop of its own. The method
+  is the one the person picked in the review, refused as
+  `method-not-allowed` when the repository forbids it, or, when none is sent,
+  the first the repository allows (squash, merge, rebase). Turning it off runs
+  `--disable-auto`. While it is on, the host observes the pull request about
+  once a minute and shows what it waits on (checks, reviews, a conflict); it
+  records `merged` when the forge merged and `turned-off-by-forge` when the
+  forge dropped auto-merge or the pull request closed.
+- **Auto-fix** binds the pull request to one Code thread linked to it (the
+  host refuses any other thread as `thread-not-linked`). While it is on, the
+  host observes the pull request about once a minute: failed required checks
+  (`gh pr checks --required`) with the tail of each failed job's log (at most
+  4 KB, four jobs), unresolved and not-outdated review threads with their
+  comments, and a merge conflict with the base. On a new failure it wakes the
+  thread with one provider turn, through the same host path a routine
+  follow-up takes, so the thread's own access level and approvals apply. The
+  turn states Octant's rules first (never force-push, never rewrite pushed
+  history, merge the base branch instead of rebasing; after a fix the agent
+  may reply to the review thread and resolve it with its ordinary tools) and
+  then the forge's text inside an outside-content block. Before the turn
+  starts the host records `thread.external-content-ingested@1` on the thread
+  (label `pull-request-auto-fix`), so the taint rules apply; when that mark is
+  refused, no turn is sent.
+- **Auto-fix limits.** A failure is a check name, a review thread id, or the
+  base conflict. Each started wake spends one attempt on every failure it
+  carried; at most three attempts per failure, after which Auto-fix stops
+  (`attempt-limit`) and opens the thread's follow-up marker. The same failures
+  on the same head never wake twice. A wake waits while a turn runs or is
+  ambiguous in the thread, while its session compacts, or for a minute after
+  the person last typed in its composer (`POST /api/code/composer-activity`,
+  sent by the composer at most every fifteen seconds); waiting is shown, never
+  journaled. Auto-fix stops when the pull request merges or closes, when the
+  thread is archived, completed, or gone, or when the person turns it off.
+  Turning it on again starts a fresh attempt count.
+- **Record.** Every switch change and every wake appends one event on the
+  `code-project-pull-request-switches` aggregate type, each its own aggregate:
+  `code.project-pull-request-merge-when-ready-recorded@1` (enabled with method
+  and head, disabled, merged, turned off by the forge) and
+  `code.project-pull-request-auto-fix-recorded@1` (enabled, disabled, woke
+  with the head, failure identities, attempt, and whether the turn started,
+  was refused, or was never sent because the mark was refused; stopped with
+  its reason). Clicks are journaled as the local user, observations as the
+  host. Payloads carry no log, comment, or credential text. The host rebuilds
+  both switches and every attempt count by replaying these events on start.
+- **Host-local.** The observation runs in the Octant server only while a
+  switch is on, through the host's `gh` login. It is not a routine and needs
+  no hosted service; a stopped host observes nothing.
 
 **Delivery (publishing to a user-owned target) is dormant.** The ship service
 and its journaled events exist, but the host wires no target source, no
@@ -9184,7 +9248,8 @@ Connectors (MCP servers added by hand, imported from other tools on this Mac,
 signed in to, or chosen from the bundled catalog) are in scope under the
 [connector rules](#extensions-and-skills): user-added packages through the
 published seams and the credential broker, never a hosted service. The person's
-confirmed pull-request merge from a local window and host-local routines
+confirmed pull-request merge from a local window, the Merge when ready and
+Auto-fix switches the person turns on there, and host-local routines
 (Automation Center) are in scope under the rules in
 [Modes](#modes-chat-work-and-code); other pull-request mutation,
 agent-initiated merge, and cloud scheduling are not. A self-hosted wake service

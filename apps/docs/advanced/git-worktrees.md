@@ -98,7 +98,9 @@ receives an explicit normalized path set.
   agent under every posture**. You can merge an open pull request yourself
   from its review on the desktop: choose a method, then **Confirm merge**.
   Octant merges only the head you reviewed, refuses if it moved, and uses your
-  signed-in `gh`. A paired device cannot merge. Durable local review findings stay thread-owned; publishing
+  signed-in `gh`. A paired device cannot merge. You can also turn on
+  **Merge when ready** and **Auto-fix** there; see
+  [Automatic actions](#automatic-actions-on-a-pull-request). Durable local review findings stay thread-owned; publishing
   them to GitHub is a later phase.
 
 ## Authority matrix
@@ -146,6 +148,35 @@ card can show an identity as **Unknown** and stale until a user refreshes.
 Thread-scoped create and observe remain on the thread. A pull request's review
 can merge it after you confirm; nothing here approves, comments, closes, or
 force-pushes.
+
+### Automatic actions on a pull request
+
+A pull request's review has two switches under **Automatic actions**. Only you
+can turn them on, with a click in a desktop window on the computer running
+Octant; a paired phone or browser cannot.
+
+- **Merge when ready** asks GitHub to merge the pull request itself once its
+  required checks and reviews pass, using the merge method selected beside
+  **Merge**. It is pinned to the head you were looking at, so a push in between
+  makes GitHub refuse. If the repository does not allow auto-merge, the review
+  says it is unsupported and turns nothing on; enable **Allow auto-merge** in
+  the repository's GitHub settings first. The status line shows what it waits
+  on, when GitHub merged it, or when GitHub turned auto-merge off.
+- **Auto-fix** watches the pull request about once a minute while Octant runs.
+  When a required check fails, a reviewer leaves an unresolved comment, or the
+  branch conflicts with its base, it wakes the linked Code thread with one turn
+  that lists the failed checks with the end of their logs, the review comments,
+  and the conflict. That text comes from GitHub, so it is marked as outside
+  content and the thread's usual approvals apply. The agent is told to fix,
+  commit, and push on the branch, never force-push or rewrite history, and to
+  merge the base branch rather than rebase; it may reply to a review thread and
+  resolve it after fixing it.
+- Auto-fix tries at most three times per failure, then stops and marks the
+  thread for your follow-up. It waits while you are typing in that thread or a
+  turn is running there, and stops when the pull request merges or closes, the
+  thread is archived, or you turn it off.
+
+Every switch change and every wake is recorded in Octant's journal.
 
 A Code thread's right sidebar can also host **Pull requests**: it lists the
 active Project's active rows from the same cached snapshot and opens a selected

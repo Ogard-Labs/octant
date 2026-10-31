@@ -30,8 +30,14 @@ import {
   decodeCodeProjectPullRequestDetailQuery,
   decodeCodeProjectPullRequestDetailRefreshCommand,
   decodeCodeProjectPullRequestDetailView,
+  decodeCodeProjectPullRequestAutoFixCommand,
   decodeCodeProjectPullRequestMergeCommand,
   decodeCodeProjectPullRequestMergeOutcome,
+  decodeCodeProjectPullRequestMergeWhenReadyCommand,
+  decodeCodeProjectPullRequestSwitchOutcome,
+  decodeCodeProjectPullRequestSwitchTarget,
+  decodeCodeProjectPullRequestSwitchesView,
+  decodeCodeThreadComposerActivity,
   decodeCodeCommand,
   decodeCodeEvidenceReference,
   decodeCodeEvidenceBatchRequest,
@@ -78,8 +84,14 @@ import {
   type CodeProjectPullRequestDetailQuery,
   type CodeProjectPullRequestDetailRefreshCommand,
   type CodeProjectPullRequestDetailView,
+  type CodeProjectPullRequestAutoFixCommand,
   type CodeProjectPullRequestMergeCommand,
   type CodeProjectPullRequestMergeOutcome,
+  type CodeProjectPullRequestMergeWhenReadyCommand,
+  type CodeProjectPullRequestSwitchOutcome,
+  type CodeProjectPullRequestSwitchTarget,
+  type CodeProjectPullRequestSwitchesView,
+  type CodeThreadComposerActivity,
   type CodeAttachmentId,
   type CodeAttachmentMediaType,
   type CodeAttachmentReference,
@@ -322,6 +334,27 @@ export interface CodeRouteService {
     signal?: AbortSignal,
     initiator?: "user" | "agent",
   ) => Promise<CodeProjectPullRequestMergeOutcome> | CodeProjectPullRequestMergeOutcome;
+  /** A pull request's Merge when ready and Auto-fix switches. */
+  readonly queryProjectPullRequestSwitches?: (
+    authenticatedWindowId: WindowId,
+    target: CodeProjectPullRequestSwitchTarget,
+  ) => Promise<CodeProjectPullRequestSwitchesView>;
+  readonly setProjectPullRequestMergeWhenReady?: (
+    authenticatedWindowId: WindowId,
+    command: CodeProjectPullRequestMergeWhenReadyCommand,
+    signal: AbortSignal,
+    initiator: "user" | "agent",
+  ) => Promise<CodeProjectPullRequestSwitchOutcome>;
+  readonly setProjectPullRequestAutoFix?: (
+    authenticatedWindowId: WindowId,
+    command: CodeProjectPullRequestAutoFixCommand,
+    initiator: "user" | "agent",
+  ) => Promise<CodeProjectPullRequestSwitchOutcome>;
+  /** A window's person is composing in a Code thread; Auto-fix holds back. */
+  readonly noteComposerActivity?: (
+    authenticatedWindowId: WindowId,
+    activity: CodeThreadComposerActivity,
+  ) => Promise<void> | void;
   /**
    * The Project's planner designation and proposals. Optional like the board:
    * a host without the planner capability answers `unavailable`, not 404.
@@ -1396,6 +1429,122 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             origin,
           );
         }
+        case "project-pull-requests-switches": {
+          requireMethodAndEmptyQuery(request, url, "POST");
+          requireJsonContentType(request);
+          if (dependencies.service.queryProjectPullRequestSwitches === undefined) {
+            return failureResponse(
+              { category: "unavailable", message: "Pull-request switches are unavailable." },
+              503,
+              origin,
+            );
+          }
+          const value = parseJson(await readBoundedBytes(request, jsonLimit));
+          refuseRendererAuthoredIdentity(value);
+          let target: CodeProjectPullRequestSwitchTarget;
+          try {
+            target = decodeCodeProjectPullRequestSwitchTarget(value);
+          } catch {
+            throw new CodeRouteRejected("Code project pull-request switch query is invalid.", 400);
+          }
+          return jsonResponse(
+            decodeCodeProjectPullRequestSwitchesView(
+              await dependencies.service.queryProjectPullRequestSwitches(
+                authenticatedWindowId,
+                target,
+              ),
+            ),
+            200,
+            origin,
+          );
+        }
+        case "project-pull-requests-merge-when-ready":
+        case "project-pull-requests-auto-fix": {
+          requireMethodAndEmptyQuery(request, url, "POST");
+          requireJsonContentType(request);
+          // The click in a local window is the approval for both switches, as
+          // for a merge; a paired device is refused before anything decodes.
+          if (operationInitiator !== "user") {
+            return failureResponse(
+              {
+                category: "unauthorized",
+                message: "Pull-request switches require the local user.",
+              },
+              403,
+              origin,
+            );
+          }
+          const value = parseJson(await readBoundedBytes(request, jsonLimit));
+          refuseRendererAuthoredIdentity(value);
+          if (route.kind === "project-pull-requests-merge-when-ready") {
+            if (dependencies.service.setProjectPullRequestMergeWhenReady === undefined) {
+              return failureResponse(
+                { category: "unavailable", message: "Merge when ready is unavailable." },
+                503,
+                origin,
+              );
+            }
+            let command: CodeProjectPullRequestMergeWhenReadyCommand;
+            try {
+              command = decodeCodeProjectPullRequestMergeWhenReadyCommand(value);
+            } catch {
+              throw new CodeRouteRejected("Merge when ready command is invalid.", 400);
+            }
+            return jsonResponse(
+              decodeCodeProjectPullRequestSwitchOutcome(
+                await dependencies.service.setProjectPullRequestMergeWhenReady(
+                  authenticatedWindowId,
+                  command,
+                  request.signal,
+                  operationInitiator,
+                ),
+              ),
+              200,
+              origin,
+            );
+          }
+          if (dependencies.service.setProjectPullRequestAutoFix === undefined) {
+            return failureResponse(
+              { category: "unavailable", message: "Auto-fix is unavailable." },
+              503,
+              origin,
+            );
+          }
+          let command: CodeProjectPullRequestAutoFixCommand;
+          try {
+            command = decodeCodeProjectPullRequestAutoFixCommand(value);
+          } catch {
+            throw new CodeRouteRejected("Auto-fix command is invalid.", 400);
+          }
+          return jsonResponse(
+            decodeCodeProjectPullRequestSwitchOutcome(
+              await dependencies.service.setProjectPullRequestAutoFix(
+                authenticatedWindowId,
+                command,
+                operationInitiator,
+              ),
+            ),
+            200,
+            origin,
+          );
+        }
+        case "composer-activity": {
+          requireMethodAndEmptyQuery(request, url, "POST");
+          requireJsonContentType(request);
+          if (dependencies.service.noteComposerActivity === undefined) {
+            return new Response(null, { status: 204, headers: corsHeaders(origin) });
+          }
+          const value = parseJson(await readBoundedBytes(request, jsonLimit));
+          refuseRendererAuthoredIdentity(value);
+          let activity: CodeThreadComposerActivity;
+          try {
+            activity = decodeCodeThreadComposerActivity(value);
+          } catch {
+            throw new CodeRouteRejected("Composer activity is invalid.", 400);
+          }
+          await dependencies.service.noteComposerActivity(authenticatedWindowId, activity);
+          return new Response(null, { status: 204, headers: corsHeaders(origin) });
+        }
         case "operation-content": {
           requireMethodAndEmptyQuery(request, url, "GET");
           if (dependencies.service.readOperationContent === undefined) {
@@ -1771,7 +1920,11 @@ type MatchedRoute =
         | "project-pull-requests-refresh"
         | "project-pull-requests-detail"
         | "project-pull-requests-detail-refresh"
-        | "project-pull-requests-merge";
+        | "project-pull-requests-merge"
+        | "project-pull-requests-switches"
+        | "project-pull-requests-merge-when-ready"
+        | "project-pull-requests-auto-fix"
+        | "composer-activity";
     }>
   | Readonly<{ kind: "planner"; projectId: string }>
   | Readonly<{
@@ -1905,6 +2058,16 @@ function matchRoute(pathname: string): MatchedRoute | undefined {
   if (pathname === "/api/code/project-pull-requests/merge") {
     return { kind: "project-pull-requests-merge" };
   }
+  if (pathname === "/api/code/project-pull-requests/switches") {
+    return { kind: "project-pull-requests-switches" };
+  }
+  if (pathname === "/api/code/project-pull-requests/merge-when-ready") {
+    return { kind: "project-pull-requests-merge-when-ready" };
+  }
+  if (pathname === "/api/code/project-pull-requests/auto-fix") {
+    return { kind: "project-pull-requests-auto-fix" };
+  }
+  if (pathname === "/api/code/composer-activity") return { kind: "composer-activity" };
   if (pathname === "/api/code/language/documents") return { kind: "language-documents" };
   if (pathname === "/api/code/language/read") return { kind: "language-read" };
   if (pathname === "/api/code/language/approvals") return { kind: "language-approvals" };

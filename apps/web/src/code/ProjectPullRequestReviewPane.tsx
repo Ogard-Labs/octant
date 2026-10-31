@@ -1,16 +1,21 @@
-import type {
-  CodeProjectPullRequestDetailObserved,
-  CodeProjectPullRequestDetailSection,
-  CodeProjectPullRequestFreshness,
-  CodeProjectPullRequestLinkedThread,
-  CodeProjectPullRequestMergeMethod,
-  CodeProjectPullRequestMergeOutcome,
+import {
+  CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS,
+  type CodeProjectPullRequestDetailObserved,
+  type CodeProjectPullRequestDetailSection,
+  type CodeProjectPullRequestFreshness,
+  type CodeProjectPullRequestLinkedThread,
+  type CodeProjectPullRequestMergeMethod,
+  type CodeProjectPullRequestMergeOutcome,
+  type CodeProjectPullRequestSwitchOutcome,
+  type CodeProjectPullRequestSwitchesView,
+  type CodeThreadId,
 } from "@octant/contracts";
 import { Activity, GitBranch, GitPullRequest, MessageSquare, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { Markdown } from "../markdown/Markdown";
 import { CodeBlock } from "../transcript/CodeBlock";
 import "./project-pull-request-review.css";
@@ -67,6 +72,17 @@ export interface ProjectPullRequestReviewPaneProps {
     headSha: string,
   ) => Promise<CodeProjectPullRequestMergeOutcome>;
   readonly onRefresh?: () => void;
+  /** Merge when ready and Auto-fix; absent where the host has no switches. */
+  readonly switches?: CodeProjectPullRequestSwitchesView;
+  readonly onMergeWhenReady?: (
+    enabled: boolean,
+    method: CodeProjectPullRequestMergeMethod,
+    headSha: string,
+  ) => Promise<CodeProjectPullRequestSwitchOutcome>;
+  readonly onAutoFix?: (
+    enabled: boolean,
+    threadId: CodeThreadId,
+  ) => Promise<CodeProjectPullRequestSwitchOutcome>;
 }
 
 export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPaneProps) {
@@ -288,6 +304,19 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
         </p>
       )}
 
+      {props.switches === undefined ? null : (
+        <PullRequestSwitches
+          detail={detail}
+          linkedThreads={props.linkedThreads}
+          mergeMethod={mergeMethod}
+          switches={props.switches}
+          {...(props.onMergeWhenReady === undefined
+            ? {}
+            : { onMergeWhenReady: props.onMergeWhenReady })}
+          {...(props.onAutoFix === undefined ? {} : { onAutoFix: props.onAutoFix })}
+        />
+      )}
+
       <p className="code-pr-review__guardrail">
         Review data is read-only; merging is explicit and approval-gated.
       </p>
@@ -439,6 +468,207 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
       />
     </section>
   );
+}
+
+function PullRequestSwitches(props: {
+  readonly detail: CodeProjectPullRequestDetailObserved;
+  readonly linkedThreads: ReadonlyArray<CodeProjectPullRequestLinkedThread>;
+  readonly mergeMethod: CodeProjectPullRequestMergeMethod;
+  readonly switches: CodeProjectPullRequestSwitchesView;
+  readonly onMergeWhenReady?: ProjectPullRequestReviewPaneProps["onMergeWhenReady"];
+  readonly onAutoFix?: ProjectPullRequestReviewPaneProps["onAutoFix"];
+}) {
+  const { detail, switches } = props;
+  const [pending, setPending] = useState<"merge-when-ready" | "auto-fix">();
+  const [refusal, setRefusal] = useState<{
+    readonly switch: "merge-when-ready" | "auto-fix";
+    readonly outcome: Exclude<CodeProjectPullRequestSwitchOutcome, { status: "applied" }>;
+  }>();
+  const autoFixThread =
+    switches.autoFix.status === "off"
+      ? props.linkedThreads[0]
+      : props.linkedThreads.find(
+          (thread) =>
+            switches.autoFix.status !== "off" &&
+            String(thread.threadId) === String(switches.autoFix.threadId),
+        );
+  const open = detail.pullRequestState === "open" || detail.pullRequestState === "draft";
+  const mergeWhenReadyOn = switches.mergeWhenReady.status === "on";
+  const autoFixOn = switches.autoFix.status === "on";
+  const mergeWhenReadyBlocked =
+    props.onMergeWhenReady === undefined
+      ? "This host cannot change Merge when ready."
+      : !open && !mergeWhenReadyOn
+        ? "Only an open pull request can merge when ready."
+        : detail.headSha === "" && !mergeWhenReadyOn
+          ? "Refresh the detail to read the pull request's head first."
+          : undefined;
+  const autoFixBlocked =
+    props.onAutoFix === undefined
+      ? "This host cannot change Auto-fix."
+      : autoFixThread === undefined
+        ? "Link a Code thread to this pull request to use Auto-fix."
+        : !open && !autoFixOn
+          ? "Only an open pull request can be fixed automatically."
+          : undefined;
+
+  async function change(
+    which: "merge-when-ready" | "auto-fix",
+    run: () => Promise<CodeProjectPullRequestSwitchOutcome>,
+  ): Promise<void> {
+    setPending(which);
+    setRefusal(undefined);
+    try {
+      const outcome = await run();
+      if (outcome.status !== "applied") setRefusal({ switch: which, outcome });
+    } catch {
+      setRefusal({ switch: which, outcome: { status: "unavailable", reason: "unavailable" } });
+    } finally {
+      setPending(undefined);
+    }
+  }
+
+  return (
+    <section
+      aria-label="Automatic actions"
+      className="code-pr-review__section code-pr-review__switches"
+    >
+      <header className="code-pr-review__section-header">
+        <h2>Automatic actions</h2>
+      </header>
+      <div className="code-pr-review__switch">
+        <div className="code-pr-review__switch-text">
+          <strong id="code-pr-review-merge-when-ready">Merge when ready</strong>
+          <p id="code-pr-review-merge-when-ready-status" role="status">
+            {mergeWhenReadyCopy(switches.mergeWhenReady)}
+          </p>
+        </div>
+        <OctantSwitch
+          checked={mergeWhenReadyOn}
+          describedBy="code-pr-review-merge-when-ready-status"
+          disabled={mergeWhenReadyBlocked !== undefined || pending !== undefined}
+          {...(mergeWhenReadyBlocked === undefined
+            ? {}
+            : { disabledReason: mergeWhenReadyBlocked })}
+          label="Merge when ready"
+          onCheckedChange={(checked) => {
+            const run = props.onMergeWhenReady;
+            if (run === undefined) return;
+            void change("merge-when-ready", () => run(checked, props.mergeMethod, detail.headSha));
+          }}
+        />
+      </div>
+      <div className="code-pr-review__switch">
+        <div className="code-pr-review__switch-text">
+          <strong>Auto-fix</strong>
+          <p id="code-pr-review-auto-fix-status" role="status">
+            {autoFixCopy(switches.autoFix, autoFixThread?.title)}
+          </p>
+        </div>
+        <OctantSwitch
+          checked={autoFixOn}
+          describedBy="code-pr-review-auto-fix-status"
+          disabled={autoFixBlocked !== undefined || pending !== undefined}
+          {...(autoFixBlocked === undefined ? {} : { disabledReason: autoFixBlocked })}
+          label="Auto-fix"
+          onCheckedChange={(checked) => {
+            const run = props.onAutoFix;
+            if (run === undefined || autoFixThread === undefined) return;
+            void change("auto-fix", () => run(checked, autoFixThread.threadId));
+          }}
+        />
+      </div>
+      {refusal === undefined ? null : (
+        /* ui-boundary-exception: compact-status */
+        <p
+          className="code-pr-review__merge-result code-pr-review__merge-result--refused"
+          role="alert"
+        >
+          {switchRefusalCopy(refusal.switch, refusal.outcome)}
+        </p>
+      )}
+    </section>
+  );
+}
+
+function mergeWhenReadyCopy(state: CodeProjectPullRequestSwitchesView["mergeWhenReady"]): string {
+  if (state.status === "off") {
+    return "Off. Turn on to let GitHub merge this pull request once its required checks and reviews pass.";
+  }
+  if (state.status === "merged") return "GitHub merged this pull request.";
+  if (state.status === "turned-off-by-forge") {
+    return "GitHub turned auto-merge off. Turn it on again if you still want it.";
+  }
+  const waits = state.waitingOn.map((wait) =>
+    wait === "checks" ? "checks" : wait === "reviews" ? "reviews" : "a merge conflict",
+  );
+  return waits.length === 0
+    ? "On. GitHub merges once required checks and reviews pass."
+    : `On. Waiting on ${waits.join(" and ")}.`;
+}
+
+function autoFixCopy(
+  state: CodeProjectPullRequestSwitchesView["autoFix"],
+  threadTitle: string | undefined,
+): string {
+  const thread = threadTitle === undefined ? "the linked thread" : `“${threadTitle}”`;
+  if (state.status === "off") {
+    return `Off. Turn on to let ${thread} fix failed checks, review comments, and merge conflicts, up to ${CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS} tries each.`;
+  }
+  if (state.status === "stopped") {
+    if (state.reason === "attempt-limit") {
+      return `Stopped after ${CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS} tries on the same failure. Look at the thread, then turn it on again.`;
+    }
+    if (state.reason === "merged") return "Stopped: the pull request merged.";
+    if (state.reason === "closed") return "Stopped: the pull request was closed.";
+    return "Stopped: the thread is archived or no longer available.";
+  }
+  if (state.pausedFor === "person-typing") return "On. Waiting while you type in the thread.";
+  if (state.pausedFor === "turn-active") {
+    return "On. Waiting for the thread's current turn to finish.";
+  }
+  if (state.lastWake !== undefined) {
+    const result =
+      state.lastWake.result === "started"
+        ? "woke the thread"
+        : state.lastWake.result === "unmarked"
+          ? "could not mark the thread as reading outside content, so it sent nothing"
+          : "tried to wake the thread, which refused the turn";
+    return `On. Last ${result} ${formatUpdatedAt(state.lastWake.at)} (try ${state.lastWake.attempt} of ${CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS}).`;
+  }
+  return `On. Watching for failed checks, review comments, and merge conflicts for ${thread}.`;
+}
+
+function switchRefusalCopy(
+  which: "merge-when-ready" | "auto-fix",
+  outcome: Exclude<CodeProjectPullRequestSwitchOutcome, { status: "applied" }>,
+): string {
+  const name = which === "merge-when-ready" ? "Merge when ready" : "Auto-fix";
+  if (outcome.status === "unsupported") {
+    return "Merge when ready is unsupported: this repository does not allow auto-merge. Turn it on in the repository's GitHub settings, or merge by hand.";
+  }
+  if (outcome.status === "unavailable") {
+    const reason =
+      outcome.reason === "unauthenticated"
+        ? "GitHub authentication is unavailable"
+        : outcome.reason === "disconnected"
+          ? "GitHub could not be reached"
+          : "the GitHub command is unavailable";
+    return `${name} did not change: ${reason}.`;
+  }
+  const reason =
+    outcome.reason === "not-authorized"
+      ? "only a local Octant window with access to this Project can change it"
+      : outcome.reason === "not-open"
+        ? "the pull request is no longer open"
+        : outcome.reason === "stale"
+          ? "the pull request changed since this review; refresh and try again"
+          : outcome.reason === "thread-not-linked"
+            ? "the thread is not linked to this pull request or is not available"
+            : outcome.reason === "method-not-allowed"
+              ? "the repository does not allow the selected merge method"
+              : "GitHub rejected the change";
+  return `${name} did not change: ${reason}.`;
 }
 
 function StaleTag(props: { readonly section: string }) {
