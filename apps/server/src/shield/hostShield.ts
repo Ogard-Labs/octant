@@ -16,8 +16,6 @@ import {
   type ShieldWatcherLabel,
   type TurnUsage,
 } from "@octant/contracts";
-import { isAcpAgentKind } from "@octant/contracts";
-import { isNativeHarnessDriverKind } from "@octant/domain";
 import { shieldReviewsPrompts, workThreadAccessOf } from "@octant/domain/guardrail-policy";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type { SpendCeilingService } from "../spendCeilingService";
