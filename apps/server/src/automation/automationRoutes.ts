@@ -1,5 +1,13 @@
+import { randomUUID } from "node:crypto";
 import {
   decodeAutomationCommandResult,
+  decodeAutomationFollowUpRequest,
+  decodeAutomationThreadRoutineRequest,
+  decodeAutomationTrigger,
+  decodeRoutineProposalDecision,
+  decodeRoutineProposalId,
+  decodeRoutineProposalDecisionResult,
+  decodeRoutineProposalList,
   decodeAutomationId,
   decodeAutomationQueryResponse,
   decodeProjectId,
@@ -8,11 +16,15 @@ import {
   MAX_AUTOMATION_QUERY_LIMIT,
   type AutomationCommand,
   type AutomationCommandFailure,
+  type AutomationCommandResult,
   type AutomationDefinition,
   type AutomationId,
   type HostId,
   type ProjectId,
+  type RoutineProposal,
+  type UtcTimestamp,
 } from "@octant/contracts";
+import { resolveNextAutomationOccurrence } from "@octant/domain";
 import { ClientPrincipalError } from "../clientPrincipal";
 import { resolvePrincipalRouteContext, type PrincipalRouteContext } from "../principalRouteContext";
 import type { ProjectService } from "../projectService";
@@ -20,6 +32,8 @@ import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import type { AutomationCommandService } from "./automationCommandService";
 import type { AutomationProjection } from "./automationProjection";
+import type { RoutineProposalService } from "./routineProposalService";
+import type { ThreadRoutineDraftResult } from "./threadRoutineDraft";
 
 const METHODS = "GET, POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
@@ -40,7 +54,17 @@ export interface AutomationRouteDependencies {
    * written against history the host never loaded.
    */
   readonly historyAvailable?: () => boolean;
+  /**
+   * Routines thread agents proposed. Listed and answered only by the window
+   * whose turn raised them; a confirm builds the routine from the thread's
+   * live facts and creates it through the same command path as `commands`.
+   */
+  readonly proposals?: {
+    readonly service: Pick<RoutineProposalService, "list" | "claim">;
+    readonly draft: (proposal: RoutineProposal) => ThreadRoutineDraftResult;
+  };
   readonly now?: () => number;
+  readonly uuid?: () => string;
 }
 
 /**
@@ -124,6 +148,25 @@ export function createAutomationRouteHandler(dependencies: AutomationRouteDepend
       }
       if (route === "commands" && request.method === "POST") {
         return await handleCommand(dependencies, context, body, origin);
+      }
+      if (route === "proposals" && request.method === "GET") {
+        return jsonResponse(
+          decodeRoutineProposalList({
+            kind: "routine-proposal-list",
+            proposals: dependencies.proposals?.service.list(context.scopeId) ?? [],
+          }),
+          200,
+          origin,
+        );
+      }
+      if (route === "proposals/decide" && request.method === "POST") {
+        return await handleProposalDecision(dependencies, context, body, origin);
+      }
+      if (route === "follow-ups" && request.method === "POST") {
+        return await handleFollowUp(dependencies, context, body, origin);
+      }
+      if (route === "thread-routines" && request.method === "POST") {
+        return await handleThreadRoutine(dependencies, context, body, origin);
       }
       return failureResponse("Automation request is invalid.", 400, origin);
     } catch {
@@ -342,6 +385,252 @@ async function handleCommand(
     origin: { kind: "interactive" },
   } as AutomationCommand;
   const result = dependencies.commands.execute(command);
+  return jsonResponse(decodeAutomationCommandResult(result), 200, origin);
+}
+
+/**
+ * A person's answer to a thread's routine proposal. The proposal leaves the
+ * waiting list on the first answer, so a retry cannot create a second
+ * routine. A confirm is a create by this request's own principal, held to the
+ * same Project check and command service as a create from the editor; only
+ * the host adds which thread proposed it.
+ */
+async function handleProposalDecision(
+  dependencies: AutomationRouteDependencies,
+  context: PrincipalRouteContext,
+  body: unknown,
+  origin: string | null,
+): Promise<Response> {
+  const proposals = dependencies.proposals;
+  let decision;
+  try {
+    decision = decodeRoutineProposalDecision(body);
+  } catch {
+    return failureResponse("Routine proposal decision is invalid.", 400, origin);
+  }
+  const claimed = proposals?.service.claim(context.scopeId, decision.proposalId);
+  if (proposals === undefined || claimed === undefined) {
+    return jsonResponse(
+      decodeRoutineProposalDecisionResult({ kind: "routine-proposal-gone" }),
+      200,
+      origin,
+    );
+  }
+  if (decision.decision === "decline") {
+    claimed.settle({ status: "declined" });
+    return jsonResponse(
+      decodeRoutineProposalDecisionResult({ kind: "routine-proposal-declined" }),
+      200,
+      origin,
+    );
+  }
+  const refuse = (failure: AutomationCommandFailure): Response => {
+    claimed.settle({ status: "not-created", message: failure.message });
+    return jsonResponse(decodeRoutineProposalDecisionResult(failure), 200, origin);
+  };
+  const result = await createThreadRoutine(dependencies, context, claimed.proposal);
+  if (result.kind !== "automation-created") {
+    return refuse(
+      result.kind === "automation-command-failed"
+        ? result
+        : commandFailure("invalid", "The routine was not created."),
+    );
+  }
+  claimed.settle({ status: "confirmed", automationId: result.automation.id });
+  return jsonResponse(
+    decodeRoutineProposalDecisionResult({
+      kind: "routine-proposal-confirmed",
+      automation: result.automation,
+    }),
+    200,
+    origin,
+  );
+}
+
+/**
+ * Create the routine a thread asked for, as this request's own principal:
+ * the definition is built from the thread's live facts, held to the same
+ * Project check and command service as a create from the editor, and only
+ * the host records which thread it came from.
+ */
+async function createThreadRoutine(
+  dependencies: AutomationRouteDependencies,
+  context: PrincipalRouteContext,
+  proposal: RoutineProposal,
+): Promise<AutomationCommandResult> {
+  if (dependencies.historyAvailable?.() === false) {
+    return commandFailure(
+      "unsupported",
+      "Automation history could not be loaded, so Automations cannot change.",
+    );
+  }
+  if (dependencies.proposals === undefined) {
+    return commandFailure("unsupported", "Routines from a thread are unavailable on this host.");
+  }
+  const built = dependencies.proposals.draft(proposal);
+  if (built.status === "refused") return commandFailure("invalid", built.message);
+  const create = {
+    kind: "create-automation",
+    automationId: decodeAutomationId((dependencies.uuid ?? randomUUID)()),
+    expectedVersion: 0,
+    definition: built.draft,
+  };
+  const accessible = await accessibleProjects(dependencies, context);
+  const denial = authorizeCommandProject(dependencies, create, accessible);
+  if (denial !== undefined) return denial;
+  return dependencies.commands.execute(
+    {
+      ...create,
+      principal: context.principal,
+      origin: { kind: "interactive" },
+    } as AutomationCommand,
+    { originThreadId: proposal.threadId },
+  );
+}
+
+/**
+ * A person creating a routine from a thread's Environment: the same draft
+ * from the thread's live facts and the same create as a confirmed proposal,
+ * so its Project, mode, and authority are the thread's, never the body's.
+ */
+async function handleThreadRoutine(
+  dependencies: AutomationRouteDependencies,
+  context: PrincipalRouteContext,
+  body: unknown,
+  origin: string | null,
+): Promise<Response> {
+  let request;
+  try {
+    request = decodeAutomationThreadRoutineRequest(body);
+  } catch {
+    return failureResponse("Routine request is invalid.", 400, origin);
+  }
+  const now = new Date((dependencies.now ?? Date.now)()).toISOString() as UtcTimestamp;
+  const firstRunAt = resolveNextAutomationOccurrence({
+    trigger: request.trigger,
+    after: now,
+    inclusive: false,
+  });
+  if (firstRunAt === undefined) {
+    return jsonResponse(
+      decodeAutomationCommandResult(
+        commandFailure("invalid", "That schedule never runs after now."),
+      ),
+      200,
+      origin,
+    );
+  }
+  const result = await createThreadRoutine(dependencies, context, {
+    proposalId: decodeRoutineProposalId((dependencies.uuid ?? randomUUID)()),
+    threadId: request.threadId,
+    mode: request.mode,
+    projectId: request.projectId,
+    displayName: request.displayName,
+    taskPrompt: request.taskPrompt,
+    trigger: request.trigger,
+    missedRunPolicy: request.missedRunPolicy,
+    firstRunAt,
+    requestedAt: now,
+  });
+  return jsonResponse(decodeAutomationCommandResult(result), 200, origin);
+}
+
+/** The plain name a follow-up a person set up from the thread goes by. */
+const FOLLOW_UP_DISPLAY_NAME = "Follow up";
+
+/**
+ * A person setting up or moving a follow-up from the thread. Setting one up
+ * is a confirmed proposal in all but name: the same draft from the thread's
+ * live facts, the same create. Moving one is an ordinary update of its time,
+ * held to the same Project check as any edit.
+ */
+async function handleFollowUp(
+  dependencies: AutomationRouteDependencies,
+  context: PrincipalRouteContext,
+  body: unknown,
+  origin: string | null,
+): Promise<Response> {
+  let request;
+  try {
+    request = decodeAutomationFollowUpRequest(body);
+  } catch {
+    return failureResponse("Follow-up request is invalid.", 400, origin);
+  }
+  const nowMs = (dependencies.now ?? Date.now)();
+  if (Date.parse(request.scheduledAt) <= nowMs) {
+    return jsonResponse(
+      decodeAutomationCommandResult(commandFailure("invalid", "Pick a time in the future.")),
+      200,
+      origin,
+    );
+  }
+  const trigger = decodeAutomationTrigger({ kind: "once", scheduledAt: request.scheduledAt });
+  if (request.kind === "schedule-follow-up") {
+    const result = await createThreadRoutine(dependencies, context, {
+      proposalId: decodeRoutineProposalId((dependencies.uuid ?? randomUUID)()),
+      threadId: request.threadId,
+      mode: request.mode,
+      projectId: request.projectId,
+      displayName: FOLLOW_UP_DISPLAY_NAME,
+      taskPrompt: request.taskPrompt,
+      trigger,
+      missedRunPolicy: "run-once",
+      targetPolicy: "same-thread",
+      firstRunAt: request.scheduledAt,
+      requestedAt: new Date(nowMs).toISOString() as RoutineProposal["requestedAt"],
+    });
+    return jsonResponse(decodeAutomationCommandResult(result), 200, origin);
+  }
+  if (dependencies.historyAvailable?.() === false) {
+    return jsonResponse(
+      decodeAutomationCommandResult(
+        commandFailure(
+          "unsupported",
+          "Automation history could not be loaded, so Automations cannot change.",
+        ),
+      ),
+      200,
+      origin,
+    );
+  }
+  const current = dependencies.projection.getDefinition(request.automationId);
+  if (current === undefined || current.targetPolicy !== "same-thread") {
+    return jsonResponse(
+      decodeAutomationCommandResult(commandFailure("not-found", "That follow-up is gone.")),
+      200,
+      origin,
+    );
+  }
+  const update = {
+    kind: "update-automation",
+    automationId: current.id,
+    expectedVersion: request.expectedVersion,
+    definition: {
+      displayName: current.displayName,
+      taskPrompt: current.taskPrompt,
+      hostId: current.hostId,
+      mode: current.mode,
+      projectId: current.projectId,
+      projectVersion: current.projectVersion,
+      binding: current.binding,
+      executionProfile: current.executionProfile,
+      authorityProfile: current.authorityProfile,
+      deliveryTarget: current.deliveryTarget,
+      trigger,
+      missedRunPolicy: current.missedRunPolicy,
+      targetPolicy: current.targetPolicy,
+    },
+  };
+  const accessible = await accessibleProjects(dependencies, context);
+  const denial = authorizeCommandProject(dependencies, update, accessible);
+  if (denial !== undefined) {
+    return jsonResponse(decodeAutomationCommandResult(denial), 200, origin);
+  }
+  const result = dependencies.commands.execute({
+    ...update,
+    principal: context.principal,
+    origin: { kind: "interactive" },
+  } as AutomationCommand);
   return jsonResponse(decodeAutomationCommandResult(result), 200, origin);
 }
 

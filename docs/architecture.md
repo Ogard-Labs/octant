@@ -1646,7 +1646,9 @@ thread has no file, shell, or Git authority for a routine to widen, but not
 built yet: today a routine targets a Work or Code Project. Each occurrence creates
 at most one new thread (target policy `new-thread`) and runs its first turn
 through the ordinary thread and turn services; a routine cannot do anything the
-thread it creates could not do.
+thread it creates could not do. The one exception is a follow-up (target
+policy `same-thread`, below), which creates no thread and sends one turn into
+the thread it came from.
 
 - **Authority ceiling.** A definition captures an execution profile (an existing
   agent profile: provider, model, policy, permission persistence) and an
@@ -1672,8 +1674,100 @@ thread it creates could not do.
   must address a routine whose Project it can reach. A paired remote device may
   author only on its own host and within those Projects; its routines get the
   same ceiling. Automation-origin execution cannot create, edit, run, pause, or
-  archive a routine (`automation-recursion`), and no agent or provider tool
-  reaches the routes.
+  archive a routine (`automation-recursion`). No agent or provider tool reaches
+  the routes; the one way an agent takes part is the proposal below, and the
+  routine it leads to is still created by a person's principal.
+- **Proposed from a thread.** A Work or Code thread's agent may propose a
+  routine with the app-managed `octant_propose_routine` tool: a name, a task
+  prompt, a trigger (once at an explicit instant, every N minutes within the
+  bounds above, or weekly at a local time in an IANA zone), and a missed-run
+  policy. It names nothing else: the thread's own Project and mode are implied,
+  and the agent cannot choose another Project, a profile, a model, or any
+  authority. Chat is never offered the tool, a turn that runs as the host (a
+  routine's run, or a usage-limit resume) is refused it as
+  `automation-recursion`, and a Code turn in Plan is
+  refused it because Plan is read-only. A proposal creates nothing, whatever
+  the thread's posture: a remembered Full access does not let an agent create
+  or confirm a routine, and the routine it leads to is approval-gated anyway.
+  The host holds it for ten minutes as a suggestion chip at the foot of the
+  thread, listed and
+  answerable only by the window or paired device whose turn raised it; with
+  no such window open, or once it goes away, the proposal is withdrawn
+  unanswered. The chip's one click confirms and dismissing it declines.
+  Confirm is the `POST /api/automations/proposals/decide` route, under the same transport
+  principal and Project check as `commands`. On confirm the host builds the
+  definition from the thread's live facts (Project version and binding, the
+  Code thread's own available checkout, the thread's provider and model, and
+  an approval-gated profile that allows that model, the thread's own when it
+  qualifies) and creates it through the ordinary create command as the
+  confirming principal, so every ceiling and revalidation above applies
+  unchanged: filesystem and tools only, no network or subagents, Work without
+  shell or Git, Code asking first, and session-only permission kept
+  session-only in both the authority receipt and the execution profile each
+  run's thread is created from. A thread that left its Project, an archived thread, a
+  Plan-posture Code thread, or an unavailable checkout refuses at confirm and
+  creates nothing. The first answer takes the proposal off the list, so a
+  retry cannot create a second routine. The call waits for the answer and
+  reports `confirmed` with the routine id, `declined`, `expired`, `cancelled`,
+  or the host's refusal. The tool rides the `appManagedTools` capability in
+  the matrix under [security and authority](#security-and-authority): a
+  provider or model without it is not offered the tool, and its degraded form
+  is the person creating the routine in Automation Center.
+- **Created from a thread by a person.** The person may also create a routine
+  from a Work or Code thread's Environment with
+  `POST /api/automations/thread-routines` (`create-thread-routine`: thread,
+  name, prompt, trigger, missed-run policy). The host builds the definition
+  from that thread's live facts exactly as for a confirmed proposal, so its
+  Project, mode, binding, and approval-gated profile are the thread's and the
+  body cannot name wider ones; a thread outside the named Project, Chat, or a
+  Plan-posture Code thread refuses. It is created as the requesting principal
+  through the same create command.
+- **Origin thread.** A routine confirmed from a proposal, or created from a
+  thread by a person, records that thread as `originThreadId` on its journaled
+  definition. Only the host sets
+  it, never a command body, and later revisions keep it, so the projection
+  rebuilds the link on replay. It links the routine and the thread in the UI
+  and grants nothing.
+- **Follow-ups in the same thread.** A follow-up is a routine with a `once`
+  trigger, missed-run policy `run-once`, and target policy `same-thread`; the
+  contract refuses `same-thread` with any other trigger or policy, and a
+  persisted one without `originThreadId`. Its one run sends its fixed prompt as
+  a new turn in its origin thread, under the host's heading
+  (`Scheduled follow-up you set up earlier in this thread:`), so the agent has
+  that conversation and the transcript marks the turn as scheduled rather than
+  typed; the mark is presentational and the run's journaled dispatch intent is
+  the evidence. It is made two ways, both through the create path above as a
+  person's principal: the agent proposes it with `octant_propose_routine`
+  (trigger `follow-up`: an instant and a prompt) and the person confirms the
+  chip, or the person sets it up from the thread with
+  `POST /api/automations/follow-ups` (`schedule-follow-up`: thread, time,
+  prompt), which builds the definition from the thread's live facts exactly as
+  a confirmed proposal does. Chat threads cannot have one, and the proposal
+  refusals above apply. Moving it (`reschedule-follow-up`) is an ordinary
+  update of its time; cancelling it is the ordinary archive. An edit cannot
+  change any routine's target policy, and Run now is refused for a follow-up,
+  because its one turn is its scheduled one. Its turn runs as the host under
+  the same ceilings as any routine run: a Work turn uses the thread's own
+  folder and runs ask-first, a Code turn asks for `approval-gated` and is
+  clamped by the thread's grant, so a person widening the thread never widens
+  the follow-up, and the turn's tools refuse new routines
+  (`automation-recursion`).
+- **Follow-up revalidation.** At fire time, after the routine checks above, the
+  host checks the thread itself and refuses with a typed reason rather than
+  adapting: `thread-unavailable` when the thread is gone, archived, or in
+  another Project; `thread-done` when a person marked it Done (Work) or
+  Complete; `full-access-ineligible` when the Code thread now has Full access;
+  `execution-profile-mismatch` when its provider or model changed; and
+  `thread-busy` when a turn is running or being started in it. A busy thread
+  is skipped, not waited on: waiting would put a scheduled turn behind the
+  person's own at a time nobody chose. A refusal fails the run with its
+  reason in the journal and sends nothing; unlike other routines, a follow-up
+  is not left paused, because the once trigger then ends it.
+- **Follow-up missed window.** A follow-up missed while the host was asleep or
+  off runs once on return if it is at most 24 hours late. Past that it fails
+  as `follow-up-missed` and sends nothing: a check made a day late is stale.
+  Either way it runs at most once and then ends itself as `exhausted`, the
+  state every spent one-time routine reaches, with its run history kept.
 - **Asleep or offline.** The scheduler is an in-process timer in the running
   host over journaled definitions. Nothing wakes the computer or runs in a
   cloud today. A self-hosted wake service on a person's hub, which only wakes

@@ -147,6 +147,7 @@ export interface WorkspaceRailLayersProps {
   readonly isNarrow: boolean;
   readonly notificationClient: AutomationNotificationClient;
   readonly onCloseAutomationCenter: () => void;
+  readonly automationCenterFocusId?: string;
   readonly onOpenAutomationThread: (
     target: AutomationThreadTarget & { readonly title: string },
   ) => void;
@@ -384,6 +385,9 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
               narrow={props.isNarrow}
               notificationClient={props.notificationClient}
               onClose={props.onCloseAutomationCenter}
+              {...(props.automationCenterFocusId === undefined
+                ? {}
+                : { focusAutomationId: props.automationCenterFocusId })}
               onOpenThread={props.onOpenAutomationThread}
             />
           </LazyRailSurface>

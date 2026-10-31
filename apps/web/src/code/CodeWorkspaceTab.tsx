@@ -16,6 +16,7 @@ import { noticeTouches, useCodeFileChangeWatch } from "./useCodeFileChangeWatch"
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
+import type { AutomationClient } from "@octant/client-runtime";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import type { ImageGenerationProfileView } from "@octant/contracts";
@@ -29,6 +30,7 @@ export default function CodeWorkspaceTab(props: {
   readonly holdAccessNotice?: CodeThreadControllers["holdAccessNotice"];
   readonly appleToolchainClient?: AppleToolchainClient;
   readonly extensionClient?: ExtensionClient;
+  readonly automationClient?: AutomationClient;
   readonly projectRemembersFullAccess?: boolean;
   readonly tab: CodeWorkspaceTab;
   readonly hostBridge?: OctantHostBridge;
@@ -141,6 +143,9 @@ export default function CodeWorkspaceTab(props: {
           ? {}
           : { appleToolchainClient: props.appleToolchainClient })}
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
+        {...(props.automationClient === undefined
+          ? {}
+          : { automationClient: props.automationClient })}
         {...(approvals === undefined ? {} : { approvals })}
         {...(props.projectRemembersFullAccess !== true ? {} : { projectRemembersFullAccess: true })}
         client={props.controller.client}

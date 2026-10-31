@@ -7,6 +7,12 @@ import {
   type AutomationListResponse,
   AutomationQueryResponse,
   decodeHostAnswer,
+  type AutomationFollowUpRequest,
+  type AutomationThreadRoutineRequest,
+  type RoutineProposal,
+  type RoutineProposalDecision,
+  RoutineProposalDecisionResult,
+  RoutineProposalList,
 } from "@octant/contracts";
 
 /**
@@ -52,6 +58,29 @@ export interface AutomationClient {
   get(automationId: AutomationId, signal?: AbortSignal): Promise<AutomationDetailResponse>;
   history(input: AutomationHistoryInput, signal?: AbortSignal): Promise<AutomationHistoryResponse>;
   execute(command: AutomationClientCommand, signal?: AbortSignal): Promise<AutomationCommandResult>;
+  /**
+   * Set up or move a one-time follow-up in a thread. Setting one up creates
+   * the routine as this window, from the thread's own facts.
+   */
+  followUp(
+    request: AutomationFollowUpRequest,
+    signal?: AbortSignal,
+  ): Promise<AutomationCommandResult>;
+  /**
+   * Create a routine from a Work or Code thread, as this window. The host
+   * takes the Project, mode, and authority from the thread itself.
+   */
+  createThreadRoutine(
+    request: AutomationThreadRoutineRequest,
+    signal?: AbortSignal,
+  ): Promise<AutomationCommandResult>;
+  /** Routines this window's thread agents proposed, waiting for the person. */
+  listProposals(signal?: AbortSignal): Promise<ReadonlyArray<RoutineProposal>>;
+  /** Confirm or decline one proposal. A confirm creates the routine as this window. */
+  decideProposal(
+    decision: RoutineProposalDecision,
+    signal?: AbortSignal,
+  ): Promise<RoutineProposalDecisionResult>;
 }
 
 export type AutomationClientFailureCategory = "aborted" | "network" | "http" | "contract";
@@ -133,7 +162,76 @@ export function createAutomationClient(options: AutomationClientOptions): Automa
         signal,
       );
     },
+    followUp(followUpRequest, signal) {
+      // One attempt: a replayed set-up would create a second follow-up.
+      return request(
+        options.fetch,
+        new URL("/api/automations/follow-ups", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(followUpRequest),
+        },
+        decodeCommandResult,
+        1,
+        signal,
+      );
+    },
+    createThreadRoutine(routineRequest, signal) {
+      // One attempt: a replayed create would make a second routine.
+      return request(
+        options.fetch,
+        new URL("/api/automations/thread-routines", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(routineRequest),
+        },
+        decodeCommandResult,
+        1,
+        signal,
+      );
+    },
+    listProposals(signal) {
+      return request(
+        options.fetch,
+        new URL("/api/automations/proposals", options.baseUrl).toString(),
+        { method: "GET", headers },
+        (value) =>
+          decodeProposalAnswer(() => decodeHostAnswer(RoutineProposalList)(value).proposals),
+        maxAttempts,
+        signal,
+      );
+    },
+    decideProposal(decision, signal) {
+      // One attempt: the host takes a proposal off the list on the first
+      // answer it receives, so a replay could only report it gone.
+      return request(
+        options.fetch,
+        new URL("/api/automations/proposals/decide", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(decision),
+        },
+        (value) =>
+          decodeProposalAnswer(() => decodeHostAnswer(RoutineProposalDecisionResult)(value)),
+        1,
+        signal,
+      );
+    },
   };
+}
+
+function decodeProposalAnswer<T>(decode: () => T): T {
+  try {
+    return decode();
+  } catch {
+    throw new AutomationClientFailure(
+      "contract",
+      "Routine proposal answer did not match the contract.",
+    );
+  }
 }
 
 function decodeQueryKind<K extends "automation-list" | "automation-detail" | "automation-history">(

@@ -84,6 +84,7 @@ export interface ReaderPagesContainerProps {
   readonly archiveOpen: boolean;
   readonly artifactLibraryOpen: boolean;
   readonly automationCenterVisible: boolean;
+  readonly automationCenterFocusId?: string;
   readonly automationEditorCatalog: ReturnType<typeof buildAutomationEditorCatalog>;
   readonly availabilityByProject: ProjectController["availabilityByProject"];
   readonly boundCodeProjectId: ShellController["boundCodeProjectId"];
@@ -152,6 +153,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
     archiveOpen,
     artifactLibraryOpen,
     automationCenterVisible,
+    automationCenterFocusId,
     automationEditorCatalog,
     availabilityByProject,
     boundCodeProjectId,
@@ -576,6 +578,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
         serverUrl={serverUrl}
         windowCapability={windowCapability}
         automationCenterVisible={automationCenterVisible}
+        {...(automationCenterFocusId === undefined ? {} : { automationCenterFocusId })}
         automationEditorCatalog={automationEditorCatalog}
         automationClient={automationClient}
         environmentNames={environmentNames}

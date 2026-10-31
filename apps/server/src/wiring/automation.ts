@@ -3,6 +3,7 @@ import {
   type CapacityReservationId,
   type CodeThreadId,
   decodeChatThreadId,
+  decodeCodeThreadId,
   decodeWorkThreadId,
   LOCAL_HOST_ID,
   type UtcTimestamp,
@@ -23,6 +24,9 @@ import { AutomationEventStore } from "../automation/automationEventStore";
 import { hydrateAutomationProjection } from "../automation/automationProjection";
 import { createAutomationRouteHandler } from "../automation/automationRoutes";
 import { AutomationSchedulerService } from "../automation/automationSchedulerService";
+import { createRoutineProposalTools } from "../automation/routineProposalTools";
+import { buildThreadRoutineDraft } from "../automation/threadRoutineDraft";
+import { isRoutineHostScope } from "../routineHostScope";
 import { resolveAutomationAuthorityLiveFacts } from "../automation/resolveAutomationAuthorityLiveFacts";
 import { AutomationNotificationPreferencesStore } from "../automation/automationNotificationPreferencesStore";
 import { AutomationNotificationDeliveryStore } from "../automation/automationNotificationDeliveryStore";
@@ -53,10 +57,13 @@ import type { ChatWiring } from "./chat";
 import type { WorkWiring } from "./work";
 
 export type AutomationDependencies = Pick<ServerStart, "persistence"> &
-  Pick<AuthorityWiring, "windowAuthorityStore"> &
+  Pick<AuthorityWiring, "liveTurns" | "routineProposalService" | "windowAuthorityStore"> &
   Pick<AgentRunsWiring, "capacityScheduler"> &
   Pick<WorkspaceWiring, "projectService"> &
-  Pick<CodeRuntimeWiring, "codeCompletedThreadSource" | "routeCodeService"> &
+  Pick<
+    CodeRuntimeWiring,
+    "codeCompletedThreadSource" | "contributeCodeTools" | "routeCodeService"
+  > &
   Pick<ChatWiring, "chatService"> &
   Pick<WorkWiring, "workThreadService" | "workThreadServiceWithWorkflows" | "workTurnService"> &
   Pick<FoundationsWiring, "workThreadProjection">;
@@ -66,9 +73,12 @@ export function wireAutomation(deps: AutomationDependencies) {
     capacityScheduler,
     chatService,
     codeCompletedThreadSource,
+    contributeCodeTools,
+    liveTurns,
     persistence,
     projectService,
     routeCodeService,
+    routineProposalService,
     windowAuthorityStore,
     workThreadProjection,
     workThreadService,
@@ -232,7 +242,10 @@ export function wireAutomation(deps: AutomationDependencies) {
       bootstrap: async (windowId) => {
         const bootstrap = await workThreadServiceWithWorkflows.bootstrap(windowId);
         return {
-          threads: bootstrap.threads.map((thread) => ({ id: thread.id })),
+          threads: bootstrap.threads.map((thread) => ({
+            id: thread.id,
+            workingDirectory: thread.workingDirectory,
+          })),
         };
       },
     },
@@ -300,6 +313,40 @@ export function wireAutomation(deps: AutomationDependencies) {
           };
         }
       },
+    },
+    readFollowUpThread: ({ mode, threadId }) => {
+      if (mode === "work") {
+        const thread = workThreadProjection.read(decodeWorkThreadId(String(threadId)));
+        if (
+          thread === undefined ||
+          thread.lifecycle === "deleting" ||
+          thread.lifecycle === "deleted"
+        )
+          return { kind: "missing" };
+        return {
+          kind: "present",
+          projectId: String(thread.projectId),
+          archived: thread.lifecycle === "archived",
+          done: thread.completionConfirmed === true || thread.completedAt !== undefined,
+          busy:
+            liveTurns.read(String(thread.id)) !== undefined ||
+            workTurnService.isTurnStarting(thread.id),
+          providerInstanceId: String(thread.providerInstanceId),
+          modelId: String(thread.modelId),
+        };
+      }
+      const thread = persistence.readCodeThread(decodeCodeThreadId(String(threadId)));
+      if (thread === undefined) return { kind: "missing" };
+      return {
+        kind: "present",
+        projectId: String(thread.projectId),
+        archived: thread.lifecycle === "archived",
+        done: thread.completedAt !== undefined,
+        busy: liveTurns.read(String(thread.id)) !== undefined,
+        providerInstanceId: String(thread.providerInstanceId),
+        modelId: String(thread.modelId),
+        executionPolicy: thread.executionPolicy,
+      };
     },
     resolveFacts: ({ definition, run }) =>
       resolveAutomationAuthorityLiveFacts(
@@ -385,13 +432,26 @@ export function wireAutomation(deps: AutomationDependencies) {
       (persistence.readShellSettings()?.settings ?? defaultShellSettings())
         .completedThreadArchiveAfterDays,
   });
+  // A Code turn's routine proposals ride the seam later areas use to add
+  // tools to a Code turn; the Work turn adds the same tool where it composes
+  // its own. Each run's own turn, which acts as the host, is refused it.
+  contributeCodeTools(({ windowId, thread, readThread }) =>
+    createRoutineProposalTools({
+      windowId,
+      thread: { id: String(thread.id), mode: "code", projectId: String(thread.projectId) },
+      readPosture: () => readThread()?.executionPolicy ?? thread.executionPolicy,
+      isAutomationOrigin: isRoutineHostScope(windowId),
+      proposals: routineProposalService,
+      now: Date.now,
+    }),
+  );
   const automationRoutes = createAutomationRouteHandler({
     projection: persistence.automationProjection,
     commands: {
       // Every authenticated command wakes the scheduler so pause/resume/
       // run-now/cancel re-arm timers immediately instead of at the next poll.
-      execute: (command) => {
-        const result = automationCommandService.execute(command);
+      execute: (command, provenance) => {
+        const result = automationCommandService.execute(command, provenance);
         automationScheduler.poke();
         return result;
       },
@@ -400,6 +460,75 @@ export function wireAutomation(deps: AutomationDependencies) {
     projects: projectService,
     hostId: String(LOCAL_HOST_ID),
     historyAvailable: () => automationHistoryAvailable,
+    proposals: {
+      service: routineProposalService,
+      draft: (proposal) =>
+        buildThreadRoutineDraft(
+          {
+            hostId: String(LOCAL_HOST_ID),
+            actorId: OCTANT_LOCAL_ACTOR_ID,
+            readThread: (mode, threadId) => {
+              if (mode === "work") {
+                const thread = workThreadProjection.read(decodeWorkThreadId(threadId));
+                return thread === undefined
+                  ? undefined
+                  : {
+                      projectId: String(thread.projectId),
+                      active: thread.lifecycle === "active",
+                      providerInstanceId: String(thread.providerInstanceId),
+                      modelId: String(thread.modelId),
+                    };
+              }
+              const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+              return thread === undefined
+                ? undefined
+                : {
+                    projectId: String(thread.projectId),
+                    active: thread.lifecycle !== "archived",
+                    providerInstanceId: String(thread.providerInstanceId),
+                    modelId: String(thread.modelId),
+                    executionPolicy: thread.executionPolicy,
+                    permissionPersistence: thread.permissionPersistence,
+                    ...(thread.profileId === undefined
+                      ? {}
+                      : { profileId: String(thread.profileId) }),
+                    checkout: {
+                      repositoryId: String(thread.repositoryId),
+                      checkoutId: String(thread.checkoutId),
+                    },
+                  };
+            },
+            readProject: (projectId) => {
+              const project = persistence.readProject(projectId as never);
+              if (project === undefined || (project.type !== "work" && project.type !== "code")) {
+                return undefined;
+              }
+              return {
+                name: project.name,
+                mode: project.type,
+                active: project.lifecycle === "active",
+                version: project.version,
+                bindingRevisionId:
+                  project.bindingHistory.at(-1)?.revisionId === undefined
+                    ? undefined
+                    : String(project.bindingHistory.at(-1)?.revisionId),
+              };
+            },
+            checkoutAvailable: (checkoutId, repositoryId) => {
+              const checkout = persistence.readCodeCheckout(checkoutId as never);
+              return (
+                checkout !== undefined &&
+                checkout.availability === "available" &&
+                String(checkout.repositoryId) === repositoryId
+              );
+            },
+            profiles: () => persistence.readAgentProfiles(),
+            uuid: randomUUID,
+            clock: () => new Date().toISOString(),
+          },
+          proposal,
+        ),
+    },
   });
   return {
     automationCommandService,

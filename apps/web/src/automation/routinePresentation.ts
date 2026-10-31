@@ -75,21 +75,42 @@ export function routineNextRunLabel(
   options: AutomationFormatOptions = {},
 ): string {
   if (nextDueAt === null) return "Not scheduled";
-  const dueMs = Date.parse(nextDueAt);
+  const when = relativeWhen(nextDueAt, now, options);
+  if (when === undefined) return "Not scheduled";
+  return when === "now" ? "Next run due now" : `Next run ${when}`;
+}
+
+/** When a pending follow-up sends its turn: "Follows up tomorrow at 9:00". */
+export function followUpWhenLabel(
+  scheduledAt: string,
+  now: string,
+  options: AutomationFormatOptions = {},
+): string {
+  const when = relativeWhen(scheduledAt, now, options);
+  if (when === undefined) return "Follow-up time unknown";
+  return when === "now" ? "Follows up now" : `Follows up ${when}`;
+}
+
+function relativeWhen(
+  dueAt: string,
+  now: string,
+  options: AutomationFormatOptions,
+): string | undefined {
+  const dueMs = Date.parse(dueAt);
   const nowMs = Date.parse(now);
-  if (!Number.isFinite(dueMs) || !Number.isFinite(nowMs)) return "Not scheduled";
-  if (dueMs <= nowMs) return "Next run due now";
+  if (!Number.isFinite(dueMs) || !Number.isFinite(nowMs)) return undefined;
+  if (dueMs <= nowMs) return "now";
 
   const minutes = Math.round((dueMs - nowMs) / 60_000);
   if (minutes < 60) {
-    return `Next run in ${String(Math.max(1, minutes))} minute${minutes === 1 ? "" : "s"}`;
+    return `in ${String(Math.max(1, minutes))} minute${minutes === 1 ? "" : "s"}`;
   }
-  const time = timeOfDay(nextDueAt, options);
-  const days = calendarDaysBetween(now, nextDueAt, options);
-  if (days === 0) return `Next run today at ${time}`;
-  if (days === 1) return `Next run tomorrow at ${time}`;
-  if (days < 7) return `Next run on ${weekdayName(nextDueAt, options)} at ${time}`;
-  return `Next run on ${dayLabel(nextDueAt, options)} at ${time}`;
+  const time = timeOfDay(dueAt, options);
+  const days = calendarDaysBetween(now, dueAt, options);
+  if (days === 0) return `today at ${time}`;
+  if (days === 1) return `tomorrow at ${time}`;
+  if (days < 7) return `on ${weekdayName(dueAt, options)} at ${time}`;
+  return `on ${dayLabel(dueAt, options)} at ${time}`;
 }
 
 /** The row's whole schedule line: what it does, then when it next does it. */

@@ -75,6 +75,11 @@ const blockReasonLabels: Record<AutomationBlockReason, string> = {
     "Full access authority is not eligible for automations. Choose an approval-gated profile.",
   "unsupported-mode": "This mode is not supported for automations.",
   "automation-recursion": "Automation-created work cannot manage automations.",
+  "thread-unavailable":
+    "The follow-up did not run: its thread was gone, archived, or in another Project.",
+  "thread-done": "The follow-up did not run: its thread was marked done.",
+  "thread-busy": "The follow-up was skipped: a turn was already running in its thread.",
+  "follow-up-missed": "The follow-up was more than a day late, so it was recorded as missed.",
 };
 
 export function automationBlockReasonLabel(reason: AutomationBlockReason): string {
@@ -281,7 +286,8 @@ export function isValidAutomationTimeZone(timeZone: string): boolean {
   }
 }
 
-function triggerIssues(trigger: AutomationTriggerFormValue): readonly string[] {
+/** What is wrong with a schedule as entered, in the editor's words; empty when it is valid. */
+export function automationTriggerIssues(trigger: AutomationTriggerFormValue): readonly string[] {
   switch (trigger.kind) {
     case "once":
       return isStrictUtcInstant(trigger.scheduledAt) ? [] : ["Choose a valid start time."];
@@ -350,7 +356,7 @@ export function buildAutomationDraft(input: AutomationDraftFormInput): Automatio
     issues.push(FULL_ACCESS_ISSUE);
   }
   issues.push(...crossConsistencyIssues(input));
-  issues.push(...triggerIssues(input.trigger));
+  issues.push(...automationTriggerIssues(input.trigger));
   if (targetSummary.length === 0) issues.push("Describe the delivery target.");
   if (targetSummary.length > MAX_AUTOMATION_TARGET_LENGTH) {
     issues.push(`Keep the delivery target under ${MAX_AUTOMATION_TARGET_LENGTH} characters.`);

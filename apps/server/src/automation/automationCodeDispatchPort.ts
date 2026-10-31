@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  automationFollowUpTurnPrompt,
   decodeCodeDeliveryTarget,
   decodeCodeOperationId,
   type AutomationRun,
@@ -160,7 +161,11 @@ async function startOrRecover(
     readonly scopeId: WindowId;
   },
 ): Promise<AutomationFirstTurnLaunchOutcome> {
-  const prompt = options.evidence.put(input.run.definitionSnapshot.taskPrompt);
+  const snapshot = input.run.definitionSnapshot;
+  const followUp = snapshot.targetPolicy === "same-thread";
+  const prompt = options.evidence.put(
+    followUp ? automationFollowUpTurnPrompt(snapshot.taskPrompt) : snapshot.taskPrompt,
+  );
   if (prompt.digest !== input.promptDigest && input.promptDigest.length > 0) {
     // Digest mismatch is still launched with the immutable task prompt; the
     // dispatch intent digest is the audit trail for the prompt bytes used.
@@ -184,6 +189,9 @@ async function startOrRecover(
     operationId,
     sessionId: sessionId as never,
     prompt,
+    // A follow-up goes into a thread a person may since have widened; its
+    // turn asks first all the same, and the host only ever narrows a turn.
+    ...(followUp ? { executionPolicy: "approval-gated" as const } : {}),
   };
   try {
     const result = await options.operations.execute(input.scopeId, command);
