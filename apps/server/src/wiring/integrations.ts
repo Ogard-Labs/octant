@@ -33,6 +33,8 @@ import { createLinearIntegrationService } from "../integration/integrationServic
 import { createIntegrationRouteHandler } from "../integrationRoutes";
 import { makeCredentialBrokerClient } from "../providers/credentialBrokerClient";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import { createSafeNetworkRouteHandler } from "../network/safeNetworkRoutes";
+import { wireRuntimeNetwork } from "./runtimeNetwork";
 import { CacheStatsProjection } from "../cacheStatsProjection";
 import { GistConnection } from "../canvas/gistExportTarget";
 import type { RecordExternalContentIngestionInput } from "../context/externalContentIngestionStore";
@@ -195,6 +197,17 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       }
     });
     yield* Effect.addFinalizer(() => Effect.sync(unsubscribeToolEgressRules));
+    const { projectExists, providerRuntimeNetwork, safeNetworkStore } = wireRuntimeNetwork({
+      persistence,
+      toolEgressRules,
+    });
+    // Settings › Access › Safe networks; only a local window changes a list.
+    const safeNetworkRoutes = createSafeNetworkRouteHandler({
+      windowAuthorityStore,
+      store: safeNetworkStore,
+      network: providerRuntimeNetwork,
+      projectExists,
+    });
     // Where a mention or a Side Chat reads its source's mark and marks the
     // thread reading that source's transcript.
     const threadOutsideContentMarks = {
@@ -391,6 +404,9 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       terminalSessionRoutes,
       threadOutsideContentMarks,
       toolEgressRules,
+      providerRuntimeNetwork,
+      safeNetworkRoutes,
+      safeNetworkStore,
     };
   });
 }

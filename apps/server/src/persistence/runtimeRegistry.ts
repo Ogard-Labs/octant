@@ -39,6 +39,8 @@ import {
   CodeProjectPullRequestAutoFixRecorded,
   WorkProjectStatusFileChanged,
   ProjectBrandKitChanged,
+  WorkProjectDeveloperToolsChanged,
+  WorkProjectActionsChanged,
   CodeProjectActionsChanged,
   ProjectExtraFolderAdded,
   ProjectExtraFolderRemoved,
@@ -212,6 +214,17 @@ import {
   ThreadEgressLaunchStartedPayload,
   ThreadEgressLaunchSummarizedPayload,
 } from "@octant/contracts";
+import {
+  RUNTIME_NETWORK_EVENT_NAMES,
+  RuntimeNetworkDecisionsRecordedPayload,
+  RuntimeNetworkLaunchStartedPayload,
+  RuntimeNetworkLaunchSummarizedPayload,
+  RuntimeNetworkReviewerAllowedPayload,
+  SAFE_NETWORKS_EVENT_NAMES,
+  SafeNetworksLimitsSetPayload,
+  SafeNetworksPlacesSetPayload,
+  SafeNetworksProjectOverrideClearedPayload,
+} from "@octant/contracts/safe-networks";
 import {
   CODE_LANGUAGE_SERVER_EVENT_NAMES,
   CodeLanguageServerApprovalGranted,
@@ -394,6 +407,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("project.provider-policy-changed@1", 1, ProjectProviderPolicyChanged)
     .register("project.native-providers-changed@1", 1, ProjectNativeProvidersChanged)
     .register("project.work-status-file-changed@1", 1, WorkProjectStatusFileChanged)
+    .register("project.work-developer-tools-changed@1", 1, WorkProjectDeveloperToolsChanged)
+    .register("project.work-actions-changed@1", 1, WorkProjectActionsChanged)
     .register("project.brand-kit-changed@1", 1, ProjectBrandKitChanged)
     .register("project.code-actions-changed@1", 1, CodeProjectActionsChanged)
     .register("project.extra-folder-added@1", 1, ProjectExtraFolderAdded)
@@ -501,6 +516,25 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       ThreadEgressDecisionsRecordedPayload,
     )
     .register(CODE_DEBUG_EVENT_NAMES.egressLaunchSummarized, 1, ThreadEgressLaunchSummarizedPayload)
+    .register(SAFE_NETWORKS_EVENT_NAMES.limitsSet, 1, SafeNetworksLimitsSetPayload)
+    .register(SAFE_NETWORKS_EVENT_NAMES.placesSet, 1, SafeNetworksPlacesSetPayload)
+    .register(
+      SAFE_NETWORKS_EVENT_NAMES.projectOverrideCleared,
+      1,
+      SafeNetworksProjectOverrideClearedPayload,
+    )
+    .register(RUNTIME_NETWORK_EVENT_NAMES.launchStarted, 1, RuntimeNetworkLaunchStartedPayload)
+    .register(
+      RUNTIME_NETWORK_EVENT_NAMES.decisionsRecorded,
+      1,
+      RuntimeNetworkDecisionsRecordedPayload,
+    )
+    .register(
+      RUNTIME_NETWORK_EVENT_NAMES.launchSummarized,
+      1,
+      RuntimeNetworkLaunchSummarizedPayload,
+    )
+    .register(RUNTIME_NETWORK_EVENT_NAMES.reviewerAllowed, 1, RuntimeNetworkReviewerAllowedPayload)
     .register(AGENT_RUN_REQUESTED, 1, AgentRunRequested)
     .register(AGENT_RUN_STATUS_CHANGED, 1, AgentRunStatusChanged)
     .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged)

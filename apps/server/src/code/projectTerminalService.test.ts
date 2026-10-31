@@ -111,9 +111,9 @@ function project(
                   addedAt: now,
                 })),
               }),
-          ...(overrides.actions === undefined ? {} : { actions: overrides.actions }),
         }
       : {}),
+    ...(overrides.actions === undefined ? {} : { actions: overrides.actions }),
   });
 }
 
@@ -491,7 +491,7 @@ describe("Project terminals", () => {
     expect(events()).toHaveLength(1);
   });
 
-  it("gives a Work Project no shell, so Work never gains one this way", async () => {
+  it("gives a Work Project the confined terminal a Code Project gets, now that Work has the shell", async () => {
     const { service, terminals } = harness({
       projects: new Map([[ids.project, project({ type: "work" })]]),
       access: () => true,
@@ -499,8 +499,37 @@ describe("Project terminals", () => {
 
     const result = await service.execute(windowId, "local-window", start());
 
-    expect(refusal(result)).toBe("unavailable");
-    expect(terminals.launches).toEqual([]);
+    expect(result).toMatchObject({ kind: "project-terminal", terminal: { state: "running" } });
+    expect(terminals.launches).toHaveLength(1);
+    expect(terminals.launches[0]?.executionPolicy).toBe("approval-gated");
+    expect(terminals.launches[0]?.cwd).toBe(root);
+  });
+
+  it("runs a Work Project's saved action in its terminal, as in Code", async () => {
+    const actionId = "92000000-0000-4000-8000-000000000002";
+    const { service, terminals } = harness({
+      projects: new Map([
+        [
+          ids.project,
+          project({
+            type: "work",
+            actions: [{ id: actionId, name: "Build", command: "make pdf", directory: "." }],
+          }),
+        ],
+      ]),
+      access: () => true,
+    });
+    await service.execute(windowId, "local-window", start());
+
+    const result = await service.execute(windowId, "local-window", {
+      kind: "run-action",
+      projectId,
+      terminalId,
+      actionId,
+    } as ProjectTerminalCommand);
+
+    expect(result).toMatchObject({ kind: "project-terminal", terminal: { state: "running" } });
+    expect(terminals.writes).toEqual([`\u0015cd '${root}' && { make pdf\r}\r`]);
   });
 
   it("refuses a Project this window has not opened, and an archived one", async () => {

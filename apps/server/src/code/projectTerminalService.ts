@@ -12,7 +12,7 @@ import {
   decodeProjectTerminalResult,
   decodeProjectTerminalStarted,
   type BindingRevisionId,
-  type CodeProject,
+  type BoundProject,
   type CodeTerminalId,
   type ProjectAction,
   type ProjectActionSuggestion,
@@ -55,13 +55,16 @@ export interface ProjectTerminalServiceOptions {
     "launch" | "observe" | "readSince" | "write" | "resize" | "terminate"
   >;
   readonly readProject: (projectId: ProjectId) => Project | undefined;
-  /** The window's own Code Project binding; see `windowCanAccessCodeProject`. */
+  /**
+   * The window's own Project binding for that Project's mode; see
+   * `windowCanAccessCodeProject`.
+   */
   readonly canAccessProject: (windowId: WindowId, projectId: ProjectId) => boolean;
   /**
    * The Project's bound root as the host verifies it now, or undefined when the
    * folder is gone, moved, or no longer the one the binding names.
    */
-  readonly resolveRoot: (project: CodeProject) => Promise<string | undefined>;
+  readonly resolveRoot: (project: BoundProject) => Promise<string | undefined>;
   /** What the Project's own files at this root suggest saving as actions. */
   readonly suggestActions: (root: string) => Promise<ReadonlyArray<ProjectActionSuggestion>>;
   /** Terminals the journal still records as running, for restart. */
@@ -90,7 +93,7 @@ interface Owner {
 type Authority =
   | {
       readonly kind: "allowed";
-      readonly project: CodeProject;
+      readonly project: BoundProject;
       readonly bindingRevisionId: BindingRevisionId;
     }
   | {
@@ -100,7 +103,7 @@ type Authority =
     };
 
 /**
- * Terminals a person opens for a Code Project without a thread.
+ * Terminals a person opens for a Work or Code Project without a thread.
  *
  * The shell is the same confined terminal a Code thread gets, started at the
  * Project's bound root. What differs is who may reach it: nothing but the
@@ -259,7 +262,7 @@ export class ProjectTerminalService {
   async settleProject(projectId: ProjectId): Promise<void> {
     const project = this.#options.readProject(projectId);
     const current =
-      project?.type === "code" && project.lifecycle === "active"
+      (project?.type === "code" || project?.type === "work") && project.lifecycle === "active"
         ? project.bindingHistory.at(-1)?.revisionId
         : undefined;
     const ending: Array<Promise<void>> = [];
@@ -323,7 +326,10 @@ export class ProjectTerminalService {
     if (folder === undefined) {
       return refused("unavailable", "That folder is not one of this Project's folders.");
     }
+    // A Work Project's terminal is confined as a Code Project's is when the
+    // Project remembers no Full access; Work Projects remember none.
     const posture: ProjectTerminalPosture =
+      authority.project.type === "code" &&
       authority.project.codeAccessPersistence === "project-default"
         ? "full-access"
         : "approval-gated";
@@ -416,11 +422,14 @@ export class ProjectTerminalService {
 
   #authority(windowId: WindowId, projectId: ProjectId): Authority {
     const project = this.#options.readProject(projectId);
-    if (project === undefined || project.type !== "code") {
+    // Work shares Code's shell at the thread's level, so a Work Project has a
+    // terminal too; whether a Work window shows it is the Project's Developer
+    // tools switch, which is presentation and is not read here.
+    if (project === undefined || (project.type !== "code" && project.type !== "work")) {
       return {
         kind: "refused",
         reason: "unavailable",
-        message: "Only a Code Project has a Project terminal.",
+        message: "Only a Work or Code Project has a Project terminal.",
       };
     }
     if (project.lifecycle !== "active") {

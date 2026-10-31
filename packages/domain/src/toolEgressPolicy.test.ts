@@ -4,7 +4,6 @@ import { AggregateId, ToolEgressLaunchId, ToolEgressRuleId } from "@octant/contr
 import {
   canonicalToolEgressHost,
   canonicalToolEgressRuleHost,
-  decideProviderRuntimeEgress,
   decideToolEgress,
   decideToolEgressGrant,
   toolEgressRuleExpiresAt,
@@ -422,31 +421,5 @@ describe("toolEgressRuleExpiresAt", () => {
     expect(toolEgressRuleLive(inAnHour, inAnHour)).toBe(false);
     expect(toolEgressRuleLive("", now)).toBe(false);
     expect(toolEgressRuleLive(inAnHour, "")).toBe(false);
-  });
-
-  it("lets a placed provider runtime reach any public name, and refuses an address, a single label, or a bad port", () => {
-    expect(decideProviderRuntimeEgress({ host: "API.Example.com.", port: 443 })).toEqual({
-      kind: "allow",
-      host: "api.example.com",
-      port: 443,
-    });
-    expect(decideProviderRuntimeEgress({ host: "169.254.169.254", port: 80 })).toEqual({
-      kind: "refuse",
-      reason: "ip-literal",
-    });
-    expect(decideProviderRuntimeEgress({ host: "[::1]", port: 443 })).toEqual({
-      kind: "refuse",
-      reason: "ip-literal",
-    });
-    for (const host of ["localhost", "metadata", "db.localhost"]) {
-      expect(decideProviderRuntimeEgress({ host, port: 443 })).toEqual({
-        kind: "refuse",
-        reason: "invalid-name",
-      });
-    }
-    expect(decideProviderRuntimeEgress({ host: "api.example.com", port: 0 })).toEqual({
-      kind: "refuse",
-      reason: "invalid-port",
-    });
   });
 });

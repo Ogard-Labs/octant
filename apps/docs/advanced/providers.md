@@ -159,6 +159,15 @@ shows each subagent it can see and marks a thread that read the web.
 - **Full access** turns a provider's own setup on by itself, as in the
   provider's own app.
 
+What each one loads today:
+
+- **Claude Code:** its own subagents (each shown in the thread as a subagent
+  run), web search and fetch (it asks before each one unless the thread has
+  Full access), the skills, settings, hooks, and plugins in its account
+  folder, and in a trusted Project that Project's settings, hooks, skills,
+  and MCP servers. Your own MCP servers start only in a trusted Project,
+  because Claude Code starts them together with the Project's `.mcp.json`.
+
 Only a window on the computer running Octant can change either switch; a
 paired phone or browser cannot. Plan mode stays read-only, so it never runs
 hooks, tool servers, or a Project's code. Chat never gets a folder or a

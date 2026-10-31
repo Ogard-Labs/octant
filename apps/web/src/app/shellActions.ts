@@ -268,6 +268,7 @@ export type ShellActions = {
   readonly setProjectDesktopRecipe: ProjectController["setDesktopRecipe"];
   readonly setProjectActions: ProjectController["setActions"];
   readonly setProjectWorkStatusFile: ProjectController["setWorkStatusFile"];
+  readonly setProjectWorkDeveloperTools: ProjectController["setWorkDeveloperTools"];
   readonly setProjectsListOpen: Dispatch<SetStateAction<boolean>>;
   readonly setRailPlaceholder: Dispatch<
     SetStateAction<{ readonly title: string; readonly message: string } | undefined>

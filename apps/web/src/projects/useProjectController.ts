@@ -400,18 +400,44 @@ export function useProjectController(options: ProjectControllerOptions) {
   }
 
   /**
-   * Save the whole list of a Code Project's terminal actions. The host
-   * refuses a Work or archived Project and a list that changes nothing.
+   * Save the whole list of a Work or Code Project's terminal actions. The
+   * host refuses an archived Project and a list that changes nothing.
    */
   async function setActions(
     projectId: ProjectId,
     actions: ReadonlyArray<ProjectAction>,
   ): Promise<boolean> {
     const project = projectById.get(projectId);
-    if (project?.type !== "code") return false;
+    if (project?.type !== "code" && project?.type !== "work") return false;
     return execute(
-      { kind: "change-code-project-actions", projectId, expectedVersion: project.version, actions },
+      {
+        kind:
+          project.type === "code" ? "change-code-project-actions" : "change-work-project-actions",
+        projectId,
+        expectedVersion: project.version,
+        actions,
+      },
       "Project actions saved.",
+    );
+  }
+
+  /**
+   * Turn a Work Project's developer surfaces (its terminal and actions) on or
+   * off. The host journals who and when; it changes what the Project shows,
+   * not what its threads may do.
+   */
+  async function setWorkDeveloperTools(projectId: ProjectId, enabled: boolean): Promise<boolean> {
+    const project = projectById.get(projectId);
+    if (project?.type !== "work") return false;
+    if ((project.developerTools?.enabled ?? false) === enabled) return true;
+    return execute(
+      {
+        kind: "change-work-project-developer-tools",
+        projectId,
+        expectedVersion: project.version,
+        enabled,
+      },
+      enabled ? "Developer tools turned on." : "Developer tools turned off.",
     );
   }
 
@@ -854,6 +880,7 @@ export function useProjectController(options: ProjectControllerOptions) {
     setDesktopRecipe,
     setActions,
     setWorkStatusFile,
+    setWorkDeveloperTools,
     setArchived,
     status,
     supersedeMemory,

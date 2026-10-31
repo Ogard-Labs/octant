@@ -72,6 +72,7 @@ import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { FoundationsWiring } from "./foundations";
 import type { IntegrationsWiring } from "./integrations";
 import type { ProvidersWiring } from "./providers";
+import { windowCanAccessWorkProject } from "../windowCodeProjectAccess";
 
 export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence" | "version"> &
   Pick<AuthorityWiring, "codeSessionAuthority" | "windowAuthorityStore"> &
@@ -133,8 +134,8 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     },
   });
   return Effect.gen(function* () {
-    // A person's own shell at a Code Project's root, with no thread. It
-    // shares the Code runtime's terminals, so one receipt store, reconcile,
+    // A person's own shell at a Work or Code Project's root, with no thread.
+    // It shares the Code runtime's terminals, so one receipt store, reconcile,
     // and shutdown cover it; the journal records its start and end.
     const sharedTerminals = codeOperationRuntime?.terminals;
     const projectTerminals =
@@ -143,11 +144,24 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
         : new ProjectTerminalService({
             terminals: sharedTerminals,
             readProject: persistence.readProject,
-            canAccessProject: canAccessCodeProject,
+            canAccessProject: (scopeId, projectId) => {
+              const project = persistence.readProject(projectId);
+              if (project?.type !== "work") return canAccessCodeProject(scopeId, projectId);
+              // A Work window reaches the Work Project its own persisted
+              // workspace binds, while it is live, as a Code window does.
+              return (
+                project.lifecycle === "active" &&
+                windowAuthorityStore.listWindowIds().some((id) => String(id) === String(scopeId)) &&
+                windowCanAccessWorkProject({
+                  workspace: persistence.readWindowWorkspace(scopeId)?.workspace,
+                  projectId,
+                })
+              );
+            },
             resolveRoot: async (project) => {
               try {
                 const binding = await projectRootPort.validate(
-                  "code",
+                  project.type,
                   project.binding.canonicalRoot,
                 );
                 if (binding.canonicalRoot !== project.binding.canonicalRoot) return undefined;

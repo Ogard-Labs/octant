@@ -19,7 +19,10 @@ import type { CodeThread } from "@octant/contracts/code";
 import type { ZenSourceContext } from "@octant/contracts/zen";
 import type { resolveAppBackground } from "@octant/domain/theme-policy";
 import { resolveZenLiveThreadCard, type ZenLiveThreadClients } from "../zen/ZenLiveThreadCards";
-import { resolveZenTerminalPinTarget } from "../zen/zenThreadActions";
+import {
+  resolveZenProjectTerminalTarget,
+  resolveZenTerminalPinTarget,
+} from "../zen/zenThreadActions";
 import { ZenRoot } from "../zen/ZenRoot";
 import type { useZenController } from "../zen/useZenController";
 import type { ShellActions } from "./shellActions";
@@ -93,17 +96,10 @@ export const ZenContainer = memo(function ZenContainer(props: ZenContainerProps)
     [codeThreads],
   );
 
-  const zenProjectTerminalTarget = useMemo(() => {
-    const projectId = workspace.contextByMode.code.projectId ?? undefined;
-    if (projectId === undefined) return undefined;
-    const project = allProjects.find(
-      (candidate) =>
-        String(candidate.id) === String(projectId) &&
-        candidate.type === "code" &&
-        candidate.lifecycle === "active",
-    );
-    return project === undefined ? undefined : { projectId: project.id, name: project.name };
-  }, [allProjects, workspace]);
+  const zenProjectTerminalTarget = useMemo(
+    () => resolveZenProjectTerminalTarget(workspace, allProjects),
+    [allProjects, workspace],
+  );
 
   return (
     <ZenRoot
