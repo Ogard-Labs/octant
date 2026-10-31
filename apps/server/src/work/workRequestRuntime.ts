@@ -7,23 +7,32 @@ import {
   type ProviderRuntimeEvent,
   type ProviderSessionId,
   type ProviderFailure,
+  type ShieldDecision,
 } from "@octant/contracts";
+import { shieldCallFromProviderRequest } from "@octant/domain/shield-judge-policy";
 import type {
   ProviderConnection,
   ProviderDriver,
   ProviderAcquireInput,
 } from "@octant/provider-sdk/driver";
 import { Effect, Stream } from "effect";
+import type { ShieldReviewPort } from "../shield/octantShield";
 import type { WorkRequestService, WorkRequestServiceResult } from "./workRequestService";
 
 type RequestConnection = Pick<
   ProviderConnection,
-  "subscribe" | "answerApproval" | "answerUserInput" | "interrupt"
+  "subscribe" | "answerApproval" | "answerUserInput" | "interrupt" | "approvalCall"
 >;
 
 export interface WorkRequestRuntimeOptions {
   readonly requests: Pick<WorkRequestService, "record" | "interruptSession">;
   readonly uuid: () => string;
+  /**
+   * Octant Shield, read when a provider asks for approval: it answers a Work
+   * thread's prompts at Auto as it answers a Code thread's, whatever the
+   * runtime. Absent, or answering nothing, every prompt goes to the person.
+   */
+  readonly shield?: () => ShieldReviewPort | undefined;
 }
 
 export interface WorkRequestSubscriptionInput {
@@ -34,7 +43,14 @@ export interface WorkRequestSubscriptionInput {
   readonly sessionId: ProviderSessionId;
 }
 
-export type WorkRequestRuntimeContext = Omit<WorkRequestSubscriptionInput, "connection">;
+export type WorkRequestRuntimeContext = Omit<WorkRequestSubscriptionInput, "connection"> & {
+  /** The folder the session runs in, which Shield judges a call against. */
+  readonly projectRoot?: string;
+  readonly signal?: AbortSignal;
+  readonly onApprovalReviewed?: NonNullable<
+    NonNullable<ProviderAcquireInput["workRequest"]>["onApprovalReviewed"]
+  >;
+};
 
 /**
  * Connects a live Work provider session to the durable request service. The
@@ -44,11 +60,13 @@ export type WorkRequestRuntimeContext = Omit<WorkRequestSubscriptionInput, "conn
 export class WorkRequestRuntime {
   readonly #requests: Pick<WorkRequestService, "record" | "interruptSession">;
   readonly #uuid: () => string;
+  readonly #shield: (() => ShieldReviewPort | undefined) | undefined;
   readonly #connections = new Map<string, RequestConnection>();
 
   constructor(options: WorkRequestRuntimeOptions) {
     this.#requests = options.requests;
     this.#uuid = options.uuid;
+    this.#shield = options.shield;
   }
 
   subscribe(input: WorkRequestSubscriptionInput): Effect.Effect<void, unknown> {
@@ -95,6 +113,90 @@ export class WorkRequestRuntime {
         );
       }),
     );
+  }
+
+  /**
+   * An approval prompt, put to Octant Shield when it reviews this thread. An
+   * allow or deny goes straight back to the provider for this one call and
+   * nobody is asked, so the prompt never becomes a request; it answers true
+   * and the caller drops the event. An ask, or a thread Shield does not
+   * review, answers false and the prompt is recorded for the person as usual.
+   * Shield's decision reaches the turn's transcript either way. The pending
+   * call comes from the connection, never from the event, whose text may be
+   * redacted.
+   */
+  screen(
+    input: WorkRequestRuntimeContext,
+    event: ProviderRuntimeEvent,
+  ): Effect.Effect<boolean, never> {
+    const shield = this.#shield?.();
+    const connection = this.#connections.get(String(input.sessionId));
+    if (
+      shield === undefined ||
+      connection === undefined ||
+      input.projectRoot === undefined ||
+      event.kind !== "approval-request" ||
+      event.sessionId !== input.sessionId
+    ) {
+      return Effect.succeed(false);
+    }
+    const projectRoot = input.projectRoot;
+    return Effect.promise(async () => {
+      let call: ReturnType<NonNullable<RequestConnection["approvalCall"]>>;
+      try {
+        call = connection.approvalCall?.({
+          sessionId: event.sessionId,
+          requestId: event.requestId,
+        });
+      } catch {
+        call = undefined;
+      }
+      let decision: ShieldDecision | undefined;
+      try {
+        decision = await shield.review({
+          threadId: String(input.threadId),
+          call: shieldCallFromProviderRequest({
+            tool: call?.tool ?? "provider-action",
+            input: call?.input,
+            workingDirectory: call?.workingDirectory,
+            description: event.description,
+            boundRoot: projectRoot,
+          }),
+          boundRoot: projectRoot,
+          ...(input.signal === undefined ? {} : { signal: input.signal }),
+        });
+      } catch {
+        decision = undefined;
+      }
+      if (decision === undefined) return false;
+      try {
+        input.onApprovalReviewed?.({
+          requestId: event.requestId,
+          toolName: call?.tool ?? event.action,
+          summary: sanitizeRequestText(event.description, "Approval requested"),
+          decision,
+        });
+      } catch {
+        // A transcript that cannot show the decision does not change it.
+      }
+      if (decision.verdict === "ask") return false;
+      try {
+        await Effect.runPromise(
+          connection.answerApproval({
+            sessionId: event.sessionId,
+            requestId: event.requestId,
+            approved: decision.verdict === "allow",
+            // Shield's answer covers this one call; nothing is remembered.
+            scope: "once",
+          }),
+        );
+        return true;
+      } catch {
+        // A provider that cannot take the answer asks the person instead,
+        // which cannot widen what Shield decided.
+        return false;
+      }
+    });
   }
 
   async answerApproval(input: {
@@ -231,6 +333,11 @@ export function attachWorkRequestRuntime(
           threadId: input.workRequest.threadId,
           providerInstanceId: input.instanceId,
           sessionId: input.workRequest.sessionId,
+          projectRoot: input.projectRoot,
+          ...(input.workRequest.signal === undefined ? {} : { signal: input.workRequest.signal }),
+          ...(input.workRequest.onApprovalReviewed === undefined
+            ? {}
+            : { onApprovalReviewed: input.workRequest.onApprovalReviewed }),
         } satisfies WorkRequestRuntimeContext;
         const detach = active.register({ ...context, connection });
         yield* Effect.addFinalizer(() => Effect.sync(detach));
@@ -238,7 +345,19 @@ export function attachWorkRequestRuntime(
           ...connection,
           subscribe: connection.subscribe.pipe(
             Effect.map((events) =>
-              events.pipe(Stream.tap((event) => active.observe(context, event))),
+              events.pipe(
+                Stream.filterEffect((event) =>
+                  active
+                    .screen(context, event)
+                    .pipe(
+                      Effect.flatMap((settledByShield) =>
+                        settledByShield
+                          ? Effect.succeed(false)
+                          : active.observe(context, event).pipe(Effect.as(true)),
+                      ),
+                    ),
+                ),
+              ),
             ),
           ),
         };

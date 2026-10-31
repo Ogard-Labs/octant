@@ -15,6 +15,7 @@ import type {
   ProviderRuntimeEvent,
   ProviderSessionId,
   ProviderToolDefinition,
+  ShieldDecision,
   WorkThreadId,
   ProviderToolAnswer,
   ProviderTurnInput,
@@ -53,6 +54,18 @@ export interface ProviderAcquireInput {
     readonly projectId: ProjectId;
     readonly threadId: WorkThreadId;
     readonly sessionId: ProviderSessionId;
+    /** Stops a review that waits on a model when the turn is cancelled. */
+    readonly signal?: AbortSignal;
+    /**
+     * Told when Octant Shield answered or declined one of this session's
+     * approvals, so the turn's transcript can show the decision.
+     */
+    readonly onApprovalReviewed?: (review: {
+      readonly requestId: string;
+      readonly toolName: string;
+      readonly summary: string;
+      readonly decision: ShieldDecision;
+    }) => void;
   };
 }
 

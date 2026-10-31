@@ -527,6 +527,7 @@ export function wireHarness(deps: HarnessDependencies) {
     readCodeThread: (threadId) => persistence.readCodeThread(threadId),
     chosenReviewer: (thread) => {
       const project = persistence.readProject(thread.projectId);
+      // A Work Project has no reviewer of its own; Settings' choice applies.
       return chosenAutoReviewer({
         project: project?.type === "code" ? project : undefined,
         settings: persistence.readCodeSettings()?.settings,
