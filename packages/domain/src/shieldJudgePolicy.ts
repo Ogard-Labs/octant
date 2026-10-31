@@ -53,6 +53,11 @@ export interface ShieldRuleInput {
   readonly call: ShieldCall;
   /** The thread's bound root: the Project folder or the thread's checkout. */
   readonly boundRoot: string;
+  /**
+   * The Project's extra folders. Reads and edits in one are inside the Project
+   * as they are in the bound root; commands still start in the bound root.
+   */
+  readonly extraRoots?: ReadonlyArray<string> | undefined;
   /** The thread has taken in outside content. */
   readonly tainted: boolean;
   /** The Project's own test and build commands, exactly as the Project runs them. */
@@ -324,16 +329,21 @@ export function judgeShieldCallByRules(input: ShieldRuleInput): ShieldRuleOutcom
   // 3. Fast allow rules.
   const cwd = normalizePosixPath(call.workingDirectory);
   const cwdInRoot = isInside(cwd, root);
-  if (call.kind === "read" && cwdInRoot) {
+  const projectRoots = [root, ...(input.extraRoots ?? []).map(normalizePosixPath)];
+  const projectRootOf = (path: string) =>
+    projectRoots.find((candidate) => isInside(path, candidate));
+  const cwdInProject = projectRootOf(cwd) !== undefined;
+  if (call.kind === "read" && cwdInProject) {
     const paths = call.paths.length === 0 ? [cwd] : call.paths;
-    if (paths.every((path) => isInside(resolveFrom(path, cwd), root))) {
+    if (paths.every((path) => projectRootOf(resolveFrom(path, cwd)) !== undefined)) {
       return decided("allow", "fast-allow", "in-root-read", "A read inside the bound folder.");
     }
   }
-  if (call.kind === "edit" && cwdInRoot && call.paths.length > 0) {
+  if (call.kind === "edit" && cwdInProject && call.paths.length > 0) {
     const inside = call.paths.every((path) => {
       const resolved = resolveFrom(path, cwd);
-      return isInside(resolved, root) && !isInside(resolved, `${root}/.git`);
+      const owner = projectRootOf(resolved);
+      return owner !== undefined && !isInside(resolved, `${owner}/.git`);
     });
     if (inside) {
       return decided("allow", "fast-allow", "in-root-edit", "An edit inside the bound folder.");
@@ -768,6 +778,9 @@ export function shieldJudgePrompt(input: ShieldJudgeInput): string {
       personMessages: messages,
       pendingCall: call,
       boundFolder: input.boundRoot,
+      ...(input.extraRoots === undefined || input.extraRoots.length === 0
+        ? {}
+        : { extraFolders: input.extraRoots }),
       guardrailLevel: input.level,
       threadReadOutsideContent: input.tainted,
     },

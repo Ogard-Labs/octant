@@ -39,6 +39,13 @@ export interface ProviderAcquireInput {
    * The folder the runtime works in, a folder on this host.
    */
   readonly projectRoot: string;
+  /**
+   * The Project's extra folders: absolute canonical paths outside
+   * `projectRoot` that the runtime gets exactly the access `projectRoot` gets
+   * at this session's level, in its own sandbox and in any profile the host
+   * wraps it in. Commands still start in `projectRoot`. Absent means none.
+   */
+  readonly extraFolders?: ReadonlyArray<string>;
   readonly mode?: "chat" | "work" | "code";
   /** Context used by the server-owned Work request projection subscriber. */
   readonly workRequest?: {

@@ -97,6 +97,8 @@ export interface ShieldReviewRequest {
   readonly threadId: string;
   readonly call: ShieldCall;
   readonly boundRoot: string;
+  /** The Project's extra folders, judged as the bound root is. */
+  readonly extraRoots?: ReadonlyArray<string> | undefined;
   /** A subagent's own taint, which counts beside its parent's. */
   readonly alsoTainted?: boolean | undefined;
   readonly signal?: AbortSignal | undefined;
@@ -181,6 +183,7 @@ export class OctantShield {
     const input: ShieldJudgeInput = {
       call: request.call,
       boundRoot: request.boundRoot,
+      ...(request.extraRoots === undefined ? {} : { extraRoots: request.extraRoots }),
       tainted,
       projectCommands: facts.projectCommands(request.boundRoot),
       level: reviewing.level,

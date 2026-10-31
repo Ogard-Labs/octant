@@ -77,6 +77,8 @@ export interface WorkTurnRuntimePort {
     readonly resumeCursor?: ProviderResumeCursor;
     readonly onSessionReady?: (handle: ProviderSessionHandle) => void;
     readonly projectRoot: string;
+    /** The Project's extra folders, granted what `projectRoot` is granted. */
+    readonly extraFolders?: ReadonlyArray<string>;
     readonly driver: ProviderDriver;
     readonly signal: AbortSignal;
     readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
@@ -247,6 +249,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       const connection = yield* input.driver.acquire({
         instanceId: input.command.authority.providerInstanceId,
         projectRoot: input.projectRoot,
+        ...(input.extraFolders === undefined ? {} : { extraFolders: input.extraFolders }),
         mode: "work",
         workRequest: {
           projectId: input.command.authority.projectId,

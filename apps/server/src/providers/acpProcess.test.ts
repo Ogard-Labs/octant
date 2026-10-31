@@ -639,6 +639,40 @@ describe("ACP child-server profiles", () => {
     }
   });
 
+  it("grants a Project's extra folder the root's writes in Work and only its reads in Plan", async () => {
+    const target = fixture(opencode);
+    const extra = `${target.canonicalRoot}-notes`;
+    mkdirSync(extra, { recursive: true });
+    const notes = realpathSync(extra);
+    const profileFor = async (executionPolicy: "approval-gated" | "plan") =>
+      (
+        await Effect.runPromise(
+          makeAcpConfinementLive({
+            platform: "darwin",
+            sandboxPath: target.sandboxPath,
+            temporaryDirectory: join(target.canonicalRoot, "tmp"),
+            hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+          }).prepare({
+            profile: gemini,
+            binaryPath: target.binaryPath,
+            root: target.canonicalRoot,
+            extraFolders: [notes],
+            managedHome: join(target.canonicalRoot, "managed-home"),
+            mode: "work",
+            executionPolicy,
+            environment: { PATH: "/usr/bin" },
+          }),
+        )
+      ).args[1];
+    const working = await profileFor("approval-gated");
+    expect(working).toContain(`(allow file-read* (subpath "${notes}"))`);
+    expect(working).toContain(`(allow file-write* (subpath "${notes}"))`);
+    const planning = await profileFor("plan");
+    expect(planning).toContain(`(allow file-read* (subpath "${notes}"))`);
+    expect(planning).toContain(`(deny file-write* (subpath "${notes}"))`);
+    expect(planning).not.toContain(`(allow file-write* (subpath "${notes}"))`);
+  });
+
   it.each(["approval-gated", "auto-accept-edits", "full-access"] as const)(
     "launches a Work session at %s under the Seatbelt profile a Code session at that level gets",
     async (executionPolicy) => {

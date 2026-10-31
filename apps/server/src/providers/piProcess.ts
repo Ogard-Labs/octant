@@ -58,6 +58,8 @@ export interface PiConfinementPort {
   readonly prepare: (input: {
     readonly binaryPath: string;
     readonly root: string;
+    /** The Project's extra folders, granted what `root` is granted. */
+    readonly extraFolders?: ReadonlyArray<string>;
     readonly piHome: string;
     readonly sessionDirectory: string;
     readonly sessionId: string;
@@ -82,6 +84,8 @@ export interface PiProcessPort {
   readonly start: (input: {
     readonly binaryPath: string;
     readonly root: string;
+    /** The Project's extra folders, granted what `root` is granted. */
+    readonly extraFolders?: ReadonlyArray<string>;
     readonly piHome: string;
     readonly sessionDirectory: string;
     readonly sessionId: string;
@@ -632,6 +636,9 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
               executable: input.binaryPath,
               args,
               boundRoot: root,
+              ...(input.mode === "chat" || input.extraFolders === undefined
+                ? {}
+                : { extraBoundRoots: input.extraFolders }),
               temporaryDirectory: temporaryDirectoryPath,
               networkEgress,
               writeBoundRoot: !(input.executionPolicy === "plan" || input.mode === "chat"),

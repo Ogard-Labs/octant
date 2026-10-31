@@ -574,6 +574,47 @@ describe("Claude execution policy", () => {
     }
   });
 
+  it("grants a Project's extra folder what the root gets, in its sandbox and its tool gate", async () => {
+    const extraFolder = "/tmp/octant-claude-notes";
+    const f = harness();
+    const scope = await Effect.runPromise(Scope.make());
+    const connection = await Effect.runPromise(
+      f.driver
+        .acquire({ instanceId, projectRoot, extraFolders: [extraFolder], mode: "code" })
+        .pipe(Effect.provideService(Scope.Scope, scope)),
+    );
+    try {
+      await Effect.runPromise(
+        connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      const open = f.opens[0]!;
+      expect(open.additionalDirectories).toEqual([extraFolder]);
+      expect(open.sandbox?.filesystem).toEqual({
+        denyRead: ["/"],
+        allowRead: [projectRoot, extraFolder],
+        allowWrite: [projectRoot, extraFolder],
+      });
+      const signal = new AbortController().signal;
+      const read = (file_path: string, toolUseId: string) =>
+        open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Read",
+          input: { file_path },
+          toolUseId,
+          signal,
+        });
+      await expect(read(`${extraFolder}/today.md`, "extra")).resolves.toEqual({
+        behavior: "allow",
+      });
+      await expect(read("/tmp/octant-claude-elsewhere/a.md", "sibling")).resolves.toMatchObject({
+        behavior: "deny",
+      });
+    } finally {
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+    }
+  });
+
   it("runs the pre-tool gate before Full-access callbacks without fabricating approvals", async () => {
     const f = harness();
     const acquired = await acquire(f.driver);

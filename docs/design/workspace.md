@@ -74,9 +74,19 @@ below the title band. The header sits on the page: the Project tile at 40px
 Project") as its subtitle, and the actions at the right edge, New thread in
 the neutral secondary paint beside the ghost Relink folder and Archive
 Project. Everything else reads on cards in the Settings section recipe: one
-card for the binding (the root in mono, read from home as `~/…` with the full
-path on hover and for screen readers, and its availability on the first row,
-what the binding grants on the second), then labelled groups. Threads are rows
+card for the Project's folders (the main folder first, labelled Main directory
+or Main repository, in mono, read from home as `~/…` with the full path on
+hover and for screen readers, and its availability on the first row; then
+each extra folder as an Extra folder row with Remove; then one line saying
+extra folders get the main folder's access while commands, checkouts and Git
+stay in the main folder, and **Add folder…**, which opens the native folder
+picker on desktop and the host folder browser elsewhere; then what the
+binding grants), then labelled groups. A refused folder (the home folder or
+above it, a system or credential folder, one inside or around another folder
+of the Project) shows the host's reason on the card. A thread's environment
+panel lists the Project's extra folders read-only, under the main folder, and
+shows nothing when there are none. Rules for what an extra folder grants are
+in [Architecture: Projects with several folders](../architecture.md#projects-with-several-folders). Threads are rows
 in one card: the title alone on its line, then the state chip, the approval
 posture as quiet text (it is a standing setting, not a state or a control, so
 it takes no chip), and facts on one line beneath it, then Details. A Work

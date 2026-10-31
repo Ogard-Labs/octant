@@ -185,7 +185,8 @@ The design rests on a small set of invariants that every package obeys:
   ([Modes](#modes-chat-work-and-code)).
 - **Work and Code share one capability set.** Chat Projects are virtual,
   memory-scoped containers with no implicit filesystem or shell authority.
-  Work binds one project root and Code binds one directory, each meant to be
+  Work binds one project root and Code binds one directory (each with any extra
+  folders the person adds, granted the same access), each meant to be
   OS-confined, and both run under the same guardrail levels: shell, local
   command-line tools, SSH to the person's own machines, file reads and
   writes, Git, provider-native tools, subagents, routines, and Full access
@@ -995,11 +996,11 @@ reaches its own kind's commands, and nothing in the renderer can turn a Chat
 into Work or a Work thread into Chat. Settings' Chat and Work switches still
 gate their domains: with one off, the composer offers only the other kind.
 
-| Mode     | Binds to                                                                                                                            | Authority                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Chat** | A virtual, memory-scoped Project, or no Project at all                                                                              | No filesystem or shell authority. Optional safe research tools; scratch space is isolated per thread.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| **Work** | Exactly one OS-confined project root                                                                                                | The shared capability set at the thread's [guardrail level](#security-and-authority): file reads and writes, shell, Git, local command-line tools, SSH to the person's own machines, provider-native tools, and subagents, as in Code. Focus: documents and artifacts with document adapters (docx, pptx, pdf, image), research with citations, local tasks, and the server-authoritative board; Done by a person. Developer surfaces stay hidden until the person turns them on for the Project (below).                                                                                                                                                                                                                                           |
-| **Code** | Exactly one directory, ideally a repository root; Code threads select a checkout (current checkout or a managed worktree) inside it | The same shared capability set at the thread's guardrail level, which starts in the mode the person picked at first run (Auto pre-selected; Ask first where the provider has no Auto) or later set for the Project or in Settings › Code › Access; any thread switches mode from its composer. Plan mode is always read-only. Focus: Git, terminals, tests, pull requests, review, and managed subagents inside the bound root, with checkouts, managed worktrees, and the objective delivery target. Creating a Code Project may explicitly initialize Git in that folder so a Code thread can prepare a checkout immediately; if that initialization fails, creation is refused and no Project is journaled. Binding without Git remains allowed. |
+| Mode     | Binds to                                                                                                                                                                                                                   | Authority                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Chat** | A virtual, memory-scoped Project, or no Project at all                                                                                                                                                                     | No filesystem or shell authority. Optional safe research tools; scratch space is isolated per thread.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **Work** | One OS-confined main folder, plus any [extra folders](#projects-with-several-folders) the person adds                                                                                                                      | The shared capability set at the thread's [guardrail level](#security-and-authority): file reads and writes, shell, Git, local command-line tools, SSH to the person's own machines, provider-native tools, and subagents, as in Code. Focus: documents and artifacts with document adapters (docx, pptx, pdf, image), research with citations, local tasks, and the server-authoritative board; Done by a person. Developer surfaces stay hidden until the person turns them on for the Project (below).                                                                                                                                                                                                                                           |
+| **Code** | One main directory, ideally a repository root, plus any [extra folders](#projects-with-several-folders) the person adds; Code threads select a checkout (current checkout or a managed worktree) inside the main directory | The same shared capability set at the thread's guardrail level, which starts in the mode the person picked at first run (Auto pre-selected; Ask first where the provider has no Auto) or later set for the Project or in Settings › Code › Access; any thread switches mode from its composer. Plan mode is always read-only. Focus: Git, terminals, tests, pull requests, review, and managed subagents inside the bound root, with checkouts, managed worktrees, and the objective delivery target. Creating a Code Project may explicitly initialize Git in that folder so a Code thread can prepare a checkout immediately; if that initialization fails, creation is refused and no Project is journaled. Binding without Git remains allowed. |
 
 A No-project Chat thread can be filed into a Chat Project from its thread menu
 (**Move to Project…**), picking one or creating it there. The move is the
@@ -2476,6 +2477,68 @@ or stops a thread.
   the Code `#thread` mention read for the window the turn runs for, judged on
   that window's standing authority like every Project check in a turn's tool
   call (see [Security and authority](#security-and-authority)).
+
+### Projects with several folders
+
+A Work or Code Project has one **main folder** (its bound root) and any
+number of **extra folders** the person adds, up to 16 (maintainer decision,
+2026-10-31). An extra folder gets the same access as the main folder at each
+thread's [guardrail level](#security-and-authority); commands, checkouts and
+Git start in the main folder. Built.
+
+- **Adding and removing.** Only a person adds or removes one, from the
+  Project page's folders card. Add folder… opens the native folder picker on
+  desktop (the host folder browser elsewhere), which issues the same
+  single-use binding receipt a Project's creation or relink consumes, so the
+  path is the folder's real path and an agent, a routine, or an import never
+  supplies one. `add-project-extra-folder` and `remove-project-extra-folder`
+  journal `project.extra-folder-added@1` (the folder, who added it, and
+  when) and `project.extra-folder-removed@1` (the folder, who removed it,
+  and when), each with the whole Project after the change, so replay rebuilds
+  the list. A Project journaled before the field existed replays with none.
+- **What can be a folder.** The domain policy refuses the home folder and
+  any folder above it, a system folder (`/`, `/System`, `/Library`, `/usr`,
+  `/etc`, `/private`, `/Volumes` itself and their peers) or a folder inside
+  a system-owned tree, a credential folder in home (`.ssh`, `.aws`,
+  `.azure`, `.gnupg`, `.kube`, `.docker`, `.password-store`,
+  `.config/gcloud`, `.config/gh`, `Library/Keychains`), anything inside or
+  containing one of those, the main folder, a folder inside or around the
+  main folder or another extra folder, and a seventeenth. Relinking the main
+  folder onto or around an extra folder is refused until that folder is
+  removed. A Chat Project has no folders.
+- **What the folders grant.** Every place that confines a thread treats
+  main and extra folders as the Project: the OS profiles give each extra
+  folder exactly the main folder's rule at that level (Seatbelt reads, and
+  writes or a trailing write denial; Bubblewrap a writable or read-only
+  bind), Claude's sandbox lists them in its read and write allow lists and
+  its `additionalDirectories`, Codex's wrapped profile and its approval
+  scope include them, OpenCode's session rules allow reaching them as a
+  folder of the session rather than an outside directory, ACP and Pi
+  profiles bind them, and the Octant Harness file tools accept an absolute
+  path in one, and Octant Shield's fast rules allow reads and edits in one
+  as in the main folder (its command rules keep to the main folder). Plan
+  reads them and writes none, as it does the main folder.
+  Full access stays unwrapped. The deny rules for secrets and the
+  `DEFAULT_DENY_READ_PATHS` refusal of ancestor roots apply to extra folders
+  unchanged. A folder missing on disk at launch is left out of the profile
+  rather than failing it. The lease or connection a runtime reuses is keyed
+  by its folders, and a change applies from the next turn. A Codex thread
+  that resumes after its folders changed first closes the idle lease of the
+  same root and mode that still holds it, as after a posture change.
+- **What the agent is told.** The runtime only sees its working directory,
+  so each Work and Code turn carries an instruction naming the extra folders
+  by absolute path and saying that commands, Git and checkouts start in the
+  main folder.
+- **Code.** Worktrees, checkouts, Git, pull requests, tests, language
+  services, debug adapters, terminals and Project actions stay keyed to the
+  main folder; an extra folder is a plain folder with no checkout
+  management. Octant's own shell port for the harness and the ACP client
+  file and terminal tools also keep the main folder's root.
+- **Not yet.** The host's own file surfaces address files by a path
+  relative to the main folder, so the `@file` picker, the Work Files and
+  overview listings, Work artifact paths, and Code search do not list or
+  resolve files in an extra folder yet. An agent reaches them through its
+  runtime's own tools.
 
 ## Agent task display
 
@@ -8034,6 +8097,9 @@ access` agree); a thread's own change is journaled as
   | Codex app-server (`codexProcess.ts`)                                      | Wrapped                         | Wrapped                                             | `allow`                                          | Octant sandbox: root read-only; writes only the account home (not its configuration) and a private temporary directory; Codex's own sandbox set to external                                                                                |
   | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | No turn runs                                                                                                                                                                                                                               |
 
+  Wherever a row names the root or the checkout, a Project's extra folders
+  get the same rule ([Projects with several folders](#projects-with-several-folders)).
+
   The columns are today's postures. On the
   [guardrail levels](#security-and-authority): Guarded and Reviewed run
   the Plan and approval-gated columns unchanged, because a reviewer
@@ -8946,7 +9012,13 @@ access` agree); a thread's own change is journaled as
   on profile pages; a paired device sees only that a signed-in page exists. The
   person signs out of a profile (closing its pages and removing its storage) at a
   local window, and the host journals that it happened without naming a site or
-  a cookie. Browser extensions (approved design, not yet built) install only
+  a cookie. The person may also import another browser's cookies into one
+  profile, only by picking a browser and profile in Settings: the host reads a
+  copy of that browser's cookie database, asks macOS for the browser's cookie key
+  through its own Keychain prompt (a refusal imports nothing), verifies each
+  decrypted value against its host, and hands the cookies to the desktop app's
+  store without logging, journaling, or returning them; the journal records the
+  source, the profile, and counts. Browser extensions (approved design, not yet built) install only
   from an unpacked folder at a local window, start disabled, are enabled per
   profile, and never load into a Private page. Detail is in [Browser profiles and extensions](design/browser-profiles.md).
 - **Side Chat reads.** A Side Chat may read its source thread's transcript,
@@ -10114,7 +10186,8 @@ the picker says why.
    the person or is refused; Shield never allows it. The malicious-call rules
    below belong here.
 2. **Fast allow rules,** with no model call: reads and edits inside the bound
-   root, the Project's own test or build command, read-only Git, egress to a
+   root or one of the Project's extra folders, the Project's own test or build
+   command, read-only Git, egress to a
    safe network, and SSH to a registered server within its profile.
 3. **Model judgment** for everything else. The Judge sees only the person's
    own messages in this thread, the pending call (tool, arguments, working

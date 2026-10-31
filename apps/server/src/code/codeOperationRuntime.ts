@@ -105,6 +105,7 @@ import {
   isAndroidEmulatorOpenInputKind,
   harnessAutoReviewEffective,
   mayWriteToRepository,
+  projectExtraFoldersInstructions,
   turnBlocksInPlaceRestore,
   unsupportedModelOptionValues,
 } from "@octant/domain";
@@ -288,6 +289,11 @@ export interface CodeOperationRuntimeOptions {
     ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
   }) => AppManagedToolSet | undefined;
   readonly persistence: RuntimePersistence;
+  /**
+   * The extra folders of a Code thread's Project, read at each turn start so
+   * a folder added or removed applies from the next turn. Absent reads none.
+   */
+  readonly readProjectExtraFolders?: (projectId: CodeThread["projectId"]) => ReadonlyArray<string>;
   /**
    * The paired device a lease confirmation names, as the host last saw it.
    * Absent on a host with no device layer, where no lease is ever confirmed.
@@ -509,6 +515,7 @@ export interface CodeOperationRuntimeOptions {
   readonly nativeHarnessTools?: (input: {
     readonly thread: CodeThread;
     readonly checkoutRoot: string;
+    readonly extraFolders?: ReadonlyArray<string>;
     readonly windowId: WindowId;
     /** The turn's resolved credential values, which a journal read redacts. */
     readonly secrets: ReadonlyArray<string>;
@@ -2063,6 +2070,8 @@ interface ActiveTurn {
   readonly sessionId: string;
   readonly requestedSessionId: string;
   readonly checkoutRoot: string;
+  /** The Project's extra folders, granted what the checkout is granted. */
+  readonly extraFolders: ReadonlyArray<string>;
   readonly driver: ProviderDriver;
   readonly resumeCursor?: ProviderResumeCursor;
   /** What the provider session held of Octant's per-turn context before this turn. */
@@ -2589,6 +2598,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       requestedSessionId: input.sessionId,
       ...(resumeCursor === undefined ? {} : { resumeCursor }),
       checkoutRoot: input.checkoutRoot,
+      extraFolders: this.#options.readProjectExtraFolders?.(input.thread.projectId) ?? [],
       driver,
       carriedSentContext: carriedSentContext({
         freshSession: resumeCursor === undefined,
@@ -3723,6 +3733,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         this.#options.nativeHarnessTools?.({
           thread: active.thread,
           checkoutRoot: active.checkoutRoot,
+          ...(active.extraFolders.length === 0 ? {} : { extraFolders: active.extraFolders }),
           windowId: active.windowId,
           secrets: active.secrets,
         }),
@@ -3813,7 +3824,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           : undefined,
       canvasOffered: offersCanvasTool(appManagedTools?.definitions),
     });
+    const extraFolderInstructions = projectExtraFoldersInstructions(active.extraFolders);
     const hostGuidance = [
+      ...(extraFolderInstructions === undefined
+        ? []
+        : [{ kind: "instructions" as const, text: extraFolderInstructions }]),
       ...appToolHostLines(appManagedTools?.definitions).map((text) => ({
         kind: "instructions" as const,
         text,
@@ -3925,6 +3940,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               }),
             }),
           checkoutRoot: active.checkoutRoot,
+          extraFolders: active.extraFolders,
           prompt,
           ...(delivery.context.length === 0 ? {} : { context: delivery.context }),
           contextAccount,
@@ -3980,6 +3996,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             acquire: (acquireInput) => {
               if (
                 acquireInput.projectRoot !== active.checkoutRoot ||
+                JSON.stringify(acquireInput.extraFolders ?? []) !==
+                  JSON.stringify(active.extraFolders) ||
                 acquireInput.permissionPersistence !== active.thread.permissionPersistence
               )
                 return Effect.fail({
