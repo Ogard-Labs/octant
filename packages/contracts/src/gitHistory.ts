@@ -73,6 +73,8 @@ export const GitHistoryPage = Schema.Struct({
   ...scope,
   /** Local-commits only: the ref the commits are measured against, as the host resolved it. */
   comparedWith: Schema.optional(text(512)),
+  /** Local-commits only: true when older commits exist than the listing holds. */
+  commitsTruncated: Schema.optional(Schema.Boolean),
   commits: Schema.Array(GitHistoryCommit).pipe(Schema.maxItems(MAX_GIT_HISTORY_PAGE)),
   refs: Schema.Array(GitHistoryRef).pipe(Schema.maxItems(256)),
   head: Schema.NullOr(GitHistoryOid),

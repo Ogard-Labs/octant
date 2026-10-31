@@ -12,10 +12,7 @@ import { CodeDiffPane, type CodeDiffProjection } from "../code/CodeDiffPane";
 import type { MonacoDiffRuntime } from "../code/MonacoEditorAdapter";
 import { nativeCodeWorkspaceApprovals } from "../code/codeWorkspaceApprovals";
 import { observeCodeThreadDiff } from "../code/observeCodeThreadDiff";
-import {
-  readCodeDiffIgnoreWhitespace,
-  writeCodeDiffIgnoreWhitespace,
-} from "../code/codeDiffWhitespacePreference";
+import { useCodeDiffIgnoreWhitespace } from "../code/codeDiffWhitespacePreference";
 import { useCodeFileChangeWatch } from "../code/useCodeFileChangeWatch";
 import { ShellState } from "./ShellState";
 import type { OctantHostBridge } from "./hostBridge";
@@ -99,7 +96,7 @@ function BoundReview(props: {
   );
   const [projection, setProjection] = useState<CodeDiffProjection>({ state: "loading" });
   const [stale, setStale] = useState(false);
-  const [ignoreWhitespace, setIgnoreWhitespace] = useState(readCodeDiffIgnoreWhitespace);
+  const [ignoreWhitespace, setIgnoreWhitespace] = useCodeDiffIgnoreWhitespace();
   const scope = useMemo(
     () => ({ checkoutId: props.checkoutId, threadId: props.threadId }),
     [props.checkoutId, props.threadId],
@@ -151,10 +148,7 @@ function BoundReview(props: {
       diff={projection}
       ignoreWhitespace={{
         value: ignoreWhitespace,
-        onChange: (value) => {
-          writeCodeDiffIgnoreWhitespace(value);
-          setIgnoreWhitespace(value);
-        },
+        onChange: setIgnoreWhitespace,
       }}
       executionPolicy={props.view.thread.executionPolicy}
       {...(props.loadRuntime === undefined ? {} : { loadRuntime: props.loadRuntime })}

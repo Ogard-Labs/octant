@@ -16,13 +16,18 @@ const commit = {
   author: "Octant Test",
   authoredAt: "2026-09-09T12:00:00Z",
 };
-const listing = (commits: ReadonlyArray<typeof commit>, comparedWith?: string) =>
+const listing = (
+  commits: ReadonlyArray<typeof commit>,
+  comparedWith?: string,
+  commitsTruncated?: boolean,
+) =>
   decodeGitHistoryResult({
     status: "history",
     threadId: scope.threadId,
     checkoutId: scope.checkoutId,
     commits,
     ...(comparedWith === undefined ? {} : { comparedWith }),
+    ...(commitsTruncated === true ? { commitsTruncated } : {}),
     refs: [],
     head: commit.oid,
     branch: "feature/notes",
@@ -95,6 +100,22 @@ describe("Local commits panel", () => {
     ).toBeVisible();
   });
 
+  it("says the list is cut when older local commits are not shown", async () => {
+    const read = vi.fn(async () => listing([commit], "origin/main", true));
+    render(
+      <LocalCommitsPanel
+        reader={{ read }}
+        threadId={scope.threadId}
+        checkoutId={scope.checkoutId}
+      />,
+    );
+
+    expect(await screen.findByText(/1\+ local commit · not on origin\/main/)).toBeVisible();
+    expect(screen.getByRole("note")).toHaveTextContent(
+      "Showing the newest 1. Older local commits are not listed.",
+    );
+  });
+
   it("rereads a commit with whitespace ignored and remembers the choice", async () => {
     const read = vi.fn(async (query: { kind: string }) =>
       query.kind === "local-commits" ? listing([commit], "origin/main") : detail,
@@ -119,5 +140,29 @@ describe("Local commits panel", () => {
       ),
     );
     expect(localStorage.getItem("octant.code.diff-ignore-whitespace.v1")).toBe("true");
+  });
+
+  it("keeps a second mounted view in step when the whitespace choice changes", async () => {
+    const read = vi.fn(async () => listing([commit], "origin/main"));
+    const user = userEvent.setup();
+    render(
+      <>
+        <LocalCommitsPanel
+          reader={{ read }}
+          threadId={scope.threadId}
+          checkoutId={scope.checkoutId}
+        />
+        <LocalCommitsPanel
+          reader={{ read }}
+          threadId={scope.threadId}
+          checkoutId={scope.checkoutId}
+        />
+      </>,
+    );
+    const [first, second] = await screen.findAllByRole("checkbox", { name: "Ignore whitespace" });
+
+    await user.click(first!);
+
+    expect(second).toBeChecked();
   });
 });

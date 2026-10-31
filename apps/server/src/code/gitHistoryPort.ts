@@ -217,19 +217,22 @@ export class GitHistoryPort {
         "--no-decorate",
         "-z",
         `--format=${LOG_FORMAT}`,
-        `--max-count=${MAX_GIT_HISTORY_PAGE}`,
+        // One past the page, so a list that fits exactly is not mistaken for a cut one.
+        `--max-count=${MAX_GIT_HISTORY_PAGE + 1}`,
         head,
         `^${tip}`,
         "--",
       ]);
       if (!log.ok) return unavailable;
+      const found = parseCommits(log.text);
       return {
         ...base,
         comparedWith: (name?.ok === true ? name.text.trim() : candidate.label).replace(
           /^refs\/(heads|remotes)\//,
           "",
         ),
-        commits: parseCommits(log.text),
+        commits: found.slice(0, MAX_GIT_HISTORY_PAGE),
+        ...(found.length > MAX_GIT_HISTORY_PAGE ? { commitsTruncated: true } : {}),
       };
     }
     return { ...base, commits: [] };

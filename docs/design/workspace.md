@@ -402,8 +402,9 @@ compare immutable object IDs with an explicit parent for merges.
 Review also owns Local commits: the commits on the thread's branch that its
 upstream does not have, or that its base branch does not have when it has no
 upstream, each opening to its own diff. The host picks the comparison and
-names it in the view; it never fetches. **Ignore whitespace** is one
-per-person choice, kept in the browser profile, that the Working tree and
+names it in the view; it never fetches. A listing holds the newest 100
+commits and says when older ones are not shown. **Ignore whitespace** is one
+per-person choice, kept in the browser profile and followed by every mounted view, that the Working tree and
 commit diffs apply by asking Git for `-w`. It changes only the diff text: the
 changed-path list, line totals and checkout state token are unchanged.
 The top-right control reveals the dock only when the active pane has a bound thread

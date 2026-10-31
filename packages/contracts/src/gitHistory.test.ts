@@ -52,6 +52,23 @@ describe("Git history reads", () => {
     ).toThrow();
   });
 
+  it("carries the local-commits truncation flag through a history page", () => {
+    const page = {
+      status: "history",
+      ...scope,
+      commits: [],
+      comparedWith: "origin/main",
+      commitsTruncated: true,
+      refs: [],
+      head: null,
+      branch: null,
+      shallow: false,
+      refsTruncated: false,
+      nextCursor: null,
+    };
+    expect(decodeGitHistoryResult(page)).toEqual(page);
+  });
+
   it("preserves unavailable and truncated results instead of inventing empty history", () => {
     expect(
       decodeGitHistoryResult({ status: "unavailable", message: "Git history is unavailable." })

@@ -178,6 +178,36 @@ describe("local Git history", () => {
     expect(none.comparedWith).toBeUndefined();
   });
 
+  it("says so when more local commits exist than one listing holds", async () => {
+    const remote = repository();
+    commit(remote, "Shared");
+    const clone = mkdtempSync(join(tmpdir(), "octant-history-clone-"));
+    directories.push(clone);
+    execFileSync("git", ["clone", "-q", remote, clone]);
+    git(clone, "config", "user.name", "Octant Test");
+    git(clone, "config", "user.email", "test@octant.local");
+    const shared = git(clone, "rev-parse", "HEAD");
+    const history = Array.from({ length: 101 }, (_, index) => {
+      const subject = `Local note ${index}`;
+      return `commit refs/heads/main\ncommitter Octant Test <test@octant.local> ${1_800_000_000 + index} +0000\ndata ${subject.length}\n${subject}\n${index === 0 ? `from ${shared}\n` : ""}M 100644 inline local.txt\ndata ${subject.length}\n${subject}\n\n`;
+    }).join("");
+    execFileSync("git", ["-C", clone, "fast-import", "--quiet"], { input: history });
+    git(clone, "reset", "--hard", "HEAD");
+    const reader = port();
+    const query = decodeGitHistoryQuery({ kind: "local-commits", ...scope });
+    const full = await reader.read(clone, query);
+    if (full.status !== "history") throw new Error("not a listing");
+    expect(full.commits).toHaveLength(100);
+    expect(full.commits[0]?.subject).toBe("Local note 100");
+    expect(full.commitsTruncated).toBe(true);
+    // Exactly one page of local commits is complete, not cut.
+    git(clone, "reset", "-q", "--hard", "HEAD~1");
+    const exact = await reader.read(clone, query);
+    if (exact.status !== "history") throw new Error("not a listing");
+    expect(exact.commits).toHaveLength(100);
+    expect(exact.commitsTruncated).toBeUndefined();
+  });
+
   it("keeps non-text and renamed files and reports bounded diffs honestly", async () => {
     const root = repository();
     commit(root, "First note");

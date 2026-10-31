@@ -189,7 +189,8 @@ commits**. The list shows the commits on the thread's branch that its upstream
 does not have yet. A branch that was never pushed is compared with its base
 branch instead, and the list says which one it used. Select a commit to expand
 its diff. Octant reads this from the local checkout and never fetches, so it
-is only as current as the last fetch you made.
+is only as current as the last fetch you made. The list holds the newest 100 commits; when there are more, the count reads
+"100+" and a note says older ones are not listed.
 
 ## Ignore whitespace
 

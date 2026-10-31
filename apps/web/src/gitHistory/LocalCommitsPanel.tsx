@@ -2,10 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { GitHistoryClient } from "@octant/client-runtime/git-history-client";
 import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts/code";
 import type { GitHistoryCommit, GitHistoryDetail } from "@octant/contracts/git-history";
-import {
-  readCodeDiffIgnoreWhitespace,
-  writeCodeDiffIgnoreWhitespace,
-} from "../code/codeDiffWhitespacePreference";
+import { useCodeDiffIgnoreWhitespace } from "../code/codeDiffWhitespacePreference";
 import { parseUnifiedDiff } from "../code/unifiedDiff";
 import { UnifiedDiffList } from "../code/UnifiedDiffList";
 import { ShellState } from "../shell/ShellState";
@@ -25,6 +22,7 @@ type Listing =
       readonly kind: "ready";
       readonly commits: ReadonlyArray<GitHistoryCommit>;
       readonly comparedWith: string | undefined;
+      readonly truncated: boolean;
     }
   | { readonly kind: "unavailable"; readonly message: string };
 
@@ -36,7 +34,7 @@ type Listing =
 export function LocalCommitsPanel(props: LocalCommitsPanelProps) {
   const [listing, setListing] = useState<Listing>({ kind: "loading" });
   const [refresh, setRefresh] = useState(0);
-  const [ignoreWhitespace, setIgnoreWhitespace] = useState(readCodeDiffIgnoreWhitespace);
+  const [ignoreWhitespace, setIgnoreWhitespace] = useCodeDiffIgnoreWhitespace();
   useEffect(() => {
     const controller = new AbortController();
     setListing({ kind: "loading" });
@@ -50,7 +48,12 @@ export function LocalCommitsPanel(props: LocalCommitsPanelProps) {
           if (controller.signal.aborted) return;
           setListing(
             result.status === "history"
-              ? { kind: "ready", commits: result.commits, comparedWith: result.comparedWith }
+              ? {
+                  kind: "ready",
+                  commits: result.commits,
+                  comparedWith: result.comparedWith,
+                  truncated: result.commitsTruncated === true,
+                }
               : {
                   kind: "unavailable",
                   message:
@@ -74,13 +77,7 @@ export function LocalCommitsPanel(props: LocalCommitsPanelProps) {
   return (
     <section className="git-history" aria-label="Local commits">
       <div className="git-history__toolbar">
-        <WhitespaceToggle
-          value={ignoreWhitespace}
-          onChange={(value) => {
-            writeCodeDiffIgnoreWhitespace(value);
-            setIgnoreWhitespace(value);
-          }}
-        />
+        <WhitespaceToggle value={ignoreWhitespace} onChange={setIgnoreWhitespace} />
         <OctantButton size="sm" variant="ghost" onClick={() => setRefresh((value) => value + 1)}>
           Refresh
         </OctantButton>
@@ -94,10 +91,17 @@ export function LocalCommitsPanel(props: LocalCommitsPanelProps) {
       {listing.kind === "ready" ? (
         <>
           <div className="git-history__status" role="status">
-            {listing.commits.length.toLocaleString("en")}{" "}
+            {listing.commits.length.toLocaleString("en")}
+            {listing.truncated ? "+ " : " "}
             {listing.commits.length === 1 ? "local commit" : "local commits"}
             {listing.comparedWith === undefined ? "" : ` · not on ${listing.comparedWith}`}
           </div>
+          {listing.truncated ? (
+            <p className="git-history__notice" role="note">
+              Showing the newest {listing.commits.length.toLocaleString("en")}. Older local commits
+              are not listed.
+            </p>
+          ) : null}
           {listing.commits.length === 0 ? (
             <p className="git-history__notice">
               {listing.comparedWith === undefined
