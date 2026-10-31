@@ -3364,6 +3364,219 @@ describe("CodeService checkout rebind", () => {
   });
 });
 
+describe("moving a Code thread to another Project", () => {
+  const otherProject = decodeProjectId("00000000-0000-4000-8000-000000007001");
+  const otherBinding = decodeBindingRevisionId("00000000-0000-4000-8000-000000007002");
+  const otherCheckout = decodeCodeCheckoutIdentity({
+    ...checkout,
+    id: "00000000-0000-4000-8000-000000007003",
+  });
+  const sourceProject = rememberedFullAccessProject as unknown as Project & { type: "code" };
+
+  function destination(folder: string, overrides: Record<string, unknown> = {}): Project {
+    return {
+      ...(sourceProject as object),
+      id: otherProject,
+      name: "Elsewhere",
+      binding: { canonicalRoot: folder },
+      bindingHistory: [
+        {
+          ...(sourceProject.bindingHistory[0] as object),
+          revisionId: otherBinding,
+          currentBinding: { canonicalRoot: folder },
+        },
+      ],
+      ...overrides,
+    } as unknown as Project;
+  }
+
+  function moveFixture(
+    folder: string,
+    options: {
+      readonly fixture?: Parameters<typeof serviceFixture>[0];
+      readonly destination?: Record<string, unknown>;
+      readonly observed?: CodeCheckoutIdentity;
+    } = {},
+  ) {
+    const target = destination(folder, options.destination);
+    const fixture = serviceFixture({
+      threads: [thread({ executionPolicy: "approval-gated" })],
+      observedCheckout: options.observed ?? otherCheckout,
+      ...options.fixture,
+    });
+    fixture.persistence.readProject.mockImplementation(((id: string) =>
+      String(id) === String(otherProject) ? target : sourceProject) as never);
+    fixture.access.canAccessProject.mockImplementation(
+      (_window: unknown, id: unknown) => id === ids.project || id === otherProject,
+    );
+    fixture.checkouts.observe.mockResolvedValue({
+      bindingRevisionId: otherBinding,
+      checkout: options.observed ?? otherCheckout,
+    } as never);
+    return fixture;
+  }
+
+  const move = (expectedVersion = 1) =>
+    ({
+      kind: "move-code-thread",
+      threadId: ids.thread,
+      expectedVersion,
+      projectId: otherProject,
+    }) as const;
+
+  it("files the thread into a Project bound to the same folder and keeps its history and guardrail level", async () => {
+    const fixture = moveFixture("/repo");
+    const result = await fixture.service.execute(ids.window, move());
+
+    expect(result).toMatchObject({
+      kind: "thread-updated",
+      thread: {
+        projectId: otherProject,
+        bindingRevisionId: otherBinding,
+        checkoutId: otherCheckout.id,
+        repositoryId,
+        executionPolicy: "approval-gated",
+        title: "Authority foundation",
+        version: 2,
+      },
+    });
+    const events = fixture.persistence.journal.append.mock.calls.map(
+      (call) =>
+        (call[0] as { events: Array<{ eventName: string; actor: { kind: string } }> }).events[0]!,
+    );
+    expect(events.map((event) => event.eventName)).toEqual([
+      "code.checkout-observed@1",
+      "code.thread-updated@1",
+    ]);
+    expect(events.every((event) => event.actor.kind === "local-user")).toBe(true);
+  });
+
+  it("keeps a managed worktree thread on the worktree it already owns", async () => {
+    const managed = decodeCodeCheckoutIdentity({
+      ...checkout,
+      kind: "managed-worktree",
+      ownershipReceiptId: "00000000-0000-4000-8000-000000007004",
+    });
+    const fixture = moveFixture("/repo", { fixture: { checkout: managed, threads: [thread()] } });
+    const result = await fixture.service.execute(ids.window, move());
+
+    expect(result).toMatchObject({
+      kind: "thread-updated",
+      thread: { projectId: otherProject, bindingRevisionId: otherBinding, checkoutId: managed.id },
+    });
+    const names = fixture.persistence.journal.append.mock.calls.map(
+      (call) => (call[0] as { events: Array<{ eventName: string }> }).events[0]!.eventName,
+    );
+    expect(names).toEqual(["code.thread-updated@1"]);
+  });
+
+  it("refuses a Project bound to a different folder, including one that contains the thread's folder", async () => {
+    for (const folder of ["/elsewhere", "/repo/packages/app", "/"]) {
+      const fixture = moveFixture(folder);
+      await expect(fixture.service.execute(ids.window, move())).rejects.toMatchObject({
+        failure: { category: "invalid" },
+      });
+      expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    }
+  });
+
+  it("says why a containing folder is refused: the thread's checkout would not stay valid there", async () => {
+    const otherRepository = decodeCodeCheckoutIdentity({
+      ...otherCheckout,
+      repositoryId: `repo_${"f".repeat(64)}`,
+    });
+    const fixture = moveFixture("/", { observed: otherRepository });
+    await expect(fixture.service.execute(ids.window, move())).rejects.toMatchObject({
+      failure: { message: /checkout would not stay valid/ },
+    });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("refuses a Project whose repository cannot be read, or whose checkout is another repository", async () => {
+    const unreadable = moveFixture("/repo");
+    unreadable.checkouts.observe.mockRejectedValue(new Error("repository unreadable"));
+    await expect(unreadable.service.execute(ids.window, move())).rejects.toMatchObject({
+      failure: { category: "unavailable" },
+    });
+
+    const differentRepository = moveFixture("/repo", {
+      observed: decodeCodeCheckoutIdentity({
+        ...otherCheckout,
+        repositoryId: `repo_${"f".repeat(64)}`,
+      }),
+    });
+    await expect(differentRepository.service.execute(ids.window, move())).rejects.toMatchObject({
+      failure: { message: /checkout would not stay valid/ },
+    });
+    for (const fixture of [unreadable, differentRepository]) {
+      expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    }
+  });
+
+  it("refuses a Chat or Work Project, a Project this window cannot reach, and a running thread", async () => {
+    const chat = moveFixture("/repo", { destination: { type: "work" } });
+    await expect(chat.service.execute(ids.window, move())).rejects.toMatchObject({
+      failure: { message: /own kind/ },
+    });
+
+    const unreachable = moveFixture("/repo");
+    unreachable.access.canAccessProject.mockImplementation(
+      (_window: unknown, id: unknown) => id === ids.project,
+    );
+    await expect(unreachable.service.execute(ids.window, move())).rejects.toMatchObject({
+      failure: { message: /not available/ },
+    });
+
+    const running = moveFixture("/repo");
+    running.persistence.readCodeRuntimeWorks.mockReturnValue([
+      {
+        work: decodeCodeRuntimeWork({
+          id: testUuid(41),
+          threadId: ids.thread,
+          kind: "provider-turn",
+          state: "running",
+          updatedAt: now,
+        }),
+        firstSequence: 1,
+      },
+    ]);
+    await expect(running.service.execute(ids.window, move())).rejects.toMatchObject({
+      failure: { message: /running turn/ },
+    });
+    for (const fixture of [chat, unreachable, running]) {
+      expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    }
+  });
+
+  it("drops a session grant of Full access when the thread changes Project", async () => {
+    const sessionAuthority = new CodeSessionAuthorityStore();
+    sessionAuthority.grantFullAccess(ids.window, ids.thread);
+    const fixture = moveFixture("/repo", { fixture: { sessionAuthority } });
+
+    const result = await fixture.service.execute(ids.window, move());
+
+    if (result.kind !== "thread-updated") throw new Error("expected a thread update");
+    expect(result.thread.executionPolicy).toBe("approval-gated");
+    expect(sessionAuthority.effectiveThread(ids.window, result.thread).executionPolicy).toBe(
+      "approval-gated",
+    );
+  });
+
+  it("refuses a Project whose provider policy excludes the thread's model, and a stale version", async () => {
+    const fixture = moveFixture("/repo", {
+      fixture: { isProviderModelAllowed: () => false },
+    });
+    await expect(fixture.service.execute(ids.window, move())).rejects.toMatchObject({
+      failure: { category: "unauthorized" },
+    });
+    const stale = moveFixture("/repo");
+    await expect(stale.service.execute(ids.window, move(5))).rejects.toMatchObject({
+      failure: { category: "stale" },
+    });
+    for (const f of [fixture, stale]) expect(f.persistence.journal.append).not.toHaveBeenCalled();
+  });
+});
+
 describe("merging a fork's conversation back", () => {
   const throughOperationId = "00000000-0000-4000-8000-000000005101";
 
@@ -4086,6 +4299,7 @@ function serviceFixture(
     readonly forkMergeBack?: CodeServiceOptions["forkMergeBack"];
     readonly forkConversation?: CodeServiceOptions["forkConversation"];
     readonly recordExternalContentIngestion?: CodeServiceOptions["recordExternalContentIngestion"];
+    readonly isProviderModelAllowed?: CodeServiceOptions["isProviderModelAllowed"];
   } = {},
 ) {
   const threads = options.threads ?? [thread()];
@@ -4199,6 +4413,9 @@ function serviceFixture(
       ? {}
       : { awaitsHarnessApproval: options.awaitsHarnessApproval }),
     ...(options.forkMergeBack === undefined ? {} : { forkMergeBack: options.forkMergeBack }),
+    ...(options.isProviderModelAllowed === undefined
+      ? {}
+      : { isProviderModelAllowed: options.isProviderModelAllowed }),
     ...(options.forkConversation === undefined
       ? {}
       : { forkConversation: options.forkConversation }),

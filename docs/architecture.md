@@ -988,9 +988,29 @@ A No-project Chat thread can be filed into a Chat Project from its thread menu
 server's `move-chat-thread` command: it keeps the thread's kind, history, and
 settings, accepts only an active Chat Project, and adds no filesystem, shell, or
 network authority; the Project's memory applies from the thread's next message.
-A thread already in a Project offers no move, and moving Work or Code threads is
-not offered. A tool-extension selection resolved while the thread had no Project
-no longer matches its new scope and is refused until it is selected again.
+A Chat already in a Project offers no move. A tool-extension selection resolved
+while the thread had no Project no longer matches its new scope and is refused
+until it is selected again.
+
+A Work or Code thread can be filed into another Project of its own mode from its
+row menu (**Move to Project…**). The server's `move-work-thread` and
+`move-code-thread` commands keep the thread's kind, history, and guardrail
+level, and add no filesystem reach: the pure `decideThreadMove` policy admits
+only an active Project of the same mode whose bound folder is the thread's
+folder or contains it, and refuses an archived thread, a running turn, a thread
+waiting on the person, the thread's own Project, and any other folder, each with
+a plain reason. A person makes the move; a routine acting as the host is
+refused. A Work thread takes the destination's binding revision and its working
+directory is rewritten to name the same place under the new root, so a
+containing folder changes the confinement root but not where the thread works.
+A Code thread also needs its checkout to stay valid: the destination's checkout
+must be the same repository at the same folder, so a Project that merely
+contains the thread's folder is refused. A checkout of the Project's folder is
+re-derived under the destination and journaled before the thread; a managed
+worktree keeps its own identity. A session grant of Full access is discarded on
+the move. The destination's provider policy still applies to the thread's
+provider and model. Each move is one journaled thread update by the local
+person with its time, and replays like any other thread update.
 
 Stop asks the runtime to end a turn. When the runtime does not end it, a
 provider whose sessions each own a process (reported as the `forceStop`

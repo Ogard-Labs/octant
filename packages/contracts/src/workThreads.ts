@@ -191,6 +191,18 @@ export const ChangeWorkThreadWorkingDirectoryCommand = Schema.Struct({
 export type ChangeWorkThreadWorkingDirectoryCommand =
   typeof ChangeWorkThreadWorkingDirectoryCommand.Type;
 
+/**
+ * Files a Work thread into another Work Project whose folder is the thread's
+ * folder or contains it. The thread keeps its kind, history and access; the
+ * host refuses any other Project and a thread with a turn in flight.
+ */
+export const MoveWorkThreadCommand = Schema.Struct({
+  kind: Schema.Literal("move-work-thread"),
+  ...WorkThreadCommandFields,
+  projectId: ProjectId,
+}).annotations(strict);
+export type MoveWorkThreadCommand = typeof MoveWorkThreadCommand.Type;
+
 export const ChangeWorkThreadProviderCommand = Schema.Struct({
   kind: Schema.Literal("change-work-thread-provider"),
   ...WorkThreadCommandFields,
@@ -288,6 +300,7 @@ export const WorkThreadCommand = Schema.Union(
   WakeWorkThreadCommand,
   ConfirmWorkThreadCompletionCommand,
   ChangeWorkThreadWorkingDirectoryCommand,
+  MoveWorkThreadCommand,
   ChangeWorkThreadProviderCommand,
   ChangeWorkThreadDocumentDeliveryCommand,
   ScheduleWorkUsageResumeCommand,

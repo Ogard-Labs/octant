@@ -750,6 +750,17 @@ export const CodeCommand = Schema.Union(
     ...CodeThreadCommandFields,
     documentDelivery: ThreadDocumentDelivery,
   }).annotations(strict),
+  /**
+   * Files a Code thread into another Code Project bound to the same folder
+   * (or one that contains it, when the thread's checkout stays valid there).
+   * The thread keeps its history, guardrail level and checkout; the host
+   * refuses any Project under which the checkout would not stay valid.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("move-code-thread"),
+    ...CodeThreadCommandFields,
+    projectId: ProjectId,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-code-thread-working-directory"),
     ...CodeThreadCommandFields,

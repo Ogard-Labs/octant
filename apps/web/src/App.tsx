@@ -4570,6 +4570,7 @@ function LaunchedShell(
       markCodeFollowUp: codeController.markFollowUp,
       markCodeThreadRead: codeController.markThreadRead,
       mergeProjectPullRequest,
+      moveCodeThread: codeController.moveThread,
       moveProject: projectController.move,
       noteCanvasReferences,
       noteHandedOffDocument,

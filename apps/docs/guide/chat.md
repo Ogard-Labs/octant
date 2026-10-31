@@ -180,7 +180,8 @@ A Chat that is not in a Project can be filed into one: open **Thread actions**
 and choose **Move to Project…**, then pick a Chat Project or name a new one. The
 conversation stays a Chat with its history. It gains no folder access; the
 Project's memory applies to the messages you send next. A Chat already in a
-Project has no move item.
+Project has no move item. Work and Code threads move from their row menu; see
+[Work](./work.md#move-to-a-project) and [Code](./code.md#move-to-a-project).
 
 ## Export
 
