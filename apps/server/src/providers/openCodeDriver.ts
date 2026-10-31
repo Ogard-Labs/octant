@@ -130,6 +130,15 @@ interface SessionState {
    * withdraws another's.
    */
   readonly unreportedEditGrants: string[];
+  /**
+   * Files a 2.x approval answered `always` admits for good, shared by every
+   * session of this Project root while the host runs: OpenCode saves the
+   * grant in its own store and makes later matching edits without asking, so
+   * each such change is admitted without spending anything.
+   */
+  readonly rememberedEdits: Set<string>;
+  /** 2.x requests Octant itself answered, whose grants it already admitted. */
+  readonly answeredRequests: Set<string>;
   readonly questions: Map<
     string,
     {
@@ -1039,6 +1048,16 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
   const clock = options.clock ?? (() => new Date().toISOString());
   const makeCorrelation = options.correlationId ?? (() => crypto.randomUUID());
   const resumeToolCatalogs = new Map<string, ReadonlyArray<ProviderToolDefinition>>();
+  // What OpenCode remembers from an `always` answer outlives the session and
+  // connection that gave it, so the admission is kept per Project root.
+  const rememberedEditGrants = new Map<string, Set<string>>();
+  const rememberedEditsFor = (projectRoot: string): Set<string> => {
+    const existing = rememberedEditGrants.get(projectRoot);
+    if (existing !== undefined) return existing;
+    const created = new Set<string>();
+    rememberedEditGrants.set(projectRoot, created);
+    return created;
+  };
   return {
     kind: "opencode",
     conversationOwnership: "provider",
@@ -1197,6 +1216,7 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
               clock,
               makeCorrelation,
               resumeToolCatalogs,
+              rememberedEditsFor(projectRoot),
             );
           }),
   };
@@ -1291,6 +1311,7 @@ function makeConnection(
   clock: () => string,
   makeCorrelation: () => string,
   resumeToolCatalogs: Map<string, ReadonlyArray<ProviderToolDefinition>>,
+  rememberedEdits: Set<string>,
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   return Effect.gen(function* () {
     const events = yield* PubSub.unbounded<ProviderRuntimeEvent>();
@@ -1784,6 +1805,7 @@ function makeConnection(
             makeCorrelation,
             input.tools ?? [],
             input.nativeSetup,
+            rememberedEdits,
           );
           return prepareManagedTools(state, input.tools ?? []).pipe(
             Effect.flatMap(() =>
@@ -1931,6 +1953,7 @@ function makeConnection(
                 makeCorrelation,
                 tools,
                 input.nativeSetup,
+                rememberedEdits,
               );
               if (inheritedTools !== undefined) {
                 inheritedTools.owner.state = state;
@@ -2156,31 +2179,40 @@ function makeConnection(
                       const grant = input.approved
                         ? (state.pendingEditGrants.get(input.requestId) ?? [])
                         : [];
+                      // On 2.x `always` saves a project grant in OpenCode's own
+                      // data directory, shared with the person's OpenCode use,
+                      // outside Octant's revocation; OpenCode then makes later
+                      // matching edits without asking and settles other
+                      // pending requests it covers. It is answered only where
+                      // the person let OpenCode run as itself, and its files
+                      // stay admitted for this Project root from then on.
+                      const always =
+                        input.approved &&
+                        input.scope !== "once" &&
+                        opencodeRemembersApproval(
+                          state,
+                          runtimeKind,
+                          options.permissionPersistence?.() ?? "current-session",
+                        );
+                      state.answeredRequests.add(input.requestId);
                       state.unreportedEditGrants.push(...grant);
+                      const newlyRemembered =
+                        runtimeKind === "beta" && always
+                          ? grant.filter((file) => !state.rememberedEdits.has(file))
+                          : [];
+                      for (const file of newlyRemembered) state.rememberedEdits.add(file);
                       return request(() =>
                         activeClient.replyPermission(
                           source,
                           input.requestId,
-                          // On 2.x `always` saves a project grant in OpenCode's
-                          // own data directory, shared with the person's OpenCode
-                          // use, outside Octant's revocation, and it also settles
-                          // other pending requests it covers. Octant keeps its
-                          // own remembered approvals, so 2.x is only answered once.
-                          input.approved
-                            ? input.scope !== "once" &&
-                              opencodeRemembersApproval(
-                                state,
-                                runtimeKind,
-                                options.permissionPersistence?.() ?? "current-session",
-                              )
-                              ? "always"
-                              : "once"
-                            : "reject",
+                          input.approved ? (always ? "always" : "once") : "reject",
                         ),
                       ).pipe(
                         Effect.tapError(() =>
                           Effect.sync(() => {
                             for (const file of grant) spendEditGrant(state, file);
+                            for (const file of newlyRemembered) state.rememberedEdits.delete(file);
+                            state.answeredRequests.delete(input.requestId);
                           }),
                         ),
                         Effect.tap(() =>
@@ -2274,6 +2306,7 @@ function newSessionState(
   makeCorrelation: () => string,
   tools: ReadonlyArray<ProviderToolDefinition>,
   nativeSetup: ProviderNativeSetup | undefined,
+  rememberedEdits: Set<string>,
 ): SessionState {
   return {
     sessionId,
@@ -2291,6 +2324,8 @@ function newSessionState(
     approvalCalls: new Map(),
     pendingEditGrants: new Map(),
     unreportedEditGrants: [],
+    rememberedEdits,
+    answeredRequests: new Set(),
     questions: new Map(),
     questionAnswers: new Map(),
     toolNames: new Set(tools.map((tool) => tool.name)),
@@ -2361,9 +2396,12 @@ function failClosedBetaEvent(
   // An edit the posture allows, or one the user already approved, may be
   // reported. Any other file change ran without a grant, so the turn fails.
   if (edit === "allow") return event;
-  if (spendEditGrant(state, resolve(projectRoot, event.path)) || spendEditGrant(state, "*")) {
+  const file = resolve(projectRoot, event.path);
+  if (spendEditGrant(state, file) || spendEditGrant(state, "*")) {
     return event;
   }
+  // A grant OpenCode remembers from an `always` answer is never spent.
+  if (state.rememberedEdits.has(file) || state.rememberedEdits.has("*")) return event;
   return {
     kind: "failed",
     instanceId: event.instanceId,
@@ -2407,6 +2445,16 @@ function mapAndOffer(
   // answer to it is refused as not pending instead of failing at the server.
   if (beta !== undefined && event.type === "permission.v2.replied") {
     const settled = textProperty(event.properties, "requestID");
+    // A request OpenCode settled by itself, because an earlier `always`
+    // covers it, lets its edit run as surely as one the person approved, so
+    // its files are admitted (for good when the reply is `always`) before
+    // the change is reported. A request Octant answered was admitted then.
+    const reply = textProperty(event.properties, "reply");
+    const grant = state.pendingEditGrants.get(settled);
+    if (grant !== undefined && !state.answeredRequests.has(settled)) {
+      if (reply === "always") for (const file of grant) state.rememberedEdits.add(file);
+      else if (reply === "once") state.unreportedEditGrants.push(...grant);
+    }
     state.approvals.delete(settled);
     state.pendingEditGrants.delete(settled);
     return;

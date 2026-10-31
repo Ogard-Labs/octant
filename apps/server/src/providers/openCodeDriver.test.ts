@@ -2016,6 +2016,83 @@ describe("OpenCode driver", () => {
     expect(locked.approvals.at(-1)).not.toContain("OpenCode's own settings");
   });
 
+  it("admits the edits OpenCode makes later on a grant it remembers from an always answer, and the requests it settles by itself", async () => {
+    const asked = (id: string, file: string) =>
+      ({
+        type: "permission.v2.asked",
+        properties: { id, sessionID: "provider-session", action: "edit", resources: [file] },
+      }) as unknown as Event;
+    const fixture = betaDriver({
+      permissionPersistence: "project-default",
+      events: [asked("perm-a", "/tmp/project/a.ts"), asked("perm-b", "/tmp/project/b.ts")],
+      eventsOnReply: [
+        {
+          type: "permission.v2.replied",
+          properties: { sessionID: "provider-session", requestID: "perm-a", reply: "always" },
+        } as unknown as Event,
+        // OpenCode settles the other pending request by the remembered grant.
+        {
+          type: "permission.v2.replied",
+          properties: { sessionID: "provider-session", requestID: "perm-b", reply: "always" },
+        } as unknown as Event,
+        {
+          type: "file.edited",
+          properties: { sessionID: "provider-session", file: "/tmp/project/a.ts" },
+        } as unknown as Event,
+        // A later edit of the same file asks nothing: OpenCode applies its grant.
+        {
+          type: "file.edited",
+          properties: { sessionID: "provider-session", file: "/tmp/project/a.ts" },
+        } as unknown as Event,
+        {
+          type: "file.edited",
+          properties: { sessionID: "provider-session", file: "/tmp/project/b.ts" },
+        } as unknown as Event,
+        { type: "session.idle", properties: { sessionID: "provider-session" } } as unknown as Event,
+      ],
+    });
+    const output = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.gen(function* () {
+              const stream = yield* connection.subscribe;
+              const collector = yield* Effect.fork(
+                Stream.runCollect(
+                  stream.pipe(
+                    Stream.takeUntil((event) =>
+                      ["completed", "failed", "interrupted"].includes(event.kind),
+                    ),
+                  ),
+                ),
+              );
+              yield* connection.start({
+                sessionId,
+                modelId,
+                executionPolicy: "approval-gated",
+                nativeSetup: {
+                  subagents: false,
+                  webTools: true,
+                  skills: true,
+                  toolServers: true,
+                  hooks: true,
+                  projectCode: false,
+                },
+              });
+              yield* Effect.sleep("20 millis");
+              yield* connection.answerApproval({ sessionId, requestId: "perm-a", approved: true });
+              return yield* Fiber.join(collector);
+            }),
+          ),
+        ),
+      ),
+    );
+    const events = Array.from(output);
+    expect(fixture.calls).toContain("permission.reply:always");
+    expect(events.filter((event) => event.kind === "file-change")).toHaveLength(3);
+    expect(events.some((event) => event.kind === "failed")).toBe(false);
+  });
+
   it("does not reply to an approval-gated 2.x write until the user approves it", async () => {
     const fixture = betaDriver({
       events: [
