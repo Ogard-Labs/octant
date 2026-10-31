@@ -82,6 +82,9 @@ export function planCodeThreadCreate(input: CodeThreadCreateInput): CodeThreadCr
         ...(input.composer.linearIssueContext === undefined
           ? {}
           : { linearIssueContext: input.composer.linearIssueContext }),
+        ...(input.composer.terminalSession === undefined
+          ? {}
+          : { terminalSession: input.composer.terminalSession }),
       }),
     };
   }
@@ -138,6 +141,9 @@ export function planCodeThreadCreate(input: CodeThreadCreateInput): CodeThreadCr
       ...(input.composer.linearIssueContext === undefined
         ? {}
         : { linearIssueContext: input.composer.linearIssueContext }),
+      ...(input.composer.terminalSession === undefined
+        ? {}
+        : { terminalSession: input.composer.terminalSession }),
     },
   };
 }

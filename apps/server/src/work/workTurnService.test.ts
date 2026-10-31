@@ -1740,6 +1740,43 @@ describe("WorkTurnService", () => {
     expect(instruction?.text).not.toContain("AGENTS.md");
   });
 
+  it("hands the runtime the Project's extra folders and names them to the agent", async () => {
+    const seen: Array<{
+      readonly extraFolders: ReadonlyArray<string> | undefined;
+      readonly context: ReadonlyArray<{ readonly kind: string; readonly text: string }>;
+    }> = [];
+    const fixture = serviceFixture({
+      project: workProject({
+        extraFolders: [
+          {
+            canonicalRoot: "/private/tmp/research",
+            addedBy: {
+              kind: "local-user",
+              actorId: "72000000-0000-4000-8000-000000000009" as never,
+            },
+            addedAt: now as never,
+          },
+        ],
+      }),
+      turnRuntime: {
+        run: async (input) => {
+          seen.push({ extraFolders: input.extraFolders, context: input.context ?? [] });
+          return { kind: "completed", response: "Provider reply" };
+        },
+      },
+    });
+
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await fixture.waitForIdle();
+
+    expect(seen[0]?.extraFolders).toEqual(["/private/tmp/research"]);
+    const instruction = seen[0]?.context.find(
+      (block) => block.kind === "instructions" && block.text.includes("extra folders"),
+    );
+    expect(instruction?.text).toContain("- /private/tmp/research");
+    expect(instruction?.text).toContain("Commands, Git and checkouts start in the main folder");
+  });
+
   it("carries no status instruction and writes no file in a Project that has not opted in", async () => {
     const contexts: Array<ReadonlyArray<{ readonly kind: string; readonly text: string }>> = [];
     // A STATUS.md left over from before the setting existed is not a signal to keep it.

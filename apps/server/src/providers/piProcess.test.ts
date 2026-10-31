@@ -286,6 +286,37 @@ describe("Pi process boundary", () => {
     expect(refused).toMatchObject({ _tag: "Left", left: { category: "stale-resume" } });
   });
 
+  it("grants a Project's extra folder the root's writes, and none to a Chat launch", async () => {
+    const f = fixture();
+    const notes = `${f.root}-notes`;
+    mkdirSync(notes, { recursive: true });
+    const confinement = makePiConfinementLive({
+      platform: "darwin",
+      sandboxPath: f.sandbox,
+      credentialPath: f.auth,
+      modelsPath: f.models,
+      temporaryDirectory: f.base,
+    });
+    const profileFor = async (mode: "code" | "chat") =>
+      (
+        await Effect.runPromise(
+          confinement.prepare({
+            binaryPath: f.binary,
+            root: mode === "chat" ? f.home : f.root,
+            extraFolders: [notes],
+            piHome: f.home,
+            sessionDirectory: join(f.home, "sessions"),
+            sessionId: `${mode}-1`,
+            mode,
+            executionPolicy: "approval-gated",
+            environment: {},
+          }),
+        )
+      ).args[1];
+    expect(await profileFor("code")).toContain(`(allow file-write* (subpath "${notes}"))`);
+    expect(await profileFor("chat")).not.toContain(notes);
+  });
+
   it("writes isolated configuration, links provider-owned auth, and loads only the Octant bridge", async () => {
     const f = fixture();
     const confinement = makePiConfinementLive({

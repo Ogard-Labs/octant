@@ -74,9 +74,19 @@ below the title band. The header sits on the page: the Project tile at 40px
 Project") as its subtitle, and the actions at the right edge, New thread in
 the neutral secondary paint beside the ghost Relink folder and Archive
 Project. Everything else reads on cards in the Settings section recipe: one
-card for the binding (the root in mono, read from home as `~/…` with the full
-path on hover and for screen readers, and its availability on the first row,
-what the binding grants on the second), then labelled groups. Threads are rows
+card for the Project's folders (the main folder first, labelled Main directory
+or Main repository, in mono, read from home as `~/…` with the full path on
+hover and for screen readers, and its availability on the first row; then
+each extra folder as an Extra folder row with Remove; then one line saying
+extra folders get the main folder's access while commands, checkouts and Git
+stay in the main folder, and **Add folder…**, which opens the native folder
+picker on desktop and the host folder browser elsewhere; then what the
+binding grants), then labelled groups. A refused folder (the home folder or
+above it, a system or credential folder, one inside or around another folder
+of the Project) shows the host's reason on the card. A thread's environment
+panel lists the Project's extra folders read-only, under the main folder, and
+shows nothing when there are none. Rules for what an extra folder grants are
+in [Architecture: Projects with several folders](../architecture.md#projects-with-several-folders). Threads are rows
 in one card: the title alone on its line, then the state chip, the approval
 posture as quiet text (it is a standing setting, not a state or a control, so
 it takes no chip), and facts on one line beneath it, then Details. A Work
@@ -827,6 +837,22 @@ through the Integration port, frames redacted issue text
 (`identifier`, status, description, comments, links) as external content and
 journals that ingestion ([details](host-reads-and-commands.md#linear-issues)).
 Refusal fails creation visibly. No Linear write-back path exists.
+
+Composer `Create from…` also has a Terminal tab in a Work or Code draft with a
+Project, for a local window. It lists the newest sessions the Claude Code and
+Codex command-line tools kept on this Mac for the Project's bound folder, with
+their title and last activity. Selecting one attaches only
+`{ provider, sessionId }`. At creation the server reads the session again,
+refuses one started in another folder, keeps the person's and the assistant's
+words (no tool calls, results, thinking, or text the tool injected), bounds
+them to the recent part of the conversation, marks the thread with outside
+content before it exists, and journals the history on the thread
+([details](host-reads-and-commands.md#terminal-sessions)). The thread shows it
+folded and read-only above its own turns. Its first admitted turn hands the
+history to the model once, framed as outside data. The provider's native
+session is not resumed: a resumed session would hold the earlier conversation
+unframed, and the Claude runtime refuses a session id Octant did not record.
+Nothing is uploaded or written back to the tool's files.
 
 ## Context and usage
 
