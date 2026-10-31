@@ -130,9 +130,13 @@ and sends anything it is unsure of to you. Auto is pre-selected for every
 provider. Where no reviewer can run, the thread starts in Ask first and the
 list says why. Choose the reviewer in Settings › Access. Your pick is the default for new threads.
 Change it in Settings › Access, per Project, or on any thread from the
-composer in one click. Full access is never the default. Turning off the
-sandbox entirely is a separate switch under Full access in Settings, with a
-one-time warning. Not built yet.
+composer in one click. Full access is never the default. Full access means
+no sandbox and no prompts: agents can change any file and run any command
+without asking, with no sandbox, so they can read your whole home folder,
+including SSH and cloud keys. The first time this computer or a Project picks
+it, Octant shows that warning once. At Full access, outside content an agent
+read is only marked on the tool row and the thread card; nothing asks. Not
+built yet.
 
 Destinations that this host cannot back — Navigator without a model, a Work
 board that is not wired, GitHub pull requests without a working GitHub

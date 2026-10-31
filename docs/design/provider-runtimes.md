@@ -14,7 +14,7 @@ Octant ([Architecture: key providers run as themselves](../architecture.md#provi
 The switch-offs in the sections below are today's build. Each key provider's
 target wire behaviour, gated by the thread's
 [guardrail level](../architecture.md#security-and-authority) (off at Guarded
-and Reviewed until the person turns it on, on at Trusted and Off):
+and Reviewed until the person turns it on, on at Full access):
 
 | Provider     | Switched off today                                                                                                                   | Target                                                                                                                                                                                                   | Built                                        |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |

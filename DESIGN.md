@@ -636,7 +636,8 @@ First-run setup asks only what a first task needs — a usable provider, a
 Project folder, a model, and the
 [mode](docs/architecture.md#security-and-authority) new threads start in
 (Auto pre-selected and marked Recommended, then Ask first, Accept edits, Plan,
-and Full access, in that order; Auto uses the provider's own reviewer or
+and Full access, in that order; Full access reads "No sandbox, no prompts"
+and is never pre-selected; Auto uses the provider's own reviewer or
 [Octant Shield](docs/architecture.md#octant-shield), so it is listed for every
 runtime, and where no reviewer can run the picker shows it unavailable with
 the reason; the pick becomes the default for every new Work and Code thread
@@ -2102,7 +2103,16 @@ extension tool request names the plugin, its server, and the tool, and adds
 and the window is a local one. Settings › Permissions lists those answers by
 Project, each with Revoke, beside Remembered websites. Its Access section
 (Settings › Access) shows the global guardrail level with one-click change,
-which governs Work and Code alike, and, each as an account default a Project
+which governs Work and Code alike. The levels, top to bottom, are Ask first,
+Accept edits, Auto, and Full access; Full access is the lowest, and there is
+no separate switch below it. The first time a machine or a Project picks Full
+access, a one-time warning asks to confirm, in the warning role: "Agents can
+change any file and run any command without asking, with no sandbox, so they
+can read your whole home folder, including SSH and cloud keys." It offers
+Cancel (focused) and Use Full access, and is not shown again for that scope.
+At Full access a tool row that read outside content carries a quiet tag and
+the thread card a small mark; neither prompts. The section also shows, each
+as an account default a Project
 may override: **Auto reviewer** (Provider's own / Octant Shield), **Safe
 networks** (trusted hosts, domains, address ranges, and private-network tags),
 and **Servers** (registered SSH hosts, each with a Read-only, Operate, or Admin

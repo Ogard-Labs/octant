@@ -7,8 +7,8 @@ carries data, before any request leaves, with a named reason
 ([Architecture: native harness](../architecture.md#native-harness)). Today
 that holds under every posture; the rule is that it follows the
 [guardrail level](../architecture.md#security-and-authority): it refuses at
-Guarded and Reviewed, warns at Trusted, and is off at Off (allowed;
-not built yet).
+Guarded and Reviewed, and at Full access only records the mark, never
+prompting or blocking (allowed; not built yet).
 
 ## Refused patterns
 
