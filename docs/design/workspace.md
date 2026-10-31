@@ -838,6 +838,22 @@ through the Integration port, frames redacted issue text
 journals that ingestion ([details](host-reads-and-commands.md#linear-issues)).
 Refusal fails creation visibly. No Linear write-back path exists.
 
+Composer `Create from…` also has a Terminal tab in a Work or Code draft with a
+Project, for a local window. It lists the newest sessions the Claude Code and
+Codex command-line tools kept on this Mac for the Project's bound folder, with
+their title and last activity. Selecting one attaches only
+`{ provider, sessionId }`. At creation the server reads the session again,
+refuses one started in another folder, keeps the person's and the assistant's
+words (no tool calls, results, thinking, or text the tool injected), bounds
+them to the recent part of the conversation, marks the thread with outside
+content before it exists, and journals the history on the thread
+([details](host-reads-and-commands.md#terminal-sessions)). The thread shows it
+folded and read-only above its own turns. Its first admitted turn hands the
+history to the model once, framed as outside data. The provider's native
+session is not resumed: a resumed session would hold the earlier conversation
+unframed, and the Claude runtime refuses a session id Octant did not record.
+Nothing is uploaded or written back to the tool's files.
+
 ## Context and usage
 
 The circular composer meter opens the host's attributed context breakdown without
