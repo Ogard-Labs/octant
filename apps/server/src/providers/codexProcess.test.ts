@@ -800,8 +800,19 @@ describe("Codex launch confinement", () => {
           );
           expect(account.output).toContain("kept-state");
           expect(account.output).not.toContain("wrote-config");
+
+          // An entry the account does not have yet cannot be planted either.
+          const absent = run(
+            policy,
+            { root, codexHome },
+            `echo K=v > '${join(codexHome, ".env")}' && echo made-env; mkdir '${join(codexHome, "skills")}' && echo made-skills`,
+          );
+          expect(absent.output).not.toContain("made-env");
+          expect(absent.output).not.toContain("made-skills");
         }
         expect(readFileSync(join(codexHome, "config.toml"), "utf8")).toBe("# account\n");
+        expect(existsSync(join(codexHome, ".env"))).toBe(false);
+        expect(existsSync(join(codexHome, "skills"))).toBe(false);
 
         const write = `echo x > '${join(root, "written")}' && echo wrote-root`;
         expect(run("plan", { root, codexHome }, write).output).not.toContain("wrote-root");

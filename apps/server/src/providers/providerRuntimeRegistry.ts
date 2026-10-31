@@ -451,6 +451,22 @@ export class ProviderRuntimeRegistry {
     return () => listeners?.delete(listener);
   }
 
+  /**
+   * Closes one leased runtime now when nothing holds it, instead of after its
+   * idle delay. A runtime a connection still holds is left running, so no
+   * other session loses its process.
+   */
+  async closeIdleLease(
+    instanceId: ProviderInstanceId,
+    lease: string,
+  ): Promise<"closed" | "held" | "absent"> {
+    const entry = this.#runtimes.get(runtimeKey(instanceId, lease));
+    if (entry === undefined) return "absent";
+    if (entry.refs !== 0) return "held";
+    await this.#closeEntry(entry);
+    return "closed";
+  }
+
   hasRuntime(instanceId: ProviderInstanceId): boolean {
     return this.#entriesOf(instanceId).length > 0;
   }

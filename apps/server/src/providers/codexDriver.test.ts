@@ -1869,6 +1869,64 @@ describe("Codex thread and turn lifecycle", () => {
     await acquired.close();
   });
 
+  it("resumes a thread under a new posture by closing the idle process that still holds it, but never one in use", async () => {
+    // Measured with codex-cli 0.164.0: a thread stays loaded in its app-server
+    // after `thread/unsubscribe`, so only that process ending frees the writer.
+    let oldPostureAlive = () => false;
+    const f = fixture({
+      threadResume: async () => {
+        if (oldPostureAlive()) {
+          throw new CodexRpcClientFailure("remote", "Codex request failed.", {
+            remoteCode: -32600,
+            remoteMessage: "thread t already has an active writer",
+          });
+        }
+        return {
+          thread: { id: "thread-moved" },
+          model: "gpt-5.4",
+          modelProvider: "openai",
+          serviceTier: null,
+          cwd: projectRoot,
+        };
+      },
+    });
+    const driver = makeCodexDriver(f.options());
+    const resume = (
+      connection: Awaited<ReturnType<typeof acquireConnection>>["connection"],
+      executionPolicy: ProviderExecutionPolicy,
+    ) =>
+      Effect.runPromise(
+        Effect.exit(
+          connection.resume({
+            sessionId,
+            resumeCursor: { driverKind: "codex", value: "thread-moved" },
+            executionPolicy,
+          }),
+        ),
+      );
+
+    const planTurn = await acquireConnection(driver);
+    expect(Exit.isSuccess(await resume(planTurn.connection, "plan"))).toBe(true);
+    const otherPlanTurn = await acquireConnection(driver);
+    expect(Exit.isSuccess(await resume(otherPlanTurn.connection, "plan"))).toBe(true);
+    oldPostureAlive = () => f.closeCount() === 0;
+
+    await planTurn.close();
+    const held = await acquireConnection(driver);
+    const refused = await resume(held.connection, "approval-gated");
+    expect(String(refused)).toContain("Another Codex process is still using this thread");
+    expect(f.closeCount()).toBe(0);
+    await held.close();
+
+    await otherPlanTurn.close();
+    const gatedTurn = await acquireConnection(driver);
+    expect(Exit.isSuccess(await resume(gatedTurn.connection, "approval-gated"))).toBe(true);
+    // The Plan process closed; the approval-gated process that resumed stays.
+    expect(f.closeCount()).toBe(1);
+    expect(f.startCount()).toBe(2);
+    await gatedTurn.close();
+  });
+
   it("resume reports another Codex process using the thread when the writer conflict persists", async () => {
     const delays: number[] = [];
     const f = fixture({

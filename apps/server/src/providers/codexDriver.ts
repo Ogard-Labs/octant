@@ -5,7 +5,7 @@ import {
   decodeProviderServiceLimits,
   type CorrelationId,
   type PermissionPersistence,
-  type ProviderExecutionPolicy,
+  ProviderExecutionPolicy,
   type ProviderFailure,
   type ProviderAccountAuthentication,
   type ProviderCapabilities,
@@ -867,13 +867,15 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
       // The process is leased when the first session names its posture, so
       // one lease is one root under one mode and posture and Octant's profile
       // can be exact for it.
+      const leaseKey = (executionPolicy: ProviderExecutionPolicy) =>
+        JSON.stringify([projectRoot, threadMode, executionPolicy]);
       const leaseFor = (executionPolicy: ProviderExecutionPolicy) =>
         Effect.gen(function* () {
           const runtime = yield* acquireRuntime(
             options,
             clientFactory,
             { kind: "thread", root: projectRoot, mode: threadMode, executionPolicy },
-            JSON.stringify([projectRoot, threadMode, executionPolicy]),
+            leaseKey(executionPolicy),
           );
           // Turn starts probe first, but not every caller does (compaction,
           // summaries, agent runs), so the session itself refuses too.
@@ -888,8 +890,25 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
           }
           return runtime;
         });
+      // Measured with codex-cli 0.164.0: a thread stays loaded in the
+      // app-server that last ran it, `thread/unsubscribe` does not unload it,
+      // and another app-server's resume is refused ("already has an active
+      // writer") until that process ends. A thread whose posture changed
+      // between turns last ran under another lease of this root and mode, idle
+      // for up to its delay, so the idle ones close now. One a connection still
+      // holds keeps running and the resume reports the conflict.
+      const closeIdleOtherPostures = (executionPolicy: ProviderExecutionPolicy) =>
+        Effect.promise(() =>
+          Promise.all(
+            ProviderExecutionPolicy.literals
+              .filter((other) => other !== executionPolicy)
+              .map((other) =>
+                options.runtimeRegistry.closeIdleLease(options.instanceId, leaseKey(other)),
+              ),
+          ),
+        ).pipe(Effect.asVoid);
       return Effect.gen(function* () {
-        return yield* makeConnection(options, leaseFor, projectRoot, mode, {
+        return yield* makeConnection(options, leaseFor, closeIdleOtherPostures, projectRoot, mode, {
           instanceId: options.instanceId,
           clock,
           makeCorrelation,
@@ -1180,6 +1199,7 @@ function makeConnection(
   leaseFor: (
     executionPolicy: ProviderExecutionPolicy,
   ) => Effect.Effect<CodexLeasedRuntime, ProviderFailure, Scope.Scope>,
+  closeIdleOtherPostures: (executionPolicy: ProviderExecutionPolicy) => Effect.Effect<void>,
   projectRoot: string,
   mode: ProviderAcquireInput["mode"],
   factories: ConnectionFactories,
@@ -1701,11 +1721,21 @@ function makeConnection(
               resumeRequest().pipe(
                 Effect.catchAll((error) =>
                   isActiveWriterConflict(error) && attempt < CODEX_RESUME_WRITER_CONFLICT_ATTEMPTS
-                    ? Effect.tryPromise({
-                        try: () =>
-                          (options.sleep ?? defaultSleep)(CODEX_RESUME_WRITER_CONFLICT_DELAY_MS),
-                        catch: providerFailure,
-                      }).pipe(Effect.flatMap(() => resumeWithWriterRetry(attempt + 1)))
+                    ? (attempt === 1
+                        ? closeIdleOtherPostures(input.executionPolicy)
+                        : Effect.void
+                      ).pipe(
+                        Effect.zipRight(
+                          Effect.tryPromise({
+                            try: () =>
+                              (options.sleep ?? defaultSleep)(
+                                CODEX_RESUME_WRITER_CONFLICT_DELAY_MS,
+                              ),
+                            catch: providerFailure,
+                          }),
+                        ),
+                        Effect.flatMap(() => resumeWithWriterRetry(attempt + 1)),
+                      )
                     : Effect.fail(error),
                 ),
               );
