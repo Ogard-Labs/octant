@@ -93,17 +93,15 @@ describe("createSupportBundleSaver", () => {
       dialog: {
         showSaveDialog: vi.fn().mockResolvedValue({ canceled: false, filePath: "/ro/x.zip" }),
       },
-      fetch: vi
-        .fn()
-        .mockResolvedValue(
-          Response.json(
-            {
-              kind: "failed",
-              message: "Octant could not write the support bundle there. Nothing was saved.",
-            },
-            { status: 422 },
-          ),
+      fetch: vi.fn().mockResolvedValue(
+        Response.json(
+          {
+            kind: "failed",
+            message: "Octant could not write the support bundle there. Nothing was saved.",
+          },
+          { status: 422 },
         ),
+      ),
     });
     await expect(save({ sender: {} })).rejects.toThrow("Nothing was saved");
   });
