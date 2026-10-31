@@ -1,4 +1,4 @@
-import { createCipheriv, createHash } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,7 +28,7 @@ function home(): string {
   return root;
 }
 
-function encrypt(value: string, host: string, withHostHash: boolean): Buffer {
+function encrypt(value: string | Buffer, host: string, withHostHash: boolean): Buffer {
   const cipher = createCipheriv(
     "aes-128-cbc",
     deriveChromiumCookieKey(PASSWORD),
@@ -44,7 +44,7 @@ function encrypt(value: string, host: string, withHostHash: boolean): Buffer {
 interface FixtureCookie {
   readonly host: string;
   readonly name: string;
-  readonly value: string;
+  readonly value: string | Buffer;
   readonly encrypt?: boolean;
   readonly expiresAtSeconds?: number;
   readonly path?: string;
@@ -82,7 +82,7 @@ function chromeProfile(
       cookie.host,
       cookie.partitionKey ?? "",
       cookie.name,
-      cookie.encrypt === false ? cookie.value : "",
+      cookie.encrypt === false ? String(cookie.value) : "",
       cookie.encrypt === false
         ? Buffer.alloc(0)
         : encrypt(cookie.value, cookie.host, version >= 24),
@@ -156,16 +156,72 @@ describe("Chromium cookie reading", () => {
   it("decrypts a value with the key the Keychain password gives, host hash included", () => {
     const key = deriveChromiumCookieKey(PASSWORD);
 
-    expect(decryptChromiumCookieValue(encrypt("abc", "x.com", true), key, true)).toBe("abc");
-    expect(decryptChromiumCookieValue(encrypt("abc", "x.com", false), key, false)).toBe("abc");
+    expect(decryptChromiumCookieValue(encrypt("abc", "x.com", true), key, "x.com")).toBe("abc");
+    expect(decryptChromiumCookieValue(encrypt("abc", "x.com", false), key, undefined)).toBe("abc");
     expect(
       decryptChromiumCookieValue(
         encrypt("abc", "x.com", true),
         deriveChromiumCookieKey("other"),
-        true,
+        "x.com",
       ),
     ).toBeUndefined();
-    expect(decryptChromiumCookieValue(Buffer.from("v11nothing"), key, true)).toBeUndefined();
+    expect(decryptChromiumCookieValue(Buffer.from("v11nothing"), key, "x.com")).toBeUndefined();
+  });
+
+  it("rejects a value whose host hash is not the hash of the row's own host", () => {
+    const key = deriveChromiumCookieKey(PASSWORD);
+
+    // Right key, but the value was sealed for another host: it is not this row's.
+    expect(
+      decryptChromiumCookieValue(encrypt("abc", "other.example", true), key, "x.com"),
+    ).toBeUndefined();
+  });
+
+  it("rejects a wrong key that still passes the padding check", () => {
+    const sealed = encrypt(SENTINEL, "x.com", true);
+    const decipherPasses = (password: string) => {
+      try {
+        const decipher = createDecipheriv(
+          "aes-128-cbc",
+          deriveChromiumCookieKey(password),
+          Buffer.alloc(16, 0x20),
+        );
+        decipher.update(sealed.subarray(3));
+        decipher.final();
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    // About one wrong key in 256 yields valid padding; find one, deterministically.
+    let wrong: string | undefined;
+    for (let attempt = 0; attempt < 20_000 && wrong === undefined; attempt += 1) {
+      if (decipherPasses(`wrong-${String(attempt)}`)) wrong = `wrong-${String(attempt)}`;
+    }
+    if (wrong === undefined) throw new Error("no padding-valid wrong key found");
+
+    expect(
+      decryptChromiumCookieValue(sealed, deriveChromiumCookieKey(wrong), "x.com"),
+    ).toBeUndefined();
+  });
+
+  it("rejects a value that is not valid UTF-8 instead of repairing it", () => {
+    const key = deriveChromiumCookieKey(PASSWORD);
+
+    expect(
+      decryptChromiumCookieValue(
+        encrypt(Buffer.from([0x61, 0xff, 0xfe, 0x62]), "x.com", true),
+        key,
+        "x.com",
+      ),
+    ).toBeUndefined();
+    expect(
+      decryptChromiumCookieValue(
+        encrypt(Buffer.from([0x61, 0xff, 0x62]), "x.com", false),
+        key,
+        undefined,
+      ),
+    ).toBeUndefined();
   });
 
   it("asks the Keychain once, reads every cookie, and leaves nothing behind in the work folder", async () => {
@@ -314,10 +370,11 @@ describe("Chromium cookie reading", () => {
     });
   });
 
-  it("reports a wrong key as unreadable rather than importing garbage", async () => {
+  it("fails the whole import closed when no value checks out against the key", async () => {
     const root = home();
     chromeProfile(root, [
-      { host: ".example.com", name: "sid", value: "v", expiresAtSeconds: future },
+      { host: ".example.com", name: "a", value: "1", expiresAtSeconds: future },
+      { host: ".example.com", name: "b", value: "2", expiresAtSeconds: future },
     ]);
 
     const result = await reader(root, keychain({ status: "ok", password: "not the key" })).read(
@@ -325,7 +382,30 @@ describe("Chromium cookie reading", () => {
       "Default",
     );
 
-    expect(result).toMatchObject({ status: "read", cookies: [], skipped: 1 });
+    expect(result).toEqual({ status: "refused", reason: "source-unreadable" });
+  });
+
+  it("skips a corrupted row and keeps the rows that check out", async () => {
+    const root = home();
+    chromeProfile(root, [
+      { host: ".example.com", name: "good", value: "1", expiresAtSeconds: future },
+      {
+        host: ".example.com",
+        name: "garbled",
+        value: Buffer.from([0x61, 0xff, 0xfe]),
+        expiresAtSeconds: future,
+      },
+    ]);
+
+    const result = await reader(root, keychain({ status: "ok", password: PASSWORD })).read(
+      "chrome",
+      "Default",
+    );
+
+    expect(result).toMatchObject({ status: "read", skipped: 1 });
+    if (result.status === "read") {
+      expect(result.cookies.map((cookie) => cookie.name)).toEqual(["good"]);
+    }
   });
 
   it("refuses a browser or profile the listing does not offer, and a path trick", async () => {

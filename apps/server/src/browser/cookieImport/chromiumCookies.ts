@@ -1,4 +1,4 @@
-import { createDecipheriv, pbkdf2Sync } from "node:crypto";
+import { createDecipheriv, createHash, pbkdf2Sync, timingSafeEqual } from "node:crypto";
 import type { ImportedCookie } from "@octant/contracts";
 import { openReadOnlySqlite } from "../../persistence/sqlitePort";
 import { importedCookieFrom, MAX_IMPORTED_COOKIES } from "./importedCookie";
@@ -20,11 +20,20 @@ export function deriveChromiumCookieKey(safeStoragePassword: string): Buffer {
   return pbkdf2Sync(safeStoragePassword, KEY_SALT, KEY_ITERATIONS, KEY_LENGTH, "sha1");
 }
 
-/** The plain value of one cookie, or undefined when it cannot be decrypted. */
+/**
+ * The plain value of one cookie, or undefined when it cannot be trusted.
+ *
+ * AES-CBC alone cannot tell a wrong key from a right one: about one wrong key in
+ * 256 still yields valid padding and garbage plaintext. So a value is accepted
+ * only when it proves itself. In a database that prefixes values with the hash
+ * of their host (`hostKey` given), the 32-byte prefix must equal SHA-256 of this
+ * row's own `host_key`; in every database the rest must be valid UTF-8, which is
+ * rejected rather than repaired with replacement characters.
+ */
 export function decryptChromiumCookieValue(
   encrypted: Uint8Array,
   key: Buffer,
-  hasHostHash: boolean,
+  hostKey: string | undefined,
 ): string | undefined {
   const bytes = Buffer.from(encrypted);
   if (bytes.subarray(0, ENCRYPTION_PREFIX.length).toString("latin1") !== ENCRYPTION_PREFIX) {
@@ -36,10 +45,19 @@ export function decryptChromiumCookieValue(
       decipher.update(bytes.subarray(ENCRYPTION_PREFIX.length)),
       decipher.final(),
     ]);
-    if (!hasHostHash) return decrypted.toString("utf8");
-    return decrypted.length < HOST_HASH_BYTES
-      ? undefined
-      : decrypted.subarray(HOST_HASH_BYTES).toString("utf8");
+    if (hostKey === undefined) return decodeStrictUtf8(decrypted);
+    if (decrypted.length < HOST_HASH_BYTES) return undefined;
+    const expected = createHash("sha256").update(hostKey).digest();
+    if (!timingSafeEqual(decrypted.subarray(0, HOST_HASH_BYTES), expected)) return undefined;
+    return decodeStrictUtf8(decrypted.subarray(HOST_HASH_BYTES));
+  } catch {
+    return undefined;
+  }
+}
+
+function decodeStrictUtf8(bytes: Uint8Array): string | undefined {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
     return undefined;
   }
@@ -108,12 +126,14 @@ export function readChromiumCookies(input: {
       return { status: "needs-key", encrypted: needsKey };
     const cookies: ImportedCookie[] = [];
     let skipped = 0;
+    let verified = 0;
     for (const row of rows) {
       const value = valueOf(row, input.key, version >= HOST_HASH_VERSION);
       if (value === undefined) {
         skipped += 1;
         continue;
       }
+      if (encryptedLength(row) > 0) verified += 1;
       const imported = importedCookieFrom(
         {
           host: String(row.host_key),
@@ -137,6 +157,10 @@ export function readChromiumCookies(input: {
       if (imported === undefined || isPartitioned) skipped += 1;
       else cookies.push(imported);
     }
+    // If not one encrypted value proved itself against its host, the key is stale
+    // or wrong: importing nothing is right, and importing whatever survived by
+    // chance is not.
+    if (needsKey > 0 && verified === 0) return { status: "unreadable" };
     return { status: "read", cookies, skipped };
   } catch {
     return { status: "unreadable" };
@@ -153,7 +177,9 @@ function encryptedLength(row: ChromiumCookieRow): number {
 function valueOf(row: ChromiumCookieRow, key: Buffer | undefined, hasHostHash: boolean) {
   const blob = row.encrypted_value;
   if (blob instanceof Uint8Array && blob.byteLength > 0) {
-    return key === undefined ? undefined : decryptChromiumCookieValue(blob, key, hasHostHash);
+    return key === undefined
+      ? undefined
+      : decryptChromiumCookieValue(blob, key, hasHostHash ? String(row.host_key) : undefined);
   }
   return typeof row.value === "string" ? row.value : undefined;
 }

@@ -146,7 +146,12 @@ into one Project or Personal profile, so they do not sign in again.
   import reports "macOS did not allow Octant to read the browser's cookie key"
   and imports nothing. A database with nothing encrypted needs no prompt, and
   Firefox stores values in the clear. The key is held in memory for the one read
-  and dropped.
+  and dropped. A decrypted value is accepted only when it proves itself: where the
+  database prefixes values with the SHA-256 of their host, the prefix must match
+  the row's own host key, and the value must be valid UTF-8, which is rejected
+  rather than repaired. A row that fails is left behind and counted; if no
+  encrypted row checks out, the key is wrong or stale and the import fails with
+  nothing imported.
 - **How it reads.** The host copies the browser's cookie database (and its
   write-ahead files) into a fresh owner-only temporary folder, reads the copy
   read-only, and deletes the folder, so the browser may be running and its own
