@@ -48,3 +48,46 @@ export const ExtensionPublisherKeyFingerprint = Schema.String.pipe(
   Schema.brand("ExtensionPublisherKeyFingerprint"),
 );
 export type ExtensionPublisherKeyFingerprint = typeof ExtensionPublisherKeyFingerprint.Type;
+
+const strict = { parseOptions: { onExcessProperty: "error" as const } };
+
+/**
+ * A package name as npm accepts it for a new package: an optional lowercase
+ * `@scope/` and one name segment, 214 characters at most.
+ */
+export const ExtensionNpmPackageName = Schema.String.pipe(
+  Schema.maxLength(214),
+  Schema.pattern(/^(?:@[a-z0-9~][a-z0-9._~-]*\/)?[a-z0-9~][a-z0-9._~-]*$/),
+);
+export type ExtensionNpmPackageName = typeof ExtensionNpmPackageName.Type;
+
+/**
+ * Where an npm package's bytes came from, as the host fetched and checked
+ * them: the package, the exact version, the registry that served it, and the
+ * integrity the registry published for the tarball, which the host recomputed
+ * over the bytes it downloaded. Only the host sets it.
+ */
+export const ExtensionNpmSource = Schema.Struct({
+  packageName: ExtensionNpmPackageName,
+  version: ExtensionPackageVersion,
+  registry: Schema.NonEmptyTrimmedString.pipe(
+    Schema.maxLength(2048),
+    Schema.filter((value) => {
+      try {
+        const parsed = new URL(value);
+        return (
+          (parsed.protocol === "https:" || parsed.protocol === "http:") &&
+          parsed.username.length === 0 &&
+          parsed.password.length === 0
+        );
+      } catch {
+        return false;
+      }
+    }),
+  ),
+  integrity: Schema.String.pipe(
+    Schema.maxLength(200),
+    Schema.pattern(/^sha(?:256|384|512)-[A-Za-z0-9+/]+={0,2}$/),
+  ),
+}).annotations(strict);
+export type ExtensionNpmSource = typeof ExtensionNpmSource.Type;

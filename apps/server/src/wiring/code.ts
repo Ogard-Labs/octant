@@ -499,6 +499,7 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "githubIssueContextService"
     | "linearIssueContextService"
     | "onGithubPullRequestsUnreadable"
+    | "terminalSessionImports"
   > &
   Pick<
     WorkspaceWiring,
@@ -536,6 +537,7 @@ export function wireCode(deps: CodeDependencies) {
     linearIssueContextService,
     liveTurns,
     machineChangeFeed,
+    terminalSessionImports,
     managedCodeThreadCreation,
     managedWorktreeReceipts,
     managedWorktreeRefsList,
@@ -764,6 +766,7 @@ export function wireCode(deps: CodeDependencies) {
           isProviderModelAllowed: isCodeProviderModelAllowed,
           issueContext: githubIssueContextService,
           linearIssueContext: linearIssueContextService,
+          terminalSessions: terminalSessionImports,
           // Resolved lazily: the pull-request service is constructed after this
           // one, and a navigation read is the first thing that needs it.
           pullRequests: {

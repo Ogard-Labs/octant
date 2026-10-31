@@ -564,6 +564,7 @@ export function createExtensionRouteHandler(options: {
       url.pathname !== "/api/extensions/catalog" &&
       url.pathname !== "/api/extensions/state" &&
       url.pathname !== "/api/extensions/lifecycle" &&
+      url.pathname !== "/api/extensions/npm" &&
       url.pathname !== "/api/extensions/skills"
     ) {
       return undefined;
@@ -587,6 +588,7 @@ export function createExtensionRouteHandler(options: {
       (url.pathname === "/api/extensions/catalog" && command.kind !== "search-catalog") ||
       (url.pathname === "/api/extensions/state" && command.kind !== "query-effective-state") ||
       (url.pathname === "/api/extensions/lifecycle" && !isLifecycleCommand(command)) ||
+      (url.pathname === "/api/extensions/npm" && !isNpmCommand(command)) ||
       (url.pathname === "/api/extensions/skills" && !isSkillCommand(command))
     ) {
       return response(
@@ -604,6 +606,18 @@ export function createExtensionRouteHandler(options: {
       if (url.pathname === "/api/extensions/lifecycle") {
         return response(
           failure("unauthorized", "Changing a package requires the Octant window on this host."),
+          401,
+          origin,
+        );
+      }
+      // A lookup may fetch a provider driver, and what it fetches is
+      // remembered for install, so it stays with a local window like the rest.
+      if (url.pathname === "/api/extensions/npm") {
+        return response(
+          failure(
+            "unauthorized",
+            "Looking up an npm package requires the Octant window on this host.",
+          ),
           401,
           origin,
         );
@@ -652,6 +666,10 @@ function isLifecycleCommand(command: ExtensionCommand): boolean {
     command.kind === "remove-skill" ||
     command.kind === "reconcile-skills"
   );
+}
+
+function isNpmCommand(command: ExtensionCommand): boolean {
+  return command.kind === "resolve-npm-package" || command.kind === "check-npm-update";
 }
 
 function isSkillCommand(command: ExtensionCommand): boolean {

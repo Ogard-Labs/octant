@@ -40,6 +40,7 @@ import { ScaffoldDirectoryName, ScaffoldId, ScaffoldRun, ScaffoldRunId } from ".
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { UsageCost } from "./context";
 import { ProjectId } from "./projects";
+import { ShieldDecision } from "./shield";
 import { MAX_THREAD_TASKS_PER_TURN } from "./threadTasks";
 import { TerminalBrowserGrantOutcome } from "./terminalBrowserGrants";
 import {
@@ -1338,6 +1339,17 @@ const ApprovalEvent = Schema.Struct({
    */
   localPersonOnly: Schema.optional(Schema.Literal(true)),
 }).annotations({ ...strict, ...personDecides });
+/**
+ * Octant Shield answered one approval prompt: what the call was and its
+ * decision. An allow or deny settles the call without asking anyone; an ask is
+ * followed by the ordinary `approval-requested` for the person. Journaled as
+ * Shield's, never as the provider's or the person's.
+ */
+const ApprovalReviewedEvent = Schema.Struct({
+  kind: Schema.Literal("approval-reviewed"),
+  summary: CodeApprovalSummaryText,
+  decision: ShieldDecision,
+}).annotations(strict);
 const QuestionEvent = Schema.Struct({
   kind: Schema.Literal("input-requested"),
   requestId: ProviderRequestId,
@@ -1652,6 +1664,7 @@ export const CodeOperationEvent = Schema.Union(
   TerminalStateChangedEvent,
   ToolEvent,
   ApprovalEvent,
+  ApprovalReviewedEvent,
   QuestionEvent,
   FileChangeEvent,
   DiffEvent,
@@ -1716,6 +1729,12 @@ export const CodeConversationStep = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("reasoning"),
     content: CodeEvidenceReference,
+  }).annotations(strict),
+  /** An approval Octant Shield answered, shown in the turn beside its tool rows. */
+  Schema.Struct({
+    kind: Schema.Literal("review"),
+    summary: CodeApprovalSummaryText,
+    decision: ShieldDecision,
   }).annotations(strict),
 );
 export type CodeConversationStep = typeof CodeConversationStep.Type;

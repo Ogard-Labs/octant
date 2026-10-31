@@ -1,3 +1,4 @@
+import type { ShieldDecision } from "@octant/contracts/shield";
 import type { HarnessRetryNotice, ThreadPublishedPage, ThreadToolStep } from "@octant/contracts";
 
 /**
@@ -27,6 +28,14 @@ export type TurnActivityRow =
       readonly id: string;
       readonly state: "pending" | "running" | "waiting" | "completed" | "failed";
       readonly summary: string;
+    }
+  | {
+      /** An approval Octant Shield answered, in its own name. */
+      readonly kind: "review";
+      readonly id: string;
+      /** The call it answered, as the approval named it. */
+      readonly summary: string;
+      readonly decision: ShieldDecision;
     };
 
 export interface TurnActivity {
@@ -77,9 +86,11 @@ export function toolStepsActivity(
 /** How many rows are still open. */
 export function activeRowCount(activity: TurnActivity): number {
   return activity.rows.filter((row) =>
-    row.kind === "tool"
-      ? row.state === "started" || row.state === "running"
-      : row.state === "pending" || row.state === "running" || row.state === "waiting",
+    row.kind === "review"
+      ? false
+      : row.kind === "tool"
+        ? row.state === "started" || row.state === "running"
+        : row.state === "pending" || row.state === "running" || row.state === "waiting",
   ).length;
 }
 
@@ -90,9 +101,11 @@ export function activeRowCount(activity: TurnActivity): number {
  */
 export function alwaysVisibleActivityRows(activity: TurnActivity): ReadonlyArray<TurnActivityRow> {
   return activity.rows.filter((row) =>
-    row.kind === "tool"
-      ? row.state === "started" || row.state === "running"
-      : row.state === "pending" || row.state === "running" || row.state === "waiting",
+    row.kind === "review"
+      ? false
+      : row.kind === "tool"
+        ? row.state === "started" || row.state === "running"
+        : row.state === "pending" || row.state === "running" || row.state === "waiting",
   );
 }
 

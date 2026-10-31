@@ -25,4 +25,6 @@ export declare function publisherKeyFingerprint(rawPublicKey: Uint8Array): strin
 export declare function signOutsideDriverPackage(input: {
   readonly root: string;
   readonly privateKeyPem: string | Uint8Array;
+  /** The name the signature carries; defaults to the driver document's slug. For npm, the npm package name. */
+  readonly name?: string;
 }): Promise<{ readonly fingerprint: string; readonly path: string }>;

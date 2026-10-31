@@ -499,7 +499,9 @@ protected `mobile-testflight` environment and uploads only when its `submit`
 input is set; pull requests get no release credential. GitHub holds only the
 revocable Expo token; Apple certificates, profiles, and the App Store Connect
 key stay in EAS's credential service. The App ID enables no optional Apple
-capability (push, associated domains, Sign in with Apple, iCloud), testers are
+capability (push, associated domains, Sign in with Apple, iCloud) until the
+maintainer builds with phone push on (`OCTANT_MOBILE_PUSH=1`, which adds push
+and Keychain sharing for the notification service extension), testers are
 maintainer-controlled App Store Connect users, and external groups, public
 links, and store listing stay closed until
 [public store distribution](design/mobile-maturity.md#phase-e-public-store-distribution),
@@ -998,6 +1000,47 @@ gate their domains: with one off, the composer offers only the other kind.
 | **Chat** | A virtual, memory-scoped Project, or no Project at all                                                                              | No filesystem or shell authority. Optional safe research tools; scratch space is isolated per thread.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | **Work** | Exactly one OS-confined project root                                                                                                | The shared capability set at the thread's [guardrail level](#security-and-authority): file reads and writes, shell, Git, local command-line tools, SSH to the person's own machines, provider-native tools, and subagents, as in Code. Focus: documents and artifacts with document adapters (docx, pptx, pdf, image), research with citations, local tasks, and the server-authoritative board; Done by a person. Developer surfaces stay hidden until the person turns them on for the Project (below). Today's build is narrower: confined reads and approval-gated writes (or auto-accept-edits), no shell or Git, never Full access; the shared level is allowed; not built yet.                                                               |
 | **Code** | Exactly one directory, ideally a repository root; Code threads select a checkout (current checkout or a managed worktree) inside it | The same shared capability set at the thread's guardrail level, which starts in the mode the person picked at first run (Auto pre-selected; Ask first where the provider has no Auto) or later set for the Project or in Settings › Code › Access; any thread switches mode from its composer. Plan mode is always read-only. Focus: Git, terminals, tests, pull requests, review, and managed subagents inside the bound root, with checkouts, managed worktrees, and the objective delivery target. Creating a Code Project may explicitly initialize Git in that folder so a Code thread can prepare a checkout immediately; if that initialization fails, creation is refused and no Project is journaled. Binding without Git remains allowed. |
+
+A No-project Chat thread can be filed into a Chat Project from its thread menu
+(**Move to Project…**), picking one or creating it there. The move is the
+server's `move-chat-thread` command: it keeps the thread's kind, history, and
+settings, accepts only an active Chat Project, and adds no filesystem, shell, or
+network authority; the Project's memory applies from the thread's next message.
+A Chat already in a Project offers no move. A tool-extension selection resolved
+while the thread had no Project no longer matches its new scope and is refused
+until it is selected again.
+
+A Work or Code thread can be filed into another Project of its own mode from its
+row menu (**Move to Project…**). The server's `move-work-thread` and
+`move-code-thread` commands keep the thread's kind, history, and guardrail
+level, and add no filesystem reach: the pure `decideThreadMove` policy admits
+only an active Project of the same mode whose bound folder is the thread's
+folder or contains it, and refuses an archived thread, a running turn, a thread
+waiting on the person, the thread's own Project, and any other folder, each with
+a plain reason. A person makes the move; a routine acting as the host is
+refused. A Work thread takes the destination's binding revision and its working
+directory is rewritten to name the same place under the new root, so a
+containing folder changes the confinement root but not where the thread works.
+A Code thread also needs its checkout to stay valid: the destination's checkout
+must be the same repository at the same folder, so a Project that merely
+contains the thread's folder is refused. A checkout of the Project's folder is
+re-derived under the destination and journaled before the thread; a managed
+worktree keeps its own identity. A session grant of Full access is discarded on
+the move. The destination's provider policy still applies to the thread's
+provider and model. Each move is one journaled thread update by the local
+person with its time, and replays like any other thread update.
+
+Stop asks the runtime to end a turn. When the runtime does not end it, a
+provider whose sessions each own a process (reported as the `forceStop`
+capability, Claude today) lets the person **Force stop** the turn ten seconds
+after pressing Stop in Chat. The server's `force-stop-chat-turn` command kills
+that attempt's own runtime process tree and nothing else, journals the attempt
+`cancelled`, and leaves the thread usable and its session resumable. A runtime
+that serves several threads from one process (Codex, OpenCode) reports
+`forceStop` unsupported: the command is refused, the UI never offers it, and
+Stop settles the attempt at once as before. For a provider that supports it, a
+Stop keeps the attempt running until the runtime really ends it, so a Stop that
+did not take stays visible. Work and Code do not offer Force stop yet.
 
 **One authority model, two focuses** (maintainer decision, 2026-10-31: "Work
 and Code should essentially be able to do the same, but Work is more for
@@ -3407,7 +3450,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   other than `builtin:provider-driver/<kind>`, and any source other than
   `bundled`. That schema stays closed: an outside driver has its own public
   `OutsideProviderDriverEntry` schema in `@octant/plugin-api`, read from a
-  local folder, installed held, and admitted at its digest when its source is
+  local folder or a signed npm package, installed held, and admitted at its digest when its source is
   trusted; the catalog lists effective outside drivers in their own group from
   the registry snapshot. Third-party provider-driver plugins are an authorized
   post-preview track under [Outside provider drivers](design/outside-provider-drivers.md). The catalog repeats installed and trusted from the activation context
@@ -6683,6 +6726,41 @@ Project, thread, and provider policy allow it. Any other state — `not-installe
 `host-prohibited`, `stale-catalog-epoch`, `broken`, `draining` — contributes no
 prompt, schema, tool, route, model, or capability.
 
+**npm packages.** A person may type an npm package name, with an optional
+version, range, or dist-tag, in Marketplace or as
+`octant plugin install npm:<package>[@<version>]`. The host looks the package
+up on the registry the person's own npm settings name: `npm_config_registry`,
+then the user `.npmrc`'s scoped `@scope:registry`, then its `registry`, then
+the public registry. Only those addresses are read; no token or other setting
+is read or sent, so a registry that needs a login answers as refused. A
+registry written with an environment variable, one with credentials in the
+address, and plain `http` to anything but this computer are refused rather
+than guessed at, so a private name is never sent to the public registry. The
+host picks one published version, downloads the one tarball the registry's
+metadata names (it must be on the registry's own origin), and requires the
+registry to have published a SHA-256, SHA-384, or SHA-512 integrity for it;
+the downloaded bytes must hash to that integrity or nothing is kept. It
+reads the archive in memory (no links, special files, or unsafe paths) and
+runs nothing from it: no `npm`, no lifecycle script, no dependency install.
+The files in that one tarball are all that is installed. A package is read as
+an Agent Plugin (a root `plugin.json` with the canonical schema) or as a
+signed provider driver ([Outside provider drivers](design/outside-provider-drivers.md#signature-rules));
+any other package is refused as not one Octant can install. The package's
+identity is the registry and the name, not the version, so a newer version
+updates the same package and a same-named package from another registry is a
+different one. The package, exact version, registry, and verified tarball
+integrity are recorded as the package's provenance in the same journaled
+install, shown in its details, and replayed with it. The package then follows
+the ordinary ladder: installed, untrusted, quarantined, switched off.
+"Check for update" asks the recorded registry for its `latest` tag and
+installs nothing; a newer version is looked up, reviewed, and confirmed like
+any install. Every failure is a plain sentence: not found, no matching
+version, integrity missing or mismatched, registry refused or unreachable,
+fetches turned off, an unsupported package. Looking up and checking stay with
+a local window, like the rest of package lifecycle, and obey the Marketplace
+fetches preference. The lookup sends only `Accept` and the constrained
+`User-Agent`; there is no telemetry.
+
 **Selection epoch.** A selected plugin, MCP server, or skill carries the
 catalog epoch it was resolved under, and the host re-resolves it on send, replay,
 resume, and at provider handoff. The epoch is a hash of the facts a selection
@@ -7630,8 +7708,8 @@ mechanisms are:
   Allowed; not built yet: the single
   level setting with its global and Project defaults, the first-run
   question, the header indicator, the one-time warning,
-  Reviewed in Work and on Mistral Vibe, Octant Shield, and Full access
-  without a sandbox or prompts for every runtime.
+  Reviewed in Work and on Mistral Vibe, Octant Shield outside the Octant
+  Harness, and Full access without a sandbox or prompts for every runtime.
 
 - **Reviewed.** A reviewer answers the prompts that would otherwise go to
   the person: the provider's own, where it has one, or
@@ -8580,6 +8658,7 @@ access` agree); a thread's own change is journaled as
   | `appManagedTools`        | `supported`                                                                       | `supported`                                                                    | `unsupported`; `supported` on macOS in a verified isolated config        | `unsupported`; `supported` once the probe attests the tool bridge on Pi 0.85.1 or 1.1.0 and later | `varies`: `supported` on macOS when the agent serves HTTP MCP                 | `unsupported`; `supported` for each model a person verified      | `unsupported`; `supported` for each model a person verified                       | `unsupported`; `supported` for each model the host verified      | `unsupported`                         |
   | `acpClientCapabilities`  | `absent`                                                                          | `absent`                                                                       | `absent`                                                                 | `absent`                                                                                          | `supported`                                                                   | `absent`                                                         | `absent`                                                                          | `absent`                                                         | `absent`                              |
   | `modelSwitch`            | `supported`                                                                       | `supported`                                                                    | `supported`; the resume names the thread's current model on every prompt | `absent`; same                                                                                    | `absent`; same                                                                | `absent`; Octant replays history, so the model may change        | `absent`; Octant replays history, so the model may change                         | `absent`; Octant replays history, so the model may change        | `absent`                              |
+  | `forceStop`              | `supported`                                                                       | `unsupported`; one process serves every thread                                 | `unsupported`; one process serves every thread                           | `absent`                                                                                          | `absent`                                                                      | `absent`                                                         | `absent`                                                                          | `absent`                                                         | `absent`                              |
   | `sessionCompaction.chat` | `supported`; `unavailable` when the install lacks `/compact`                      | `supported`; `unavailable` before Codex 0.162.1                                | `absent`                                                                 | `absent`                                                                                          | `absent`                                                                      | `unsupported`; Octant summarizes                                 | `unsupported`; Octant summarizes                                                  | `unsupported`; Octant summarizes                                 | `absent`                              |
   | `sessionCompaction.work` | as Chat                                                                           | as Chat                                                                        | `absent`                                                                 | `absent`                                                                                          | `absent`                                                                      | `unsupported`; Octant summarizes                                 | `unsupported`; Octant summarizes                                                  | `unsupported`; Octant summarizes                                 | `absent`                              |
   | `sessionCompaction.code` | as Chat                                                                           | as Chat                                                                        | `absent`                                                                 | `absent`                                                                                          | `absent`                                                                      | `supported`; Octant Harness compacts its own transcript          | `supported`; Octant Harness compacts its own transcript                           | `supported`; Octant Harness compacts its own transcript          | `absent`                              |
@@ -10121,7 +10200,10 @@ in this document describe the build as it ships.
 ### Octant Shield
 
 Octant Shield is Octant's own automatic approval reviewer (maintainer
-decision, 2026-10-31; designed, not built). It answers the approval prompts
+decision, 2026-10-31). Its Judge is built for the Octant Harness, its
+subagents included (build order step 1, below); the other runtimes, the picker
+and Settings, the Watcher, safe networks, and the server registry are designed,
+not built. It answers the approval prompts
 that would otherwise go to the person, for every runtime that routes
 approvals through Octant: Octant Harness, Claude Code (`canUseTool`), Codex
 (app-server approval requests), OpenCode (`permission.asked`), ACP agents
@@ -10243,7 +10325,49 @@ wall. A model reviewer is not a guarantee.
 
 **Evaluation.** The repository keeps a fixture set of known-safe and
 known-unsafe calls, and a release with Shield requires measuring its
-false-allow rate on that set.
+false-allow rate on that set. The set lives in
+`packages/domain/src/shieldEvaluationFixtures.ts`; every test run checks that
+the rule stages answer each fixture as recorded and never allow a
+known-unsafe one, and `bun run shield:eval` measures the whole pipeline,
+running the model stage only against an endpoint named in its environment.
+
+**As built.** The rule stages, the prompt the model sees, the answer it must
+give, and the brakes are pure policy in `packages/domain/src/shieldJudgePolicy.ts`;
+the host runs them in `apps/server/src/shield/`. The Judge's input type has no
+field for a tool result, a file's contents, or a fetched page, and the
+person's messages are read from the thread's own turn prompts, never from what
+the agent read, so nothing outside can reach the model. The Project's own
+test and build commands are the `test`, `build`, `typecheck`, and `lint`
+scripts of its root `package.json` under the package manager its lockfile
+names, and the standard commands of a Cargo, Swift, or Go package at the
+root; a command passes by rule only with plain arguments after it. Read-only
+Git is `status`, `diff`, `log`, `show`, `blame`, and the other subcommands
+that only read, with no shell composition and no flag that writes a file.
+The model is a tool-less one-shot session started in a scratch folder
+outside every Project, on the thread's provider account with the catalogue's
+smallest tier by name (a nano, mini, or haiku model, for example), else the
+thread's own model; it has 20 seconds. Each model call reserves a small
+bound against the thread's and Project's spend ceilings first, so a ceiling
+that refuses hands the call to the person, and what the call used is
+journaled under the reviewed thread (request shape `shield-review`, on its
+own `shield-review-usage` aggregate) before the reservation is released, so
+the usage ledger and every ceiling over the thread count it; a call that
+reported nothing is recorded as unreported spend. A fast allow reads a
+command exactly as written: any quoting, escape, expansion, glob, separator,
+redirection, or whitespace other than a space or a tab sends it to the model,
+and read-only Git refuses any option, or unambiguous prefix of one, that
+writes a file, runs a program, reads outside the repository, or switches
+repositories (`--output`, `--ext-diff`, `--textconv`, `--no-index`,
+`--exec-path`, `--git-dir`, `--work-tree`, `-O`, and the like). The brakes are kept per thread in
+the host process: a restart gives a paused thread back to Shield, which
+widens nothing because every counted decision was a refusal. A class the
+person already allowed for the session goes through on their word without
+asking Shield. On the Octant Harness an allow or deny is journaled as a
+settled harness approval carrying the decision, an ask is journaled as the
+pending approval with Shield's reason, and the Code transcript shows each
+decision as an `approval-reviewed` row beside the tool rows. A subagent asks
+under its parent's reviewer, judged against its own worktree, with its own
+taint counted beside the parent's.
 
 **Build order.** (1) Octant Harness; (2) every runtime through the approval
 path; (3) the picker and Settings; (4) the Watcher; (5) safe networks; (6)
@@ -10340,8 +10464,8 @@ in the credential broker, the value fetched at use and never kept.
 The [guardrail levels](#security-and-authority) and the
 [key providers' native features](#providers) are in scope; of them only
 Guarded, Accept edits, Reviewed for Claude Code and Codex in Code, and
-Full access in Code are built; [Octant Shield](#octant-shield) is in scope and
-designed, not built. A merge or force-push an agent starts on its own
+Full access in Code are built; [Octant Shield](#octant-shield) is in scope,
+and its Judge is built for the Octant Harness only. A merge or force-push an agent starts on its own
 initiative, and cloud scheduling, are not in scope. A self-hosted wake service
 that runs in the Octant server on a person's hub and wakes their own spokes is
 in scope under [Hub and spokes](design/hub-and-spokes.md#wake-service); an

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   decodeCodeThreadId,
@@ -15,6 +16,8 @@ import { GithubIssueContextService } from "../github/githubIssueContextService";
 import { LinearIssueContextService } from "../plugins/linear/linearIssueContextService";
 import { LINEAR_ISSUE_GET_OPERATION } from "@octant/contracts/linear-issues";
 import { GithubReadToolService } from "../github/githubReadToolService";
+import { TerminalSessionImports } from "../terminalSessions/terminalSessionImports";
+import { createTerminalSessionRouteHandler } from "../terminalSessionRoutes";
 import {
   isGithubIntegrationEffective,
   isLinearIntegrationEffective,
@@ -315,12 +318,38 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       uuid: randomUUID,
       isEffective: linearIntegrationIsEffective,
     });
+    // The person's own command-line homes, where those tools keep sessions.
+    const claudeHome = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
+    const codexHome = process.env.CODEX_HOME ?? join(homedir(), ".codex");
+    const terminalSessionImports = new TerminalSessionImports({
+      journal: persistence.journal,
+      roots: () => ({
+        claudeProjects: join(claudeHome, "projects"),
+        codexSessions: join(codexHome, "sessions"),
+        codexSessionIndex: join(codexHome, "session_index.jsonl"),
+      }),
+      clock: () => new Date().toISOString(),
+      uuid: randomUUID,
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+    const terminalSessionRoutes = createTerminalSessionRouteHandler({
+      windowAuthorityStore,
+      imports: terminalSessionImports,
+      readProject: (projectId) => persistence.readProject(projectId),
+      ...(options.allowedRendererHttpOrigin === undefined
+        ? {}
+        : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
+    });
+    // A thread starts from at most one outside source: an issue, or a
+    // terminal session. Its first admitted turn carries it.
     const peekCreateFromIssueFramed = (threadId: string) =>
       githubIssueContextService.peekFramedForFirstTurn(threadId) ??
-      linearIssueContextService.peekFramedForFirstTurn(threadId);
+      linearIssueContextService.peekFramedForFirstTurn(threadId) ??
+      terminalSessionImports.peekFramedForFirstTurn(threadId);
     const consumeCreateFromIssueFramed = (threadId: string) => {
       githubIssueContextService.consumeFramedForFirstTurn(threadId);
       linearIssueContextService.consumeFramedForFirstTurn(threadId);
+      terminalSessionImports.consumeFramedForFirstTurn(threadId);
     };
     const integrationRoutes = createIntegrationRouteHandler({
       windowAuthorityStore,
@@ -346,6 +375,8 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       onGithubPullRequestsUnreadable,
       peekCreateFromIssueFramed,
       siblingThreadsService,
+      terminalSessionImports,
+      terminalSessionRoutes,
       threadOutsideContentMarks,
       toolEgressRules,
       providerRuntimeNetwork,

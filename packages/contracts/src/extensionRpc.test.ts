@@ -6,7 +6,10 @@ import {
   decodeUserAddedMcpServerRequest,
   decodeExtensionSnapshot,
 } from "./extensionRpc";
+import { ExtensionProvenance } from "./extensions";
+import { Schema } from "effect";
 
+const decodeExtensionProvenance = Schema.decodeUnknownSync(ExtensionProvenance);
 const extensionId = "10000000-0000-4000-8000-000000000001";
 const packageId = "20000000-0000-4000-8000-000000000001";
 const digest = `sha256:${"a".repeat(64)}`;
@@ -92,6 +95,49 @@ describe("extension RPC contracts", () => {
         server: { ...server.server, headers: [{ name: "bad header", value: "x", secret: false }] },
       }),
     ).toThrow();
+  });
+
+  it("decodes an npm lookup and an update check, and refuses a field it does not know", () => {
+    const lookup = { kind: "resolve-npm-package", packageName: "@scope/demo", range: "^1.2.0" };
+    expect(decodeExtensionCommand(lookup).kind).toBe("resolve-npm-package");
+    expect(decodeExtensionCommand({ kind: "resolve-npm-package", packageName: "demo" }).kind).toBe(
+      "resolve-npm-package",
+    );
+    expect(() => decodeExtensionCommand({ ...lookup, registry: "https://example.test" })).toThrow();
+    // An update names the installed package; it never carries a registry of its own.
+    expect(decodeExtensionCommand({ ...lookup, updateOf: extensionId }).kind).toBe(
+      "resolve-npm-package",
+    );
+    expect(() => decodeExtensionCommand({ ...lookup, updateOf: "not-an-id" })).toThrow();
+    expect(decodeExtensionCommand({ kind: "check-npm-update", extensionId }).kind).toBe(
+      "check-npm-update",
+    );
+    expect(
+      decodeExtensionCommandResult({
+        kind: "npm-update-checked",
+        extensionId,
+        installedVersion: "1.0.0",
+        available: "1.1.0",
+      }).kind,
+    ).toBe("npm-update-checked");
+  });
+
+  it("records an npm source as a package, an exact version, a registry, and a SHA-2 integrity", () => {
+    const npm = {
+      packageName: "@scope/demo",
+      version: "1.2.0",
+      registry: "https://registry.example.test",
+      integrity: `sha512-${"A".repeat(86)}==`,
+    };
+    expect(decodeExtensionProvenance({ reviewed: false, npm }).npm).toEqual(npm);
+    for (const bad of [
+      { ...npm, integrity: `sha1-${"A".repeat(27)}=` },
+      { ...npm, packageName: "Not A Name" },
+      { ...npm, registry: "https://user:pw@registry.example.test" },
+      { ...npm, token: "secret" },
+    ]) {
+      expect(() => decodeExtensionProvenance({ reviewed: false, npm: bad })).toThrow();
+    }
   });
 
   it("requires versioned optimistic desired-state mutations", () => {

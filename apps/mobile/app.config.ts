@@ -61,6 +61,12 @@ const config: ExpoConfig = {
     // key that encrypts secure storage never leaves it, so a restored copy
     // is unreadable at best. Nothing is backed up.
     allowBackup: false,
+    // Push on Android needs the Firebase project's file. It is a build input
+    // (an EAS file variable), never a file in the repository, and a build
+    // made without it reports push unavailable instead of failing.
+    ...(process.env.GOOGLE_SERVICES_JSON
+      ? { googleServicesFile: process.env.GOOGLE_SERVICES_JSON }
+      : {}),
     // Expo adds the overlay permission by default and no library here needs
     // it. Location is never asked for, and without the media-location
     // permission Android removes a picked photo's location before Octant
@@ -75,6 +81,12 @@ const config: ExpoConfig = {
   },
   plugins: [
     ["expo-build-properties", { ios: { enableSceneSupport: true } }],
+    // The push entitlement, the Keychain group shared with the notification
+    // service extension, and the extension target itself. Off until the build
+    // is made with the push capability on its App ID (`OCTANT_MOBILE_PUSH=1`,
+    // an EAS variable set once the push accounts exist), so a build made
+    // before then signs as it does today.
+    ["./plugins/withOctantPush", { enabled: process.env.OCTANT_MOBILE_PUSH === "1" }],
     "expo-secure-store",
     "expo-local-authentication",
     "expo-font",

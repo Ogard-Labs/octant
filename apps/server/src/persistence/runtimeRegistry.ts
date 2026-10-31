@@ -303,6 +303,7 @@ import {
 import { registerArtifactMirrorEvents } from "../canvas/artifactMirrorEventStore";
 import { registerGoalLoopEvents } from "../goal/goalLoopEventStore";
 import { registerFollowUpSuggestionEvents } from "../followUps/threadFollowUpSuggestionStore";
+import { registerTerminalSessionEvents } from "../terminalSessions/terminalSessionImports";
 import { registerNativeHarnessEvents } from "../harness/nativeHarnessEvents";
 import { registerTurnMetricsEvents } from "../metrics/turnMetricsStore";
 import { registerSideTaskEvents } from "../sideTasks/sideTaskStore";
@@ -615,6 +616,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerNativeHarnessEvents(events);
   registerTurnMetricsEvents(events);
   registerFollowUpSuggestionEvents(events);
+  registerTerminalSessionEvents(events);
   registerSideTaskEvents(events);
   registerShipEvents(events);
   registerThreadMessageQueueEvents(events);

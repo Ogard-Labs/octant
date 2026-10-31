@@ -37,6 +37,11 @@ export interface ThreadComposerStop {
   readonly ariaLabel: string;
   readonly disabledReason?: string | undefined;
   readonly onStop: () => void;
+  /**
+   * Offered beside Stop once a Stop did not end the turn. It kills the turn's
+   * runtime process, which a normal Stop never does.
+   */
+  readonly forceStop?: { readonly onForceStop: () => void } | undefined;
 }
 
 /**
@@ -334,6 +339,17 @@ function ThreadComposerTrailing(props: {
     <div className={cellClassName}>
       {meter}
       {props.controls}
+      {sending && stop.forceStop !== undefined ? (
+        <OctantButton
+          onClick={stop.forceStop.onForceStop}
+          size="sm"
+          title="Kill this response's process. Use it when Stop did not end the response."
+          type="button"
+          variant="secondary"
+        >
+          Force stop
+        </OctantButton>
+      ) : null}
       {sending ? (
         <OctantButton
           aria-label={stop.ariaLabel}

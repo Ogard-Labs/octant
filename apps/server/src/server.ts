@@ -206,6 +206,7 @@ export function startOctantServer(
     });
     const {
       agentRunInteractions,
+      shieldHolder,
       nativeHarnessApprovals,
       nativeHarnessQuestions,
       nativeHarnessSessions,
@@ -283,6 +284,8 @@ export function startOctantServer(
       onGithubPullRequestsUnreadable,
       peekCreateFromIssueFramed,
       siblingThreadsService,
+      terminalSessionImports,
+      terminalSessionRoutes,
       threadOutsideContentMarks,
       toolEgressRules,
       providerRuntimeNetwork,
@@ -454,10 +457,15 @@ export function startOctantServer(
       researchRouter,
       sideTaskFirstMessage,
       sideTaskRoutes,
+      hostShield,
       threadWork,
     } = wireHarness({
       projectService,
       agentRunInteractions,
+      shieldHolder,
+      codeEvidence,
+      providerRuntimeRegistry,
+      spendCeiling,
       nativeHarnessApprovals,
       nativeHarnessQuestions,
       nativeHarnessSessions,
@@ -530,6 +538,7 @@ export function startOctantServer(
       githubIssueContextService,
       gitObservationPort,
       linearIssueContextService,
+      terminalSessionImports,
       liveTurns,
       machineChangeFeed,
       managedWorktreeReceipts,
@@ -702,6 +711,9 @@ export function startOctantServer(
       threadMentionService: (): ThreadMentionService => threadMentionService,
       threadOutsideContentMarks,
     });
+    // Octant Shield's decisions show on the Code transcript beside the tool
+    // rows; the runtime that owns the transcript is built after Shield.
+    hostShield.showDecisionsWith((input) => codeOperationRuntime?.recordShieldReview?.(input));
     const {
       codeCheckoutOpenRoutes,
       codeExternalEditorRoutes,
@@ -851,6 +863,7 @@ export function startOctantServer(
       goalService,
       imageJobService,
       linearIssueContextService,
+      terminalSessionImports,
       liveTurns,
       managedWorktreeReceipts,
       nativeHarnessComposition,
@@ -1100,6 +1113,7 @@ export function startOctantServer(
       localServerRoutes,
       localUsageHistoryRoutes,
       machineChangeRoutes,
+      terminalSessionRoutes,
       nativeHarnessEgressRoutes,
       nativeHarnessRoutingRoutes,
       nativeHarnessSessionRoutes,

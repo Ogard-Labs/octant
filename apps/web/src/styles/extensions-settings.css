@@ -441,6 +441,46 @@
   justify-self: start;
 }
 
+/* An installed npm package: where it came from, then a check for a newer version. */
+.extcard > .extensions-settings__npm-source {
+  grid-column: 2 / -1;
+  display: grid;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-3);
+}
+
+.extensions-settings__npm-source > button {
+  justify-self: start;
+}
+
+/* The integrity is one long unbroken string, so it breaks at any character. */
+.extensions-settings__integrity {
+  word-break: break-all;
+}
+
+/* Install from npm: the name takes the row, the version and the button follow. */
+.extensions-settings__npm-lookup {
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
+.extensions-settings__npm-fields {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--oct-space-3);
+}
+
+.extensions-settings__npm-name {
+  flex: 2 1 14rem;
+  min-width: 0;
+}
+
+.extensions-settings__npm-range {
+  flex: 1 1 8rem;
+  min-width: 0;
+}
+
 /* A failure is one sentence in the warning colour: "code: message". */
 .extensions-settings__failure {
   grid-column: 2 / -1;
