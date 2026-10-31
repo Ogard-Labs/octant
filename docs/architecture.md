@@ -1521,7 +1521,10 @@ through the provider-neutral `octant_pull_request` tool. The rules:
   operation service before `gh` runs. Plan refuses. An approval-gated or
   auto-accept-edits thread asks the person in the thread with the exact
   repository, base, head, draft state, title, and body; their answer becomes
-  a one-use approval bound to that command and the delivery target. Full
+  a one-use approval bound to that command and the delivery target. The
+  approval shows the whole title and body or none of it: text too long for the
+  approval prompt (the 2 KB summary bound) is refused rather than shown cut,
+  because an approval never covers text the person could not read. Full
   access runs it without asking.
 - **Record.** Each attempt journals the thread's operation result (number,
   URL, base, head, and draft state when known) and its runtime-work unit, so

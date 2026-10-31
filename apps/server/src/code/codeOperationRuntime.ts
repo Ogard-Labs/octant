@@ -3134,7 +3134,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     signal?: AbortSignal,
   ): Promise<
     | { readonly status: "approved"; readonly approvalId: CodeApprovalId }
-    | { readonly status: "denied" | "cancelled" | "expired" | "unavailable" }
+    | { readonly status: "denied" | "cancelled" | "expired" | "unavailable" | "too-large" }
   > {
     const store = this.#approvalStore;
     if (store === undefined) return { status: "unavailable" };
@@ -3155,8 +3155,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     if (context === undefined) return { status: "unavailable" };
     const effect: CodeOperationApprovalRequest["effect"] = { kind: "operation", command };
     const prompt = approvalPrompt(effect, thread, checkout, context.pullRequestTarget);
-    const summary = boundProviderSummary(`${prompt.message}\n${prompt.detail}`);
+    const shown = `${prompt.message}\n${prompt.detail}`;
+    const summary = boundProviderSummary(shown);
     if (summary === undefined) return { status: "unavailable" };
+    // The approval authorizes the full title and body, so the person must be
+    // able to read all of it; a prompt cut at the summary bound would have
+    // them allow text they never saw.
+    if (summary !== shown.trim()) return { status: "too-large" };
     const outcome = await this.#askToolApproval(active, summary, undefined, signal);
     if (outcome !== "approved") return { status: outcome };
     try {

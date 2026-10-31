@@ -111,7 +111,7 @@ const proposeThreadDefinition = {
 const pullRequestDefinition = {
   name: CODE_PULL_REQUEST_TOOL_NAME,
   description:
-    "Open or change the pull request for this thread's own branch, only when the person asks for it. create opens it with a title and body, as a draft when draft is true, and stacked on another open branch when base names a branch that has an open pull request of its own; without base it targets the thread's delivery base. update changes the open pull request's title, body, or draft state (draft false marks it ready for review). Push the branch first. An approval-gated thread asks the person before GitHub is touched; Plan mode refuses. This tool cannot merge, close, or change any other branch's pull request.",
+    "Open or change the pull request for this thread's own branch, only when the person asks for it. create opens it with a title and body, as a draft when draft is true, and stacked on another open branch when base names a branch that has an open pull request of its own; without base it targets the thread's delivery base. update changes the open pull request's title, body, or draft state (draft false marks it ready for review). Push the branch first. An approval-gated thread asks the person before GitHub is touched, and refuses a title and body too long to show whole in that approval (about 1.5 KB together); Plan mode refuses. This tool cannot merge, close, or change any other branch's pull request.",
   inputSchema: {
     type: "object",
     properties: {
@@ -231,7 +231,7 @@ const androidDefinition = {
 const CODE_TOOL_HELP: Readonly<Record<string, string>> = {
   ...BROWSER_TOOL_HELP,
   [CODE_PULL_REQUEST_TOOL_NAME]:
-    "Open or change the pull request for this thread's own branch, only when the person asks. create needs title and takes body, draft (true opens a draft), and base (another branch with an open pull request, to stack on it). update takes title, body, or draft (false marks the pull request ready for review, true turns it back into a draft). Push the branch before create. The result names the pull request's number, url, base, and draft state; report exactly that. Merging and closing are not available here.",
+    "Open or change the pull request for this thread's own branch, only when the person asks. create needs title and takes body, draft (true opens a draft), and base (another branch with an open pull request, to stack on it). update takes title, body, or draft (false marks the pull request ready for review, true turns it back into a draft). Push the branch before create. The result names the pull request's number, url, base, and draft state; report exactly that. An approval-gated thread shows the person the whole title and body, so keep them short enough to read there (about 1.5 KB together). Merging and closing are not available here.",
   [CODE_TERMINAL_TOOL_NAME]:
     "Use Octant's terminal for this Code task: run starts a command, write supplies input to the running terminal, read checks its output, and stop terminates it. command is required for run or write. Check commandCompleted and commandExitCode; a running terminal is not proof that its command succeeded. For document artifacts, create files within the bound checkout and report their real relative paths. Octant's Files and Document tools provide host-authorized previews; never invent an artifact URL or claim a preview opened based on a write alone. Ordinary terminal permissions still apply.",
   [CODE_APPLE_TOOL_NAME]:
@@ -387,7 +387,9 @@ export interface CodeAppManagedToolsOptions {
       signal?: AbortSignal,
     ) => Promise<
       | { readonly status: "approved"; readonly approvalId: CodeApprovalId }
-      | { readonly status: "denied" | "cancelled" | "expired" | "unavailable" }
+      | {
+          readonly status: "denied" | "cancelled" | "expired" | "unavailable" | "too-large";
+        }
     >;
   };
   readonly executeOperation: (
@@ -709,7 +711,9 @@ async function pullRequestTool(
         `pull-request-approval-${outcome.status}`,
         outcome.status === "denied"
           ? "The person declined this pull-request change. Nothing reached GitHub."
-          : undefined,
+          : outcome.status === "too-large"
+            ? "The title and body are too long to show whole in the approval, and an approval never covers text the person cannot read. Shorten them (about 1.5 KB together) and ask again. Nothing reached GitHub."
+            : undefined,
       );
     }
     // The person answered while the thread could have moved on.

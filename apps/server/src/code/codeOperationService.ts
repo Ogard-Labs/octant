@@ -3516,15 +3516,16 @@ export class CodeOperationService {
     command: Extract<CodeOperationCommand, { readonly kind: "update-pull-request" }>,
     checkoutRoot: string,
   ): Promise<CodeOperationResult> {
-    const update = this.#options.pullRequests.update;
-    if (update === undefined || (await this.#hasGitHubRemote(checkoutRoot)) === false)
+    const pullRequests = this.#options.pullRequests;
+    // Call it on the port: a class-backed port reads private state through `this`.
+    if (pullRequests.update === undefined || (await this.#hasGitHubRemote(checkoutRoot)) === false)
       return decodeCodeOperationResult({
         kind: "pull-request-state",
         operationId: command.operationId,
         state: "unavailable",
-        ...(update === undefined ? {} : { failureCode: "no-remote" }),
+        ...(pullRequests.update === undefined ? {} : { failureCode: "no-remote" }),
       });
-    const result = await update(
+    const result = await pullRequests.update(
       {
         threadId: command.threadId,
         ...(command.title === undefined ? {} : { title: command.title }),
