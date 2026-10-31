@@ -19,7 +19,10 @@ import type { CodeThread } from "@octant/contracts/code";
 import type { ZenSourceContext } from "@octant/contracts/zen";
 import type { resolveAppBackground } from "@octant/domain/theme-policy";
 import { resolveZenLiveThreadCard, type ZenLiveThreadClients } from "../zen/ZenLiveThreadCards";
-import { resolveZenTerminalPinTarget } from "../zen/zenThreadActions";
+import {
+  resolveZenProjectTerminalTarget,
+  resolveZenTerminalPinTarget,
+} from "../zen/zenThreadActions";
 import { ZenRoot } from "../zen/ZenRoot";
 import type { useZenController } from "../zen/useZenController";
 import type { ShellActions } from "./shellActions";
@@ -93,29 +96,10 @@ export const ZenContainer = memo(function ZenContainer(props: ZenContainerProps)
     [codeThreads],
   );
 
-  // The window's Code Project, or else its Work Project once the person turned
-  // on that Project's Developer tools, which is what shows a Work terminal.
-  const zenProjectTerminalTarget = useMemo(() => {
-    const codeProjectId = workspace.contextByMode.code.projectId ?? undefined;
-    const workProjectId = workspace.contextByMode.work.projectId ?? undefined;
-    const project =
-      allProjects.find(
-        (candidate) =>
-          codeProjectId !== undefined &&
-          String(candidate.id) === String(codeProjectId) &&
-          candidate.type === "code" &&
-          candidate.lifecycle === "active",
-      ) ??
-      allProjects.find(
-        (candidate) =>
-          workProjectId !== undefined &&
-          String(candidate.id) === String(workProjectId) &&
-          candidate.type === "work" &&
-          candidate.developerTools?.enabled === true &&
-          candidate.lifecycle === "active",
-      );
-    return project === undefined ? undefined : { projectId: project.id, name: project.name };
-  }, [allProjects, workspace]);
+  const zenProjectTerminalTarget = useMemo(
+    () => resolveZenProjectTerminalTarget(workspace, allProjects),
+    [allProjects, workspace],
+  );
 
   return (
     <ZenRoot

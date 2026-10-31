@@ -39,6 +39,50 @@ function disclosure(name: string): HTMLDetailsElement {
   return details;
 }
 
+describe("Octant Shield decisions among the tool rows", () => {
+  const review = (verdict: "allow" | "ask" | "deny") => ({
+    kind: "review" as const,
+    id: `review-${verdict}`,
+    summary: "bash: git push origin HEAD",
+    decision: {
+      reviewer: "octant-shield" as const,
+      verdict,
+      stage: verdict === "allow" ? ("fast-allow" as const) : ("model" as const),
+      ...(verdict === "allow" ? { rule: "read-only-git" } : {}),
+      reason: `Shield's reason to ${verdict}.`,
+      ...(verdict === "allow"
+        ? {}
+        : { model: { providerInstanceId: "p" as never, modelId: "small-model" as never } }),
+      latencyMs: 42,
+      decidedAt: "2026-10-31T00:00:00.000Z" as never,
+    },
+  });
+
+  it("names Shield, the verdict, the call, the reason, and who decided", () => {
+    render(
+      <TurnActivityRows
+        activity={{ reasoning: "", rows: [review("allow"), review("deny"), review("ask")] }}
+        running
+      />,
+    );
+    const notes = screen.getAllByRole("note");
+    expect(notes.map((note) => note.getAttribute("data-verdict"))).toEqual([
+      "allow",
+      "deny",
+      "ask",
+    ]);
+    expect(notes[0]).toHaveTextContent("Octant Shield allowed");
+    expect(notes[0]).toHaveTextContent("read-only-git · 42 ms");
+    expect(notes[1]).toHaveTextContent("Octant Shield denied");
+    expect(notes[1]).toHaveTextContent("small-model · 42 ms");
+    expect(notes[2]).toHaveAccessibleName(
+      "Octant Shield asked you: bash: git push origin HEAD. Shield's reason to ask.",
+    );
+    // Shield's decisions are not counted as tool calls or folded as running work.
+    expect(screen.queryByRole("button", { name: /bash/ })).toBeNull();
+  });
+});
+
 describe("TurnActivityRows", () => {
   it("reveals reasoning-only history with one disclosure instead of nested Thinking rows", async () => {
     render(

@@ -4,7 +4,10 @@ import {
   decodeHostControlStatus,
   decodeHostLifecycleOutcome,
   decodeHostRestoreOutcome,
+  decodeSetHostMemoryLimitsOutcome,
+  type SetHostMemoryLimitsRequest,
 } from "@octant/contracts/host-control";
+import { decideHostMemoryLimits, type PrincipalKind } from "@octant/domain";
 import { decodeHostDataMap } from "@octant/contracts/host-data-map";
 import { desktopCredentialStore } from "./hostDataMap";
 import type { HostRuntimeDiagnostics } from "@octant/host-runtime";
@@ -103,6 +106,8 @@ describe("host control routes", () => {
     const memory = {
       pressure: "elevated" as const,
       processMegabytes: 2300,
+      limits: { kind: "automatic" as const },
+      effectiveLimits: { pressuredMegabytes: 2048, criticalMegabytes: 4096 },
       previousStop: {
         lastSeenAt: "2026-08-11T11:00:00.000Z",
         pressure: "critical" as const,
@@ -496,6 +501,104 @@ describe("host control routes", () => {
       makeRequest("/api/host-control/data-map", { capability, body: {} }),
     );
     expect(response?.status).toBe(405);
+  });
+});
+
+describe("host memory limits route", () => {
+  const path = "/api/host-control/memory-limits";
+  const custom = { kind: "custom", pressuredGb: 3, criticalGb: 6 } as const;
+
+  function limitsSetup() {
+    const set = vi.fn((request: SetHostMemoryLimitsRequest, principalKind: PrincipalKind) => {
+      const decision = decideHostMemoryLimits({ principalKind, limits: request.limits });
+      return decision.kind === "allow"
+        ? ({ kind: "saved", limits: decision.limits } as const)
+        : ({ kind: "refused", code: decision.code, message: decision.message } as const);
+    });
+    return { set, ...setup({ memoryLimits: { set } }) };
+  }
+
+  it("saves limits for a local window and reports them back", async () => {
+    const { handler, set } = limitsSetup();
+    const response = await handler(makeRequest(path, { capability, body: { limits: custom } }));
+    expect(response?.status).toBe(200);
+    expect(decodeSetHostMemoryLimitsOutcome(await response?.json())).toEqual({
+      kind: "saved",
+      limits: custom,
+    });
+    expect(set).toHaveBeenCalledWith({ limits: custom }, "local-window");
+  });
+
+  it("answers invalid limits with a refusal and a plain message, not an error status", async () => {
+    const { handler } = limitsSetup();
+    const response = await handler(
+      makeRequest(path, {
+        capability,
+        body: { limits: { kind: "custom", pressuredGb: 8, criticalGb: 2 } },
+      }),
+    );
+    expect(response?.status).toBe(200);
+    expect(decodeSetHostMemoryLimitsOutcome(await response?.json())).toEqual({
+      kind: "refused",
+      code: "critical-not-above-pressured",
+      message: "The critical limit must be above the pressured limit.",
+    });
+  });
+
+  it("rejects a malformed body, a wrong method, and a missing capability without effects", async () => {
+    const { handler, set } = limitsSetup();
+    const malformed = await handler(
+      makeRequest(path, {
+        capability,
+        body: { limits: { kind: "custom", pressuredGb: "3", criticalGb: 6 } },
+      }),
+    );
+    expect(malformed?.status).toBe(400);
+    const wrongMethod = await handler(makeRequest(path, { method: "GET", capability }));
+    expect(wrongMethod?.status).toBe(405);
+    const unauthenticated = await handler(makeRequest(path, { body: { limits: custom } }));
+    expect(unauthenticated?.status).toBe(401);
+    expect(set).not.toHaveBeenCalled();
+  });
+
+  it("refuses a paired remote device with a 403 and leaves the limits alone", async () => {
+    const { bindPrincipalRouteContext } = await import("./principalRouteContext");
+    const { Schema } = await import("effect");
+    const { DeviceId, StableHostId, RemoteSessionId } =
+      await import("@octant/contracts/remote-access");
+    const { handler } = limitsSetup();
+    const request = makeRequest(path, { capability, body: { limits: custom } });
+    bindPrincipalRouteContext(request, {
+      principal: {
+        kind: "remote-device",
+        deviceId: Schema.decodeUnknownSync(DeviceId)("00000000-0000-4000-8000-00000000c001"),
+        hostId: Schema.decodeUnknownSync(StableHostId)("00000000-0000-4000-8000-00000000c002"),
+        credentialGeneration: 1,
+        origin: "https://octant.example",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: Schema.decodeUnknownSync(RemoteSessionId)(
+          "00000000-0000-4000-8000-00000000c003",
+        ),
+      },
+      scopeId: decodeWindowId("00000000-0000-4000-8000-00000000c001"),
+    });
+    const response = await handler(request);
+    expect(response?.status).toBe(403);
+    expect(decodeSetHostMemoryLimitsOutcome(await response?.json())).toMatchObject({
+      kind: "refused",
+      code: "unauthorized",
+    });
+  });
+
+  it("is not a product route and reports unavailable when no limits store is wired", async () => {
+    const { classifyProductAction } = await import("./authenticatedProductRoutes");
+    expect(
+      classifyProductAction(new Request(`http://127.0.0.1:3100${path}`, { method: "POST" })),
+    ).toBeUndefined();
+    const { handler } = setup();
+    const response = await handler(makeRequest(path, { capability, body: { limits: custom } }));
+    expect(response?.status).toBe(503);
   });
 });
 

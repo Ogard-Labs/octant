@@ -121,6 +121,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "githubIssueContextService"
     | "linearIssueContextService"
     | "peekCreateFromIssueFramed"
+    | "terminalSessionImports"
     | "threadOutsideContentMarks"
   > &
   Pick<ComputerUseWiring, "computerToolsFor" | "computerUseTools"> &
@@ -210,6 +211,7 @@ export function wireWork(deps: WorkDependencies) {
     linearIssueContextService,
     liveTurns,
     managedWorktreeReceipts,
+    terminalSessionImports,
     nativeHarnessComposition,
     nativeHarnessHooks,
     nativeHarnessSessions,
@@ -313,6 +315,7 @@ export function wireWork(deps: WorkDependencies) {
           ?.models.find((model) => String(model.id) === String(modelId)),
       issueContext: githubIssueContextService,
       linearIssueContext: linearIssueContextService,
+      terminalSessions: terminalSessionImports,
     });
     // Hosts composed after Work (delegation to another spoke) learn that a
     // person stopped a thread's turn through this, not through the service.

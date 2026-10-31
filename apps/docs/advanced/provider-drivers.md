@@ -264,8 +264,8 @@ need **Verify tools** again.
 A driver added from a local folder may be unsigned developer input, and its
 review says so; trust is bound to the exact contents you reviewed. A
 publisher can also sign the package, and drivers from a marketplace source
-must be signed. Only local folders are accepted today; the npm source comes
-later.
+must be signed. Local folders and signed npm packages are accepted; see
+[Publishing to npm](#publishing-to-npm).
 
 To sign, make an Ed25519 key once and keep it private:
 
@@ -295,3 +295,22 @@ version, or a reinstall, signed by another key is held: under Plugins, its
 card shows the pinned key and the new one side by side. **Trust new
 publisher** replaces the pin and clears what its providers verified, and you
 then trust the version as usual; **Forget publisher** drops the pin.
+
+## Publishing to npm
+
+A person installs your driver with `octant plugin install npm:@scope/name` or
+from Marketplace. Octant downloads the one tarball, checks it against the
+integrity the registry published, verifies your signature, and runs no install
+script. A driver from npm must be signed, and the signature must name the npm
+package:
+
+```sh
+node outsideDriverSign.mjs ./my-driver --key-file driver-signing-key.pem --name @scope/name
+```
+
+Sign the exact files the tarball will hold: run `npm pack`, unpack it, sign the
+unpacked folder, and publish from that folder. A file that `npm pack` adds
+after signing makes the signature invalid. The version in
+`octant-provider-driver.json` must equal the version in `package.json`, the
+package must have no `preinstall`, `install`, `postinstall`, or `prepare`
+script, and it must hold no native code or executable file.

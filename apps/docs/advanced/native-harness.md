@@ -358,7 +358,23 @@ child is answered once as well: the terminal prompt, the terminal UI, the
 harness card, and the phone panel offer no session-wide choice for it, and the
 card and the phone panel name that child, its provider, and its model.
 **Deny** tells the lead not to retry. Every approval and decision is
-journaled with the session. When you answer on another surface first, the
+journaled with the session.
+
+On a Code thread in **Auto**, Octant Shield answers these approvals before
+anyone is asked. It allows reads and edits inside the thread's folder, your
+Project's own test and build commands, and Git commands that only read,
+without a model call; it refuses or hands you the calls that look harmful
+(a download piped into a shell, an encoded command, reading keys and sending
+them out, persistence, mass deletion, force-pushing); and it asks a small
+model about the rest. That model sees only your own messages in the thread
+and the pending call, never what the agent read. When Shield is unsure, its
+model does not answer, or the thread has read outside content and the call
+would reach out or could not be undone, the approval comes to you with
+Shield's reason. After three denials in a row, or twenty in one thread, the
+next call comes to you. Each decision shows in the transcript as an Octant
+Shield line beside the tool rows. A class you allowed for the session goes
+through on your word without asking Shield, and a subagent's calls are
+answered the same way. When you answer on another surface first, the
 line-mode prompt closes with an "answered elsewhere" note instead of waiting
 for input (with `--json`, an `approval-settled` line).
 

@@ -1,6 +1,7 @@
 import {
   decodeHostBackupRequest,
   decodeHostLifecycleRequest,
+  decodeSetHostMemoryLimitsRequest,
   type HostBackupOutcome,
   type HostControlPolicy,
   type HostControlStatus,
@@ -8,6 +9,8 @@ import {
   type HostMemoryStatus,
   type HostLifecycleOutcome,
   type HostRestoreOutcome,
+  type SetHostMemoryLimitsOutcome,
+  type SetHostMemoryLimitsRequest,
 } from "@octant/contracts/host-control";
 import type { HostDataMap } from "@octant/contracts/host-data-map";
 import {
@@ -29,6 +32,7 @@ import {
   type HostControlOperation,
   type HostControlServiceModeInput,
   type HostLifecycleControls,
+  type PrincipalKind,
 } from "@octant/domain";
 import { boundHostRuntimeDiagnostics, type HostRuntimeDiagnostics } from "@octant/host-runtime";
 import { isLoopbackHostname } from "./shellRoutes";
@@ -71,6 +75,7 @@ const ROUTES = {
   lifecycle: "/api/host-control/lifecycle",
   backup: "/api/host-control/backup",
   restore: "/api/host-control/restore",
+  memoryLimits: "/api/host-control/memory-limits",
   retention: "/api/host-control/thread-retention",
   purge: "/api/host-control/thread-purge",
   export: "/api/host-control/export",
@@ -115,6 +120,13 @@ export interface HostControlRouteDependencies {
   readonly backup?: (label: string) => HostControlBackupReceipt;
   /** The memory guard's report; omitting it leaves `memory` off the status. */
   readonly memory?: () => HostMemoryStatus;
+  /** The journaled memory limits; omitting it makes the setting unavailable. */
+  readonly memoryLimits?: {
+    readonly set: (
+      request: SetHostMemoryLimitsRequest,
+      principalKind: PrincipalKind,
+    ) => SetHostMemoryLimitsOutcome;
+  };
   /**
    * Verified host-runtime locations and Project list for the data map.
    * Omitting it is a test seam: every location category reports `unknown`.
@@ -229,6 +241,17 @@ export function createHostControlRouteHandler(
       }
       return authorized("backup", origin, () =>
         handleBackup(dependencies, body.label ?? "manual", origin),
+      );
+    }
+    if (route === ROUTES.memoryLimits) {
+      let body;
+      try {
+        body = decodeSetHostMemoryLimitsRequest(decoded.value);
+      } catch {
+        return failure("Memory limits request is invalid.", 400, origin);
+      }
+      return authorized("memory-limits", origin, () =>
+        handleSetMemoryLimits(dependencies, request, body, origin, now()),
       );
     }
     if (route === ROUTES.retention) {
@@ -518,6 +541,35 @@ function handleBackup(
     byteLength: receipt.byteLength,
   };
   return json(outcome, 200, origin);
+}
+
+function handleSetMemoryLimits(
+  dependencies: HostControlRouteDependencies,
+  request: Request,
+  body: SetHostMemoryLimitsRequest,
+  origin: string | null,
+  now: number,
+): Response {
+  if (dependencies.memoryLimits === undefined) {
+    return failure("Memory limits are unavailable while the owner is starting.", 503, origin);
+  }
+  let principalKind: PrincipalKind;
+  try {
+    const context = authenticateRoutePrincipal({
+      request,
+      store: dependencies.windowAuthorityStore,
+      now,
+    });
+    principalKind = context.principal.kind === "remote-device" ? "remote-device" : "local-window";
+  } catch (error) {
+    if (error instanceof WindowAuthorityError) {
+      return failure("Host control is unauthorized.", 401, origin);
+    }
+    return failure("Host control request is invalid.", 400, origin);
+  }
+  const outcome = dependencies.memoryLimits.set(body, principalKind);
+  const unauthorized = outcome.kind === "refused" && outcome.code === "unauthorized";
+  return json(outcome, unauthorized ? 403 : 200, origin);
 }
 
 function handleReadRetention(

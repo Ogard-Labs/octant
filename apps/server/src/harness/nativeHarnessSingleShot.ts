@@ -3,6 +3,7 @@ import type {
   ProviderInstanceId,
   ProviderModelId,
   ProviderSessionId,
+  TurnUsage,
 } from "@octant/contracts";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { Effect, Fiber, Stream } from "effect";
@@ -18,7 +19,12 @@ const MAX_TEXT_CHARACTERS = 16_384;
  * not be made or broke).
  */
 export type OneShotOutcome =
-  | { readonly status: "completed"; readonly text: string }
+  | {
+      readonly status: "completed";
+      readonly text: string;
+      /** What the provider reported the request used; absent when it reported nothing. */
+      readonly usage?: TurnUsage;
+    }
   | { readonly status: "withheld" }
   | { readonly status: "interrupted" }
   | { readonly status: "timed-out" }
@@ -69,6 +75,7 @@ export async function completeOnceOutcome(input: OneShotInput): Promise<OneShotO
     // An answer steered by a page the runtime read would reach a thread with
     // no mark to say so, and nothing here can mark one, so it is not used.
     let readOutsideContent = false;
+    let usage: TurnUsage | undefined;
     const collected = yield* subscribeThenSend({
       connection,
       consume: (events) =>
@@ -87,6 +94,23 @@ export async function completeOnceOutcome(input: OneShotInput): Promise<OneShotO
               if (event.kind === "interrupted") interrupted = true;
               if (event.kind === "failed") failure = event.failure;
               if (event.kind === "outside-content-read") readOutsideContent = true;
+              // A later report covers the whole request, so it replaces an earlier one.
+              if (event.kind === "usage") {
+                usage = {
+                  inputTokens: event.inputTokens,
+                  outputTokens: event.outputTokens,
+                  ...(event.reasoningTokens === undefined
+                    ? {}
+                    : { reasoningTokens: event.reasoningTokens }),
+                  ...(event.cacheReadInputTokens === undefined
+                    ? {}
+                    : { cacheReadInputTokens: event.cacheReadInputTokens }),
+                  ...(event.cacheWriteInputTokens === undefined
+                    ? {}
+                    : { cacheWriteInputTokens: event.cacheWriteInputTokens }),
+                  ...(event.costUsd === undefined ? {} : { costUsd: event.costUsd }),
+                };
+              }
             }),
           ),
         ),
@@ -107,7 +131,7 @@ export async function completeOnceOutcome(input: OneShotInput): Promise<OneShotO
     if (!completed) return { status: "unreached" } as const;
     return readOutsideContent
       ? ({ status: "withheld" } as const)
-      : ({ status: "completed", text } as const);
+      : ({ status: "completed", text, ...(usage === undefined ? {} : { usage }) } as const);
   });
   try {
     return await Effect.runPromise(

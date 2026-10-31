@@ -16,7 +16,9 @@ import {
   type WorkThread,
 } from "@octant/contracts";
 import { hasKnownContextWindow } from "@octant/domain/context-policy";
+import { shieldCallFromHarness } from "@octant/domain/shield-judge-policy";
 import { nativeHarnessResultTaintsThread } from "@octant/domain/untrusted-content-policy";
+import type { ShieldReviewPort } from "../shield/octantShield";
 import {
   clampChildThreadEgressPolicy,
   materializeHarnessToolNetwork,
@@ -40,6 +42,7 @@ import {
 } from "./nativeHarnessJournalLookup";
 import type { NativeHarnessTranscriptStore } from "./nativeHarnessTranscriptStore";
 import type {
+  NativeHarnessApprovalAsk,
   NativeHarnessApprovalStore,
   NativeHarnessCommandApprovalOutcome,
 } from "./nativeHarnessApprovals";
@@ -153,7 +156,13 @@ export interface NativeHarnessCompositionOptions {
   /** Where each lead tool call is noted while its turn runs. */
   readonly activity?: Pick<NativeHarnessSessionStore, "noteToolCall" | "deliverSteering">;
   readonly approvals?: Pick<NativeHarnessApprovalStore, "ask"> &
-    Partial<Pick<NativeHarnessApprovalStore, "askCommand">>;
+    Partial<Pick<NativeHarnessApprovalStore, "askCommand" | "recordReviewed" | "remembers">>;
+  /**
+   * Octant Shield, which answers a Code thread's prompts at Auto when it is
+   * the thread's reviewer. Absent, or answering nothing for a thread, the
+   * person is asked as before.
+   */
+  readonly shield?: ShieldReviewPort;
   /**
    * The hosts a marked Code thread's command confirmation lists: its thread
    * and Project rules, and its open proposals. Absent, a marked thread's
@@ -377,6 +386,8 @@ export function createNativeHarnessComposition(
     readonly lead: NativeHarnessSlotCandidate;
     /** The window a Code turn runs in, whose grant its commands' network follows. */
     readonly windowId?: string;
+    /** A Code thread's checkout, the root Octant Shield judges its calls against. */
+    readonly boundRoot?: string;
   }): Pick<NativeHarnessToolPorts, "askUser" | "approvals" | "steering" | "callEnded"> => ({
     callEnded: (callId) => {
       confirmedCommandHosts.delete(callId);
@@ -399,7 +410,7 @@ export function createNativeHarnessComposition(
       ? {}
       : {
           approvals: async (input) => {
-            const ask = {
+            let ask: NativeHarnessApprovalAsk = {
               threadId: scope.parentThreadId,
               mode: scope.mode,
               projectId: scope.projectId,
@@ -410,6 +421,45 @@ export function createNativeHarnessComposition(
               singleUse: input.freshConfirmation,
               signal: input.signal,
             };
+            // At Auto with Shield reviewing, Shield answers before anyone is
+            // asked. A class the person already allowed for the session goes
+            // through on their word, so Shield never overrules the person.
+            const shieldReviews =
+              scope.mode === "code" &&
+              scope.boundRoot !== undefined &&
+              options.shield !== undefined &&
+              approvalStore.remembers?.(
+                scope.parentThreadId,
+                input.approvalClass,
+                input.freshConfirmation,
+              ) !== true;
+            if (shieldReviews && scope.boundRoot !== undefined && options.shield !== undefined) {
+              const decision = await options.shield.review({
+                threadId: scope.parentThreadId,
+                call: shieldCallFromHarness({
+                  toolName: input.toolName,
+                  arguments: input.arguments,
+                  approvalClass: input.approvalClass,
+                  workingDirectory: scope.boundRoot,
+                  freshConfirmation: input.freshConfirmation,
+                  command: input.command,
+                }),
+                boundRoot: scope.boundRoot,
+                signal: input.signal,
+              });
+              if (decision !== undefined) {
+                options.shield.recordOnTranscript?.({
+                  threadId: scope.parentThreadId,
+                  summary: input.summary,
+                  decision,
+                });
+                if (decision.verdict === "allow" || decision.verdict === "deny") {
+                  approvalStore.recordReviewed?.(ask, { ...decision, verdict: decision.verdict });
+                  return decision.verdict === "allow" ? "approved" : "shield-denied";
+                }
+                ask = { ...ask, shield: decision };
+              }
+            }
             // A marked thread's command that will run through the egress
             // rules lists the hosts it may reach, so the person picks them
             // for this one command.
@@ -648,6 +698,7 @@ export function createNativeHarnessComposition(
             projectId: thread.projectId,
             lead: leadOf(thread),
             windowId,
+            boundRoot: checkoutRoot,
           }),
           filesystem: new NativeHarnessFileSystem({ root: checkoutRoot }),
           ...(shell === undefined ? {} : { shell }),

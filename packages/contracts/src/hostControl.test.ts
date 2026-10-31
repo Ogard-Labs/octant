@@ -4,7 +4,11 @@ import {
   decodeHostControlStatus,
   decodeHostLifecycleOutcome,
   decodeHostLifecycleRequest,
+  decodeHostMemoryLimits,
+  decodeHostMemoryLimitsChanged,
   decodeHostRestoreOutcome,
+  decodeSetHostMemoryLimitsOutcome,
+  decodeSetHostMemoryLimitsRequest,
   HOST_LIFECYCLE_ACTIONS,
 } from "./hostControl";
 
@@ -63,6 +67,8 @@ describe("HostControlStatus", () => {
       memory: {
         pressure: "elevated",
         processMegabytes: 2300,
+        limits: { kind: "automatic" },
+        effectiveLimits: { pressuredMegabytes: 2048, criticalMegabytes: 4096 },
         lastRelief: {
           at: "2026-10-31T10:00:00.000Z",
           pressure: "elevated",
@@ -90,6 +96,8 @@ describe("HostControlStatus", () => {
         memory: {
           pressure: "normal",
           processMegabytes: 300,
+          limits: { kind: "automatic" },
+          effectiveLimits: { pressuredMegabytes: 2048, criticalMegabytes: 4096 },
           lastRelief: {
             at: "2026-10-31T10:00:00.000Z",
             pressure: "elevated",
@@ -200,5 +208,74 @@ describe("HostRestoreOutcome", () => {
       guidance: "Stop the Octant host, then run the offline restore command with --confirm.",
     });
     expect(decoded.kind).toBe("refused-online");
+  });
+});
+
+describe("HostMemoryLimits", () => {
+  it("decodes automatic and a custom pair with the critical limit above the pressured one", () => {
+    expect(decodeHostMemoryLimits({ kind: "automatic" })).toEqual({ kind: "automatic" });
+    expect(decodeHostMemoryLimits({ kind: "custom", pressuredGb: 0.5, criticalGb: 64 })).toEqual({
+      kind: "custom",
+      pressuredGb: 0.5,
+      criticalGb: 64,
+    });
+  });
+
+  it.each([
+    [{ kind: "custom", pressuredGb: 4, criticalGb: 4 }],
+    [{ kind: "custom", pressuredGb: 6, criticalGb: 3 }],
+    [{ kind: "custom", pressuredGb: 0.25, criticalGb: 2 }],
+    [{ kind: "custom", pressuredGb: 2, criticalGb: 65 }],
+    [{ kind: "custom", pressuredGb: Number.NaN, criticalGb: 8 }],
+    [{ kind: "custom", pressuredGb: 2 }],
+    [{ kind: "automatic", pressuredGb: 2 }],
+  ])("refuses stored limits that are out of order, out of range, or incomplete: %j", (limits) => {
+    expect(() => decodeHostMemoryLimits(limits)).toThrow();
+  });
+
+  it("accepts any pair of numbers in a request so the policy can refuse it with a message", () => {
+    expect(
+      decodeSetHostMemoryLimitsRequest({
+        limits: { kind: "custom", pressuredGb: 90, criticalGb: 1 },
+      }),
+    ).toEqual({ limits: { kind: "custom", pressuredGb: 90, criticalGb: 1 } });
+    expect(() =>
+      decodeSetHostMemoryLimitsRequest({
+        limits: { kind: "custom", pressuredGb: "2", criticalGb: 4 },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeSetHostMemoryLimitsRequest({ limits: { kind: "automatic" }, extra: true }),
+    ).toThrow();
+  });
+
+  it("decodes a saved outcome and a refusal, and nothing in between", () => {
+    expect(
+      decodeSetHostMemoryLimitsOutcome({ kind: "saved", limits: { kind: "automatic" } }).kind,
+    ).toBe("saved");
+    expect(
+      decodeSetHostMemoryLimitsOutcome({
+        kind: "refused",
+        code: "out-of-range",
+        message: "Memory limits must be between 0.5 and 64 GB.",
+      }).kind,
+    ).toBe("refused");
+    expect(() =>
+      decodeSetHostMemoryLimitsOutcome({ kind: "refused", code: "unknown", message: "No." }),
+    ).toThrow();
+  });
+
+  it("records who changed the limits, when, and the values before and after", () => {
+    const change = {
+      kind: "memory-limits-changed",
+      previous: { kind: "automatic" },
+      next: { kind: "custom", pressuredGb: 3, criticalGb: 6 },
+      changedBy: "local-window",
+      changedAt: "2026-10-31T12:00:00.000Z",
+    };
+    expect(decodeHostMemoryLimitsChanged(change)).toEqual(change);
+    expect(() =>
+      decodeHostMemoryLimitsChanged({ ...change, changedBy: "remote-device" }),
+    ).toThrow();
   });
 });

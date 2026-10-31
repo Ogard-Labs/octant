@@ -115,6 +115,7 @@ export type ShellActions = {
     method: CodeProjectPullRequestMergeMethod,
     headSha: string,
   ) => Promise<CodeProjectPullRequestMergeOutcome>;
+  readonly moveCodeThread: CodeController["moveThread"];
   readonly moveProject: ProjectController["move"];
   readonly noteCanvasReferences: NonNullable<WorkspaceViewProps["onCanvasReferencesObserved"]>;
   readonly noteHandedOffDocument: (mode: OctantMode, threadId: string, canvasId: string) => void;

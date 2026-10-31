@@ -56,6 +56,14 @@ What differs is focus: Work shows documents, artifacts, local tasks, and its boa
 
 Turn on **Developer tools** in the Work Project's overview (under Access and limits) to show the Project's terminal and its **Actions**: named commands such as Build or Preview that you save once and run from the toolbar or the command palette, in the Project's own terminal at its folder. Only you can turn the switch on, from a window on this computer; Octant records when. It changes what the Project shows, not what its tasks may do.
 
+## Continue a terminal session
+
+A new Work task can start from a Claude Code or Codex session you had in a
+terminal in the same folder. Choose **Create from…**, then **Terminal**, and
+pick the session. The task shows that conversation as folded, read-only
+history, and the assistant reads it once at the start. The session stays on
+this Mac, and the task is marked as holding outside content.
+
 ## Work settings
 
 **Settings › Work** sets what a new Work thread starts with:
@@ -132,6 +140,16 @@ hand. A thread that is waiting on you cannot be snoozed.
 Put-away threads move to the archive on their own after a week. Change that
 window, or turn it off, under **Settings › General › Archive put-away
 threads**. Archiving keeps every thread; only a confirmed purge deletes.
+
+## Move to a Project
+
+Choose **Move to Project…** from a Work thread's row menu to file it into
+another Work Project. The thread stays a Work thread and keeps its history and
+its access level. It can move only to a Work Project whose folder is the same
+as, or contains, the folder it works in; Projects bound to any other folder are
+listed greyed out with the reason, and the host refuses them too. The thread
+keeps working in the same place inside the new Project's folder. Octant refuses
+the move while a turn is running or the agent is waiting on you.
 
 ## Export
 

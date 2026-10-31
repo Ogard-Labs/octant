@@ -12,6 +12,7 @@ import {
   Flag,
   Forward,
   GitPullRequest,
+  FolderInput,
   Hash,
   Mail,
   MailOpen,
@@ -101,6 +102,21 @@ export interface ThreadRowActions {
   readonly onOpenPullRequestOnGithub?: (identity: ThreadBoardPullRequestIdentity) => void;
   /** Asks the list to open its rename field; the list owns the commit. */
   readonly onStartRenameThread?: (threadId: string) => void;
+  /**
+   * Opens the choice of Project to file a Work or Code thread into. The row's
+   * Project id is passed so the dialog can compare folders. Absent when the
+   * host cannot move this kind of thread.
+   */
+  readonly onMoveToProject?: (
+    threadId: string,
+    title: string,
+    projectId: string | undefined,
+  ) => void;
+  /**
+   * Whether this row's kind can move at all. A list that mixes kinds sets it so
+   * a row of a kind with no move never offers an item that would do nothing.
+   */
+  readonly canMoveToProject?: (threadId: string) => boolean;
 }
 
 export function threadRowMenuIsEmpty(actions: ThreadRowActions | undefined): boolean {
@@ -122,7 +138,8 @@ export function threadRowMenuIsEmpty(actions: ThreadRowActions | undefined): boo
     actions.onPinThread === undefined &&
     actions.onOpenPullRequest === undefined &&
     actions.onOpenPullRequestOnGithub === undefined &&
-    actions.onStartRenameThread === undefined
+    actions.onStartRenameThread === undefined &&
+    actions.onMoveToProject === undefined
   );
 }
 
@@ -354,6 +371,22 @@ export function ThreadRowMenu(props: {
             </OctantContextMenuItem>
           </OctantContextMenuSubContent>
         </OctantContextMenuSub>
+        {props.actions.onMoveToProject === undefined ||
+        props.actions.canMoveToProject?.(threadId) === false ? null : (
+          <OctantContextMenuItem
+            className="thread-row-context-menu__item"
+            label="Move to Project…"
+            onClick={() =>
+              props.actions.onMoveToProject?.(
+                String(props.thread.threadId),
+                props.thread.title,
+                props.thread.projectId,
+              )
+            }
+          >
+            <MenuContent icon={FolderInput}>Move to Project…</MenuContent>
+          </OctantContextMenuItem>
+        )}
         {props.actions.onExportThread === undefined ? null : (
           <OctantContextMenuItem
             className="thread-row-context-menu__item"

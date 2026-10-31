@@ -8,6 +8,7 @@ import {
   ExtensionPublisherKeyFingerprint,
   ToolExtensionId,
 } from "./extensionIdentity";
+import { ExtensionNpmSource } from "./extensionIdentity";
 import { OctantMode } from "./modes";
 import { ThreadPublishedPage } from "./threadToolSteps";
 import {
@@ -1436,6 +1437,13 @@ export const ProviderCapabilities = Schema.Struct({
    */
   modelSwitch: Schema.optional(ProviderCapabilitySupport),
   /**
+   * Whether one session's runtime process can be killed on its own, through
+   * the connection's `forceStop`. A runtime that serves several threads from
+   * one process reports `unsupported`, since killing it would end the others.
+   * Absent reads as unsupported.
+   */
+  forceStop: Schema.optional(ProviderCapabilitySupport),
+  /**
    * Whether the runtime compacts a session it holds when asked, per mode,
    * through the connection's `compact`: `unavailable` when this install is too
    * old for the request. Absent reads as unsupported in every mode. A host
@@ -1823,13 +1831,16 @@ export type ProviderObservedState = typeof ProviderObservedState.Type;
  * One outside driver the activation ladder admits on this host, as the
  * provider catalog lists it: the exact package a provider would bind, the
  * package's own name, and the package facts the catalog repeats. Only a
- * local folder yields a driver today: developer input, unsigned unless its
- * folder carries a signature the host verified, whose key is `publisherKey`.
+ * local folder or an npm package yields a driver. A folder is developer input,
+ * unsigned unless it carries a signature the host verified; an npm package is
+ * always signed. The verified key is `publisherKey`, and `npm` is where the host
+ * fetched an npm package from.
  */
 export const OutsideProviderDriverListing = Schema.Struct({
   driver: OutsideProviderDriverReference,
   displayName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
-  source: Schema.Literal("local-folder"),
+  source: Schema.Literal("local-folder", "npm"),
+  npm: Schema.optional(ExtensionNpmSource),
   installed: Schema.Boolean,
   trusted: Schema.Boolean,
   publisherKey: Schema.optional(ExtensionPublisherKeyFingerprint),

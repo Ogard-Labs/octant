@@ -7,6 +7,7 @@ import {
   decodeWorkThread,
   decodeWorkThreadBootstrap,
   decodeWorkThreadNavigation,
+  decodeThreadWorkingDirectory,
   decodeWorkThreadCommand,
   DEFAULT_WORK_ACCESS,
   WorkSettings as WorkSettingsSchema,
@@ -48,6 +49,11 @@ import {
   decideCompleteThread,
   decideSnoozeThread,
 } from "@octant/domain/thread-completion-policy";
+import {
+  THREAD_MOVE_REFUSALS,
+  decideThreadMove,
+  folderRelativeTo,
+} from "@octant/domain/thread-project-move-policy";
 import { isRoutineHostScope } from "../routineHostScope";
 import {
   INHERITED_MARK_REFUSAL,
@@ -55,6 +61,10 @@ import {
   type InheritedExternalContentMark,
   type RecordExternalContentIngestion,
 } from "../context/inheritedExternalContentMark";
+import type {
+  PreparedTerminalSession,
+  TerminalSessionImportPort,
+} from "../terminalSessions/terminalSessionImports";
 import type {
   CompletedThreadArchiveInput,
   CompletedThreadArchiveOutcome,
@@ -192,6 +202,7 @@ export interface WorkThreadServiceDependencies {
     canonicalRoot: string,
   ) => Promise<WorkStatusDatedItem | undefined>;
   readonly issueContext?: GithubIssueContextPort;
+  readonly terminalSessions?: TerminalSessionImportPort;
   readonly linearIssueContext?: LinearIssueContextPort;
   /**
    * Journals the outside-content mark a thread made from a marked thread
@@ -234,6 +245,7 @@ export class WorkThreadService {
   readonly #observeRuntime?: WorkThreadServiceDependencies["observeRuntime"];
   readonly #projectDueReminder?: WorkThreadServiceDependencies["projectDueReminder"];
   readonly #issueContext?: GithubIssueContextPort;
+  readonly #terminalSessions: TerminalSessionImportPort | undefined;
   readonly #linearIssueContext?: LinearIssueContextPort;
   readonly #recordExternalContentIngestion: RecordExternalContentIngestion | undefined;
 
@@ -258,6 +270,7 @@ export class WorkThreadService {
     if (dependencies.issueContext !== undefined) {
       this.#issueContext = dependencies.issueContext;
     }
+    this.#terminalSessions = dependencies.terminalSessions;
     if (dependencies.linearIssueContext !== undefined) {
       this.#linearIssueContext = dependencies.linearIssueContext;
     }
@@ -438,6 +451,17 @@ export class WorkThreadService {
             "Choose either a GitHub issue or a Linear issue, not both.",
           );
         }
+        // The first turn carries one outside source, so a second one would be
+        // shown as imported and never reach the model.
+        if (
+          command.terminalSession !== undefined &&
+          (command.issueContext !== undefined || command.linearIssueContext !== undefined)
+        ) {
+          throw this.#failure(
+            "invalid",
+            "Choose either an issue or a terminal session to start from, not both.",
+          );
+        }
         const preparedIssue = await prepareOptionalIssueContext(
           this.#issueContext,
           command.issueContext,
@@ -459,6 +483,28 @@ export class WorkThreadService {
             linearIssueContextFailureCategory(preparedLinearIssue.reason),
             preparedLinearIssue.message,
           );
+        }
+        const inheritedMark = executionContext?.inheritedMark;
+        let terminalSession: PreparedTerminalSession | undefined;
+        if (command.terminalSession !== undefined) {
+          // A follow-up already starts from another thread's text.
+          if (inheritedMark !== undefined) {
+            throw this.#failure(
+              "invalid",
+              "A thread made from another thread cannot also start from a terminal session.",
+            );
+          }
+          if (this.#terminalSessions === undefined) {
+            throw this.#failure("unavailable", "Terminal sessions are unavailable on this host.");
+          }
+          // The session must come from the Project's own folder; the reader
+          // refuses one started anywhere else.
+          const prepared = await this.#terminalSessions.prepare(
+            command.terminalSession,
+            project.binding.canonicalRoot,
+          );
+          if (prepared.status === "refused") throw this.#failure("invalid", prepared.message);
+          terminalSession = prepared.prepared;
         }
         const created = decodeWorkThread({
           id: command.threadId,
@@ -485,16 +531,20 @@ export class WorkThreadService {
           journal: this.#persistence.journal,
           record: this.#recordExternalContentIngestion,
           threadId: String(created.id),
-          mark: executionContext?.inheritedMark,
+          mark: inheritedMark ?? terminalSession?.mark,
           correlationId: () => this.#uuid(),
-          journalThread: () =>
+          journalThread: () => {
             this.#append(
               created.id,
               0,
               "work.thread-created@1",
               { kind: "thread-created", thread: created },
               isRoutineHostScope(authenticatedWindowId) ? "system" : "local-user",
-            ),
+            );
+            if (terminalSession !== undefined) {
+              this.#terminalSessions?.journalImported(String(created.id), terminalSession);
+            }
+          },
         });
         if (journaled.status === "refused") {
           throw this.#failure("unavailable", INHERITED_MARK_REFUSAL);
@@ -606,6 +656,9 @@ export class WorkThreadService {
             "This task is marked Done. Archive and reactivate it before resuming it.",
           );
         }
+      }
+      if (command.kind === "move-work-thread") {
+        return await this.#moveThread(authenticatedWindowId, current, project, command);
       }
       const usageResumeUpdatedAt = decodeTimestamp(this.#clock());
       if (command.kind === "schedule-work-usage-resume") {
@@ -887,6 +940,100 @@ export class WorkThreadService {
     } catch (error) {
       throw this.#mapFailure(error);
     }
+  }
+
+  /**
+   * Files a Work thread into another Work Project. The thread keeps its kind,
+   * history and access; the host moves it only into a Project whose folder is
+   * the thread's folder or contains it, so it never reaches a folder the person
+   * had not bound for it, and rewrites its working directory to name the same
+   * place under the new root.
+   */
+  async #moveThread(
+    authenticatedWindowId: WindowId,
+    current: WorkThread,
+    source: Extract<Project, { readonly type: "work" }>,
+    command: Extract<WorkThreadCommand, { readonly kind: "move-work-thread" }>,
+  ): Promise<WorkThreadCommandResult> {
+    // A routine acts as the host, never as the person; filing a thread is the person's call.
+    if (isRoutineHostScope(authenticatedWindowId)) {
+      throw this.#failure("unauthorized", "Only a person can move a thread to another Project.");
+    }
+    const bootstrap = await this.#projects.bootstrap(authenticatedWindowId);
+    const visible = bootstrap.active.some(
+      (candidate) => String(candidate.id) === String(command.projectId),
+    );
+    const destination = visible ? this.#persistence.readProject(command.projectId) : undefined;
+    if (destination === undefined) {
+      throw this.#failure("invalid", THREAD_MOVE_REFUSALS["destination-unavailable"]);
+    }
+    const destinationFolder = destination.type === "chat" ? "" : destination.binding.canonicalRoot;
+    const signals = await this.#restSignals(current.id);
+    const decision = decideThreadMove({
+      thread: { lifecycle: current.lifecycle, ...signals },
+      source: { id: String(source.id), mode: "work", folder: source.binding.canonicalRoot },
+      destination: {
+        id: String(destination.id),
+        mode: destination.type,
+        lifecycle: destination.lifecycle,
+        folder: destinationFolder,
+      },
+    });
+    if (decision.status === "refused") {
+      throw this.#failure("invalid", THREAD_MOVE_REFUSALS[decision.reason]);
+    }
+    if (destination.type !== "work") {
+      throw this.#failure("invalid", THREAD_MOVE_REFUSALS["different-mode"]);
+    }
+    const destinationRevision = destination.bindingHistory.at(-1);
+    if (destinationRevision === undefined || destinationFolder.trim() === "") {
+      throw this.#failure("invalid", THREAD_MOVE_REFUSALS["destination-unavailable"]);
+    }
+    // The destination's own provider policy still applies to the thread's provider.
+    const provider = this.#persistence.readProviderInstance(current.providerInstanceId);
+    if (provider !== undefined) {
+      try {
+        assertProviderAllowedByProjectPolicy(
+          destination,
+          provider,
+          this.#readProviderModel?.(current.providerInstanceId, current.modelId),
+        );
+      } catch (error) {
+        if (error instanceof ProjectProviderPolicyRejected) {
+          throw this.#failure("unauthorized", error.message);
+        }
+        throw error;
+      }
+    }
+    // Keep the thread working in the same place: name it relative to the new root.
+    const offset = folderRelativeTo(destinationFolder, source.binding.canonicalRoot) ?? ".";
+    const currentDirectory = current.workingDirectory ?? ".";
+    const workingDirectory = decodeThreadWorkingDirectory(
+      offset === "."
+        ? currentDirectory
+        : currentDirectory === "."
+          ? offset
+          : `${offset}/${currentDirectory}`,
+    );
+    try {
+      await this.#workingDirectories.resolve(destinationFolder, workingDirectory);
+    } catch {
+      throw this.#failure("invalid", "Work working directory is unavailable.");
+    }
+    const updated = decodeWorkThread({
+      ...current,
+      projectId: destination.id,
+      bindingRevisionId: destinationRevision.revisionId,
+      workingDirectory,
+      version: command.expectedVersion + 1,
+      updatedAt: decodeTimestamp(this.#clock()),
+    });
+    this.#append(current.id, command.expectedVersion, "work.thread-updated@1", {
+      kind: "thread-updated",
+      thread: updated,
+    });
+    this.#projection.apply({ kind: "thread-updated", thread: updated });
+    return { kind: "thread-updated", thread: updated };
   }
 
   #assertReady(): void {

@@ -159,6 +159,57 @@ describe("Work thread routes", () => {
     expect(local?.status).toBe(200);
   });
 
+  it("refuses a paired device starting a thread from a terminal session on this host", async () => {
+    const execute = vi.fn(async () => ({ kind: "thread-created", thread: thread() }));
+    const route = routeFixture({ execute });
+    const remoteDeviceId = "73000000-0000-4000-8000-000000000030";
+    const fromDevice = (withSession: boolean) => {
+      const remote = request("/api/work/threads/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "create-work-thread",
+          threadId,
+          projectId,
+          title: "Draft brief",
+          providerInstanceId: "73000000-0000-4000-8000-000000000004",
+          modelId: "model-a",
+          hostId: "local",
+          bindingRevisionId: "72000000-0000-4000-8000-000000000008",
+          ...(withSession
+            ? {
+                terminalSession: {
+                  provider: "claude",
+                  sessionId: "0b4c1f2e-1111-4111-8111-111111111111",
+                },
+              }
+            : {}),
+        }),
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "73000000-0000-4000-8000-000000000031" as never,
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return remote;
+    };
+
+    const refused = await route(fromDevice(true));
+    expect(refused?.status).toBe(403);
+    expect(await refused?.json()).toMatchObject({ category: "unauthorized" });
+    expect(execute).not.toHaveBeenCalled();
+
+    expect((await route(fromDevice(false)))?.status).toBe(200);
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
   it("rejects missing capability and caller-supplied window identity", async () => {
     const route = routeFixture({});
 
