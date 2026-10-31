@@ -196,6 +196,8 @@ export type ShellActions = {
     readonly projectHostId?: HostId;
     readonly onRefuse: (reason: string) => void;
   }) => HostId | undefined;
+  readonly addProjectExtraFolder: ProjectController["addExtraFolder"];
+  readonly removeProjectExtraFolder: ProjectController["removeExtraFolder"];
   readonly relinkProject: ProjectController["relink"];
   readonly renameCodeThread: (threadId: string, title: string) => void;
   readonly renameProject: ProjectController["rename"];

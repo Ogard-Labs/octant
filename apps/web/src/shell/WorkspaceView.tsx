@@ -60,6 +60,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { ComposerContextMeterGate } from "../context/composerContextMeterScope";
 import { SplitWorkspace, type PaneFacts } from "./SplitWorkspace";
 import { ProjectOverview } from "../projects/ProjectOverview";
+import type { ProjectChange } from "../projects/useProjectController";
 import { providerGroupsForProject } from "../projects/ProjectProviderPolicySection";
 import { pickerHasReadyInstance } from "../providers/ComposerModelPicker";
 import type { OctantHostBridge } from "./hostBridge";
@@ -413,6 +414,14 @@ export interface WorkspaceViewProps {
   readonly availabilityByProject: ReadonlyMap<ProjectId, ProjectAvailability>;
   readonly onArchiveProject: (projectId: ProjectId) => void;
   readonly onRelinkProject: (projectId: ProjectId, receiptId: string) => Promise<boolean>;
+  readonly onAddProjectExtraFolder?: (
+    projectId: ProjectId,
+    receiptId: string,
+  ) => Promise<ProjectChange>;
+  readonly onRemoveProjectExtraFolder?: (
+    projectId: ProjectId,
+    canonicalRoot: string,
+  ) => Promise<ProjectChange>;
   readonly onRenameProject: (projectId: ProjectId, name: string) => Promise<boolean>;
   readonly onProjectColorChange?: (
     projectId: ProjectId,
@@ -2247,6 +2256,12 @@ function renderNonCodeTab(
           ? {}
           : { windowCapability: props.projectWindowCapability })}
         providerInstances={props.providerController.instances ?? []}
+        {...(props.onAddProjectExtraFolder === undefined
+          ? {}
+          : { onAddExtraFolder: props.onAddProjectExtraFolder })}
+        {...(props.onRemoveProjectExtraFolder === undefined
+          ? {}
+          : { onRemoveExtraFolder: props.onRemoveProjectExtraFolder })}
         onRelink={props.onRelinkProject}
         onRename={props.onRenameProject}
         {...(props.onProjectColorChange === undefined

@@ -357,7 +357,7 @@ describe("ProjectOverview", () => {
     expect(screen.queryByText(/Git|worktree|pull request/i)).not.toBeInTheDocument();
     expect(
       screen.getByText(
-        "Bound to one confined directory. Knowledge-work stays inside the Project root.",
+        "Confined to the Project's folders. Knowledge-work stays inside them.",
       ),
     ).toBeVisible();
   });
