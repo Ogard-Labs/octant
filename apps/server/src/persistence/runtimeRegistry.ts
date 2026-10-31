@@ -39,6 +39,8 @@ import {
   WorkProjectStatusFileChanged,
   ProjectBrandKitChanged,
   CodeProjectActionsChanged,
+  ProjectExtraFolderAdded,
+  ProjectExtraFolderRemoved,
   CodeProjectDesktopRecipeChanged,
   CodeCheckoutObserved,
   CodeCheckoutRemoved,
@@ -160,6 +162,7 @@ import {
   RemoteServerGrantClosedPayload,
   RemoteServerGrantOpenedPayload,
   BROWSER_PROFILE_EVENT_NAMES,
+  BrowserCookiesImported,
   BrowserProfileCleared,
   TERMINAL_BROWSER_GRANT_EVENT_NAMES,
   TerminalBrowserGrantIssued,
@@ -382,6 +385,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("project.work-status-file-changed@1", 1, WorkProjectStatusFileChanged)
     .register("project.brand-kit-changed@1", 1, ProjectBrandKitChanged)
     .register("project.code-actions-changed@1", 1, CodeProjectActionsChanged)
+    .register("project.extra-folder-added@1", 1, ProjectExtraFolderAdded)
+    .register("project.extra-folder-removed@1", 1, ProjectExtraFolderRemoved)
     .register("project.code-desktop-recipe-changed@1", 1, CodeProjectDesktopRecipeChanged)
     .register("memory.entry-created@1", 1, MemoryEntryCreated)
     .register("memory.entry-superseded@1", 1, MemoryEntrySuperseded)
@@ -550,6 +555,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(PROJECT_TERMINAL_EVENT_NAMES.started, 1, ProjectTerminalStarted)
     .register(PROJECT_TERMINAL_EVENT_NAMES.ended, 1, ProjectTerminalEnded)
     .register(BROWSER_PROFILE_EVENT_NAMES.cleared, 1, BrowserProfileCleared)
+    .register(BROWSER_PROFILE_EVENT_NAMES.cookiesImported, 1, BrowserCookiesImported)
     .register(TERMINAL_BROWSER_GRANT_EVENT_NAMES.issued, 1, TerminalBrowserGrantIssued)
     .register(TERMINAL_BROWSER_GRANT_EVENT_NAMES.revoked, 1, TerminalBrowserGrantRevoked)
     .register(HUB_MEMBERSHIP_CHANGED, 1, HubMembershipChangedPayload)

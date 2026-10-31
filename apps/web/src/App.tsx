@@ -4643,6 +4643,8 @@ function LaunchedShell(
       previewSplitResize: controller.previewSplitResize,
       recoverZen: zen.recoverZen,
       refuseUnlessCreatableDestination,
+      addProjectExtraFolder: projectController.addExtraFolder,
+      removeProjectExtraFolder: projectController.removeExtraFolder,
       relinkProject: projectController.relink,
       renameCodeThread,
       renameProject: projectController.rename,

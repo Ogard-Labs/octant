@@ -124,6 +124,32 @@ describe("Octant Shield's rule stages", () => {
     });
   });
 
+  it("allows reads and edits in a Project's extra folder as in the root, and keeps commands to the root", () => {
+    const extra = { extraRoots: ["/Users/dev/notes"] };
+    const read: ShieldCall = { ...bash(""), tool: "read", kind: "read", command: undefined };
+    const edit: ShieldCall = { ...bash(""), tool: "edit", kind: "edit", command: undefined };
+    expect(rules({ ...read, paths: ["/Users/dev/notes/today.md"] }, extra)).toMatchObject({
+      verdict: "allow",
+      rule: "in-root-read",
+    });
+    expect(rules({ ...edit, paths: ["/Users/dev/notes/today.md"] }, extra)).toMatchObject({
+      verdict: "allow",
+      rule: "in-root-edit",
+    });
+    expect(rules({ ...edit, paths: ["/Users/dev/notes/.git/config"] }, extra)).toEqual({
+      kind: "needs-model",
+    });
+    expect(rules({ ...edit, paths: ["/Users/dev/notes-old/a.md"] }, extra)).toEqual({
+      kind: "needs-model",
+    });
+    expect(rules({ ...edit, paths: ["/Users/dev/notes/today.md"] })).toEqual({
+      kind: "needs-model",
+    });
+    expect(rules(bash("git status", { workingDirectory: "/Users/dev/notes" }), extra)).toEqual({
+      kind: "needs-model",
+    });
+  });
+
   it("allows the Project's own command with plain arguments only", () => {
     const own = { projectCommands: ["bun run test"] };
     expect(rules(bash("bun run test"), own)).toMatchObject({ rule: "project-command" });
