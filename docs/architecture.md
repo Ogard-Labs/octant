@@ -8517,13 +8517,17 @@ mechanisms are:
   `run-action` command: the caller names the action, never its text, and the
   host reads the line from the Project record now, then types it into a
   terminal the window already owns, entering the action's folder from the root
-  first. It therefore runs under that terminal's confinement and posture with
+  first, grouping the whole command behind that folder change so a folder that
+  has gone away stops every statement of it, and rechecking the window's
+  authority and binding after the root resolves. It therefore runs under that terminal's confinement and posture with
   the same authority checks as any other write, and typing into a shell that is
   running another program reaches that program. The header buttons (the first
   three, with the rest in a menu) and the command palette's Actions group ask
   the window to run one; the window reuses a Project terminal it already
   pinned, otherwise opens and pins one, and shows it in Zen, the Project
-  terminal's only surface.
+  terminal's only surface. A refusal means nothing was typed, so the window may try
+  another terminal; a lost reply leaves the outcome unknown, so it is reported
+  and never retried, since the command may not be safe to run twice.
 - **Terminal Browser grant.** A person may start a Code thread
   terminal with a Browser grant, so a provider CLI they type there can drive
   that thread's Browser and nothing else. It is off by default, asked for per

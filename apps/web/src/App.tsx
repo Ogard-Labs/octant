@@ -313,6 +313,7 @@ import { projectPullRequestKey } from "./code/CodeProjectPullRequests";
 import { OctantToast } from "./ui/base/OctantToast";
 import { useProjectController } from "./projects/useProjectController";
 import { ProjectActionButtons } from "./projects/ProjectActionButtons";
+import { runProjectAction as runSavedProjectAction } from "./projects/runProjectAction";
 import { ProjectThreadsProvider } from "./projects/ProjectThreadsSection";
 import { useProviderController } from "./providers/useProviderController";
 import { ModelToolVerificationContext } from "./providers/ModelToolVerificationContext";
@@ -6523,36 +6524,23 @@ function LaunchedShell(
    * and approval posture, so this only names the action.
    */
   async function runProjectAction(projectId: ProjectId, action: ProjectAction): Promise<void> {
-    const run = (terminalId: CodeTerminalId) =>
-      projectTerminalClient
-        .execute({ kind: "run-action", projectId, terminalId, actionId: action.id })
-        .catch(() => undefined);
     // Zen holds the card, so its space has to be loaded before a shell starts:
     // a shell with no card to show it would only be stopped again.
     if (!zen.active) await zen.enterZen();
-    let ran: Awaited<ReturnType<typeof run>>;
-    for (const element of zen.space?.elements ?? []) {
-      if (element.kind !== "project-terminal") continue;
-      if (String(element.projectId) !== String(projectId)) continue;
-      const result = await run(element.terminalId);
-      if (result?.kind === "project-terminal" && result.terminal.state === "running") {
-        ran = result;
-        break;
-      }
-    }
-    if (ran === undefined) {
-      const terminalId = await addZenProjectTerminal(projectId);
-      if (terminalId === undefined) return;
-      ran = await run(terminalId);
-    }
-    if (ran?.kind === "project-terminal-refused") {
-      setThreadExportNotice(ran.message);
-      return;
-    }
-    if (ran?.kind !== "project-terminal") {
-      setThreadExportNotice(`${action.name} could not be run.`);
-      return;
-    }
+    await runSavedProjectAction(
+      {
+        execute: (command) => projectTerminalClient.execute(command),
+        pinnedTerminals: (zen.space?.elements ?? []).flatMap((element) =>
+          element.kind === "project-terminal" && String(element.projectId) === String(projectId)
+            ? [element.terminalId]
+            : [],
+        ),
+        openTerminal: () => addZenProjectTerminal(projectId),
+        notify: setThreadExportNotice,
+      },
+      projectId,
+      action,
+    );
   }
 
   function addZenBrowser(sourceContext: import("@octant/contracts/zen").ZenSourceContext): void {

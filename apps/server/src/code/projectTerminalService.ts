@@ -206,6 +206,20 @@ export class ProjectTerminalService {
               "This Project's folder is unavailable. Relink the Project.",
             );
           }
+          // The root was resolved across an await. Switching the window to
+          // another Project, or a relink or archive, in between must not type
+          // into a shell the window no longer holds.
+          const settled = this.#authority(windowId, command.projectId);
+          if (
+            settled.kind === "refused" ||
+            owner.ended ||
+            String(settled.bindingRevisionId) !== String(owner.bindingRevisionId)
+          ) {
+            return refused(
+              "authority-revoked",
+              "This Project changed while its action was starting.",
+            );
+          }
           this.#options.terminals.write(String(command.terminalId), actionLine(root, action));
           return this.#view(command.terminalId, owner);
         }
@@ -510,9 +524,12 @@ function refused(reason: ProjectTerminalRefusalReason, message: string): Project
  * holds, enter the action's folder from the Project root (so one action does
  * not inherit the folder an earlier one left the shell in), and run the
  * command. The path is single-quoted, so a name cannot be read as an option or
- * split into words.
+ * split into words. The whole command sits in a group behind the folder change,
+ * so a folder that has gone away stops every statement of it (`a; b` would
+ * otherwise run `b` in the old folder); the group's closing brace is on its own
+ * line so a trailing comment in the command cannot swallow it.
  */
 function actionLine(root: string, action: ProjectAction): string {
   const folder = action.directory === "." ? root : `${root}/${action.directory}`;
-  return `\u0015cd '${folder.replaceAll("'", "'\\''")}' && ${action.command}\r`;
+  return `\u0015cd '${folder.replaceAll("'", "'\\''")}' && { ${action.command}\r}\r`;
 }

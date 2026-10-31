@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -172,6 +173,7 @@ function harness(
     readonly projects?: Map<string, Project>;
     readonly access?: (window: string, project: string) => boolean;
     readonly root?: string | undefined;
+    readonly resolveRoot?: () => Promise<string | undefined>;
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "octant-project-terminal-"));
@@ -194,7 +196,7 @@ function harness(
     canAccessProject: (window, id) =>
       options.access?.(String(window), String(id)) ??
       (String(window) === ids.window && String(id) === ids.project),
-    resolveRoot: async () => ("root" in options ? options.root : root),
+    resolveRoot: options.resolveRoot ?? (async () => ("root" in options ? options.root : root)),
     suggestActions: async () => [
       { name: "Dev", command: "bun run dev", directory: ".", source: "package.json" as const },
     ],
@@ -251,7 +253,51 @@ describe("Project terminal actions", () => {
     const result = await service.execute(windowId, "local-window", run());
 
     expect(result).toMatchObject({ kind: "project-terminal", terminal: { state: "running" } });
-    expect(terminals.writes).toEqual([`\u0015cd '${root}/apps/web' && bun run dev\r`]);
+    expect(terminals.writes).toEqual([`\u0015cd '${root}/apps/web' && { bun run dev\r}\r`]);
+  });
+
+  it("runs none of a saved command when its folder cannot be entered", async () => {
+    const work = mkdtempSync(join(tmpdir(), "octant-action-line-"));
+    directories.push(work);
+    const projects = new Map([
+      [
+        ids.project,
+        project({
+          actions: [
+            { id: actionId, name: "Clean", command: "echo first; touch ran", directory: "gone" },
+          ],
+        }),
+      ],
+    ]);
+    const { service, terminals } = harness({ projects, root: join(work, "missing-root") });
+    await service.execute(windowId, "local-window", start());
+    await service.execute(windowId, "local-window", run());
+
+    // The shell reads the typed line as the terminal would: Enter is a newline.
+    const typed = (terminals.writes[0] ?? "").replace("\u0015", "").replaceAll("\r", "\n");
+    spawnSync("sh", ["-c", typed], { cwd: work });
+
+    expect(existsSync(join(work, "ran"))).toBe(false);
+  });
+
+  it("types nothing when the window left the Project while the root was resolving", async () => {
+    let allowed = true;
+    let leaveDuringResolve = false;
+    const { service, terminals } = harness({
+      projects: withActions("."),
+      access: (window, project) => allowed && window === ids.window && project === ids.project,
+      resolveRoot: async () => {
+        if (leaveDuringResolve) allowed = false;
+        return root;
+      },
+    });
+    await service.execute(windowId, "local-window", start());
+    leaveDuringResolve = true;
+
+    const result = await service.execute(windowId, "local-window", run());
+
+    expect(refusal(result)).toBe("authority-revoked");
+    expect(terminals.writes).toEqual([]);
   });
 
   it("refuses an action the Project did not save, and a paired device, and types nothing", async () => {
