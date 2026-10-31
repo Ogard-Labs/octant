@@ -8506,7 +8506,10 @@ mechanisms are:
   one-line command, and a folder inside the bound root. The person saves the
   whole list from the Project overview (`project.code-actions-changed@1`); a
   paired device is refused, because a saved line is later typed into the
-  person's own shell. A Work or archived Project has none. The host suggests
+  person's own shell. An archived Project has none, and a Work Project has none
+  while Work's shell is withheld (today's build); once Work takes the shared
+  capability set, its actions follow the thread's guardrail level like Code's.
+  The host suggests
   actions from the root `package.json` scripts (with the package manager the
   lockfile names, leaving out install and publish hooks) and the root
   `Makefile` targets; it reads them without running anything, and nothing is
