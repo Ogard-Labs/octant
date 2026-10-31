@@ -100,6 +100,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
     replicaMembershipClient,
     replicaStoreSettingsClient,
     replicaSyncStatusClient,
+    secretStoresClient,
     usageClient,
     usageDashboardClient,
   } = props.clients;
@@ -190,6 +191,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
       {...(canvasClient === undefined ? {} : { canvasClient })}
       {...(desktopPaneClient === undefined ? {} : { desktopPaneClient })}
       {...(replicaStoreSettingsClient === undefined ? {} : { replicaStoreSettingsClient })}
+      {...(secretStoresClient === undefined ? {} : { secretStoresClient })}
       {...(replicaMembershipClient === undefined ? {} : { replicaMembershipClient })}
       replicaSyncStatusClient={replicaSyncStatusClient}
       folderBrowseClient={folderBrowseClient}

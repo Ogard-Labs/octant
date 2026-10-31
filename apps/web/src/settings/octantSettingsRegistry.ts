@@ -972,6 +972,28 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
+      id: "secret-stores",
+      label: "Secret stores",
+      scope: "host",
+      keywords:
+        "secret stores 1password op command line vault item reference link unlink api key credential password manager keychain pointer fetch on use",
+      settings: [
+        {
+          id: settingId("secret-store-link"),
+          label: "Linked secret stores",
+          scope: "host",
+          keywords:
+            "link unlink 1password op cli secret store vault locked not installed password manager",
+        },
+        {
+          id: settingId("secret-store-check"),
+          label: "Check an item",
+          scope: "host",
+          keywords: "check item reference op vault found locked missing test",
+        },
+      ],
+    },
+    {
       id: "data",
       label: "Data & storage",
       scope: "host",

@@ -3600,12 +3600,17 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
 - **Credentials.** API keys live in the host credential store — macOS Keychain
   on macOS, freedesktop Secret Service on Linux — and are reached only
   through the host's loopback credential broker by opaque UUID reference.
-  A person may also link an external secret store: the broker resolves a
-  linked value at use, by opaque reference, and the value never enters the
-  journal, logs, diagnostics, or the renderer (allowed; not built yet).
   The desktop saves a key from its own renderer; a host without the desktop
   app takes it only from the host-local `octant provider key` command, as
   [security and authority](#security-and-authority) states.
+  A person may also link an external secret store (the 1Password CLI `op`
+  today) and point a provider's API key, or a connector's secret, at an item in
+  it instead of pasting the value. The credential store then holds a pointer
+  under the same id: the store name and the item reference, which names an item
+  and is not a secret. The broker follows the pointer when the value is used,
+  hands the value to the caller that asked through the existing resolve route,
+  and keeps nothing; the value never enters the journal, logs, diagnostics, or
+  the renderer ([linked secret stores](#linked-secret-stores) states the rules).
   A provider instance holds one stored value: a plain key, or a JSON pool of
   labelled keys in list order with one active key ([`apiKeyPool.ts`](../packages/host-runtime/src/apiKeyPool.ts)).
   A request sends the active key first, then the others in list order.
@@ -6900,8 +6905,8 @@ same. This holds in Chat, Work, and Code.
   Spaces), are built; Cua Spaces, reached through the person's local Cua daemon, is
   designed (accepted on 2026-10-27), and its local-daemon port and its driver
   for a Space on this computer or on another of the person's computers that
-  the recipe names are built but
-  offered on no host until the maintainer's live smokes pass; see
+  the recipe names are built and
+  offered, with the maintainer's live smokes still owed; see
   [Disposable desktops](design/disposable-desktops.md#cua-spaces-through-the-local-daemon).
   A driver whose provider runs a daemon on this machine reaches it only
   through the host's daemon port: one Unix socket under the home of Octant's
@@ -6919,9 +6924,10 @@ same. This holds in Chat, Work, and Code.
   billed lease is estimated from the recipe's hourly cost before it starts
   and refused if it would pass the cap, and no agent can change the cap
   ([Disposable desktops: C5](design/disposable-desktops.md#expiry-and-teardown-when-the-daemons-host-may-die)).
-  No host offers a
-  cloud provider yet, so a recipe can
-  name only the host-local provider.
+  A host lists E2B, and Cua on Linux, from its first start; a recipe can
+  name either, and a provider whose setup is missing (no credential store, or
+  no Cua daemon running) is listed as needing setup and refuses every start
+  ([Disposable desktops: offering E2B and Cua](design/disposable-desktops.md#built-offering-e2b-and-cua)).
 
 **Canvas export.** A destination plugin contributes an export target through
 `@octant/plugin-api`. The contribution names the formats it accepts. The host
@@ -8686,6 +8692,33 @@ access` agree); a thread's own change is journaled as
   Project inactive or rebound ends the terminal the same way. A host restart
   ends a terminal still recorded as running as `host-restarted`, since its
   process did not survive.
+- **Project actions.** A Code Project keeps up to twelve named actions (for
+  example Run, Test, Dev) on its record: a name unique within the Project, a
+  one-line command, and a folder inside the bound root. The person saves the
+  whole list from the Project overview (`project.code-actions-changed@1`); a
+  paired device is refused, because a saved line is later typed into the
+  person's own shell. An archived Project has none, and a Work Project has none
+  while Work's shell is withheld (today's build); once Work takes the shared
+  capability set, its actions follow the thread's guardrail level like Code's.
+  The host suggests
+  actions from the root `package.json` scripts (with the package manager the
+  lockfile names, leaving out install and publish hooks) and the root
+  `Makefile` targets; it reads them without running anything, and nothing is
+  saved until the person confirms. Running an action is the Project terminal's
+  `run-action` command: the caller names the action, never its text, and the
+  host reads the line from the Project record now, then types it into a
+  terminal the window already owns, entering the action's folder from the root
+  first, grouping the whole command behind that folder change so a folder that
+  has gone away stops every statement of it, and rechecking the window's
+  authority and binding after the root resolves. It therefore runs under that terminal's confinement and posture with
+  the same authority checks as any other write, and typing into a shell that is
+  running another program reaches that program. The header buttons (the first
+  three, with the rest in a menu) and the command palette's Actions group ask
+  the window to run one; the window reuses a Project terminal it already
+  pinned, otherwise opens and pins one, and shows it in Zen, the Project
+  terminal's only surface. A refusal means nothing was typed, so the window may try
+  another terminal; a lost reply leaves the outcome unknown, so it is reported
+  and never retried, since the command may not be safe to run twice.
 - **Terminal Browser grant.** A person may start a Code thread
   terminal with a Browser grant, so a provider CLI they type there can drive
   that thread's Browser and nothing else. It is off by default, asked for per
@@ -9451,6 +9484,78 @@ access` agree); a thread's own change is journaled as
     an unreachable store leaves the request for the next start. The authority
     boundary above is unchanged: the new route sits behind the same bridge
     secret, window capability, no-`Origin`, and loopback checks.
+    <a id="linked-secret-stores"></a>
+
+- **Linked secret stores.** A person may link a secret store they already use
+  and point a credential at an item in it. Octant never holds the value: the
+  broker fetches it at use, returns it to the one caller that asked, and drops
+  it. Built for the 1Password CLI; the seam is a closed list of adapters
+  ([`linkedSecretStores.ts`](../packages/host-runtime/src/linkedSecretStores.ts)),
+  each answering `probe` and `read`, so another tool (the Bitwarden CLI, a macOS
+  Keychain item) is a new adapter and no change to the broker, the journal, or
+  Settings.
+  - **Link.** Settings › Secret stores sends `link-store` to the host-only
+    `/api/secret-stores/commands` route (a local window; `/api/secret-stores` is
+    a remote local-only prefix, so a paired device is refused). The broker's
+    `/v1/secret-stores/link` links a store only while its tool is installed and
+    the store is open, and records the store and the link time in
+    `secret-stores/linked-secret-stores.json` in the data directory (mode 0600,
+    removed by a complete-data removal). A locked store, a missing tool, or an
+    unreachable store is reported as a value (`store-locked`,
+    `tool-not-installed`, `store-unavailable`) and nothing is linked. Unlinking
+    leaves every pointer in place and makes each fail closed
+    (`linked-store-not-linked`) until the store is linked again.
+  - **Point.** `point-provider-key` names a provider instance, a store, and an
+    item reference. The host accepts it only for an instance that sends an API
+    key or bearer token, only after the broker proved the item resolves right
+    now (a locked store or missing item refuses and writes nothing), and never
+    over a key the person stored: that refuses as `key-already-stored`, so the
+    person removes it first. The pointer replaces only another pointer.
+    The host rereads the provider after the item check: a provider removed or
+    reconfigured meanwhile has already had its key cleared, so the new pointer is
+    deleted and the change refused (`provider-changed`), the same protection the
+    pasted-key route applies, so a delayed write never sends an old endpoint's
+    key to a new one.
+    A connector's secret does the same: in Add an MCP server, a secret row
+    marked "From 1Password" sends `linked: { store, reference }` with an empty
+    value, the host points the generated secret id at the item (refusing the add
+    when the store is locked or the item is missing) and journals it with a
+    `connector-secret` target, and removing the server clears and journals the
+    pointer. The id resolves through the broker's connector namespace; no other
+    namespace follows a pointer, and no route returns one as a value. A pasted value that looks like a pointer is
+    refused by the broker's `set`, and the desktop's key operations refuse to
+    replace or edit a pointer, so a reference changes only through the
+    journaled route.
+  - **Use.** The provider's existing path asks the broker to resolve the
+    instance id. The broker reads the pointer, runs the adapter (for `op`:
+    `op read --no-newline <reference>`, with the reference validated as an
+    `op://vault/item[/section]/field` address and passed as one argument, never
+    through a shell, with Octant's own `OCTANT_*` variables removed from the
+    tool's environment, a timeout, and a size bound), and returns the value in
+    that response alone. The tool's own words are read once to classify the
+    outcome and dropped. A fetch is never cached: a rotated item is used at the
+    next request.
+  - **Failure is a value and fails closed.** `locked`, `missing`, `unavailable`,
+    `not-linked`, and `invalid-reference` each answer with a typed cause and no
+    value, and the provider's turn fails with its existing unauthenticated or
+    unavailable state and a message that names the store and never an item or a
+    value. There is no fallback to a stored copy, a file, or an environment
+    variable.
+  - **Journal.** `secret-store.recorded@1` on one host-wide aggregate
+    ([`secretStoresJournal.ts`](../apps/server/src/secretStores/secretStoresJournal.ts),
+    [`secretStores.ts` contract](../packages/contracts/src/secretStores.ts))
+    records `secret-store.linked`, `secret-store.unlinked`,
+    `credential-reference.set` (store, reference, whether it replaced one) and
+    `credential-reference.cleared`, each with the local window id. A reference
+    names an item and is journaled; the value is not an input to any record, and
+    the schema rejects any other field. A change is made and then journaled; when
+    the journal refuses, a link or a new reference is undone and the answer says
+    nothing changed, and an unlink or clear that cannot be recorded says it was
+    made but not recorded. An earlier pointer is put back through the broker's
+    `restore`, which writes the pointer without reading its item (the item may be
+    gone or its store locked by then); if it cannot be put back, the new pointer
+    is removed and the answer says so, so an unjournaled pointer never stays
+    active.
 - **Organization sign-in on a host without the desktop app.** An Azure AI
   Foundry endpoint that signs in with a directory account and opted in to it
   (`deviceCodeSignIn`) signs in with a device code from
@@ -10084,8 +10189,10 @@ under the rules in [Modes](#modes-chat-work-and-code). Of the pull-request
 actions, only a fast-forward push, opening a ready pull request, a person's
 merge of one pull request from a local window, and the Merge when ready and
 Auto-fix switches the person turns on there are built; the rest, Chat routines,
-the key providers' skill folders and extra skill folders added in Settings, and
-linked external secret stores are allowed and not built yet.
+and the key providers' skill folders and extra skill folders added in Settings,
+are allowed and not built yet. Linked external secret stores are built for the
+1Password CLI, under [linked secret stores](#linked-secret-stores): a pointer
+in the credential broker, the value fetched at use and never kept.
 The [guardrail levels](#security-and-authority) and the
 [key providers' native features](#providers) are in scope; of them only
 Guarded, Accept edits, Reviewed for Claude Code and Codex in Code, and
