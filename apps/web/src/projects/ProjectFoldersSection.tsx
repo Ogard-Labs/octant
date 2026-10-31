@@ -69,12 +69,17 @@ export function ProjectFoldersSection(props: ProjectFoldersSectionProps) {
           ? { kind: "done", message: done }
           : { kind: "failed", message: outcome.message },
       );
-      if (outcome.status === "changed") setPicking(false);
     } catch {
       if (alive.current)
         setNotice({ kind: "failed", message: "The Project could not be changed." });
     } finally {
-      if (alive.current) setPending(false);
+      // The host folder browser stays in its selecting state once it has
+      // handed over a receipt, so it closes on every outcome; a refusal shows
+      // here and the next Add folder… opens a fresh one.
+      if (alive.current) {
+        setPending(false);
+        setPicking(false);
+      }
     }
   }
 

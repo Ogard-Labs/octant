@@ -1,3 +1,4 @@
+import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ProjectRootPickerResult } from "@octant/contracts/desktop-bridge";
 import { decodeProjectSummary, type ProjectSummary } from "@octant/contracts/projects";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
@@ -188,6 +189,53 @@ describe("Project folders", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Your home folder cannot be added to a Project.");
     expect(alert).toHaveAttribute("aria-live", "assertive");
+  });
+
+  it("closes the host folder browser and shows the refusal when the host refuses the folder it chose", async () => {
+    const user = userEvent.setup();
+    const browse = vi.fn(async () => ({
+      breadcrumbs: [],
+      candidates: [
+        {
+          candidateId: "80000000-0000-4000-8000-000000000020",
+          displayName: "Home",
+          isGitRepository: false,
+          isSelectable: true,
+        },
+      ],
+      hasMore: false,
+      browsedAt: "2026-10-31T12:00:00.000Z",
+    }));
+    const select = vi.fn(async () => ({
+      receiptId: RECEIPT,
+      displayName: "Home",
+      selectedAt: "2026-10-31T12:00:00.000Z",
+    }));
+    const onAdd = vi.fn(async () => ({
+      status: "refused" as const,
+      message: "Choose a folder inside your home folder, not the home folder itself.",
+    }));
+    render(
+      <ProjectFoldersSection
+        folderBrowseClient={{ browse, select } as unknown as FolderBrowseClient}
+        hostId="80000000-0000-4000-8000-000000000099"
+        onAdd={onAdd}
+        onRemove={vi.fn()}
+        project={project()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add folder…" }));
+    await user.click(await screen.findByRole("button", { name: "Select" }));
+
+    expect(onAdd).toHaveBeenCalledWith(RECEIPT);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Choose a folder inside your home folder, not the home folder itself.",
+    );
+    // A second try opens a fresh browser that is not stuck selecting.
+    await user.click(screen.getByRole("button", { name: "Add folder…" }));
+    expect(await screen.findByRole("button", { name: "Select" })).toBeEnabled();
   });
 
   it("says folder selection is unavailable when this window has no picker", async () => {

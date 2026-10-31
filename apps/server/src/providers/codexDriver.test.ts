@@ -291,11 +291,17 @@ function fixture(
 async function acquireConnection(
   driver: ReturnType<typeof makeCodexDriver>,
   mode?: "chat" | "work" | "code",
+  extraFolders?: ReadonlyArray<string>,
 ) {
   const scope = await Effect.runPromise(Scope.make());
   const connection = await Effect.runPromise(
     driver
-      .acquire({ instanceId, projectRoot, ...(mode === undefined ? {} : { mode }) })
+      .acquire({
+        instanceId,
+        projectRoot,
+        ...(mode === undefined ? {} : { mode }),
+        ...(extraFolders === undefined ? {} : { extraFolders }),
+      })
       .pipe(Effect.provideService(Scope.Scope, scope)),
   );
   return { connection, close: () => Effect.runPromise(Scope.close(scope, Exit.void)) };
@@ -1926,6 +1932,52 @@ describe("Codex thread and turn lifecycle", () => {
     expect(f.closeCount()).toBe(1);
     expect(f.startCount()).toBe(2);
     await gatedTurn.close();
+  });
+
+  it("resumes a thread after the Project's extra folders changed by closing the idle process that still holds it", async () => {
+    // Adding or removing a folder changes the lease's folder set, so the
+    // process the thread last ran in is idle under the old set.
+    let oldFoldersAlive = () => false;
+    const f = fixture({
+      threadResume: async () => {
+        if (oldFoldersAlive()) {
+          throw new CodexRpcClientFailure("remote", "Codex request failed.", {
+            remoteCode: -32600,
+            remoteMessage: "thread t already has an active writer",
+          });
+        }
+        return {
+          thread: { id: "thread-moved" },
+          model: "gpt-5.4",
+          modelProvider: "openai",
+          serviceTier: null,
+          cwd: projectRoot,
+        };
+      },
+    });
+    const driver = makeCodexDriver(f.options());
+    const resume = (connection: Awaited<ReturnType<typeof acquireConnection>>["connection"]) =>
+      Effect.runPromise(
+        Effect.exit(
+          connection.resume({
+            sessionId,
+            resumeCursor: { driverKind: "codex", value: "thread-moved" },
+            executionPolicy: "approval-gated",
+          }),
+        ),
+      );
+
+    const before = await acquireConnection(driver, "code");
+    expect(Exit.isSuccess(await resume(before.connection))).toBe(true);
+    await before.close();
+    oldFoldersAlive = () => f.closeCount() === 0;
+
+    const after = await acquireConnection(driver, "code", ["/tmp/octant-codex-notes"]);
+    const resumed = await resume(after.connection);
+    expect(Exit.isSuccess(resumed)).toBe(true);
+    expect(f.closeCount()).toBe(1);
+    expect(f.startCount()).toBe(2);
+    await after.close();
   });
 
   it("resume reports another Codex process using the thread when the writer conflict persists", async () => {

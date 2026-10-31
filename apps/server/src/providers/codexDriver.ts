@@ -900,24 +900,25 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
       // app-server that last ran it, `thread/unsubscribe` does not unload it,
       // and another app-server's resume is refused ("already has an active
       // writer") until that process ends. A thread whose posture changed
-      // between turns last ran under another lease of this root and mode, idle
-      // for up to its delay, so the idle ones close now. One a connection still
-      // holds keeps running and the resume reports the conflict.
-      const closeIdleOtherPostures = (executionPolicy: ProviderExecutionPolicy) =>
+      // between turns, or whose Project gained or lost an extra folder, last ran
+      // under another lease of this root and mode, idle for up to its delay, so
+      // every idle lease of this root and mode other than the one this resume
+      // uses closes now. The folder set is matched loosely on purpose: the old
+      // set is gone from the Project by the time the thread resumes. One a
+      // connection still holds keeps running and the resume reports the conflict.
+      const closeIdleOtherLeases = (executionPolicy: ProviderExecutionPolicy) =>
         Effect.promise(() =>
-          Promise.all(
-            ProviderExecutionPolicy.literals
-              .filter((other) => other !== executionPolicy)
-              .map((other) =>
-                options.runtimeRegistry.closeIdleLease(options.instanceId, leaseKey(other)),
-              ),
-          ),
-        ).pipe(Effect.asVoid);
+          options.runtimeRegistry.closeIdleLeasesWhere(options.instanceId, (lease) => {
+            if (lease === leaseKey(executionPolicy)) return false;
+            const parsed = codexThreadLease(lease);
+            return parsed?.root === projectRoot && parsed.mode === threadMode;
+          }),
+        );
       return Effect.gen(function* () {
         return yield* makeConnection(
           options,
           leaseFor,
-          closeIdleOtherPostures,
+          closeIdleOtherLeases,
           projectRoot,
           extraFolders,
           mode,
@@ -941,6 +942,21 @@ interface CodexLeasedRuntime {
   readonly client: CodexClientPort;
   readonly version: string;
   readonly exited: Promise<void>;
+}
+
+/** The root and mode a thread lease key names, or undefined for any other lease. */
+function codexThreadLease(
+  lease: string,
+): { readonly root: string; readonly mode: string } | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(lease);
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(parsed) || parsed.length !== 4) return undefined;
+  const [root, , mode] = parsed;
+  return typeof root === "string" && typeof mode === "string" ? { root, mode } : undefined;
 }
 
 function acquireRuntime(
@@ -1213,7 +1229,7 @@ function makeConnection(
   leaseFor: (
     executionPolicy: ProviderExecutionPolicy,
   ) => Effect.Effect<CodexLeasedRuntime, ProviderFailure, Scope.Scope>,
-  closeIdleOtherPostures: (executionPolicy: ProviderExecutionPolicy) => Effect.Effect<void>,
+  closeIdleOtherLeases: (executionPolicy: ProviderExecutionPolicy) => Effect.Effect<void>,
   projectRoot: string,
   extraFolders: ReadonlyArray<string>,
   mode: ProviderAcquireInput["mode"],
@@ -1737,7 +1753,7 @@ function makeConnection(
                 Effect.catchAll((error) =>
                   isActiveWriterConflict(error) && attempt < CODEX_RESUME_WRITER_CONFLICT_ATTEMPTS
                     ? (attempt === 1
-                        ? closeIdleOtherPostures(input.executionPolicy)
+                        ? closeIdleOtherLeases(input.executionPolicy)
                         : Effect.void
                       ).pipe(
                         Effect.zipRight(

@@ -2525,7 +2525,9 @@ Git start in the main folder. Built.
   `DEFAULT_DENY_READ_PATHS` refusal of ancestor roots apply to extra folders
   unchanged. A folder missing on disk at launch is left out of the profile
   rather than failing it. The lease or connection a runtime reuses is keyed
-  by its folders, and a change applies from the next turn.
+  by its folders, and a change applies from the next turn. A Codex thread
+  that resumes after its folders changed first closes the idle lease of the
+  same root and mode that still holds it, as after a posture change.
 - **What the agent is told.** The runtime only sees its working directory,
   so each Work and Code turn carries an instruction naming the extra folders
   by absolute path and saying that commands, Git and checkouts start in the
