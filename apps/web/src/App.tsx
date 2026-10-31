@@ -1,4 +1,5 @@
 import { SidebarThreadTabsContext, type SidebarThreadTabs } from "./shell/sidebarThreadTabs";
+import { autoReviewFor } from "./code/autoReview";
 import {
   createTabActivationRegistry,
   TabActivationProvider,
@@ -4420,7 +4421,9 @@ function LaunchedShell(
     if (selected === undefined || merge === undefined || headSha === "") {
       return Promise.resolve({ status: "unavailable", reason: "unavailable" });
     }
-    return merge({ ...selected, method, headSha });
+    // The Confirm merge click is the person's confirmation of this head and of
+    // the required checks; the host verifies both before it merges.
+    return merge({ ...selected, method, headSha, confirmed: true });
   }
 
   const rootLinkActions = useMemo(
@@ -4641,6 +4644,8 @@ function LaunchedShell(
       previewSplitResize: controller.previewSplitResize,
       recoverZen: zen.recoverZen,
       refuseUnlessCreatableDestination,
+      addProjectExtraFolder: projectController.addExtraFolder,
+      removeProjectExtraFolder: projectController.removeExtraFolder,
       relinkProject: projectController.relink,
       renameCodeThread,
       renameProject: projectController.rename,
@@ -4694,7 +4699,9 @@ function LaunchedShell(
       setProjectArchived: projectController.setArchived,
       setProjectColor: projectController.setColor,
       setProjectProviderPolicy: projectController.setProviderPolicy,
+      setProjectNativeProviders: projectController.setNativeProviders,
       setProjectPermissionMode: projectController.setCodePermissionMode,
+      setProjectAutoReviewer: projectController.setCodeAutoReviewer,
       setProjectBrandKit: projectController.setBrandKit,
       setProjectDesktopRecipe: projectController.setDesktopRecipe,
       setProjectActions: projectController.setActions,
@@ -7178,8 +7185,13 @@ function LaunchedShell(
             controller: firstRunController,
             onSelectModel: selectFirstRunModel,
             autoSupportedFor: (providerInstanceId) =>
-              providerController.observedByInstance.get(providerInstanceId)?.capabilities
-                .harnessAutoReview === "supported",
+              autoReviewFor({
+                providerInstanceId,
+                instances: providerController.instances,
+                observedByInstance: providerController.observedByInstance,
+                chosen: codeController.bootstrap?.settings.autoReviewer,
+                shieldModel: codeController.bootstrap?.settings.shieldModel,
+              })?.status === "reviewer",
             onSetDefaultMode: async (mode) => {
               const settings = codeController.bootstrap?.settings;
               if (settings === undefined) return false;

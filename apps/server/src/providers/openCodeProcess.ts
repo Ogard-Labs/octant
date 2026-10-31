@@ -38,6 +38,11 @@ import {
 } from "../process/threadEgressPolicy";
 import { makeBoundedProviderStderr } from "./providerProcessDiagnostic";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
+import {
+  acquireProviderRuntimeNetwork,
+  type ProviderRuntimeNetworkPort,
+  type ProviderRuntimeProxiedNetwork,
+} from "../network/providerRuntimeNetwork";
 
 export interface OpenCodeBinaryProbe {
   readonly binaryPath: string;
@@ -67,6 +72,8 @@ export interface OpenCodeServerConnection {
 export interface OpenCodeProcessStartInput {
   readonly binaryPath: string;
   readonly cwd: string;
+  /** The Project's extra folders, granted what `cwd` is granted. */
+  readonly extraFolders?: ReadonlyArray<string>;
   /** Product mode used to derive the OS process policy before launch. */
   readonly mode?: "chat" | "work" | "code";
   /** Effective thread policy used to derive filesystem/process/network limits. */
@@ -79,6 +86,11 @@ export interface OpenCodeProcessStartInput {
    * into the private configuration; a 2.x launch without them denies all.
    */
   readonly betaPermissions?: ReadonlyArray<PermissionV2Rule>;
+  /**
+   * The launch's own egress proxy, set by this port below Full access when
+   * the host routes runtimes through it. A caller's value is ignored.
+   */
+  readonly network?: ProviderRuntimeProxiedNetwork;
 }
 
 export interface OpenCodeProcessPort {
@@ -102,6 +114,8 @@ export interface OpenCodeProcessOptions {
   readonly onDiagnostic?: (message: string) => void;
   readonly shutdownTimeoutMs?: number;
   readonly startupTimeoutMs?: number;
+  /** Routes the runtime through its own egress proxy below Full access. */
+  readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
 }
 
 export interface OpenCodeProbeOptions {
@@ -999,13 +1013,30 @@ function prepareOpenCodeLaunch(
             ? standinBin
             : `${standinBin}:${existingPath}`;
       }
-      const networkEgress = materializeOsNetworkEgress(
-        resolveProviderRuntimeEgressPolicy({ mode, executionPolicy }),
-      );
+      const networkEgress =
+        input.network === undefined
+          ? materializeOsNetworkEgress(
+              resolveProviderRuntimeEgressPolicy({ mode, executionPolicy }),
+            )
+          : ({ kind: "proxied", endpoint: input.network.endpoint } as const);
+      // OpenCode is a loopback server, and its OS rules open only its own
+      // port and the tool bridge ports, so loopback stays off the proxy.
+      const environment =
+        input.network === undefined
+          ? profile.environment
+          : {
+              ...profile.environment,
+              ...input.network.environment,
+              NO_PROXY: "127.0.0.1,localhost,::1",
+              no_proxy: "127.0.0.1,localhost,::1",
+            };
       const launch = confinement.prepare({
         executable: input.binaryPath,
         args,
         boundRoot: root,
+        ...(mode === "chat" || input.extraFolders === undefined
+          ? {}
+          : { extraBoundRoots: input.extraFolders }),
         temporaryDirectory,
         additionalWriteRoots: writeRoots,
         readRoots,
@@ -1045,7 +1076,7 @@ function prepareOpenCodeLaunch(
             }
           : {}),
       });
-      return { ...launch, cwd: root, environment: profile.environment };
+      return { ...launch, cwd: root, environment };
     },
     catch: (error) =>
       failure(
@@ -1521,10 +1552,22 @@ export function makeOpenCodeProcessLive(
           catch: () =>
             failure("invalid-configuration", "OpenCode runtime routing could not be prepared."),
         });
+        const executionPolicy = input.executionPolicy ?? "approval-gated";
+        const network =
+          executionPolicy === "full-access"
+            ? undefined
+            : yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
+                runtime: "opencode",
+                root: input.cwd,
+                executionPolicy,
+                loopbackPorts: input.loopbackPorts ?? [],
+                environment: options.inheritedEnvironment ?? process.env,
+              });
+        const { network: _ignored, ...requested } = input;
         let terminate: (() => Promise<void>) | undefined;
         return yield* Effect.acquireReleaseInterruptible(
           acquireOpenCodeServer(
-            input,
+            network === undefined ? requested : { ...requested, network },
             { ...resolvedOptions, runtimeConfig },
             runtime,
             probe.version,

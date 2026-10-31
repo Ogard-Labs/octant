@@ -37,6 +37,8 @@ const SECRET_SHAPED =
 const SUMMARY_MAX_CHARACTERS = 1_024;
 /** Claude's own checklist tool: it rewrites the whole list on every call. */
 export const CLAUDE_CHECKLIST_TOOL = "TodoWrite";
+/** Claude Code's own subagent tool, offered only when the person turned subagents on. */
+export const CLAUDE_SUBAGENT_TOOL = "Agent";
 const PATH_MAX_CHARACTERS = 4_096;
 /** Claude's own tools that bring outside content to the model, and the input naming what. */
 const OUTSIDE_CONTENT_TOOLS: ReadonlyMap<
@@ -64,6 +66,7 @@ const DECODED_MESSAGE_KINDS = new Set([
   "tool-progress",
   "tool-summary",
   "task",
+  "child-assistant",
   "rate-limit",
   "authentication",
   "status",
@@ -466,10 +469,24 @@ function mapToolUse(
     toolCallId: resolved.state.toolCallId,
     toolName: resolved.state.toolName,
   });
+  if (content.toolName === CLAUDE_SUBAGENT_TOOL) {
+    // The runtime's own subagent: shown as a child run of this thread from
+    // its start. Its own tool calls each pass Octant's gate on their own.
+    const task = normalized(jsonString(content.input, "description") ?? "", SUMMARY_MAX_CHARACTERS);
+    return [
+      start,
+      event(context, {
+        kind: "child-agent-activity",
+        childAgentId: resolved.state.toolCallId,
+        ...(task === undefined ? {} : { task }),
+        status: "starting",
+        summary: "Claude started a subagent.",
+      }),
+    ];
+  }
   const outsideContent = OUTSIDE_CONTENT_TOOLS.get(content.toolName);
   if (outsideContent === undefined) return [start];
-  // The driver offers Claude neither web tool and refuses a session that
-  // reports either, so those mark the thread only if that ever changes.
+  // Offered only to a session the person let use Claude's own web tools.
   // Claude runs each of these itself and hands the model what came back.
   const target = outsideContentTarget(jsonString(content.input, outsideContent.targetKey));
   return [
@@ -482,6 +499,52 @@ function mapToolUse(
       ...(target === undefined ? {} : { target }),
     }),
   ];
+}
+
+/**
+ * A subagent's reply, read for the tools it calls. A web read inside a
+ * subagent reaches the model just as the parent's own does, so it marks the
+ * thread the same way; the child run shows what it is doing. A reply that
+ * names no running `Agent` call of this session is not one Octant opened.
+ */
+function mapChildAssistant(
+  context: ClaudeEventContext,
+  message: Extract<ClaudeDecodedMessage, { readonly kind: "child-assistant" }>,
+): ReadonlyArray<ClaudeMappedMessage> {
+  const parent = context.toolStates.get(message.parentToolUseId);
+  if (
+    parent === undefined ||
+    parent.toolName !== CLAUDE_SUBAGENT_TOOL ||
+    parent.lifecycle !== "active"
+  ) {
+    return [failure("Claude subagent activity did not match a running subagent.")];
+  }
+  const results: ClaudeMappedMessage[] = [];
+  for (const use of message.toolUses) {
+    const toolName = normalized(use.toolName, LABEL_MAX_CHARACTERS);
+    if (toolName === undefined) return [failure("Claude returned invalid tool metadata.")];
+    results.push(
+      event(context, {
+        kind: "child-agent-activity",
+        childAgentId: parent.toolCallId,
+        status: "running",
+        summary: `The subagent is using ${toolName}.`,
+      }),
+    );
+    const outsideContent = OUTSIDE_CONTENT_TOOLS.get(use.toolName);
+    if (outsideContent === undefined) continue;
+    const target = outsideContentTarget(jsonString(use.input, outsideContent.targetKey));
+    results.push(
+      event(context, {
+        kind: "outside-content-read",
+        toolCallId: context.makeToolCallId(),
+        toolName,
+        source: outsideContent.source,
+        ...(target === undefined ? {} : { target }),
+      }),
+    );
+  }
+  return results.length === 0 ? [{ kind: "ignored" }] : results;
 }
 
 const CHECKLIST_STATUSES: Readonly<Record<string, "pending" | "in-progress" | "completed">> = {
@@ -667,6 +730,16 @@ function mapToolResults(
     const state = pair.state!;
     state.lifecycle = "terminal";
     if (!state.emitsActivity) continue;
+    if (state.toolName === CLAUDE_SUBAGENT_TOOL) {
+      results.push(
+        event(context, {
+          kind: "child-agent-activity",
+          childAgentId: state.toolCallId,
+          status: pair.result.isError ? "failed" : "completed",
+          summary: pair.result.isError ? "The subagent failed." : "The subagent finished.",
+        }),
+      );
+    }
     if (pair.result.isError) {
       results.push(
         event(context, {
@@ -1134,6 +1207,8 @@ export function mapClaudeMessage(
       return [{ kind: "ignored" }];
     case "task":
       return mapTask(context, message);
+    case "child-assistant":
+      return mapChildAssistant(context, message);
     case "rate-limit": {
       // Every rate-limit message says how much of a window is spent, not only
       // the ones that reject a turn. Passing the window through is what lets a

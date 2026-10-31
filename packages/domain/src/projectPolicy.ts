@@ -1,10 +1,12 @@
 import type { CanvasDesignBrand } from "@octant/contracts/canvas";
 import type { DesktopRecipe, LeasableDesktopProvider } from "@octant/contracts/desktop-lease";
 import type { AggregateVersion, UtcTimestamp } from "@octant/contracts/events";
-import type { PermissionMode } from "@octant/contracts/providers";
+import type { KeyProviderDriverKinds, PermissionMode } from "@octant/contracts/providers";
+import type { AutoReviewer } from "@octant/contracts/shield";
 import { designBrandTokenRefusal } from "./canvasDesignFrameKit";
 import { desktopNetworkAllowed } from "./desktopLeasePolicy";
 import {
+  MAX_PROJECT_EXTRA_FOLDERS,
   decodeProjectRank,
   type BindingRevisionId,
   type BoundProject,
@@ -19,6 +21,7 @@ import {
   type Project,
   type ProjectAction,
   type ProjectActor,
+  type ProjectExtraFolder,
   type ProjectColor,
   type ProjectId,
   type ProjectLifecycle,
@@ -28,6 +31,7 @@ import {
 } from "@octant/contracts/projects";
 
 export type ProjectPolicyRejectionCode =
+  | "extra-folder-refused"
   | "binding-not-allowed"
   | "binding-revision-conflict"
   | "binding-unchanged"
@@ -238,6 +242,27 @@ export function changeCodeProjectAccess(
   };
 }
 
+/** Set who answers a Code Project's prompts at Auto, or return it to Settings. */
+export function changeCodeProjectAutoReviewer(
+  project: Project,
+  autoReviewer: AutoReviewer | undefined,
+  updatedAt: UtcTimestamp,
+): CodeProject {
+  if (project.type !== "code") {
+    reject("binding-not-allowed", "Only Code Projects have an Auto reviewer");
+  }
+  if (project.autoReviewer === autoReviewer) {
+    reject("invalid-lifecycle", "This Project already uses that Auto reviewer");
+  }
+  const { autoReviewer: _previous, ...rest } = project;
+  return {
+    ...rest,
+    ...(autoReviewer === undefined ? {} : { autoReviewer }),
+    version: nextVersion(project),
+    updatedAt,
+  };
+}
+
 /**
  * Set the mode a Code Project's new threads start in, or return it to the
  * Settings default. Remembered Full access follows the mode, so every reader
@@ -379,6 +404,33 @@ export function changeProjectProviderPolicy(
   return {
     ...project,
     providerPolicy,
+    version: nextVersion(project),
+    updatedAt,
+  };
+}
+
+/**
+ * Sets which key providers a Work or Code Project trusts to run as
+ * themselves there, with the Project's own settings, hooks, MCP servers, and
+ * plugins. A Chat Project has no folder, so it holds no such trust. The list
+ * is kept in the order the person gave it; an empty list removes the field.
+ */
+export function changeProjectNativeProviders(
+  project: Project,
+  providers: KeyProviderDriverKinds,
+  updatedAt: UtcTimestamp,
+): BoundProject {
+  if (project.type === "chat") {
+    reject("binding-not-allowed", "Only Work and Code Projects trust a provider's own setup");
+  }
+  const current = project.nativeProviders ?? [];
+  if (current.length === providers.length && current.every((kind) => providers.includes(kind))) {
+    reject("invalid-lifecycle", "Project already trusts exactly these providers");
+  }
+  const { nativeProviders: _previous, ...rest } = project;
+  return {
+    ...rest,
+    ...(providers.length === 0 ? {} : { nativeProviders: providers }),
     version: nextVersion(project),
     updatedAt,
   };
@@ -614,6 +666,255 @@ export function workProjectKeepsStatusFile(
   );
 }
 
+/** Whether `inner` is `outer` or lies beneath it, both canonical absolute paths. */
+export function folderContainsPath(outer: string, inner: string): boolean {
+  if (outer === "/") return inner.startsWith("/");
+  return inner === outer || inner.startsWith(`${outer}/`);
+}
+
+function foldersOverlap(left: string, right: string): boolean {
+  return folderContainsPath(left, right) || folderContainsPath(right, left);
+}
+
+/**
+ * The folders a bound Project grants, main folder first. Every question of
+ * the form "is this path inside the Project?" asks it of this list: an extra
+ * folder gets exactly the access the main folder gets at a thread's level.
+ */
+export function projectFolderRoots(project: {
+  readonly binding: CanonicalProjectBinding;
+  readonly extraFolders?: ReadonlyArray<Pick<ProjectExtraFolder, "canonicalRoot">> | undefined;
+}): ReadonlyArray<string> {
+  return [
+    project.binding.canonicalRoot,
+    ...(project.extraFolders ?? []).map((folder) => folder.canonicalRoot),
+  ];
+}
+
+/** The extra folders alone, as the paths a launch or a driver is handed. */
+export function projectExtraFolderRoots(project: {
+  readonly extraFolders?: ReadonlyArray<Pick<ProjectExtraFolder, "canonicalRoot">> | undefined;
+}): ReadonlyArray<string> {
+  return (project.extraFolders ?? []).map((folder) => folder.canonicalRoot);
+}
+
+/**
+ * What an agent is told about a Project's extra folders, or undefined when it
+ * has none. The runtime only ever hears of its working directory, so without
+ * this it would not know the folders it was granted exist.
+ */
+export function projectExtraFoldersInstructions(
+  extraFolders: ReadonlyArray<string>,
+): string | undefined {
+  if (extraFolders.length === 0) return undefined;
+  return [
+    "This Project has extra folders beside its main folder (your working directory):",
+    ...extraFolders.map((folder) => `- ${folder}`),
+    "You may read and change files in them exactly as in the main folder, naming them by absolute path. Commands, Git and checkouts start in the main folder; the extra folders are plain folders.",
+  ].join("\n");
+}
+
+/** Whether a canonical absolute path lies in one of a Project's folders. */
+export function isPathInProjectFolders(
+  folders: ReadonlyArray<string>,
+  canonicalPath: string,
+): boolean {
+  return folders.some((folder) => folderContainsPath(folder, canonicalPath));
+}
+
+/**
+ * Folders the operating system or the host owns. An extra folder may not be
+ * one of these, contain one, or (for the system-owned trees) sit inside one.
+ */
+const SYSTEM_FOLDERS = [
+  "/Applications",
+  "/Library",
+  "/Network",
+  "/System",
+  "/Users",
+  "/Volumes",
+  "/bin",
+  "/boot",
+  "/cores",
+  "/dev",
+  "/etc",
+  "/home",
+  "/lib",
+  "/lib64",
+  "/media",
+  "/mnt",
+  "/opt",
+  "/private",
+  "/private/etc",
+  "/private/tmp",
+  "/private/var",
+  "/proc",
+  "/root",
+  "/run",
+  "/sbin",
+  "/srv",
+  "/sys",
+  "/tmp",
+  "/usr",
+  "/var",
+] as const;
+
+/** System trees whose subfolders are never a person's working files. */
+const SYSTEM_OWNED_TREES = [
+  "/System",
+  "/Library",
+  "/bin",
+  "/boot",
+  "/dev",
+  "/etc",
+  "/private/etc",
+  "/private/var/db",
+  "/proc",
+  "/sbin",
+  "/sys",
+  "/usr",
+] as const;
+
+/**
+ * Folders under home that hold credentials. Granting one, a folder inside one,
+ * or a folder that contains one would hand a runtime the keys the OS profiles
+ * otherwise keep out of reach, so none of them can be an extra folder.
+ */
+const HOME_SECRET_FOLDERS = [
+  ".aws",
+  ".azure",
+  ".config/gcloud",
+  ".config/gh",
+  ".docker",
+  ".gnupg",
+  ".kube",
+  ".password-store",
+  ".ssh",
+  "Library/Keychains",
+] as const;
+
+export interface ExtraFolderJudgement {
+  readonly mainRoot: string;
+  readonly extraFolders: ReadonlyArray<string>;
+  readonly candidate: string;
+  /** The host user's home folder, canonical. */
+  readonly homeDirectory: string;
+}
+
+/**
+ * Why a folder cannot be added to a Project beside its main folder, or
+ * undefined when it can. The candidate is the canonical path the folder picker
+ * resolved, so the comparisons here are exact.
+ */
+export function extraFolderRefusal(input: ExtraFolderJudgement): string | undefined {
+  const { candidate, homeDirectory } = input;
+  if (!candidate.startsWith("/") || candidate === "/") {
+    return "Choose a folder, not the whole disk.";
+  }
+  if (candidate === homeDirectory || folderContainsPath(candidate, homeDirectory)) {
+    return "Choose a folder inside your home folder, not the home folder itself.";
+  }
+  if (SYSTEM_FOLDERS.some((folder) => folder === candidate)) {
+    return "A system folder cannot be added to a Project.";
+  }
+  if (SYSTEM_OWNED_TREES.some((tree) => folderContainsPath(tree, candidate))) {
+    return "A folder the system owns cannot be added to a Project.";
+  }
+  if (
+    HOME_SECRET_FOLDERS.some((secret) => foldersOverlap(`${homeDirectory}/${secret}`, candidate))
+  ) {
+    return "A folder that holds keys or credentials cannot be added to a Project.";
+  }
+  if (foldersOverlap(input.mainRoot, candidate)) {
+    return candidate === input.mainRoot
+      ? "That folder is already the Project's main folder."
+      : "That folder overlaps the Project's main folder.";
+  }
+  const existing = input.extraFolders.find((folder) => foldersOverlap(folder, candidate));
+  if (existing !== undefined) {
+    return existing === candidate
+      ? "That folder is already in the Project."
+      : "That folder overlaps another folder in the Project.";
+  }
+  if (input.extraFolders.length >= MAX_PROJECT_EXTRA_FOLDERS) {
+    return `A Project can have at most ${MAX_PROJECT_EXTRA_FOLDERS} extra folders.`;
+  }
+  return undefined;
+}
+
+export interface AddProjectExtraFolderInput {
+  readonly canonicalRoot: string;
+  readonly actor: ProjectActor;
+  readonly addedAt: UtcTimestamp;
+  readonly homeDirectory: string;
+}
+
+/** Adds a folder a person picked to a bound Project beside its main folder. */
+export function addProjectExtraFolder(
+  project: Project,
+  input: AddProjectExtraFolderInput,
+): { readonly project: BoundProject; readonly folder: ProjectExtraFolder } {
+  if (project.type === "chat") {
+    reject("binding-not-allowed", "Chat Projects have no folders");
+  }
+  if (project.lifecycle === "archived") {
+    reject("invalid-lifecycle", "Archived Projects are read-only");
+  }
+  const existing = project.extraFolders ?? [];
+  const refusal = extraFolderRefusal({
+    mainRoot: project.binding.canonicalRoot,
+    extraFolders: existing.map((folder) => folder.canonicalRoot),
+    candidate: input.canonicalRoot,
+    homeDirectory: input.homeDirectory,
+  });
+  if (refusal !== undefined) reject("extra-folder-refused", refusal);
+  const folder: ProjectExtraFolder = {
+    canonicalRoot: input.canonicalRoot,
+    addedBy: input.actor,
+    addedAt: input.addedAt,
+  };
+  return {
+    project: {
+      ...project,
+      extraFolders: [...existing, folder],
+      version: nextVersion(project),
+      updatedAt: input.addedAt,
+    },
+    folder,
+  };
+}
+
+/** Removes one extra folder; the main folder is changed only by relinking. */
+export function removeProjectExtraFolder(
+  project: Project,
+  canonicalRoot: string,
+  updatedAt: UtcTimestamp,
+): BoundProject {
+  if (project.type === "chat") {
+    reject("binding-not-allowed", "Chat Projects have no folders");
+  }
+  if (project.lifecycle === "archived") {
+    reject("invalid-lifecycle", "Archived Projects are read-only");
+  }
+  const existing = project.extraFolders ?? [];
+  if (!existing.some((folder) => folder.canonicalRoot === canonicalRoot)) {
+    reject(
+      "extra-folder-refused",
+      canonicalRoot === project.binding.canonicalRoot
+        ? "The main folder cannot be removed; relink the Project to change it"
+        : "That folder is not one of the Project's extra folders",
+    );
+  }
+  const remaining = existing.filter((folder) => folder.canonicalRoot !== canonicalRoot);
+  const { extraFolders: _replaced, ...rest } = project;
+  return {
+    ...rest,
+    ...(remaining.length === 0 ? {} : { extraFolders: remaining }),
+    version: nextVersion(project),
+    updatedAt,
+  };
+}
+
 export function changeProjectLifecycle(
   project: Project,
   lifecycle: ProjectLifecycle,
@@ -649,6 +950,17 @@ export function relinkProject(project: Project, input: RelinkProjectInput): Boun
   }
   if (input.binding.canonicalRoot === project.binding.canonicalRoot) {
     reject("binding-unchanged", "Replacement root must differ from the current root");
+  }
+  // The extra folders were judged against the old main folder; a new one that
+  // overlaps any of them would grant the same files twice under two roles.
+  const overlapping = (project.extraFolders ?? []).find((folder) =>
+    foldersOverlap(folder.canonicalRoot, input.binding.canonicalRoot),
+  );
+  if (overlapping !== undefined) {
+    reject(
+      "extra-folder-refused",
+      "The new main folder overlaps one of the Project's extra folders; remove that folder first",
+    );
   }
   const revision = {
     revisionId: input.revisionId,

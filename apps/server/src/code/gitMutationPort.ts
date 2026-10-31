@@ -280,6 +280,10 @@ export class GitMutationPort {
         readonly remote: string;
         readonly refspec: string;
       };
+      /** Replace the remote branch instead of adding to it; see the push command. */
+      readonly force?:
+        | { readonly mode: "with-lease"; readonly expectedRemoteOid: string }
+        | { readonly mode: "plain" };
     } & GitMutationPolicy,
     signal?: AbortSignal,
   ): Promise<GitMutationResult> {
@@ -293,9 +297,20 @@ export class GitMutationPort {
     const lock = await this.#lockState(input.checkoutRoot, signal, input.executionPolicy);
     if (lock === "failed") return { status: "failed" };
     if (lock === "locked") return { status: "rejected", reason: "index-locked" };
+    if (input.force?.mode === "with-lease" && !isObjectId(input.force.expectedRemoteOid)) {
+      return { status: "rejected", reason: "invalid-refspec" };
+    }
+    // The lease names the exact remote head it replaces, so a branch someone
+    // else moved since is refused by Git instead of overwritten.
+    const forceArguments =
+      input.force === undefined
+        ? []
+        : input.force.mode === "with-lease"
+          ? [`--force-with-lease=${input.remoteRef}:${input.force.expectedRemoteOid}`]
+          : ["--force"];
     return this.#apply(
       input.checkoutRoot,
-      ["push", "--porcelain", "--", input.remote, refspec],
+      ["push", "--porcelain", ...forceArguments, "--", input.remote, refspec],
       signal,
       input.executionPolicy,
     );

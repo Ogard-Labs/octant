@@ -169,6 +169,69 @@ describe("ProviderProjection", () => {
     connection.close();
   });
 
+  it("replays a person turning a key provider's own setup on and off", () => {
+    const connection = openConnection();
+    const { runtime, projection } = providerProjection();
+    const journal = new Journal({
+      connection,
+      registry: runtime.events,
+      projections: runtime.projections,
+      clock: () => now,
+    });
+    const created = instance();
+    const on = instance({ nativeSetup: true, version: 2 });
+    const off = instance({ version: 3 });
+    journal.append({
+      aggregate: { aggregateType: "provider-instance", aggregateId: ids.instance },
+      expectedVersion: 0,
+      events: [pending("provider.instance-created@1", { instance: created })],
+    });
+    journal.append({
+      aggregate: { aggregateType: "provider-instance", aggregateId: ids.instance },
+      expectedVersion: 1,
+      events: [pending("provider.instance-native-setup-changed@1", { instance: on })],
+    });
+    expect(readProviderInstance(connection, on.id)).toEqual(on);
+    projection.reset(connection);
+    rebuildProjection({ connection, journal, projection, clock: () => now });
+    expect(readProviderInstance(connection, on.id)).toEqual(on);
+
+    journal.append({
+      aggregate: { aggregateType: "provider-instance", aggregateId: ids.instance },
+      expectedVersion: 2,
+      events: [pending("provider.instance-native-setup-changed@1", { instance: off })],
+    });
+    projection.reset(connection);
+    rebuildProjection({ connection, journal, projection, clock: () => now });
+    expect(readProviderInstance(connection, off.id)).toEqual(off);
+    expect(readProviderInstance(connection, off.id)).not.toHaveProperty("nativeSetup");
+
+    // Only a key provider's account takes the switch, so the journal refuses
+    // an event naming any other provider.
+    const pi = decodeProviderInstance({
+      id: "70000000-0000-4000-8000-000000000009",
+      displayName: "Pi",
+      driverKind: "pi",
+      configuration: { kind: "pi-rpc", binaryPath: "/opt/homebrew/bin/pi" },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+    expect(() =>
+      journal.append({
+        aggregate: {
+          aggregateType: "provider-instance",
+          aggregateId: "70000000-0000-4000-8000-000000000009",
+        },
+        expectedVersion: 0,
+        events: [pending("provider.instance-native-setup-changed@1", { instance: pi })],
+      }),
+    ).toThrow();
+    connection.close();
+  });
+
   it("replays a versioned model catalog with manual ordering and invalidation state", () => {
     const connection = openConnection();
     const { runtime, projection } = providerProjection();

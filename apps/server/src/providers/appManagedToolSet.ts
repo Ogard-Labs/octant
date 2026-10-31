@@ -1,4 +1,8 @@
-import type { ProviderToolDefinition, ProviderToolImage } from "@octant/contracts";
+import type {
+  ProviderToolDefinition,
+  ProviderToolImage,
+  ShieldWatcherLabel,
+} from "@octant/contracts";
 
 export interface AppManagedToolSet {
   readonly definitions: ReadonlyArray<ProviderToolDefinition>;
@@ -11,6 +15,11 @@ export interface AppManagedToolSet {
     readonly result: unknown;
     readonly isError?: boolean;
     readonly images?: ReadonlyArray<ProviderToolImage>;
+    /**
+     * Set when the result brought outside content into the thread, with what
+     * Octant Shield's Watcher found in it; the tool row carries the mark.
+     */
+    readonly outsideContent?: { readonly labels: ReadonlyArray<ShieldWatcherLabel> };
   }>;
 }
 

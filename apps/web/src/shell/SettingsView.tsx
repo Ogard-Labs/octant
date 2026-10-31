@@ -59,6 +59,7 @@ import { useSettingsSaved, type SettingsWriteResult } from "./useSettingsSaved";
 import { SidebarDestinationSettings } from "./SidebarDestinationSettings";
 import { PluginSettingsSection } from "./PluginSettingsSection";
 import { BrowserProfilesSection } from "../browser/BrowserProfilesSection";
+import { BrowserExtensionsSection } from "../browser/BrowserExtensionsSection";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { RememberedBrowserProfileSite } from "@octant/contracts/shell";
 import { browserProfileKey } from "@octant/domain";
@@ -78,6 +79,8 @@ import { JournalGrowthTable } from "../support/JournalGrowthTable";
 import type { DiagnosticsExportClient } from "@octant/client-runtime/diagnostics-export-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
+import type { SafeNetworksClient } from "@octant/client-runtime/safe-networks-client";
+import { SafeNetworksSettings } from "../settings/SafeNetworksSettings";
 import type { HostFederationLifecycle } from "@octant/client-runtime/host-federation-lifecycle";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { IntegrationClient } from "@octant/client-runtime/integration-client";
@@ -210,7 +213,10 @@ export interface SettingsViewProps {
   readonly diagnosticsExportClient?: DiagnosticsExportClient;
   readonly hostControlClient?: HostControlClient;
   /** Settings › Data & privacy › Browser profiles; absent where the host keeps none. */
-  readonly browserAutomationClient?: Pick<BrowserAutomationClient, "manageProfiles">;
+  readonly browserAutomationClient?: Pick<
+    BrowserAutomationClient,
+    "manageExtensions" | "manageProfiles"
+  >;
   /** Settings › Data & privacy › Public links; absent where the host has no such surface. */
   readonly canvasClient?: Pick<CanvasClient, "publicLinkSettings" | "setPublicLinkSettings">;
   /** Settings › Computer use › the monthly cap for desktops that bill; absent where the host has no route to it. */
@@ -218,6 +224,8 @@ export interface SettingsViewProps {
   /** Settings › Sync on this host; absent off it, where store setup is not offered. */
   readonly replicaStoreSettingsClient?: ReplicaStoreSettingsClient;
   /** Absent off the host: linking a secret store and pointing a key at it are host authority. */
+  /** Settings › Access › Safe networks; absent where the host has no such route. */
+  readonly safeNetworksClient?: SafeNetworksClient;
   readonly secretStoresClient?: SecretStoresClient;
   /** Creating, joining, and revoking on this host; absent off it. */
   readonly replicaMembershipClient?: ReplicaMembershipClient;
@@ -284,6 +292,7 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   github: "Connection and repository access on the selected host.",
   host: "The host process: its status, startup, notifications, and maintenance.",
   permissions: "What you have already allowed: websites, extension tools, and public links.",
+  access: "The network places agents may reach below Full access.",
   data: "What this host stores, how long it keeps threads, and how to back it up.",
   "secret-stores":
     "Keep API keys in a password manager you already use. Octant keeps a reference and fetches the key when it is used.",
@@ -961,6 +970,7 @@ function ActiveSectionContent({
             <CodeSettingsView
               focusedSetting={focusedSetting}
               onUpdate={props.codeController.updateSettings}
+              providerSnapshot={props.providerController?.snapshot}
               settings={props.codeController.bootstrap.settings}
             />
           )}
@@ -1238,6 +1248,16 @@ function ActiveSectionContent({
           focusedSetting={focusedSetting}
         />
       );
+    case "access":
+      return (
+        <div className="settings-section-stack" id="settings-access">
+          <SafeNetworksSettings
+            client={props.safeNetworksClient}
+            projectNames={props.projectNames ?? NO_PROJECT_NAMES}
+            {...(focusedSetting === undefined ? {} : { focusedSetting })}
+          />
+        </div>
+      );
     case "sync":
       return (
         <SyncSettingsSection
@@ -1321,6 +1341,15 @@ function ActiveSectionContent({
                 Backup, recovery, and retention controls are available on the host machine only.
               </p>
             </section>
+          )}
+          {props.browserAutomationClient === undefined ? null : (
+            <BrowserExtensionsSection
+              client={props.browserAutomationClient}
+              {...(props.pickLocalPluginFolder === undefined
+                ? {}
+                : { pickExtensionFolder: props.pickLocalPluginFolder })}
+              {...(focusedSetting === undefined ? {} : { focusedSetting })}
+            />
           )}
           {props.browserAutomationClient === undefined ? null : (
             <BrowserProfilesSection
@@ -1720,6 +1749,7 @@ function providerSettingsViewProps(
     onRetry: controller.retry,
     onSetEnabled: controller.setEnabled,
     onSetClaudeArtifactDelivery: controller.setClaudeArtifactDelivery,
+    onSetProviderNativeSetup: controller.setProviderNativeSetup,
     onDataTagsChange: controller.setDataTags,
     onModelDataTagsChange: controller.setModelDataTags,
     onModelContextWindowChange: controller.setModelContextWindow,

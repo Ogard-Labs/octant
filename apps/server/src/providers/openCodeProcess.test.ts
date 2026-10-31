@@ -643,7 +643,7 @@ describe("OpenCodeProcessPort", () => {
       { reserveLoopbackPort: async () => 43123, ...dependencies },
     );
 
-  it("passes the explicit mode and policy to the OS confinement port before spawning", async () => {
+  it("passes the explicit mode, policy and extra folders to the OS confinement port before spawning", async () => {
     const fixture = profileRecordingWrapper("isolation-supported");
     // The configured path is a launcher link; the kernel needs read-metadata on
     // the link's directory before it can resolve to the realpath the profile
@@ -668,6 +668,7 @@ describe("OpenCodeProcessPort", () => {
         }).start({
           binaryPath: linkedBinary,
           cwd: fixture.root,
+          extraFolders: ["/tmp/octant-opencode-notes"],
           mode: "work",
           executionPolicy: "plan",
         }),
@@ -675,6 +676,8 @@ describe("OpenCodeProcessPort", () => {
     );
     expect(captured).toMatchObject({
       boundRoot: realpathSync(fixture.root),
+      // An extra folder is bound beside the root and read-only with it in Plan.
+      extraBoundRoots: ["/tmp/octant-opencode-notes"],
       // Plan withholds writing and running something, not the model call the
       // agent makes to produce the plan.
       networkEgress: "allow",
@@ -822,6 +825,53 @@ describe("OpenCodeProcessPort", () => {
     expect(
       rules.some((rule) => rule.includes('(allow process-exec (literal "/usr/bin/false"))')),
     ).toBe(false);
+  });
+
+  it("starts the server on its own egress proxy below Full access and keeps loopback off the proxy", async () => {
+    const fixture = profileRecordingWrapper("isolation-supported");
+    let captured: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
+    const confinement: ProcessConfinementPort = {
+      prepare: (input) => {
+        captured = input;
+        return { command: input.executable, args: input.args };
+      },
+    };
+    const started: Array<{ readonly runtime: string; readonly root: string }> = [];
+    let released = 0;
+    await Effect.runPromise(
+      Effect.scoped(
+        makeOpenCodeProcessLive({
+          confinement,
+          platform: "darwin",
+          runtimeConfigResolver: async () => undefined,
+          startupTimeoutMs: 2_000,
+          runtimeNetwork: {
+            start: async (input) => {
+              started.push({ runtime: input.runtime, root: input.root });
+              return {
+                status: "proxied",
+                endpoint: { kind: "loopback", port: 47003 },
+                environment: { HTTPS_PROXY: "http://octant:token@127.0.0.1:47003" },
+                release: async () => {
+                  released += 1;
+                },
+              };
+            },
+          },
+        }).start({
+          binaryPath: fixture.binaryPath,
+          cwd: fixture.root,
+          mode: "code",
+          executionPolicy: "approval-gated",
+        }),
+      ),
+    );
+    expect(started).toEqual([{ runtime: "opencode", root: fixture.root }]);
+    expect(captured?.networkEgress).toEqual({
+      kind: "proxied",
+      endpoint: { kind: "loopback", port: 47003 },
+    });
+    expect(released).toBe(1);
   });
 
   it.each(["approval-gated", "auto-accept-edits", "full-access"] as const)(

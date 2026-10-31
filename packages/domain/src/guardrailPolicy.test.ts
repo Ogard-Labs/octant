@@ -5,9 +5,11 @@ import {
   guardrailLevelOf,
   permissionModeOf,
   clampWorkAccess,
+  chosenAutoReviewer,
   resolveAutoReviewer,
   resolveGuardrail,
   shieldReviewsPrompts,
+  shieldRoutesApprovals,
   threadAccessOf,
   workAccessOfPermissionMode,
   workThreadAccessOf,
@@ -182,6 +184,38 @@ describe("the mode a new thread starts in", () => {
     expect(
       defaultPermissionModeFor({ project: { codeAccessPersistence: "project-default" }, settings }),
     ).toBe("full-access");
+  });
+});
+
+describe("which runtimes Octant Shield can review", () => {
+  it("reviews every runtime that sends its prompts to Octant, and none that decides alone", () => {
+    for (const kind of [
+      "openai-compatible",
+      "ollama",
+      "claude",
+      "codex",
+      "opencode",
+      "pi",
+      "kilo",
+    ]) {
+      expect(shieldRoutesApprovals(kind as never), kind).toBe(true);
+    }
+    for (const kind of ["oh-my-pi", "openai-image"]) {
+      expect(shieldRoutesApprovals(kind as never), kind).toBe(false);
+    }
+  });
+
+  it("takes the Project's reviewer over Settings'", () => {
+    expect(
+      chosenAutoReviewer({
+        project: { autoReviewer: "provider" },
+        settings: { autoReviewer: "octant-shield" },
+      }),
+    ).toBe("provider");
+    expect(chosenAutoReviewer({ project: {}, settings: { autoReviewer: "octant-shield" } })).toBe(
+      "octant-shield",
+    );
+    expect(chosenAutoReviewer({})).toBeUndefined();
   });
 });
 

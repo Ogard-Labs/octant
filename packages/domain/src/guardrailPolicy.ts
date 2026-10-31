@@ -1,6 +1,8 @@
+import { isAcpAgentKind } from "@octant/contracts/acp-agent-profiles";
 import type {
   AutoReviewer,
   GuardrailLevel,
+  ProviderDriverKind,
   PermissionMode,
   ProviderExecutionPolicy,
   ToolActionAuthority,
@@ -8,6 +10,7 @@ import type {
   WorkAccess,
   WorkTurnCapabilityFacts,
 } from "@octant/contracts";
+import { isNativeHarnessDriverKind } from "./providerPolicy";
 
 /**
  * What a thread stores about its authority. The level is derived from these,
@@ -310,6 +313,32 @@ export function resolveGuardrail(input: {
   }
 }
 
+/** The Auto reviewer a thread's person chose: its Project's, else Settings'. */
+export function chosenAutoReviewer(input: {
+  readonly project?: { readonly autoReviewer?: AutoReviewer | undefined } | undefined;
+  readonly settings?: { readonly autoReviewer?: AutoReviewer | undefined } | undefined;
+}): AutoReviewer | undefined {
+  return input.project?.autoReviewer ?? input.settings?.autoReviewer;
+}
+
+/**
+ * Runtimes whose approval prompts reach Octant before the call runs, so
+ * Octant Shield can answer them: the Octant Harness, whose tool calls pass
+ * Octant's approval path, the Anthropic and OpenAI coding runtimes
+ * (`canUseTool`, app-server approval requests), OpenCode (`permission.asked`),
+ * every ACP agent (`session/request_permission`), and Pi (its extension's
+ * confirmation).
+ */
+export function shieldRoutesApprovals(driverKind: ProviderDriverKind): boolean {
+  if (isNativeHarnessDriverKind(driverKind) || isAcpAgentKind(driverKind)) return true;
+  return (
+    driverKind === "claude" ||
+    driverKind === "codex" ||
+    driverKind === "opencode" ||
+    driverKind === "pi"
+  );
+}
+
 /**
  * Whether Octant Shield answers this thread's approval prompts: Auto on a
  * prompting posture, with Shield the reviewer that runs. Everywhere else the
@@ -373,4 +402,22 @@ export function defaultPermissionModeFor(input: {
     executionPolicy: input.settings.defaultExecutionPolicy,
     autoApprove: input.settings.defaultAutoApprove,
   });
+}
+
+/**
+ * Whether outside content is recorded only: Code at Full access, where the
+ * mark tags the tool row and the thread card and never asks or blocks. Work
+ * is not on the shared levels, so its mark gates as before.
+ */
+export function outsideContentRecordedOnly(input: {
+  readonly mode: ToolActionAuthority["mode"];
+  readonly executionPolicy: ThreadAccess["executionPolicy"];
+}): boolean {
+  if (input.mode !== "code") return false;
+  const guardrail = resolveGuardrail({
+    access: { executionPolicy: input.executionPolicy },
+    capabilities: { providerReview: true, providerSandbox: false },
+    mode: "code",
+  });
+  return guardrail.status === "supported" && guardrail.outsideContent === "recorded";
 }

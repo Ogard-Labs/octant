@@ -27,6 +27,7 @@ describe("octantSettingsRegistry", () => {
       "github",
       "linear",
       "permissions",
+      "access",
       "secret-stores",
       "data",
       "sync",
@@ -78,12 +79,20 @@ describe("octantSettingsRegistry", () => {
       "browser-site-approvals",
       "tool-approvals",
     ]);
+    expect(section("access")?.label).toBe("Access");
+    expect(section("access")?.scope).toBe("host");
+    expect(ids("access")).toEqual(["network-limits", "safe-networks"]);
     expect(section("secret-stores")?.label).toBe("Secret stores");
     expect(section("secret-stores")?.scope).toBe("host");
     expect(ids("secret-stores")).toEqual(["secret-store-link", "secret-store-check"]);
     expect(section("data")?.label).toBe("Data & storage");
     expect(section("data")?.scope).toBe("host");
-    expect(ids("data")).toEqual(["data-map", "browser-profiles", "thread-retention"]);
+    expect(ids("data")).toEqual([
+      "data-map",
+      "browser-profiles",
+      "browser-extensions",
+      "thread-retention",
+    ]);
     expect(section("data")?.keywords).toMatch(/backup/);
     expect(section("data")?.keywords).toMatch(/retention/);
   });
@@ -168,6 +177,7 @@ describe("octantSettingsRegistry", () => {
       "provider-deployment-ids",
       "provider-claude-account",
       "provider-claude-artifacts",
+      "provider-native-setup",
     ]);
     const code = octantSettingsRegistry.sections.find((section) => section.id === "code");
     expect(code?.settings.map((setting) => setting.id)).toEqual([
@@ -176,6 +186,8 @@ describe("octantSettingsRegistry", () => {
       "code-language-services",
       "project-view-switcher",
       "code-default-access",
+      "code-auto-reviewer",
+      "code-shield-model",
       "code-editor-executable",
       "code-editor-arguments",
       "open-in-applications",
@@ -267,8 +279,18 @@ describe("octantSettingsRegistry", () => {
     expect(first("password")).not.toBe("keybindings/keybindings");
     expect(first("password")).toBeDefined();
     expect(first("delete my data")).toBe("data/thread-retention");
-    expect(first("telemetry")).toBe("data/data-map");
-    expect(first("connector")).toBe("skills");
+    // "telemetry" also reaches Safe networks through its "network" synonym.
+    const telemetry = searchSettings(available, capabilities, "telemetry").map((result) =>
+      result.kind === "setting" ? `${result.sectionId}/${result.settingId}` : result.sectionId,
+    );
+    expect(telemetry).toContain("data/data-map");
+    // "connector" also reaches Browser extensions through the word "extension",
+    // so the Skills page is among the first answers rather than always the first.
+    expect(
+      searchSettings(available, capabilities, "connector")
+        .slice(0, 2)
+        .map((result) => result.sectionId),
+    ).toContain("skills");
     expect(first("sign out github")).toBe("github/github-logout");
     expect(first("notif")).toBeDefined();
     expect(first("display name")).toBe("providers/provider-display-name");
@@ -322,6 +344,7 @@ const COMPUTED_SETTING_ROWS: Readonly<Record<string, string>> = {
   "provider-*-manual-model-ids": "provider-manual-model-ids",
   "provider-*-deployment-ids": "provider-deployment-ids",
   "provider-*-claude-artifacts": "provider-claude-artifacts",
+  "provider-*-native-setup": "provider-native-setup",
   "*-config-directory": "provider-claude-account",
   "*-accent": "provider-claude-account",
   "*-auth-login": "provider-claude-account",

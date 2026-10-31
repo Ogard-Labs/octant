@@ -626,8 +626,7 @@
 
 /* Mono meta, matching the system's .menu-label/.eyebrow treatment. */
 .project-dialog__header span,
-.project-overview__type,
-.project-overview__root > span {
+.project-overview__type {
   color: var(--oct-meta);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
@@ -1057,24 +1056,40 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   background: var(--project-overview-card-fill);
 }
 
-.project-overview__root {
-  display: flex;
+/* The Project's folders: the main folder, then the extra ones the person added.
+   The availability note sits beside the first row, so the list takes the
+   first column and stays top-aligned with it. */
+.project-folders {
+  display: grid;
   min-width: 0;
-  align-items: baseline;
   gap: var(--oct-space-2);
 }
 
-.project-overview__root > span {
-  flex: none;
+.project-folders__list {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  gap: var(--oct-space-1);
+  list-style: none;
+}
+
+.project-folders__row {
+  display: grid;
+  grid-template-columns: 8.5rem minmax(0, 1fr) auto;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.project-folders__label {
   color: var(--oct-meta);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-medium);
-  letter-spacing: 0;
-  text-transform: none;
 }
 
-.project-overview__root strong {
+.project-folders__path {
   min-width: 0;
   overflow: hidden;
   color: var(--oct-fg);
@@ -1085,7 +1100,35 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   white-space: nowrap;
 }
 
+.project-folders__note {
+  margin: 0;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-snug);
+}
+
+.project-folders__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.project-folders__status {
+  margin: 0;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.project-folders__status:empty {
+  display: none;
+}
+
+.project-folders__status[role="alert"] {
+  color: var(--oct-fg);
+}
+
 .project-overview__availability {
+  align-self: start;
   justify-self: end;
   color: var(--oct-fg-2);
   font-size: var(--oct-text-xs);
