@@ -47,6 +47,7 @@ export * from "./folderBrowse";
 export * from "./browserAutomation";
 export * from "./browserAutomationRpc";
 export * from "./browserProfiles";
+export * from "./browserExtensions";
 export * from "./browserCapture";
 export * from "./canvas";
 export * from "./canvasActions";

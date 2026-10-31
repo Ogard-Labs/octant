@@ -8870,9 +8870,15 @@ access` agree); a thread's own change is journaled as
   on profile pages; a paired device sees only that a signed-in page exists. The
   person signs out of a profile (closing its pages and removing its storage) at a
   local window, and the host journals that it happened without naming a site or
-  a cookie. Browser extensions (approved design, not yet built) install only
-  from an unpacked folder at a local window, start disabled, are enabled per
-  profile, and never load into a Private page. Detail is in [Browser profiles and extensions](design/browser-profiles.md).
+  a cookie. Purging a Project clears its profile with its other data. Browser
+  extensions install only from an unpacked Manifest V3 folder chosen with the
+  native picker at a local window (the host copies it under
+  `browser-extensions/<id>/` and journals the install), start disabled, are
+  enabled per profile after the person reads what they can read and change, and
+  never load into a Private page; an update that asks for more turns off
+  everywhere until reconfirmed, and the desktop app loads them into the profile's
+  Electron session. A signed-in page's approval from a phone-started turn waits
+  for a local window, and a kept screenshot's record names the profile. Detail is in [Browser profiles and extensions](design/browser-profiles.md).
 - **Side Chat reads.** A Side Chat may read its source thread's transcript,
   state, and files; it never inherits the source's Work or Code execution
   authority. The file tools (`octant_side_chat_list_files`,

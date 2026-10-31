@@ -961,6 +961,9 @@ export function wireProviders(deps: ProvidersDependencies) {
       },
     });
     githubExtensionSnapshot.read = () => extensionApiService.snapshot();
+    // One store for the host: the folder picker issues a receipt through the
+    // extension routes, and installing a Browser extension consumes it.
+    const localPluginImportReceipts = new LocalPluginImportReceiptStore();
     const extensionRoutes = createExtensionRouteHandler({
       service: extensionApiService,
       windowAuthorityStore,
@@ -969,7 +972,7 @@ export function wireProviders(deps: ProvidersDependencies) {
         ? {}
         : { desktopBridgeSecret: options.desktopBridgeSecret }),
       localPluginFolderRegistry,
-      localPluginImportReceipts: new LocalPluginImportReceiptStore(),
+      localPluginImportReceipts,
       userAddedMcpServers,
       agentToolingDiscovery,
       extensionProjectPins: {
@@ -1757,6 +1760,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       extensionRoutes,
       generatedImageStore,
       imageJobService,
+      localPluginImportReceipts,
       localUsageHistoryRoutes,
       managedCodeThreadCreation,
       managedWorktreeRefsList,

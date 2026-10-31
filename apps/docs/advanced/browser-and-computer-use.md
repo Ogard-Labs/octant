@@ -66,6 +66,8 @@ choose a profile from the control at the left of the address bar:
   cookies, site storage, and cache after you confirm. The Settings list shows
   each profile's size. Profiles are never in an export, a Canvas share, sync, a
   backup, or diagnostics.
+- Purging a Project removes its profile with the Project's other data. Archiving
+  a Project closes its profile's pages and keeps the profile.
 
 **What the agent may do on a signed-in page.** A Project or Personal page is
 treated as signed in, because Octant cannot tell. The agent can ask for one by
@@ -76,8 +78,37 @@ profile only, under **Settings → Permissions → Remembered websites**. A site
 allowed Private does not cover a signed-in page, and one profile's grant does
 not cover another. A routine, a subagent, or a CLI typed into a thread terminal
 cannot open a signed-in page, and neither can a paired phone or browser, which
-sees only "Signed-in page — open it on this Mac." Plan mode refuses the Browser
-as it always did, and password and one-time-code fields stay protected.
+sees only "Signed-in page — open it on this Mac." If a turn you started from
+your phone needs such a site, its question waits for a window on this Mac. While
+the agent drives a signed-in page, the Browser's status label and the floating
+preview name the profile. Plan mode refuses the Browser as it always did, and
+password and one-time-code fields stay protected.
+
+### Browser extensions
+
+Extensions add features to pages, such as a reading tool or an ad blocker. They
+work in the Octant app on this Mac, in a Project or Personal profile, and never
+in a Private page. They are off until you turn them on, and an extension can
+read and change the pages it runs on, including what the agent reads there.
+
+- **Install** from **Settings → Data & privacy → Browser extensions → Install
+  extension…**, then choose an unpacked Manifest V3 extension folder. Octant
+  copies the folder, so later edits to it change nothing; choose the folder again
+  to update. There is no web store, and extensions that need native messaging
+  (most password managers) or a store sign-in do not work.
+- **Enable** an extension for one profile at a time. Octant lists in plain words
+  the sites it can read and change and the permissions it asks for, and enables
+  it only when you confirm. An update that asks for more than the version you
+  allowed turns off everywhere and asks again, showing only what is new.
+- **Use** an extension from the puzzle-piece button in the Browser toolbar,
+  which appears when one is on in the page's profile. Choose an extension to open
+  its popup or options page. While the agent drives the page, the button shows
+  how many extensions are on, and the agent's site question says so.
+- **Remove** turns an extension off in every profile and deletes its copy.
+- Only you, at a window on this Mac, install or enable extensions. The agent,
+  plugins, skills, and a paired phone cannot; a phone can see the list.
+- Extensions that call parts of the browser Octant does not provide fail inside
+  the extension. Popups that need `chrome.tabs` do not work yet.
 
 ### Browser captures
 
@@ -106,6 +137,7 @@ address and time. The strip is absent until the thread has a capture.
   Browser pane says so when you pressed Screenshot, and nothing is added to the
   strip. The Browser gives no picture of a page it treats as sensitive, for
   example one with a password field.
+- A capture of a page in a Project or Personal profile names the profile, because the picture can show an account.
 - An archived thread still shows the captures it kept.
 
 Links inside a Work or Code conversation open in the app: following one

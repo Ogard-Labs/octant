@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -9,6 +10,14 @@ import { browserProfilePartition, storedBrowserProfileOfPartitionFolder } from "
 
 /** The part of an Electron session a stored profile's store needs. */
 export interface BrowserProfileSessionPort {
+  /** Electron's per-session extension host. Absent where the runtime has none. */
+  readonly extensions?: {
+    loadExtension(
+      path: string,
+      options?: { readonly allowFileAccess?: boolean },
+    ): Promise<{ readonly id: string }>;
+    removeExtension(id: string): void;
+  };
   clearStorageData(options?: { readonly storages?: ReadonlyArray<string> }): Promise<void>;
   clearCache(): Promise<void>;
   flushStorageData?(): void;
@@ -27,9 +36,36 @@ export interface StoredBrowserProfileSize {
   readonly sizeBytes: number;
 }
 
+export interface EnabledExtensionFolder {
+  readonly id: string;
+  readonly path: string;
+  readonly contentHash: string;
+}
+
 export interface BrowserProfileStore {
   readonly list: () => Promise<ReadonlyArray<StoredBrowserProfileSize>>;
   readonly clear: (profile: StoredBrowserProfile, scope: BrowserProfileClearScope) => Promise<void>;
+  /**
+   * Makes the extensions loaded in a profile's session exactly the ones given.
+   * Only a stored profile's session is ever asked: a Private page has none, so no
+   * extension can run there.
+   */
+  readonly syncExtensions: (
+    profile: StoredBrowserProfile,
+    wanted: ReadonlyArray<EnabledExtensionFolder>,
+  ) => Promise<void>;
+  /** The `chrome-extension://` address of a loaded extension's popup or options page. */
+  readonly extensionPage: (
+    profile: StoredBrowserProfile,
+    extensionId: string,
+    kind: "popup" | "options",
+  ) => string | undefined;
+}
+
+interface LoadedExtension {
+  readonly electronId: string;
+  readonly path: string;
+  readonly contentHash: string;
 }
 
 /**
@@ -42,7 +78,45 @@ export interface BrowserProfileStore {
 export function createBrowserProfileStore(
   options: BrowserProfileStoreOptions,
 ): BrowserProfileStore {
+  // Electron keeps a loaded extension for the life of the app, per session.
+  const loaded = new Map<string, Map<string, LoadedExtension>>();
   return Object.freeze<BrowserProfileStore>({
+    async syncExtensions(profile, wanted) {
+      const partition = browserProfilePartition(profile, "");
+      const host = options.sessionFor(partition).extensions;
+      if (host === undefined) return;
+      const here = loaded.get(partition) ?? new Map<string, LoadedExtension>();
+      loaded.set(partition, here);
+      for (const [id, extension] of here) {
+        const keep = wanted.some(
+          (entry) => entry.id === id && entry.contentHash === extension.contentHash,
+        );
+        if (!keep) {
+          host.removeExtension(extension.electronId);
+          here.delete(id);
+        }
+      }
+      for (const entry of wanted) {
+        if (here.has(entry.id)) continue;
+        try {
+          const extension = await host.loadExtension(entry.path, { allowFileAccess: false });
+          here.set(entry.id, {
+            electronId: extension.id,
+            path: entry.path,
+            contentHash: entry.contentHash,
+          });
+        } catch {
+          // An extension Electron cannot load fails inside itself, as the design
+          // says; the rest of the profile's extensions still load.
+        }
+      }
+    },
+    extensionPage(profile, extensionId, kind) {
+      const extension = loaded.get(browserProfilePartition(profile, ""))?.get(extensionId);
+      if (extension === undefined) return undefined;
+      const page = manifestPage(extension.path, kind);
+      return page === undefined ? undefined : `chrome-extension://${extension.electronId}/${page}`;
+    },
     async list() {
       let folders: string[];
       try {
@@ -73,6 +147,29 @@ export function createBrowserProfileStore(
       session.flushStorageData?.();
     },
   });
+}
+
+/** The popup or options page the extension's manifest names, as a path inside its folder. */
+function manifestPage(folder: string, kind: "popup" | "options"): string | undefined {
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(readFileSync(join(folder, "manifest.json"), "utf8"));
+  } catch {
+    return undefined;
+  }
+  if (typeof manifest !== "object" || manifest === null) return undefined;
+  const record = manifest as Record<string, unknown>;
+  const action =
+    typeof record.action === "object" ? (record.action as Record<string, unknown>) : {};
+  const ui =
+    typeof record.options_ui === "object" ? (record.options_ui as Record<string, unknown>) : {};
+  const page = kind === "popup" ? action.default_popup : (record.options_page ?? ui.page);
+  return typeof page === "string" &&
+    page !== "" &&
+    !page.startsWith("/") &&
+    !page.split("/").includes("..")
+    ? page
+    : undefined;
 }
 
 async function directorySize(directory: string): Promise<number> {

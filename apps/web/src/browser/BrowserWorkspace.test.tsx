@@ -1045,6 +1045,57 @@ describe("BrowserWorkspace", () => {
     }
   });
 
+  it.each([
+    ["personal", { kind: "personal" }, "Agent active · Personal"],
+    [
+      "project",
+      { kind: "project", projectId: "40000000-0000-4000-8000-000000000001" },
+      "Agent active · Project",
+    ],
+    ["private", { kind: "private" }, "Agent active"],
+  ])(
+    "names the %s profile in the driver indicator while the agent drives the page",
+    async (_name, profile, expected) => {
+      const restoreDom = stubNativeSurfaceDom();
+      try {
+        const browser = client();
+        vi.mocked(browser.inspectThread).mockResolvedValue({
+          status: "running",
+          threadId: threadId as any,
+          context: { ...context, policy: { ...context.policy, profile } } as any,
+          evidence: [],
+        } as any);
+        render(
+          <BrowserWorkspace
+            client={browser}
+            hostBridge={
+              {
+                attachBrowserSurface: vi.fn(async () => ({
+                  ...nativeSurfaceState,
+                  control: "agent" as const,
+                })),
+                detachBrowserSurface: vi.fn(async () => undefined),
+                getHostCapabilities: vi.fn(async () => ({ liveBrowserSupported: true }) as any),
+                updateBrowserSurfaceBounds: vi.fn(async () => undefined),
+              } as any
+            }
+            tab={{
+              kind: "browser",
+              id: "90000000-0000-4000-8000-000000000022" as any,
+              mode: "work",
+              title: "Browser",
+              threadId: threadId as any,
+            }}
+          />,
+        );
+
+        expect(await screen.findByText(expected)).toBeInTheDocument();
+      } finally {
+        restoreDom();
+      }
+    },
+  );
+
   it.each(["workspace-drag-preview", "workspace-drop-overlay", "octant-dialog__backdrop"])(
     "detaches the native surface while the .%s renderer overlay is present",
     async (overlayClass) => {

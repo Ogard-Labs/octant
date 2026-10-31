@@ -254,6 +254,7 @@ html[data-octant-reduced-transparency="true"] .thread-activity-pip__collapsed-co
    and nothing else, since the picture already carries the shadow. */
 html[data-octant-reduced-transparency="true"] .browser-pip__caption,
 html[data-octant-reduced-transparency="true"] .browser-pip__count,
+html[data-octant-reduced-transparency="true"] .browser-pip__profile,
 html[data-octant-reduced-transparency="true"] .browser-pip__close {
   background: var(--octant-floating);
   backdrop-filter: none;
@@ -262,6 +263,7 @@ html[data-octant-reduced-transparency="true"] .browser-pip__close {
 @media (prefers-reduced-transparency: reduce) {
   .browser-pip__caption,
   .browser-pip__count,
+  .browser-pip__profile,
   .browser-pip__close {
     background: var(--octant-floating);
     backdrop-filter: none;
@@ -271,6 +273,7 @@ html[data-octant-reduced-transparency="true"] .browser-pip__close {
 @supports not (backdrop-filter: blur(1px)) {
   .browser-pip__caption,
   .browser-pip__count,
+  .browser-pip__profile,
   .browser-pip__close {
     background: var(--octant-floating);
   }

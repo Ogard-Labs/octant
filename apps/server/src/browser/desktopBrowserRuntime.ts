@@ -1,3 +1,5 @@
+import { storedBrowserProfile } from "@octant/domain";
+import type { StoredBrowserProfile } from "@octant/contracts/browser-profiles";
 import type {
   BrowserContextId,
   BrowserContextPolicy,
@@ -21,6 +23,16 @@ export interface DesktopBrowserRuntimeOptions {
   readonly token: string;
   readonly fetch?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
   readonly eventPollIntervalMs?: number;
+  /**
+   * The extensions enabled in a stored profile. Electron keeps a loaded extension
+   * for the life of the app only, so a page opening in a profile first makes the
+   * session's extensions match this list.
+   */
+  readonly extensionsFor?: (profile: StoredBrowserProfile) => ReadonlyArray<{
+    readonly id: string;
+    readonly path: string;
+    readonly contentHash: string;
+  }>;
 }
 
 export class DesktopBrowserOwnerUnavailable extends Error {
@@ -35,6 +47,7 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
   readonly #token: string;
   readonly #fetch: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
   readonly #eventPollIntervalMs: number;
+  readonly #extensionsFor: DesktopBrowserRuntimeOptions["extensionsFor"];
   readonly #exitListeners = new Set<(contextIds?: ReadonlyArray<BrowserContextId>) => void>();
   #eventPoll: ReturnType<typeof setInterval> | undefined;
 
@@ -50,6 +63,7 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
     this.#token = options.token;
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#eventPollIntervalMs = options.eventPollIntervalMs ?? 250;
+    this.#extensionsFor = options.extensionsFor;
   }
 
   async available(): Promise<boolean> {
@@ -91,6 +105,9 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
     clear: async (profile, scope) => {
       await this.#request("/v1/profiles/clear", { profile, scope });
     },
+    syncExtensions: async (profile, extensions) => {
+      await this.#request("/v1/extensions/sync", { profile, extensions });
+    },
   };
 
   async createContext(
@@ -99,6 +116,14 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
     signal: AbortSignal,
     owner: { readonly windowId: WindowId; readonly threadId: BrowserThreadId },
   ): Promise<"native-live"> {
+    const stored = storedBrowserProfile(policy.profile);
+    if (stored !== undefined && this.#extensionsFor !== undefined) {
+      // A page that cannot get its extensions still opens: the journal says what
+      // is enabled, and the next sync makes the session match.
+      await this.profiles
+        .syncExtensions(stored, this.#extensionsFor(stored))
+        .catch(() => undefined);
+    }
     await this.#request("/v1/contexts/create", { contextId, policy, owner }, signal);
     return "native-live";
   }
@@ -200,11 +225,12 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
 
 export function createDesktopBrowserRuntimeFromEnvironment(
   env: NodeJS.ProcessEnv,
+  extra: Pick<DesktopBrowserRuntimeOptions, "extensionsFor"> = {},
 ): DesktopBrowserRuntime | undefined {
   const brokerUrl = env.OCTANT_BROWSER_BROKER_URL;
   const token = env.OCTANT_BROWSER_BROKER_TOKEN;
   if (brokerUrl === undefined || token === undefined) return undefined;
-  return new DesktopBrowserRuntime({ brokerUrl, token });
+  return new DesktopBrowserRuntime({ brokerUrl, token, ...extra });
 }
 
 async function navigationBlockedUrl(response: Response): Promise<string | undefined> {

@@ -1015,6 +1015,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "browser profiles sign out signed in cookies project personal private site data clear sign-in",
         },
         {
+          id: settingId("browser-extensions"),
+          label: "Browser extensions",
+          scope: "host",
+          keywords: "browser extensions install enable disable remove unpacked folder popup",
+        },
+        {
           id: settingId("thread-retention"),
           label: "Thread retention",
           scope: "host",

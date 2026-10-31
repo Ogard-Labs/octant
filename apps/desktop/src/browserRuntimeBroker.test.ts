@@ -151,6 +151,8 @@ describe("BrowserRuntimeBroker profiles", () => {
     return {
       list: vi.fn(async () => [{ profile: { kind: "personal" as const }, sizeBytes: 12 }]),
       clear: vi.fn(async () => undefined),
+      syncExtensions: vi.fn(async () => undefined),
+      extensionPage: vi.fn(() => undefined),
     };
   }
   const post = (broker: { url: string; token: string }, path: string, body: unknown) =>
@@ -203,6 +205,37 @@ describe("BrowserRuntimeBroker profiles", () => {
         expect(response.status).toBe(400);
       }
       expect(profiles.clear).not.toHaveBeenCalled();
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("loads the extensions the server names into a stored profile, and refuses anything else", async () => {
+    const profiles = store();
+    const broker = await startBrowserRuntimeBroker(host() as never, profiles);
+    try {
+      const entry = {
+        id: "a".repeat(32),
+        path: "/data/browser-extensions/x",
+        contentHash: "b".repeat(64),
+      };
+      const ok = await broker.fetchForTest(
+        post(broker, "v1/extensions/sync", { profile: { kind: "personal" }, extensions: [entry] }),
+      );
+      expect(ok.status).toBe(200);
+      expect(profiles.syncExtensions).toHaveBeenCalledWith({ kind: "personal" }, [entry]);
+
+      for (const body of [
+        { profile: { kind: "private" }, extensions: [] },
+        { profile: { kind: "personal" }, extensions: [{ ...entry, path: "relative/folder" }] },
+        { profile: { kind: "personal" }, extensions: [{ ...entry, id: "../../x" }] },
+        { profile: { kind: "personal" }, extensions: [{ ...entry, contentHash: "short" }] },
+        { profile: { kind: "personal" }, extensions: "all" },
+      ]) {
+        const response = await broker.fetchForTest(post(broker, "v1/extensions/sync", body));
+        expect(response.status).toBe(400);
+      }
+      expect(profiles.syncExtensions).toHaveBeenCalledOnce();
     } finally {
       await broker.close();
     }

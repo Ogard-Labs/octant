@@ -404,6 +404,7 @@ export function startOctantServer(
       nativeHarnessLeadFallback,
       nativeHarnessTranscripts,
       probeProviderForThreads,
+      localPluginImportReceipts,
       providerDataDirectory,
       providerOAuthRoutes,
       providerRoutes,
@@ -578,6 +579,7 @@ export function startOctantServer(
     });
     const {
       browserAutomationService,
+      browserExtensionService,
       browserProfileService,
       browserToolApprovalService,
       liveProjectBrowsers,
@@ -595,6 +597,7 @@ export function startOctantServer(
       options,
       persistence,
       projectService,
+      localPluginImportReceipts,
       providerDataDirectory,
       shellService,
       windowAuthorityStore,
@@ -918,6 +921,7 @@ export function startOctantServer(
         browserAuthority,
         browserAutomationService,
         browserCaptures,
+        browserExtensionService,
         browserProfileService,
         canAccessCodeProject,
         capacityScheduler,
@@ -1160,6 +1164,8 @@ export function startOctantServer(
       secretStoresRoutes,
       remoteHost,
     } = wireRemote({
+      browserExtensionService,
+      browserProfileService,
       canvasPublicShareService,
       threadExportService,
       agentMessageService,
