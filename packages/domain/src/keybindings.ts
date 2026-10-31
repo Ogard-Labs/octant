@@ -18,6 +18,7 @@ export type OctantKeybindingActionId =
   | "zen-mode"
   | "toggle-sidebar"
   | "home"
+  | "next-waiting-thread"
   | "zen-next-space"
   | "zen-previous-space"
   | "review-next"
@@ -77,6 +78,12 @@ export const OCTANT_KEYBINDING_ACTIONS: ReadonlyArray<OctantKeybindingAction> = 
     defaultChord: "Mod+\\",
   },
   { id: "home", label: "Go to the home screen", area: "Shell", defaultChord: "Mod+Shift+H" },
+  {
+    id: "next-waiting-thread",
+    label: "Jump to the next thread that needs you",
+    area: "Shell",
+    defaultChord: "Mod+Shift+J",
+  },
   {
     id: "zen-next-space",
     label: "Show the next focus space",

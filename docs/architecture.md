@@ -7066,13 +7066,26 @@ Settings exposes plugin enablement, macOS permission setup, the driver version,
 and update controls. An explicit permission setup requests macOS access, then
 opens Screen Recording settings if it remains unavailable; macOS may suppress
 a repeated prompt. Opening Settings does not grant access. Recheck only reads
-the current state and never requests permissions. The app bundles a pinned,
+the current state and never requests permissions. While the plugin is enabled
+and macOS allows Octant, the reported permissions are the running driver's own
+`check_permissions` answer, not Octant's: macOS can refuse the child while
+allowing Octant (measured with an ad-hoc signed build launched by
+LaunchServices), and an unreadable answer counts as refused. The app bundles a pinned,
 publisher-verified driver. The driver runs under Octant's macOS permissions,
 so it checks upstream daily only
 when the person turns automatic updates on in Settings › Computer use; it is
 off by default, a saved choice is kept, and a manual Check for updates still
 works. Verified updates stage privately, activate
-only while idle, and retain the previous version if startup fails. The driver
+only while idle, and retain the previous version if startup fails. The SDK
+accepts a driver whose handshake reports its wire contract as the same
+`major.minor` as the one the SDK speaks (patch releases only, because the
+driver is pre-1.0), whatever the driver's own version; the check runs at every
+startup and when a staged update starts, before it becomes the active version,
+and an update that fails it is dropped and the previous driver restarts. Octant
+addresses elements by the snapshot's `element_token` and requests the
+structured element list; the driver refuses any argument outside a tool's
+schema, so a new driver release is checked against the tools Octant calls
+before the bundled pin moves. The driver
 never uses a standalone CuaDriver installation. Plan refuses computer-use
 control. See
 [decisions/0113-computer-use-plugin-and-driver-updates.md](decisions/0113-computer-use-plugin-and-driver-updates.md).
@@ -9210,10 +9223,17 @@ mechanisms are:
     host without the desktop app a host-local `octant` prompt is the one way
     to save a key.
   - **Store absent or locked.** `octant server run` starts a credential
-    broker only when Secret Service (`org.freedesktop.secrets` on the user
-    bus) and `/usr/bin/secret-tool` are present at start. Without a broker the
-    routes refuse as `credential-store-unavailable`, and the CLI names both
-    requirements and says to restart the server after starting the keyring.
+    broker on Linux whether or not a keyring answers at start. Every call
+    reaches Secret Service (`org.freedesktop.secrets` on the user bus) through
+    `/usr/bin/secret-tool` then, so a keyring started or unlocked after the
+    server works on the next call with no restart, and Octant caches no
+    verdict about it. A call that cannot reach the keyring refuses as
+    `credential-store-unavailable` with the store's cause when it can tell:
+    locked, no `Login` collection, no service running, no `secret-tool`,
+    denied, or no answer inside the limit. The CLI and the desktop window show
+    the cause and the next step. The desktop on Linux selects its Secret
+    Service stores the same way, without a startup probe, and the Providers
+    and Add endpoint banners read the store again each time they load.
     On macOS the Keychain broker and its helper are owned by the desktop app:
     when the desktop runs the host, the same routes store through its broker
     into the Keychain; `octant server run` on a macOS host without it starts

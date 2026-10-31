@@ -188,7 +188,9 @@ and Screen Recording permissions, and check the installed CuaDriver version.
 if access is still missing. macOS may not show another permission prompt. Enable
 Octant there; if it is absent, use **+** to add the installed Octant app. Relaunch
 Octant after changing permissions, then choose **Recheck**. Recheck reads the
-current state without requesting access. Each task asks before accessing an
+current state without requesting access. Settings shows **Allowed** only when
+the computer-use driver Octant starts holds the permission too; an unsigned
+Octant build can be allowed while its driver is refused. Each task asks before accessing an
 application; **Allow app for 5 minutes** grants that
 task temporary access. Plan mode, remote clients, unavailable permissions,
 and unsupported provider transports refuse control.
@@ -203,8 +205,8 @@ operate. Use **Stop computer use** or disable the plugin to revoke access.
 Octant bundles its own CuaDriver, including the native SDK, and does not require
 a separate installation. **Automatic updates** is off by default. When you turn
 it on, Octant checks upstream daily, verifies the publisher, checksum, architecture, and
-driver compatibility, then upgrades after computer-use tasks finish. If the
-replacement cannot start, Octant retains the previous verified driver. You
+that its protocol is compatible with this Octant, then upgrades after computer-use tasks finish. If the
+replacement is incompatible or cannot start, Octant keeps the previous verified driver. You
 can use **Check for updates** in Settings at any time.
 Checks send no task content or identifiers.
 
