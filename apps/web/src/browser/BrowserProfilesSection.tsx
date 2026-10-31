@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { SettingRow, SettingsSection, SettingsState } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { BrowserCookieImportDialog } from "./BrowserCookieImportDialog";
 import { formatProfileSize } from "./browserProfileCopy";
 
 export interface BrowserProfilesSectionProps {
@@ -27,7 +28,11 @@ type Loaded =
 export function BrowserProfilesSection(props: BrowserProfilesSectionProps) {
   const { client } = props;
   const [loaded, setLoaded] = useState<Loaded>({ kind: "loading" });
-  const [confirming, setConfirming] = useState<BrowserProfileSummary>();
+  const [confirming, setConfirming] = useState<{
+    readonly summary: BrowserProfileSummary;
+    readonly scope: "all" | "cookies";
+  }>();
+  const [importingInto, setImportingInto] = useState<BrowserProfileSummary>();
   const [clearing, setClearing] = useState(false);
   const [notice, setNotice] = useState<string>();
   const manage = client.manageProfiles;
@@ -56,15 +61,17 @@ export function BrowserProfilesSection(props: BrowserProfilesSectionProps) {
     void refresh();
   }, [refresh]);
 
-  async function signOut(profile: StoredBrowserProfile): Promise<void> {
+  async function clear(profile: StoredBrowserProfile, scope: "all" | "cookies"): Promise<void> {
     if (manage === undefined) return;
     setClearing(true);
     try {
-      const result = await manage.call(client, { kind: "clear", profile, scope: "all" });
+      const result = await manage.call(client, { kind: "clear", profile, scope });
       setNotice(
         result.kind === "browser-profiles-refused"
           ? result.message
-          : "Signed out. The profile’s pages closed and its data was removed.",
+          : scope === "all"
+            ? "Signed out. The profile’s pages closed and its data was removed."
+            : "Cookies cleared. The profile’s pages closed.",
       );
     } catch {
       setNotice("The profile could not be cleared.");
@@ -99,30 +106,67 @@ export function BrowserProfilesSection(props: BrowserProfilesSectionProps) {
               scope="host"
               settingId="browser-profiles"
             >
-              <OctantButton
-                onClick={() => setConfirming(summary)}
-                size="sm"
-                type="button"
-                variant="secondary"
-              >
-                Sign out…
-              </OctantButton>
+              <div className="host-settings__controls">
+                <OctantButton
+                  aria-label={`Import cookies into ${summary.label}`}
+                  onClick={() => setImportingInto(summary)}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  Import cookies…
+                </OctantButton>
+                <OctantButton
+                  aria-label={`Clear cookies in ${summary.label}`}
+                  onClick={() => setConfirming({ summary, scope: "cookies" })}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  Clear cookies…
+                </OctantButton>
+                <OctantButton
+                  aria-label={`Sign out of ${summary.label}`}
+                  onClick={() => setConfirming({ summary, scope: "all" })}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  Sign out…
+                </OctantButton>
+              </div>
             </SettingRow>
           ))}
         </div>
       ) : null}
       {notice === undefined ? null : <SettingsState kind="empty">{notice}</SettingsState>}
+      {importingInto === undefined ? null : (
+        <BrowserCookieImportDialog
+          client={client}
+          onClose={(outcome) => {
+            setImportingInto(undefined);
+            if (outcome !== undefined) setNotice(outcome);
+            void refresh();
+          }}
+          profile={importingInto}
+        />
+      )}
       {confirming === undefined ? null : (
         <OctantConfirmDialog
-          confirmLabel="Sign out"
+          confirmLabel={confirming.scope === "all" ? "Sign out" : "Clear cookies"}
           destructive
           onCancel={() => setConfirming(undefined)}
-          onConfirm={() => void signOut(confirming.profile)}
+          onConfirm={() => void clear(confirming.summary.profile, confirming.scope)}
           pending={clearing}
-          title={`Sign out of ${confirming.label}?`}
+          title={
+            confirming.scope === "all"
+              ? `Sign out of ${confirming.summary.label}?`
+              : `Clear cookies in ${confirming.summary.label}?`
+          }
         >
-          Every page in this profile closes, and its cookies, site storage and cache are removed.
-          Sites you were signed in to will ask you to sign in again.
+          {confirming.scope === "all"
+            ? "Every page in this profile closes, and its cookies, site storage and cache are removed. Sites you were signed in to will ask you to sign in again."
+            : "Every page in this profile closes and its cookies are removed. Other site storage stays. Sites you were signed in to will ask you to sign in again."}
         </OctantConfirmDialog>
       )}
     </SettingsSection>

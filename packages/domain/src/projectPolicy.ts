@@ -2,6 +2,7 @@ import type { CanvasDesignBrand } from "@octant/contracts/canvas";
 import type { DesktopRecipe, LeasableDesktopProvider } from "@octant/contracts/desktop-lease";
 import type { AggregateVersion, UtcTimestamp } from "@octant/contracts/events";
 import type { KeyProviderDriverKinds, PermissionMode } from "@octant/contracts/providers";
+import type { AutoReviewer } from "@octant/contracts/shield";
 import { designBrandTokenRefusal } from "./canvasDesignFrameKit";
 import { desktopNetworkAllowed } from "./desktopLeasePolicy";
 import {
@@ -235,6 +236,27 @@ export function changeCodeProjectAccess(
   return {
     ...rest,
     codeAccessPersistence,
+    version: nextVersion(project),
+    updatedAt,
+  };
+}
+
+/** Set who answers a Code Project's prompts at Auto, or return it to Settings. */
+export function changeCodeProjectAutoReviewer(
+  project: Project,
+  autoReviewer: AutoReviewer | undefined,
+  updatedAt: UtcTimestamp,
+): CodeProject {
+  if (project.type !== "code") {
+    reject("binding-not-allowed", "Only Code Projects have an Auto reviewer");
+  }
+  if (project.autoReviewer === autoReviewer) {
+    reject("invalid-lifecycle", "This Project already uses that Auto reviewer");
+  }
+  const { autoReviewer: _previous, ...rest } = project;
+  return {
+    ...rest,
+    ...(autoReviewer === undefined ? {} : { autoReviewer }),
     version: nextVersion(project),
     updatedAt,
   };

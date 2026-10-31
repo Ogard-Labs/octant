@@ -7,6 +7,7 @@ import { GithubIssueContextRequest } from "./githubIssueContext";
 import { TerminalSessionImportRequest } from "./terminalSessions";
 import { LinearIssueContextRequest } from "./linearIssueContext";
 import { BindingRevisionId, ProjectId } from "./projects";
+import { AutoReviewer, ShieldModelChoice } from "./shield";
 import { ThreadWorkingDirectory } from "./workingDirectory";
 import {
   PermissionPersistence,
@@ -445,6 +446,18 @@ export const CodeSettings = Schema.Struct({
    * which is what a store persisted before the question existed did.
    */
   defaultAutoApprove: Schema.optional(Schema.Boolean),
+  /**
+   * Who answers prompts at Auto, as an account default a Code Project may
+   * override. Absent means the provider's own reviewer where it has one and
+   * Octant Shield everywhere else, which is also what "provider" means on a
+   * provider without one.
+   */
+  autoReviewer: Schema.optional(AutoReviewer),
+  /**
+   * The model Octant Shield judges with. Absent means each thread's own
+   * provider account with that provider's smallest model.
+   */
+  shieldModel: Schema.optional(ShieldModelChoice),
   fullAccessSandboxOff: RetiredSandboxOffSwitch,
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
@@ -661,6 +674,10 @@ export const CodeCommand = Schema.Union(
     defaultDiffLayout: Schema.optional(CodeDiffLayout),
     bundledLanguageServer: Schema.optional(Schema.Boolean),
     defaultAutoApprove: Schema.optional(Schema.Boolean),
+    /** Absent keeps the stored choice. */
+    autoReviewer: Schema.optional(AutoReviewer),
+    /** Absent keeps the stored choice; null returns to each thread's own provider. */
+    shieldModel: Schema.optional(Schema.NullOr(ShieldModelChoice)),
   }).annotations(strict),
   CreateCodeThreadCommand,
   Schema.Struct({
