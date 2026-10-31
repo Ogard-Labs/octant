@@ -1,7 +1,7 @@
 import type { ManagedToolAnswer } from "./managedMcpTools";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
 import {
@@ -79,6 +79,7 @@ import {
 import { claudeProcessPlanUsageLimits, decodeClaudeProcessPlanUsage } from "./claudeProcessUsage";
 import { claudeNativeArtifactsSupport } from "./claudeNativeArtifacts";
 import { readClaudePublishedSnapshot } from "./claudePublishedSnapshot";
+import { secretGuardRefusal } from "../process/secretGuard";
 import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 import { providerResumeBinding, resumeBindingRefuses } from "./resumeBinding";
 
@@ -291,6 +292,42 @@ function claudeSandboxSettings(
       allowWrite: [projectRoot],
     },
   };
+}
+
+/** The account's own state, which the secret guard leaves to this runtime. */
+function claudeOwnAccountPaths(environment: Readonly<Record<string, string | undefined>>) {
+  const configuration =
+    environment.CLAUDE_CONFIG_DIR !== undefined && environment.CLAUDE_CONFIG_DIR !== ""
+      ? environment.CLAUDE_CONFIG_DIR
+      : join(environment.HOME ?? homedir(), ".claude");
+  return [configuration, environment.CLAUDE_SECURESTORAGE_CONFIG_DIR].filter(
+    (path): path is string => path !== undefined && isAbsolute(path),
+  );
+}
+
+/**
+ * Why a file tool call that names a protected file is refused, at every
+ * posture. Claude's own file tools run in the runtime process, so below Full
+ * access, where that process is not wrapped, this gate is what keeps a
+ * Project that contains the home folder from handing over a key.
+ */
+export function claudeFileToolSecretRefusal(
+  toolName: string,
+  input: Readonly<Record<string, unknown>>,
+  ownAccountPaths: ReadonlyArray<string>,
+  homeDirectory?: string,
+): string | undefined {
+  if (!CLAUDE_READ_TOOLS.has(toolName) && !CLAUDE_EDIT_TOOLS.has(toolName)) return undefined;
+  for (const key of ["file_path", "notebook_path", "path"] as const) {
+    const value = input[key];
+    if (typeof value !== "string") continue;
+    const refusal = secretGuardRefusal(value, {
+      ownAccountPaths,
+      ...(homeDirectory === undefined ? {} : { homeDirectory }),
+    });
+    if (refusal !== undefined) return refusal;
+  }
+  return undefined;
 }
 
 /** Whether a file tool's target resolves to the login keychain folder or a file in it. */
@@ -1617,6 +1654,7 @@ function makeConnection(
           }).pipe(Effect.provideService(Scope.Scope, scope)),
           signal,
         );
+        const ownClaudeAccountPaths = claudeOwnAccountPaths(environment.environment);
         const runtimeVersion = await runSetupEffect(
           options.process.probeVersion(options.binaryPath),
           signal,
@@ -1915,6 +1953,15 @@ function makeConnection(
           if (digest === undefined) {
             return deny("Claude tool request has invalid input.");
           }
+          // The secret guard answers before any posture, Full access
+          // included, and says which rule refused and which channel to use.
+          // The runtime's own account state is its own to read.
+          const secretRefusal = claudeFileToolSecretRefusal(
+            request.toolName,
+            requestInput,
+            ownClaudeAccountPaths,
+          );
+          if (secretRefusal !== undefined) return deny(secretRefusal);
           // Claude Code takes a hook "allow" as the final word and runs the
           // tool without calling `canUseTool`. Observed 2026-09-06: an
           // approval-gated thread answered "allow" here for a Project-confined

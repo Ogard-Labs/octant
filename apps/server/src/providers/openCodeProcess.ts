@@ -969,9 +969,24 @@ function prepareOpenCodeLaunch(
         providerDataDirectory,
       ]);
       if (executionPolicy === "full-access") {
-        return {
-          command: input.binaryPath,
+        // No sandbox and no prompts, except the secret guard: the runtime
+        // and its commands may not read or write the protected files, its own
+        // configuration, state, and sign-in excepted.
+        if (confinement.guardSecrets === undefined) {
+          throw new ProcessConfinementError(
+            "invalid-configuration",
+            "OpenCode Full access needs the secret guard, which this host cannot prepare.",
+          );
+        }
+        const launch = confinement.guardSecrets({
+          executable: input.binaryPath,
           args,
+          cwd: root,
+          ownAccountPaths: writeRoots,
+        });
+        return {
+          command: launch.command,
+          args: [...launch.args],
           cwd: root,
           environment: profile.environment,
         };

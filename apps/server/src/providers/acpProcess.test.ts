@@ -771,20 +771,19 @@ describe.each(denyDefaultProfiles)("ACP deny-default confinement ($displayName)"
           )
         : []),
     ];
-    if (deniedPaths.length === 0) {
-      expect(fullAccess).toMatchObject({ command: target.binaryPath, args });
-    } else {
-      // The static extension denials outlive Full access: a workspace
-      // instruction, project config, skill root, project MCP server, or the
-      // runtime's own folder-trust list stays denied even when the rest of
-      // the sandbox is opened.
-      expect(fullAccess.command).toBe(target.sandboxPath);
-      const fullAccessProfile = fullAccess.args[1]!;
-      expect(fullAccessProfile).toContain("(allow default)");
-      for (const path of deniedPaths) {
-        expect(fullAccessProfile).toContain(`(deny file-read* (subpath "${path}"))`);
-        expect(fullAccessProfile).toContain(`(deny file-write* (subpath "${path}"))`);
-      }
+    // Full access opens everything but the secret guard's files and the
+    // static extension denials: a workspace instruction, project config,
+    // skill root, project MCP server, or the runtime's own folder-trust list
+    // stays denied even when the rest of the sandbox is opened.
+    expect(fullAccess.command).toBe(target.sandboxPath);
+    expect(fullAccess.args.slice(-(args.length + 1))).toEqual([target.binaryPath, ...args]);
+    const fullAccessProfile = fullAccess.args[1] ?? "";
+    expect(fullAccessProfile).toContain("(allow default)");
+    expect(fullAccessProfile).not.toContain("(deny default)");
+    expect(fullAccessProfile).toContain(".ssh");
+    for (const path of deniedPaths) {
+      expect(fullAccessProfile).toContain(`(deny file-read* (subpath "${path}"))`);
+      expect(fullAccessProfile).toContain(`(deny file-write* (subpath "${path}"))`);
     }
     for (const file of profile.process.managedFiles({
       managedHome,
@@ -1071,14 +1070,8 @@ describe.each(directoryHostProfiles)("ACP host-profile contract ($displayName)",
     const launch = prepared.result.right;
     const hostEnv =
       directoryHostAuthentication(profile).environment?.(prepared.hostAuthenticationPath) ?? {};
-    const deniesHostExtensions =
-      (profile.process.hostDeniedEntries?.length ?? 0) > 0 ||
-      (profile.process.forbiddenRootEntries?.length ?? 0) > 0 ||
-      (profile.process.hostAuthentication?.kind === "directory" &&
-        (profile.process.hostAuthentication.forbiddenEntries?.length ?? 0) > 0);
-    expect(launch.command).toBe(
-      deniesHostExtensions ? prepared.target.sandboxPath : prepared.target.binaryPath,
-    );
+    // The secret guard wraps every Full access launch, extension denials or not.
+    expect(launch.command).toBe(prepared.target.sandboxPath);
     expect(launch.environment).toMatchObject(hostEnv);
     expect(launch.environment.HOME).not.toBe(prepared.hostHome);
     expect(launch.environment.HOME).not.toBe(homedir());

@@ -21,13 +21,11 @@ import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
 import {
   makeProcessConfinementLive,
+  prepareSecretGuardedLaunch,
   ProcessConfinementError,
-  requireSandboxExec,
   seatbeltDenyRule,
-  wrapCommandInSandboxExec,
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
-import { buildLinuxAllowDefaultDenyLaunch } from "../process/linuxConfinement";
 import {
   materializeOsNetworkEgress,
   resolveProviderRuntimeEgressPolicy,
@@ -391,52 +389,29 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
             root,
           ),
         ];
-        // Full access is unrestricted except for the static MCP/skills/hooks
-        // denials. Darwin uses allow-default plus trailing denies. Linux binds
-        // the host root and overlays the same paths.
+        // Full access is unrestricted except for the secret guard and the
+        // static MCP/skills/hooks denials. Darwin uses allow-default plus
+        // trailing denies. Linux binds the host root and overlays the same
+        // paths. The agent's own managed home and provider-owned sign-in stay
+        // its own to read.
         if (input.executionPolicy === "full-access") {
-          if (denyPaths.length === 0) {
-            return {
-              command: input.binaryPath,
-              args,
-              cwd: root,
-              environment: { ...input.environment, ...hostAuthentication.environment },
-            };
-          }
           const launch = yield* Effect.try({
-            try: () => {
-              if (platform === "darwin") {
-                requireSandboxExec({ platform, sandboxPath });
-                return wrapCommandInSandboxExec({
-                  sandboxPath,
+            try: () =>
+              prepareSecretGuardedLaunch(
+                {
                   executable: input.binaryPath,
                   args,
-                  profile: [
-                    "(version 1)",
-                    "(allow default)",
-                    ...denyPaths.flatMap((path) => [
-                      seatbeltDenyRule("file-read*", path),
-                      seatbeltDenyRule("file-write*", path),
-                    ]),
-                  ].join("\n"),
-                });
-              }
-              if (platform === "linux") {
-                return buildLinuxAllowDefaultDenyLaunch(
-                  {
-                    executable: input.binaryPath,
-                    args,
-                    cwd: root,
-                    denyPaths,
-                  },
-                  { bwrapPath: sandboxPath },
-                );
-              }
-              throw new ProcessConfinementError(
-                "incompatible",
-                `${name} Full access extension denials require macOS or Linux.`,
-              );
-            },
+                  cwd: root,
+                  ownAccountPaths: [
+                    managedHome,
+                    ...hostAuthentication.readPaths,
+                    ...hostAuthentication.writePaths,
+                  ],
+                  additionalDenyPaths: denyPaths,
+                },
+                platform,
+                sandboxPath,
+              ),
             catch: (error) =>
               failure(
                 error instanceof ProcessConfinementError && error.reason === "invalid-configuration"

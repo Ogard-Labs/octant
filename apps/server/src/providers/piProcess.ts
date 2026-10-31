@@ -31,6 +31,7 @@ import { makePiRpcClient, type PiRpcClient } from "./piRpcClient";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import {
   makeProcessConfinementLive,
+  prepareSecretGuardedLaunch,
   ProcessConfinementError,
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
@@ -597,7 +598,31 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
           resumePath,
         );
         if (input.executionPolicy === "full-access") {
-          return { command: input.binaryPath, args, cwd: root, environment };
+          // No sandbox and no prompts, except the secret guard. Pi's own home
+          // and the sign-in it links to stay its own to read.
+          const guarded = yield* Effect.try({
+            try: () =>
+              prepareSecretGuardedLaunch(
+                {
+                  executable: input.binaryPath,
+                  args,
+                  cwd: root,
+                  ownAccountPaths: [piHome, credentialPath, modelsPath],
+                },
+                platform,
+                sandboxPath,
+              ),
+            catch: (error) =>
+              failure(
+                error instanceof ProcessConfinementError && error.reason === "invalid-configuration"
+                  ? "invalid-configuration"
+                  : "incompatible",
+                error instanceof ProcessConfinementError
+                  ? error.message
+                  : "Pi Full access secret guard could not be prepared.",
+              ),
+          });
+          return { command: guarded.command, args: [...guarded.args], cwd: root, environment };
         }
         const temporaryDirectoryPath = yield* temporaryDirectory(
           options.temporaryDirectory ?? input.environment.TMPDIR ?? "/tmp",

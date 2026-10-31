@@ -18,6 +18,7 @@
     "./chat-message-parts": "./src/chatMessageParts.ts",
     "./code-policy": "./src/codePolicy.ts",
     "./guardrail-policy": "./src/guardrailPolicy.ts",
+    "./secret-guard-policy": "./src/secretGuardPolicy.ts",
     "./thread-board-policy": "./src/threadBoardPolicy.ts",
     "./turn-decision-policy": "./src/turnDecisionPolicy.ts",
     "./thread-board-pull-request-policy": "./src/threadBoardPullRequestPolicy.ts",

@@ -29,7 +29,17 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
-import { buildBubblewrapLaunch, DEFAULT_BWRAP_PATH } from "./linuxConfinement";
+import {
+  buildBubblewrapLaunch,
+  buildLinuxAllowDefaultDenyLaunch,
+  DEFAULT_BWRAP_PATH,
+} from "./linuxConfinement";
+import {
+  buildSecretGuardSeatbeltProfile,
+  secretGuardEntries,
+  secretGuardLinuxPaths,
+  secretGuardSeatbeltRules,
+} from "./secretGuard";
 import type { OsNetworkEgress } from "./threadEgressPolicy";
 
 export class ProcessConfinementError extends Error {
@@ -115,6 +125,13 @@ export interface SeatbeltProfileInput {
    */
   readonly isolatedRoots?: ReadonlyArray<string>;
   readonly privateHomeAllowPaths?: ReadonlyArray<string>;
+  /**
+   * The launching runtime's own account paths, whose sign-in the secret guard
+   * leaves readable. The read and write roots other than the bound root and
+   * the temporary directory count as own too: a launch is granted its own
+   * account home by name.
+   */
+  readonly ownAccountPaths?: ReadonlyArray<string>;
   readonly extraRules?: ReadonlyArray<string>;
   readonly homeDirectory?: string;
   readonly usersDirectory?: string;
@@ -157,6 +174,8 @@ export interface ProcessConfinementPrepareInput {
   /** See {@link SeatbeltProfileInput.isolatedRoots}. */
   readonly isolatedRoots?: ReadonlyArray<string>;
   readonly privateHomeAllowPaths?: ReadonlyArray<string>;
+  /** See {@link SeatbeltProfileInput.ownAccountPaths}. */
+  readonly ownAccountPaths?: ReadonlyArray<string>;
   readonly extraRules?: ReadonlyArray<string>;
   /**
    * Whether this launch is an interactive shell on a pseudo-terminal, and where
@@ -175,8 +194,29 @@ export interface ProcessConfinementPrepareInput {
   readonly inboundRelay?: Readonly<{ socketPath: string; port: number }>;
 }
 
+/**
+ * A Full access launch: no sandbox and no prompts, except that the secret
+ * guard still keeps protected files out of the runtime's and its commands'
+ * reach.
+ */
+export interface SecretGuardLaunchInput {
+  readonly executable: string;
+  readonly args: ReadonlyArray<string>;
+  readonly cwd: string;
+  /** The runtime's own account paths; its own sign-in stays readable. */
+  readonly ownAccountPaths: ReadonlyArray<string>;
+  /** Further paths this runtime may not read or write, such as its extension folders. */
+  readonly additionalDenyPaths?: ReadonlyArray<string>;
+}
+
 export interface ProcessConfinementPort {
   readonly prepare: (input: ProcessConfinementPrepareInput) => ConfinedProcessLaunch;
+  /**
+   * Wraps a Full access launch in the minimal secret-guard profile. A port
+   * without it cannot start a Full access runtime: there is no unguarded
+   * fallback. With an empty protected list the launch is returned unwrapped.
+   */
+  readonly guardSecrets?: (input: SecretGuardLaunchInput) => ConfinedProcessLaunch;
 }
 
 export interface ProcessConfinementOptions {
@@ -821,10 +861,47 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     ...writeGrantsBeneathBoundRoot(input, additionalWriteRoots, writeBoundRoot).map((path) =>
       seatbeltAllowRule("file-write*", path),
     ),
+    // The secret guard follows every grant above, so a protected file inside
+    // a granted root (a home folder opened as a Project) stays denied. Caller
+    // rules come after it: the Plan launch's own Keychain sign-in read is one.
+    ...secretGuardSeatbeltRules({
+      entries: secretGuardEntries({ platform: "darwin", homeDirectory: input.homeDirectory }),
+      ownAccountPaths: ownAccountRoots(input, readRoots, additionalWriteRoots),
+      ownWriteRoots: additionalWriteRoots,
+      readableRoots: [
+        input.boundRoot,
+        input.temporaryDirectory,
+        ...readRoots,
+        ...additionalWriteRoots,
+      ],
+      profile: "deny-default",
+    }),
     '(allow file-write-data (literal "/dev/null"))',
     ...(input.extraRules ?? []),
   ];
   return lines.join("\n");
+}
+
+/**
+ * The paths whose sign-in the secret guard leaves to this launch: what the
+ * caller named, and every root granted by name except the bound root and the
+ * temporary directory, which a person or the host chose for other reasons.
+ */
+export function ownAccountRoots(
+  input: Pick<SeatbeltProfileInput, "boundRoot" | "temporaryDirectory" | "ownAccountPaths">,
+  readRoots: ReadonlyArray<string>,
+  additionalWriteRoots: ReadonlyArray<string>,
+): ReadonlyArray<string> {
+  const shared = new Set([
+    ...resolvedRootForms(input.boundRoot),
+    ...resolvedRootForms(input.temporaryDirectory),
+  ]);
+  return uniqueAbsolutePaths([
+    ...(input.ownAccountPaths ?? []),
+    ...[...readRoots, ...additionalWriteRoots].filter(
+      (path) => !resolvedRootForms(path).some((form) => shared.has(form)),
+    ),
+  ]);
 }
 
 export function wrapCommandInSandboxExec(
@@ -891,7 +968,88 @@ export function makeProcessConfinementLive(
         "Confinement is supported only on macOS and Linux.",
       );
     },
+    guardSecrets: (input) => prepareSecretGuardedLaunch(input, platform, sandboxPath, options),
   };
+}
+
+/**
+ * A confinement port for the commands a Full access thread runs: every launch
+ * it prepares gets the secret guard and nothing else, whatever confinement the
+ * caller asked for. A port that cannot guard secrets refuses every launch.
+ */
+export function secretGuardedCommandConfinement(
+  port: ProcessConfinementPort,
+): ProcessConfinementPort {
+  return {
+    prepare: ({ executable, args, boundRoot, ownAccountPaths }) => {
+      if (port.guardSecrets === undefined) {
+        throw new ProcessConfinementError(
+          "invalid-configuration",
+          "Full access commands need the secret guard, which this host cannot prepare.",
+        );
+      }
+      return port.guardSecrets({
+        executable,
+        args,
+        cwd: boundRoot,
+        ownAccountPaths: ownAccountPaths ?? [],
+      });
+    },
+  };
+}
+
+/**
+ * The Full access launch. macOS: an allow-default Seatbelt profile with only
+ * the secret-file denials. Linux: the host root bound as it is, with each
+ * existing protected file covered. Nothing else is confined.
+ */
+export function prepareSecretGuardedLaunch(
+  input: SecretGuardLaunchInput,
+  platform: NodeJS.Platform,
+  sandboxPath: string,
+  options: Pick<ProcessConfinementOptions, "homeDirectory"> = {},
+): ConfinedProcessLaunch {
+  if (!isAbsolute(input.executable)) {
+    throw new ProcessConfinementError(
+      "invalid-configuration",
+      "A secret-guarded executable path must be absolute.",
+    );
+  }
+  const entries = secretGuardEntries({ platform, homeDirectory: options.homeDirectory });
+  const additionalDenyPaths = input.additionalDenyPaths ?? [];
+  if (platform === "darwin") {
+    // Removing every protected group and adding none is the person's choice to
+    // run Full access with nothing guarded, so nothing wraps the launch.
+    if (entries.length === 0 && additionalDenyPaths.length === 0) {
+      return { command: input.executable, args: input.args };
+    }
+    requireSandboxExec({ platform, sandboxPath });
+    return wrapCommandInSandboxExec({
+      sandboxPath,
+      executable: input.executable,
+      args: input.args,
+      profile: buildSecretGuardSeatbeltProfile({
+        entries,
+        ownAccountPaths: input.ownAccountPaths,
+        additionalDenyPaths,
+      }),
+    });
+  }
+  if (platform === "linux") {
+    const denyPaths = [
+      ...secretGuardLinuxPaths({ entries, ownAccountPaths: input.ownAccountPaths }),
+      ...additionalDenyPaths,
+    ];
+    if (denyPaths.length === 0) return { command: input.executable, args: input.args };
+    return buildLinuxAllowDefaultDenyLaunch(
+      { executable: input.executable, args: input.args, cwd: input.cwd, denyPaths },
+      { bwrapPath: sandboxPath },
+    );
+  }
+  throw new ProcessConfinementError(
+    "incompatible",
+    "The secret guard is supported only on macOS and Linux.",
+  );
 }
 
 function prepareSeatbeltLaunch(
@@ -946,6 +1104,7 @@ function prepareSeatbeltLaunch(
       : { additionalDenyWritePaths: input.additionalDenyWritePaths }),
     ...(input.isolatedRoots === undefined ? {} : { isolatedRoots: input.isolatedRoots }),
     privateHomeAllowPaths,
+    ...(input.ownAccountPaths === undefined ? {} : { ownAccountPaths: input.ownAccountPaths }),
     ...(input.extraRules === undefined && input.terminal === undefined
       ? {}
       : {

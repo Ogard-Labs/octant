@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -53,6 +54,7 @@ const directories: string[] = [];
  */
 const passthroughConfinement: ProcessConfinementPort = {
   prepare: (input) => ({ command: input.executable, args: input.args }),
+  guardSecrets: (input) => ({ command: input.executable, args: input.args }),
 };
 
 function probeCodex(binaryPath: string, overrides: CodexProbeOptions = {}) {
@@ -722,20 +724,47 @@ describe("CodexProcessPort", () => {
 });
 
 describe("Codex launch confinement", () => {
-  it("launches Full access as the program itself, with no profile around it", () => {
+  it("launches Full access under the secret guard only, with the account home as its own", () => {
+    const guarded: Array<{ executable: string; ownAccountPaths: ReadonlyArray<string> }> = [];
+    const codexHome = realpathSync(mkdtempSync(join(tmpdir(), "octant-codex-home-")));
+    directories.push(codexHome);
     const prepared = prepareCodexLaunch({
       binaryPath: "/bin/sh",
       args: ["-c", "true"],
       authority: { kind: "thread", root: tmpdir(), mode: "code", executionPolicy: "full-access" },
-      environment: { HOME: homedir() },
+      environment: { HOME: homedir(), CODEX_HOME: codexHome },
       confinement: {
         prepare: () => {
-          throw new Error("Full access must not be confined.");
+          throw new Error("Full access must not get the deny-default profile.");
+        },
+        guardSecrets: (input) => {
+          guarded.push(input);
+          return {
+            command: "/usr/bin/sandbox-exec",
+            args: ["-p", "guard", "--", input.executable],
+          };
         },
       },
       platform: process.platform,
     });
-    expect(prepared.status === "prepared" ? prepared.launch.command : undefined).toBe("/bin/sh");
+    expect(prepared.status === "prepared" ? prepared.launch.command : undefined).toBe(
+      "/usr/bin/sandbox-exec",
+    );
+    expect(guarded).toEqual([
+      { executable: "/bin/sh", args: ["-c", "true"], cwd: tmpdir(), ownAccountPaths: [codexHome] },
+    ]);
+  });
+
+  it("refuses Full access on a host that cannot prepare the secret guard", () => {
+    const prepared = prepareCodexLaunch({
+      binaryPath: "/bin/sh",
+      args: [],
+      authority: { kind: "thread", root: tmpdir(), mode: "code", executionPolicy: "full-access" },
+      environment: { HOME: homedir() },
+      confinement: { prepare: () => ({ command: "/bin/sh", args: [] }) },
+      platform: process.platform,
+    });
+    expect(prepared.status).toBe("refused");
   });
 
   // Real `sandbox-exec`: what a command run by Codex can reach is whatever the

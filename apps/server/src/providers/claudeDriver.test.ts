@@ -22,7 +22,11 @@ import type {
   ClaudeQueryPort,
   ClaudeSessionMetadata,
 } from "./claudeAgentSdkPort";
-import { claudeExecutionOptions, makeClaudeDriver } from "./claudeDriver";
+import {
+  claudeExecutionOptions,
+  claudeFileToolSecretRefusal,
+  makeClaudeDriver,
+} from "./claudeDriver";
 import type { ClaudeResumeIdentity, ClaudeResumeIdentityPort } from "./claudeDriver";
 import {
   REQUIRED_GUARDS,
@@ -378,6 +382,44 @@ async function acquire(
   );
   return { connection, close: () => Effect.runPromise(Scope.close(scope, Exit.void)) };
 }
+
+describe("Claude file tools and the secret guard", () => {
+  const home = "/Users/person";
+
+  it("refuses a file tool naming a protected file and says which channel to use", () => {
+    const refusal = claudeFileToolSecretRefusal(
+      "Read",
+      { file_path: `${home}/.ssh/id_ed25519` },
+      [],
+      home,
+    );
+    expect(refusal).toContain("SSH private keys");
+    expect(refusal).toContain("SSH agent");
+    expect(
+      claudeFileToolSecretRefusal("Grep", { path: `${home}/.aws/credentials` }, [], home),
+    ).toContain("Cloud command-line credentials");
+    expect(
+      claudeFileToolSecretRefusal("Write", { file_path: `${home}/.npmrc` }, [], home),
+    ).toContain("Package registry tokens");
+  });
+
+  it("lets the runtime read its own account state and ordinary files", () => {
+    expect(
+      claudeFileToolSecretRefusal(
+        "Read",
+        { file_path: `${home}/.claude/.credentials.json` },
+        [`${home}/.claude`],
+        home,
+      ),
+    ).toBeUndefined();
+    expect(
+      claudeFileToolSecretRefusal("Read", { file_path: `${home}/.ssh/config` }, [], home),
+    ).toBeUndefined();
+    expect(
+      claudeFileToolSecretRefusal("Bash", { command: `cat ${home}/.ssh/id_rsa` }, [], home),
+    ).toBeUndefined();
+  });
+});
 
 describe("Claude execution policy", () => {
   it("offers app-owned tools and resolves their answers through the provider connection", async () => {

@@ -824,6 +824,44 @@ describe("OpenCodeProcessPort", () => {
     ).toBe(false);
   });
 
+  it("starts Full access under the secret guard with its own state as its own", async () => {
+    const fixture = probeWrapper("v2-ready");
+    const guarded: Array<Parameters<NonNullable<ProcessConfinementPort["guardSecrets"]>>[0]> = [];
+    const prepared: Array<ReadonlyArray<string>> = [];
+    const confinement: ProcessConfinementPort = {
+      // The version probe is confined as at every level; only the runtime
+      // launch takes the guard instead.
+      prepare: (input) => {
+        prepared.push(input.args);
+        return { command: input.executable, args: input.args };
+      },
+      guardSecrets: (input) => {
+        guarded.push(input);
+        return { command: input.executable, args: input.args };
+      },
+    };
+    await Effect.runPromise(
+      Effect.scoped(
+        makeOpenCodeProcessLive({
+          confinement,
+          platform: "darwin",
+          runtimeConfigResolver: async () => undefined,
+          startupTimeoutMs: 2_000,
+        }).start({
+          binaryPath: fixture.binaryPath,
+          cwd: fixture.root,
+          mode: "code",
+          executionPolicy: "full-access",
+        }),
+      ),
+    );
+    expect(guarded).toHaveLength(1);
+    expect(guarded[0]?.executable).toBe(fixture.binaryPath);
+    expect(guarded[0]?.args).toContain("serve");
+    expect(prepared.some((args) => args.includes("serve"))).toBe(false);
+    expect(guarded[0]?.ownAccountPaths.length).toBeGreaterThan(0);
+  });
+
   // The agent is a loopback HTTP server, so the confinement has to let it
   // listen on the port this launch reserved. Without the bind it exits before
   // readiness when OS egress is none. Chat and Work turns now allow the

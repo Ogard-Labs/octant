@@ -404,7 +404,7 @@ describe("Pi process boundary", () => {
     expect(noEgressLaunch.args[1]).toContain("(allow network*)");
   });
 
-  it("maps modes to the minimum Pi tools and keeps full access genuine", async () => {
+  it("maps modes to the minimum Pi tools and keeps full access to the secret guard alone", async () => {
     expect(piArguments("/bridge.ts", "/sessions", "chat-1", "chat", "approval-gated")).toContain(
       "--no-tools",
     );
@@ -435,8 +435,13 @@ describe("Pi process boundary", () => {
         environment: sanitizePiEnvironment({ PATH: "/usr/bin" }, f.home),
       }),
     );
-    expect(launch.command).toBe(f.binary);
-    expect(launch.args[0]).toBe("--mode");
+    // Everything allowed but the protected files: no deny-default profile.
+    expect(launch.command).toBe(f.sandbox);
+    expect(launch.args[0]).toBe("-p");
+    expect(launch.args[1]).toContain("(allow default)");
+    expect(launch.args[1]).not.toContain("(deny default)");
+    expect(launch.args[1]).toContain(".ssh");
+    expect(launch.args.slice(3, 5)).toEqual([f.binary, "--mode"]);
     expect(launch.environment.OCTANT_PI_APPROVALS).toBe("disabled");
     expect(existsSync(join(f.home, "octant-approval-bridge.ts"))).toBe(true);
 
