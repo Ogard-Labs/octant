@@ -200,6 +200,13 @@ describe("Project creation and lifecycle", () => {
     expect(() =>
       changeCodeProjectPermissionMode(makeProject(ids.chat, "0/1"), "auto", updatedAt),
     ).toThrow(ProjectPolicyRejected);
+    // A Project that remembered Full access before Project modes existed has no
+    // mode of its own; returning it to Settings must still clear the memory.
+    const legacyFull = changeCodeProjectAccess(project, "project-default", updatedAt);
+    expect(legacyFull).not.toHaveProperty("defaultPermissionMode");
+    expect(changeCodeProjectPermissionMode(legacyFull, undefined, updatedAt)).toMatchObject({
+      codeAccessPersistence: "current-session",
+    });
     // The older remembered-access switch speaks for the whole mode when used.
     expect(changeCodeProjectAccess(full, "current-session", updatedAt)).not.toHaveProperty(
       "defaultPermissionMode",

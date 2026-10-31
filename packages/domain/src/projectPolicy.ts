@@ -249,14 +249,22 @@ export function changeCodeProjectPermissionMode(
   if (project.type !== "code") {
     reject("binding-not-allowed", "Only Code Projects have a default mode");
   }
-  if (project.defaultPermissionMode === permissionMode) {
+  const codeAccessPersistence: CodeAccessPersistence =
+    permissionMode === "full-access" ? "project-default" : "current-session";
+  // A Project that remembered Full access before Project modes existed has no
+  // mode of its own but still starts threads in Full access, so returning it to
+  // the Settings default is a change even though both modes are unset.
+  if (
+    project.defaultPermissionMode === permissionMode &&
+    project.codeAccessPersistence === codeAccessPersistence
+  ) {
     reject("invalid-lifecycle", "This Project already starts threads in that mode");
   }
   const { defaultPermissionMode: _previousMode, ...rest } = project;
   return {
     ...rest,
     ...(permissionMode === undefined ? {} : { defaultPermissionMode: permissionMode }),
-    codeAccessPersistence: permissionMode === "full-access" ? "project-default" : "current-session",
+    codeAccessPersistence,
     version: nextVersion(project),
     updatedAt,
   };
