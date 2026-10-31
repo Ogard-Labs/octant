@@ -24,7 +24,8 @@ export type HostControlOperation =
   | "restore"
   | "retention"
   | "purge"
-  | "export";
+  | "export"
+  | "memory-limits";
 
 /**
  * Canonical least-authority catalogue names for every host control
@@ -44,6 +45,7 @@ export const HOST_CONTROL_ACTION_NAMES: Readonly<Record<HostControlOperation, st
   retention: "host.store.retention",
   purge: "host.store.purge",
   export: "host.store.export",
+  "memory-limits": "host.service.memory-limits",
 };
 
 export function authorizeHostControlAction(input: {

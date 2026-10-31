@@ -340,18 +340,40 @@ lasts): the kernel's pressure level on macOS, and the available share of
 `/proc/meminfo` on Linux, where under 10% reads as low and under 5% as very
 low. A reading the platform cannot give is "unknown", which counts as no
 signal, never as normal pressure. The host process counts as pressure on its
-own once it holds 2 GiB (4 GiB for very low), or a quarter (a half) of a
-machine smaller than 8 GiB. On the first low reading, when pressure rises, and
+own once it holds its **memory limits**: low at the first, very low at the
+second. The setting is Automatic by default, which is 2 GiB (4 GiB for very
+low), or a quarter (a half) of a machine smaller than 8 GiB. Custom replaces
+the pair with two sizes in GB of 1024³ bytes, the same unit as the default
+(0.5 to 64, very low above low) that apply as
+given on any machine, without the small-machine scaling: the person chose them
+knowing what else the machine runs. The limits are a host setting in Settings >
+Host, changed only by a local window: `POST /api/host-control/memory-limits`
+sits on the loopback host-control surface, behind the `host.service.memory-limits`
+action that a paired device is denied, so a paired device can neither read nor
+change it. Each change is one journaled event
+(`host-memory-limits.changed@1`) naming who made it, when, and the values
+before and after; the `host_memory_limits_projection` row is rebuilt from those
+events, and saving the values already in force records nothing. A pair that is
+out of bounds or not ordered comes back as a refused outcome with a plain
+message, never as a stored value. The guard reads the saved limits at every
+sample, and a change takes a reading at once, so a new limit applies without a
+restart; a limits read that fails falls back to Automatic and is logged, since
+the built-in pair is the safe reading. The limits only move when the host eases
+itself; they never touch a running turn or the system's own signal. On the
+first low reading, when pressure rises, and
 then at most once a minute while it lasts, the host eases itself in a fixed
 order: it logs the reading, stops provider runtimes whose last lease ended and
 sessions parked for reuse (the next turn starts them again), then trims caches
 it rebuilds on demand (SQLite's page cache and, under Bun, the heap). A running
 turn is never stopped; the report only counts how many were left running. The
 host-control status carries a `memory` report (level, the host's size in
-megabytes, the last relief as counts, and any unclean stop) and nothing named:
+megabytes, the limits in force as set and as resolved for this machine, the last
+relief as counts, and any unclean stop) and nothing named:
 no provider, thread, or path. The renderer shows it as one dismissible, quiet
 notice and as rows in Settings > Host, only when the host stopped something, when
-memory was very low, or after an unclean stop. Dismissal is local to the
+memory was very low, or after an unclean stop. The Memory limits control (an
+Automatic or Custom choice with two fields) sits in its own Memory section on
+the same page whenever the host reports memory. Dismissal is local to the
 renderer. Nothing leaves the machine.
 
 The host keeps `host-memory.json` in its data directory (owner-only: the last

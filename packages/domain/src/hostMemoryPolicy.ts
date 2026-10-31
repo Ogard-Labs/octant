@@ -1,3 +1,13 @@
+import {
+  HOST_MEMORY_LIMIT_MAX_GB,
+  HOST_MEMORY_LIMIT_MIN_GB,
+  type HostMemoryLimits,
+  type HostMemoryLimitsRefusalCode,
+  type SetHostMemoryLimitsRequest,
+} from "@octant/contracts/host-control";
+import { authorizeHostControlAction } from "./hostControlPolicy";
+import type { PrincipalKind } from "./remoteAccessPolicy";
+
 export type HostMemoryPressure = "normal" | "elevated" | "critical";
 
 /** What the operating system says about memory, before the host adds its own size. */
@@ -33,27 +43,52 @@ function fromSystem(signal: SystemMemorySignal): HostMemoryPressure {
   return "normal";
 }
 
+export interface ResolvedHostMemoryLimits {
+  readonly pressuredBytes: number;
+  readonly criticalBytes: number;
+}
+
+/**
+ * The byte limits the host's own size is judged by. Automatic is the fixed
+ * pair, shrunk to a share of a small machine; custom is the person's pair, used
+ * exactly as given on any machine, because they chose it knowing what else the
+ * machine runs.
+ */
+export function resolveHostMemoryLimits(
+  limits: HostMemoryLimits,
+  totalBytes: number,
+): ResolvedHostMemoryLimits {
+  if (limits.kind === "custom") {
+    return { pressuredBytes: limits.pressuredGb * GIB, criticalBytes: limits.criticalGb * GIB };
+  }
+  const known = totalBytes > 0;
+  return {
+    pressuredBytes: known
+      ? Math.min(ELEVATED_PROCESS_BYTES, totalBytes * ELEVATED_PROCESS_SHARE)
+      : ELEVATED_PROCESS_BYTES,
+    criticalBytes: known
+      ? Math.min(CRITICAL_PROCESS_BYTES, totalBytes * CRITICAL_PROCESS_SHARE)
+      : CRITICAL_PROCESS_BYTES,
+  };
+}
+
 /**
  * The host's own size counts as pressure on its own: a host that holds half a
  * small machine starves everything else long before the system signal moves.
- * The limits shrink with the machine and never exceed their fixed ceilings.
  */
-function fromProcess(reading: HostMemoryReading): HostMemoryPressure {
-  const known = reading.totalBytes > 0;
-  const elevatedAt = known
-    ? Math.min(ELEVATED_PROCESS_BYTES, reading.totalBytes * ELEVATED_PROCESS_SHARE)
-    : ELEVATED_PROCESS_BYTES;
-  const criticalAt = known
-    ? Math.min(CRITICAL_PROCESS_BYTES, reading.totalBytes * CRITICAL_PROCESS_SHARE)
-    : CRITICAL_PROCESS_BYTES;
-  if (reading.processRssBytes >= criticalAt) return "critical";
-  if (reading.processRssBytes >= elevatedAt) return "elevated";
+function fromProcess(reading: HostMemoryReading, limits: HostMemoryLimits): HostMemoryPressure {
+  const { pressuredBytes, criticalBytes } = resolveHostMemoryLimits(limits, reading.totalBytes);
+  if (reading.processRssBytes >= criticalBytes) return "critical";
+  if (reading.processRssBytes >= pressuredBytes) return "elevated";
   return "normal";
 }
 
-export function classifyHostMemory(reading: HostMemoryReading): HostMemoryClassification {
+export function classifyHostMemory(
+  reading: HostMemoryReading,
+  limits: HostMemoryLimits = { kind: "automatic" },
+): HostMemoryClassification {
   const system = fromSystem(reading.system);
-  const process = fromProcess(reading);
+  const process = fromProcess(reading, limits);
   const pressure = RANK[system] >= RANK[process] ? system : process;
   if (pressure === "normal") return { pressure, source: "none" };
   if (RANK[system] === RANK[process]) return { pressure, source: "both" };
@@ -76,4 +111,53 @@ export function shouldRelieveHostMemory(input: HostMemoryReliefInput): boolean {
   if (input.lastRelief === undefined) return true;
   if (RANK[input.pressure] > RANK[input.lastRelief.pressure]) return true;
   return input.now - input.lastRelief.at >= HOST_MEMORY_RELIEF_COOLDOWN_MS;
+}
+
+export type HostMemoryLimitsDecision =
+  | { readonly kind: "allow"; readonly limits: HostMemoryLimits }
+  | {
+      readonly kind: "refused";
+      readonly code: HostMemoryLimitsRefusalCode;
+      readonly message: string;
+    };
+
+const LIMITS_UNAUTHORIZED_MESSAGE = "Memory limits can only be changed on this host.";
+const LIMITS_OUT_OF_RANGE_MESSAGE = `Memory limits must be between ${HOST_MEMORY_LIMIT_MIN_GB} and ${HOST_MEMORY_LIMIT_MAX_GB} GB.`;
+const LIMITS_ORDER_MESSAGE = "The critical limit must be above the pressured limit.";
+
+function inRange(value: number): boolean {
+  return (
+    Number.isFinite(value) && value >= HOST_MEMORY_LIMIT_MIN_GB && value <= HOST_MEMORY_LIMIT_MAX_GB
+  );
+}
+
+/**
+ * A change of the memory limits needs a local window, and a custom pair must
+ * sit inside the bounds with critical above pressured. A refusal is a value
+ * with a message a person can act on, never an exception.
+ */
+export function decideHostMemoryLimits(input: {
+  readonly principalKind: PrincipalKind;
+  readonly limits: SetHostMemoryLimitsRequest["limits"];
+}): HostMemoryLimitsDecision {
+  const authority = authorizeHostControlAction({
+    principalKind: input.principalKind,
+    operation: "memory-limits",
+  });
+  if (authority.kind === "deny") {
+    return { kind: "refused", code: "unauthorized", message: LIMITS_UNAUTHORIZED_MESSAGE };
+  }
+  const { limits } = input;
+  if (limits.kind === "automatic") return { kind: "allow", limits };
+  if (!inRange(limits.pressuredGb) || !inRange(limits.criticalGb)) {
+    return { kind: "refused", code: "out-of-range", message: LIMITS_OUT_OF_RANGE_MESSAGE };
+  }
+  if (limits.criticalGb <= limits.pressuredGb) {
+    return {
+      kind: "refused",
+      code: "critical-not-above-pressured",
+      message: LIMITS_ORDER_MESSAGE,
+    };
+  }
+  return { kind: "allow", limits };
 }

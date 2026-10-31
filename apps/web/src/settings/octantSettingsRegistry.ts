@@ -1263,6 +1263,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "automatic startup launch at login start",
         },
         {
+          id: settingId("host-memory-limits"),
+          label: "Memory limits",
+          scope: "host",
+          keywords:
+            "memory limits low very low pressure ram gigabytes gb automatic custom critical",
+        },
+        {
           id: settingId("host-backup"),
           label: "Host snapshot",
           scope: "host",

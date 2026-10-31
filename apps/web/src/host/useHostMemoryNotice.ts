@@ -1,10 +1,13 @@
-import type { HostControlStatus } from "@octant/contracts/host-control";
 import { useCallback, useEffect, useState } from "react";
-import { hostMemoryNotices, type HostMemoryNotice } from "./hostMemoryNotice";
+import {
+  hostMemoryNotices,
+  type HostMemoryNotice,
+  type HostMemoryReading,
+} from "./hostMemoryNotice";
 
 /** What the hook needs of the host control client: the status read. */
 export interface HostMemoryStatusSource {
-  status(): Promise<Pick<HostControlStatus, "memory">>;
+  status(): Promise<{ readonly memory?: HostMemoryReading | undefined }>;
 }
 
 /** The host reads memory every few seconds; a minute is enough to hear of it. */
