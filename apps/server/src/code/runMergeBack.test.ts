@@ -189,6 +189,23 @@ describe("reviewing what a run produced", () => {
     });
   });
 
+  it("asks Git to ignore whitespace for the branch diff only when told to", async () => {
+    const { service, git } = harness();
+
+    await service.execute(ids.window as never, reviewCommand);
+    await service.execute(ids.window as never, { ...reviewCommand, ignoreWhitespace: true });
+
+    expect(git.readBranchDiff).toHaveBeenNthCalledWith(1, {
+      checkoutRoot: runRoot,
+      baseRef: "origin/main",
+    });
+    expect(git.readBranchDiff).toHaveBeenNthCalledWith(2, {
+      checkoutRoot: runRoot,
+      baseRef: "origin/main",
+      ignoreWhitespace: true,
+    });
+  });
+
   it("names the work the run never committed, which no merge would carry", async () => {
     const { service } = harness({ runUncommitted: ["src/draft.ts"] });
 

@@ -4497,8 +4497,15 @@ function baseCheckoutResolver(
 
 function codeOperationGitPort(git: GitService): CodeOperationGitPort {
   return {
-    observe: async ({ checkoutRoot, maxDiffBytes }) =>
-      mapGitObservation(await git.observe(checkoutRoot), maxDiffBytes),
+    observe: async ({ checkoutRoot, maxDiffBytes, ignoreWhitespace }) =>
+      mapGitObservation(
+        await git.observe(
+          checkoutRoot,
+          undefined,
+          ignoreWhitespace === true ? { ignoreWhitespace: true } : undefined,
+        ),
+        maxDiffBytes,
+      ),
     observeRemotes: async ({ checkoutRoot }) => {
       const remotes = await git.observeRemotes(checkoutRoot);
       return remotes?.map((remote) => ({
@@ -4534,6 +4541,7 @@ function codeOperationGitPort(git: GitService): CodeOperationGitPort {
       const result = await git.readDiff({
         checkoutRoot: input.checkoutRoot,
         scope: { kind: "branch", baseRef: input.baseRef },
+        ...(input.ignoreWhitespace === true ? { ignoreWhitespace: true } : {}),
       });
       return result.status === "ready"
         ? {

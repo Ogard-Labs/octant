@@ -409,6 +409,7 @@ export interface CodeOperationGitPort {
   readonly observe: (input: {
     readonly checkoutRoot: string;
     readonly maxDiffBytes: number;
+    readonly ignoreWhitespace?: boolean;
   }) => Promise<{
     readonly status: "ready" | "unavailable" | "failed";
     readonly head?: {
@@ -522,6 +523,7 @@ export interface CodeOperationGitPort {
   readonly readBranchDiff?: (input: {
     readonly checkoutRoot: string;
     readonly baseRef: string;
+    readonly ignoreWhitespace?: boolean;
   }) => Promise<
     | {
         readonly status: "ready";
@@ -3165,7 +3167,11 @@ export class CodeOperationService {
     ]) {
       const comparison = await compare({ checkoutRoot, baseRef, headRef: "HEAD" });
       if (comparison.status !== "ready") continue;
-      const diff = await readDiff({ checkoutRoot, baseRef });
+      const diff = await readDiff({
+        checkoutRoot,
+        baseRef,
+        ...(command.ignoreWhitespace === true ? { ignoreWhitespace: true } : {}),
+      });
       if (diff.status !== "ready") continue;
       return decodeCodeOperationResult({
         kind: "run-reviewed",
@@ -3277,6 +3283,7 @@ export class CodeOperationService {
     const result = await this.#options.git.observe({
       checkoutRoot,
       maxDiffBytes: command.maxDiffBytes,
+      ...(command.ignoreWhitespace === true ? { ignoreWhitespace: true } : {}),
     });
     if (
       result.status !== "ready" ||

@@ -407,6 +407,8 @@ const ObserveGit = Schema.Struct({
   ...OperationScope,
   gitOperationId: CodeGitOperationId,
   maxDiffBytes: Schema.Int.pipe(Schema.between(1, 1024 * 1024)),
+  /** Read the diff with Git's `-w`; only the diff text changes, never the checkout state. */
+  ignoreWhitespace: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 const StageGit = Schema.Struct({
   kind: Schema.Literal("stage-git"),
@@ -613,6 +615,7 @@ const ReviewRun = Schema.Struct({
   ...OperationScope,
   gitOperationId: CodeGitOperationId,
   maxDiffBytes: Schema.Int.pipe(Schema.between(1, 1024 * 1024)),
+  ignoreWhitespace: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 
 /**
