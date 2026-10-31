@@ -40,7 +40,9 @@ import { Cause, Effect, Exit, Option, Queue, Scope, Stream } from "effect";
 import {
   codexAccountWindowStatus,
   mapCodexMessage,
+  mapCodexSubagentCall,
   mapCodexSubagentWebSearch,
+  type CodexSubagentCall,
   type CodexEventContext,
   type CodexPendingApproval,
 } from "./codexEventMapper";
@@ -850,6 +852,8 @@ export function makeCodexClient(connection: CodexAppServerConnection): CodexClie
 
 export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
   const clientFactory = options.clientFactory ?? makeCodexClient;
+  // Codex's own subagent threads outlive the turn and connection that started them.
+  const subagentLineage = new Map<string, string>();
   const clock = options.clock ?? (() => new Date().toISOString());
   const makeCorrelation = options.correlationId ?? (() => crypto.randomUUID());
   const contextFacts = makeCodexContextFacts(options, clientFactory, clock);
@@ -985,6 +989,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             makeRequestId,
             makeTaskId,
             makeToolCallId,
+            subagentLineage,
           },
         );
       });
@@ -1255,6 +1260,18 @@ interface ConnectionFactories {
   readonly makeRequestId: () => string;
   readonly makeTaskId: () => string;
   readonly makeToolCallId: () => string;
+  /** Each of Codex's own subagent threads, by the thread that started it; shared by the driver's connections. */
+  readonly subagentLineage: Map<string, string>;
+}
+
+/** How far a subagent's subagents are followed back to the thread that owns them. */
+const MAX_CODEX_SUBAGENT_DEPTH = 8;
+/** Subagent threads a driver remembers; the oldest is forgotten first. */
+const MAX_CODEX_SUBAGENT_LINEAGE = 1_024;
+
+/** Every agent thread a subagent call names: the ones it started and the ones it reports on. */
+function codexSubagentThreads(item: CodexSubagentCall): ReadonlyArray<string> {
+  return [...new Set([...item.receiverThreadIds, ...Object.keys(item.agentsStates ?? {})])];
 }
 
 /**
@@ -1305,8 +1322,35 @@ function makeConnection(
     const queue = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<ProviderSessionId, SessionState>();
     const sessionsByThread = new Map<string, SessionState>();
-    // Codex's own subagent threads, each with the session whose turn started it.
-    const subagentThreads = new Map<string, SessionState>();
+    /**
+     * The session that owns one of Codex's own subagent threads: its parent
+     * thread, or the parent's parent for a subagent a subagent started. The
+     * lineage lives with the driver, not this connection, because each turn
+     * acquires a new connection and a subagent outlives the turn that started
+     * it; the resumed session is found again by its Codex thread.
+     */
+    const subagentOwner = (threadId: string): SessionState | undefined => {
+      let current = threadId;
+      for (let depth = 0; depth < MAX_CODEX_SUBAGENT_DEPTH; depth += 1) {
+        const parentThread = factories.subagentLineage.get(current);
+        if (parentThread === undefined) return undefined;
+        const owner = sessionsByThread.get(parentThread);
+        if (owner !== undefined) return owner;
+        current = parentThread;
+      }
+      return undefined;
+    };
+    const recordSubagent = (childThreadId: string, parentThreadId: string) => {
+      const lineage = factories.subagentLineage;
+      if (childThreadId === parentThreadId) return;
+      lineage.delete(childThreadId);
+      lineage.set(childThreadId, parentThreadId);
+      // The oldest entry goes first once the driver has seen this many.
+      if (lineage.size > MAX_CODEX_SUBAGENT_LINEAGE) {
+        const oldest = lineage.keys().next().value;
+        if (oldest !== undefined) lineage.delete(oldest);
+      }
+    };
     const pendingApprovalOwners = new Map<string, ProviderSessionId>();
     /** Each pending approval's call, for an automatic reviewer; never published. */
     const approvalCalls = new Map<string, ProviderApprovalCall>();
@@ -1425,9 +1469,10 @@ function makeConnection(
     /**
      * A message on one of Codex's own subagent threads. Only a session that
      * runs them at Full access has any, and nothing there asks a person, so
-     * the one thing read is a web search the subagent ran, which marks the
-     * parent's thread; a subagent the subagent starts is followed the same
-     * way. Everything else on those threads is Codex's own.
+     * two things are read: a web search the subagent ran, which marks the
+     * owning thread, and a subagent call it made, which shows the agents it
+     * started, waited on, or closed as child runs under it. Everything else
+     * on those threads is Codex's own.
      */
     const observeSubagentThread = (message: CodexServerMessage) => {
       if (
@@ -1436,20 +1481,23 @@ function makeConnection(
       ) {
         return;
       }
-      const parent = subagentThreads.get(message.params.threadId);
+      const subagentThread = message.params.threadId;
+      const owner = subagentOwner(subagentThread);
       const item = message.params.item;
-      if (parent === undefined || isUnmodeledThreadItem(item)) return;
-      if (
-        message.method === "item/completed" &&
-        item.type === "collabAgentToolCall" &&
-        item.tool === "spawnAgent"
-      ) {
-        for (const threadId of item.receiverThreadIds) subagentThreads.set(threadId, parent);
+      if (owner === undefined || isUnmodeledThreadItem(item)) return;
+      if (message.method === "item/completed" && item.type === "collabAgentToolCall") {
+        for (const threadId of codexSubagentThreads(item)) {
+          recordSubagent(threadId, subagentThread);
+        }
+        if (owner.terminal || owner.context === undefined) return;
+        for (const mapped of mapCodexSubagentCall(owner.context, item, subagentThread)) {
+          if (mapped.kind === "event") offer(mapped.event);
+        }
         return;
       }
       if (message.method !== "item/started" || item.type !== "webSearch") return;
-      if (parent.terminal || parent.context === undefined) return;
-      const mark = mapCodexSubagentWebSearch(parent.context, item.query);
+      if (owner.terminal || owner.context === undefined) return;
+      const mark = mapCodexSubagentWebSearch(owner.context, item.query);
       if (mark.kind === "event") offer(mark.event);
     };
     const handleMessage = (message: CodexServerMessage) => {
@@ -1588,12 +1636,10 @@ function makeConnection(
           state.compaction.compacted = true;
         }
         // A subagent Codex started runs on a thread of its own; its web
-        // searches are read from that thread on this session's behalf.
-        if (
-          item.event.kind === "child-agent-activity" &&
-          (item.event.status === "running" || item.event.status === "starting")
-        ) {
-          subagentThreads.set(item.event.childAgentId, state);
+        // searches and its own subagents are read from that thread on this
+        // session's behalf, this turn and every later one.
+        if (item.event.kind === "child-agent-activity") {
+          recordSubagent(item.event.childAgentId, state.threadId);
         }
         offer(item.event);
         if (isTerminal(item.event)) {

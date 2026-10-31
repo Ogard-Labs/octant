@@ -3582,6 +3582,172 @@ describe("Codex running as itself", () => {
     expect(codexAppServerArgs("0.164.0")).toContain("agents.enabled=false");
   });
 
+  it("keeps a subagent's web searches marking its parent after the parent's thread resumes on a new connection", async () => {
+    let emit: (message: CodexServerMessage) => void = () => undefined;
+    let turn = 0;
+    const f = fixture({
+      turnStart: async () => {
+        turn += 1;
+        emit(
+          notification("turn/started", {
+            threadId: "thread-1",
+            turn: { id: `turn-${turn}`, status: "inProgress" },
+          }),
+        );
+        if (turn === 1) {
+          emit(
+            notification("item/completed", {
+              threadId: "thread-1",
+              turnId: "turn-1",
+              item: {
+                type: "collabAgentToolCall",
+                id: "collab-1",
+                tool: "wait",
+                status: "completed",
+                receiverThreadIds: ["thread-child"],
+                agentsStates: { "thread-child": { status: "completed" } },
+              },
+              completedAtMs: 20,
+            }),
+          );
+        } else {
+          emit(
+            notification("item/started", {
+              threadId: "thread-child",
+              turnId: "turn-child",
+              item: { type: "webSearch", id: "search-late", query: "late search" },
+              startedAtMs: 30,
+            }),
+          );
+        }
+        return { turn: { id: `turn-${turn}`, status: "inProgress" } };
+      },
+    });
+    emit = f.emit;
+    const driver = makeCodexDriver(f.options());
+    const first = await acquireConnection(driver, "code");
+    await Effect.runPromise(
+      first.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "full-access",
+        nativeSetup: ownSetup,
+      }),
+    );
+    const firstEvents = takeEvents(first.connection, 1);
+    await Effect.runPromise(
+      first.connection.send({ sessionId, prompt: "Wait.", attachments: [], tools: [] }),
+    );
+    expect((await firstEvents)[0]).toMatchObject({
+      kind: "child-agent-activity",
+      childAgentId: "thread-child",
+      status: "completed",
+    });
+    await first.close();
+
+    const second = await acquireConnection(driver, "code");
+    await Effect.runPromise(
+      second.connection.resume({
+        sessionId: secondSessionId,
+        resumeCursor: { driverKind: "codex", value: "thread-1" },
+        executionPolicy: "full-access",
+        nativeSetup: ownSetup,
+      }),
+    );
+    const secondEvents = takeEvents(second.connection, 1);
+    await Effect.runPromise(
+      second.connection.send({
+        sessionId: secondSessionId,
+        prompt: "Go on.",
+        attachments: [],
+        tools: [],
+      }),
+    );
+    expect((await secondEvents)[0]).toMatchObject({
+      kind: "outside-content-read",
+      target: "late search",
+    });
+    await second.close();
+  });
+
+  it("shows a subagent's own subagents as child runs under it and marks the thread for their searches", async () => {
+    let emit: (message: CodexServerMessage) => void = () => undefined;
+    const f = fixture({
+      turnStart: async () => {
+        emit(
+          notification("turn/started", {
+            threadId: "thread-1",
+            turn: { id: "turn-1", status: "inProgress" },
+          }),
+        );
+        emit(
+          notification("item/completed", {
+            threadId: "thread-1",
+            turnId: "turn-1",
+            item: {
+              type: "collabAgentToolCall",
+              id: "collab-1",
+              tool: "spawnAgent",
+              status: "completed",
+              receiverThreadIds: ["thread-child"],
+            },
+            completedAtMs: 20,
+          }),
+        );
+        emit(
+          notification("item/completed", {
+            threadId: "thread-child",
+            turnId: "turn-child",
+            item: {
+              type: "collabAgentToolCall",
+              id: "collab-2",
+              tool: "spawnAgent",
+              status: "completed",
+              receiverThreadIds: ["thread-grandchild"],
+              prompt: "Check the changelog",
+            },
+            completedAtMs: 25,
+          }),
+        );
+        emit(
+          notification("item/started", {
+            threadId: "thread-grandchild",
+            turnId: "turn-grandchild",
+            item: { type: "webSearch", id: "search-deep", query: "deep search" },
+            startedAtMs: 30,
+          }),
+        );
+        return { turn: { id: "turn-1", status: "inProgress" } };
+      },
+    });
+    emit = f.emit;
+    const acquired = await acquireConnection(makeCodexDriver(f.options()), "code");
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "full-access",
+        nativeSetup: ownSetup,
+      }),
+    );
+    const events = takeEvents(acquired.connection, 3);
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "Research.", attachments: [], tools: [] }),
+    );
+    const [child, grandchild, mark] = await events;
+    expect(child).toMatchObject({ kind: "child-agent-activity", childAgentId: "thread-child" });
+    expect(child).not.toHaveProperty("parentChildAgentId");
+    expect(grandchild).toMatchObject({
+      kind: "child-agent-activity",
+      childAgentId: "thread-grandchild",
+      parentChildAgentId: "thread-child",
+      task: "Check the changelog",
+      status: "running",
+    });
+    expect(mark).toMatchObject({ kind: "outside-content-read", target: "deep search" });
+    await acquired.close();
+  });
+
   it("shows Codex's own subagent as a child run and marks the thread when the subagent searches the web", async () => {
     let emit: (message: CodexServerMessage) => void = () => undefined;
     const f = fixture({
