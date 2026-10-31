@@ -30,6 +30,55 @@ const capabilities = {
 } as const;
 
 describe("ProviderRuntimeRegistry", () => {
+  it("keeps leased runtimes apart, survives one lease's exit, and closes idle leases beyond three", async () => {
+    vi.useFakeTimers();
+    const registry = new ProviderRuntimeRegistry();
+    const closed: string[] = [];
+    const exits = new Map<string, () => void>();
+    let invalidated = 0;
+    registry.onRuntimeInvalidated(instanceId, () => {
+      invalidated += 1;
+    });
+    const lease = (name: string) =>
+      Effect.runPromise(
+        Effect.scoped(
+          registry.acquireRuntime(instanceId, {
+            idleMs: 30_000,
+            lease: name,
+            start: async () => ({
+              value: name,
+              exited: new Promise<void>((resolve) => exits.set(name, resolve)),
+              close: async () => void closed.push(name),
+            }),
+          }),
+        ),
+      );
+    try {
+      expect(await lease("a")).toBe("a");
+      expect(await lease("b")).toBe("b");
+      expect(registry.hasRuntime(instanceId)).toBe(true);
+
+      // One thread's process ending is that thread's to observe.
+      exits.get("a")?.();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(invalidated).toBe(0);
+      expect(closed).toEqual(["a"]);
+
+      for (const name of ["c", "d", "e"]) {
+        await lease(name);
+        await vi.advanceTimersByTimeAsync(1);
+      }
+      // Four idle leases on the instance; the one idle longest is closed.
+      expect(closed).toEqual(["a", "b"]);
+      await registry.invalidateRuntime(instanceId);
+      expect([...closed].sort()).toEqual(["a", "b", "c", "d", "e"]);
+      expect(invalidated).toBe(1);
+    } finally {
+      await registry.closeAll();
+      vi.useRealTimers();
+    }
+  });
+
   it("expires idle native sessions and retains only four most recently released runtimes", async () => {
     vi.useFakeTimers();
     const registry = new ProviderRuntimeRegistry();

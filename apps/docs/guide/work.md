@@ -50,7 +50,9 @@ The sidebar **Thread board** is a server-derived view of Work threads as Ready, 
 
 To redesign an existing website, ask the agent to open the page in the Browser and take a screenshot. It can then build a Canvas design with the page as it is now beside a redesigned version. The before frame shows the screenshot the thread kept (a small picture, about 40 KB), and the agent draws the after frame itself; it never pulls the site's own images, styles, or fonts into a frame. Only screenshots this thread took are used. The Canvas preview shows them, but a share, a public link, and an export leave them out.
 
-Work has no shell and no Git. The agent in a Work thread is never given a way to run commands, so it never asks you to approve one; changes to files in the Project still ask first. When Work work becomes software engineering, use a [promotion](/guide/promotions) to start a linked Code thread with explicit user approval.
+Today Work has no shell and no Git. The agent in a Work thread is never given a way to run commands, so it never asks you to approve one; changes to files in the Project still ask first. When Work work becomes software engineering, use a [promotion](/guide/promotions) to start a linked Code thread with explicit user approval.
+
+Planned: Work and Code can do the same things. A Work thread gets the same shell, Git, command-line tools, `ssh` to your own machines, provider tools, subagents, and Full access as a Code thread, under the same guardrail level: at Guarded you approve each command and the first connection to each host; at Full access nothing asks. Octant keeps no SSH keys; `ssh` uses your own agent and settings. What differs is focus: Work shows documents, artifacts, local tasks, and its board, and keeps Git panels, pull requests, reviews, issue trackers, and worktrees out of sight until you turn on **Developer tools** in the Work Project's overview. A Work thread is still Done when you mark it Done. This is not built yet.
 
 ## Work settings
 

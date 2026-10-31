@@ -3,7 +3,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { CuaDriverLike, EmbeddedCuaDriverHostLike, ToolResult } from "@trycua/cua-driver";
 import { verifyComputerDriverBinary } from "./computerUseDriverRelease";
-import type { StagedComputerDriver } from "./computerUseDriverUpdates";
+import {
+  isCompatibleComputerDriverContract,
+  type StagedComputerDriver,
+} from "./computerUseDriverUpdates";
 
 export interface ComputerDriverRuntime {
   readonly generation: string;
@@ -70,7 +73,7 @@ export async function startComputerDriverRuntime(options: {
     );
     if (
       connection.driverVersion !== options.driver.version ||
-      connection.contractVersion !== "0.8.0"
+      !isCompatibleComputerDriverContract(connection.contractVersion)
     )
       throw new Error("Computer-use driver contract is incompatible.");
     const connected = sdk.CuaDriver.connect(connection.socketPath);
@@ -144,6 +147,27 @@ export async function computerUsePermissions(request: boolean = false) {
   // enable the installed app in System Settings, as the SDK recommends.
   if (!permissions.screenRecording) await openComputerUsePermissionSettings();
   return permissions;
+}
+
+/**
+ * The running driver's own view of its grants. macOS can refuse the driver
+ * while it allows Octant: an ad-hoc signed Octant launched by LaunchServices
+ * does not pass its grant to the child. An unreadable answer counts as refused.
+ */
+export async function computerDriverPermissions(
+  runtime: ComputerDriverRuntime,
+): Promise<{ readonly accessibility: boolean; readonly screenRecording: boolean }> {
+  try {
+    const result = await runtime.call("check_permissions", {});
+    const report: unknown = JSON.parse(result.structuredJson ?? "null");
+    if (result.isError || !isRecord(report)) throw new Error("Unreadable permission report.");
+    return {
+      accessibility: report.accessibility === true,
+      screenRecording: report.screen_recording === true,
+    };
+  } catch {
+    return { accessibility: false, screenRecording: false };
+  }
 }
 
 export async function openComputerUsePermissionSettings(): Promise<void> {

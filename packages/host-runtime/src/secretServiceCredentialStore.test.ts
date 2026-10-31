@@ -11,6 +11,7 @@ import {
   type SecretToolCommandExecutor,
   type SecretToolCommandResult,
 } from "./secretServiceCredentialStore";
+import { addApiKey, apiKeysInUseOrder } from "./apiKeyPool";
 import { CredentialStoreFailure } from "./credentialStore";
 
 const providerInstanceId = randomUUID();
@@ -198,10 +199,112 @@ describe("Secret Service credential store", () => {
         'secret-tool: Object does not exist at path "/org/freedesktop/secrets/collection/login"',
       ),
     ).rejects.toMatchObject({ category: "unavailable", cause: "no-login-collection" });
-    await expect(storing("secret-tool: dbus connection refused")).rejects.toMatchObject({
-      category: "unavailable",
+    await expect(storing("secret-tool: unexpected failure")).rejects.toMatchObject({
+      category: "failed",
       cause: undefined,
     });
+  });
+
+  it("names a keyring nobody started, a denied caller, and a missing tool", async () => {
+    const storing = (stderr: string) =>
+      makeSecretServiceCredentialStore({
+        execute: async () => result({ exitCode: 1, stderr }),
+      }).set(providerInstanceId, credential);
+    for (const stderr of [
+      "secret-tool: GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.secrets was not provided by any .service files",
+      "secret-tool: Cannot autolaunch D-Bus without X11 $DISPLAY",
+      "secret-tool: dbus connection refused",
+    ]) {
+      await expect(storing(stderr)).rejects.toMatchObject({
+        category: "unavailable",
+        cause: "no-service",
+      });
+    }
+    await expect(
+      storing(
+        "secret-tool: GDBus.Error:org.freedesktop.DBus.Error.AccessDenied: Permission denied",
+      ),
+    ).rejects.toMatchObject({ category: "unavailable", cause: "denied" });
+
+    const missingTool = makeSecretServiceCredentialStore({
+      execute: async () => {
+        throw Object.assign(new Error("spawn /usr/bin/secret-tool ENOENT"), { code: "ENOENT" });
+      },
+    });
+    await expect(missingTool.set(providerInstanceId, credential)).rejects.toMatchObject({
+      category: "unavailable",
+      cause: "no-tool",
+    });
+
+    const silent = makeSecretServiceCredentialStore({
+      execute: async () => {
+        throw new Error("secret-tool timed out");
+      },
+    });
+    await expect(silent.set(providerInstanceId, credential)).rejects.toMatchObject({
+      category: "unavailable",
+      cause: "timed-out",
+    });
+  });
+
+  it("reads a keyring that is not running as unavailable, never as a missing key", async () => {
+    const down = makeSecretServiceCredentialStore({
+      execute: async () =>
+        result({
+          exitCode: 1,
+          stderr:
+            "secret-tool: The name org.freedesktop.secrets was not provided by any .service files",
+        }),
+    });
+    await expect(down.has(providerInstanceId)).rejects.toMatchObject({ cause: "no-service" });
+    await expect(down.resolve(providerInstanceId)).rejects.toMatchObject({ cause: "no-service" });
+  });
+
+  it("hands back exactly the key a person entered, whatever the label around it holds", async () => {
+    const stored = new Map<string, string>();
+    const store = makeSecretServiceCredentialStore({
+      execute: async (spec) => {
+        const account = spec.args[spec.args.indexOf("account") + 1] ?? "";
+        if (spec.args[0] === "store") {
+          stored.set(account, spec.stdin ?? "");
+          return result();
+        }
+        // secret-tool prints the stored bytes as they are.
+        return result({ stdout: stored.get(account) ?? "" });
+      },
+    });
+    const typed = `test-key_${"Ab0-_=".repeat(16)}`;
+    // A pasted key often carries its line break; only that edge is dropped.
+    const entered = addApiKey(undefined, { secret: `${typed}\n`, label: "Nøkkel – work" });
+    await store.set(providerInstanceId, entered.stored);
+    const [key] = apiKeysInUseOrder(await store.resolve(providerInstanceId));
+    expect(key?.secret).toBe(typed);
+    expect(key?.label).toBe("Nøkkel – work");
+  });
+
+  it("works on the next call once a keyring that was down starts answering", async () => {
+    let running = false;
+    const stored = new Map<string, string>();
+    const store = makeSecretServiceCredentialStore({
+      execute: async (spec) => {
+        if (!running) {
+          return result({ exitCode: 1, stderr: "Cannot autolaunch D-Bus without X11 $DISPLAY" });
+        }
+        const account = spec.args[spec.args.indexOf("account") + 1] ?? "";
+        if (spec.args[0] === "store") {
+          stored.set(account, spec.stdin ?? "");
+          return result();
+        }
+        const value = stored.get(account);
+        return value === undefined ? result({ exitCode: 1 }) : result({ stdout: value });
+      },
+    });
+    await expect(store.set(providerInstanceId, credential)).rejects.toMatchObject({
+      cause: "no-service",
+    });
+    running = true;
+    await store.set(providerInstanceId, credential);
+    await expect(store.resolve(providerInstanceId)).resolves.toBe(credential);
   });
 
   it("requires both a responding Secret Service and the client tool", async () => {

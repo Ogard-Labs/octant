@@ -45,6 +45,13 @@ export interface ProviderRuntimeRegistryOptions {
 
 export interface ProviderRuntimeAcquireOptions<T> {
   readonly idleMs: number;
+  /**
+   * Separates processes on one instance that carry different authority, such
+   * as one root under one posture. Without it the instance has one runtime.
+   * A leased runtime's own exit is its holder's to observe: it does not end
+   * the instance's other runtimes or clear what the instance was observed to be.
+   */
+  readonly lease?: string;
   readonly start: (
     onProcessStarted?: ProviderProcessStartedListener,
   ) => Promise<ProviderRuntimeResource<T>>;
@@ -77,10 +84,27 @@ export function trackProviderProcess<
 }
 
 interface RuntimeEntry<T = unknown> {
+  readonly instanceId: ProviderInstanceId;
+  readonly key: string;
+  readonly lease: string | undefined;
   readonly resource: Promise<ProviderRuntimeResource<T>>;
   refs: number;
   idleTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Release order, so the lease idle longest is the first one closed. */
+  idleSince?: number;
   closing?: Promise<void>;
+}
+
+/**
+ * Idle leased runtimes kept per instance. A Codex lease measured about 100 MB
+ * resident (launcher and app-server) on macOS 27, so an instance whose threads
+ * span many roots keeps the most recently used few warm for the next turn and
+ * closes the rest rather than holding one process per root until each idles out.
+ */
+const IDLE_LEASES_PER_INSTANCE = 3;
+
+function runtimeKey(instanceId: ProviderInstanceId, lease: string | undefined): string {
+  return lease === undefined ? String(instanceId) : `${String(instanceId)}\u0000${lease}`;
 }
 
 export class ProviderRuntimeInvalidationRejected extends Error {
@@ -107,7 +131,8 @@ export class ProviderRuntimeRegistry {
   >();
   readonly #activeSessionsByInstance = new Map<ProviderInstanceId, number>();
   readonly #compatibleProtocols = new Map<ProviderInstanceId, CompatibleProtocol>();
-  readonly #runtimes = new Map<ProviderInstanceId, RuntimeEntry>();
+  readonly #runtimes = new Map<string, RuntimeEntry>();
+  #idleSequence = 0;
   readonly #idleNativeSessions = new NativeSessionRuntimePool();
   #closed = false;
   readonly #nativeSessionShutdown = new Map<symbol, () => Promise<void>>();
@@ -338,28 +363,33 @@ export class ProviderRuntimeRegistry {
         }
         const startedAt = performance.now();
         let createdRuntimeEntry = false;
-        let entry = this.#runtimes.get(instanceId) as RuntimeEntry<T> | undefined;
+        const key = runtimeKey(instanceId, options.lease);
+        let entry = this.#runtimes.get(key) as RuntimeEntry<T> | undefined;
         if (entry === undefined) {
           createdRuntimeEntry = true;
           entry = {
+            instanceId,
+            key,
+            lease: options.lease,
             refs: 0,
             resource: options
               .start((process) => this.trackProcess(instanceId, process))
               .then((resource) => this.#trackResource(instanceId, resource)),
             idleTimer: undefined,
           };
-          this.#runtimes.set(instanceId, entry as RuntimeEntry);
-          void entry.resource.then(
+          const created = entry;
+          this.#runtimes.set(key, created as RuntimeEntry);
+          void created.resource.then(
             (resource) => {
               if (resource.exited !== undefined) {
                 void resource.exited.then(
-                  () => this.#invalidateUnexpectedExit(instanceId, entry!),
-                  () => this.#invalidateUnexpectedExit(instanceId, entry!),
+                  () => this.#invalidateUnexpectedExit(created),
+                  () => this.#invalidateUnexpectedExit(created),
                 );
               }
             },
             () => {
-              if (this.#runtimes.get(instanceId) === entry) this.#runtimes.delete(instanceId);
+              if (this.#runtimes.get(key) === created) this.#runtimes.delete(key);
             },
           );
         }
@@ -367,6 +397,7 @@ export class ProviderRuntimeRegistry {
           clearTimeout(entry.idleTimer);
           entry.idleTimer = undefined;
         }
+        delete entry.idleSince;
         entry.refs += 1;
         acquired = entry;
         const value = (await entry.resource).value;
@@ -394,15 +425,17 @@ export class ProviderRuntimeRegistry {
         const entry = acquired;
         if (entry === undefined || entry.refs === 0) return;
         entry.refs -= 1;
-        if (entry.refs !== 0 || this.#runtimes.get(instanceId) !== entry) return;
-        if (options.idleMs === 0) await this.#closeEntry(instanceId, entry);
+        if (entry.refs !== 0 || this.#runtimes.get(entry.key) !== entry) return;
+        if (options.idleMs === 0) await this.#closeEntry(entry);
         else {
+          entry.idleSince = ++this.#idleSequence;
           entry.idleTimer = setTimeout(() => {
             // Idle cleanup is recoverable through the persisted process receipt.
             // Observe a failed close so it cannot become an unhandled rejection
             // or surface as a native main-process dialog.
-            void this.#closeEntry(instanceId, entry).catch(() => undefined);
+            void this.#closeEntry(entry).catch(() => undefined);
           }, options.idleMs);
+          if (entry.lease !== undefined) this.#closeIdleLeasesBeyondLimit(instanceId);
         }
       }),
     );
@@ -418,8 +451,41 @@ export class ProviderRuntimeRegistry {
     return () => listeners?.delete(listener);
   }
 
+  /**
+   * Closes one leased runtime now when nothing holds it, instead of after its
+   * idle delay. A runtime a connection still holds is left running, so no
+   * other session loses its process.
+   */
+  async closeIdleLease(
+    instanceId: ProviderInstanceId,
+    lease: string,
+  ): Promise<"closed" | "held" | "absent"> {
+    const entry = this.#runtimes.get(runtimeKey(instanceId, lease));
+    if (entry === undefined) return "absent";
+    if (entry.refs !== 0) return "held";
+    await this.#closeEntry(entry);
+    return "closed";
+  }
+
   hasRuntime(instanceId: ProviderInstanceId): boolean {
-    return this.#runtimes.has(instanceId);
+    return this.#entriesOf(instanceId).length > 0;
+  }
+
+  #entriesOf(instanceId: ProviderInstanceId): ReadonlyArray<RuntimeEntry> {
+    return [...this.#runtimes.values()].filter(
+      (entry) => String(entry.instanceId) === String(instanceId),
+    );
+  }
+
+  #closeIdleLeasesBeyondLimit(instanceId: ProviderInstanceId): void {
+    const idle = this.#entriesOf(instanceId)
+      .filter(
+        (entry) => entry.lease !== undefined && entry.refs === 0 && entry.idleSince !== undefined,
+      )
+      .sort((left, right) => (right.idleSince ?? 0) - (left.idleSince ?? 0));
+    for (const entry of idle.slice(IDLE_LEASES_PER_INSTANCE)) {
+      void this.#closeEntry(entry).catch(() => undefined);
+    }
   }
 
   async invalidateRuntime(instanceId: ProviderInstanceId): Promise<void> {
@@ -428,9 +494,8 @@ export class ProviderRuntimeRegistry {
         "Stop active sessions before changing this provider runtime.",
       );
     }
-    const entry = this.#runtimes.get(instanceId);
     try {
-      if (entry !== undefined) await this.#closeEntry(instanceId, entry);
+      await Promise.all(this.#entriesOf(instanceId).map((entry) => this.#closeEntry(entry)));
       await this.#idleNativeSessions.invalidate(instanceId);
     } finally {
       this.clearObservedState(instanceId);
@@ -469,9 +534,7 @@ export class ProviderRuntimeRegistry {
       ...[...this.#nativeSessionShutdown.values()].map((cleanup) =>
         Promise.resolve().then(cleanup),
       ),
-      ...[...this.#runtimes.entries()].map(([instanceId, entry]) =>
-        this.#closeEntry(instanceId, entry),
-      ),
+      ...[...this.#runtimes.values()].map((entry) => this.#closeEntry(entry)),
     ]);
     const failed = results.find((result) => result.status === "rejected");
     if (failed?.status === "rejected") throw failed.reason;
@@ -563,21 +626,23 @@ export class ProviderRuntimeRegistry {
     };
   }
 
-  async #closeEntry(instanceId: ProviderInstanceId, entry: RuntimeEntry): Promise<void> {
+  async #closeEntry(entry: RuntimeEntry): Promise<void> {
     if (entry.closing !== undefined) return entry.closing;
     if (entry.idleTimer !== undefined) clearTimeout(entry.idleTimer);
-    if (this.#runtimes.get(instanceId) === entry) this.#runtimes.delete(instanceId);
+    if (this.#runtimes.get(entry.key) === entry) this.#runtimes.delete(entry.key);
     entry.closing = entry.resource.then((resource) => resource.close());
     return entry.closing;
   }
 
-  #invalidateUnexpectedExit(instanceId: ProviderInstanceId, entry: RuntimeEntry): void {
-    if (this.#runtimes.get(instanceId) !== entry || entry.closing !== undefined) return;
-    this.#runtimes.delete(instanceId);
-    this.clearObservedState(instanceId);
-    this.clearCompatibleProtocol(instanceId);
-    for (const listener of this.#invalidationListeners.get(instanceId) ?? []) listener();
-    void this.#closeEntry(instanceId, entry).catch(() => undefined);
+  #invalidateUnexpectedExit(entry: RuntimeEntry): void {
+    if (this.#runtimes.get(entry.key) !== entry || entry.closing !== undefined) return;
+    this.#runtimes.delete(entry.key);
+    if (entry.lease === undefined) {
+      this.clearObservedState(entry.instanceId);
+      this.clearCompatibleProtocol(entry.instanceId);
+      for (const listener of this.#invalidationListeners.get(entry.instanceId) ?? []) listener();
+    }
+    void this.#closeEntry(entry).catch(() => undefined);
   }
 
   async #waitForProcessGroupExit(pid: number): Promise<boolean> {

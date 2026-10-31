@@ -58,6 +58,7 @@
     "./context-compaction": "./src/contextCompaction.ts",
     "./context-policy": "./src/contextPolicy.ts",
     "./trim-trailing": "./src/trimTrailing.ts",
+    "./keyring-advice": "./src/keyringAdvice.ts",
     "./model-context-window": "./src/modelContextWindow.ts",
     "./diagnostics-policy": "./src/diagnosticsPolicy.ts",
     "./work-confinement-policy": "./src/workConfinementPolicy.ts",
