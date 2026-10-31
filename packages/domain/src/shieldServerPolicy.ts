@@ -104,13 +104,33 @@ const PLAIN_CONFIG_KEYS = new Set([
   "connectionattempts",
 ]);
 
+const COMMAND_PREFIXES: ReadonlySet<string> = new Set([
+  "sudo",
+  "exec",
+  "command",
+  "env",
+  "nohup",
+  "time",
+]);
+
 /**
- * `ssh` where the shell runs it: first, or after a separator, a subshell or
- * substitution opening, or `sudo`/`exec`/`command`, quoted or not. A word
- * `ssh` inside a message or a search pattern is not a call.
+ * Whether `ssh` runs where the shell runs a command: first, or after a
+ * separator, a subshell or substitution opening, or `sudo`/`exec`/`command`,
+ * quoted or not. A word `ssh` inside a message or a search pattern is not a
+ * call. Read by splitting rather than by one pattern, so a long hostile
+ * command costs linear time.
  */
-const SSH_IN_COMMAND_POSITION =
-  /(?:^|[;&|(`\n]|\$\()\s*(?:(?:sudo|exec|command|env|nohup|time)\s+)*['"]?ssh['"]?(?=\s|$)/;
+function sshInCommandPosition(text: string): boolean {
+  for (const piece of text.split(/[;&|(`\n]/)) {
+    for (const word of piece.trim().split(/\s+/)) {
+      const bare = word.replace(/^['"]|['"]$/g, "");
+      if (bare === "ssh") return true;
+      if (!COMMAND_PREFIXES.has(bare) && bare !== "$") break;
+    }
+  }
+  return false;
+}
+
 const KEY_FILE = /(?:^|\/)(?:id_[a-z0-9_-]+|[^/]+\.pem|[^/]+\.key)$|\.ssh\//i;
 
 /**
@@ -121,7 +141,7 @@ const KEY_FILE = /(?:^|\/)(?:id_[a-z0-9_-]+|[^/]+\.pem|[^/]+\.key)$|\.ssh\//i;
  */
 export function parseSshInvocation(command: string): SshInvocation {
   const trimmed = command.trim();
-  if (!SSH_IN_COMMAND_POSITION.test(trimmed)) return { kind: "not-ssh" };
+  if (!sshInCommandPosition(trimmed)) return { kind: "not-ssh" };
   const words = localWords(trimmed);
   if (words === undefined || words[0] !== "ssh") {
     return { kind: "unreadable", host: guessHost(trimmed) };
