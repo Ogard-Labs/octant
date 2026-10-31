@@ -55,6 +55,12 @@ export interface NativeHarnessTurnObserverOptions {
   readonly contextHarness?: Pick<ContextHarnessService, "inspect">;
   /** The thread's goal, put in front of every turn while it is open. */
   readonly readGoal?: (threadId: string) => ThreadGoal | undefined;
+  /**
+   * What the agent reads about the person's registered servers in Work and
+   * Code: aliases, users, profiles, and runbook notes framed as context that
+   * grants nothing.
+   */
+  readonly serverContext?: () => string | undefined;
   readonly uuid: () => string;
   readonly clock: () => string;
 }
@@ -97,11 +103,13 @@ export class NativeHarnessTurnObserver {
     const redirect = this.#redirects.get(scope.threadId);
     this.#redirects.delete(scope.threadId);
     const goal = this.#goalContext(scope.threadId);
+    const servers = scope.mode === "chat" ? undefined : this.#serverContext();
     return [
       ...nativeHarnessInstructions(scope.mode),
       // Per-turn content, after the stable instructions, so the goal's
       // changing statuses never move the cached prefix.
       ...(goal === undefined ? [] : [{ kind: "work-item" as const, text: goal }]),
+      ...(servers === undefined ? [] : [{ kind: "project-memory" as const, text: servers }]),
       ...(redirect === undefined
         ? []
         : [
@@ -362,6 +370,16 @@ export class NativeHarnessTurnObserver {
       }
     } catch {
       // An answer the schema refuses is not an intervention.
+    }
+  }
+
+  #serverContext(): string | undefined {
+    try {
+      return this.#options.serverContext?.();
+    } catch {
+      // Notes that cannot be read leave the turn without them; they never
+      // gate one.
+      return undefined;
     }
   }
 

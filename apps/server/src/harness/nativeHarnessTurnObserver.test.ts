@@ -14,6 +14,7 @@ function observer(
   isHarness = true,
   session?: { status: string; detail?: string },
   goal?: Record<string, unknown>,
+  serverContext?: () => string | undefined,
 ) {
   const recorded: { turns: unknown[]; interventions: unknown[]; settled: number; started: number } =
     {
@@ -55,6 +56,7 @@ function observer(
     hostId: "00000000-0000-4000-8000-0000000000aa",
     scratchRoot: "/tmp",
     ...(goal === undefined ? {} : { readGoal: () => goal as never }),
+    ...(serverContext === undefined ? {} : { serverContext }),
     uuid: () => `00000000-0000-4000-8000-${String(++counter).padStart(12, "0")}`,
     clock: () => "2026-09-05T12:00:00.000Z",
   });
@@ -119,6 +121,26 @@ describe("native harness turn observer", () => {
       scope,
     );
     expect(done.some((block) => block.kind === "work-item")).toBe(false);
+  });
+
+  it("gives Work and Code turns the registered servers as notes, and Chat none", () => {
+    const notes = () => "The person registered these servers for SSH.";
+    for (const mode of ["work", "code"] as const) {
+      const context = observer(true, undefined, undefined, notes).subject.contextFor({
+        ...scope,
+        mode,
+      });
+      expect(context).toContainEqual({ kind: "project-memory", text: notes() });
+    }
+    const chat = observer(true, undefined, undefined, notes).subject.contextFor({
+      ...scope,
+      mode: "chat",
+    });
+    expect(chat.some((block) => block.kind === "project-memory")).toBe(false);
+    const unreadable = observer(true, undefined, undefined, () => {
+      throw new Error("journal closed");
+    }).subject.contextFor(scope);
+    expect(unreadable[0]?.kind).toBe("instructions");
   });
 
   it("hands a pending advisor redirect to exactly the next turn", async () => {

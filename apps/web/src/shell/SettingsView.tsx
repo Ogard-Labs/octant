@@ -229,7 +229,7 @@ export interface SettingsViewProps {
   /** Settings › Access › Safe networks; absent where the host has no such route. */
   readonly safeNetworksClient?: SafeNetworksClient;
   readonly secretStoresClient?: SecretStoresClient;
-  /** Settings › Servers; absent off this computer. */
+  /** Settings › Access › Servers; absent off this computer. */
   readonly shieldServersClient?: ShieldServersClient;
   /** Creating, joining, and revoking on this host; absent off it. */
   readonly replicaMembershipClient?: ReplicaMembershipClient;
@@ -294,11 +294,9 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   skills:
     "Skills extend what agents can do. Review the source, then trust and enable only what you want.",
   github: "Connection and repository access on the selected host.",
-  servers:
-    "Your own servers that agents may reach over SSH, and what Shield lets them do there.",
   host: "The host process: its status, startup, notifications, and maintenance.",
   permissions: "What you have already allowed: websites, extension tools, and public links.",
-  access: "The network places agents may reach below Full access.",
+  access: "The network places and your own servers agents may reach below Full access.",
   data: "What this host stores, how long it keeps threads, and how to back it up.",
   "secret-stores":
     "Keep API keys in a password manager you already use. Octant keeps a reference and fetches the key when it is used.",
@@ -1247,13 +1245,6 @@ function ActiveSectionContent({
         </section>
       );
     }
-    case "servers":
-      return (
-        <ShieldServersSettings
-          client={props.shieldServersClient}
-          focusedSetting={focusedSetting}
-        />
-      );
     case "secret-stores":
       return (
         <SecretStoresSettingsSection
@@ -1268,6 +1259,10 @@ function ActiveSectionContent({
             client={props.safeNetworksClient}
             projectNames={props.projectNames ?? NO_PROJECT_NAMES}
             {...(focusedSetting === undefined ? {} : { focusedSetting })}
+          />
+          <ShieldServersSettings
+            client={props.shieldServersClient}
+            focusedSetting={focusedSetting}
           />
         </div>
       );

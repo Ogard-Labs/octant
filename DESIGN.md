@@ -2149,8 +2149,9 @@ model** (each thread's provider with its smallest model, or a configured
 endpoint). The rules behind them are in
 [Octant Shield](docs/architecture.md#octant-shield). Built for Code: Auto
 reviewer and Shield model in Settings › Code › Access, and the reviewer
-override as a select on a Code Project's overview; servers are allowed, not
-built yet. **Safe networks** is built as Settings › Access, in the
+override as a select on a Code Project's overview; **Servers** is built as an
+account list below Safe networks in Settings › Access (a Project override is
+allowed, not built yet). **Safe networks** is built as Settings › Access, in the
 Privacy & data group after Permissions: a **Network limits** panel with a
 switch that is off by default, a sentence saying plainly whether limits are on,
 and a note that a change applies to the next runtime started; then an intro
@@ -2167,6 +2168,14 @@ its count and age, and a quiet **Trust**, which adds that host and port to
 the list being edited. While limits are off, or when the host cannot route
 runtimes through these rules, a plain note says the lists are saved but not applied
 ([Provider runtime network](docs/architecture.md#provider-runtime-network)).
+**Servers** opens with a sentence saying agents reach these servers with the
+person's SSH agent and Octant never reads key files, a quiet note when no SSH
+agent is running, one line per profile (Read-only, Operate, Admin) and one
+saying lock-out and destructive actions always ask. A server row shows
+`user@alias` in the code font, its profile, its runbook path, and how many
+deploys it has, with quiet Change and Remove; the form is Alias, User,
+Profile, Deploy commands (one per line, shown for Operate and Admin), and
+Runbook path. A refusal from the host shows inline in the alert role.
 A Work Project's **Developer tools** switch is presentation, not a
 permission, so it lives on that Project's overview, not here
 ([Workspace](docs/design/workspace.md); allowed, not built yet). A Browser request from a

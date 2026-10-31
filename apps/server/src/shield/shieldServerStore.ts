@@ -1,4 +1,5 @@
-import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
+import { closeSync, constants, fstatSync, openSync, readSync, statSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import {
   AggregateId,
   AggregateVersion,
@@ -242,7 +243,7 @@ export class ShieldServerStore {
     const deployCommands = server.deployCommands
       .map((command) => command.trim())
       .filter((command) => command.length > 0);
-    if (deployCommands.some((command) => /[\0\r\n]/.test(command))) {
+    if (deployCommands.some((command) => command.includes("\u0000") || /[\r\n]/.test(command))) {
       return refused("invalid-deploy-command");
     }
     const canonical: ShieldServer = { ...server, deployCommands };
@@ -331,4 +332,23 @@ export function readRunbookFile(path: string, maxBytes: number): string | undefi
   } finally {
     if (descriptor !== undefined) closeSync(descriptor);
   }
+}
+
+/**
+ * The person's SSH agent socket, when the host process was given one and it
+ * is a socket: what an SSH session signs in through. Read each time, so an
+ * agent started after the host is picked up.
+ */
+export function personSshAgentSocket(
+  value: string | undefined,
+  isSocket: (path: string) => boolean = (path) => {
+    try {
+      return statSync(path).isSocket();
+    } catch {
+      return false;
+    }
+  },
+): string | undefined {
+  if (value === undefined || !isAbsolute(value) || value.includes("\0")) return undefined;
+  return isSocket(value) ? value : undefined;
 }

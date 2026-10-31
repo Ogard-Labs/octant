@@ -26,7 +26,6 @@ describe("octantSettingsRegistry", () => {
       "device-tools",
       "github",
       "linear",
-      "servers",
       "permissions",
       "access",
       "secret-stores",
@@ -82,7 +81,12 @@ describe("octantSettingsRegistry", () => {
     ]);
     expect(section("access")?.label).toBe("Access");
     expect(section("access")?.scope).toBe("host");
-    expect(ids("access")).toEqual(["network-limits", "safe-networks"]);
+    expect(ids("access")).toEqual([
+      "network-limits",
+      "safe-networks",
+      "shield-servers-list",
+      "shield-servers-add",
+    ]);
     expect(section("secret-stores")?.label).toBe("Secret stores");
     expect(section("secret-stores")?.scope).toBe("host");
     expect(ids("secret-stores")).toEqual(["secret-store-link", "secret-store-check"]);
@@ -286,8 +290,8 @@ describe("octantSettingsRegistry", () => {
     );
     expect(telemetry).toContain("data/data-map");
     // "connector" also reaches Browser extensions through the word "extension",
-    // and Servers through "server", so the Skills page is among the first
-    // answers rather than always the first.
+    // and Access's Servers through "server", so the Skills page is among the
+    // first answers rather than always the first.
     expect(
       searchSettings(available, capabilities, "connector")
         .slice(0, 4)

@@ -54,6 +54,7 @@ import {
   createNativeHarnessTools,
   type NativeHarnessDelegatePort,
   type NativeHarnessShellPort,
+  type NativeHarnessShellRun,
   type NativeHarnessToolPorts,
 } from "./nativeHarnessTools";
 
@@ -90,6 +91,17 @@ export interface NativeHarnessCompositionOptions {
    * access runs on `shell`.
    */
   readonly fullAccessShell?: NativeHarnessShellPort;
+  /**
+   * Journals a command that reached a server over `ssh`, with its host and
+   * how it ended, at every level. `unavailable` means the record could not
+   * be kept, and the command's output is withheld as an unmarked result is.
+   */
+  readonly recordRemoteCommand?: (input: {
+    readonly threadId: string;
+    readonly command: string;
+    readonly status: NativeHarnessShellRun["status"];
+    readonly exitCode?: number | undefined;
+  }) => "recorded" | "not-remote" | "unavailable";
   /**
    * A Code thread's access posture now, as the window running it holds it and
    * clamped to its running turn's, or nothing for a thread that is not one.
@@ -532,6 +544,33 @@ export function createNativeHarnessComposition(
       return (shell ?? unavailableShell).run(input);
     },
   });
+  /** The shell with every `ssh` command it ran journaled under the thread. */
+  const recordingRemoteCommands = (
+    threadId: string,
+    shell: NativeHarnessShellPort | undefined,
+  ): NativeHarnessShellPort | undefined => {
+    const record = options.recordRemoteCommand;
+    if (shell === undefined || record === undefined) return shell;
+    return {
+      run: async (input) => {
+        const run = await shell.run(input);
+        let recorded: ReturnType<typeof record>;
+        try {
+          recorded = record({
+            threadId,
+            command: input.command,
+            status: run.status,
+            ...(run.exitCode === undefined ? {} : { exitCode: run.exitCode }),
+          });
+        } catch {
+          recorded = "unavailable";
+        }
+        return recorded === "unavailable"
+          ? { status: "unavailable", output: "", truncated: false }
+          : run;
+      },
+    };
+  };
   const codeEgress = (threadId: string, windowId?: string) => {
     const executionPolicy = options.readCodeExecutionPolicy?.(threadId, windowId);
     return executionPolicy === undefined
@@ -542,9 +581,12 @@ export function createNativeHarnessComposition(
     scope: HarnessEgressScope,
     windowId: string,
   ): NativeHarnessShellPort | undefined =>
-    options.proxiedShell === undefined
-      ? options.shell
-      : postureShell(options.proxiedShell(scope), () => codeEgress(scope.threadId, windowId));
+    recordingRemoteCommands(
+      scope.threadId,
+      options.proxiedShell === undefined
+        ? options.shell
+        : postureShell(options.proxiedShell(scope), () => codeEgress(scope.threadId, windowId)),
+    );
   const workEgress = (threadId: string) => {
     const executionPolicy = options.readWorkExecutionPolicy?.(threadId);
     return executionPolicy === undefined
@@ -554,9 +596,12 @@ export function createNativeHarnessComposition(
   // Work and Code share the shell at the thread's level, so a Work thread's
   // commands run on the shell a Code thread at that level gets.
   const workShell = (scope: HarnessEgressScope): NativeHarnessShellPort | undefined =>
-    options.proxiedShell === undefined
-      ? options.shell
-      : postureShell(options.proxiedShell(scope), () => workEgress(scope.threadId));
+    recordingRemoteCommands(
+      scope.threadId,
+      options.proxiedShell === undefined
+        ? options.shell
+        : postureShell(options.proxiedShell(scope), () => workEgress(scope.threadId)),
+    );
   const delegateFor = (scope: {
     readonly parentThreadId: string;
     readonly windowId: string;
@@ -779,20 +824,25 @@ export function createNativeHarnessComposition(
         });
       const commandsProxied =
         authority.network && options.proxiedShell !== undefined && projectId !== undefined;
-      const shell = !authority.network
-        ? options.offlineShell
-        : options.proxiedShell === undefined
-          ? options.shell
-          : projectId === undefined
-            ? unavailableShell
-            : postureShell(
-                options.proxiedShell({
-                  threadId: runId,
-                  projectId: String(projectId),
-                  parentThreadId,
-                }),
-                childEgress,
-              );
+      // A child's remote commands are recorded under the parent thread the
+      // person reviews.
+      const shell = recordingRemoteCommands(
+        parentThreadId,
+        !authority.network
+          ? options.offlineShell
+          : options.proxiedShell === undefined
+            ? options.shell
+            : projectId === undefined
+              ? unavailableShell
+              : postureShell(
+                  options.proxiedShell({
+                    threadId: runId,
+                    projectId: String(projectId),
+                    parentThreadId,
+                  }),
+                  childEgress,
+                ),
+      );
       const { approveCommand, ...interactions } = options.childInteractions?.(run) ?? {};
       const askApproval = interactions.approvals;
       const approvals: NativeHarnessToolPorts["approvals"] =

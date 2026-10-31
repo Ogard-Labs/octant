@@ -66,7 +66,7 @@ export const ShieldServerDeployCommand = Schema.String.pipe(
 export const ShieldServerRunbookPath = Schema.String.pipe(
   Schema.minLength(2),
   Schema.maxLength(MAX_SHIELD_RUNBOOK_PATH_LENGTH),
-  Schema.pattern(/^\/[^\0]*$/),
+  Schema.filter((path) => path.startsWith("/") && !path.includes("\u0000")),
 );
 
 export const ShieldServerFields = Schema.Struct({

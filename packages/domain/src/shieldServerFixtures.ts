@@ -58,7 +58,10 @@ export const SHIELD_REMOTE_COMMAND_FIXTURES: ReadonlyArray<ShieldRemoteCommandFi
   { command: "pm2 restart all", tier: "operate" },
   { command: "nginx -s reload", tier: "operate" },
   // Admin: configuration edits.
-  { command: "sudo sed -i s/worker_processes.*/worker_processes=4/ /etc/nginx/nginx.conf", tier: "admin" },
+  {
+    command: "sudo sed -i s/worker_processes.*/worker_processes=4/ /etc/nginx/nginx.conf",
+    tier: "admin",
+  },
   { command: "sudo cp /tmp/app.conf /etc/nginx/sites-available/app.conf", tier: "admin" },
   { command: "sudo systemctl enable fail2ban", tier: "admin" },
   { command: "sudo systemctl daemon-reload", tier: "admin" },
@@ -76,7 +79,10 @@ export const SHIELD_REMOTE_COMMAND_FIXTURES: ReadonlyArray<ShieldRemoteCommandFi
   { command: "sudo firewall-cmd --remove-service=ssh --permanent", tier: "lockout" },
   { command: "sudo systemctl stop sshd", tier: "lockout" },
   { command: "sudo systemctl disable ssh", tier: "lockout" },
-  { command: "sudo sed -i s/PermitRootLogin.*/PermitRootLogin=no/ /etc/ssh/sshd_config", tier: "lockout" },
+  {
+    command: "sudo sed -i s/PermitRootLogin.*/PermitRootLogin=no/ /etc/ssh/sshd_config",
+    tier: "lockout",
+  },
   { command: "sudo userdel -r olduser", tier: "lockout" },
   { command: "sudo deluser deploy", tier: "lockout" },
   { command: "sudo passwd -l root", tier: "lockout" },

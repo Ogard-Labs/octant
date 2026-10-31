@@ -27,7 +27,6 @@ export const SETTINGS_SECTION_IDS = [
   "device-tools",
   "github",
   "linear",
-  "servers",
   "permissions",
   "access",
   "secret-stores",

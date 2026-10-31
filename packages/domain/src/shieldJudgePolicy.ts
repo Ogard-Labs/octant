@@ -264,7 +264,9 @@ export function judgeShieldCallByRules(input: ShieldRuleInput): ShieldRuleOutcom
   const command = call.command?.trim();
 
   const ssh: SshInvocation =
-    command === undefined || command.length === 0 ? { kind: "not-ssh" } : parseSshInvocation(command);
+    command === undefined || command.length === 0
+      ? { kind: "not-ssh" }
+      : parseSshInvocation(command);
   if (ssh.kind === "ssh") return judgeSshCall(ssh, input);
 
   // 1. Hard lines and deny rules.

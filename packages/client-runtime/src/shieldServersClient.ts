@@ -34,7 +34,9 @@ export class ShieldServersClientFailure extends Error {
 
 const PATH = "/api/shield/servers";
 
-export function createShieldServersClient(options: ShieldServersClientOptions): ShieldServersClient {
+export function createShieldServersClient(
+  options: ShieldServersClientOptions,
+): ShieldServersClient {
   const fetch = bindFetchPort(options.fetch);
   const target = new URL(PATH, options.baseUrl).toString();
   const send = async (init: RequestInit): Promise<unknown> => {

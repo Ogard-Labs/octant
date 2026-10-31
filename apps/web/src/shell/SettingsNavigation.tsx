@@ -81,7 +81,6 @@ const SETTINGS_NAVIGATION_META: Readonly<
   "device-tools": { group: "Tools", icon: TabletSmartphone },
   github: { group: "Tools", icon: FolderGit2 },
   linear: { group: "Tools", icon: ListTodo },
-  servers: { group: "Tools", icon: Server },
   permissions: { group: "Privacy & data", icon: ShieldCheck },
   access: { group: "Privacy & data", icon: Network },
   "secret-stores": { group: "Privacy & data", icon: KeyRound },

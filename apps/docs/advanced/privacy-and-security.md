@@ -309,6 +309,34 @@ What this does not cover yet:
   the proxy settings cannot reach anything; turn the switch off to get its
   network back.
 
+### Your servers over SSH
+
+Agents can reach your own servers with `ssh`, in Work and Code alike. Register
+each one in **Settings → Access → Servers**: the host alias from your SSH
+config, the user you sign in as, and a profile.
+
+- **Read-only**: status, logs, disk, processes, and service status.
+- **Operate**: also restarts services, updates packages, and runs the deploy
+  commands you describe, exactly as you wrote them.
+- **Admin**: also edits configuration.
+
+At Auto, Octant Shield lets a command through when the server's profile
+covers it, and asks you about anything else. Some actions always ask you,
+whatever the profile: firewall changes that can cut access, removing users or
+keys, disk and partition changes, deleting data, and reboots. SSH to a host
+you did not register always asks too. Every remote command is recorded with
+its host and exit status.
+
+Octant never reads your key files: `ssh` signs in through your SSH agent. You
+can point each server at a notes file (a runbook); agents read it as
+reference, and nothing written there changes what Shield allows. Only someone
+at this computer can change the list.
+
+What this does not cover yet: below Full access an agent's command runs in a
+sandbox that cannot read your SSH config or open a connection to a server, so
+`ssh` connects only at Full access today, where commands are recorded but not
+reviewed. Exit status and runbook notes reach only Octant Harness threads.
+
 ## Remote transport
 
 Remote access is HTTPS-only with browser-trusted certificates; certificate

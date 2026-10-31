@@ -22,6 +22,7 @@ import {
   type ShieldCall,
   type ShieldJudgeInput,
 } from "@octant/domain/shield-judge-policy";
+import type { ShieldServerRule } from "@octant/domain/shield-server-policy";
 
 /** How long the model may take before Shield hands the call to the person. */
 export const SHIELD_MODEL_TIMEOUT_MS = 20_000;
@@ -86,6 +87,8 @@ export interface ShieldThreadFacts {
   /** The person's own messages in the thread, oldest first. Nothing the agent read. */
   readonly personMessages: (threadId: string) => ReadonlyArray<string>;
   readonly projectCommands: (boundRoot: string) => ReadonlyArray<string>;
+  /** The servers the person registered; SSH to any other host goes to the person. */
+  readonly servers?: () => ReadonlyArray<ShieldServerRule>;
 }
 
 export interface OctantShieldOptions {
@@ -199,6 +202,7 @@ export class OctantShield {
       ...(request.extraRoots === undefined ? {} : { extraRoots: request.extraRoots }),
       tainted,
       projectCommands: facts.projectCommands(request.boundRoot),
+      servers: facts.servers?.() ?? [],
       level: reviewing.level,
       personMessages: facts.personMessages(request.threadId),
       watcherLabels,
