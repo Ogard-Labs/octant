@@ -449,7 +449,7 @@ export function buildBubblewrapLaunch(
   // Bubblewrap applies seccomp before execve of the command, so a filter that
   // blocked execve would prevent the launch itself. Overlay host executable
   // search paths, re-bind this launch's binary, then load a process-deny
-  // seccomp program that blocks fork/clone (and execveat) after start. See 0068.
+  // seccomp program that blocks fork/clone (and execveat) after start.
   const denyProcessFork = input.allowProcessFork === false;
   const denyProcessExec = input.allowProcessExec === false;
   if (denyProcessFork || denyProcessExec) {

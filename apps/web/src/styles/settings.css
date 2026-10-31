@@ -578,7 +578,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 /* --- Settings primitives: open routine groups, raised discrete objects --- */
 
-/* Panels are open sections (0072): a label, a rule, rows. The raised card
+/* Panels are open sections: a label, a rule, rows. The raised card
    this used to draw was the last one left in Settings. */
 .settings-panel {
   overflow: visible;
@@ -1012,9 +1012,8 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 }
 
 /* All preference sections share an open layout, including expanded editors.
-   The section remains the object that owns its label and row list (0109), but
-   routine content stays on the page ground under the scoped supersession in
-   0116. `overflow` stays visible so rows can host menus and comboboxes. */
+   The section remains the object that owns its label and row list, but
+   routine content stays on the page ground. `overflow` stays visible so rows can host menus and comboboxes. */
 .settings-card-section {
   display: grid;
   gap: 0;
@@ -1026,7 +1025,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 /* Routine Settings content stays open on the page ground. A section owns its
    label and row list; bounded surfaces are reserved for discrete editors and
-   protected actions (0116). */
+   protected actions. */
 
 /* Every section carries `--open`; the modifier documents that routine rows
    stay on the page ground and keeps the shared selector explicit. */

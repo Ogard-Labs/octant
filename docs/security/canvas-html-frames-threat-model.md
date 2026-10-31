@@ -4,8 +4,7 @@
 - Threat model id: `canvas-html-frames-v1`
 - Status: Accepted with
   [Canvas documents, designs, and prototypes](../architecture.md#canvas-documents-designs-and-prototypes).
-  Static frames that run nothing ship today under
-  [0164](../decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md),
+  Static frames that run nothing ship today,
   measured and themed static frames (F2) ship with Canvas schema version 16,
   asset-bearing static frames (F5) with version 17, and running frames with
   version 18, with F1, F3, F4, F6, F7, F8, F9, and F10 implemented and tested.
@@ -54,7 +53,7 @@ agent-authored frame does not.
 
 | Tier                        | Document                                          | Sandbox                                                                                                                                              | Policy                                                                                                                                                                                                                                                                  |
 | --------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Static (0164)               | `srcdoc`                                          | empty                                                                                                                                                | Frame policy below, narrowing the inherited app policy                                                                                                                                                                                                                  |
+| Static                      | `srcdoc`                                          | empty                                                                                                                                                | Frame policy below, narrowing the inherited app policy                                                                                                                                                                                                                  |
 | Static, measured and themed | `srcdoc`                                          | `allow-same-origin` only                                                                                                                             | Same; no script can run, so same origin grants the page nothing it can use                                                                                                                                                                                              |
 | Flow Play's design screen   | `srcdoc`                                          | `allow-same-origin` only, on an unthemed device frame for the click-through only                                                                     | Same policy as the tier above: the frame runs nothing, so F2's analysis holds unchanged. Same-origin exists so the player can read the page's own `#octant-flow:<screen>` hash and follow the author's anchors; the board and the exported site keep the empty sandbox. |
 | Running                     | Served by the host route with a single-use ticket | `allow-scripts` only, in the response's `sandbox` directive, and in the parent frame in a browser; on desktop a surface of its own with no route out | `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'`                                                      |
@@ -133,7 +132,7 @@ client's `frame-src` to that path on its own origin.
   still take focus by script in some cases (observed on Electron 43 from a blur
   handler). On desktop the page never holds the window's focus (F10).
 - Chromium once stopped painting sandboxed frames that were `inert` or had
-  `pointer-events: none` (0164). Every tier keeps frames hit-testable and
+  `pointer-events: none`. Every tier keeps frames hit-testable and
   covers a still frame instead.
 - The secret filter cannot read markup. Shared and exported frames rely on
   the person's acknowledgement, not on scanning; a saved or copied HTML file
@@ -169,8 +168,6 @@ client's `frame-src` to that path on its own origin.
 
 ## Related
 
-- [0010](../decisions/0010-secure-preview-and-canvas.md)
-- [0164](../decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md)
 - [Canvas documents, designs, and prototypes](../architecture.md#canvas-documents-designs-and-prototypes)
 - [canvas-share-authenticated-snapshot-threat-model.md](canvas-share-authenticated-snapshot-threat-model.md)
 - [canvas-share-static-export-threat-model.md](canvas-share-static-export-threat-model.md)

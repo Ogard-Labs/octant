@@ -8,9 +8,7 @@
 
 **Scope:** Structured messages between AgentRuns and real threads on one Octant
 host, beyond bounded `#thread` mention excerpts and beyond Chat-only
-`octant_thread_message` (0049)
-
-**Design:** [`../decisions/0063-agent-to-agent-messaging.md`](../decisions/0063-agent-to-agent-messaging.md)
+`octant_thread_message`
 
 **Effective rule:** [`../architecture.md`](../architecture.md) (the paragraph on
 agent-to-agent messaging under Modes) states what the host enforces. It is
@@ -39,7 +37,7 @@ power in another.
   grant. Untrusted with authority.
 - **Receiving agent / thread:** processes delivered bodies as data under its
   own policy. Untrusted with the sender's secrets and workspace.
-- **Child AgentRun:** equal-or-narrower than its parent (0012). May send or
+- **Child AgentRun:** equal-or-narrower than its parent. May send or
   receive only inside that clamp.
 - **Remote client:** may observe journaled status the principal can Open; cannot
   mint local receipts or exceed host policy.
@@ -56,9 +54,9 @@ power in another.
 
 ### Assumptions
 
-- 0009 untrusted-content rules and thread-lifetime taint remain in force.
-- 0012 hierarchy, depth, and concurrency ceilings remain in force.
-- 0049 Chat coordination stays a separate, mention-gated path. Broader
+- Untrusted-content rules and thread-lifetime taint remain in force.
+- Hierarchy, depth, and concurrency ceilings remain in force.
+- Chat coordination stays a separate, mention-gated path. Broader
   messaging (this design) may target Chat, Work, Code, and AgentRuns under
   Open-scope intersection; it does not widen `octant_thread_message` beyond
   Chat.
@@ -132,7 +130,7 @@ path meets the threats above.
 | Bodies framed as data            | Context assembly fixtures; instruction-shaped text not executed                        |
 | Events decode and bound          | Contract tests for the four event names and oversize/path labels                       |
 | Replay safe                      | Restart test rebuilds in-flight/refused projections without resurrecting purged bodies |
-| 0049 path unchanged              | Existing Chat coordination tests remain green                                          |
+| Chat coordination path unchanged | Existing Chat coordination tests remain green                                          |
 
 ## Residual risk
 
@@ -164,8 +162,4 @@ path meets the threats above.
 
 ## Related
 
-- [`../decisions/0063-agent-to-agent-messaging.md`](../decisions/0063-agent-to-agent-messaging.md)
 - [`security-architecture-threat-model.md`](security-architecture-threat-model.md)
-- [`../decisions/0012-mixed-provider-subagents.md`](../decisions/0012-mixed-provider-subagents.md)
-- [`../decisions/0049-thread-dialogue-lane.md`](../decisions/0049-thread-dialogue-lane.md)
-- [`../decisions/0009-sandbox-confinement-and-approvals.md`](../decisions/0009-sandbox-confinement-and-approvals.md)

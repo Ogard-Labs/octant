@@ -1,8 +1,7 @@
 import type { SqliteConnection } from "./sqlitePort";
 
 /**
- * Startup compaction of superseded `code.checkout-observed@1` events, per
- * decision record 0039.
+ * Startup compaction of superseded `code.checkout-observed@1` events.
  *
  * A reconnect loop once journaled an observation for every poll of an unchanged
  * worktree, growing one aggregate to ~21k payload-identical events. The write

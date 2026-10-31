@@ -2199,7 +2199,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   font-size: var(--oct-text-xs);
 }
 
-/* What changed while a turn ran (0141). A work product, so it is the one card
+/* What changed while a turn ran. A work product, so it is the one card
    in a transcript whose replies are bare prose: a hairline ring on the card
    fill, no lift. Rows carry no borders; the counts are the only hue, the same
    diff ink the checkout strip uses. */
@@ -2319,7 +2319,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 }
 
 /* The bar controls' look is the system's `.composer-row` treatment
-   (ADR 0038); nothing to restate here. */
+   (octant.css); nothing to restate here. */
 
 .code-thread-workspace .visually-hidden {
   position: absolute;

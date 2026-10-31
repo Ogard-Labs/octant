@@ -1,7 +1,7 @@
 # One-step pairing with a self-made listener certificate
 
 **Status: approved by the maintainer on 2026-10-14; slices 1 to 6 are
-built (the live checks of 4, 5, and 6 are open); slice 7 is not.** Nothing else here is in force. [Architecture](../architecture.md)
+built (the live checks of 4, 5, and 6 are open); slice 7 is not.** Nothing else here is in force. [Architecture](../../architecture.md)
 holds only the rules that are true today, and each slice below moves its rules
 there when it lands; the host certificate, the pairing code, the client trust
 rule, pairing from a code, and the desktop's and phone's pins are already
@@ -223,7 +223,7 @@ why.
 ## Slices
 
 Each slice is one reviewable change with its tests. Each moves the rules it
-makes true into [Architecture](../architecture.md) in the same pull request,
+makes true into [Architecture](../../architecture.md) in the same pull request,
 and the plan shrinks accordingly.
 
 1. _Host certificate._ **Built**; its rules are in Architecture. Generation, storage, renewal, the self-made enable
@@ -250,7 +250,7 @@ and the plan shrinks accordingly.
    in-app scanner, and pasted code. The iOS exchange is tested on a Mac
    against a host-made certificate; the Android exchange has not been
    compiled or run. Not yet done: the device pass from the
-   [TestFlight runbook](../mobile-testflight.md) against a self-made host,
+   [TestFlight runbook](../../mobile-testflight.md) against a self-made host,
    including a refused mismatch, on both platforms.
 6. _One-line start._ **Built**; its rules are in Architecture. `--pair`. Tests: Tailscale is chosen over LAN,
    several candidates refuse and list them, a public address is never
@@ -271,7 +271,7 @@ enabling sections, and a new section for adding a computer),
 `apps/docs/guide/linux-host.md` (the Tailscale pairing steps become the one
 command), and `apps/docs/advanced/privacy-and-security.md` (the remote
 transport paragraph). The
-[mobile remote-control threat model](../security/mobile-remote-control-threat-model.md)
+[mobile remote-control threat model](../../security/mobile-remote-control-threat-model.md)
 gains the pin, the scheme claim, and the stolen-key limit. Until then those
 pages keep describing a browser-trusted certificate, which is still the only
 behavior.

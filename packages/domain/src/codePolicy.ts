@@ -152,7 +152,7 @@ export function harnessAsksUnderSessionFullAccess(input: {
  * prompts (`approval-gated` or `auto-accept-edits`), the provider reports the
  * capability, and the thread has not ingested untrusted content. Taint still
  * wins: a tainted thread cannot delegate, so irreversible classes come back
- * to the user (0104).
+ * to the user.
  */
 export function harnessAutoReviewEffective(input: {
   readonly autoApprove: boolean;

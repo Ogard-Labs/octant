@@ -205,7 +205,7 @@ const androidDefinition = {
 /**
  * Full usage for each Code family, returned by its `help` operation. The
  * always-visible descriptions above keep only what an agent must know before
- * its first call (decision 0067).
+ * its first call.
  */
 const CODE_TOOL_HELP: Readonly<Record<string, string>> = {
   ...BROWSER_TOOL_HELP,

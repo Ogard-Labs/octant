@@ -391,7 +391,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
             root,
           ),
         ];
-        // Full access is unrestricted except for 0006's static MCP/skills/hooks
+        // Full access is unrestricted except for the static MCP/skills/hooks
         // denials. Darwin uses allow-default plus trailing denies. Linux binds
         // the host root and overlays the same paths.
         if (input.executionPolicy === "full-access") {

@@ -136,8 +136,8 @@ export interface RepositoryTestProcessInput {
   /**
    * Exact host paths this launch must read even though they sit beneath a
    * denied ancestor, unioned with the port-wide set. A launch that needs a
-   * node names it here so a launch that does not never receives the grant
-   * (0133). macOS only.
+   * node names it here so a launch that does not never receives the grant.
+   * macOS only.
    */
   readonly literalReadPaths?: ReadonlyArray<string>;
   /**

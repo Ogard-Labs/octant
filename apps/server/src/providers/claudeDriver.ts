@@ -260,7 +260,7 @@ function claudePolicyOptions(
       // host records rather than one the provider makes for it. When the user
       // opts into harness-delegated approvals, the SDK's `auto` classifier
       // answers prompts Octant would otherwise surface; `canUseTool` and
-      // `PreToolUse` stay registered regardless (0104).
+      // `PreToolUse` stay registered regardless.
       return {
         permissionMode: autoApprove === true ? "auto" : "default",
         allowDangerouslySkipPermissions: false,

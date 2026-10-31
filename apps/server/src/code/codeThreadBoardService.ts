@@ -152,8 +152,8 @@ export interface CodeBoardPullRequestSource {
 }
 
 /**
- * Reads a thread's live plan (0027) and reduces it to the board's
- * step-completion count (0051). A dropped step leaves the plan's own record
+ * Reads a thread's live plan and reduces it to the board's
+ * step-completion count. A dropped step leaves the plan's own record
  * but no longer counts toward either side of the fraction, so a plan that
  * dropped a step can still read as fully done.
  */
@@ -245,7 +245,7 @@ export class CodeThreadBoardService {
         // Archived threads are dropped by the metadata projection; skip them here.
         if (metadata === undefined) return undefined;
         // A thread the person completed rests in its shelf until they reopen
-        // it; the board is for work in play (decision 0088).
+        // it; the board is for work in play.
         if (entry.thread.completedAt !== undefined) return undefined;
         const activity = runtimeByThread.get(String(entry.thread.id));
         if (activity === undefined) return undefined;

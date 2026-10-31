@@ -3,19 +3,19 @@
  * launches a runtime, and for the one the discovery scan performs on a
  * candidate it found itself.
  *
- * 0009 requires every Octant-spawned subprocess that can execute arbitrary code
+ * The sandbox rules require every Octant-spawned subprocess that can execute arbitrary code
  * to launch through the shared builder. The version read was the one launch no
  * family wrapped: the binary path is user-configured — and, in discovery, not
  * even named by the user — so a replaced executable ran with the user's whole
- * home and the network before any confined launch happened. 0142 names that as
- * a standing gap across every family, and 0146 closes it here, in one place, so
+ * home and the network before any confined launch happened. That was
+ * a standing gap across every family, and this module closes it in one place, so
  * the read sites cannot drift apart again.
  *
  * A version read needs far less than a turn. It has no thread, so no bound
  * project root and no managed home: its working directory, its `HOME` and the
  * only path it may write are one throwaway scratch directory this module
  * creates and the caller releases. Egress is `none` — a version string is
- * local, so 0122's probe exception for readiness checks that must reach a
+ * local, so the probe exception for readiness checks that must reach a
  * control plane does not apply here.
  *
  * The environment is reduced here, not by each family. A family builds the one
