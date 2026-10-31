@@ -1464,7 +1464,8 @@ occupy the main workspace in turn, following the
 [workspace navigation rule](docs/design/workspace.md#navigation-and-projects).
 The directory provides search and All, Chat, Work, and Code filters. Project
 detail is thread-first, with memory, provider access, and canvases in compact
-expandable rows below the primary work. A Work Project other than the default
+expandable rows below the primary work; its layout is in
+[Workspace](docs/design/workspace.md#navigation-and-projects). A Work Project other than the default
 folder also has a **Status file** row whose switch sits in place of the expand
 control: off by default, its copy says what turning it on keeps in the folder. Threads without a listed Project appear once in **No Project**, a collapsible
 folder row in the Project tree with the same nested-thread layout as Projects.

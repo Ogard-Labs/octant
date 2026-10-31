@@ -7,7 +7,7 @@ import type { DesktopRecipe, DesktopRecipeKeyChange } from "@octant/contracts/de
 import type { ProjectColor, ProjectProviderPolicy } from "@octant/contracts/projects";
 import type { ProviderInstance } from "@octant/contracts/providers";
 import { ChevronDown, SquarePen } from "lucide-react";
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { Children, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -202,33 +202,35 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 value={projectColorMenuValue(props.project.color)}
               />
             )}
-            <form
-              noValidate
-              onSubmit={(event) => {
-                event.preventDefault();
-                void commitName();
-              }}
-            >
-              <label className="sr-only" htmlFor={`project-name-${props.project.id}`}>
-                Project name
-              </label>
-              {/* The name is the page title, edited in place: the heading carries
-                the title role and the field inherits its type. */}
-              <h1 className="oct-title project-overview__title">
-                <OctantInput
-                  className="project-overview__name"
-                  defaultValue={props.project.name}
-                  id={`project-name-${props.project.id}`}
-                  onBlur={() => void commitName()}
-                  readOnly={archived || connectionStale}
-                  ref={nameInput}
-                  unstyled
-                />
-              </h1>
-            </form>
-            {props.project.type === "chat" ? null : (
-              <span className="project-overview__type">{label(props.project.type)} Project</span>
-            )}
+            <div className="project-overview__heading">
+              <form
+                noValidate
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void commitName();
+                }}
+              >
+                <label className="sr-only" htmlFor={`project-name-${props.project.id}`}>
+                  Project name
+                </label>
+                {/* The name is the page title, edited in place: the heading carries
+                  the title role and the field inherits its type. */}
+                <h1 className="oct-title project-overview__title">
+                  <OctantInput
+                    className="project-overview__name"
+                    defaultValue={props.project.name}
+                    id={`project-name-${props.project.id}`}
+                    onBlur={() => void commitName()}
+                    readOnly={archived || connectionStale}
+                    ref={nameInput}
+                    unstyled
+                  />
+                </h1>
+              </form>
+              {props.project.type === "chat" ? null : (
+                <span className="project-overview__type">{label(props.project.type)} Project</span>
+              )}
+            </div>
           </div>
           <div className="project-overview__actions" aria-label="Project actions">
             <p
@@ -239,7 +241,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
               {relinkStatus}
             </p>
             {props.onNewThread === undefined || archived || connectionStale ? null : (
-              <OctantButton onClick={props.onNewThread} size="sm" type="button">
+              <OctantButton onClick={props.onNewThread} size="sm" type="button" variant="secondary">
                 <SquarePen aria-hidden="true" size={14} strokeWidth={1.7} />
                 {props.project.type === "chat" ? "New chat" : "New thread"}
               </OctantButton>
@@ -270,7 +272,12 @@ export function ProjectOverview(props: ProjectOverviewProps) {
           <section className="project-overview__context" aria-label="Project binding">
             <div className="project-overview__root">
               <span>{props.project.type === "code" ? "Repository" : "Directory"}</span>
-              <strong>{props.project.binding.canonicalRoot}</strong>
+              <strong title={props.project.binding.canonicalRoot}>
+                <span aria-hidden="true">
+                  {homeRelativePath(props.project.binding.canonicalRoot)}
+                </span>
+                <span className="sr-only">{props.project.binding.canonicalRoot}</span>
+              </strong>
             </div>
             {unavailable ? (
               <OctantAlert className="project-overview__warning" tone="warning">
@@ -288,11 +295,9 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                     : "Available"}
               </span>
             )}
+            <p className="project-overview__description">{authorityCopy(props.project.type)}</p>
           </section>
         ) : null}
-        {props.project.type === "chat" ? null : (
-          <p className="project-overview__description">{authorityCopy(props.project.type)}</p>
-        )}
         {picking &&
         props.folderBrowseClient !== undefined &&
         props.hostId !== undefined &&
@@ -341,101 +346,110 @@ export function ProjectOverview(props: ProjectOverviewProps) {
             </section>
           )}
         </div>
+        {/*
+          Two groups rather than one run of identical rows: what the Project's
+          threads know (memory, brand, canvases) and what they may reach or
+          spend. Six alike rows in one list gave a reader nothing to scan by.
+        */}
         <div aria-label="Project settings" className="project-overview__inspectors">
-          {props.projectClient === undefined ? null : (
-            <ProjectOverviewInspector
-              key={`${String(props.project.id)}-memory`}
-              label="Memory"
-              summary="Approved context and audit history"
-            >
-              <ProjectMemorySection
-                client={props.projectClient}
-                {...(props.onMemoryChanged === undefined
-                  ? {}
-                  : { onChanged: props.onMemoryChanged })}
-                project={props.project}
-                projects={props.memoryProjects ?? []}
-                {...(connectionStale ? { readOnly: true } : {})}
-              />
-            </ProjectOverviewInspector>
-          )}
-          {props.project.type !== "chat" && props.onProviderPolicyChange !== undefined ? (
-            <ProjectOverviewInspector
-              key={`${String(props.project.id)}-providers`}
-              label="Provider access"
-              summary="Choose which providers and models this Project may use"
-            >
-              <ProjectProviderPolicySection
+          <ProjectOverviewGroup label="Context">
+            {props.projectClient === undefined ? null : (
+              <ProjectOverviewInspector
+                key={`${String(props.project.id)}-memory`}
+                label="Memory"
+                summary="Approved context and audit history"
+              >
+                <ProjectMemorySection
+                  client={props.projectClient}
+                  {...(props.onMemoryChanged === undefined
+                    ? {}
+                    : { onChanged: props.onMemoryChanged })}
+                  project={props.project}
+                  projects={props.memoryProjects ?? []}
+                  {...(connectionStale ? { readOnly: true } : {})}
+                />
+              </ProjectOverviewInspector>
+            )}
+            {props.onBrandKitChange === undefined ? null : (
+              <ProjectOverviewInspector
+                key={`${String(props.project.id)}-brand-kit`}
+                label="Brand kit"
+                summary="Colours and fonts your designs can use"
+              >
+                <ProjectBrandKitSection
+                  disabled={archived || connectionStale}
+                  onChange={async (brandKit) =>
+                    (await props.onBrandKitChange?.(props.project.id, brandKit)) ?? false
+                  }
+                  project={props.project}
+                />
+              </ProjectOverviewInspector>
+            )}
+            {props.canvasInventory === undefined ? null : (
+              <ProjectOverviewInspector
+                key={`${String(props.project.id)}-canvases`}
+                label="Canvases"
+                summary="Boards and visual artifacts saved with this Project"
+              >
+                {props.canvasInventory}
+              </ProjectOverviewInspector>
+            )}
+          </ProjectOverviewGroup>
+          <ProjectOverviewGroup label="Access and limits">
+            {props.project.type !== "chat" && props.onProviderPolicyChange !== undefined ? (
+              <ProjectOverviewInspector
+                key={`${String(props.project.id)}-providers`}
+                label="Provider access"
+                summary="Choose which providers and models this Project may use"
+              >
+                <ProjectProviderPolicySection
+                  disabled={archived || connectionStale}
+                  onChange={async (policy) =>
+                    (await props.onProviderPolicyChange?.(props.project.id, policy)) ?? false
+                  }
+                  project={props.project}
+                  providerInstances={props.providerInstances ?? []}
+                />
+              </ProjectOverviewInspector>
+            ) : null}
+            {props.project.type === "code" && props.onDesktopRecipeChange !== undefined ? (
+              <ProjectOverviewInspector
+                key={`${String(props.project.id)}-desktop-recipe`}
+                label="Disposable desktop"
+                summary="The Linux desktop this Project's threads can start"
+              >
+                <ProjectDesktopRecipeSection
+                  {...(desktopPaneClient === undefined ? {} : { client: desktopPaneClient })}
+                  disabled={archived || connectionStale}
+                  onChange={async (recipe, key) =>
+                    (await props.onDesktopRecipeChange?.(props.project.id, recipe, key)) ?? false
+                  }
+                  project={props.project}
+                />
+              </ProjectOverviewInspector>
+            ) : null}
+            {props.project.type === "work" &&
+            props.project.origin !== "default-folder" &&
+            props.onWorkStatusFileChange !== undefined ? (
+              <WorkStatusFileSetting
                 disabled={archived || connectionStale}
-                onChange={async (policy) =>
-                  (await props.onProviderPolicyChange?.(props.project.id, policy)) ?? false
-                }
-                project={props.project}
-                providerInstances={props.providerInstances ?? []}
+                enabled={props.project.statusFile === "enabled"}
+                onChange={(enabled) => props.onWorkStatusFileChange?.(props.project.id, enabled)}
               />
-            </ProjectOverviewInspector>
-          ) : null}
-          {props.onBrandKitChange === undefined ? null : (
-            <ProjectOverviewInspector
-              key={`${String(props.project.id)}-brand-kit`}
-              label="Brand kit"
-              summary="Colours and fonts your designs can use"
-            >
-              <ProjectBrandKitSection
-                disabled={archived || connectionStale}
-                onChange={async (brandKit) =>
-                  (await props.onBrandKitChange?.(props.project.id, brandKit)) ?? false
-                }
-                project={props.project}
-              />
-            </ProjectOverviewInspector>
-          )}
-          {props.project.type === "code" && props.onDesktopRecipeChange !== undefined ? (
-            <ProjectOverviewInspector
-              key={`${String(props.project.id)}-desktop-recipe`}
-              label="Disposable desktop"
-              summary="The Linux desktop this Project's threads can start"
-            >
-              <ProjectDesktopRecipeSection
-                {...(desktopPaneClient === undefined ? {} : { client: desktopPaneClient })}
-                disabled={archived || connectionStale}
-                onChange={async (recipe, key) =>
-                  (await props.onDesktopRecipeChange?.(props.project.id, recipe, key)) ?? false
-                }
-                project={props.project}
-              />
-            </ProjectOverviewInspector>
-          ) : null}
-          {props.project.type === "work" &&
-          props.project.origin !== "default-folder" &&
-          props.onWorkStatusFileChange !== undefined ? (
-            <WorkStatusFileSetting
-              disabled={archived || connectionStale}
-              enabled={props.project.statusFile === "enabled"}
-              onChange={(enabled) => props.onWorkStatusFileChange?.(props.project.id, enabled)}
-            />
-          ) : null}
-          {props.spendCeilingClient === undefined ? null : (
-            <ProjectOverviewInspector
-              key={`${String(props.project.id)}-ceiling`}
-              label="Spend ceiling"
-              summary="Optional Project limits on tokens, turns, agent run time, and money"
-            >
-              <ProjectSpendCeilingSection
-                client={props.spendCeilingClient}
-                projectId={String(props.project.id)}
-              />
-            </ProjectOverviewInspector>
-          )}
-          {props.canvasInventory === undefined ? null : (
-            <ProjectOverviewInspector
-              key={`${String(props.project.id)}-canvases`}
-              label="Canvases"
-              summary="Boards and visual artifacts saved with this Project"
-            >
-              {props.canvasInventory}
-            </ProjectOverviewInspector>
-          )}
+            ) : null}
+            {props.spendCeilingClient === undefined ? null : (
+              <ProjectOverviewInspector
+                key={`${String(props.project.id)}-ceiling`}
+                label="Spend ceiling"
+                summary="Optional Project limits on tokens, turns, agent run time, and money"
+              >
+                <ProjectSpendCeilingSection
+                  client={props.spendCeilingClient}
+                  projectId={String(props.project.id)}
+                />
+              </ProjectOverviewInspector>
+            )}
+          </ProjectOverviewGroup>
         </div>
       </section>
     </section>
@@ -460,7 +474,7 @@ function WorkStatusFileSetting(props: {
     <section className="project-overview-inspector">
       <div className="project-overview-inspector__row">
         <div>
-          <h2>Status file</h2>
+          <h3>Status file</h3>
           <p id={descriptionId}>
             Keep a STATUS.md in this folder. Every task reads it and updates where the work stands,
             and its dated follow-ups and deadlines become reminders. When off, Octant writes nothing
@@ -482,6 +496,20 @@ function WorkStatusFileSetting(props: {
   );
 }
 
+/** A titled card of setting rows; drawn only when one of its rows is. */
+function ProjectOverviewGroup(props: { readonly children: ReactNode; readonly label: string }) {
+  const headingId = useId();
+  if (Children.toArray(props.children).length === 0) return null;
+  return (
+    <section aria-labelledby={headingId} className="project-overview__group">
+      <h2 className="project-overview__section-label" id={headingId}>
+        {props.label}
+      </h2>
+      <div className="project-overview__card">{props.children}</div>
+    </section>
+  );
+}
+
 function ProjectOverviewInspector(props: {
   readonly children: ReactNode;
   readonly label: string;
@@ -492,7 +520,7 @@ function ProjectOverviewInspector(props: {
     <section className="project-overview-inspector">
       <div className="project-overview-inspector__row">
         <div>
-          <h2>{props.label}</h2>
+          <h3>{props.label}</h3>
           <p>{props.summary}</p>
         </div>
         <OctantButton
@@ -518,6 +546,11 @@ function ProjectOverviewInspector(props: {
 
 function label(type: ProjectSummary["type"]): string {
   return type === "chat" ? "Chat" : type === "work" ? "Work" : "Code";
+}
+
+/** The home prefix repeats on every Project; the full path stays in the title. */
+function homeRelativePath(path: string): string {
+  return path.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, "~");
 }
 
 function authorityCopy(type: ProjectSummary["type"]): string {
