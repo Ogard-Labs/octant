@@ -1919,6 +1919,75 @@ describe("OpenCode driver", () => {
     expect(fixture.calls).toContain("permission.reply:once");
   });
 
+  it("answers a remembered 2.x approval always only once the person let OpenCode run as itself, and says where the grant goes", async () => {
+    const answer = async (nativeSetup: boolean) => {
+      const fixture = betaDriver({
+        permissionPersistence: "project-default",
+        events: [
+          {
+            type: "permission.v2.asked",
+            properties: {
+              id: "perm-1",
+              sessionID: "provider-session",
+              action: "edit",
+              resources: ["*"],
+            },
+          } as unknown as Event,
+        ],
+      });
+      const approvals: string[] = [];
+      await Effect.runPromise(
+        Effect.scoped(
+          fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+            Effect.flatMap((connection) =>
+              Effect.gen(function* () {
+                const stream = yield* connection.subscribe;
+                yield* Effect.fork(
+                  Stream.runForEach(stream, (event) =>
+                    Effect.sync(() => {
+                      if (event.kind === "approval-request") approvals.push(event.description);
+                    }),
+                  ),
+                );
+                yield* connection.start({
+                  sessionId,
+                  modelId,
+                  executionPolicy: "approval-gated",
+                  ...(nativeSetup
+                    ? {
+                        nativeSetup: {
+                          subagents: true,
+                          webTools: true,
+                          skills: true,
+                          toolServers: true,
+                          hooks: true,
+                          projectCode: false,
+                        },
+                      }
+                    : {}),
+                });
+                yield* connection.send({ sessionId, prompt: "edit", attachments: [], tools: [] });
+                yield* Effect.sleep("20 millis");
+                yield* connection.answerApproval({
+                  sessionId,
+                  requestId: "perm-1",
+                  approved: true,
+                });
+              }),
+            ),
+          ),
+        ),
+      );
+      return { calls: fixture.calls, approvals };
+    };
+    const own = await answer(true);
+    expect(own.calls).toContain("permission.reply:always");
+    expect(own.approvals.at(-1)).toContain("OpenCode's own settings");
+    const locked = await answer(false);
+    expect(locked.calls).toContain("permission.reply:once");
+    expect(locked.approvals.at(-1)).not.toContain("OpenCode's own settings");
+  });
+
   it("does not reply to an approval-gated 2.x write until the user approves it", async () => {
     const fixture = betaDriver({
       events: [
@@ -2469,6 +2538,53 @@ describe("OpenCode driver", () => {
     expect(evaluateV2Permission(rules, "question")).toBe("deny");
     expect(evaluateV2Permission(rules, "other-server_tool")).toBe("deny");
     expect(evaluateV2Permission(rules, `${bridge}_octant_browser`)).toBe("allow");
+  });
+
+  it("launches with OpenCode's own skills only for a session that carries the person's setup", async () => {
+    const launch = async (nativeSetup: boolean) => {
+      const fixture = betaDriver();
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* fixture.driver.acquire({
+              instanceId,
+              projectRoot: "/tmp/project",
+              mode: "code",
+            });
+            yield* connection.start({
+              sessionId,
+              modelId,
+              executionPolicy: "approval-gated",
+              ...(nativeSetup
+                ? {
+                    nativeSetup: {
+                      subagents: true,
+                      webTools: true,
+                      skills: true,
+                      toolServers: true,
+                      hooks: true,
+                      projectCode: false,
+                    },
+                  }
+                : {}),
+            });
+          }),
+        ),
+      );
+      return fixture.processInputs.at(-1);
+    };
+    const own = await launch(true);
+    expect(own?.ownSkills).toBe(true);
+    expect(evaluateV2Permission([...(own?.betaPermissions ?? [])], "skill")).toBe("ask");
+    // MCP tools the person did not hand Octant stay denied, shell still asks.
+    expect(evaluateV2Permission([...(own?.betaPermissions ?? [])], "other-server_tool")).toBe(
+      "deny",
+    );
+    expect(evaluateV2Permission([...(own?.betaPermissions ?? [])], "shell")).toBe("ask");
+
+    const locked = await launch(false);
+    expect(locked).not.toHaveProperty("ownSkills");
+    expect(evaluateV2Permission([...(locked?.betaPermissions ?? [])], "skill")).toBe("deny");
   });
 
   it("adapts a 2.x event from data when properties is not an object", () => {

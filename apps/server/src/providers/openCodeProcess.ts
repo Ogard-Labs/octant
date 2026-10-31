@@ -79,6 +79,13 @@ export interface OpenCodeProcessStartInput {
    * into the private configuration; a 2.x launch without them denies all.
    */
   readonly betaPermissions?: ReadonlyArray<PermissionV2Rule>;
+  /**
+   * The person let OpenCode load its own skills: the launch keeps the
+   * `.claude/skills` and `.agents/skills` discovery OpenCode does by itself and
+   * does not deny the `skill` permission. Its project configuration and
+   * plugins stay off either way.
+   */
+  readonly ownSkills?: true;
 }
 
 export interface OpenCodeProcessPort {
@@ -130,6 +137,25 @@ const OPENCODE_GUARDS = {
   OPENCODE_DISABLE_MODELS_FETCH: "1",
   OPENCODE_DISABLE_PROJECT_CONFIG: "1",
 } as const;
+
+/**
+ * The guards for a launch whose person let OpenCode load its own skills: the
+ * switches that keep OpenCode from reading `.claude/skills` and
+ * `.agents/skills` go, and every other guard (updater, model fetch, the
+ * borrowed `CLAUDE.md` prompt, default plugins, project configuration)
+ * stays. Read from the installed opencode v2.2.0 binary: its server reads
+ * `.claude` skills only when neither `OPENCODE_DISABLE_CLAUDE_CODE` nor
+ * `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS` is set, so both go.
+ */
+function openCodeGuardsWithOwnSkills(): Readonly<Record<string, string>> {
+  const {
+    OPENCODE_DISABLE_CLAUDE_CODE: _compatibilityOff,
+    OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: _compatibilitySkillsOff,
+    OPENCODE_DISABLE_EXTERNAL_SKILLS: _externalSkillsOff,
+    ...kept
+  } = OPENCODE_GUARDS;
+  return kept;
+}
 
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 2_000;
 const DEFAULT_STARTUP_TIMEOUT_MS = 10_000;
@@ -620,6 +646,7 @@ export function createPrivateOpenCodeProfile(
   inheritedEnvironment: NodeJS.ProcessEnv,
   temporaryDirectory: () => string = tmpdir,
   betaPermissions?: ReadonlyArray<PermissionV2Rule>,
+  ownSkills = false,
 ): PrivateOpenCodeProfile {
   const root = temporaryDirectory();
   const directories: string[] = [];
@@ -660,7 +687,7 @@ export function createPrivateOpenCodeProfile(
     Object.assign(environment, {
       OPENCODE_CONFIG: configPath,
       OPENCODE_CONFIG_DIR: configDirectory,
-      ...OPENCODE_GUARDS,
+      ...(ownSkills ? openCodeGuardsWithOwnSkills() : OPENCODE_GUARDS),
       TMPDIR: tempHome,
       XDG_CACHE_HOME: cacheHome,
       XDG_CONFIG_HOME: configHome,
@@ -680,7 +707,7 @@ export function createPrivateOpenCodeProfile(
     // executable extensions and compatibility tools stay denied.
     const ownedConfig: Record<string, unknown> = {
       ...projected,
-      permission: { skill: { "*": "deny" }, "*_*": "deny" },
+      permission: ownSkills ? { "*_*": "deny" } : { skill: { "*": "deny" }, "*_*": "deny" },
     };
     // OpenCode 2 appends configured `permissions` after every agent's
     // built-in rules, and its default agent allows `*`. Without these rules an
@@ -1232,6 +1259,7 @@ function acquireOpenCodeServer(
           options.inheritedEnvironment ?? process.env,
           tmpdir,
           runtime === "beta" ? (input.betaPermissions ?? BETA_DENY_ALL) : undefined,
+          input.ownSkills === true,
         );
       } catch {
         resume(

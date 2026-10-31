@@ -386,6 +386,48 @@ describe("probeOpenCodeBinary", () => {
     }
   });
 
+  it("keeps OpenCode's own skill discovery only for a launch whose person allowed it, and every other guard", () => {
+    const root = fixtureRoot();
+    const skillSwitches = [
+      "OPENCODE_DISABLE_CLAUDE_CODE",
+      "OPENCODE_DISABLE_CLAUDE_CODE_SKILLS",
+      "OPENCODE_DISABLE_EXTERNAL_SKILLS",
+    ];
+    const locked = createPrivateOpenCodeProfile({ content: "{}" }, { HOME: root }, () => root);
+    const own = createPrivateOpenCodeProfile(
+      { content: "{}" },
+      { HOME: root },
+      () => root,
+      undefined,
+      true,
+    );
+    try {
+      for (const name of skillSwitches) {
+        expect(locked.environment[name], name).toBe("1");
+        expect(own.environment, name).not.toHaveProperty(name);
+      }
+      for (const name of [
+        "OPENCODE_DISABLE_AUTOUPDATE",
+        "OPENCODE_DISABLE_CLAUDE_CODE_PROMPT",
+        "OPENCODE_DISABLE_DEFAULT_PLUGINS",
+        "OPENCODE_DISABLE_PROJECT_CONFIG",
+        "OPENCODE_DISABLE_MODELS_FETCH",
+      ]) {
+        expect(own.environment[name], name).toBe("1");
+      }
+      const config = (profile: typeof own) =>
+        JSON.parse(readFileSync(profile.environment.OPENCODE_CONFIG ?? "", "utf8")) as {
+          readonly permission: Record<string, unknown>;
+        };
+      expect(config(locked).permission).toEqual({ skill: { "*": "deny" }, "*_*": "deny" });
+      // Every MCP tool but Octant's own bridge stays denied either way.
+      expect(config(own).permission).toEqual({ "*_*": "deny" });
+    } finally {
+      locked.cleanup();
+      own.cleanup();
+    }
+  });
+
   it("makes OpenCode's default provider data root explicit for confinement", () => {
     const root = fixtureRoot();
     const profile = createPrivateOpenCodeProfile({ content: "{}" }, { HOME: root }, () => root);

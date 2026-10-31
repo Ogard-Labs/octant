@@ -241,7 +241,8 @@ The key providers run inside Octant as they run on their own, with their native 
 - A per-thread switch is not built yet.
 - Claude Code loads its own subagents (each shown as a child run, every call through the parent's gate), web search and fetch (asking below Full access, marking the thread), home skills, settings and hooks, and a trusted Project's settings, hooks, skills, MCP servers and plugins; its account's MCP servers start only with a trusted Project's.
 - Codex keeps its Project skills and, in Chat, the person's tool servers and plugins; its own subagents run only at Full access, because their approvals never reach Octant, each shown as a child run, with their web searches marking the thread.
-- The other key providers' drivers still switch these native features off (not built yet).
+- OpenCode loads its own skills and answers a remembered 2.x approval `always`, saying the grant lives in OpenCode's own store; the person's own OpenCode config and permission rules, its delegation as child runs, and Reviewed through Octant Shield are not built yet.
+- Mistral Vibe's driver still switches these native features off (not built yet).
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Providers](../architecture.md#providers) and [Provider runtimes: Key providers](provider-runtimes.md#key-providers).
 
