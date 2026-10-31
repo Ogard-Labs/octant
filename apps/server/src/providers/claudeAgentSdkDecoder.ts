@@ -181,7 +181,7 @@ function decodeJsonValue(value: unknown, depth = 0): ClaudeJsonValue {
 
 function decodeAssistantContent(
   value: unknown,
-  input: Pick<ClaudeOpenQueryInput, "tools" | "executionPolicy">,
+  input: Pick<ClaudeOpenQueryInput, "tools" | "executionPolicy" | "nativeSetup">,
 ): ClaudeAssistantContent {
   const block = object(value);
   if (block === undefined || typeof block.type !== "string") {
@@ -228,7 +228,7 @@ function decodeAssistantContent(
     if (
       typeof block.id !== "string" ||
       typeof block.name !== "string" ||
-      (!input.tools.includes(block.name) && !disabled) ||
+      (!claudeOffersTool(input, block.name) && !disabled) ||
       decodedInputObject === undefined ||
       !callerIsKnownShape
     ) {
@@ -258,7 +258,7 @@ const STREAM_STOP_REASONS = new Set([
 
 function decodeStreamEvent(
   value: unknown,
-  input: Pick<ClaudeOpenQueryInput, "tools" | "executionPolicy">,
+  input: Pick<ClaudeOpenQueryInput, "tools" | "executionPolicy" | "nativeSetup">,
 ): ClaudeStreamEvent {
   const event = object(value);
   if (event === undefined || typeof event.type !== "string") {
@@ -877,10 +877,31 @@ export function permissionMode(
 
 // Authority only widens when the runtime holds a tool Octant did not ask
 // for. It may hold fewer: Claude Code 2.1.258 never lists AskUserQuestion in
-// the initialized tool set even when it was requested.
-function withinRequestedTools(granted: readonly string[], requested: readonly string[]): boolean {
-  const requestedSet = new Set(requested);
-  return granted.every((tool) => requestedSet.has(tool));
+// the initialized tool set even when it was requested. A session that loads
+// a trusted Project's code also holds the tools of the MCP servers the person
+// and the Project set up, which Octant cannot name in advance; each call to
+// one still passes Octant's gate.
+export function claudeOffersTool(
+  input: Pick<ClaudeOpenQueryInput, "tools" | "nativeSetup">,
+  toolName: string,
+): boolean {
+  if (input.tools.includes(toolName)) return true;
+  return (
+    input.nativeSetup?.projectCode === true &&
+    toolName.startsWith("mcp__") &&
+    !toolName.startsWith("mcp__octant__")
+  );
+}
+
+/** Whether a server the session reports is one this session may hold. */
+function claudeOffersMcpServer(input: ClaudeOpenQueryInput, server: unknown): boolean {
+  if (typeof server !== "object" || server === null) return false;
+  const record = server as Record<string, unknown>;
+  if (record.name === "octant")
+    return input.managedToolServer === true && record.status === "connected";
+  // The person's and the trusted Project's own servers; one that failed or
+  // waits for sign-in simply offers no tools.
+  return input.nativeSetup?.projectCode === true && typeof record.name === "string";
 }
 
 function decodeInitializedMessage(
@@ -923,12 +944,8 @@ function decodeInitializedMessage(
     !modelAccepted ||
     message.permissionMode !== expectedPermissionMode ||
     (input.resumeSessionId !== undefined && message.session_id !== input.resumeSessionId) ||
-    mcpServers.some((server) => {
-      if (!input.managedToolServer || typeof server !== "object" || server === null) return true;
-      const record = server as Record<string, unknown>;
-      return record.name !== "octant" || record.status !== "connected";
-    }) ||
-    !withinRequestedTools(tools, input.tools)
+    !mcpServers.every((server) => claudeOffersMcpServer(input, server)) ||
+    !tools.every((tool) => claudeOffersTool(input, tool))
   ) {
     throw protocol("Claude initialized an unexpected runtime surface.");
   }
@@ -1024,7 +1041,7 @@ function decodeTaskUsage(value: unknown): ClaudeTaskUsage {
 
 function decodeResult(
   message: Record<string, unknown>,
-  allowedTools: readonly string[],
+  offered: Pick<ClaudeOpenQueryInput, "tools" | "nativeSetup">,
 ): ClaudeDecodedMessage {
   const usage = decodeUsage(message.usage, false);
   const durationMs = nonNegativeNumber(message.duration_ms);
@@ -1057,7 +1074,7 @@ function decodeResult(
       (entry) =>
         entry === undefined ||
         typeof entry.tool_name !== "string" ||
-        !allowedTools.includes(entry.tool_name) ||
+        !claudeOffersTool(offered, entry.tool_name) ||
         typeof entry.tool_use_id !== "string" ||
         object(decodeJsonValue(entry.tool_input)) === undefined,
     )
@@ -1161,6 +1178,48 @@ export type ClaudeDecodePhase =
     }
   | { readonly kind: "active"; readonly sessionId: string };
 
+const MAX_CHILD_TOOL_USES = 32;
+
+/**
+ * What Octant reads of a subagent's own message: which tools its reply
+ * calls, so the parent thread can show the run and mark a web read. The
+ * subagent's text, its streamed deltas, and its tool results stay the
+ * runtime's; each call it makes already passed Octant's gate with the
+ * parent's posture before it ran.
+ */
+function decodeChildMessage(
+  message: Record<string, unknown>,
+  parentToolUseId: string,
+): ClaudeDecodedMessage {
+  if (typeof message.session_id !== "string") {
+    throw protocol("Claude returned an unsupported runtime message.");
+  }
+  if (message.type !== "assistant") return { kind: "ignored" };
+  const content = object(message.message)?.content;
+  if (!Array.isArray(content)) {
+    throw protocol("Claude returned an unsupported runtime message.");
+  }
+  const toolUses = content.flatMap((value) => {
+    const block = object(value);
+    if (block?.type !== "tool_use") return [];
+    const input = object(decodeJsonValue(block.input));
+    if (typeof block.id !== "string" || typeof block.name !== "string" || input === undefined) {
+      throw protocol("Claude returned an unsupported runtime message.");
+    }
+    return [
+      {
+        toolUseId: block.id,
+        toolName: block.name,
+        input: input as { readonly [key: string]: ClaudeJsonValue },
+      },
+    ];
+  });
+  if (toolUses.length > MAX_CHILD_TOOL_USES) {
+    throw protocol("Claude returned an unsupported runtime message.");
+  }
+  return { kind: "child-assistant", sessionId: message.session_id, parentToolUseId, toolUses };
+}
+
 export function decodeMessage(
   value: unknown,
   input: ClaudeOpenQueryInput,
@@ -1195,7 +1254,28 @@ export function decodeMessage(
   ) {
     throw protocol("Claude returned an unsupported runtime message.");
   }
-  if (message.subagent_type !== undefined || message.task_description !== undefined) {
+  // A subagent's own messages name the parent's `Agent` call. They exist only
+  // in a session the person let run its own subagents; anywhere else one is
+  // still a runtime surface Octant did not open.
+  if (
+    input.nativeSetup?.subagents === true &&
+    typeof message.parent_tool_use_id === "string" &&
+    message.parent_tool_use_id.length > 0 &&
+    message.parent_tool_use_id.length <= 256
+  ) {
+    return decodeChildMessage(message, message.parent_tool_use_id);
+  }
+  // A subagent's own task frames name its type; they are read below only in
+  // a session with its own subagents on.
+  const ownSubagentTaskFrame =
+    input.nativeSetup?.subagents === true &&
+    message.type === "system" &&
+    typeof message.subtype === "string" &&
+    message.subtype.startsWith("task_");
+  if (
+    (message.subagent_type !== undefined && !ownSubagentTaskFrame) ||
+    message.task_description !== undefined
+  ) {
     throw protocol("Claude returned an unsupported runtime message.");
   }
   if (message.type === "assistant") {
@@ -1242,7 +1322,7 @@ export function decodeMessage(
     };
   }
   if (message.type === "user") return decodeToolResults(message);
-  if (message.type === "result") return decodeResult(message, input.tools);
+  if (message.type === "result") return decodeResult(message, input);
   if (message.type === "tool_progress") {
     const elapsedSeconds = nonNegativeNumber(message.elapsed_time_seconds);
     // App-owned MCP calls report parent-correlated heartbeats while awaiting
@@ -1259,7 +1339,7 @@ export function decodeMessage(
       typeof message.session_id !== "string" ||
       typeof message.tool_use_id !== "string" ||
       typeof message.tool_name !== "string" ||
-      !input.tools.includes(message.tool_name) ||
+      !claudeOffersTool(input, message.tool_name) ||
       elapsedSeconds === undefined ||
       (message.parent_tool_use_id !== null && !managedHeartbeat) ||
       (message.task_id !== undefined && typeof message.task_id !== "string")
@@ -1356,14 +1436,27 @@ export function decodeMessage(
     let description: string | undefined;
     let summary: string | undefined;
     let usage: ClaudeTaskUsage | undefined;
+    // A session with its own subagents on reports each one's lifecycle as a
+    // task: `task_started` names the agent (`task_type: "local_agent"`,
+    // `subagent_type`, its prompt) and later frames carry the subagent type.
+    // The prompt is the runtime's and is never kept. Workflows stay refused.
+    const subagentTask = (value: Record<string, unknown>) =>
+      input.nativeSetup?.subagents === true &&
+      (value.subagent_type === undefined || typeof value.subagent_type === "string");
     if (message.subtype === "task_started") {
+      const ownSubagent =
+        subagentTask(message) &&
+        (message.task_type === undefined || message.task_type === "local_agent") &&
+        (message.prompt === undefined || typeof message.prompt === "string") &&
+        (message.skip_transcript === undefined || typeof message.skip_transcript === "boolean");
       if (
         typeof message.description !== "string" ||
-        message.subagent_type !== undefined ||
-        message.task_type !== undefined ||
         message.workflow_name !== undefined ||
-        message.prompt !== undefined ||
-        (message.skip_transcript !== undefined && message.skip_transcript !== false)
+        (!ownSubagent &&
+          (message.subagent_type !== undefined ||
+            message.task_type !== undefined ||
+            message.prompt !== undefined ||
+            (message.skip_transcript !== undefined && message.skip_transcript !== false)))
       ) {
         throw protocol("Claude returned an unsupported runtime message.");
       }
@@ -1371,7 +1464,7 @@ export function decodeMessage(
     } else if (message.subtype === "task_progress") {
       if (
         typeof message.description !== "string" ||
-        message.subagent_type !== undefined ||
+        (message.subagent_type !== undefined && !subagentTask(message)) ||
         (message.last_tool_name !== undefined && typeof message.last_tool_name !== "string") ||
         (message.summary !== undefined && typeof message.summary !== "string")
       ) {
@@ -1386,7 +1479,9 @@ export function decodeMessage(
         !TASK_NOTIFICATION_STATUSES.has(message.status) ||
         typeof message.output_file !== "string" ||
         typeof message.summary !== "string" ||
-        (message.skip_transcript !== undefined && message.skip_transcript !== false)
+        (message.skip_transcript !== undefined &&
+          message.skip_transcript !== false &&
+          !(subagentTask(message) && typeof message.skip_transcript === "boolean"))
       ) {
         throw protocol("Claude returned an unsupported runtime message.");
       }
@@ -1401,7 +1496,9 @@ export function decodeMessage(
           (typeof patch.status !== "string" || !TASK_UPDATE_STATUSES.has(patch.status))) ||
         (patch.description !== undefined && typeof patch.description !== "string") ||
         (patch.error !== undefined && typeof patch.error !== "string") ||
-        (patch.is_backgrounded !== undefined && patch.is_backgrounded !== false)
+        (patch.is_backgrounded !== undefined &&
+          patch.is_backgrounded !== false &&
+          !(subagentTask(message) && typeof patch.is_backgrounded === "boolean"))
       ) {
         throw protocol("Claude returned an unsupported runtime message.");
       }
