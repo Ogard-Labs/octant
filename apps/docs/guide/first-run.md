@@ -149,8 +149,8 @@ list says why. Choose the reviewer in Settings › Access. Your pick is the defa
 Change it in Settings › Access, per Project, or on any thread from the
 composer in one click. Full access is never the default. Full access means
 no sandbox and no prompts: agents can change any file and run any command
-without asking, with no sandbox, so they can read your whole home folder,
-including SSH and cloud keys. The first time this computer or a Project picks
+without asking, with no sandbox. Only protected files, such as SSH and cloud
+keys, stay out of their reach. The first time this computer or a Project picks
 it, Octant shows that warning once. At Full access, outside content an agent
 read is only marked on the tool row and the thread card; nothing asks. Not
 built yet.

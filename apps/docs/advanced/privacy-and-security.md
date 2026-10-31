@@ -183,7 +183,8 @@ that hosts the thread, not from a paired phone or browser.
   selected. A per-message posture may only narrow the thread's grant; the
   server clamps composer intent. Full access is what it says: the provider
   runtime runs without Octant's deny-default sandbox, so keep it for folders
-  and providers you trust. No posture grants an agent merge authority; only you merge, from a pull
+  and providers you trust. Only the [protected files](#protected-files) stay
+  out of reach. No posture grants an agent merge authority; only you merge, from a pull
   request's review on the desktop after confirming.
 - App-managed filesystem and shell tools cross an Octant-owned sandbox
   boundary; path checks alone are insufficient. Most provider runtimes cross it
@@ -191,7 +192,8 @@ that hosts the thread, not from a paired phone or browser.
 - The Codex runtime does not: one Codex process serves every thread, which
   Octant cannot bind to a single folder and posture, so the shell it runs falls
   to the provider's own sandbox. That sandbox is on every posture except Full
-  access, which you select explicitly and which is unsandboxed by design. The
+  access, which you select explicitly and which is unsandboxed by design apart
+  from the protected files. The
   Claude runtime crosses the boundary on Plan turns, where Octant's own sandbox
   makes the folder unwritable and stops the runtime starting any process, with
   one exception on macOS: on a Claude subscription account the runtime may run
@@ -210,6 +212,63 @@ that hosts the thread, not from a paired phone or browser.
   in a Project or Personal profile, which keeps its sign-in on this Mac until you
   sign out. The agent asks you before it uses a signed-in site; a routine, a
   subagent, a terminal CLI, and a paired device cannot open one.
+
+### Protected files
+
+Some files are secrets whatever mode a thread is in. No agent, and no command
+an agent runs, can read or change them, at any level, Full access included:
+
+- SSH private keys in `~/.ssh` (`id_*`, `*.pem`, `*.key`, and any file with a
+  `.pub` companion). `~/.ssh/config`, `known_hosts`, and public keys stay
+  readable.
+- Cloud command-line credentials (`~/.aws/credentials` and its sign-in caches,
+  and the credential and token files under `~/.config/gcloud` and `~/.azure`),
+  `~/.kube/config`, `~/.docker/config.json`, `~/.npmrc`, `~/.pypirc`, and the
+  other package registry token files.
+- `~/.git-credentials`, `~/.netrc`, and the forge command-line sign-in file
+  `~/.config/gh/hosts.yml`.
+- Keychain files other than your login keychain, and the local vault folders
+  of password managers.
+- Browser cookie and saved-login stores.
+- Octant's own secrets, and every provider's stored sign-in except the one the
+  running provider uses itself.
+
+The work those files serve goes through a channel instead, so ordinary work
+keeps working:
+
+- **SSH** uses your SSH agent (`SSH_AUTH_SOCK`), a password manager's SSH
+  agent included. Git over SSH works the same way.
+- **Git over HTTPS** signs in through the system credential helper, which
+  reads the keychain through the keychain service, not the file.
+- **API keys and tokens** go through Octant's credential broker. Link the key
+  in Octant, and the runtime receives it in its environment. For a cluster,
+  point `KUBECONFIG` at a file you keep outside the protected list.
+
+When an agent asks for a protected file, the refusal says which group refused
+it and which channel to use. You see that message in the tool row.
+
+Change the list in **Settings › Permissions › Protected files**. Add a file or
+folder of your own, absolute or starting with `~/`. Removing a built-in group
+asks you to confirm first, and Octant records the change. **Protect again**
+undoes it. If you remove every group, Full access runs with nothing guarded.
+
+Octant also redacts known key formats, and every key the credential broker
+handed out, from what agents say and what their tools print, from thread
+exports, and from the service log, at every level.
+
+What to know:
+
+- On macOS the guard is a sandbox profile. A program that starts a sandbox of
+  its own cannot start inside it at Full access. `swift build` and
+  `swift package` need `--disable-sandbox`, and a browser started by a test
+  needs its own sandbox off (`--no-sandbox`). Test runners that already start
+  browsers that way are not affected.
+- On Linux a protected file that does not exist yet when the agent starts is
+  not covered until the next start.
+- Claude Code's own commands below Full access run in Claude Code's sandbox,
+  which keeps them to the Project folder. If the Project folder contains your
+  home folder, Octant refuses Claude's file tools on a protected file; its
+  commands are held only by your approval or its reviewer.
 
 ### What the Claude runtime does on its own
 
