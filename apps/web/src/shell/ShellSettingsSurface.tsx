@@ -12,6 +12,7 @@ import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { IntegrationClient } from "@octant/client-runtime/integration-client";
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
 import type { ProtectedFilesClient } from "@octant/client-runtime/protected-files-client";
+import type { SafeNetworksClient } from "@octant/client-runtime/safe-networks-client";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ReplicaMembershipClient } from "@octant/client-runtime/replica-membership-client";
 import type { ReplicaStoreSettingsClient } from "@octant/client-runtime/replica-store-settings-client";
@@ -80,6 +81,7 @@ export interface ShellSettingsSurfaceProps {
   readonly canvasClient?: Pick<CanvasClient, "publicLinkSettings" | "setPublicLinkSettings">;
   readonly desktopPaneClient?: Pick<DesktopPaneClient, "request">;
   readonly replicaStoreSettingsClient?: ReplicaStoreSettingsClient;
+  readonly safeNetworksClient?: SafeNetworksClient;
   readonly secretStoresClient?: SecretStoresClient;
   readonly replicaMembershipClient?: ReplicaMembershipClient;
   readonly replicaSyncStatusClient?: ReplicaSyncStatusClient;
@@ -170,6 +172,9 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             {...(props.replicaStoreSettingsClient === undefined
               ? {}
               : { replicaStoreSettingsClient: props.replicaStoreSettingsClient })}
+            {...(props.safeNetworksClient === undefined
+              ? {}
+              : { safeNetworksClient: props.safeNetworksClient })}
             {...(props.secretStoresClient === undefined
               ? {}
               : { secretStoresClient: props.secretStoresClient })}

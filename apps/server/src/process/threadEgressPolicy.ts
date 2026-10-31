@@ -3,12 +3,15 @@ import type { ProviderExecutionPolicy } from "@octant/contracts";
 /**
  * Per-thread network egress policy for tool/provider Seatbelt launches.
  *
- * Thread-level policies are three-valued. Provider runtimes materialize them
- * at two OS levels (`none` / `allow`): their inference and tool traffic share
- * one process, so a proxy could not tell them apart. Harness tool commands
- * get a third level, `proxied`, where the OS opens only a per-launch egress
- * proxy that checks every connection against the thread's host rules
- * (docs/architecture.md § Harness tool egress rules).
+ * Thread-level policies are three-valued. Harness tool commands materialize
+ * `provider-endpoints-only` as `proxied`, where the OS opens only a per-launch
+ * egress proxy that checks every connection against the thread's host rules
+ * (docs/architecture.md § Harness tool egress rules). A wrapped provider
+ * runtime gets `proxied` too where the host routes runtimes through their own
+ * proxy (`network/providerRuntimeNetwork.ts`, which decides by the
+ * provider's endpoints, the Project's rules, and the person's safe
+ * networks); where it does not, the runtime keeps `allow` from
+ * `materializeOsNetworkEgress` below.
  *
  * Defaults:
  * - Plan / Chat → `none`
@@ -83,11 +86,10 @@ export function resolveDefaultThreadEgressPolicy(
 }
 
 /**
- * Map a provider runtime's egress to the two-level OS permission.
- *
- * `provider-endpoints-only` becomes OS `allow` because the runtime's own
- * inference and its tools share a process; brokers enforce the host-level
- * restriction where one exists.
+ * Map a provider runtime's egress to the two-level OS permission on a host
+ * that does not route runtimes through their own proxy: there
+ * `provider-endpoints-only` becomes OS `allow`. A routed launch takes
+ * `proxied` from its runtime network instead.
  */
 export function materializeOsNetworkEgress(policy: ThreadEgressPolicy): "none" | "allow" {
   return policy === "none" ? "none" : "allow";

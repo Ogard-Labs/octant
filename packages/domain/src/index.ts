@@ -141,6 +141,7 @@ export * from "./themePolicy";
 export * from "./toolActionPolicy";
 export * from "./toolCallPolicy";
 export * from "./toolEgressPolicy";
+export * from "./safeNetworkPolicy";
 export * from "./untrustedContentPolicy";
 export * from "./artifactLibraryPolicy";
 export * from "./artifactMirrorPolicy";

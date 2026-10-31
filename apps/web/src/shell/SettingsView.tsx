@@ -80,6 +80,8 @@ import type { DiagnosticsExportClient } from "@octant/client-runtime/diagnostics
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
 import type { ProtectedFilesClient } from "@octant/client-runtime/protected-files-client";
+import type { SafeNetworksClient } from "@octant/client-runtime/safe-networks-client";
+import { SafeNetworksSettings } from "../settings/SafeNetworksSettings";
 import type { HostFederationLifecycle } from "@octant/client-runtime/host-federation-lifecycle";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { IntegrationClient } from "@octant/client-runtime/integration-client";
@@ -226,6 +228,8 @@ export interface SettingsViewProps {
   /** Settings › Sync on this host; absent off it, where store setup is not offered. */
   readonly replicaStoreSettingsClient?: ReplicaStoreSettingsClient;
   /** Absent off the host: linking a secret store and pointing a key at it are host authority. */
+  /** Settings › Access › Safe networks; absent where the host has no such route. */
+  readonly safeNetworksClient?: SafeNetworksClient;
   readonly secretStoresClient?: SecretStoresClient;
   /** Creating, joining, and revoking on this host; absent off it. */
   readonly replicaMembershipClient?: ReplicaMembershipClient;
@@ -293,6 +297,7 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   host: "The host process: its status, startup, notifications, and maintenance.",
   permissions:
     "The files no agent may touch, and what you have already allowed: websites, extension tools, and public links.",
+  access: "The network places agents may reach below Full access.",
   data: "What this host stores, how long it keeps threads, and how to back it up.",
   "secret-stores":
     "Keep API keys in a password manager you already use. Octant keeps a reference and fetches the key when it is used.",
@@ -1247,6 +1252,16 @@ function ActiveSectionContent({
           client={props.secretStoresClient}
           focusedSetting={focusedSetting}
         />
+      );
+    case "access":
+      return (
+        <div className="settings-section-stack" id="settings-access">
+          <SafeNetworksSettings
+            client={props.safeNetworksClient}
+            projectNames={props.projectNames ?? NO_PROJECT_NAMES}
+            {...(focusedSetting === undefined ? {} : { focusedSetting })}
+          />
+        </div>
       );
     case "sync":
       return (

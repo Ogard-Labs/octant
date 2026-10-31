@@ -42,6 +42,7 @@ import { draftGitText } from "../code/codeGitDraftService";
 import { makeContextSummaryGenerator } from "../context/contextSummaryGenerator";
 import { completeOnceOutcome } from "../harness/nativeHarnessSingleShot";
 import { makeThreadHandOffCompletion } from "../threadHandOffCompletion";
+import type { ProviderRuntimeNetworkPort } from "../network/providerRuntimeNetwork";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000701");
 const otherInstanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000702");
@@ -202,6 +203,7 @@ function harness(
     readonly compactAnnounced?: boolean;
     readonly configDirectory?: string;
     readonly artifactDelivery?: () => boolean;
+    readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
     readonly makeEnvironmentScope?: (
       authentication: ClaudeAuthentication,
       options?: ClaudeEnvironmentScopeOptions,
@@ -336,6 +338,7 @@ function harness(
       ...(options.artifactDelivery === undefined
         ? {}
         : { artifactDelivery: options.artifactDelivery }),
+      ...(options.runtimeNetwork === undefined ? {} : { runtimeNetwork: options.runtimeNetwork }),
       process,
       sdk,
       credentialResolver,
@@ -650,6 +653,50 @@ describe("Claude execution policy", () => {
 
       await acquired.close();
     }
+  });
+
+  it("points the sandbox's network at the session's egress proxy where the host routes it, and releases it when the session ends", async () => {
+    const started: Array<{ readonly runtime: string; readonly autoReview: boolean | undefined }> =
+      [];
+    let released = 0;
+    const runtimeNetwork: ProviderRuntimeNetworkPort = {
+      start: async (input) => {
+        started.push({ runtime: input.runtime, autoReview: input.autoReview });
+        expect(input.authentication).toBe("none");
+        return {
+          status: "proxied",
+          endpoint: { kind: "loopback", port: 47005 },
+          environment: {},
+          release: async () => {
+            released += 1;
+          },
+        };
+      },
+    };
+    for (const executionPolicy of [
+      "approval-gated",
+      "auto-accept-edits",
+      "plan",
+      "full-access",
+    ] as const) {
+      const f = harness("subscription", "current-session", { runtimeNetwork });
+      const acquired = await acquire(f.driver);
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy, autoApprove: true }),
+      );
+      expect(f.opens[0]?.sandbox?.network).toEqual(
+        executionPolicy === "approval-gated" || executionPolicy === "auto-accept-edits"
+          ? { httpProxyPort: 47005 }
+          : undefined,
+      );
+      await Effect.runPromise(acquired.connection.stop(sessionId));
+      await acquired.close();
+    }
+    expect(started).toEqual([
+      { runtime: "claude-sandbox", autoReview: true },
+      { runtime: "claude-sandbox", autoReview: true },
+    ]);
+    expect(released).toBe(2);
   });
 
   it("grants a Project's extra folder what the root gets, in its sandbox and its tool gate", async () => {
@@ -3162,6 +3209,122 @@ describe("Claude artifact delivery", () => {
     const afterChoice = await launch(f, "code", "approval-gated", false);
     expect(afterChoice.tools).not.toContain("Artifact");
     expectEveryGuard(afterChoice.environment);
+  });
+
+  it("offers Claude's own subagents, web tools, and skills only to a session that carries the person's setup, keeping every channel guard", async () => {
+    const ownSetup = {
+      subagents: true,
+      webTools: true,
+      skills: true,
+      toolServers: true,
+      hooks: true,
+      projectCode: false,
+    } as const;
+    const f = guardedHarness("subscription", () => false);
+    const acquired = await acquire(f.driver, "code");
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "approval-gated",
+          nativeSetup: ownSetup,
+        }),
+      );
+      const open = f.opens.at(-1)!;
+      expect(open.tools).toEqual(
+        expect.arrayContaining(["Agent", "WebSearch", "WebFetch", "Skill"]),
+      );
+      // The account's own MCP servers cannot start without a Project's, so
+      // the driver leaves them off rather than claim them.
+      expect(open.nativeSetup).toEqual({ ...ownSetup, toolServers: false });
+      // Only the guard that kept Claude Code's own subagents off goes.
+      expect(open.authEnvironment).not.toHaveProperty("CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS");
+      const { CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS: _subagentsOff, ...channelGuards } =
+        REQUIRED_GUARDS;
+      expect(open.authEnvironment).toMatchObject(channelGuards);
+
+      const signal = new AbortController().signal;
+      const ask = (toolName: string, input: Record<string, unknown>, toolUseId: string) =>
+        open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName,
+          input,
+          toolUseId,
+          signal,
+        });
+      // Starting a subagent and reading a skill act inside the session.
+      await expect(
+        ask("Agent", { description: "Look", prompt: "Look" }, "agent-1"),
+      ).resolves.toEqual({ behavior: "allow" });
+      await expect(ask("Skill", { skill: "pdf" }, "skill-1")).resolves.toEqual({
+        behavior: "allow",
+      });
+      // A web read asks at Guarded, as Claude Code itself does.
+      await expect(ask("WebFetch", { url: "https://example.invalid" }, "fetch-1")).resolves.toEqual(
+        {
+          behavior: "ask",
+        },
+      );
+      // An MCP server's tool is not held without the trusted Project's code.
+      await expect(ask("mcp__linear__search", { query: "x" }, "mcp-1")).resolves.toMatchObject({
+        behavior: "deny",
+      });
+    } finally {
+      await acquired.close();
+    }
+
+    const off = await launch(f, "code", "approval-gated", false);
+    for (const tool of ["Agent", "WebSearch", "WebFetch", "Skill"]) {
+      expect(off.tools).not.toContain(tool);
+    }
+    expectEveryGuard(off.environment);
+  });
+
+  it("runs a web read without asking at Full access and asks before a trusted Project's MCP tool below it", async () => {
+    for (const executionPolicy of ["full-access", "approval-gated"] as const) {
+      // A fresh account per posture, so each session is the first the runtime names.
+      const f = guardedHarness("subscription", () => false);
+      const acquired = await acquire(f.driver, "code");
+      try {
+        await Effect.runPromise(
+          acquired.connection.start({
+            sessionId,
+            modelId,
+            executionPolicy,
+            nativeSetup: {
+              subagents: true,
+              webTools: true,
+              skills: true,
+              toolServers: true,
+              hooks: true,
+              projectCode: true,
+            },
+          }),
+        );
+        const open = f.opens.at(-1)!;
+        const signal = new AbortController().signal;
+        const answer = (toolName: string, toolUseId: string) =>
+          open.preToolUse({
+            sessionId: "sdk-session-1",
+            projectRoot,
+            toolName,
+            input: { query: "x" },
+            toolUseId,
+            signal,
+          });
+        const expected = executionPolicy === "full-access" ? "allow" : "ask";
+        await expect(answer("WebSearch", `search-${executionPolicy}`)).resolves.toEqual({
+          behavior: expected,
+        });
+        await expect(answer("mcp__linear__search", `mcp-${executionPolicy}`)).resolves.toEqual({
+          behavior: expected,
+        });
+      } finally {
+        await acquired.close();
+      }
+    }
   });
 
   it("refuses an Artifact call in Plan without raising an approval, because publishing leaves the computer", async () => {

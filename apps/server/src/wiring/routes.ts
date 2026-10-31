@@ -29,7 +29,10 @@ import type { WorkRequestsWiring } from "./workRequests";
 
 export type RoutesDependencies = Pick<ServerStart, "latencyStats" | "persistence"> &
   Pick<AgentRunsWiring, "agentRunRouteDependencies" | "agentRunSettingsRoutes"> &
-  Pick<IntegrationsWiring, "githubRoutes" | "integrationRoutes" | "terminalSessionRoutes"> &
+  Pick<
+    IntegrationsWiring,
+    "githubRoutes" | "integrationRoutes" | "safeNetworkRoutes" | "terminalSessionRoutes"
+  > &
   Pick<
     UsageWiring,
     | "diagnosticsExportRoutes"
@@ -182,6 +185,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     nativeHarnessSessionRoutes,
     navigatorAssistantRoutes,
     pendingRequestRoutes,
+    safeNetworkRoutes,
     planRoutes,
     previewHandoffBridgeRoutes,
     previewRoutes,
@@ -253,6 +257,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await nativeHarnessRoutingRoutes(request)) ??
     (await nativeHarnessSessionRoutes(request)) ??
     (await nativeHarnessEgressRoutes(request)) ??
+    (await safeNetworkRoutes(request)) ??
     (await followUpSuggestionRoutes(request)) ??
     (await sideTaskRoutes(request)) ??
     (await githubRoutes(request)) ??

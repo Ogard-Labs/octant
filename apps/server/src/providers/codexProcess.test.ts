@@ -723,6 +723,40 @@ describe("CodexProcessPort", () => {
 });
 
 describe("Codex launch confinement", () => {
+  it("puts the app-server on its own egress proxy, not open network, when the host routes it", () => {
+    let captured: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
+    const prepared = prepareCodexLaunch({
+      binaryPath: "/bin/sh",
+      args: ["-c", "true"],
+      authority: {
+        kind: "thread",
+        root: tmpdir(),
+        mode: "code",
+        executionPolicy: "approval-gated",
+      },
+      environment: { HOME: homedir() },
+      confinement: {
+        prepare: (input) => {
+          captured = input;
+          return { command: input.executable, args: input.args };
+        },
+      },
+      platform: "darwin",
+      network: {
+        endpoint: { kind: "loopback", port: 47002 },
+        environment: { HTTPS_PROXY: "http://octant:token@127.0.0.1:47002" },
+      },
+    });
+    expect(captured?.networkEgress).toEqual({
+      kind: "proxied",
+      endpoint: { kind: "loopback", port: 47002 },
+    });
+    expect(prepared.status === "prepared" ? prepared.launch.environment.HTTPS_PROXY : "").toBe(
+      "http://octant:token@127.0.0.1:47002",
+    );
+    if (prepared.status === "prepared") prepared.launch.release();
+  });
+
   it("launches Full access as the program itself, with no profile around it", () => {
     const prepared = prepareCodexLaunch({
       binaryPath: "/bin/sh",
