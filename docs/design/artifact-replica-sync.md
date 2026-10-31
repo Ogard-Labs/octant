@@ -13,8 +13,8 @@ and store-endpoint security rules
 A store a person sets aside for sync holds one
 write-once JSON entry per committed artifact version or deletion, at
 `<instanceId>/<sequence>.json`, with a detached signature beside it at
-`<instanceId>/<sequence>.sig`. The payload is the artifact bundle from
-[0029](../decisions/0029-artifact-storage-mirror.md) (`octant.artifact-bundle/1`),
+`<instanceId>/<sequence>.sig`. The payload is the artifact bundle the
+artifact mirror writes (`octant.artifact-bundle/1`),
 not a second document. Reconciling an artifact entry appends a version, keeps both
 heads when two computers revise the same parent, or records a tombstone. It
 cannot overwrite. An unknown or revoked instance, a bad or missing
@@ -351,7 +351,7 @@ them in.
 `ReplicaArtifactImport` in `apps/server/src/replica/`.
 
 - **Publish.** The Canvas service's committed-version hook - the seam the
-  0029 mirror listens on - hands every committed version to artifact sync,
+  artifact mirror listens on - hands every committed version to artifact sync,
   whichever surface made it; a deletion is queued through the same service
   as a tombstone over every version head this host knows. Nothing is
   queued while sync is off or this host has no replica identity, nor for a
@@ -360,8 +360,8 @@ them in.
   pass the share filter; a version that fails, or exceeds the bundle size
   bound, is journaled as a refused publish and never queued. A queued
   entry is journaled first (`replica.artifact-queued@2`) with its kind,
-  artifact origin, parents (the previous local version), and the 0029
-  bundle whose header names the artifact's replica origin - the instance
+  artifact origin, parents (the previous local version), and the
+  artifact bundle whose header names the artifact's replica origin - the instance
   that first published it, since every host calls itself `local` - plus
   the Project name it is filed under. Drains run oldest first through the
   membership service's single command line, at the identity's next free
@@ -476,7 +476,7 @@ them in.
   library query applies to synced entries: mode, kind, and text match (text
   also matches the computer's name), and a Project filter or the Shared tab
   matches none, since they have no Project or share here.
-- **Binding (0040).** `SyncedArtifactService` serves the host-only
+- **Binding.** `SyncedArtifactService` serves the host-only
   `POST /api/artifacts/synced` route; a paired device is refused before the
   command is decoded. Opening a synced artifact binds it to a thread the
   person chooses among those `decideReplicaArtifactBinding` finds

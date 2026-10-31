@@ -10,8 +10,13 @@ Workspace owns the Browser pane
 ([Workspace: tool lifecycles](workspace.md#tool-lifecycles)). DESIGN.md owns
 the controls and the approval card.
 
-Status: approved design, not yet built. Until it is built, every Browser page is
-Private, as described below.
+Status: profiles, their storage, site approvals, refusals, and Settings are
+built. Browser extensions are approved design, not yet built; the Extensions
+section below is that design. Four smaller pieces of the profile design are not
+built yet and are marked where they appear: purging a Project removes its
+profile, a kept screenshot's record names the profile, the driver indicator and
+floating preview show the profile's name, and a phone-started turn's approval
+waiting for a local window.
 
 ## Profiles
 
@@ -30,10 +35,9 @@ and service workers in. There are three kinds:
   staging site once in that Project's profile, and every thread of the Project
   that opens a page in it is signed in.
 - The Personal profile is for sites the person uses across Projects. It is not
-  their everyday browser's profile: Octant never opens, reads, copies, or imports
-  another browser's profile, cookies, history, or saved passwords. The
-  `existing-profile` profile mode in the Browser contract is retired and is
-  refused everywhere.
+  their everyday browser's profile: Octant never opens another browser's profile
+  in place. The `existing-profile` profile mode in the Browser contract is
+  retired: the schema no longer decodes it, so no caller can ask for it.
 - Chat has no Browser, so it has no profile. A Chat Project has no Project
   profile.
 - The person signs in by typing into the page themselves. Octant saves no
@@ -45,16 +49,20 @@ and service workers in. There are three kinds:
   it from the profile control at the left of the Browser toolbar's address field
   (Private, Project, Personal). Changing it opens the same address in the chosen
   profile as a new browsing context; the old context closes, and nothing it held
-  (cookies, approvals, an agent's binding) carries over.
+  (cookies, approvals, an agent's binding) carries over. The host turns "Project"
+  into the thread's or window's own Project, so a caller cannot name another
+  Project's profile.
 - Tabs a page opens stay in its profile.
 - The control remembers the person's last choice per Project for new pages they
   open. It never changes the profile of a page the agent opens.
 - An agent's own new page is Private. The agent may ask to open a page in the
-  Project or Personal profile (a `profile` argument on the Browser tool's open
-  operation). The host decides, not the tool argument: the request raises a site
-  approval naming the profile unless the person already remembered that
-  (origin, profile) pair, and rebinding a page to a different model or authority
-  still asks (see below).
+  Project or Personal profile (a `profile` argument on the Browser tool's
+  `navigate` operation, honoured only when no page is open). The host decides,
+  not the tool argument: the request raises a site approval naming the profile
+  unless the person already remembered that (origin, profile) pair, and
+  rebinding a page to a different model or authority still asks (see below). A
+  page keeps the profile it opened in; the agent changes it only by stopping its
+  Browser and opening again, which asks again.
 - The thread-less Project Browser (the person's own browser for a Project) uses
   the same control. It has no agent, so no approval applies there.
 
@@ -76,8 +84,13 @@ and service workers in. There are three kinds:
 - Profiles are never written inside a Project folder.
 - On macOS, Chromium encrypts a persistent profile's cookies with a key it keeps
   in the login keychain. Octant adds no second encryption layer.
-- Profiles are declared in the host data map and listed in Settings › Data &
-  privacy under "Browser profiles", each with its size.
+- Profiles are declared in the host data map (the desktop app tells the host the
+  folder it keeps them in) and listed in Settings › Data & privacy under
+  "Browser profiles", each with its size. The size is the space the profile's
+  folder occupies; the host never reads a cookie to produce it. The Personal
+  profile is always listed; a Project profile is listed once it has a store, by
+  the Project's name, or as "A Project that no longer exists" when the Project
+  is gone.
 - Profiles are never in a thread export, a Canvas share, replica sync, a backup
   Octant makes, or the diagnostics export. A profile holds sign-ins, which are
   credentials.
@@ -88,8 +101,15 @@ and service workers in. There are three kinds:
   confirmation it closes every page of that profile and clears all of its
   storage (cookies, storage, cache, service workers). The Settings row has the
   same action.
+- Clearing is the person's, at a local window only, and has two scopes: all of a
+  profile's storage (what "Sign out" does) or its cookies alone. The host closes
+  the profile's pages, in the server's records and in the desktop app's views,
+  before it removes anything, and journals `browser.profile-cleared@1` with the
+  profile and the scope. The record names no site, cookie, or count.
 - Archiving a Project closes its profile's pages and keeps the profile.
-  Purging the Project removes the profile with the Project's other data.
+  Purging the Project removes the profile with the Project's other data (not
+  built yet: until it is, a purged Project's profile stays listed in Settings,
+  where the person can sign out of it).
 - Turning a mode off closes its Projects' profile pages and keeps the profiles.
 
 ### Page rules that do not change
@@ -112,7 +132,10 @@ thread made.
   The approval covers reading (snapshots, screenshots, text) as well as acting,
   because reading a signed-in page reads the person's account.
 - **Remembered per profile.** "Always allow" on that approval remembers the pair
-  (origin, profile), journaled like today's remembered origins, and listed in
+  (origin, profile) in the shell settings
+  (`rememberedBrowserProfileSites`), journaled like today's remembered origins:
+  it grows only through the approval answer, and a settings write may forget a
+  pair but never add one. The pairs are listed in
   Settings › Data & privacy › Remembered websites with the profile beside the
   site. A remembered Private origin never covers a profile page, and a pair
   remembered for one Project's profile never covers another Project's profile or
@@ -125,9 +148,12 @@ thread made.
 - **Plan mode** refuses every Browser operation on every profile, as it does
   today, except stopping the thread's own Browser.
 - **Paired devices.** A paired device may not open a profile page, switch a page
-  to a profile, answer a profile site approval, or see a profile page's picture.
-  It sees "Signed-in page — open it on this Mac." A turn that a phone started
-  still raises the approval; the approval waits for a local window.
+  to a profile, answer a profile site approval, act on a profile page, list or
+  clear a profile, or see a profile page's picture, text, address, or title. It
+  sees "Signed-in page — open it on this Mac." (Built.) A turn that a phone
+  started still raises the approval; the approval waits for a local window (not
+  built yet: today a phone-started turn's approval is answered the way every
+  Browser approval already is).
 - **Unattended turns.** A routine's turn and a subagent's turn are refused on
   profile pages (`profile-needs-a-person`). A subagent's own Browser is Private.
 - **Terminal Browser grant.** A CLI in a thread terminal may drive the thread's
@@ -137,11 +163,12 @@ thread made.
 - **Captures.** A screenshot the agent or person keeps from a profile page is
   kept by the thread under the usual
   [Browser captures](browser-captures.md) rules, and its record names the
-  profile.
+  profile (not built yet: today the record does not name the profile).
 
 The agent's activity on a profile page is visible: while the agent drives one,
 the Browser toolbar's driver indicator and the floating page preview both show
-the profile's name.
+the profile's name (not built yet; the toolbar's profile control already shows
+the page's profile).
 
 ## Extensions
 

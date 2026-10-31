@@ -12,6 +12,7 @@ import { CodeDiffPane, type CodeDiffProjection } from "../code/CodeDiffPane";
 import type { MonacoDiffRuntime } from "../code/MonacoEditorAdapter";
 import { nativeCodeWorkspaceApprovals } from "../code/codeWorkspaceApprovals";
 import { observeCodeThreadDiff } from "../code/observeCodeThreadDiff";
+import { useCodeDiffIgnoreWhitespace } from "../code/codeDiffWhitespacePreference";
 import { useCodeFileChangeWatch } from "../code/useCodeFileChangeWatch";
 import { ShellState } from "./ShellState";
 import type { OctantHostBridge } from "./hostBridge";
@@ -95,6 +96,7 @@ function BoundReview(props: {
   );
   const [projection, setProjection] = useState<CodeDiffProjection>({ state: "loading" });
   const [stale, setStale] = useState(false);
+  const [ignoreWhitespace, setIgnoreWhitespace] = useCodeDiffIgnoreWhitespace();
   const scope = useMemo(
     () => ({ checkoutId: props.checkoutId, threadId: props.threadId }),
     [props.checkoutId, props.threadId],
@@ -103,8 +105,8 @@ function BoundReview(props: {
   const observe = useCallback(async () => {
     setStale(false);
     setProjection({ state: "loading" });
-    setProjection(await observeCodeThreadDiff(props.client, nextUuid, scope));
-  }, [nextUuid, props.client, scope]);
+    setProjection(await observeCodeThreadDiff(props.client, nextUuid, scope, { ignoreWhitespace }));
+  }, [ignoreWhitespace, nextUuid, props.client, scope]);
 
   useEffect(() => {
     // Clear the previous subject's files before the next observation lands.
@@ -144,6 +146,10 @@ function BoundReview(props: {
       createOperationId={() => nextUuid() as never}
       defaultLayout={props.defaultDiffLayout ?? "unified"}
       diff={projection}
+      ignoreWhitespace={{
+        value: ignoreWhitespace,
+        onChange: setIgnoreWhitespace,
+      }}
       executionPolicy={props.view.thread.executionPolicy}
       {...(props.loadRuntime === undefined ? {} : { loadRuntime: props.loadRuntime })}
       {...(props.onOpenFile === undefined

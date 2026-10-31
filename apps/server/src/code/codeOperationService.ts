@@ -409,6 +409,7 @@ export interface CodeOperationGitPort {
   readonly observe: (input: {
     readonly checkoutRoot: string;
     readonly maxDiffBytes: number;
+    readonly ignoreWhitespace?: boolean;
   }) => Promise<{
     readonly status: "ready" | "unavailable" | "failed";
     readonly head?: {
@@ -522,6 +523,7 @@ export interface CodeOperationGitPort {
   readonly readBranchDiff?: (input: {
     readonly checkoutRoot: string;
     readonly baseRef: string;
+    readonly ignoreWhitespace?: boolean;
   }) => Promise<
     | {
         readonly status: "ready";
@@ -592,23 +594,50 @@ type GitMutationOutcome =
   | { readonly status: "unavailable" }
   | { readonly status: "failed"; readonly detail?: string };
 
+interface CodeOperationPullRequestIdentity {
+  readonly number: number;
+  readonly url: string;
+  readonly baseRepository: string;
+  readonly baseBranch: string;
+  readonly headOwner: string;
+  readonly headBranch: string;
+}
+
 export interface CodeOperationPullRequestPort {
   readonly ensure: (
-    input: { readonly threadId: CodeThread["id"]; readonly title: string; readonly body: string },
+    input: {
+      readonly threadId: CodeThread["id"];
+      readonly title: string;
+      readonly body: string;
+      readonly draft?: boolean;
+      readonly baseBranch?: string;
+    },
     signal: AbortSignal,
   ) => Promise<
     | {
         readonly status: "created" | "existing";
-        readonly pullRequest: {
-          readonly number: number;
-          readonly url: string;
-          readonly baseRepository: string;
-          readonly baseBranch: string;
-          readonly headOwner: string;
-          readonly headBranch: string;
-        };
+        readonly pullRequest: CodeOperationPullRequestIdentity;
+        readonly draft?: boolean;
       }
-    | { readonly status: "unavailable" }
+    | { readonly status: "unavailable"; readonly code?: string }
+  >;
+  /** Absent on a host that cannot change pull requests; the update is then unavailable. */
+  readonly update?: (
+    input: {
+      readonly threadId: CodeThread["id"];
+      readonly title?: string;
+      readonly body?: string;
+      readonly draft?: boolean;
+    },
+    signal: AbortSignal,
+  ) => Promise<
+    | {
+        readonly status: "updated";
+        readonly pullRequest: CodeOperationPullRequestIdentity;
+        readonly draft?: boolean;
+      }
+    | { readonly status: "none" }
+    | { readonly status: "unavailable"; readonly code?: string }
   >;
   readonly observeReview: (
     input: { readonly threadId: CodeThread["id"]; readonly maxDiffBytes: number },
@@ -2792,6 +2821,8 @@ export class CodeOperationService {
       }
       case "create-pull-request":
         return this.#pullRequest(command, root.checkoutRoot);
+      case "update-pull-request":
+        return this.#updatePullRequest(command, root.checkoutRoot);
       case "observe-pull-request":
         return this.#pullRequestReview(command, root.checkoutRoot);
       case "create-review-finding": {
@@ -3165,7 +3196,11 @@ export class CodeOperationService {
     ]) {
       const comparison = await compare({ checkoutRoot, baseRef, headRef: "HEAD" });
       if (comparison.status !== "ready") continue;
-      const diff = await readDiff({ checkoutRoot, baseRef });
+      const diff = await readDiff({
+        checkoutRoot,
+        baseRef,
+        ...(command.ignoreWhitespace === true ? { ignoreWhitespace: true } : {}),
+      });
       if (diff.status !== "ready") continue;
       return decodeCodeOperationResult({
         kind: "run-reviewed",
@@ -3277,6 +3312,7 @@ export class CodeOperationService {
     const result = await this.#options.git.observe({
       checkoutRoot,
       maxDiffBytes: command.maxDiffBytes,
+      ...(command.ignoreWhitespace === true ? { ignoreWhitespace: true } : {}),
     });
     if (
       result.status !== "ready" ||
@@ -3464,7 +3500,13 @@ export class CodeOperationService {
         failureCode: "no-remote",
       });
     const result = await this.#options.pullRequests.ensure(
-      { threadId: command.threadId, title: command.title, body: command.body },
+      {
+        threadId: command.threadId,
+        title: command.title,
+        body: command.body,
+        ...(command.draft === undefined ? {} : { draft: command.draft }),
+        ...(command.baseBranch === undefined ? {} : { baseBranch: command.baseBranch }),
+      },
       new AbortController().signal,
     );
     if (result.status === "unavailable")
@@ -3472,19 +3514,43 @@ export class CodeOperationService {
         kind: "pull-request-state",
         operationId: command.operationId,
         state: "unavailable",
+        ...(result.code === "invalid-base" ? { failureCode: "invalid-base" } : {}),
       });
-    const pr = result.pullRequest;
-    return decodeCodeOperationResult({
-      kind: "pull-request-state",
-      operationId: command.operationId,
-      state: result.status,
-      number: pr.number,
-      url: pr.url,
-      headRepository: pr.headOwner,
-      headBranch: pr.headBranch,
-      baseRepository: pr.baseRepository,
-      baseBranch: pr.baseBranch,
-    });
+    return pullRequestState(command.operationId, result.status, result.pullRequest, result.draft);
+  }
+
+  async #updatePullRequest(
+    command: Extract<CodeOperationCommand, { readonly kind: "update-pull-request" }>,
+    checkoutRoot: string,
+  ): Promise<CodeOperationResult> {
+    const pullRequests = this.#options.pullRequests;
+    // Call it on the port: a class-backed port reads private state through `this`.
+    if (pullRequests.update === undefined || (await this.#hasGitHubRemote(checkoutRoot)) === false)
+      return decodeCodeOperationResult({
+        kind: "pull-request-state",
+        operationId: command.operationId,
+        state: "unavailable",
+        ...(pullRequests.update === undefined ? {} : { failureCode: "no-remote" }),
+      });
+    const result = await pullRequests.update(
+      {
+        threadId: command.threadId,
+        ...(command.title === undefined ? {} : { title: command.title }),
+        ...(command.body === undefined ? {} : { body: command.body }),
+        ...(command.draft === undefined ? {} : { draft: command.draft }),
+      },
+      new AbortController().signal,
+    );
+    if (result.status !== "updated")
+      return decodeCodeOperationResult({
+        kind: "pull-request-state",
+        operationId: command.operationId,
+        state: "unavailable",
+        ...(result.status === "none" ? { failureCode: "not-found" } : {}),
+      });
+    // An edited pull request is still the existing one; the journaled state
+    // says what GitHub holds, not which change made it so.
+    return pullRequestState(command.operationId, "existing", result.pullRequest, result.draft);
   }
 
   async #pullRequestReview(
@@ -4282,6 +4348,8 @@ function operationFor(kind: CodeOperationCommand["kind"]): CodeOperation {
       return "push";
     case "create-pull-request":
       return "create-pr";
+    case "update-pull-request":
+      return "update-pr";
     default:
       return "edit";
   }
@@ -4289,4 +4357,24 @@ function operationFor(kind: CodeOperationCommand["kind"]): CodeOperation {
 
 function operationApprovalEffect(command: CodeOperationCommand): CodeApprovalEffect {
   return { kind: "operation", command } as CodeApprovalEffect;
+}
+
+function pullRequestState(
+  operationId: CodeOperationCommand["operationId"],
+  state: "created" | "existing",
+  pr: CodeOperationPullRequestIdentity,
+  draft: boolean | undefined,
+): CodeOperationResult {
+  return decodeCodeOperationResult({
+    kind: "pull-request-state",
+    operationId,
+    state,
+    number: pr.number,
+    url: pr.url,
+    headRepository: pr.headOwner,
+    headBranch: pr.headBranch,
+    baseRepository: pr.baseRepository,
+    baseBranch: pr.baseBranch,
+    ...(draft === undefined ? {} : { draft }),
+  });
 }

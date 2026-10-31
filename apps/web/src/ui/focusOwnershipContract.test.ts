@@ -8,7 +8,7 @@ const recipeDirectory = join(import.meta.dirname, "shadcn");
  * The style every recipe is imported from paints keyboard focus per control,
  * as a wide translucent halo. That is a web idiom: it reads as a page element
  * that happens to be focusable. Octant keeps focus visually quiet so selected
- * and expanded fills carry the state cue (0094).
+ * and expanded fills carry the state cue.
  *
  * Eight recipes carried the imported halo before this was checked, so the rule
  * is not self-enforcing: it survives exactly as long as something re-reads the

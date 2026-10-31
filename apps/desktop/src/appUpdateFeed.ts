@@ -10,7 +10,7 @@ import { type AppReleaseRing, OCTANT_UPDATE_CHECK_DISCLOSURE } from "@octant/con
  * This, not the host the feed came from, is what makes an update trustworthy.
  * A feed served from the right domain over a valid certificate proves only that
  * somebody controls that domain today; the signature proves the release is one
- * we published. See `docs/decisions/0034`.
+ * we published. See docs/architecture.md, "Current Release Boundary".
  *
  * A missing or unusable value is not a permissive default:
  * `createFeedVerifier` refuses every signature unless this is a valid Ed25519

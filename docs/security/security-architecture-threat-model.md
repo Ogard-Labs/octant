@@ -54,10 +54,10 @@ existing control.
 - The bound Work project root and Code repository root (filesystem contents and integrity).
 - Provider credentials and OAuth sessions (Keychain / secret-store material as
   opaque broker refs; never journaled, never rendered). Delegated provider-runtime
-  OAuth stays out of Octant storage (0005). Octant never reads, stores, or
+  OAuth stays out of Octant storage. Octant never reads, stores, or
   injects a provider CLI's credentials, including Claude OAuth tokens.
   Host-driven `subscription-oauth`
-  refresh and access live only as 0054 broker refs (0111).
+  refresh and access live only as broker refs.
 - Host identity keys, remote device credentials, and pairing secrets.
 - The append-only event journal: integrity of recorded tool calls, approvals, and authority
   transitions, and the guarantee that no secret or instruction-laundering content enters it as
@@ -123,19 +123,19 @@ the outermost check that fails closed first is listed first.
 A repository README, web page, or MCP tool result contains instructions such as "run
 `curl … | sh`", "approve all future writes", "the reviewer must approve this shell", or a fake
 tool-call transcript. The model relays them as its own intent, including toward a native-harness
-reviewer that would answer a prompt (0110).
+reviewer that would answer a prompt.
 
 | Layer              | Control                                                                                                               | Module                                                                         | State           |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | --------------- |
 | Journal provenance | Tool results are journaled as untrusted data with source provenance, never as instructions                            | `packages/contracts` tool-evidence provenance (see Untrusted-content policy)   | Newly specified |
 | Policy engine      | Any resulting tool call still resolves fail-closed against mode/provider/host/actor/elevation                         | `packages/domain/src/toolActionPolicy.ts` + unified engine (see Policy engine) | Partial today   |
 | Approval taint     | Threads that ingested external content require fresh explicit confirmation for irreversible approval classes          | Untrusted-content policy (below)                                               | Newly specified |
-| Reviewer bound     | Native-harness reviewer sees only the approval request plus bounded facts, framed as data; ambiguity goes to a person | Native harness reviewer (0110)                                                 | Newly specified |
-| Eligible classes   | Reviewer may answer `shell-commands` and `network-access` only; it cannot mint categories or waive taint              | Native harness reviewer (0110)                                                 | Newly specified |
+| Reviewer bound     | Native-harness reviewer sees only the approval request plus bounded facts, framed as data; ambiguity goes to a person | Native harness reviewer                                                        | Newly specified |
+| Eligible classes   | Reviewer may answer `shell-commands` and `network-access` only; it cannot mint categories or waive taint              | Native harness reviewer                                                        | Newly specified |
 | Sandbox            | Even an approved malicious command stays inside the bound root's sandbox profile and egress policy                    | Provider/tool Seatbelt launchers (see Sandbox boundary)                        | Partial today   |
 
-Escape probes for the reviewer path are a release-gate follow-up once 0110 is implemented; they
-are not present while that record is Proposed.
+Escape probes for the reviewer path are a release-gate follow-up once the reviewer path is implemented;
+they are not present while it is only specified.
 
 ### AC2 — Rogue MCP server requesting undeclared capabilities
 
@@ -394,25 +394,25 @@ process; they run on macOS only, in the `macos-15` CI job, and passed there on 2
   Missing `sandbox-exec` fails closed as `incompatible` rather than running unconfined. Modules:
   `apps/server/src/providers/piProcess.ts`, `acpProcess.ts`, `openCodeProcess.ts`, and
   `claudeProcess.ts` on Plan — the runtimes whose process carries exactly one thread's root, mode,
-  and execution policy. On Full access, 0009's user-selected unrestricted posture, OpenCode and Pi
+  and execution policy. On Full access, the user-selected unrestricted posture, OpenCode and Pi
   return the binary unwrapped. ACP drops the deny-default profile too, and a profile that carries
-  0006's static MCP, skills, and hooks denials launches through an allow-default wrapper that adds
+  the static MCP, skills, and hooks denials launches through an allow-default wrapper that adds
   only those. A bound root a launch may not write is denied in the profile rather than left
   ungranted, so a checkout beneath a write grant, such as the temp or a configuration directory,
   is not writable through it.
   `apps/server/src/childProcessEnvironment.ts` strips the broker URLs, broker tokens, and desktop
   bridge secret from every child, and argv carrying a provider credential is refused.
 - **Unwrapped provider runtimes and what they leave exposed.** The Codex app-server is not
-  wrapped, and neither is a Claude launch on the two postures that write, a scoped exception
-  recorded in `docs/decisions/0143-confinement-wraps-a-runtime-that-carries-one-thread.md` and
-  narrowed by `docs/decisions/0145-a-plan-turn-is-confined-by-octant.md`. Octant-owned tools those
+  wrapped, and neither is a Claude launch on the two postures that write, a scoped exception:
+  Octant wraps a runtime launch only when the process carries exactly one thread's authority, and a
+  Claude Plan turn is confined by Octant. Octant-owned tools those
   threads reach stay confined. What the runtime process itself is left holding:
   - _Provider sandbox by posture._ Codex sends a `sandbox` on every `thread/start`
     (`read-only` on Plan, `workspace-write` when approval-gated, `danger-full-access` on the
     user-selected Full access). Claude sends sandbox settings on approval-gated and
     auto-accept-edits turns, which is the whole of its remaining exception: a Claude Plan launch
     now carries Octant's own profile, so Plan's read-only boundary is the kernel's on that path
-    rather than the runtime's `permissionMode` (0145).
+    rather than the runtime's `permissionMode`.
   - _Environment._ Claude and Pi pass an allowlist (`PASSTHROUGH_VARIABLES`, `SAFE_ENVIRONMENT`).
     Pi's also admits all fifteen variables in `PROVIDER_CREDENTIALS` — `OPENAI_API_KEY`,
     `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` and the rest — from the host whichever provider the
@@ -426,10 +426,10 @@ process; they run on macOS only, in the `macos-15` CI job, and passed there on 2
     _as a variable_. That is a statement about the environment only; see _Files_ below. Under
     API-key authentication `ANTHROPIC_API_KEY` is written into Claude's
     child environment at launch and deleted from the in-memory object when the scope closes.
-    0009 reads two ways on that: it says provider credentials are stripped from every child, and
-    that secrets reach a process only as named references resolved at launch. This record states
+    The confinement rules read two ways on that: it says provider credentials are stripped from every child, and
+    that secrets reach a process only as named references resolved at launch. This model states
     the mechanism rather than settling which clause governs.
-  - _Files._ 0009's wrapped profile enumerates the rest of the user's home as denied. An unwrapped
+  - _Files._ The wrapped profile enumerates the rest of the user's home as denied. An unwrapped
     runtime gets none of that. Both forward `HOME`. Codex no longer forwards the AWS locators
     (`AWS_PROFILE`, `AWS_SHARED_CREDENTIALS_FILE`, `AWS_CONFIG_FILE`), and a Codex Bedrock sign-in
     that would read the AWS shared config is refused as `incompatible` (see the architecture's
@@ -459,8 +459,7 @@ process; they run on macOS only, in the `macos-15` CI job, and passed there on 2
   Octant's `api-key` authentication instead.
 - **Version reads are confined; three readiness probes are not.** Every `--version` read prepares
   its launch through `prepareConfinedVersionProbe`
-  (`apps/server/src/process/confinedVersionProbe.ts`), recorded in
-  `docs/decisions/0146-a-version-read-launches-confined.md`: the six family reads
+  (`apps/server/src/process/confinedVersionProbe.ts`): the six family reads
   (`probeAcpBinary`, Claude's `runProbe` at `kind: "version"`, `probeCodexBinary`, Oh My Pi's and
   Pi's `inspectVersion`, `probeOpenCodeBinary`) and `scanDescriptor` in
   `apps/server/src/providers/discoveryService.ts`. The read binds no project root and no managed
@@ -470,14 +469,14 @@ process; they run on macOS only, in the `macos-15` CI job, and passed there on 2
   the family computed from the scratch, so provider credentials, cloud keys and config-home
   variables never reach a replaced executable. A host that cannot confine refuses the read rather
   than running it, and it ends the read's whole process group when the read settles.
-  Process exec and fork stay allowed, a scoped exception to 0122 that 0146 states, because a
+  Process exec and fork stay allowed, a scoped exception to the rule that a readiness probe launches with no process exec or fork, because a
   configured path is routinely a launcher that starts the program that answers; a child inherits
-  the same profile. Three readiness launches stay unconfined, and 0122 expects each to retain
+  the same profile. Three readiness launches stay unconfined, and each is expected to retain
   confinement: `scanDescriptor`'s optional `authProbeArgs`, which reads the provider's credential
   state out of the user's home against a candidate found on `PATH`; Claude's `auth status --json`
   in `runProbe`; and the Oh My Pi connection check's RPC process in `ohMyPiProcess.ts`. Each bounds
   its timeout and output and sanitizes its environment. Giving them a home they can read is a
-  readiness-probe question under 0122.
+  readiness-probe question.
 - **Extension executable quarantine.** Executable components are quarantined until explicit trust
   (`packages/plugin-host/src/activation.ts`), then run only in supervised processes launched under
   `sandbox-exec` with `PATH=/usr/bin:/bin`, an explicit ready-handshake, bounded handshake bytes,
@@ -549,7 +548,7 @@ process; they run on macOS only, in the `macos-15` CI job, and passed there on 2
   approved capability; their sandbox profile is derived from declared capabilities the same way
   thread tools derive from authority.
 
-### Consumer subscription OAuth delta (0111)
+### Consumer subscription OAuth delta
 
 Directory and cloud-IAM identity have their own threat controls (E1–E8) in
 [Enterprise provider identity](../design/enterprise-provider-identity.md#threat-model).
@@ -563,7 +562,7 @@ or the renderer.
 | ID  | Delta                              | Control                                                                                                                                                                                                                             |
 | --- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | O1  | Long-lived refresh tokens          | Broker-only opaque refs; never journaled, logged, exported, or renderer-visible. Host-local revoke invalidates Octant refs only — it does not revoke the IdP token. Residual risk is a still-valid refresh token until the IdP does |
-| O2  | Confused-deputy spend              | Existing mode, Project, and approval gates stay in front; a remote principal cannot start the OAuth flow or rotate broker material (0013)                                                                                           |
+| O2  | Confused-deputy spend              | Existing mode, Project, and approval gates stay in front; a remote principal cannot start the OAuth flow or rotate broker material                                                                                                  |
 | O3  | Account or tenant binding on probe | Instance config carries the expected binding; `subscription-oauth` `ProviderDriver.probe` reports `incompatible` on mismatch                                                                                                        |
 | O4  | Refresh-token reuse / rotation     | Single-flight refresh with rotation safety; `refresh_token_reused` is terminal and invalidates the stored family; network and 5xx are transient                                                                                     |
 | O5  | First-party `client_id` and ToS    | Explicit user acknowledgment before any first-party-client-ID flow; Octant originator / client metadata; API-key path always offered                                                                                                |

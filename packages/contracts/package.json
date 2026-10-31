@@ -55,6 +55,7 @@
     "./browser-automation": "./src/browserAutomation.ts",
     "./browser-automation-rpc": "./src/browserAutomationRpc.ts",
     "./browser-capture": "./src/browserCapture.ts",
+    "./browser-profiles": "./src/browserProfiles.ts",
     "./canvas": "./src/canvas.ts",
     "./canvas-actions": "./src/canvasActions.ts",
     "./canvasContext": "./src/canvasContext.ts",

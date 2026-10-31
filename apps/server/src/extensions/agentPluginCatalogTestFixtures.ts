@@ -21,6 +21,8 @@ export interface TarFixtureEntry {
   readonly content?: string | Uint8Array;
   readonly kind?: "file" | "directory" | "symlink";
   readonly linkTarget?: string;
+  /** Unix permission bits; defaults to 0o644. */
+  readonly mode?: number;
 }
 
 export function pluginManifest(overrides: Readonly<Record<string, unknown>> = {}): string {
@@ -153,7 +155,7 @@ export function buildGzipTar(entries: ReadonlyArray<TarFixtureEntry>): Uint8Arra
     const content = kind === "file" ? Buffer.from(entry.content ?? "") : Buffer.alloc(0);
     const header = Buffer.alloc(512, 0);
     header.write(entry.path.slice(0, 100), 0, "utf8");
-    header.write("0000644\0", 100, "utf8");
+    header.write(`${(entry.mode ?? 0o644).toString(8).padStart(7, "0")}\0`, 100, "utf8");
     header.write("0000000\0", 108, "utf8");
     header.write("0000000\0", 116, "utf8");
     header.write(`${content.byteLength.toString(8).padStart(11, "0")}\0`, 124, "utf8");

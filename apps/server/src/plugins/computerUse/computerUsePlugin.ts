@@ -7,7 +7,7 @@ import type { ComputerUseHostPort, ComputerUseToolPlugin } from "@octant/plugin-
 
 /**
  * Full Computer use guidance, returned by the tool's `help` operation so the
- * always-visible description stays short (decision 0067). The host answers it
+ * always-visible description stays short. The host answers it
  * without issuing a command.
  */
 export const COMPUTER_USE_TOOL_HELP: Readonly<Record<string, string>> = {

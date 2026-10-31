@@ -5,7 +5,7 @@
  * set up survives one, and the membership service asks this service for its
  * store on every command. Sync starts off. With sync off, or no store chosen,
  * the selection is `not-configured` and nothing opens a store, so a host with
- * sync off makes no store call (decision 0163).
+ * sync off makes no store call.
  *
  * A bucket's access key and secret go only into the host credential store
  * (macOS Keychain or freedesktop Secret Service) through the credential

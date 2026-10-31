@@ -314,6 +314,14 @@ not stop the server-owned session.
 **Pull requests** lists the active Project's open and draft requests from the
 cached snapshot and opens a selected row in Review in the same dock; the
 request named on a pane tab opens there too.
+When you ask, the agent can open the pull request for the thread's own
+branch, as a draft or ready for review, and stack it on another branch that
+already has an open pull request. It can also change that pull request's
+title and description, or mark a draft ready (or turn it back into a draft).
+It never chooses another branch, and it cannot merge or close anything. A
+thread that asks before acting shows you the exact change first; Full access
+goes ahead; Plan refuses. The thread's pull request shows in Review and on
+its card, stacked ones included.
 The sidebar follows the pane that last received pointer or keyboard input.
 Each thread remembers its open tools and selected tool.
 
@@ -346,6 +354,17 @@ Put-away threads move to the archive on their own after a week. Change that
 window, or turn it off, under **Settings › General › Archive put-away
 threads**. Archiving keeps every thread and its history; only a confirmed purge
 in **Settings › Data & storage** deletes anything.
+
+## Move to a Project
+
+Choose **Move to Project…** from a Code thread's row menu to file it into
+another Code Project. The thread stays a Code thread and keeps its history,
+its guardrail level, and its checkout or managed worktree. It can move only to
+a Code Project bound to the same repository folder, so the checkout stays
+valid; a Project bound to any other folder is greyed out with the reason, and
+the host refuses it too. A Full access grant you made for the current session
+does not carry over: the thread returns to its saved level. Octant refuses the
+move while a turn is running or the agent is waiting on you.
 
 ## Agents that see the other threads of a Project
 

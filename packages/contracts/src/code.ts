@@ -716,7 +716,7 @@ export const CodeCommand = Schema.Union(
    * A thread's checkout id is derived from the binding revision it was created
    * against, so rebinding the Project supersedes it and no later observation
    * can produce the thread's own id again. Without this the thread is
-   * fail-closed for good, which 0032 refuses as a resting state. The act is
+   * fail-closed for good, which is never an acceptable resting state. The act is
    * the user's, never inferred from a matching filesystem root: what authority
    * a thread holds only changes because someone asked.
    */
@@ -749,6 +749,17 @@ export const CodeCommand = Schema.Union(
     kind: Schema.Literal("change-code-thread-document-delivery"),
     ...CodeThreadCommandFields,
     documentDelivery: ThreadDocumentDelivery,
+  }).annotations(strict),
+  /**
+   * Files a Code thread into another Code Project bound to the same folder
+   * (or one that contains it, when the thread's checkout stays valid there).
+   * The thread keeps its history, guardrail level and checkout; the host
+   * refuses any Project under which the checkout would not stay valid.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("move-code-thread"),
+    ...CodeThreadCommandFields,
+    projectId: ProjectId,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-code-thread-working-directory"),

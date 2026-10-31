@@ -4,6 +4,7 @@ import type {
   BrowserActionRequest,
   BrowserAutomationSnapshot,
   BrowserThreadId,
+  CodeApprovalId,
   CodeBoardView,
   CodeOperationCommand,
   CodeOperationResult,
@@ -52,6 +53,8 @@ import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import type { CodeOperationTerminalSnapshot } from "./codeOperationService";
 
 const MAX_TOOL_INPUT_BYTES = 16 * 1024;
+// A pull-request body is often longer than any other tool input.
+const MAX_PULL_REQUEST_TOOL_INPUT_BYTES = 128 * 1024;
 const MAX_TERMINAL_RESULT_BYTES = 32 * 1024;
 const MAX_TERMINAL_SCAN_BYTES = 64 * 1024;
 const MAX_BROWSER_TEXT_RESULT_BYTES = 24 * 1024;
@@ -64,6 +67,7 @@ export const CODE_APPLE_TOOL_NAME = "octant_apple";
 export const CODE_ANDROID_TOOL_NAME = "octant_android";
 export const CODE_BOARD_TOOL_NAME = "octant_board";
 export const CODE_PROPOSE_THREAD_TOOL_NAME = "octant_propose_thread";
+export const CODE_PULL_REQUEST_TOOL_NAME = "octant_pull_request";
 
 /**
  * Ceiling on cards one board read hands the provider. The board is ordered by
@@ -101,6 +105,23 @@ const proposeThreadDefinition = {
       rationale: { type: "string" },
     },
     required: ["title", "intent"],
+  },
+} as const;
+
+const pullRequestDefinition = {
+  name: CODE_PULL_REQUEST_TOOL_NAME,
+  description:
+    "Open or change the pull request for this thread's own branch, only when the person asks for it. create opens it with a title and body, as a draft when draft is true, and stacked on another open branch when base names a branch that has an open pull request of its own; without base it targets the thread's delivery base. update changes the open pull request's title, body, or draft state (draft false marks it ready for review). Push the branch first. An approval-gated thread asks the person before GitHub is touched, and refuses a title and body too long to show whole in that approval (about 1.5 KB together); Plan mode refuses. This tool cannot merge, close, or change any other branch's pull request.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      operation: { type: "string", enum: ["create", "update"] },
+      title: { type: "string" },
+      body: { type: "string" },
+      draft: { type: "boolean" },
+      base: { type: "string" },
+    },
+    required: ["operation"],
   },
 } as const;
 
@@ -205,10 +226,12 @@ const androidDefinition = {
 /**
  * Full usage for each Code family, returned by its `help` operation. The
  * always-visible descriptions above keep only what an agent must know before
- * its first call (decision 0067).
+ * its first call.
  */
 const CODE_TOOL_HELP: Readonly<Record<string, string>> = {
   ...BROWSER_TOOL_HELP,
+  [CODE_PULL_REQUEST_TOOL_NAME]:
+    "Open or change the pull request for this thread's own branch, only when the person asks. create needs title and takes body, draft (true opens a draft), and base (another branch with an open pull request, to stack on it). update takes title, body, or draft (false marks the pull request ready for review, true turns it back into a draft). Push the branch before create. The result names the pull request's number, url, base, and draft state; report exactly that. An approval-gated thread shows the person the whole title and body, so keep them short enough to read there (about 1.5 KB together). Merging and closing are not available here.",
   [CODE_TERMINAL_TOOL_NAME]:
     "Use Octant's terminal for this Code task: run starts a command, write supplies input to the running terminal, read checks its output, and stop terminates it. command is required for run or write. Check commandCompleted and commandExitCode; a running terminal is not proof that its command succeeded. For document artifacts, create files within the bound checkout and report their real relative paths. Octant's Files and Document tools provide host-authorized previews; never invent an artifact URL or claim a preview opened based on a write alone. Ordinary terminal permissions still apply.",
   [CODE_APPLE_TOOL_NAME]:
@@ -353,6 +376,22 @@ export interface CodeAppManagedToolsOptions {
       | { readonly status: "denied" | "cancelled" | "expired" | "unavailable" }
     >;
   };
+  /**
+   * Asks the person, in the thread, to allow one pull-request change, and on
+   * approval returns the host's one-use approval for exactly that command.
+   * Absent on a host that cannot ask; the pull-request tool is then omitted.
+   */
+  readonly pullRequestApproval?: {
+    readonly request: (
+      command: PullRequestToolCommand,
+      signal?: AbortSignal,
+    ) => Promise<
+      | { readonly status: "approved"; readonly approvalId: CodeApprovalId }
+      | {
+          readonly status: "denied" | "cancelled" | "expired" | "unavailable" | "too-large";
+        }
+    >;
+  };
   readonly executeOperation: (
     windowId: WindowId,
     command: CodeOperationCommand,
@@ -464,6 +503,7 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
       terminalDefinition,
       ...(options.apple === undefined ? [] : [appleDefinition]),
       ...(options.android === undefined ? [] : [androidDefinition]),
+      ...(options.pullRequestApproval === undefined ? [] : [pullRequestDefinition]),
       // The planner tools appear only in the currently designated planner
       // thread. Any other thread that calls them anyway is refused by name
       // below with a value, never a throw.
@@ -499,6 +539,9 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
       }
       if (name === CODE_ANDROID_TOOL_NAME && options.android !== undefined) {
         return androidTool(options, parseAndroidInput(inputJson), signal);
+      }
+      if (name === CODE_PULL_REQUEST_TOOL_NAME && options.pullRequestApproval !== undefined) {
+        return pullRequestTool(options, parsePullRequestInput(inputJson), signal);
       }
       const postureFailure = currentAuthorityFailure(options);
       if (postureFailure !== undefined) {
@@ -591,6 +634,144 @@ async function plannerProposeTool(
     },
     isError: false,
   };
+}
+
+export type PullRequestToolCommand = Extract<
+  CodeOperationCommand,
+  { readonly kind: "create-pull-request" | "update-pull-request" }
+>;
+
+type PullRequestToolInput =
+  | {
+      readonly operation: "create";
+      readonly title: string;
+      readonly body: string;
+      readonly draft?: boolean;
+      readonly base?: string;
+    }
+  | {
+      readonly operation: "update";
+      readonly title?: string;
+      readonly body?: string;
+      readonly draft?: boolean;
+    };
+
+/**
+ * Opens or changes the pull request of this thread's own delivery branch.
+ *
+ * The head is never the agent's to choose: the host resolves it from the
+ * thread's delivery target. Plan refuses; an approval-gated posture asks the
+ * person in the thread and sends the host's one-use approval for exactly this
+ * command; Full access runs it as the person's standing choice. The operation
+ * service checks that authority again before `gh` runs and journals the
+ * result on the thread.
+ */
+async function pullRequestTool(
+  options: CodeAppManagedToolsOptions,
+  input: PullRequestToolInput | undefined,
+  signal?: AbortSignal,
+) {
+  if (input === undefined || options.pullRequestApproval === undefined) {
+    return failure("invalid-pull-request-input");
+  }
+  const posture = currentPosture(options);
+  if (posture === "plan") return failure("plan-mode-read-only", postureRefusal("plan"));
+  const scope = {
+    operationId: operationId(options),
+    threadId: options.thread.id,
+    checkoutId: options.thread.checkoutId,
+  };
+  // The approval binds the command without its authorization (see
+  // `approvalEffectDigest`), so the stand-in below is replaced, never sent.
+  const unauthorized: PullRequestToolCommand =
+    input.operation === "create"
+      ? {
+          kind: "create-pull-request",
+          ...scope,
+          title: input.title,
+          body: input.body,
+          ...(input.draft === undefined ? {} : { draft: input.draft }),
+          ...(input.base === undefined ? {} : { baseBranch: input.base }),
+          idempotencyKey: String(scope.operationId),
+          authorization: { kind: "full-access" },
+        }
+      : {
+          kind: "update-pull-request",
+          ...scope,
+          ...(input.title === undefined ? {} : { title: input.title }),
+          ...(input.body === undefined ? {} : { body: input.body }),
+          ...(input.draft === undefined ? {} : { draft: input.draft }),
+          authorization: { kind: "full-access" },
+        };
+  let command = unauthorized;
+  if (decidesCodeEffectsByApproval(posture)) {
+    const outcome = await options.pullRequestApproval.request(unauthorized, signal);
+    if (outcome.status !== "approved") {
+      return failure(
+        `pull-request-approval-${outcome.status}`,
+        outcome.status === "denied"
+          ? "The person declined this pull-request change. Nothing reached GitHub."
+          : outcome.status === "too-large"
+            ? "The title and body are too long to show whole in the approval, and an approval never covers text the person cannot read. Shorten them (about 1.5 KB together) and ask again. Nothing reached GitHub."
+            : undefined,
+      );
+    }
+    // The person answered while the thread could have moved on.
+    const changed =
+      currentThreadIdentityFailure(options) ??
+      (currentPosture(options) === "plan" ? "plan-mode-read-only" : undefined);
+    if (changed !== undefined) return failure(changed);
+    if (signal?.aborted === true) return failure("tool-interrupted");
+    command = {
+      ...unauthorized,
+      authorization: { kind: "approved", approvalId: outcome.approvalId },
+    };
+  }
+  const result = await options.executeOperation(options.windowId, command);
+  if (result.kind === "operation-failed") {
+    return failure(result.failure.category, result.failure.message);
+  }
+  if (result.kind !== "pull-request-state") return failure("pull-request-unavailable");
+  if (!("number" in result)) {
+    return failure(
+      result.failureCode === undefined
+        ? "pull-request-unavailable"
+        : `pull-request-${result.failureCode}`,
+      pullRequestRefusal(result.failureCode),
+    );
+  }
+  return {
+    result: {
+      status:
+        input.operation === "update"
+          ? "updated"
+          : result.state === "created"
+            ? "created"
+            : "already-open",
+      number: result.number,
+      url: result.url,
+      baseBranch: result.baseBranch,
+      headBranch: result.headBranch,
+      ...(result.draft === undefined ? {} : { draft: result.draft }),
+      ...(input.operation === "create" && result.state !== "created"
+        ? { note: "This branch already had an open pull request; nothing new was created." }
+        : {}),
+    },
+    isError: false,
+  };
+}
+
+function pullRequestRefusal(code: string | undefined): string {
+  switch (code) {
+    case "invalid-base":
+      return "That base has no open pull request in this repository, so a stacked pull request cannot sit on it. Name an open branch, or leave base out.";
+    case "not-found":
+      return "This thread's branch has no open pull request to change. Create one first.";
+    case "no-remote":
+      return "This checkout has no GitHub remote.";
+    default:
+      return "GitHub could not be reached or refused the change. Check that the branch is pushed and GitHub access is signed in.";
+  }
 }
 
 async function terminalTool(
@@ -1801,6 +1982,42 @@ type BrowserToolInput = {
   | { readonly operation: "type"; readonly selector: string; readonly text: string }
 );
 
+function parsePullRequestInput(value: string): PullRequestToolInput | undefined {
+  const parsed = parseObject(
+    value,
+    new Set(["operation", "title", "body", "draft", "base"]),
+    MAX_PULL_REQUEST_TOOL_INPUT_BYTES,
+  );
+  if (parsed === undefined) return undefined;
+  const { operation, title, body, draft, base } = parsed;
+  if (title !== undefined && (typeof title !== "string" || title.trim().length === 0)) {
+    return undefined;
+  }
+  if (body !== undefined && typeof body !== "string") return undefined;
+  if (draft !== undefined && typeof draft !== "boolean") return undefined;
+  if (base !== undefined && (typeof base !== "string" || base.trim().length === 0)) {
+    return undefined;
+  }
+  if (operation === "create") {
+    if (typeof title !== "string") return undefined;
+    return {
+      operation,
+      title,
+      body: typeof body === "string" ? body : "",
+      ...(typeof draft === "boolean" ? { draft } : {}),
+      ...(typeof base === "string" ? { base } : {}),
+    };
+  }
+  if (operation !== "update" || base !== undefined) return undefined;
+  if (title === undefined && body === undefined && draft === undefined) return undefined;
+  return {
+    operation,
+    ...(typeof title === "string" ? { title } : {}),
+    ...(typeof body === "string" ? { body } : {}),
+    ...(typeof draft === "boolean" ? { draft } : {}),
+  };
+}
+
 function parseTerminalInput(value: string): TerminalToolInput | undefined {
   const parsed = parseObject(value, new Set(["operation", "command"]));
   if (parsed === undefined) return undefined;
@@ -2220,8 +2437,9 @@ function isLowSurrogate(code: number): boolean {
 function parseObject(
   value: string,
   allowedKeys: ReadonlySet<string>,
+  maxBytes = MAX_TOOL_INPUT_BYTES,
 ): Record<string, unknown> | undefined {
-  if (Buffer.byteLength(value, "utf8") > MAX_TOOL_INPUT_BYTES) return undefined;
+  if (Buffer.byteLength(value, "utf8") > maxBytes) return undefined;
   try {
     const parsed = JSON.parse(value) as unknown;
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;

@@ -544,15 +544,29 @@ function OutsidePackageFacts(props: {
   return (
     <SettingsSection title="Package">
       <p className="settings-section-line">
-        {signed
-          ? "Installed from a folder on this computer and signed by its publisher: Octant verified the signature and checked its files against the digest you trusted. Nobody else reviewed it. Trust, switches, and removal are under Plugins."
-          : "Installed from a folder on this computer. It is unsigned developer input: Octant checked its files against the digest you trusted, and nobody else reviewed it. Trust, switches, and removal are under Plugins."}
+        {listing.npm !== undefined
+          ? "Installed from an npm registry and signed by its publisher: Octant checked the download against the registry's integrity, verified the signature, and checked its files against the digest you trusted. Nobody else reviewed it. Trust, switches, and removal are under Plugins."
+          : signed
+            ? "Installed from a folder on this computer and signed by its publisher: Octant verified the signature and checked its files against the digest you trusted. Nobody else reviewed it. Trust, switches, and removal are under Plugins."
+            : "Installed from a folder on this computer. It is unsigned developer input: Octant checked its files against the digest you trusted, and nobody else reviewed it. Trust, switches, and removal are under Plugins."}
       </p>
       <dl className="provider-catalog__facts">
         <div className="provider-catalog__fact">
           <dt>Source</dt>
-          <dd>{signed ? "Local folder, signed" : "Local folder, unsigned"}</dd>
+          <dd>
+            {listing.npm !== undefined
+              ? `npm, ${listing.npm.packageName}@${listing.npm.version}`
+              : signed
+                ? "Local folder, signed"
+                : "Local folder, unsigned"}
+          </dd>
         </div>
+        {listing.npm === undefined ? null : (
+          <div className="provider-catalog__fact">
+            <dt>Integrity</dt>
+            <dd className="oct-meta--mono">{listing.npm.integrity}</dd>
+          </div>
+        )}
         {listing.publisherKey === undefined ? null : (
           <div className="provider-catalog__fact">
             <dt>Publisher key</dt>

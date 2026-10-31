@@ -17,6 +17,11 @@
  *     node outsideDriverSign.mjs <package-folder> --key-file <private-key.pem>
  *     node outsideDriverSign.mjs <package-folder> --key-stdin < private-key.pem
  *
+ * For a package published to npm, add `--name <npm package name>` (for
+ * example `@scope/loopback-chat`). The signature then names the package as npm
+ * does, so Octant refuses the same files republished under another npm name.
+ * Sign the exact files the tarball will hold: the folder `npm pack` unpacks to.
+ *
  * This file imports only runtime built-ins, so an author can copy it and run
  * it on Node or Bun without installing anything.
  */
@@ -72,7 +77,7 @@ export function publisherKeyFingerprint(rawPublicKey) {
  * Signs the package folder at `root` with `privateKeyPem` and writes its
  * signature file. Returns the fingerprint of the key that signed it.
  *
- * @param {{ root: string, privateKeyPem: string | Uint8Array }} input
+ * @param {{ root: string, privateKeyPem: string | Uint8Array, name?: string }} input
  * @returns {Promise<{ fingerprint: string, path: string }>}
  */
 export async function signOutsideDriverPackage(input) {
@@ -107,7 +112,7 @@ export async function signOutsideDriverPackage(input) {
     files.push({ path, sha256: createHash("sha256").update(content).digest("hex") });
   }
   const content = {
-    name: manifest.slug,
+    name: input.name ?? manifest.slug,
     version: manifest.version,
     protocolVersions: document.protocolVersions,
     files,
@@ -169,15 +174,33 @@ async function readStandardInput() {
 }
 
 async function main(argv) {
-  const [folder, flag, keyFile] = argv;
+  const [folder, ...flags] = argv;
   const usage =
-    "Usage: outsideDriverSign.mjs <package-folder> (--key-file <private-key.pem> | --key-stdin)";
+    "Usage: outsideDriverSign.mjs <package-folder> (--key-file <private-key.pem> | --key-stdin) [--name <npm package name>]";
   if (folder === undefined) throw new SigningRefused(usage);
   let privateKeyPem;
-  if (flag === "--key-file" && keyFile !== undefined) privateKeyPem = await readFile(keyFile);
-  else if (flag === "--key-stdin") privateKeyPem = await readStandardInput();
-  else throw new SigningRefused(usage);
-  const signed = await signOutsideDriverPackage({ root: folder, privateKeyPem });
+  let name;
+  for (let index = 0; index < flags.length; index += 1) {
+    const flag = flags[index];
+    const value = flags[index + 1];
+    if (flag === "--key-file" && value !== undefined) {
+      privateKeyPem = await readFile(value);
+      index += 1;
+    } else if (flag === "--key-stdin") {
+      privateKeyPem = await readStandardInput();
+    } else if (flag === "--name" && value !== undefined) {
+      name = value;
+      index += 1;
+    } else {
+      throw new SigningRefused(usage);
+    }
+  }
+  if (privateKeyPem === undefined) throw new SigningRefused(usage);
+  const signed = await signOutsideDriverPackage({
+    root: folder,
+    privateKeyPem,
+    ...(name === undefined ? {} : { name }),
+  });
   process.stdout.write(`Signed ${signed.path}\nPublisher key ${signed.fingerprint}\n`);
 }
 

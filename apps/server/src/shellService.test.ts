@@ -1512,6 +1512,65 @@ describe("ShellService", () => {
     ).toMatchObject({ kind: "settings-replaced", settings: { rememberedBrowserOrigins: [] } });
   });
 
+  it("refuses remembered signed-in sites added through replace-settings and journals a pair through the host path", () => {
+    const { persistence, append } = persistenceStub();
+    const service = new ShellService({
+      persistence,
+      uuid: uuidSequence(),
+      clock: () => now,
+    });
+    service.bootstrap(ids.window);
+    const pair = { origin: "https://github.com", profile: { kind: "personal" as const } };
+    const remembered = { ...defaultShellSettings(), rememberedBrowserProfileSites: [pair] };
+
+    expect(() =>
+      service.execute(
+        decodeShellCommand({
+          kind: "replace-settings",
+          windowId: ids.window,
+          expectedVersion: 0,
+          settings: remembered,
+        }),
+      ),
+    ).toThrowError(
+      expect.objectContaining({ failure: expect.objectContaining({ category: "invalid" }) }),
+    );
+    expect(append).not.toHaveBeenCalled();
+
+    expect(
+      service.rememberBrowserProfileSites({
+        windowId: ids.window,
+        expectedVersion: 0 as never,
+        sites: [pair],
+      }),
+    ).toEqual({ kind: "settings-replaced", settings: remembered, version: 1 });
+    // Remembering the same pair again adds nothing; the origin set is untouched.
+    expect(
+      service.rememberBrowserProfileSites({
+        windowId: ids.window,
+        expectedVersion: 1 as never,
+        sites: [pair],
+      }),
+    ).toMatchObject({
+      settings: { rememberedBrowserProfileSites: [pair], rememberedBrowserOrigins: [] },
+    });
+
+    // Forgetting a pair stays an ordinary settings write.
+    expect(
+      service.execute(
+        decodeShellCommand({
+          kind: "replace-settings",
+          windowId: ids.window,
+          expectedVersion: 2,
+          settings: { ...remembered, rememberedBrowserProfileSites: [] },
+        }),
+      ),
+    ).toMatchObject({
+      kind: "settings-replaced",
+      settings: { rememberedBrowserProfileSites: [] },
+    });
+  });
+
   it("keeps reporting a folder stored under Documents after the host default moved", () => {
     const stored = decodeShellSettings({
       ...defaultShellSettings(),

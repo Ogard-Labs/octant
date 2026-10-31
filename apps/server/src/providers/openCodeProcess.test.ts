@@ -679,7 +679,7 @@ describe("OpenCodeProcessPort", () => {
       // An extra folder is bound beside the root and read-only with it in Plan.
       extraBoundRoots: ["/tmp/octant-opencode-notes"],
       // Plan withholds writing and running something, not the model call the
-      // agent makes to produce the plan (0145).
+      // agent makes to produce the plan.
       networkEgress: "allow",
       writeBoundRoot: false,
       allowProcessExec: false,

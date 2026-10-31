@@ -1,5 +1,6 @@
 export * from "./browserAutomationPolicy";
 export * from "./browserCapturePolicy";
+export * from "./browserProfilePolicy";
 export * from "./computerUsePolicy";
 export * from "./desktopLeasePolicy";
 export * from "./validationCompositionPolicy";
@@ -89,6 +90,7 @@ export * from "./workTurnPolicy";
 export * from "./dataLifecyclePolicy";
 export * from "./threadRetentionPolicy";
 export * from "./threadCompletionPolicy";
+export * from "./threadProjectMovePolicy";
 export * from "./threadExportPolicy";
 export * from "./threadHandOffPolicy";
 export * from "./eventPolicy";

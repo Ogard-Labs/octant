@@ -53,7 +53,7 @@ export type SpawnClaudeCodeProcess = NonNullable<ClaudeAgentSdkOptions["spawnCla
  * The Agent SDK composes the launch and hands the spawn callback only command,
  * args, cwd, env, and a signal, so the bound root and the posture cannot be
  * read off `SpawnOptions`. They are bound here instead, at the call that opens
- * the query, which is the only place that knows them (0143, 0145).
+ * the query, which is the only place that knows them.
  */
 export interface ClaudeRuntimeConfinement {
   readonly projectRoot: string;
@@ -72,11 +72,11 @@ export interface ClaudeRuntimeConfinement {
 /**
  * The postures whose Claude runtime launches Octant confines itself.
  *
- * Plan is confined because 0009 requires its read-only boundary at the sandbox
+ * Plan is confined because its read-only boundary is required at the sandbox
  * rather than in the provider's permission layer. The postures that write still
  * run on the runtime's own sandbox settings and stay in the exception manifest
  * of `providerProcessConfinement.test.ts`; Full access is an unrestricted
- * posture 0009 never confines.
+ * posture the sandbox rules never confine.
  */
 export const CONFINED_CLAUDE_EXECUTION_POLICIES: ReadonlySet<ProviderExecutionPolicy> = new Set([
   "plan",
@@ -282,7 +282,7 @@ function runProbe(
 
   // The version read is always confined. The authentication probe reaches the
   // provider's own control plane out of the user's credential home, which is a
-  // readiness check under 0122 rather than a local string read, so on its own
+  // readiness check rather than a local string read, so on its own
   // it runs unconfined. A caller about to start a confined launch passes that
   // launch's confinement, and the probe then runs inside it.
   // Preparing inside the suspend keeps one scratch directory per run: an
@@ -470,7 +470,7 @@ function runProbe(
 /**
  * Refuse a runtime state path that is the checkout, sits inside it, or is an
  * ancestor of it, so a Plan launch cannot reopen the project through a state
- * grant (0145).
+ * grant.
  */
 function refuseStateOverlappingCheckout(
   boundRoot: string,
@@ -732,7 +732,7 @@ export function claudeLoginKeychainPath(): string {
  *
  * Only the Seatbelt profile can name the programs a shell may start. Linux
  * Plan launches load the seccomp filter that refuses every process-creating
- * fork (0068), so a shell there could start nothing and the Bash tool is not
+ * fork, so a shell there could start nothing and the Bash tool is not
  * offered.
  */
 export function claudePlanRunsCommands(platform: NodeJS.Platform = process.platform): boolean {
@@ -966,7 +966,7 @@ const CLAUDE_PLAN_GIT_ENVIRONMENT = {
  * {@link CONFINED_CLAUDE_EXECUTION_POLICIES} launches unchanged and stays in
  * the exception manifest. There is no unconfined fallback for one that is
  * inside it: a builder that cannot prepare the launch throws, and the turn
- * fails rather than starting unwrapped (0009).
+ * fails rather than starting unwrapped.
  */
 function confineClaudeLaunch(
   spawnOptions: SpawnOptions,
@@ -1125,7 +1125,7 @@ function confineClaudeLaunch(
         ...stateRoots.readRoots,
       ],
       // The runtime calls its own control plane, so it resolves the runtime
-      // egress policy rather than the thread default (0132, 0145). This driver
+      // egress policy rather than the thread default. This driver
       // carries Code threads, and the policy no longer reads the mode.
       networkEgress: materializeOsNetworkEgress(
         resolveProviderRuntimeEgressPolicy({
@@ -1134,7 +1134,7 @@ function confineClaudeLaunch(
         }),
       ),
       // Plan is read-only at the sandbox, not only in the provider's permission
-      // layer (0009): the checkout reads and never writes, and the runtime execs
+      // layer: the checkout reads and never writes, and the runtime execs
       // nothing but itself, `/usr/bin/security` for a Keychain sign-in, and on
       // macOS the shell and read-only programs `planCommandRules` names.
       // `/bin/sh` stays refused, so a session hook is still refused with

@@ -93,7 +93,7 @@ export interface OpenAiCompatibleEndpoint {
  * generation both ride the same instance as chat: `/audio/*` and
  * `/images/*` resolve against the same base URL with the same credential and
  * endpoint policy, so neither capability ever needs a second URL a person
- * could point somewhere else (`docs/decisions/0084`, `docs/decisions/0085`).
+ * could point somewhere else.
  */
 export type CompatibleEndpointPath =
   | "models"

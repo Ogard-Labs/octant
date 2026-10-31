@@ -23,6 +23,7 @@ import {
 } from "@octant/contracts";
 import type { ProjectSummary, ProjectId } from "@octant/contracts/projects";
 import type { BrowserToolApproval } from "@octant/contracts/browser-automation-rpc";
+import { browserApprovalDetail, browserApprovalSummary } from "../browser/browserProfileCopy";
 import {
   prependEarlierTurns,
   refreshNewestTurns,
@@ -2172,10 +2173,10 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
             </>
           }
           className="thread-column"
-          detail="Shell and file access stay unchanged"
+          detail={browserApprovalDetail(pendingBrowserApproval)}
           error={browserApprovalMessage}
           label="Browser origin approval"
-          summary={`Allow Browser to open ${pendingBrowserApproval.origin}?`}
+          summary={browserApprovalSummary(pendingBrowserApproval)}
         />
       )}
       <ThreadComposer
@@ -2394,7 +2395,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
             </>
           ),
           // Two groups: what the person adds sits left, how the task runs
-          // (0073) sits right beside send. The model used to hug the attach
+          // sits right beside send. The model used to hug the attach
           // button, so it jumped sides between a new task and the thread it
           // became.
           trailing: (

@@ -208,7 +208,7 @@ export interface AppleToolchainServiceOptions {
    * `-` into the working directory — the checkout — and reports nothing, so
    * the capture names a file here instead. The capture launch is granted this
    * directory as its only extra write root, so it may live outside the shared
-   * temporary root every confined command can read (0160); the service creates
+   * temporary root every confined command can read; the service creates
    * it as a private directory when it is missing. By default it is the process
    * port's own temporary directory.
    */
@@ -1030,7 +1030,7 @@ export class AppleToolchainService {
         );
         // The capture lands in a host-private directory, created 0700, that no
         // other confined launch can read; only this launch is granted it as a
-        // write root (0160).
+        // write root.
         let captureDirectoryReady = true;
         try {
           await mkdir(this.#captureDirectory, { recursive: true, mode: 0o700 });
@@ -1571,7 +1571,7 @@ export class AppleToolchainService {
         // Every launch denies the capture directory after its broad grants, so
         // a checkout bound to an ancestor cannot read another thread's raw
         // screen. The screenshot launch alone re-allows it by carrying the
-        // same directory as an additional write root (0160).
+        // same directory as an additional write root.
         isolatedRoots: [this.#captureDirectory, ...(this.#options.isolatedRoots ?? [])],
         ...(grants === undefined ? {} : grants),
       },

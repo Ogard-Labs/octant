@@ -655,7 +655,7 @@ function existingRealPaths(paths: ReadonlyArray<string | undefined>): ReadonlyAr
 
 /**
  * Builds the app-server launch for one lease. Full access keeps the runtime
- * unwrapped, as 0009 defines it. Every other posture, and the catalog lease,
+ * unwrapped, as the sandbox rules define it. Every other posture, and the catalog lease,
  * runs under Octant's deny-default profile: the thread's root (writable only
  * where the posture writes), the account home, a private temporary directory,
  * and the program itself. The rest of `HOME` is denied, which is what Codex's

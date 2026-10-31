@@ -1680,6 +1680,7 @@ function renderNonCodeTab(
   if (tab.kind === "chat-thread") {
     return (
       <ChatThreadWorkspace
+        {...(props.onCreateProject === undefined ? {} : { onCreateProject: props.onCreateProject })}
         chatClient={props.chatClient}
         chatReadCursorStore={props.chatReadCursorStore}
         {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
@@ -2497,6 +2498,7 @@ function ChatThreadWorkspace(props: {
   /** Opens the Side Chat tab for a sidecar the host has already resolved. */
   readonly onOpenSideChat?: (sidecar: SideChatSidecar) => void;
   readonly projects: ReadonlyArray<ProjectSummary>;
+  readonly onCreateProject?: (mode: "chat", name: string) => Promise<ProjectId | undefined>;
   readonly providerController: ProviderController;
   readonly tab: Extract<WorkspaceTab, { kind: "chat-thread" }>;
   readonly threadId: Extract<WorkspaceTab, { kind: "chat-thread" }>["threadId"];
@@ -2517,6 +2519,7 @@ function ChatThreadWorkspace(props: {
     client: props.chatClient,
     readCursorStore: props.chatReadCursorStore,
   });
+  const createProject = props.onCreateProject;
   const providerOrder = props.providerController.defaults?.providerOrder ?? [];
   const providerGroups = useMemo(
     () =>
@@ -2600,6 +2603,16 @@ function ChatThreadWorkspace(props: {
                 props.onOpenThread?.(thread.id, thread.title, thread.projectId),
             })}
         {...(props.onOpenSideChat === undefined ? {} : { onOpenSideChat: props.onOpenSideChat })}
+        moveToProject={{
+          projects: props.projects.flatMap((project) =>
+            project.type === "chat" && project.lifecycle === "active"
+              ? [{ id: project.id, name: project.name }]
+              : [],
+          ),
+          ...(createProject === undefined
+            ? {}
+            : { onCreateProject: (name: string) => createProject("chat", name) }),
+        }}
       />
     </ChatThreadEnvironment>
   );

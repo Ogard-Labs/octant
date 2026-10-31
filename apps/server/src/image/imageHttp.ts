@@ -197,7 +197,7 @@ export function makeImageGenerationPorts(options: {
 }
 
 /**
- * The one bounded exception to "reject URL forms" (`docs/decisions/0086`): a
+ * The one bounded exception to "reject URL forms": a
  * single GET to a URL a provider's own just-completed authenticated call
  * returned (BFL's `result.sample`, and Ideogram's `data[].url`). No
  * redirects, the same size and time bounds as any other image fetch, and the

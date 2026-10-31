@@ -186,7 +186,7 @@ export interface CodeTurnRunnerInput {
    * Whether the harness's native reviewer may answer approval prompts for
    * this turn. The caller computes this from the thread's `autoApprove` flag,
    * the provider's `harnessAutoReview` capability, and the thread's taint
-   * status (0104). When `false` or absent, the driver runs in its default
+   * status. When `false` or absent, the driver runs in its default
    * permission mode and Octant's own gate answers every prompt.
    */
   readonly harnessAutoReviewEnabled?: boolean;

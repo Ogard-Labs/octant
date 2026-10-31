@@ -217,6 +217,25 @@ Linear bodies into threads.
 - [Subagents](/advanced/subagents) for child runs in isolated worktrees
 - [Recovery and troubleshooting](/advanced/recovery) for inventory and conflict recovery
 
+## Review what only exists on this machine
+
+Open **Review** in the right sidebar of a Code thread, then choose **Local
+commits**. The list shows the commits on the thread's branch that its upstream
+does not have yet. A branch that was never pushed is compared with its base
+branch instead, and the list says which one it used. Select a commit to expand
+its diff. Octant reads this from the local checkout and never fetches, so it
+is only as current as the last fetch you made. The list holds the newest 100 commits; when there are more, the count reads
+"100+" and a note says older ones are not listed.
+
+## Ignore whitespace
+
+**Ignore whitespace** appears above the diff in **Working tree** and in a
+commit's diff. It asks Git to leave out changes that only move or re-indent
+text, which makes a reformatting easier to read past. Your choice is kept for
+every thread in this browser or app profile. The changed-path count at the top
+still includes files whose only change was whitespace, so it can be higher than
+the number of files shown.
+
 ## Browse Git history
 
 Open **Review** in the right sidebar of a Code thread, then choose **History**.

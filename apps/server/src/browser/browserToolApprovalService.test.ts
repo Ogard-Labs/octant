@@ -269,3 +269,95 @@ describe("BrowserToolApprovalService", () => {
     expect(remembered).toHaveLength(1);
   });
 });
+
+describe("BrowserToolApprovalService for signed-in pages", () => {
+  const threadId = "50000000-0000-4000-8000-000000000001";
+  const personal = { kind: "personal" } as const;
+
+  type Remember = (origin: string, windowId: never, profile: unknown) => void;
+  function service(rememberOrigin: Remember, remembered: Array<string> = []) {
+    return new BrowserToolApprovalService({
+      uuid: () => "40000000-0000-4000-8000-000000000001",
+      now: () => Date.parse("2026-10-31T10:00:00.000Z"),
+      authorityIsCurrent: () => true,
+      rememberOrigin: rememberOrigin as never,
+      isOriginRemembered: (origin, profile) =>
+        remembered.includes(`${origin}|${profile?.kind ?? "private"}`),
+      isHostScope: isRoutineHostScope,
+    });
+  }
+
+  it("names the profile in the prompt the person sees", async () => {
+    const approvals = service(vi.fn<Remember>());
+    void approvals.request({
+      windowId,
+      threadId,
+      authority,
+      origin: "https://github.com",
+      profile: personal,
+    });
+
+    expect(approvals.list(windowId)).toEqual([
+      expect.objectContaining({ origin: "https://github.com", profile: personal }),
+    ]);
+  });
+
+  it("remembers the pair on Always allow and tells the grant which profile it covers", async () => {
+    const rememberOrigin = vi.fn<Remember>();
+    const approvals = service(rememberOrigin);
+    const pending = approvals.request({
+      windowId,
+      threadId,
+      authority,
+      origin: "https://github.com",
+      profile: personal,
+    });
+
+    approvals.decide(windowId, {
+      approvalId: approvals.list(windowId)[0]?.approvalId as never,
+      decision: "approved",
+      remember: true,
+    });
+
+    await expect(pending).resolves.toBe("approved");
+    expect(rememberOrigin).toHaveBeenCalledWith("https://github.com", windowId, personal);
+  });
+
+  it("does not remember anything for approve once", async () => {
+    const rememberOrigin = vi.fn<Remember>();
+    const approvals = service(rememberOrigin);
+    void approvals.request({
+      windowId,
+      threadId,
+      authority,
+      origin: "https://github.com",
+      profile: personal,
+    });
+
+    approvals.decide(windowId, {
+      approvalId: approvals.list(windowId)[0]?.approvalId as never,
+      decision: "approved",
+    });
+
+    expect(rememberOrigin).not.toHaveBeenCalled();
+  });
+
+  it("answers isRemembered for the exact pair only", () => {
+    const approvals = service(vi.fn<Remember>(), [
+      "https://github.com|personal",
+      "https://example.com|private",
+    ]);
+
+    expect(approvals.isRemembered("https://github.com", personal)).toBe(true);
+    expect(approvals.isRemembered("https://github.com")).toBe(false);
+    expect(approvals.isRemembered("https://example.com", personal)).toBe(false);
+    expect(approvals.isRemembered("https://example.com")).toBe(true);
+  });
+
+  it("knows the routine host scope is unattended and a window is not", () => {
+    const approvals = service(vi.fn<Remember>());
+
+    expect(approvals.isUnattendedScope(ROUTINE_HOST_SCOPE_ID)).toBe(true);
+    expect(approvals.isUnattendedScope(windowId)).toBe(false);
+  });
+});
