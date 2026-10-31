@@ -26,6 +26,7 @@ import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
 import {
   makeProcessConfinementLive,
   ProcessConfinementError,
+  seatbeltAllowLiteralReadRule,
   seatbeltDenyRule,
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
@@ -43,6 +44,9 @@ import {
 } from "../network/providerRuntimeNetwork";
 
 export type { AcpSessionMode } from "./acpProfiles";
+
+/** See {@link AcpProviderProfile} `process.readsSystemKeychain`. */
+const SYSTEM_KEYCHAIN_PATH = "/Library/Keychains/System.keychain";
 
 export interface AcpLaunchSpec {
   readonly command: string;
@@ -489,6 +493,12 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 seatbeltDenyRule("file-read*", path),
                 seatbeltDenyRule("file-write*", path),
               ])
+            : []),
+          // Caller rules follow the Keychain and built-in secret-file denials,
+          // so neither overrides this one literal read; a path the person
+          // protects in Settings still does. Nothing grants a write there.
+          ...(platform === "darwin" && profile.process.readsSystemKeychain === true
+            ? [seatbeltAllowLiteralReadRule(SYSTEM_KEYCHAIN_PATH)]
             : []),
         ];
         const launch = yield* Effect.try({

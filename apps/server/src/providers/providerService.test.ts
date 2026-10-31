@@ -459,7 +459,7 @@ describe("ProviderService", () => {
     expect(fixture.append).not.toHaveBeenCalled();
   });
 
-  it("reports why an Off fx provider is withheld and refuses to turn it on", async () => {
+  it("lets an Off fx provider be turned on", async () => {
     const fx = provider({
       displayName: "fx local",
       driverKind: "fx",
@@ -473,13 +473,9 @@ describe("ProviderService", () => {
     const fixture = serviceFixture({ instances: [fx] });
 
     const snapshot = await fixture.service.bootstrap(windowId);
-    expect(snapshot.observedStates).toHaveLength(1);
-    expect(snapshot.observedStates[0]).toMatchObject({
-      instanceId,
-      reason: "driver-not-admitted",
-      message: expect.stringMatching(/fx is not offered yet/),
-    });
-
+    expect(snapshot.observedStates.map((state) => state.reason)).not.toContain(
+      "driver-not-admitted",
+    );
     await expect(
       fixture.service.execute(windowId, {
         kind: "set-provider-enabled",
@@ -487,10 +483,10 @@ describe("ProviderService", () => {
         expectedVersion: 1,
         enabled: true,
       }),
-    ).rejects.toMatchObject({
-      failure: { message: expect.stringMatching(/fx is not offered yet/) },
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: { id: instanceId, enabled: true },
     });
-    expect(fixture.append).not.toHaveBeenCalled();
   });
 
   it("checks again after a key change instead of joining a probe that began before it", async () => {
@@ -911,7 +907,7 @@ describe("ProviderService", () => {
     });
   });
 
-  it("keeps a stored fx provider but reports it unavailable with the reason fx is withheld and never starts it", async () => {
+  it("checks a stored fx provider like any other provider", async () => {
     const fx = provider({
       displayName: "fx local",
       driverKind: "fx",
@@ -921,28 +917,11 @@ describe("ProviderService", () => {
         authentication: "api-key",
       },
     });
-    const fixture = serviceFixture({
-      instances: [fx],
-      withCatalogPersistence: true,
-      initialCatalog: persistedCatalog(),
-    });
-    fixture.runtime.setObservedState(observation());
+    const fixture = serviceFixture({ instances: [fx] });
 
-    const snapshot = await fixture.service.bootstrap(windowId);
-    expect(snapshot.instances).toEqual([fx]);
-    expect(snapshot.observedStates).toHaveLength(1);
-    expect(snapshot.observedStates[0]).toMatchObject({
-      readiness: "unavailable",
-      processState: "stopped",
-      models: [],
-      reason: "driver-not-admitted",
-      message: expect.stringMatching(/fx is not offered yet.*certificates inside Octant's sandbox/),
-    });
-
-    await expect(fixture.service.probe(windowId, instanceId)).rejects.toThrow(
-      /fx is not offered yet/,
-    );
-    expect(fixture.probe).not.toHaveBeenCalled();
+    await fixture.service.probe(windowId, instanceId);
+    expect(fixture.probe).toHaveBeenCalled();
+    expect(fixture.runtime.observedState(instanceId)?.reason).not.toBe("driver-not-admitted");
   });
 
   it("refuses to probe or create a provider whose driver plugin is not effective", async () => {
