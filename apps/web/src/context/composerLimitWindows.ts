@@ -6,7 +6,7 @@ import {
 import type { ComposerContextUsageFallback } from "./composerContextMeterScope";
 
 /** The share used at which a limit bar takes the warning ink, as the meter's popover does. */
-const NEAR_LIMIT_PERCENT = 80;
+export const NEAR_LIMIT_PERCENT = 80;
 
 export interface ComposerLimitWindow {
   readonly window: string;
