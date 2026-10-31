@@ -63,13 +63,13 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Browser](#browser)                                                                   | 4         | 4       | 0            | 0                   |
 | [Provider runtimes](#provider-runtimes)                                               | 6         | 6       | 0            | 0                   |
 | [Model endpoints and organization sign-in](#model-endpoints-and-organization-sign-in) | 6         | 5       | 1            | 0                   |
-| [Outside provider drivers](#outside-provider-drivers)                                 | 3         | 2       | 1            | 0                   |
+| [Outside provider drivers](#outside-provider-drivers)                                 | 3         | 3       | 0            | 0                   |
 | [Device workbench and mobile](#device-workbench-and-mobile)                           | 8         | 6       | 2            | 0                   |
 | [Hubs, relay and Nightly](#hubs-relay-and-nightly)                                    | 5         | 3       | 1            | 1                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
 | [Decided, pending a specification update](#decided-pending-a-specification-update)    | 5         | 0       | 0            | 5                   |
-| **All areas**                                                                         | **222**   | **173** | **35**       | **14**              |
+| **All areas**                                                                         | **222**   | **174** | **34**       | **14**              |
 
 ## Principles and hard lines
 
@@ -455,6 +455,7 @@ Modes are server-enforced domain policy, not renderer flags. The shell shows two
 - A new-thread composer chooses Chat (no folder) or In a folder (a Work thread bound to a Project root). The choice only selects the create command, and nothing converts a thread between Chat and Work.
 - Chat binds a virtual, memory-scoped Project or none; Work binds exactly one OS-confined root; Code binds exactly one directory and selects a checkout inside it.
 - Memory is scoped to one Project and keeps source, kind, timestamps and supersession; moving it across Projects or modes is explicit and keeps provenance. _Here only._
+- Move to Project: a No-project Chat can be filed into a Chat Project, and a Work or Code thread into another Project of its own mode. The thread keeps its kind, history and guardrail level and gains no filesystem reach: a Work or Code thread moves only into an active Project whose folder is its own folder or contains it, and is refused while a turn runs or the thread waits on the person. A Code thread also needs its checkout to stay valid, so only a Project bound to the same repository folder is accepted. The server checks authority before the move, only a person can make it, and it is journaled with who and when.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
@@ -731,6 +732,7 @@ A turn stopped by an explicit provider usage-limit signal carries a provider-neu
 - The reset timer is an in-process host timer that continues through the ordinary turn-admission path, with no cloud wake and no billing automation.
 - A stale recovery settles as invalidated rather than firing against newer state.
 - Chat, Work and Code each cut a turn off after five minutes without a provider event, because a long tool call can leave a provider silent. _Here only._
+- A provider whose sessions each own a process offers Force stop in Chat ten seconds after a Stop that did not end the turn. It kills that attempt's process and nothing else, leaves the thread usable and resumable, and is refused for a provider that shares one process across threads (built for Claude; Work and Code turns not built yet).
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
@@ -1932,6 +1934,7 @@ Status: Built. Since: —. Detail: [Workspace: Boards and integrations](workspac
 A thread or Project can start from a forge issue, a tracker issue or a cloned repository, without write-back.
 
 - Creating from an issue attaches only its identity. The server reauthorizes, frames redacted text as external content and journals the ingestion. There is no write-back.
+- A local window may start a Work or Code thread from a Claude Code or Codex terminal session of the Project's own folder. Creating attaches only the provider and session id; the server rereads the session, refuses another folder, keeps only the person's and the assistant's words within a fixed bound, marks the thread with outside content before it exists, and journals the history with the thread so purging erases it. The first admitted turn hands the history to the model once, framed as outside data. A paired device cannot start one, and a thread starts from an issue or a session, never both. The provider's session is not resumed, nothing is uploaded, and nothing is written back.
 - Cloning verifies identity and origin before materializing, promotes atomically without overwriting, and issues a one-time binding receipt.
 
 Status: Built. Since: —. Detail: [Workspace: Boards and integrations](workspace.md#boards-and-integrations).
@@ -2337,9 +2340,11 @@ Updates are never automatic, and trust binds a content digest. Marketplace packa
 
 - A new digest arrives held and untrusted; the instances stop until the person trusts it, and trusting clears their Verify tools records.
 - A marketplace package carries a publisher signature, the key is pinned at first trust, and a version signed by another key is held until re-trusted.
-- Only a local folder yields a driver today; the package-registry source is not built yet.
+- A driver comes from a local folder or from a signed npm package. The host checks the download against the integrity the registry published, the signature names the npm package, and nothing from the package runs when it is fetched.
+- A package's identity is its registry and name, so a new version updates the same package. An update check asks the registry the package was installed from and installs nothing.
+- Publishing the author kit to npm needs an npm organization and stays a maintainer action.
 
-Status: Partly built. Since: 2026-10-26. Detail: [Outside provider drivers: provenance and updates](outside-provider-drivers.md#provenance-and-updates) and [signature rules](outside-provider-drivers.md#signature-rules).
+Status: Built. Since: 2026-10-26. Detail: [Outside provider drivers: provenance and updates](outside-provider-drivers.md#provenance-and-updates), [signature rules](outside-provider-drivers.md#signature-rules) and [npm source](outside-provider-drivers.md#npm-source).
 
 ## Device workbench and mobile
 

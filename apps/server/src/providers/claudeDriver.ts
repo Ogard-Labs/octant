@@ -338,6 +338,8 @@ const availableCapabilities: ProviderCapabilities = {
   nativeChildAgents: "unsupported",
   harnessAutoReview: "supported",
   modelSwitch: "supported",
+  // Each session owns its runtime process, so one can be killed alone.
+  forceStop: "supported",
   ...unsupportedChatCapabilities,
   appManagedTools: "supported",
 };
@@ -2462,6 +2464,25 @@ function makeConnection(
             });
             return Effect.fail(sanitizeFailure(providerFailure, "interrupted"));
           }),
+        );
+      },
+      forceStop: (sessionId) => {
+        const state = sessions.get(sessionId);
+        if (state === undefined || state.terminal || state.released) {
+          return Effect.fail(failure("protocol", "Claude session is not active."));
+        }
+        // The kill comes first: the graceful release that follows waits on the
+        // very runtime that stopped answering.
+        return state.query.forceKill().pipe(
+          Effect.tap(() =>
+            Effect.sync(() =>
+              terminal(state, {
+                kind: "interrupted",
+                message: "Claude execution was stopped by force.",
+              }),
+            ),
+          ),
+          Effect.mapError((providerFailure) => sanitizeFailure(providerFailure, "interrupted")),
         );
       },
       stop: (sessionId) =>

@@ -619,6 +619,35 @@ describe("ProviderCatalogView outside drivers", () => {
     expect(within(pkg).getByText("Publisher key").nextSibling?.textContent).toBe(publisherKey);
   });
 
+  it("names the npm package and integrity a signed driver was fetched from", () => {
+    const publisherKey = `ed25519:${"e".repeat(64)}`;
+    const npm = {
+      packageName: "@example/loopback-chat",
+      version: "0.1.0",
+      registry: "https://registry.example.test",
+      integrity: `sha512-${"D".repeat(86)}==`,
+    };
+    render(
+      <ProviderCatalogView
+        {...props({
+          outsideDrivers: [
+            { ...listing, source: "npm", npm: npm as never, publisherKey: publisherKey as never },
+          ],
+          instances: [outsideInstance(listing.driver.digest)],
+        })}
+      />,
+    );
+    openSetup(/^Loopback chat, off/);
+    const pkg = screen.getByRole("heading", { name: "Package" }).closest("section");
+    if (pkg === null) throw new Error("expected the package section");
+    expect(within(pkg).getByText("Source").nextSibling?.textContent).toBe(
+      "npm, @example/loopback-chat@0.1.0",
+    );
+    expect(within(pkg).getByText("Integrity").nextSibling?.textContent).toBe(npm.integrity);
+    expect(pkg.textContent).toContain("Installed from an npm registry");
+    expect(pkg.textContent).not.toContain("folder on this computer");
+  });
+
   it("does not count a provider bound to another digest of the same driver", () => {
     render(
       <ProviderCatalogView
