@@ -39,10 +39,10 @@ apps gives nobody a reason to use it.
    out of the box. A person may relax it per Project, per thread, or globally;
    the choice is visible and journaled
    ([Guardrail levels](#security-and-authority)). The first run asks which
-   level new threads start at and pre-selects Full access (Trusted), with
-   Guarded offered (maintainer decision, 2026-10-31); at Full access the
-   provider's own sandbox still applies where it has one, the injection gate
-   still warns, and every hard line holds.
+   mode new threads start in and pre-selects Auto, never Full access
+   (maintainer decision, 2026-10-31); at Full access, when the person picks
+   it, the provider's own sandbox still applies where it has one, the
+   injection gate still warns, and every hard line holds.
 4. **Key providers run as themselves.** Claude Code, Codex, Mistral Vibe, and
    OpenCode keep their native tools, subagents, skills, hooks, and sandboxes
    inside Octant. Octant adds; it does not amputate
@@ -942,11 +942,11 @@ reaches its own kind's commands, and nothing in the renderer can turn a Chat
 into Work or a Work thread into Chat. Settings' Chat and Work switches still
 gate their domains: with one off, the composer offers only the other kind.
 
-| Mode     | Binds to                                                                                                                            | Authority                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Chat** | A virtual, memory-scoped Project, or no Project at all                                                                              | No filesystem or shell authority. Optional safe research tools; scratch space is isolated per thread.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| **Work** | Exactly one OS-confined project root                                                                                                | The shared capability set at the thread's [guardrail level](#security-and-authority): file reads and writes, shell, Git, local command-line tools, SSH to the person's own machines, provider-native tools, and subagents, as in Code. Focus: documents and artifacts with document adapters (docx, pptx, pdf, image), research with citations, local tasks, and the server-authoritative board; Done by a person. Developer surfaces stay hidden until the person turns them on for the Project (below). Today's build is narrower: confined reads and approval-gated writes (or auto-accept-edits), no shell or Git, never Full access; the shared level is allowed; not built yet.                                                                                                                           |
-| **Code** | Exactly one directory, ideally a repository root; Code threads select a checkout (current checkout or a managed worktree) inside it | The same shared capability set at the thread's guardrail level, which starts at the level the person picked at first run (Full access pre-selected, Guarded offered) or later set for the Project or globally (allowed; not built yet). Today it starts approval-gated (Guarded), or Full access when remembered for that Project. Plan mode is always read-only. Focus: Git, terminals, tests, pull requests, review, and managed subagents inside the bound root, with checkouts, managed worktrees, and the objective delivery target. Creating a Code Project may explicitly initialize Git in that folder (`docs/decisions/0079`) so a Code thread can prepare a checkout immediately; if that initialization fails, creation is refused and no Project is journaled. Binding without Git remains allowed. |
+| Mode     | Binds to                                                                                                                            | Authority                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Chat** | A virtual, memory-scoped Project, or no Project at all                                                                              | No filesystem or shell authority. Optional safe research tools; scratch space is isolated per thread.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| **Work** | Exactly one OS-confined project root                                                                                                | The shared capability set at the thread's [guardrail level](#security-and-authority): file reads and writes, shell, Git, local command-line tools, SSH to the person's own machines, provider-native tools, and subagents, as in Code. Focus: documents and artifacts with document adapters (docx, pptx, pdf, image), research with citations, local tasks, and the server-authoritative board; Done by a person. Developer surfaces stay hidden until the person turns them on for the Project (below). Today's build is narrower: confined reads and approval-gated writes (or auto-accept-edits), no shell or Git, never Full access; the shared level is allowed; not built yet.                                                                                                                                                        |
+| **Code** | Exactly one directory, ideally a repository root; Code threads select a checkout (current checkout or a managed worktree) inside it | The same shared capability set at the thread's guardrail level, which starts in the mode the person picked at first run (Auto pre-selected; Ask first where the provider has no Auto) or later set for the Project or in Settings › Access (allowed; not built yet). Today it starts approval-gated (Guarded), or Full access when remembered for that Project. Plan mode is always read-only. Focus: Git, terminals, tests, pull requests, review, and managed subagents inside the bound root, with checkouts, managed worktrees, and the objective delivery target. Creating a Code Project may explicitly initialize Git in that folder (`docs/decisions/0079`) so a Code thread can prepare a checkout immediately; if that initialization fails, creation is refused and no Project is journaled. Binding without Git remains allowed. |
 
 **One authority model, two focuses** (maintainer decision, 2026-10-31: "Work
 and Code should essentially be able to do the same, but Work is more for
@@ -7236,26 +7236,33 @@ mechanisms are:
 
   | Level           | Who approves tool calls                                                      | Prompt-injection gate                                | Sandbox                                     | Git and pull requests                                                                  | Default for                                                               |
   | --------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-  | Guarded         | The person, for anything with effects                                        | On: fresh confirmation after reading outside content | Octant's OS confinement plus the provider's | Opens and updates pull requests after asking; merges only when the person asked        | Offered at first run                                                      |
-  | Provider review | The provider's own review model or harness; the person for what it escalates | On                                                   | Octant's plus the provider's                | As Guarded, with the provider's review standing in for the person's click              | Opt-in, per provider that supports it                                     |
-  | Trusted         | Nobody inside the folder; the person for anything outside it                 | Warns, does not block                                | The provider's own sandbox                  | Opens, updates, and merges the pull requests the person asked for without asking again | Pre-selected at first run as Full access (today's remembered Full access) |
-  | Off             | Nobody                                                                       | Off                                                  | None beyond the operating system            | As Trusted, plus a plain force-push when the person asks for it                        | Opt-in, with a one-time warning                                           |
+  | Guarded         | The person, for anything with effects                                        | On: fresh confirmation after reading outside content | Octant's OS confinement plus the provider's | Opens and updates pull requests after asking; merges only when the person asked        | Ask first in the first-run picker; the fallback where Auto is unsupported |
+  | Provider review | The provider's own review model or harness; the person for what it escalates | On                                                   | Octant's plus the provider's                | As Guarded, with the provider's review standing in for the person's click              | Auto in the first-run picker, pre-selected where the provider supports it |
+  | Trusted         | Nobody inside the folder; the person for anything outside it                 | Warns, does not block                                | The provider's own sandbox                  | Opens, updates, and merges the pull requests the person asked for without asking again | Full access in the first-run picker, never pre-selected                   |
+  | Off             | Nobody                                                                       | Off                                                  | None beyond the operating system            | As Trusted, plus a plain force-push when the person asks for it                        | Not in the picker: a Settings switch under Full access, one-time warning  |
   - **Every level keeps the hard lines** in
     [Overview and principles](#overview-and-principles): Plan stays read-only,
     an agent never merges or force-pushes on its own initiative, no
     telemetry, no stored forge token, and the journal records every lowered
     level, merge, and force-push. A level changes who answers and what Octant
     confines, never those.
-  - **First run asks.** The first run asks which level new threads start at,
-    with Full access (Trusted) pre-selected and Guarded offered. Whichever the
-    person picks becomes the default for every new thread, Work and Code, in
-    every Project, until they change it. Full access means no approval
-    prompts: the provider's own sandbox still applies where it has one, and
-    Octant's sandbox may stay on underneath without prompting. Changing the
-    level is one click per thread, per Project, or globally, and the warning
-    for a lower level shows once (maintainer decision, 2026-10-31; allowed;
-    not built yet: today new Code threads start approval-gated unless Full
-    access is remembered).
+  - **First run asks.** The first run asks once which mode new threads start
+    in. The picker lists, in this order: Auto (Recommended; the provider's own
+    reviewer; shown only where the provider supports it), Ask first
+    (Guarded), Accept edits (file edits inside the folder go through,
+    commands ask), Plan (read-only), and Full access (Trusted: no prompts; the
+    provider's own sandbox, or Octant's, still applies). Auto is pre-selected
+    and marked Recommended: when the person uses Claude or Codex, or any other
+    provider that has an auto mode, new threads default to Auto. The person
+    can pick any other mode instead, and Full access is never the default.
+    Where Auto is unsupported for a thread's provider, that thread falls back
+    to Ask first and the picker says so. Off (no sandbox) is not in the
+    picker: it is a Settings switch under Full access, with a one-time
+    warning. The answer becomes the default for every new thread, Work and
+    Code; Settings › Access changes it, a Project may override it, and any
+    thread can switch mode at any time from the composer in one click
+    (maintainer decision, 2026-10-31; allowed; not built yet: today new Code
+    threads start approval-gated unless Full access is remembered).
   - **Lowering is journaled and shown.** Each change records who lowered it,
     when, from which level, and at which scope. The thread header shows the
     level in force and the scope it came from.
@@ -7316,9 +7323,9 @@ mechanisms are:
   sandbox changes. Grants are scoped and journaled; a remembered approval of
   one MCP tool in one Project follows the rules in
   [Extensions and skills](#extensions-and-skills). Work and Code threads
-  start at the level the person picked at first run (Full access
-  pre-selected, Guarded offered), changeable per thread, per Project, or
-  globally (allowed; not built yet: today Code starts approval-gated and only
+  start in the mode the person picked at first run (Auto
+  pre-selected where the provider supports it, else Ask first), changeable
+  per thread from the composer, per Project, or in Settings › Access (allowed; not built yet: today Code starts approval-gated and only
   a per-Project remembered Full access exists, and Work has neither);
   Plan mode is read-only; auto-accept-edits waives only project file writes;
   today a Work thread takes its access from Settings › Work when it is created —

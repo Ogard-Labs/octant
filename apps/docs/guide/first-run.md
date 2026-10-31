@@ -120,12 +120,16 @@ The thread starts in the authority mode you selected: **Full access**,
 **Approval-gated**, or **Plan** (read-only). Code threads start approval-gated
 unless you explicitly remember Full access.
 
-Planned: first run asks which guardrail level new threads start at, with
-**Full access** pre-selected and **Guarded** offered. Your pick becomes the
-default for every new Work and Code thread until you change it, which takes
-one click per thread, per Project, or for everything. Full access means no
-approval prompts; the provider's own sandbox still applies where it has one.
-Not built yet.
+Planned: first run asks once which mode new threads start in. The list is Auto
+(Recommended; the provider's own reviewer; shown only where your provider
+supports it), Ask first, Accept edits, Plan, and Full access. Auto is
+pre-selected, so with Claude or Codex, or any provider that has an auto mode,
+new threads start in Auto. Where Auto is not available, that thread starts in
+Ask first and the list says so. Your pick is the default for new threads.
+Change it in Settings › Access, per Project, or on any thread from the
+composer in one click. Full access is never the default. Turning off the
+sandbox entirely is a separate switch under Full access in Settings, with a
+one-time warning. Not built yet.
 
 Destinations that this host cannot back — Navigator without a model, a Work
 board that is not wired, GitHub pull requests without a working GitHub

@@ -634,10 +634,11 @@ behavior is in [Workspace](docs/design/workspace.md#start-screen-cards).
 
 First-run setup asks only what a first task needs — a usable provider, a
 Project folder, a model, and the
-[guardrail level](docs/architecture.md#security-and-authority) new threads
-start at (Full access pre-selected, Guarded offered; the pick becomes the
-default for every new Work and Code thread until changed; this question is allowed, not
-built yet) — and ends in one primary action, Start a task,
+[mode](docs/architecture.md#security-and-authority) new threads start in
+(Auto pre-selected and marked Recommended, then Ask first, Accept edits, Plan,
+and Full access, in that order; Auto is listed only where the provider
+supports it; the pick becomes the default for every new Work and Code thread
+until changed in Settings › Access; this question is allowed, not built yet) — and ends in one primary action, Start a task,
 that opens the new-task composer in that Project. Every step is optional from
 the first one. Opening setup focuses the current step's heading so a long
 provider list does not scroll past its introduction; Tab then reaches the
