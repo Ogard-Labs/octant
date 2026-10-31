@@ -27,6 +27,7 @@ describe("octantSettingsRegistry", () => {
       "github",
       "linear",
       "permissions",
+      "access",
       "secret-stores",
       "data",
       "sync",
@@ -78,6 +79,9 @@ describe("octantSettingsRegistry", () => {
       "browser-site-approvals",
       "tool-approvals",
     ]);
+    expect(section("access")?.label).toBe("Access");
+    expect(section("access")?.scope).toBe("host");
+    expect(ids("access")).toEqual(["safe-networks"]);
     expect(section("secret-stores")?.label).toBe("Secret stores");
     expect(section("secret-stores")?.scope).toBe("host");
     expect(ids("secret-stores")).toEqual(["secret-store-link", "secret-store-check"]);
@@ -267,7 +271,11 @@ describe("octantSettingsRegistry", () => {
     expect(first("password")).not.toBe("keybindings/keybindings");
     expect(first("password")).toBeDefined();
     expect(first("delete my data")).toBe("data/thread-retention");
-    expect(first("telemetry")).toBe("data/data-map");
+    // "telemetry" also reaches Safe networks through its "network" synonym.
+    const telemetry = searchSettings(available, capabilities, "telemetry").map((result) =>
+      result.kind === "setting" ? `${result.sectionId}/${result.settingId}` : result.sectionId,
+    );
+    expect(telemetry).toContain("data/data-map");
     expect(first("connector")).toBe("skills");
     expect(first("sign out github")).toBe("github/github-logout");
     expect(first("notif")).toBeDefined();

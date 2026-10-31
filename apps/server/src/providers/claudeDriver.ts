@@ -81,6 +81,10 @@ import { claudeNativeArtifactsSupport } from "./claudeNativeArtifacts";
 import { readClaudePublishedSnapshot } from "./claudePublishedSnapshot";
 import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 import { providerResumeBinding, resumeBindingRefuses } from "./resumeBinding";
+import {
+  acquireProviderRuntimeNetwork,
+  type ProviderRuntimeNetworkPort,
+} from "../network/providerRuntimeNetwork";
 
 const CLAUDE_TOOLS = [
   "Read",
@@ -275,11 +279,23 @@ function claudePolicyOptions(
   }
 }
 
-function claudeSandboxSettings(
+/** Whether this posture runs Claude's commands in its own sandbox. */
+function claudeRunsSandbox(policy: ProviderExecutionPolicy): boolean {
+  return policy === "approval-gated" || policy === "auto-accept-edits";
+}
+
+/**
+ * Claude's own sandbox for its commands. With `proxyPort` the sandbox's
+ * network goes to Octant's egress proxy for the session, which reaches only
+ * the Project's egress rules and the person's safe networks; without it (a
+ * host that does not route runtimes) the sandbox keeps its own network rules.
+ */
+export function claudeSandboxSettings(
   policy: ProviderExecutionPolicy,
   projectRoot: string,
+  proxyPort?: number,
 ): ClaudeSandboxSettings | undefined {
-  if (policy !== "approval-gated" && policy !== "auto-accept-edits") return undefined;
+  if (!claudeRunsSandbox(policy)) return undefined;
   return {
     enabled: true,
     failIfUnavailable: true,
@@ -290,6 +306,7 @@ function claudeSandboxSettings(
       allowRead: [projectRoot],
       allowWrite: [projectRoot],
     },
+    ...(proxyPort === undefined ? {} : { network: { httpProxyPort: proxyPort } }),
   };
 }
 
@@ -378,6 +395,8 @@ export interface ClaudeDriverOptions {
   readonly artifactDelivery?: () => boolean;
   readonly process: ClaudeProcessPort;
   readonly sdk: ClaudeAgentSdkPort;
+  /** Where the command sandbox sends its network below Full access; absent keeps the sandbox's own rules. */
+  readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly runtimeRegistry: ProviderDriverRuntimeRegistry;
   readonly resumeIdentityPort: ClaudeResumeIdentityPort;
@@ -1675,7 +1694,25 @@ function makeConnection(
             projectRoot,
             isProjectConfinedPath: options.isProjectConfinedPath,
           });
-        const sandbox = claudeSandboxSettings(input.executionPolicy, projectRoot);
+        const sandboxNetwork = claudeRunsSandbox(input.executionPolicy)
+          ? await runSetupEffect(
+              acquireProviderRuntimeNetwork(options.runtimeNetwork, {
+                runtime: "claude-sandbox",
+                root: projectRoot,
+                executionPolicy: input.executionPolicy,
+                autoReview: input.autoApprove === true,
+                // The sandbox points its commands at a bare port and sends no
+                // proxy credentials.
+                authentication: "none",
+              }).pipe(Effect.provideService(Scope.Scope, scope)),
+              signal,
+            )
+          : undefined;
+        const sandbox = claudeSandboxSettings(
+          input.executionPolicy,
+          projectRoot,
+          sandboxNetwork?.endpoint.port,
+        );
         let callbackState: SessionState | undefined;
         const canUseTool: ClaudeOpenQueryInput["canUseTool"] = async (request) => {
           const activeState = callbackState;

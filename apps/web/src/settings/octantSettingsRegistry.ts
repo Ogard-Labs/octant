@@ -972,6 +972,22 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
+      id: "access",
+      label: "Access",
+      scope: "host",
+      keywords:
+        "access network safe networks trusted hosts domains address ranges local network this mac private network overlay egress proxy refused recently refused trust allow outbound connections",
+      settings: [
+        {
+          id: settingId("safe-networks"),
+          label: "Safe networks",
+          scope: "host",
+          keywords:
+            "safe networks trusted hosts domains address range cidr local network this mac private network overlay egress proxy refused recently refused trust every project own list port",
+        },
+      ],
+    },
+    {
       id: "secret-stores",
       label: "Secret stores",
       scope: "host",

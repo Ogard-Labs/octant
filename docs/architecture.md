@@ -6018,11 +6018,11 @@ explicit network approval (`unrestricted`) keep OS `allow`. `web-fetch` and
 `web-search` run in the server process, not in a confined command, and keep
 their own rules above; they neither use nor consult egress rules. Provider
 runtimes that run their own tools inside their own process (Claude Agent SDK,
-Codex, OpenCode, ACP, Pi) are out of scope: their inference and tool traffic
-share one process, so a proxy could not tell them apart, and the
-provider-endpoints-only exception still materializes as `allow` for them.
-Saying so is the honest boundary; routing those runtimes through the proxy
-with provider-endpoint rules is a separate follow-up. An approved
+Codex, OpenCode, ACP, Pi) share one process between inference and tools, so
+thread rules and learn mode do not fit them; they run on a proxy of their own
+under the [provider runtime network](#provider-runtime-network), decided by
+their provider's endpoints, their Project's rules, and the person's safe
+networks. An approved
 `repo-tooling` language server also runs on `proxied`, whatever the starting
 thread's posture, with the same proxy and launch records on an aggregate of
 its own: it serves a checkout, so only its Project's rules apply, suspended
@@ -6540,6 +6540,115 @@ proofs that suite already holds:
 5. **Escape-suite gate.** An `egress-rule-bypass` fixture row in the threat
    model's escape suite drives phases 1–4 end to end, and the layer-3 native
    probes join the pre-release check.
+
+### Provider runtime network
+
+**Status: built on macOS (maintainer request, 2026-10-31).** The decision is
+`decideProviderRuntimeEgress` in `packages/domain/src/safeNetworkPolicy.ts`,
+the places and records are in `packages/contracts/src/safeNetworks.ts`, and
+the host side is `apps/server/src/network/` (`providerRuntimeNetwork.ts`,
+`safeNetworkStore.ts`, `safeNetworkRoutes.ts`), composed in
+`wiring/runtimeNetwork.ts`. Linux keeps open network for runtimes (below).
+
+**Outcome.** Below Full access a provider runtime reaches its provider's own
+endpoints, the loopback ports its own launch serves Octant's tools on, the
+hosts its Project's egress rules allow, and the places the person trusts in
+Settings › Access, and nothing else. `provider-endpoints-only` finally means
+that for the runtime process too. Full access stays open network.
+
+**Where it applies.** Every wrapped runtime below Full access, Plan and Chat
+included: OpenCode, ACP agents, Pi, and the Codex app-server, each launch
+(and each probe) on a listener of its own. Claude's own process is unwrapped
+outside Plan, so at Ask first, Accept edits and Auto its command sandbox
+carries the network instead: the Agent SDK's `sandbox.network.httpProxyPort`
+points the sandbox's commands at the session's listener in place of the
+sandbox's own proxy. Octant sends that one network setting and refuses a
+sandbox with any other (`hasValidSandbox`). The SDK has no setting that
+carries proxy credentials, so that listener takes no launch token
+(`authentication: "none"`); only processes that can reach the port use it,
+and a confined launch's OS rules reach only its own port. Still open: Claude's
+own process (its in-process web fetch and, in Plan, the runtime itself, whose
+launch is composed synchronously inside the SDK's spawn hook) and SOCKS
+traffic from the Claude sandbox, which its own filter keeps. Each runtime's
+module reaches this through `acquireProviderRuntimeNetwork`, and
+`providerProcessConfinement.test.ts` refuses a wrapped module that does not.
+
+**Enforcement point.** The host proxy harness commands use
+(`nativeHarnessEgressProxy.ts`), with a provider-runtime decider in place of
+thread rules: a fresh loopback listener and 256-bit token per launch, the same
+`CONNECT` and plain-HTTP paths, head limits, server-name check, resolution
+pinned to the checked addresses, limits, and recheck of every open tunnel. The
+Seatbelt profile is the `proxied` one: one outbound rule to the listener,
+plus the launch's own tool-bridge ports and, for OpenCode, its own server
+port. The launch environment carries the proxy variables; OpenCode also gets
+`NO_PROXY` for loopback, because it is a loopback server whose OS rules open
+only its own ports.
+
+**Decision, per request** (`decideProviderRuntimeEgress`):
+
+1. A port outside 1–65535 refuses.
+2. An address, and `localhost`, pass only at the launch's own loopback ports
+   or inside a trusted range or private-network tag; otherwise `ip-literal`.
+3. A name that is not a DNS name refuses.
+4. The provider's own endpoints pass at port 443: domains per runtime in
+   `network/providerRuntimeEndpoints.ts`, plus the host of any `https` base
+   URL the launch's environment configures (`*_BASE_URL`, `*_ENDPOINT`).
+   Runtimes that serve several model providers list the ones they offer out
+   of the box.
+5. A trusted `host` or `domain` place passes, at its port when it names one.
+6. A live Project egress rule passes; an expired one refuses `expired`.
+7. A host a reviewer allowed for this launch passes.
+8. Anything else refuses `no-rule`, with the host and port named in the
+   answer (`octant-egress-refused: no-rule registry.npmjs.org:443`).
+
+A name nothing lists is refused before any lookup, so a lookup cannot carry
+data out. After resolution a private answer connects only for a name the
+person trusted as a place, inside a trusted range or tag, or on loopback at
+the launch's own ports; every other private, loopback, and link-local answer
+refuses `private-destination`, a provider endpoint included. Link-local
+addresses, where cloud metadata answers, never pass: no tag holds them and no
+range may cover them. A runtime's bytes taint no thread here: inference and
+tools share the process, and its tool results are marked where the runtime
+reports them, as before. Thread rules and learn mode do not apply to a
+runtime, because a runtime serves a folder, not one thread; its Project comes
+from the folder (a managed worktree's own thread's Project, else the
+innermost active Work or Code Project whose bound folder holds it), and a
+folder no Project holds gets the account default and no Project rules.
+
+**Unlisted hosts at Auto and Ask first.** At Auto, where the launch knows it
+runs at Auto (Claude's sandbox today), an unlisted host goes to the reviewer
+hook (`RuntimeNetworkReviewer`) before its refusal is answered; the proxy
+decides again once the reviewer answers or 20 seconds pass. An `allow` is
+journaled first (`runtime-network.reviewer-allowed@1`) and holds for that
+launch alone; it is never a place or a rule. No reviewer is composed yet, so
+at Auto as at Ask first the refusal stands and goes to the person: the
+host appears under Recently refused in Settings › Access › Safe networks,
+where one click trusts it for the Project or every Project, and the runtime's
+next attempt passes. The connection is refused at once rather than held.
+
+**Audit journal.** On the launch's own `runtime-network` aggregate:
+`runtime-network.launch-started@1` (the launch's id, runtime, ACP profile,
+Project, and posture), `runtime-network.decisions-recorded@1` and
+`runtime-network.launch-summarized@1` with the per-host entries harness
+launches record, and `runtime-network.reviewer-allowed@1`. The launch start is
+journaled before the runtime starts; a launch whose listener cannot bind or
+whose start cannot be journaled never starts the runtime, which reports that
+its network guard could not start. Recently refused is rebuilt at startup
+from the launch starts and summaries.
+
+**Linux.** The capsule's private network namespace would also cut the host
+loopback that tool bridges and OpenCode's own server use, so Linux runtimes
+keep `allow` until the forwarder carries those connections too. The Safe
+networks page says so when its host does not route runtimes.
+
+**Not proven live.** No real runtime turn has run on its proxy: a runtime's
+own HTTP client honouring the proxy variables with credentials, Codex's
+streaming transport among them, and Claude's sandbox using the outside proxy
+port, are unverified against real providers. A client that ignores the
+variables fails closed. The real check is a Codex-shaped launch under
+Seatbelt in `providerRuntimeNetwork.hostile.test.ts`: `curl` reaches a trusted
+loopback server through the proxy, is refused an untrusted one with 403, and
+fails going around the proxy.
 
 ## Extensions and skills
 
@@ -7922,12 +8031,13 @@ access` agree); a thread's own change is journaled as
   scoped exception to the deny-default network rule:
   the process producing a plan still has to ask the model for it, while the
   tools that thread reaches keep `none`. Seatbelt and Bubblewrap cannot express
-  a host allowlist, so `provider-endpoints-only` materializes as plain OS
-  network `allow` for the runtime process (`materializeOsNetworkEgress`): the
-  runtime, Plan included, can reach any host. The endpoint restriction the name
-  promises holds only for Octant-brokered tools (browser origin allowlists,
-  research backends) and for native-harness commands, which run on `proxied`
-  under the [harness tool egress rules](#harness-tool-egress-rules)
+  a host allowlist, so on macOS the runtime runs on `proxied` under the
+  [provider runtime network](#provider-runtime-network): its OS rules reach
+  only its own listener, which allows the provider's endpoints, the Project's
+  rules, and the person's safe networks. On Linux, and wherever the host does
+  not route runtimes, `provider-endpoints-only` still materializes as plain OS
+  network `allow` (`materializeOsNetworkEgress`). Native-harness commands run
+  on `proxied` under the [harness tool egress rules](#harness-tool-egress-rules)
   (`materializeHarnessToolNetwork`). The persisted value keeps its name for
   journal compatibility.
   A provider runtime launch is wrapped when the process carries exactly one
@@ -7953,12 +8063,12 @@ access` agree); a thread's own change is journaled as
   runtime cannot write it either, and a target inside another denied folder
   is already hidden by that folder's cover.
 
-  | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                      | Plan's read-only enforced by                                                                                                                                                                                                               |
-  | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-  | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                             | `allow`                                          | Octant sandbox: no root write, no exec or fork                                                                                                                                                                                             |
-  | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only | `allow` on Plan; not limited by Octant otherwise | Octant sandbox: project and checkout read-only; write only `sessions/` and this session's own transcript and folder; on macOS exec only zsh and listed read-only tools, which get no network and write only the launch temporary directory |
-  | Codex app-server (`codexProcess.ts`)                                      | Wrapped                         | Wrapped                                             | `allow`                                          | Octant sandbox: root read-only; writes only the account home (not its configuration) and a private temporary directory; Codex's own sandbox set to external                                                                                |
-  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | No turn runs                                                                                                                                                                                                                               |
+  | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                  | Plan's read-only enforced by                                                                                                                                                                                                               |
+  | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+  | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                             | `proxied` on macOS; `allow` on Linux         | Octant sandbox: no root write, no exec or fork                                                                                                                                                                                             |
+  | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only | `allow` on Plan; commands `proxied` on macOS | Octant sandbox: project and checkout read-only; write only `sessions/` and this session's own transcript and folder; on macOS exec only zsh and listed read-only tools, which get no network and write only the launch temporary directory |
+  | Codex app-server (`codexProcess.ts`)                                      | Wrapped                         | Wrapped                                             | `proxied` on macOS; `allow` on Linux         | Octant sandbox: root read-only; writes only the account home (not its configuration) and a private temporary directory; Codex's own sandbox set to external                                                                                |
+  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                        | No turn runs                                                                                                                                                                                                                               |
 
   The columns are today's postures. On the
   [guardrail levels](#security-and-authority): Guarded and Reviewed run
@@ -7977,7 +8087,9 @@ access` agree); a thread's own change is journaled as
   - **ACP, OpenCode, Pi:** wrapped at Guarded and Reviewed, with
     process exec and fork allowed and writes held to the Project root, so the
     shell runs confined; unwrapped at Full access, with no sandbox. Egress at Guarded and Reviewed is
-    the Project's egress rules rather than a blanket `allow`.
+    the provider's endpoints, the Project's egress rules, and the person's
+    safe networks rather than a blanket `allow` (built on macOS;
+    [provider runtime network](#provider-runtime-network)).
   - **Claude Agent SDK:** unwrapped as in Code's approval-gated posture; the
     runtime's own sandbox holds commands to the Project root, and its
     permission prompts carry each command to the person at Guarded.
@@ -10075,7 +10187,20 @@ tool row and a small mark on the thread card, never a prompt or a block.
 (account default, Project override): hosts, domains, address ranges, and
 private-network tags. Egress to a trusted place passes by rule; anything else
 goes to the Judge at Reviewed and to the person at Guarded. Each decision is
-journaled per host.
+journaled per host. Built for provider runtimes on macOS
+([provider runtime network](#provider-runtime-network)): a `host` place
+matches that name, a `domain` the name and every name under it, a range is
+CIDR, and the tags are `this-mac` (loopback), `local-network` (the private
+IPv4 ranges and IPv6 unique-local addresses), and `overlay-network`
+(100.64.0.0/10); any place may name a port. A range that reaches a
+link-local address is refused. Each list is journaled whole, journal first, as
+`safe-networks.places-set@1` on the `safe-networks` aggregate (the account's
+fixed id, or the Project's), and `safe-networks.project-override-cleared@1`
+returns a Project to the default; startup replays them. Only a person at a
+local window changes them (`GET`/`POST /api/access/safe-networks`). The
+reviewer hook is in place and no reviewer is composed, so today every unlisted
+host goes to the person. Not built yet: safe networks for harness commands,
+which keep thread and Project rules, and taint suspending places.
 
 **Servers over SSH,** in Work and Code alike:
 

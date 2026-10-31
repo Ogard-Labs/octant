@@ -2136,7 +2136,21 @@ may override: **Auto reviewer** (Provider's own / Octant Shield), **Safe
 networks** (trusted hosts, domains, address ranges, and private-network tags),
 and **Servers** (registered SSH hosts, each with a Read-only, Operate, or Admin
 profile and an optional notes file). The rules behind them are in
-[Octant Shield](docs/architecture.md#octant-shield); allowed, not built yet.
+[Octant Shield](docs/architecture.md#octant-shield); allowed, not built yet,
+except Safe networks. **Safe networks** is built as Settings › Access, in the
+Privacy & data group after Permissions: an intro sentence, the **Every
+Project** list, a **Project** picker that says whether the chosen Project
+follows the every-Project list or has its own (with **Use its own list** and
+**Follow every-Project list**), and **Recently refused**. A place row shows its
+kind in the meta role, its value in the code font, an optional port, and a
+quiet Remove; the add row is Kind, value, optional Port, and Add place, and
+Save sends the whole list. A refusal from the host shows inline in the alert
+role and marks the refused row; nothing decides validity in the renderer
+beyond a port's range. Each refused host row shows `host:port`, the runtime,
+its count and age, and a quiet **Trust**, which adds that host and port to
+the list being edited. When the host does not route runtimes through these
+rules, a plain note says the lists are saved but not applied
+([Provider runtime network](docs/architecture.md#provider-runtime-network)).
 A Work Project's **Developer tools** switch is presentation, not a
 permission, so it lives on that Project's overview, not here
 ([Workspace](docs/design/workspace.md); allowed, not built yet). A Browser request from a

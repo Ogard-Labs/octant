@@ -81,6 +81,13 @@ export interface ClaudeSandboxSettings {
     readonly allowRead: readonly [string];
     readonly allowWrite: readonly [string];
   };
+  /**
+   * The sandbox's commands reach the network only through this loopback
+   * port: Octant's egress proxy for the session. The Agent SDK's
+   * `sandbox.network.httpProxyPort` points the sandbox at an outside proxy
+   * instead of its own, so the proxy decides every host.
+   */
+  readonly network?: { readonly httpProxyPort: number };
 }
 
 export const CLAUDE_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -641,6 +648,8 @@ const SANDBOX_KEYS = [
   "filesystem",
 ] as const;
 const SANDBOX_FILESYSTEM_KEYS = ["allowRead", "allowWrite", "denyRead"] as const;
+/** The only network setting Octant sends: the session's egress proxy port. */
+const SANDBOX_NETWORK_KEYS = ["httpProxyPort"] as const;
 
 function hasExactKeys(
   value: unknown,
@@ -663,20 +672,34 @@ function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
     ) {
       return input.sandbox === undefined;
     }
-    if (!hasExactKeys(input.sandbox, SANDBOX_KEYS)) return false;
+    const sandbox = input.sandbox;
+    if (sandbox === undefined) return false;
+    const { network, ...rest } = sandbox;
+    if (!hasExactKeys(rest, SANDBOX_KEYS)) return false;
+    // A network setting is only ever the proxy port: anything that would let
+    // the sandbox pick its own domains, sockets, or bindings is refused.
     if (
-      input.sandbox.enabled !== true ||
-      input.sandbox.failIfUnavailable !== true ||
-      input.sandbox.autoAllowBashIfSandboxed !== false ||
-      input.sandbox.allowUnsandboxedCommands !== false ||
-      !hasExactKeys(input.sandbox.filesystem, SANDBOX_FILESYSTEM_KEYS)
+      network !== undefined &&
+      (!hasExactKeys(network, SANDBOX_NETWORK_KEYS) ||
+        !Number.isInteger(network.httpProxyPort) ||
+        network.httpProxyPort < 1 ||
+        network.httpProxyPort > 65_535)
+    ) {
+      return false;
+    }
+    if (
+      sandbox.enabled !== true ||
+      sandbox.failIfUnavailable !== true ||
+      sandbox.autoAllowBashIfSandboxed !== false ||
+      sandbox.allowUnsandboxedCommands !== false ||
+      !hasExactKeys(sandbox.filesystem, SANDBOX_FILESYSTEM_KEYS)
     ) {
       return false;
     }
     return (
-      isExactPathTuple(input.sandbox.filesystem.denyRead, "/") &&
-      isExactPathTuple(input.sandbox.filesystem.allowRead, input.projectRoot) &&
-      isExactPathTuple(input.sandbox.filesystem.allowWrite, input.projectRoot)
+      isExactPathTuple(sandbox.filesystem.denyRead, "/") &&
+      isExactPathTuple(sandbox.filesystem.allowRead, input.projectRoot) &&
+      isExactPathTuple(sandbox.filesystem.allowWrite, input.projectRoot)
     );
   } catch {
     return false;
@@ -722,6 +745,9 @@ function liveBridge(): ClaudeAgentSdkBridge {
                   allowRead: [...sandbox.filesystem.allowRead],
                   allowWrite: [...sandbox.filesystem.allowWrite],
                 },
+                ...(sandbox.network === undefined
+                  ? {}
+                  : { network: { httpProxyPort: sandbox.network.httpProxyPort } }),
               },
             }),
         hooks: {
@@ -971,6 +997,9 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                         allowRead: [...input.sandbox.filesystem.allowRead] as [string],
                         allowWrite: [...input.sandbox.filesystem.allowWrite] as [string],
                       },
+                      ...(input.sandbox.network === undefined
+                        ? {}
+                        : { network: { httpProxyPort: input.sandbox.network.httpProxyPort } }),
                     },
                   }),
               // The SDK composes the launch and its `SpawnOptions` carry no

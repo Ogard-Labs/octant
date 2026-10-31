@@ -1761,6 +1761,43 @@ describe("ACP probe confinement", () => {
     expect(profileText).not.toContain("(allow process-exec)\n");
     expect(profileText).not.toContain("(allow process-fork)");
   });
+
+  it("reaches only the launch's own egress proxy and its tool bridge when the host routes the runtime through it", async () => {
+    const target = fixture(kilo);
+    const managedHome = join(target.canonicalRoot, "managed-home");
+    const hostAuthenticationPath = join(target.canonicalRoot, "host-auth");
+    mkdirSync(hostAuthenticationPath, { recursive: true });
+    const launch = await Effect.runPromise(
+      makeAcpConfinementLive({
+        platform: "darwin",
+        sandboxPath: target.sandboxPath,
+        temporaryDirectory: join(target.canonicalRoot, "tmp"),
+        hostAuthenticationPath,
+      }).prepare({
+        profile: kilo,
+        binaryPath: target.binaryPath,
+        root: managedHome,
+        managedHome,
+        mode: "code",
+        executionPolicy: "approval-gated",
+        environment: sanitizeAcpEnvironment(
+          kilo,
+          { PATH: "/usr/bin", HOME: "/Users/octant-test" },
+          { managedHome, executionPolicy: "approval-gated" },
+        ),
+        loopbackPorts: [43124],
+        network: {
+          endpoint: { kind: "loopback", port: 47001 },
+          environment: { HTTPS_PROXY: "http://octant:token@127.0.0.1:47001" },
+        },
+      }),
+    );
+    const profileText = seatbeltProfile(launch);
+    expect(profileText).not.toContain("(allow network*)");
+    expect(profileText).toContain('(allow network-outbound (remote ip "localhost:47001"))');
+    expect(profileText).toContain('(allow network-outbound (remote ip "localhost:43124"))');
+    expect(launch.environment.HTTPS_PROXY).toBe("http://octant:token@127.0.0.1:47001");
+  });
 });
 
 it("ships every ACP profile through deny-default confinement", () => {

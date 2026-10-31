@@ -113,6 +113,28 @@ describe("provider runtime confinement", () => {
     expect(undeclared).toEqual([]);
   });
 
+  it("routes every wrapped runtime's network through its own egress proxy below Full access", () => {
+    // A wrapped runtime that resolved its OS network on its own would launch
+    // on open network again, which is what "provider endpoints only" used to
+    // mean for every one of them.
+    const declared = new Set(UNWRAPPED.map(({ file }) => file));
+    const open = providerProcessModules()
+      .filter(
+        (fileName) =>
+          !declared.has(fileName) &&
+          !launchesThroughOutsideDriverPort(
+            readFileSync(join(providersDirectory, fileName), "utf8"),
+          ),
+      )
+      .filter(
+        (fileName) =>
+          !readFileSync(join(providersDirectory, fileName), "utf8").includes(
+            "acquireProviderRuntimeNetwork(",
+          ),
+      );
+    expect(open).toEqual([]);
+  });
+
   it("drops a provider runtime from the exception set once it uses the shared builder", () => {
     const stale = UNWRAPPED.filter(
       ({ file, postures }) => postures === undefined && usesConfinementBuilder(file),

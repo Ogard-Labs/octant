@@ -285,6 +285,8 @@ export function startOctantServer(
       siblingThreadsService,
       threadOutsideContentMarks,
       toolEgressRules,
+      providerRuntimeNetwork,
+      safeNetworkRoutes,
     } = yield* wireIntegrations({
       externalContentIngestionStore,
       options,
@@ -416,6 +418,7 @@ export function startOctantServer(
       reviewedModelManifest,
       skillDiscoveryService,
     } = yield* wireProviders({
+      providerRuntimeNetwork,
       providerRuntimeRegistry,
       workRequestRuntime,
       agentRunChildWorktree,
@@ -1105,6 +1108,7 @@ export function startOctantServer(
       planRoutes,
       previewHandoffBridgeRoutes,
       previewRoutes,
+      safeNetworkRoutes,
       productFeedbackRoutes,
       projectBindingRoutes,
       projectRoutes,
