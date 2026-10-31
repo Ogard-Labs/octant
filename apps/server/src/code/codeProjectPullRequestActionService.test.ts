@@ -73,6 +73,7 @@ function fixture(
     editLabels: vi.fn(options.forge?.editLabels ?? (async () => done)),
     comment: vi.fn(options.forge?.comment ?? (async () => done)),
     replyToReviewThread: vi.fn(options.forge?.replyToReviewThread ?? (async () => done)),
+    retarget: vi.fn(options.forge?.retarget ?? (async () => done)),
     setState: vi.fn(options.forge?.setState ?? (async () => done)),
     summary: vi.fn(
       options.forge?.summary ??
@@ -136,7 +137,7 @@ describe("project pull-request actions", () => {
     [
       { kind: "reply", ...target, reviewThreadId: "PRRT_1", body: "Fixed." },
       "replyToReviewThread",
-      { threadNodeId: "PRRT_1", body: "Fixed." },
+      { owner: "octant", name: "octant", number: 12, threadNodeId: "PRRT_1", body: "Fixed." },
     ],
     [
       { kind: "close", ...target },
@@ -302,6 +303,44 @@ describe("stack merge", () => {
         [3, "remote-device"],
       ]);
       expect(merge.mock.calls[0]?.[1]).toMatchObject({ confirmed: true, headSha: "a".repeat(40) });
+    } finally {
+      store.close();
+    }
+  });
+
+  it("points each child at the branch the stack lands on before merging it", async () => {
+    const { service, forge, merge, store } = fixture({ summaries: chain });
+    try {
+      await service.mergeStack(windowId, command([1, 2, 3]), signal(), "local-window");
+      expect(
+        forge.retarget.mock.calls.map(([request]) => [request.number, request.baseBranch]),
+      ).toEqual([
+        [2, "main"],
+        [3, "main"],
+      ]);
+      expect(forge.retarget.mock.invocationCallOrder[0]).toBeLessThan(
+        merge.mock.invocationCallOrder[1] ?? 0,
+      );
+    } finally {
+      store.close();
+    }
+  });
+
+  it("stops before merging a child it could not retarget", async () => {
+    const { service, merge, store } = fixture({
+      summaries: chain,
+      forge: { retarget: async () => ({ status: "refused", reason: "failed" }) },
+    });
+    try {
+      expect(await service.mergeStack(windowId, command([1, 2]), signal(), "local-window")).toEqual(
+        {
+          status: "stopped",
+          merged: [1],
+          stoppedAt: 2,
+          outcome: { status: "unavailable", reason: "unavailable" },
+        },
+      );
+      expect(merge).toHaveBeenCalledTimes(1);
     } finally {
       store.close();
     }

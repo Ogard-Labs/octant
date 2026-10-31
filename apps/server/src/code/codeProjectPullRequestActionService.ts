@@ -42,7 +42,14 @@ export interface CodeProjectPullRequestActionForge {
     signal: AbortSignal,
   ): Promise<GhPullRequestActionResult>;
   replyToReviewThread(
-    request: { readonly threadNodeId: string; readonly body: string },
+    request: GhPullRequestIdentityRequest & {
+      readonly threadNodeId: string;
+      readonly body: string;
+    },
+    signal: AbortSignal,
+  ): Promise<GhPullRequestActionResult>;
+  retarget(
+    request: GhPullRequestIdentityRequest & { readonly baseBranch: string },
     signal: AbortSignal,
   ): Promise<GhPullRequestActionResult>;
   setState(
@@ -211,8 +218,31 @@ export class CodeProjectPullRequestActionService {
     }
     const decision = decideStackMerge(summaries);
     if (decision.decision === "refuse") return { status: "refused", reason: decision.reason };
+    // Merging a parent into the branch below it would strand its child there
+    // when the forge keeps the merged branch, so each child is pointed at the
+    // branch the whole stack lands on before it merges.
+    const destination = summaries[0]?.baseBranch ?? "";
     const merged: number[] = [];
-    for (const item of command.items) {
+    for (const [index, item] of command.items.entries()) {
+      if (index > 0) {
+        const retargeted = await this.#forge.retarget(
+          {
+            owner: command.repositoryOwner,
+            name: command.repositoryName,
+            number: item.number,
+            baseBranch: destination,
+          },
+          signal,
+        );
+        if (retargeted.status !== "done") {
+          return {
+            status: "stopped",
+            merged,
+            stoppedAt: item.number,
+            outcome: { status: "unavailable", reason: "unavailable" },
+          };
+        }
+      }
       const outcome = await this.#merge(
         windowId,
         {
@@ -255,7 +285,7 @@ export class CodeProjectPullRequestActionService {
         return this.#forge.comment({ ...identity, body: command.body }, signal);
       case "reply":
         return this.#forge.replyToReviewThread(
-          { threadNodeId: command.reviewThreadId, body: command.body },
+          { ...identity, threadNodeId: command.reviewThreadId, body: command.body },
           signal,
         );
       case "close":

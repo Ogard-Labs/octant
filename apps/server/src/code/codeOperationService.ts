@@ -683,7 +683,11 @@ export interface CodeOperationPullRequestActions {
     signal: AbortSignal,
   ) => Promise<GhPullRequestActionResult>;
   readonly replyToReviewThread: (
-    input: { readonly threadNodeId: string; readonly body: string },
+    input: GhPullRequestIdentityRequest & { readonly threadNodeId: string; readonly body: string },
+    signal: AbortSignal,
+  ) => Promise<GhPullRequestActionResult>;
+  readonly retarget: (
+    input: GhPullRequestIdentityRequest & { readonly baseBranch: string },
     signal: AbortSignal,
   ) => Promise<GhPullRequestActionResult>;
   readonly setState: (
@@ -3701,7 +3705,7 @@ export class CodeOperationService {
             signal,
           )
         : await this.#options.pullRequests.actions?.replyToReviewThread(
-            { threadNodeId: command.reviewThreadId, body: command.body },
+            { ...located.target, threadNodeId: command.reviewThreadId, body: command.body },
             signal,
           );
     if (done === undefined) return this.#pullRequestUnavailable(command.operationId);

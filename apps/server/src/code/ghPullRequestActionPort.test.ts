@@ -24,6 +24,13 @@ function fixture(results: ReadonlyArray<GhCommandResult | Error>) {
   };
 }
 
+const threadOwner = (number: number, name = "octant") => ({
+  exitCode: 0,
+  stdout: JSON.stringify({
+    data: { node: { pullRequest: { number, repository: { name, owner: { login: "octant" } } } } },
+  }),
+});
+
 const view = (state: string) => ({
   exitCode: 0,
   stdout: JSON.stringify({
@@ -87,18 +94,58 @@ describe("pull-request action port", () => {
   it("posts a comment and a review reply with the text on stdin, not in arguments", async () => {
     const { port, run } = fixture([
       { exitCode: 0, stdout: "" },
+      threadOwner(7),
       { exitCode: 0, stdout: "{}" },
     ]);
     await expect(port.comment({ ...identity, body: "Looks good." }, signal)).resolves.toEqual({
       status: "done",
     });
     await expect(
-      port.replyToReviewThread({ threadNodeId: "PRRT_abc123", body: "Fixed." }, signal),
+      port.replyToReviewThread(
+        { ...identity, threadNodeId: "PRRT_abc123", body: "Fixed." },
+        signal,
+      ),
     ).resolves.toEqual({ status: "done" });
     expect(run.mock.calls[0]?.[1].stdin).toBe("Looks good.");
     expect(run.mock.calls[0]?.[0]).not.toContain("Looks good.");
-    expect(run.mock.calls[1]?.[1].stdin).toBe("Fixed.");
-    expect(run.mock.calls[1]?.[0]).toContain("thread=PRRT_abc123");
+    expect(run.mock.calls[2]?.[1].stdin).toBe("Fixed.");
+    expect(run.mock.calls[2]?.[0]).toContain("thread=PRRT_abc123");
+  });
+
+  it("refuses to reply in a review thread that belongs to another pull request", async () => {
+    const { port, run } = fixture([threadOwner(8), threadOwner(7, "elsewhere")]);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expect(
+        port.replyToReviewThread(
+          { ...identity, threadNodeId: "PRRT_other", body: "Fixed." },
+          signal,
+        ),
+      ).resolves.toEqual({ status: "refused", reason: "invalid" });
+    }
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(
+      run.mock.calls.every(([arguments_]) => !arguments_.join(" ").includes("addPullRequest")),
+    ).toBe(true);
+  });
+
+  it("points a stacked pull request at another base without touching its branch", async () => {
+    const { port, run } = fixture([{ exitCode: 0, stdout: "" }]);
+    await expect(port.retarget({ ...identity, baseBranch: "main" }, signal)).resolves.toEqual({
+      status: "done",
+    });
+    expect(run.mock.calls[0]?.[0]).toEqual([
+      "pr",
+      "edit",
+      "7",
+      "--repo",
+      "octant/octant",
+      "--base",
+      "main",
+    ]);
+    await expect(port.retarget({ ...identity, baseBranch: "--delete" }, signal)).resolves.toEqual({
+      status: "refused",
+      reason: "invalid",
+    });
   });
 
   it("refuses an empty comment, an oversized comment, and a malformed thread id", async () => {
@@ -112,7 +159,7 @@ describe("pull-request action port", () => {
       reason: "invalid",
     });
     await expect(
-      port.replyToReviewThread({ threadNodeId: "bad id; rm", body: "x" }, signal),
+      port.replyToReviewThread({ ...identity, threadNodeId: "bad id; rm", body: "x" }, signal),
     ).resolves.toEqual({ status: "refused", reason: "invalid" });
     expect(run).not.toHaveBeenCalled();
   });

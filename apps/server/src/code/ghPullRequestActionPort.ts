@@ -41,6 +41,9 @@ export type GhPullRequestSummaryResult =
     }>
   | Readonly<{ status: "unavailable" }>;
 
+const THREAD_OWNER_QUERY =
+  "query($thread:ID!){node(id:$thread){... on PullRequestReviewThread{pullRequest{number repository{name owner{login}}}}}}";
+
 const REPLY_MUTATION =
   "mutation($thread:ID!,$body:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$thread,body:$body}){comment{id}}}";
 
@@ -207,12 +210,42 @@ export class GhPullRequestActionPort {
     );
   }
 
-  /** Replies in one review thread by the thread's node id. */
+  /**
+   * Replies in one review thread by the thread's node id. The thread is read
+   * first and must belong to the named pull request: a node id is global, so
+   * an id from another pull request or repository would otherwise post under
+   * the person's name outside the scope they approved.
+   */
   async replyToReviewThread(
-    request: { readonly threadNodeId: string; readonly body: string },
+    request: GhPullRequestIdentityRequest & {
+      readonly threadNodeId: string;
+      readonly body: string;
+    },
     signal: AbortSignal,
   ): Promise<GhPullRequestActionResult> {
-    if (!NODE_ID_PATTERN.test(request.threadNodeId) || !validComment(request.body)) {
+    if (
+      repositoryOf(request) === undefined ||
+      !NODE_ID_PATTERN.test(request.threadNodeId) ||
+      !validComment(request.body)
+    ) {
+      return { status: "refused", reason: "invalid" };
+    }
+    const owner = await this.#run(
+      [
+        "api",
+        "graphql",
+        "-f",
+        `query=${THREAD_OWNER_QUERY}`,
+        "-F",
+        `thread=${request.threadNodeId}`,
+      ],
+      undefined,
+      signal,
+    );
+    if (owner === undefined || owner.exitCode !== 0) {
+      return { status: "unavailable", reason: "unavailable" };
+    }
+    if (!threadBelongsTo(parseJson(owner.stdout), request)) {
       return { status: "refused", reason: "invalid" };
     }
     return this.#act(
@@ -227,6 +260,25 @@ export class GhPullRequestActionPort {
         "body=@-",
       ],
       request.body,
+      signal,
+    );
+  }
+
+  /**
+   * Points a stacked pull request at the branch the stack lands on, so merging
+   * its parent first does not strand it on the parent's branch.
+   */
+  async retarget(
+    request: GhPullRequestIdentityRequest & { readonly baseBranch: string },
+    signal: AbortSignal,
+  ): Promise<GhPullRequestActionResult> {
+    const repository = repositoryOf(request);
+    if (repository === undefined || !validBranch(request.baseBranch)) {
+      return { status: "refused", reason: "invalid" };
+    }
+    return this.#act(
+      ["pr", "edit", String(request.number), "--repo", repository, "--base", request.baseBranch],
+      undefined,
       signal,
     );
   }
@@ -323,6 +375,23 @@ function repositoryOf(request: GhPullRequestIdentityRequest): string | undefined
     : undefined;
 }
 
+function validBranch(branch: string): boolean {
+  return /^[A-Za-z0-9_][A-Za-z0-9._/-]{0,199}$/.test(branch) && !branch.includes("..");
+}
+
+function threadBelongsTo(value: unknown, request: GhPullRequestIdentityRequest): boolean {
+  if (!isRecord(value) || !isRecord(value.data) || !isRecord(value.data.node)) return false;
+  const pullRequest = value.data.node.pullRequest;
+  if (!isRecord(pullRequest) || !isRecord(pullRequest.repository)) return false;
+  const owner = pullRequest.repository.owner;
+  return (
+    pullRequest.number === request.number &&
+    pullRequest.repository.name === request.name &&
+    isRecord(owner) &&
+    owner.login === request.owner
+  );
+}
+
 function validLabel(label: string): boolean {
   return (
     label.length >= 1 &&
@@ -378,6 +447,7 @@ export function createGhPullRequestPort(options: {
       editLabels: (input, signal) => actions.editLabels(input, signal),
       comment: (input, signal) => actions.comment(input, signal),
       replyToReviewThread: (input, signal) => actions.replyToReviewThread(input, signal),
+      retarget: (input, signal) => actions.retarget(input, signal),
       setState: (input, signal) => actions.setState(input, signal),
       summary: (input, signal) => actions.summary(input, signal),
       requiredChecks: (input, signal) => actions.requiredChecks(input, signal),

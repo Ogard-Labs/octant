@@ -4901,6 +4901,7 @@ describe("CodeOperationRuntime", () => {
         editLabels: vi.fn(overrides.editLabels ?? (async () => done)),
         comment: vi.fn(overrides.comment ?? (async () => done)),
         replyToReviewThread: vi.fn(overrides.replyToReviewThread ?? (async () => done)),
+        retarget: vi.fn(overrides.retarget ?? (async () => done)),
         setState: vi.fn(overrides.setState ?? (async () => done)),
         summary: vi.fn(
           overrides.summary ??
@@ -5067,7 +5068,7 @@ describe("CodeOperationRuntime", () => {
         expect.any(AbortSignal),
       );
       expect(actions.replyToReviewThread).toHaveBeenCalledWith(
-        { threadNodeId: "PRRT_abc", body: "Fixed in the next commit." },
+        expect.objectContaining({ threadNodeId: "PRRT_abc", body: "Fixed in the next commit." }),
         expect.any(AbortSignal),
       );
       fixture.close();
