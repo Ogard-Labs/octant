@@ -19,6 +19,12 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import {
   ProjectPolicyRejected,
+  addProjectExtraFolder,
+  extraFolderRefusal,
+  isPathInProjectFolders,
+  projectExtraFolderRoots,
+  projectFolderRoots,
+  removeProjectExtraFolder,
   changeCodeProjectAccess,
   changeCodeProjectActions,
   changeCodeProjectPermissionMode,
@@ -53,6 +59,7 @@ const actor = {
   actorId: "77777777-7777-4777-8777-777777777777",
 } as ProjectActor;
 const root = { canonicalRoot: "/Users/example/Workspace" } as CanonicalProjectBinding;
+const home = "/Users/example";
 
 function makeProject(
   id: Project["id"],
@@ -731,6 +738,130 @@ describe("Project binding relink", () => {
       ProjectPolicyRejected,
     );
     expect(() => relinkProject(work, { ...input, binding: root })).toThrow(ProjectPolicyRejected);
+  });
+
+  it("refuses a new main folder that overlaps an extra folder", () => {
+    const work = addProjectExtraFolder(makeProject(ids.work, "0/1", { type: "work" }), {
+      canonicalRoot: "/Users/example/Notes",
+      actor,
+      addedAt: updatedAt,
+      homeDirectory: home,
+    }).project;
+    const relinkTo = (canonicalRoot: string) =>
+      relinkProject(work, {
+        previousBindingRevision: 1,
+        binding: { canonicalRoot } as CanonicalProjectBinding,
+        revisionId: ids.revision2,
+        actor,
+        changedAt: updatedAt,
+      });
+    for (const overlapping of ["/Users/example/Notes", "/Users/example/Notes/Drafts"]) {
+      expect(() => relinkTo(overlapping)).toThrow(/extra folders/);
+    }
+    expect(relinkTo("/Users/example/Other").extraFolders).toHaveLength(1);
+  });
+});
+
+
+describe("Project extra folders", () => {
+  const work = () => makeProject(ids.work, "0/1", { type: "work" });
+  const add = (project: Project, canonicalRoot: string) =>
+    addProjectExtraFolder(project, { canonicalRoot, actor, addedAt: updatedAt, homeDirectory: home });
+
+  it("adds a folder with who added it and when, and counts it as inside the Project", () => {
+    const { project, folder } = add(work(), "/Users/example/Notes");
+    expect(folder).toEqual({ canonicalRoot: "/Users/example/Notes", addedBy: actor, addedAt: updatedAt });
+    expect(project).toMatchObject({ version: 2, updatedAt, extraFolders: [folder] });
+    const folders = projectFolderRoots(project);
+    expect(folders).toEqual(["/Users/example/Workspace", "/Users/example/Notes"]);
+    expect(projectExtraFolderRoots(project)).toEqual(["/Users/example/Notes"]);
+    expect(isPathInProjectFolders(folders, "/Users/example/Notes/today.md")).toBe(true);
+    expect(isPathInProjectFolders(folders, "/Users/example/Workspace/a.txt")).toBe(true);
+    expect(isPathInProjectFolders(folders, "/Users/example/Notes-old/a.txt")).toBe(false);
+    expect(isPathInProjectFolders(folders, "/Users/example/Desktop")).toBe(false);
+  });
+
+  it("refuses the main folder, a folder inside or around it, and a duplicate or nested extra", () => {
+    const withNotes = add(work(), "/Users/example/Notes").project;
+    for (const candidate of [
+      "/Users/example/Workspace",
+      "/Users/example/Workspace/docs",
+      "/Users/example/Notes",
+      "/Users/example/Notes/Drafts",
+    ]) {
+      expect(() => add(withNotes, candidate)).toThrow(ProjectPolicyRejected);
+    }
+    const around = makeProject(ids.work, "0/1", {
+      type: "work",
+      binding: { canonicalRoot: "/Users/example/Work/Workspace" } as CanonicalProjectBinding,
+    });
+    expect(() => add(around, "/Users/example/Work")).toThrow(/main folder/);
+  });
+
+  it("refuses the home folder, anything above it, system folders and secret folders", () => {
+    for (const candidate of [
+      "/Users/example",
+      "/Users",
+      "/System/Library",
+      "/usr/local/share",
+      "/etc",
+      "/Applications",
+      "/Users/example/.ssh",
+      "/Users/example/.aws/sso",
+      "/Users/example/.config",
+      "/Users/example/Library",
+      "/Users/example/Library/Keychains",
+    ]) {
+      expect(() => add(work(), candidate), candidate).toThrow(ProjectPolicyRejected);
+    }
+    expect(add(work(), "/Volumes/Shared/Specs").project.extraFolders).toHaveLength(1);
+    expect(add(work(), "/Users/example/.config/nvim").project.extraFolders).toHaveLength(1);
+  });
+
+  it("refuses Chat Projects, archived Projects and lists past the limit", () => {
+    expect(() => add(makeProject(ids.chat, "0/1"), "/Users/example/Notes")).toThrow(
+      ProjectPolicyRejected,
+    );
+    expect(() =>
+      add(makeProject(ids.work, "0/1", { type: "work", lifecycle: "archived" }), "/Users/example/N"),
+    ).toThrow(ProjectPolicyRejected);
+    let project: Project = work();
+    for (let index = 0; index < 16; index += 1) {
+      project = add(project, `/Users/example/Folder ${index}`).project;
+    }
+    expect(() => add(project, "/Users/example/One more")).toThrow(/at most 16/);
+  });
+
+  it("removes only an extra folder and leaves a Project with none as it was before", () => {
+    const withNotes = add(work(), "/Users/example/Notes").project;
+    const removed = removeProjectExtraFolder(withNotes, "/Users/example/Notes", updatedAt);
+    expect(removed.extraFolders).toBeUndefined();
+    expect(removed.version).toBe(3);
+    expect(() => removeProjectExtraFolder(withNotes, "/Users/example/Workspace", updatedAt)).toThrow(
+      /main folder/,
+    );
+    expect(() => removeProjectExtraFolder(withNotes, "/Users/example/Other", updatedAt)).toThrow(
+      ProjectPolicyRejected,
+    );
+  });
+
+  it("judges a candidate without a Project for the folder picker to explain", () => {
+    expect(
+      extraFolderRefusal({
+        mainRoot: "/Users/example/Workspace",
+        extraFolders: [],
+        candidate: "/Users/example/Notes",
+        homeDirectory: home,
+      }),
+    ).toBeUndefined();
+    expect(
+      extraFolderRefusal({
+        mainRoot: "/Users/example/Workspace",
+        extraFolders: [],
+        candidate: "/",
+        homeDirectory: home,
+      }),
+    ).toMatch(/whole disk/);
   });
 });
 

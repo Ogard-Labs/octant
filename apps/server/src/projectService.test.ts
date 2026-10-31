@@ -1062,6 +1062,149 @@ describe("ProjectService", () => {
     ).rejects.toMatchObject({ failure: { category: "invalid" } });
   });
 
+  it("adds an extra folder only from a picker receipt and journals who added it and when", async () => {
+    const receipts = new BindingReceiptStore(() => Buffer.alloc(32, 3));
+    const receipt = receipts.issue({
+      windowId,
+      projectType: "work",
+      canonicalBinding: { canonicalRoot: "/canonical/notes" },
+      now: 0,
+    });
+    const fixture = fixtureService({ projects: [workProject()], receipts, nowMs: 1 });
+    await expect(
+      fixture.service.executeProject(windowId, {
+        kind: "add-project-extra-folder",
+        projectId: workId,
+        expectedVersion: 1,
+        receiptId: receipt.receiptId,
+      }),
+    ).resolves.toMatchObject({
+      kind: "project-extra-folder-added",
+      project: { version: 2, extraFolders: [{ canonicalRoot: "/canonical/notes" }] },
+    });
+    const event = fixture.append.mock.calls[0]?.[0]?.events?.[0];
+    expect(event?.eventName).toBe("project.extra-folder-added@1");
+    expect(event?.actor).toEqual({ kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID });
+    expect(event?.payload.folder).toEqual({
+      canonicalRoot: "/canonical/notes",
+      addedBy: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      addedAt: now,
+    });
+
+    // The receipt is spent: a second add with it is refused and journals nothing.
+    await expect(
+      fixture.service.executeProject(windowId, {
+        kind: "add-project-extra-folder",
+        projectId: workId,
+        expectedVersion: 2,
+        receiptId: receipt.receiptId,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(fixture.append).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses an extra folder that overlaps the main folder or names a secret folder", async () => {
+    for (const canonicalRoot of ["/canonical/work/docs", "/canonical", "/Users/example/.ssh"]) {
+      const receipts = new BindingReceiptStore(() => Buffer.alloc(32, 4));
+      const receipt = receipts.issue({
+        windowId,
+        projectType: "work",
+        canonicalBinding: { canonicalRoot },
+        now: 0,
+      });
+      const fixture = fixtureService({
+        projects: [workProject()],
+        receipts,
+        nowMs: 1,
+        homeDirectory: "/Users/example",
+      });
+      await expect(
+        fixture.service.executeProject(windowId, {
+          kind: "add-project-extra-folder",
+          projectId: workId,
+          expectedVersion: 1,
+          receiptId: receipt.receiptId,
+        }),
+      ).rejects.toMatchObject({ failure: { category: "invalid" } });
+      expect(fixture.append).not.toHaveBeenCalled();
+    }
+  });
+
+  it("replays added and removed extra folders across persistence restart, and none for older Projects", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-project-extra-folders-"));
+    const projectId = decodeProjectId("00000000-0000-4000-8000-000000000694");
+    const olderId = decodeProjectId("00000000-0000-4000-8000-000000000693");
+    const roots = ["/Users/example/Work", "/Users/example/Older", "/Users/example/Notes", "/Volumes/Specs"];
+    const consume = () => ({ canonicalRoot: roots.shift() ?? "/unused" });
+    const run = <A>(body: (service: ProjectService) => Promise<A>) =>
+      Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const persistence = yield* Persistence;
+            return yield* Effect.promise(() =>
+              body(
+                new ProjectService({
+                  persistence,
+                  bindingReceiptStore: { consume } as never,
+                  projectRootPort: { validate: async (_type, path) => ({ canonicalRoot: path }) },
+                  uuid: uuidSequence(),
+                  clock: () => now,
+                  homeDirectory: () => "/Users/example",
+                }),
+              ),
+            );
+          }).pipe(
+            Effect.provide(makePersistenceLive({ dataDirectory: directory, clock: () => now })),
+          ),
+        ),
+      );
+    const receiptId = "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVA";
+    try {
+      await run(async (service) => {
+        for (const id of [projectId, olderId]) {
+          await service.executeProject(windowId, {
+            kind: "create-work-project",
+            projectId: id,
+            expectedVersion: 0,
+            name: "Folders",
+            receiptId,
+            hostId: "local",
+          });
+        }
+        for (const expectedVersion of [1, 2]) {
+          await service.executeProject(windowId, {
+            kind: "add-project-extra-folder",
+            projectId,
+            expectedVersion,
+            receiptId,
+          });
+        }
+        await service.executeProject(windowId, {
+          kind: "remove-project-extra-folder",
+          projectId,
+          expectedVersion: 3,
+          canonicalRoot: "/Users/example/Notes",
+        });
+      });
+
+      const restored = await run((service) => service.bootstrap(windowId));
+      const byId = new Map(restored.active.map((project) => [String(project.id), project]));
+      const project = byId.get(String(projectId));
+      expect(project?.type === "work" ? project.extraFolders : undefined).toEqual([
+        {
+          canonicalRoot: "/Volumes/Specs",
+          addedBy: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+          addedAt: now,
+        },
+      ]);
+      expect(project?.version).toBe(4);
+      const older = byId.get(String(olderId));
+      expect(older?.type === "work" ? older.extraFolders : "wrong type").toBeUndefined();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("writes STATUS.md and never AGENTS.md into the folder when a Work Project opts into a status file", async () => {
     const folder = realpathSync(mkdtempSync(join(tmpdir(), "octant-status-opt-in-")));
     try {
@@ -1521,6 +1664,7 @@ function fixtureService(
       today: string,
     ) => Promise<void>;
     offeredDesktopProviders?: () => ReadonlyArray<LeasableDesktopProvider>;
+    homeDirectory?: string;
   } = {},
 ) {
   const projects = [...(options.projects ?? [])];
@@ -1613,6 +1757,9 @@ function fixtureService(
       ...(options.offeredDesktopProviders === undefined
         ? {}
         : { offeredDesktopProviders: options.offeredDesktopProviders }),
+      ...(options.homeDirectory === undefined
+        ? {}
+        : { homeDirectory: () => options.homeDirectory ?? "" }),
     }),
   };
 }
