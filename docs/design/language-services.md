@@ -606,7 +606,7 @@ classes.
 ### Authority
 
 - **Code only.** The component kind is `mode-prohibited` in Chat and Work. Work
-  has no developer environment, and Chat has no folder.
+  has a Project terminal and actions but no language environment, and Chat has no folder.
 - **Every read is checked when it runs.** The thread is an active Code thread.
   Its checkout is available and is the one the request names. The file
   reference belongs to that thread and checkout, and its path is contained by

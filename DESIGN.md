@@ -654,7 +654,7 @@ and is never pre-selected; Auto uses the provider's own reviewer or
 [Octant Shield](docs/architecture.md#octant-shield), so it is listed for every
 runtime, and where no reviewer can run the picker shows it unavailable with
 the reason; the pick becomes the default for every new Work and Code thread
-until changed in Settings › Access; this question is allowed, not built yet) — and ends in one primary action, Start a task,
+until changed in Settings › Access) — and ends in one primary action, Start a task,
 that opens the new-task composer in that Project. Every step is optional from
 the first one. Opening setup focuses the current step's heading so a long
 provider list does not scroll past its introduction; Tab then reaches the
@@ -2161,8 +2161,7 @@ model** (each thread's provider with its smallest model, or a configured
 endpoint). The rules behind them are in
 [Octant Shield](docs/architecture.md#octant-shield). Built for Code: Auto
 reviewer and Shield model in Settings › Code › Access, and the reviewer
-override as a select on a Code Project's overview; servers are allowed, not
-built yet. **Safe networks** is built as Settings › Access, in the
+override as a select on a Code Project's overview; Servers are not built. **Safe networks** is built as Settings › Access, in the
 Privacy & data group after Permissions: a **Network limits** panel with a
 switch that is off by default, a sentence saying plainly whether limits are on,
 and a note that a change applies to the next runtime started; then an intro
@@ -2181,7 +2180,7 @@ runtimes through these rules, a plain note says the lists are saved but not appl
 ([Provider runtime network](docs/architecture.md#provider-runtime-network)).
 A Work Project's **Developer tools** switch is presentation, not a
 permission, so it lives on that Project's overview, not here
-([Workspace](docs/design/workspace.md); allowed, not built yet). A Browser request from a
+([Workspace](docs/design/workspace.md)). A Browser request from a
 CLI in a Code thread's terminal names the origin and the thread and says a
 program in the terminal asked, not the thread's agent
 ([Terminal Browser grant](docs/design/terminal-browser-grant.md#the-window)).
