@@ -30,6 +30,7 @@ import { isRoutineHostScope } from "../routineHostScope";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { ExtensionToolApprovalService } from "../extensions/extensionToolApprovalService";
+import { RoutineProposalService } from "../automation/routineProposalService";
 import {
   chatThreadStandsInProject,
   isDeviceRegistrationCurrent,
@@ -140,6 +141,14 @@ export function wireAuthority(deps: AuthorityDependencies) {
     },
     onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
   });
+  // Routines a Work or Code thread's agent proposed, waiting for the window
+  // whose turn raised them. A prompt like the tool approvals above, so it
+  // rides the same change topic.
+  const routineProposalService = new RoutineProposalService({
+    uuid: randomUUID,
+    now: Date.now,
+    onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
+  });
   const codeSessionAuthority = new CodeSessionAuthorityStore();
   const agentRunExecutionWindows = new Map<
     AgentRun["requestId"],
@@ -205,6 +214,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
       simulatorInputGrants.revokeWindow(String(windowId));
       androidInputGrants.revokeWindow(String(windowId));
       extensionToolApprovalService.revokeWindow(windowId);
+      routineProposalService.revokeWindow(windowId);
       codeSessionAuthority.revokeWindow(windowId);
       for (const [requestId, binding] of agentRunExecutionWindows) {
         if (String(binding.windowId) === String(windowId))
@@ -242,6 +252,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     codeParentActiveTurn,
     codeSessionAuthority,
     extensionToolApprovalService,
+    routineProposalService,
     isPairedDeviceScope,
     liveTurns,
     machineChangeFeed,

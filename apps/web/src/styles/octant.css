@@ -2492,6 +2492,17 @@ input.switch:checked::after {
   justify-items: end;
   gap: 4px;
 }
+/* Over a turn the host sent at a scheduled time: says so before the bubble,
+   right-aligned with it, in the meta tone. */
+.turn-scheduled-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-self: end;
+  gap: var(--oct-space-1);
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
 .turn-user .bubble {
   width: auto;
   max-width: min(80%, 620px);

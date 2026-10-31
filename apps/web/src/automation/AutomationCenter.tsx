@@ -94,6 +94,8 @@ export interface AutomationCenterProps {
    */
   readonly environmentNames?: ReadonlyMap<string, string>;
   readonly localHostId?: string;
+  /** A routine to open when the center is shown, e.g. from a thread's Environment. */
+  readonly focusAutomationId?: string;
 }
 
 type EditorState =
@@ -199,6 +201,12 @@ export function AutomationCenter(props: AutomationCenterProps) {
   ) {
     await controller.execute(command, successNotice);
   }
+
+  const { focusAutomationId } = props;
+  const { select: selectAutomation } = controller;
+  useEffect(() => {
+    if (focusAutomationId !== undefined) selectAutomation(focusAutomationId);
+  }, [focusAutomationId, selectAutomation]);
 
   function selectRow(automationId: string) {
     setEditor({ kind: "closed" });

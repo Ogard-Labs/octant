@@ -125,6 +125,8 @@ export type ShellActions = {
   readonly openArchivedThread: (entry: ArchivedThreadEntry) => void;
   readonly openArtifactLibrary: () => void;
   readonly openAutomationCenter: () => void;
+  /** Opens the Automation Center with one routine selected. */
+  readonly openRoutine: (automationId: string) => void;
   readonly openBottomTool: (surface: RightUtilityDockSurfaceId) => void;
   readonly openCanvas: ShellController["openCanvas"];
   readonly openCanvasInSidebar: NonNullable<WorkspaceViewProps["onOpenCanvasInSidebar"]>;

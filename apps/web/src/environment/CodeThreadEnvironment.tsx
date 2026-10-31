@@ -1,6 +1,7 @@
 import { ThreadActivityEnvironment } from "../threadActivity/ThreadActivityEnvironment";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type {
+  AutomationClient,
   LocalServerClient,
   UsageDashboardClient,
   UsageQueryFilter,
@@ -46,6 +47,7 @@ import { OpenInMenu } from "./OpenInMenu";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { EnvironmentGoal } from "./EnvironmentGoal";
 import { EnvironmentSubagents } from "./EnvironmentSubagents";
+import { EnvironmentRoutines } from "./EnvironmentRoutines";
 import { ThreadUsagePanel } from "../usage/ThreadUsagePanel";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
@@ -123,6 +125,9 @@ export interface CodeThreadEnvironmentProps {
   readonly deliveryOutcome?: CodeDeliveryOutcomeKind;
   /** Opens the Agents tool; with a run id, on that subagent. */
   readonly onOpenAgents?: (runId?: string) => void;
+  readonly automationClient?: AutomationClient;
+  /** Opens the Automation Center on this routine. */
+  readonly onOpenRoutine?: (automationId: string) => void;
   readonly environmentOpen?: boolean;
   readonly onOpenGit?: () => void;
   readonly onCreatePullRequest?: () => void;
@@ -315,6 +320,17 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
               <EnvironmentSubagents
                 client={props.agentRunClient}
                 {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
+                threadId={String(props.tab.threadId)}
+              />
+            )}
+            {props.automationClient === undefined || props.project === undefined ? null : (
+              <EnvironmentRoutines
+                client={props.automationClient}
+                mode="code"
+                {...(props.onOpenRoutine === undefined
+                  ? {}
+                  : { onOpenRoutine: props.onOpenRoutine })}
+                projectId={String(props.project.id)}
                 threadId={String(props.tab.threadId)}
               />
             )}

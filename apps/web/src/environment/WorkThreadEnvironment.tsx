@@ -8,11 +8,16 @@ import { EnvironmentCard, EnvironmentGroup } from "./EnvironmentGroup";
 import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
 import { ChangeWorkingFolder, workingFolderLabel } from "./WorkingDirectoryControl";
 import { EnvironmentSubagents } from "./EnvironmentSubagents";
+import { EnvironmentRoutines } from "./EnvironmentRoutines";
 import { ThreadGoalPanel } from "../goal/ThreadGoalPanel";
 import { ThreadUsagePanel } from "../usage/ThreadUsagePanel";
 import type { GoalClient } from "@octant/client-runtime/goal-client";
 import type { GoalLoopClient } from "@octant/client-runtime/goal-loop-client";
-import type { UsageDashboardClient, UsageQueryFilter } from "@octant/client-runtime";
+import type {
+  AutomationClient,
+  UsageDashboardClient,
+  UsageQueryFilter,
+} from "@octant/client-runtime";
 
 type WorkThreadWorkspaceTab = Extract<WorkspaceTab, { readonly kind: "work-thread" }>;
 type WorkProject = Extract<ProjectSummary, { readonly type: "work" }>;
@@ -27,6 +32,9 @@ export interface WorkThreadEnvironmentProps {
   readonly agentRunClient?: AgentRunClient;
   /** Opens the Agents tool; with a run id, on that subagent. */
   readonly onOpenAgents?: (runId?: string) => void;
+  readonly automationClient?: AutomationClient;
+  /** Opens the Automation Center on this routine. */
+  readonly onOpenRoutine?: (automationId: string) => void;
   readonly environmentOpen?: boolean;
   readonly goalClient?: GoalClient;
   readonly goalLoopClient?: GoalLoopClient;
@@ -105,6 +113,15 @@ export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
             <EnvironmentSubagents
               client={props.agentRunClient}
               {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
+              threadId={String(props.tab.threadId)}
+            />
+          )}
+          {props.automationClient === undefined || project === undefined ? null : (
+            <EnvironmentRoutines
+              client={props.automationClient}
+              mode="work"
+              {...(props.onOpenRoutine === undefined ? {} : { onOpenRoutine: props.onOpenRoutine })}
+              projectId={String(project.id)}
               threadId={String(props.tab.threadId)}
             />
           )}

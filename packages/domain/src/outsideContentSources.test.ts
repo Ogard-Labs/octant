@@ -52,6 +52,7 @@ const RECORDED_LABELS: ReadonlyArray<string> = [
   "octant_create_image",
   "octant_github",
   "octant_offer_side_task",
+  "octant_propose_routine",
   "octant_propose_thread",
   "octant_side_chat_list_files",
   "octant_side_chat_read_file",

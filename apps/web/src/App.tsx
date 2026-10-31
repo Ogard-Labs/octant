@@ -958,6 +958,12 @@ function LaunchedShell(
       : projectPullRequestKey(selectedProjectPullRequest);
   const [workBoardOpen, setWorkBoardOpen] = useState(false);
   const [automationCenterOpen, setAutomationCenterOpen] = useState(false);
+  const [automationCenterFocusId, setAutomationCenterFocusId] = useState<string>();
+  // The focus is a one-shot request; keeping it past closing would reselect
+  // the routine the next time the center opens from the sidebar.
+  useEffect(() => {
+    if (!automationCenterOpen) setAutomationCenterFocusId(undefined);
+  }, [automationCenterOpen]);
   const [agentsCenterOpen, setAgentsCenterOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
   // Snoozed rows wake on the clock, so the sidebar keeps a minute-coarse one.
@@ -4562,6 +4568,7 @@ function LaunchedShell(
       openArchivedThread,
       openArtifactLibrary,
       openAutomationCenter,
+      openRoutine,
       openBottomTool,
       openCanvas: controller.openCanvas,
       openCanvasInSidebar,
@@ -5453,6 +5460,12 @@ function LaunchedShell(
 
   function openAutomationCenter() {
     closeWorkspaceReaders();
+    setAutomationCenterOpen(true);
+  }
+
+  function openRoutine(automationId: string) {
+    closeWorkspaceReaders();
+    setAutomationCenterFocusId(automationId);
     setAutomationCenterOpen(true);
   }
 
@@ -6777,6 +6790,7 @@ function LaunchedShell(
                   archiveOpen={archiveOpen}
                   artifactLibraryOpen={artifactLibraryOpen}
                   automationCenterVisible={automationCenterVisible}
+                  {...(automationCenterFocusId === undefined ? {} : { automationCenterFocusId })}
                   automationEditorCatalog={automationEditorCatalog}
                   availabilityByProject={projectController.availabilityByProject}
                   boundCodeProjectId={controller.boundCodeProjectId}

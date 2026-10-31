@@ -286,6 +286,10 @@ export class AutomationProjection implements Projection {
       definitionRevision: definition.definitionRevision,
       nextDueAt: definition.nextDueAt,
       ...(latest === undefined ? {} : { latestRunLifecycle: latest.lifecycle }),
+      ...(definition.originThreadId === undefined
+        ? {}
+        : { originThreadId: definition.originThreadId }),
+      targetPolicy: definition.targetPolicy,
       version: definition.version,
       updatedAt: definition.updatedAt,
     } as AutomationSummary;

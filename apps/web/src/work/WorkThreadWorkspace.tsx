@@ -38,7 +38,11 @@ import {
   WorkTurnClientFailure,
   type WorkTurnClient,
 } from "@octant/client-runtime/work-turn-client";
-import type { FileMentionClient, ThreadMentionClient } from "@octant/client-runtime";
+import type {
+  AutomationClient,
+  FileMentionClient,
+  ThreadMentionClient,
+} from "@octant/client-runtime";
 import { announceShellSettingsWritten } from "../shell/shellSettingsNotifications";
 import { Check, CirclePause, Ellipsis, FileText, FolderOpen } from "lucide-react";
 import {
@@ -72,6 +76,8 @@ import { appendTranscript } from "../voice/appendTranscript";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import type { ImageGenerationProfileView } from "@octant/contracts";
 import { decodeBrowserThreadId, decodeImageGenerationScopeId } from "@octant/contracts";
+import { parseAutomationFollowUpTurnPrompt } from "@octant/contracts/automation";
+import { ScheduledFollowUpMark } from "../automation/ScheduledFollowUpMark";
 import { BrowserCaptureList } from "../browser/BrowserCaptureList";
 import { GeneratedImageList } from "../image/GeneratedImageList";
 import { ImageGenerationAction } from "../image/ImageGenerationAction";
@@ -127,6 +133,7 @@ import { toolStepsActivity } from "../transcript/turnActivity";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
 import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
+import { RoutineProposalPrompt } from "../automation/RoutineProposalPrompt";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import {
@@ -424,6 +431,7 @@ export interface WorkThreadWorkspaceProps {
   readonly windowCapability?: string;
   readonly messageQueueClient?: ThreadMessageQueueClient;
   readonly extensionClient?: ExtensionClient;
+  readonly automationClient?: AutomationClient;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
   /** Opens the dock's Canvas tool on this Canvas; a Canvas drawn in the thread offers it. */
   readonly onOpenCanvasInSidebar?: (card: CanvasThreadReferenceCard) => void;
@@ -1874,6 +1882,20 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                   </article>
                 );
               }
+              const followUpPrompt = parseAutomationFollowUpTurnPrompt(row.entry.text);
+              if (followUpPrompt !== undefined) {
+                return (
+                  <article aria-label="Scheduled follow-up" className="turn-user">
+                    <ScheduledFollowUpMark />
+                    <div className="bubble">
+                      <TrackerReferenceText asParagraph text={followUpPrompt} />
+                    </div>
+                    {row.at === undefined ? null : (
+                      <TurnTime at={row.at} copyValue={followUpPrompt} />
+                    )}
+                  </article>
+                );
+              }
               return (
                 <article aria-label="Your message" className="turn-user">
                   <div className="bubble">
@@ -2108,6 +2130,12 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       <ExtensionToolApprovalPrompt
         className="thread-column"
         client={props.extensionClient}
+        threadId={String(props.threadId)}
+        turnActive={turnRunning}
+      />
+      <RoutineProposalPrompt
+        className="thread-column"
+        client={props.automationClient}
         threadId={String(props.threadId)}
         turnActive={turnRunning}
       />

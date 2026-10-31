@@ -102,6 +102,7 @@ export interface ThreadPaneContainerProps {
     | "revealBrowserActivity"
     | "openLinkInApp"
     | "openProjectCreate"
+    | "openRoutine"
     | "openReviewForThread"
     | "openSubagent"
     | "refuseUnlessCreatableDestination"
@@ -351,6 +352,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     openInbox,
     openLinkInApp,
     openProjectCreate,
+    openRoutine,
     openReviewForThread,
     openSettings,
     openSideChat,
@@ -396,6 +398,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
   const {
     agentRunClient,
     appleToolchainClient,
+    automationClient,
     browserAutomationClient,
     canvasClient,
     chatClient,
@@ -551,6 +554,8 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
               codeController={codeController}
               codeControllers={codeThreadControllers}
               extensionClient={extensionClient}
+              automationClient={automationClient}
+              onOpenRoutine={openRoutine}
               workPromotionController={workPromotionController}
               codeProviderChoices={codeProviderChoices}
               openInApplications={settings.openInApplications}

@@ -588,3 +588,116 @@ html[data-octant-increased-contrast="true"] .thread-environment-dock__header,
 html[data-octant-increased-contrast="true"] .environment-card__rows {
   border: 1px solid var(--octant-border-strong);
 }
+
+/* Routines: the ones this thread's agent proposed, one block per routine with
+   its schedule under the name and its two actions beneath. */
+.environment-routines__list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--oct-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.environment-routine {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.environment-routine__head {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--oct-space-2);
+  font-size: var(--oct-text-xs);
+}
+
+.environment-routine__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-fg-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.environment-routines__state {
+  flex: none;
+  color: var(--oct-muted);
+}
+
+.environment-routine__schedule {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-body);
+}
+
+.environment-routine__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-1);
+}
+
+/* Follow-up: the empty line and the picker sit in the row's body, in the same
+   small type as a routine's schedule. */
+.environment-follow-ups__empty,
+.environment-follow-up-picker__note {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-body);
+}
+
+.environment-follow-up-picker {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-2);
+}
+
+.environment-follow-up-picker__picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-1);
+}
+
+.environment-follow-up-picker__field {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+}
+
+/* Routines list every routine of the Project; a small line under the name says
+   how one relates to this thread, in the schedule's type. The New routine form
+   borrows the Automation Center editor's fields at the row's smaller size. */
+.environment-routine__place {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.environment-routine-form {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-2);
+  font-size: var(--oct-text-xs);
+}
+
+.environment-routine-form .automation-editor__field .input,
+.environment-routine-form .automation-editor__field .select,
+.environment-routine-form .automation-editor__field .textarea {
+  font-size: var(--oct-text-xs);
+}
+
+.environment-routine-form__issues {
+  margin: 0;
+  padding-inline-start: 1.1rem;
+  color: var(--oct-warn-fg);
+  font-size: var(--oct-text-xs);
+}

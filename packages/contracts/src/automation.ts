@@ -89,8 +89,40 @@ export type AutomationTriggerKind = typeof AutomationTriggerKind.Type;
 export const AutomationMissedRunPolicy = Schema.Literal("skip", "run-once");
 export type AutomationMissedRunPolicy = typeof AutomationMissedRunPolicy.Type;
 
-export const AutomationTargetPolicy = Schema.Literal("new-thread");
+/**
+ * Where a run's turn goes. `new-thread` starts a fresh thread for each run.
+ * `same-thread` is a one-time follow-up: its single run sends the fixed
+ * prompt as a new turn in the thread the routine came from, so the agent has
+ * that conversation. Only a once trigger may use it.
+ */
+export const AutomationTargetPolicy = Schema.Literal("new-thread", "same-thread");
 export type AutomationTargetPolicy = typeof AutomationTargetPolicy.Type;
+
+/**
+ * How late a missed follow-up may still run once the host is back. A
+ * follow-up exists to check on something at about a chosen time; a day later
+ * the check is stale, so past this it is recorded as missed instead.
+ */
+export const AUTOMATION_FOLLOW_UP_MISSED_WINDOW_MS = 24 * 60 * 60 * 1_000;
+
+/**
+ * The first line of the turn a follow-up sends into its thread. It tells the
+ * agent the turn was scheduled, and the transcript shows such a turn as
+ * scheduled rather than typed.
+ */
+export const AUTOMATION_FOLLOW_UP_TURN_HEADING =
+  "Scheduled follow-up you set up earlier in this thread:";
+
+/** The text a follow-up's turn sends: the heading, then the fixed prompt. */
+export function automationFollowUpTurnPrompt(taskPrompt: string): string {
+  return `${AUTOMATION_FOLLOW_UP_TURN_HEADING}\n\n${taskPrompt}`;
+}
+
+/** The fixed prompt of a follow-up's turn text, or undefined when the text is not one. */
+export function parseAutomationFollowUpTurnPrompt(text: string): string | undefined {
+  const prefix = `${AUTOMATION_FOLLOW_UP_TURN_HEADING}\n\n`;
+  return text.startsWith(prefix) ? text.slice(prefix.length) : undefined;
+}
 
 export const AutomationLifecycle = Schema.Literal("enabled", "paused", "exhausted", "archived");
 export type AutomationLifecycle = typeof AutomationLifecycle.Type;
@@ -431,6 +463,13 @@ export const AutomationBlockReason = Schema.Literal(
   "full-access-ineligible",
   "unsupported-mode",
   "automation-recursion",
+  // A follow-up's own thread at fire time: gone, archived, or in another
+  // Project; marked Done or Complete; or already running a turn.
+  "thread-unavailable",
+  "thread-done",
+  "thread-busy",
+  // A follow-up the host could not run within its missed window.
+  "follow-up-missed",
 );
 export type AutomationBlockReason = typeof AutomationBlockReason.Type;
 
@@ -487,7 +526,11 @@ function automationDefinitionDraftMatchesPolicy(definition: AutomationDefinition
     !automationAuthorityProfileFitsExecutionProfile(
       definition.authorityProfile,
       definition.executionProfile,
-    )
+    ) ||
+    // A follow-up runs once, and late rather than never while inside its
+    // missed window; the window, not the missed-run policy, bounds it.
+    (definition.targetPolicy === "same-thread" &&
+      (definition.trigger.kind !== "once" || definition.missedRunPolicy !== "run-once"))
   ) {
     return false;
   }
@@ -504,6 +547,12 @@ export const AutomationDefinition = Schema.Struct({
   blockedReason: Schema.optional(AutomationBlockReason),
   createdBy: AutomationAuthorPrincipal,
   updatedBy: AutomationAuthorPrincipal,
+  /**
+   * The Work or Code thread whose agent proposed this routine, when a person
+   * confirmed it from that thread. Set by the host at creation, never by a
+   * command body, and kept unchanged by every later revision.
+   */
+  originThreadId: Schema.optional(AutomationThreadId),
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
@@ -532,6 +581,7 @@ function automationPersistedDefinitionMatchesPolicy(definition: AutomationDefini
       : definition.nextDueAt !== null);
   return (
     automationDefinitionDraftMatchesPolicy(definition) &&
+    (definition.targetPolicy !== "same-thread" || definition.originThreadId !== undefined) &&
     dueEvidenceMatches &&
     enabledDueMatches &&
     (definition.lifecycle !== "enabled" || definition.blockedReason === undefined) &&
@@ -998,10 +1048,108 @@ export const AutomationSummary = Schema.Struct({
   trigger: AutomationTrigger,
   nextDueAt: Schema.NullOr(UtcTimestamp),
   latestRunLifecycle: Schema.optional(AutomationRunLifecycle),
+  /** See {@link AutomationDefinition}'s `originThreadId`. */
+  originThreadId: Schema.optional(AutomationThreadId),
+  /** Present when the routine is a follow-up in its origin thread. */
+  targetPolicy: Schema.optional(AutomationTargetPolicy),
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
 }).annotations(strict);
 export type AutomationSummary = typeof AutomationSummary.Type;
+
+// ── Routine proposals from a thread ────────────────────────────────────────
+
+export const ROUTINE_PROPOSAL_TOOL_NAME = "octant_propose_routine";
+
+export const RoutineProposalId = brandedUuid("RoutineProposalId");
+export type RoutineProposalId = typeof RoutineProposalId.Type;
+
+/**
+ * A routine a Work or Code thread's agent proposed, waiting for the person.
+ * It names only what the agent chose; the Project, mode, profile, and
+ * authority are the host's, resolved from the thread when the person confirms.
+ */
+export const RoutineProposal = Schema.Struct({
+  proposalId: RoutineProposalId,
+  threadId: AutomationThreadId,
+  mode: AutomationMode,
+  projectId: ProjectId,
+  displayName: boundedText(MAX_AUTOMATION_DISPLAY_NAME_LENGTH),
+  taskPrompt: boundedText(MAX_AUTOMATION_TASK_PROMPT_LENGTH),
+  trigger: AutomationTrigger,
+  missedRunPolicy: AutomationMissedRunPolicy,
+  /** `same-thread` is a one-time follow-up in this thread; absent means a new thread per run. */
+  targetPolicy: Schema.optional(AutomationTargetPolicy),
+  /** The first time it would run, resolved by the host when it was proposed. */
+  firstRunAt: UtcTimestamp,
+  requestedAt: UtcTimestamp,
+}).annotations(strict);
+export type RoutineProposal = typeof RoutineProposal.Type;
+
+export const RoutineProposalList = Schema.Struct({
+  kind: Schema.Literal("routine-proposal-list"),
+  proposals: Schema.Array(RoutineProposal).pipe(Schema.maxItems(32)),
+}).annotations(strict);
+export type RoutineProposalList = typeof RoutineProposalList.Type;
+
+export const RoutineProposalDecision = Schema.Struct({
+  proposalId: RoutineProposalId,
+  decision: Schema.Literal("confirm", "decline"),
+}).annotations(strict);
+export type RoutineProposalDecision = typeof RoutineProposalDecision.Type;
+
+export const RoutineProposalDecisionResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("routine-proposal-confirmed"),
+    automation: AutomationDefinition,
+  }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("routine-proposal-declined") }).annotations(strict),
+  /** The proposal is no longer waiting: answered, expired, or withdrawn. */
+  Schema.Struct({ kind: Schema.Literal("routine-proposal-gone") }).annotations(strict),
+  AutomationCommandFailure,
+);
+export type RoutineProposalDecisionResult = typeof RoutineProposalDecisionResult.Type;
+
+/**
+ * A person setting up, or moving, a follow-up from the thread itself. The
+ * host builds the routine from the thread's own facts, exactly as for a
+ * confirmed proposal; the body names only the thread, the time, and the
+ * prompt.
+ */
+export const AutomationFollowUpRequest = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("schedule-follow-up"),
+    threadId: AutomationThreadId,
+    mode: AutomationMode,
+    projectId: ProjectId,
+    scheduledAt: UtcTimestamp,
+    taskPrompt: boundedText(MAX_AUTOMATION_TASK_PROMPT_LENGTH),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("reschedule-follow-up"),
+    automationId: AutomationId,
+    expectedVersion: AggregateVersion,
+    scheduledAt: UtcTimestamp,
+  }).annotations(strict),
+);
+export type AutomationFollowUpRequest = typeof AutomationFollowUpRequest.Type;
+
+/**
+ * A person creating a routine from a Work or Code thread's Environment. Like
+ * a confirmed proposal, the host builds it from the thread's own facts; the
+ * body names only the thread and what the person chose.
+ */
+export const AutomationThreadRoutineRequest = Schema.Struct({
+  kind: Schema.Literal("create-thread-routine"),
+  threadId: AutomationThreadId,
+  mode: AutomationMode,
+  projectId: ProjectId,
+  displayName: boundedText(MAX_AUTOMATION_DISPLAY_NAME_LENGTH),
+  taskPrompt: boundedText(MAX_AUTOMATION_TASK_PROMPT_LENGTH),
+  trigger: AutomationTrigger,
+  missedRunPolicy: AutomationMissedRunPolicy,
+}).annotations(strict);
+export type AutomationThreadRoutineRequest = typeof AutomationThreadRoutineRequest.Type;
 
 export const AutomationQuery = Schema.Union(
   Schema.Struct({
@@ -1312,3 +1460,15 @@ export const decodeAutomationCommandResult = Schema.decodeUnknownSync(Automation
 export const decodeAutomationQuery = Schema.decodeUnknownSync(AutomationQuery);
 export const decodeAutomationQueryResponse = Schema.decodeUnknownSync(AutomationQueryResponse);
 export const decodeAutomationEvent = Schema.decodeUnknownSync(AutomationEvent);
+export const decodeAutomationThreadId = Schema.decodeUnknownSync(AutomationThreadId);
+export const decodeRoutineProposalId = Schema.decodeUnknownSync(RoutineProposalId);
+export const decodeRoutineProposal = Schema.decodeUnknownSync(RoutineProposal);
+export const decodeRoutineProposalList = Schema.decodeUnknownSync(RoutineProposalList);
+export const decodeRoutineProposalDecision = Schema.decodeUnknownSync(RoutineProposalDecision);
+export const decodeRoutineProposalDecisionResult = Schema.decodeUnknownSync(
+  RoutineProposalDecisionResult,
+);
+export const decodeAutomationFollowUpRequest = Schema.decodeUnknownSync(AutomationFollowUpRequest);
+export const decodeAutomationThreadRoutineRequest = Schema.decodeUnknownSync(
+  AutomationThreadRoutineRequest,
+);

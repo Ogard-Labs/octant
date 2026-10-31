@@ -14,6 +14,7 @@ import {
   buildManualAutomationOccurrenceKey,
   buildScheduledAutomationOccurrenceKey,
   canExhaustOnceAutomation,
+  decideAutomationFollowUp,
   intersectAutomationAuthority,
   isAutomationMutationAllowed,
   isAutomationRunLifecycleActive,
@@ -589,5 +590,67 @@ describe("automation weekly resolution evidence", () => {
         } as AutomationDefinition),
       ).toMatchObject({ nextDueAt: scheduledAt });
     }
+  });
+});
+
+describe("follow-up fire-time decision", () => {
+  const thread = {
+    kind: "present" as const,
+    projectId: "project-a",
+    archived: false,
+    done: false,
+    busy: false,
+    providerInstanceId: "provider-a",
+    modelId: "model-a",
+  };
+  const decide = (
+    overrides: Partial<typeof thread> & { readonly executionPolicy?: string } = {},
+    now = "2026-11-01T09:05:00.000Z",
+  ) =>
+    decideAutomationFollowUp({
+      projectId: "project-a",
+      providerInstanceId: "provider-a",
+      modelId: "model-a",
+      scheduledAt: utc("2026-11-01T09:00:00.000Z"),
+      now: utc(now),
+      thread: { ...thread, ...overrides },
+    });
+
+  it("lets a follow-up run in its unchanged, idle thread", () => {
+    expect(decide()).toEqual({ kind: "ready" });
+  });
+
+  it("refuses a thread that is archived, gone, or moved to another Project", () => {
+    expect(decide({ archived: true })).toMatchObject({ reason: "thread-unavailable" });
+    expect(decide({ projectId: "project-b" })).toMatchObject({ reason: "thread-unavailable" });
+    expect(
+      decideAutomationFollowUp({
+        projectId: "project-a",
+        providerInstanceId: "provider-a",
+        modelId: "model-a",
+        scheduledAt: utc("2026-11-01T09:00:00.000Z"),
+        now: utc("2026-11-01T09:00:00.000Z"),
+        thread: { kind: "missing" },
+      }),
+    ).toMatchObject({ reason: "thread-unavailable" });
+  });
+
+  it("refuses a thread marked done and skips one already running a turn", () => {
+    expect(decide({ done: true })).toMatchObject({ reason: "thread-done" });
+    expect(decide({ busy: true })).toMatchObject({ reason: "thread-busy" });
+  });
+
+  it("refuses when the thread's provider, model, or posture no longer matches", () => {
+    expect(decide({ modelId: "model-b" })).toMatchObject({ reason: "execution-profile-mismatch" });
+    expect(decide({ executionPolicy: "full-access" })).toMatchObject({
+      reason: "full-access-ineligible",
+    });
+  });
+
+  it("runs a missed follow-up within a day and records it missed after that", () => {
+    expect(decide({}, "2026-11-02T08:59:00.000Z")).toEqual({ kind: "ready" });
+    expect(decide({}, "2026-11-02T09:01:00.000Z")).toMatchObject({
+      reason: "follow-up-missed",
+    });
   });
 });

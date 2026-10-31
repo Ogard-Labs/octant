@@ -105,7 +105,7 @@ import type { WorkOverviewClient } from "@octant/client-runtime/work-overview-cl
 import type { WorkResearchClient } from "@octant/client-runtime/work-research-client";
 import type { GoalClient } from "@octant/client-runtime/goal-client";
 import type { GoalLoopClient } from "@octant/client-runtime/goal-loop-client";
-import type { UsageDashboardClient } from "@octant/client-runtime";
+import type { AutomationClient, UsageDashboardClient } from "@octant/client-runtime";
 import type { UsageQueryFilter } from "@octant/contracts/usage-rpc";
 import { WorkResearchPanel } from "../work/WorkResearchPanel";
 import { ThreadPlanProvider } from "../plan/ThreadPlanContext";
@@ -190,6 +190,9 @@ export interface WorkspaceViewProps {
    */
   readonly codeControllers: CodeThreadControllers;
   readonly extensionClient?: ExtensionClient;
+  readonly automationClient?: AutomationClient;
+  /** Opens the Automation Center on one routine. */
+  readonly onOpenRoutine?: (automationId: string) => void;
   readonly workPromotionController: WorkPromotionController;
   readonly workMutationClient?: WorkMutationClient;
   readonly workThreadClient?: WorkThreadClient;
@@ -1167,6 +1170,9 @@ function renderCodeTab(
           ? {}
           : { appleToolchainClient: props.appleToolchainClient })}
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
+        {...(props.automationClient === undefined
+          ? {}
+          : { automationClient: props.automationClient })}
         controller={codeController}
         holdAccessNotice={props.codeControllers.holdAccessNotice}
         onOpenCodeThread={props.onOpenCodeThread}
@@ -1292,6 +1298,10 @@ function renderCodeTab(
               ? {}
               : { deliveryOutcome: codeController.activeView.thread.deliveryTarget.outcomeKind })}
             {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
+            {...(props.automationClient === undefined
+              ? {}
+              : { automationClient: props.automationClient })}
+            {...(props.onOpenRoutine === undefined ? {} : { onOpenRoutine: props.onOpenRoutine })}
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
             {...(props.openInApplications === undefined
               ? {}
@@ -1753,6 +1763,10 @@ function renderNonCodeTab(
             {...(!displayReady || props.onOpenAgents === undefined
               ? {}
               : { onOpenAgents: props.onOpenAgents })}
+            {...(!displayReady || props.automationClient === undefined
+              ? {}
+              : { automationClient: props.automationClient })}
+            {...(props.onOpenRoutine === undefined ? {} : { onOpenRoutine: props.onOpenRoutine })}
             {...(initialThread === undefined ? {} : { initialThread })}
             {...(props.goalClient === undefined ? {} : { goalClient: props.goalClient })}
             {...(props.goalLoopClient === undefined
@@ -1838,6 +1852,9 @@ function renderNonCodeTab(
                 {...(props.extensionClient === undefined
                   ? {}
                   : { extensionClient: props.extensionClient })}
+                {...(props.automationClient === undefined
+                  ? {}
+                  : { automationClient: props.automationClient })}
                 {...(props.onOpenCanvasReference === undefined
                   ? {}
                   : { onOpenCanvas: props.onOpenCanvasReference })}
