@@ -14,6 +14,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { BrowserProfileControl } from "../browser/BrowserProfileControl";
+import { BrowserExtensionsButton } from "../browser/BrowserExtensionsButton";
 import {
   readRememberedProfileChoice,
   writeRememberedProfileChoice,
@@ -256,6 +257,17 @@ export function ZenProjectResearchDock(props: ZenProjectResearchDockProps) {
         signedInPagesAvailable={nativeSupported === true}
         {...(client.manageProfiles === undefined ? {} : { onSignOut: () => signOut() })}
       />
+      {native && active && context?.profile !== undefined && context.profile !== "private" ? (
+        <BrowserExtensionsButton
+          agentDriving={false}
+          client={client}
+          hostBridge={props.hostBridge}
+          profile={
+            context.profile === "personal" ? { kind: "personal" } : { kind: "project", projectId }
+          }
+          refreshKey={String(context.contextId)}
+        />
+      ) : null}
       <OctantInput
         aria-label="Project browser address"
         className="zen-research__address-input"

@@ -95,7 +95,7 @@ describe("AutomationDefinitionEditor creation", () => {
     await chooseLabeledOption("Authority profile", "Ask for approvals Work");
     // The effective authority is summarized as named text, never a token dump.
     expect(
-      screen.getByText("Ask for approvals · filesystem, tools · this session only"),
+      screen.getByText("Ask for approvals · filesystem, shell, git, tools · this session only"),
     ).toBeVisible();
 
     await chooseLabeledOption("Schedule", "Run once");

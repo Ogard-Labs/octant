@@ -30,7 +30,10 @@ export interface SettingsContainerProps {
   readonly availableFonts?: ReadonlyArray<string>;
   readonly backgroundImageLibrary: ReturnType<typeof useBackgroundImageLibrary>;
   readonly chatController: ChatController;
-  readonly browserAutomationClient?: Pick<BrowserAutomationClient, "manageProfiles">;
+  readonly browserAutomationClient?: Pick<
+    BrowserAutomationClient,
+    "manageExtensions" | "manageProfiles"
+  >;
   readonly clients: ReturnType<typeof createLaunchedShellClients>;
   readonly codeController: CodeController;
   readonly controller: ReturnType<typeof useShellController>;

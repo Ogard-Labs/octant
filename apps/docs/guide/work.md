@@ -50,9 +50,9 @@ The sidebar **Thread board** is a server-derived view of Work threads as Ready, 
 
 To redesign an existing website, ask the agent to open the page in the Browser and take a screenshot. It can then build a Canvas design with the page as it is now beside a redesigned version. The before frame shows the screenshot the thread kept (a small picture, about 40 KB), and the agent draws the after frame itself; it never pulls the site's own images, styles, or fonts into a frame. Only screenshots this thread took are used. The Canvas preview shows them, but a share, a public link, and an export leave them out.
 
-Today Work has no shell and no Git. The agent in a Work thread is never given a way to run commands, so it never asks you to approve one; changes to files in the Project still ask first. When Work work becomes software engineering, use a [promotion](/guide/promotions) to start a linked Code thread with explicit user approval.
+Work and Code can do the same things. A Work thread gets the same shell, Git, command-line tools, `ssh` to your own machines, and provider tools as a Code thread, under the same mode: at **Ask first** and **Accept edits** you approve each command, at **Auto** the provider's own reviewer answers (a provider without one asks first), and at **Full access** nothing asks and nothing is sandboxed. Octant keeps no SSH keys; `ssh`, `scp`, and `rsync` run as ordinary commands with your own agent and settings, so at Ask first you approve them like any other command. Pick the mode from the shield button beside the model in the composer; the next turn runs at it. Work has no Plan mode. When Work work becomes software engineering with a delivery target, use a [promotion](/guide/promotions) to start a linked Code thread with explicit user approval.
 
-Planned: Work and Code can do the same things. A Work thread gets the same shell, Git, command-line tools, `ssh` to your own machines, provider tools, subagents, and Full access as a Code thread, under the same guardrail level: at Guarded you approve each command and the first connection to each host; at Full access nothing asks. Octant keeps no SSH keys; `ssh` uses your own agent and settings. What differs is focus: Work shows documents, artifacts, local tasks, and its board, and keeps Git panels, pull requests, reviews, issue trackers, and worktrees out of sight until you turn on **Developer tools** in the Work Project's overview. A Work thread is still Done when you mark it Done. This is not built yet.
+What differs is focus: Work shows documents, artifacts, local tasks, and its board, and keeps Git panels, pull requests, reviews, issue trackers, and worktrees out of sight until you turn on **Developer tools** in the Work Project's overview. A Work thread is still Done when you mark it Done. The Developer tools switch is not built yet.
 
 ## Continue a terminal session
 
@@ -67,9 +67,9 @@ this Mac, and the task is marked as holding outside content.
 **Settings › Work** sets what a new Work thread starts with:
 
 - **Default model** is the provider and model a new thread starts on, unless you pick another in the composer. If that model is no longer available, the first available one is used.
-- **Access** is what the agent may do to files in the Project folder without asking. **Ask first** (the default) asks before every change. **Auto-accept edits** lets edits inside the Project folder happen without a prompt; anything outside the folder is still refused, and everything else works as before. Some providers have no auto-accept path and keep asking.
+- **Access** is the mode a new thread starts in, the same modes a Code thread has. **Ask first** (the default) asks before every command and every change. **Accept edits** lets edits inside the Project folder happen without a prompt and still asks before commands; anything outside the folder is still refused. **Auto** lets the provider's own reviewer answer. **Full access** runs with no sandbox and no prompts; the first time you pick it, Octant says what that means and asks you to confirm. Only a window on this computer can pick Full access; a paired device can lower a thread but not raise one to it.
 
-A thread keeps the access it started with, so changing the setting never changes a thread that already exists. A goal loop only auto-accepts edits when its own limits allow it too. A Work folder has no checkpoint to go back to, so a goal loop's rounds run only while they ask before each edit; a loop that would accept edits on its own pauses and says so.
+Changing the setting never changes a thread that already exists; each thread changes its own mode from its composer. A goal loop only auto-accepts edits when its own limits allow it too, and never runs a round above them. A Work folder has no checkpoint to go back to, so a goal loop's rounds run only while they ask before each edit; a loop that would accept edits on its own pauses and says so.
 
 ## Sending while a response is running
 
@@ -200,8 +200,10 @@ and what to do with runs missed while the computer is off. It belongs to the
 thread's Project and mode; you do not pick them.
 
 A routine made this way belongs to the thread's Project. Each run starts a new
-thread there that asks before it changes anything, and a Work run has no shell
-or Git, whatever the proposal said. It appears under Routines in the thread's
+thread there that asks before it runs a command or changes anything, whatever
+the proposal said. A Work routine saved before Work threads had the shell
+does not run until you edit it in Automation Center and save it with a
+profile that includes the shell and Git; its run history says why. It appears under Routines in the thread's
 Environment. That list shows every active and paused routine of the
 Project, not only this thread's: this thread's follow-ups first, then the
 routines made from this thread, then the rest. Each can be paused, resumed, or

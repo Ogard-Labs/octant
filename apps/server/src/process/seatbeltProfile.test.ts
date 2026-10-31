@@ -124,6 +124,91 @@ describe("shared Seatbelt profile builder", () => {
     },
   );
 
+  describe("a Project's extra folders", () => {
+    function folders() {
+      const root = temporaryRoot();
+      const main = join(root, "main");
+      const extra = join(root, "extra");
+      const sibling = join(root, "sibling");
+      const temporaryDirectory = join(root, "tmp");
+      for (const folder of [main, extra, sibling, temporaryDirectory]) mkdirSync(folder);
+      return { main, extra, sibling, temporaryDirectory };
+    }
+
+    it("grants an extra folder exactly the bound root's read and write rules", () => {
+      const { main, extra, sibling, temporaryDirectory } = folders();
+      const profile = buildDenyDefaultSeatbeltProfile({
+        boundRoot: main,
+        extraBoundRoots: [extra],
+        temporaryDirectory,
+        networkEgress: "none",
+        privateHomeAllowPaths: [],
+      });
+      for (const folder of [main, extra]) {
+        expect(profile).toContain(seatbeltAllowRule("file-read*", folder));
+        expect(profile).toContain(seatbeltAllowRule("file-write*", folder));
+      }
+      expect(profile).not.toContain(seatbeltAllowRule("file-read*", sibling));
+      expect(profile).not.toContain(seatbeltAllowRule("file-write*", sibling));
+    });
+
+    it("denies writes to an extra folder at a read-only level, as it does the bound root", () => {
+      const { main, extra, temporaryDirectory } = folders();
+      const profile = buildDenyDefaultSeatbeltProfile({
+        boundRoot: main,
+        extraBoundRoots: [extra],
+        temporaryDirectory,
+        networkEgress: "none",
+        writeBoundRoot: false,
+        privateHomeAllowPaths: [],
+      });
+      const lines = profile.split("\n");
+      for (const folder of [main, extra]) {
+        expect(lines).toContain(seatbeltAllowRule("file-read*", folder));
+        expect(lines).toContain(seatbeltDenyRule("file-write*", folder));
+        expect(lines).not.toContain(seatbeltAllowRule("file-write*", folder));
+      }
+    });
+
+    it("refuses an extra folder that is relative or an ancestor of a denied system path", () => {
+      const { main, temporaryDirectory } = folders();
+      const build = (extra: string) =>
+        buildDenyDefaultSeatbeltProfile({
+          boundRoot: main,
+          extraBoundRoots: [extra],
+          temporaryDirectory,
+          networkEgress: "none",
+          privateHomeAllowPaths: [],
+        });
+      expect(() => build("notes")).toThrow(ProcessConfinementError);
+      expect(() => build("/Library")).toThrow(ProcessConfinementError);
+    });
+
+    it.skipIf(process.platform !== "darwin")(
+      "lets a confined process write into an extra folder and not into a sibling folder",
+      () => {
+        const { main, extra, sibling, temporaryDirectory } = folders();
+        const launch = makeProcessConfinementLive({ platform: "darwin" }).prepare({
+          executable: "/bin/sh",
+          args: [
+            "-c",
+            `echo main > '${join(main, "a.txt")}'; echo extra > '${join(extra, "b.txt")}'; echo sibling > '${join(sibling, "c.txt")}'`,
+          ],
+          boundRoot: main,
+          extraBoundRoots: [extra],
+          temporaryDirectory,
+          networkEgress: "none",
+          allowFileReadStar: true,
+        });
+        const result = spawnSync(launch.command, [...launch.args], { cwd: main, encoding: "utf8" });
+        expect(existsSync(join(main, "a.txt"))).toBe(true);
+        expect(existsSync(join(extra, "b.txt"))).toBe(true);
+        expect(existsSync(join(sibling, "c.txt"))).toBe(false);
+        expect(result.stderr).toContain("Operation not permitted");
+      },
+    );
+  });
+
   it("denies a bound root it may not write even when the temporary directory holds it", () => {
     // A scratch checkout under `$TMPDIR` — where the provider smokes put theirs
     // — was writable through the temporary directory's own subpath grant, so a

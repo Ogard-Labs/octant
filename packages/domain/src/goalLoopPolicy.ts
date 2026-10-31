@@ -23,6 +23,25 @@ import type {
  * could, never more.
  */
 
+/**
+ * What every Work turn holds, whatever its level: the Project folder, the
+ * shell and Git a Code turn at that level has, and Octant's tools, with no
+ * network authority of its own and no subagents. The host starts a loop only
+ * under a ceiling that does not withhold any of these, because a round cannot
+ * run without them; the level itself is the turn's own, narrowed per round.
+ * The client starts a Work loop under exactly this ceiling.
+ */
+export const WORK_GOAL_LOOP_CEILING: AgentRunAuthority = {
+  filesystem: true,
+  shell: true,
+  git: true,
+  network: false,
+  tools: true,
+  subagents: false,
+  executionPolicy: "approval-gated",
+  permissionPersistence: "current-session",
+};
+
 export interface GoalLoopRoundFacts {
   readonly loopStatus: GoalLoopStatus;
   readonly goalStatus: ThreadGoalStatus;

@@ -123,7 +123,7 @@ describe("a routine the hub offered, built on this host", () => {
       projectId: PROJECT_ID,
       executionProfile: { executionPolicy: "approval-gated" },
       authorityProfile: {
-        effective: { shell: false, git: false, executionPolicy: "approval-gated" },
+        effective: { shell: true, git: true, executionPolicy: "approval-gated" },
       },
     });
   });

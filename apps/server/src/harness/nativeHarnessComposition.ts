@@ -65,16 +65,16 @@ export interface NativeHarnessCompositionOptions {
   readonly tasks?: Pick<NativeHarnessSessionStore, "replaceTasks">;
   /** The thread goal a lead reads and checks; absent on a host without goals. */
   readonly goals?: Pick<GoalService, "read" | "execute">;
-  /** Code only: the sandboxed shell. */
+  /** Work and Code: the sandboxed shell. */
   readonly shell?: NativeHarnessShellPort;
   /**
-   * Code only: the same sandboxed shell with the network closed at the OS, for
+   * Work and Code: the same sandboxed shell with the network closed at the OS, for
    * a child that holds no network authority. Without it such a child gets no
    * shell, because the ordinary one can reach the network.
    */
   readonly offlineShell?: NativeHarnessShellPort;
   /**
-   * Code only: the sandboxed shell on `proxied` network, whose commands reach
+   * Work and Code: the sandboxed shell on `proxied` network, whose commands reach
    * only the hosts the scope's egress rules name. With it, each command runs
    * on the network its thread's live posture resolves: approval-gated and
    * auto-accept-edits on `proxied`, Full access on `shell`, anything else on
@@ -83,7 +83,7 @@ export interface NativeHarnessCompositionOptions {
    */
   readonly proxiedShell?: (scope: HarnessEgressScope) => NativeHarnessShellPort;
   /**
-   * Code only: the shell a Full access command runs on, outside Octant's OS
+   * Work and Code: the shell a Full access command runs on, outside Octant's OS
    * sandbox with the network open, as Full access runs in the providers' own
    * apps. Chosen per command with `proxiedShell`, so a posture lowered
    * mid-turn puts the next command back in the sandbox. Without it Full
@@ -99,6 +99,12 @@ export interface NativeHarnessCompositionOptions {
     threadId: string,
     windowId?: string,
   ) => ProviderExecutionPolicy | undefined;
+  /**
+   * A Work thread's posture now: its running turn's level, or nothing when no
+   * turn runs. A Work thread's commands run on the network it resolves, as a
+   * Code thread's do; without a turn they run offline.
+   */
+  readonly readWorkExecutionPolicy?: (threadId: string) => ProviderExecutionPolicy | undefined;
   /**
    * The web search a turn may use, resolved each time a turn's tools are
    * composed: its backing endpoint is a live setting, not a startup fact.
@@ -209,11 +215,15 @@ export interface NativeHarnessComposition {
   readonly forWork: (input: {
     readonly thread: WorkThread;
     readonly projectRoot: string;
+    /** The Project's extra folders, which the file tools treat as the root. */
+    readonly extraFolders?: ReadonlyArray<string>;
     readonly windowId: string;
   }) => AppManagedToolSet | undefined;
   readonly forCode: (input: {
     readonly thread: CodeThread;
     readonly checkoutRoot: string;
+    /** The Project's extra folders, which the file tools treat as the checkout. */
+    readonly extraFolders?: ReadonlyArray<string>;
     readonly windowId: string;
     /**
      * The credential values the turn resolved. A lookup redacts them from
@@ -382,6 +392,8 @@ export function createNativeHarnessComposition(
     readonly windowId?: string;
     /** A Code thread's checkout, the root Octant Shield judges its calls against. */
     readonly boundRoot?: string;
+    /** The Project's extra folders, which Shield judges as it judges the root. */
+    readonly extraRoots?: ReadonlyArray<string> | undefined;
   }): Pick<NativeHarnessToolPorts, "askUser" | "approvals" | "steering" | "callEnded"> => ({
     callEnded: (callId) => {
       confirmedCommandHosts.delete(callId);
@@ -439,6 +451,7 @@ export function createNativeHarnessComposition(
                   command: input.command,
                 }),
                 boundRoot: scope.boundRoot,
+                ...(scope.extraRoots === undefined ? {} : { extraRoots: scope.extraRoots }),
                 signal: input.signal,
               });
               if (decision !== undefined) {
@@ -460,13 +473,16 @@ export function createNativeHarnessComposition(
             const askCommand = approvalStore.askCommand;
             if (
               !input.freshConfirmation ||
-              scope.mode !== "code" ||
+              scope.mode === "chat" ||
               (input.toolName !== "bash" && input.toolName !== "goal-check") ||
               askCommand === undefined ||
               options.commandHosts === undefined ||
               options.proxiedShell === undefined ||
-              materializeHarnessToolNetwork(codeEgress(scope.parentThreadId, scope.windowId)) !==
-                "proxied"
+              materializeHarnessToolNetwork(
+                scope.mode === "code"
+                  ? codeEgress(scope.parentThreadId, scope.windowId)
+                  : workEgress(scope.parentThreadId),
+              ) !== "proxied"
             ) {
               return approvalStore.ask(ask);
             }
@@ -529,6 +545,18 @@ export function createNativeHarnessComposition(
     options.proxiedShell === undefined
       ? options.shell
       : postureShell(options.proxiedShell(scope), () => codeEgress(scope.threadId, windowId));
+  const workEgress = (threadId: string) => {
+    const executionPolicy = options.readWorkExecutionPolicy?.(threadId);
+    return executionPolicy === undefined
+      ? "none"
+      : resolveDefaultThreadEgressPolicy({ mode: "work", executionPolicy });
+  };
+  // Work and Code share the shell at the thread's level, so a Work thread's
+  // commands run on the shell a Code thread at that level gets.
+  const workShell = (scope: HarnessEgressScope): NativeHarnessShellPort | undefined =>
+    options.proxiedShell === undefined
+      ? options.shell
+      : postureShell(options.proxiedShell(scope), () => workEgress(scope.threadId));
   const delegateFor = (scope: {
     readonly parentThreadId: string;
     readonly windowId: string;
@@ -605,9 +633,10 @@ export function createNativeHarnessComposition(
         },
       });
     },
-    forWork: ({ thread, projectRoot, windowId }) => {
+    forWork: ({ thread, projectRoot, extraFolders, windowId }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
       const threadId = String(thread.id);
+      const shell = workShell({ threadId, projectId: String(thread.projectId) });
       return compose({
         threadId,
         mode: "work",
@@ -626,7 +655,11 @@ export function createNativeHarnessComposition(
             projectId: thread.projectId,
             lead: leadOf(thread),
           }),
-          filesystem: new NativeHarnessFileSystem({ root: projectRoot }),
+          filesystem: new NativeHarnessFileSystem({
+            root: projectRoot,
+            ...(extraFolders === undefined ? {} : { extraRoots: extraFolders }),
+          }),
+          ...(shell === undefined ? {} : { shell }),
           ...webPorts(),
           ...contextRemainingFor("work-thread", threadId),
           ...journalLookupFor({
@@ -644,7 +677,7 @@ export function createNativeHarnessComposition(
         },
       });
     },
-    forCode: ({ thread, checkoutRoot, windowId, secrets }) => {
+    forCode: ({ thread, checkoutRoot, extraFolders, windowId, secrets }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
       const threadId = String(thread.id);
       const shell = codeShell({ threadId, projectId: String(thread.projectId) }, windowId);
@@ -676,8 +709,12 @@ export function createNativeHarnessComposition(
             lead: leadOf(thread),
             windowId,
             boundRoot: checkoutRoot,
+            ...(extraFolders === undefined ? {} : { extraRoots: extraFolders }),
           }),
-          filesystem: new NativeHarnessFileSystem({ root: checkoutRoot }),
+          filesystem: new NativeHarnessFileSystem({
+            root: checkoutRoot,
+            ...(extraFolders === undefined ? {} : { extraRoots: extraFolders }),
+          }),
           ...(shell === undefined ? {} : { shell }),
           ...webPorts(),
           ...contextRemainingFor("code-thread", threadId),

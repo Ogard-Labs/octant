@@ -2,9 +2,9 @@ import { randomUUID } from "node:crypto";
 import {
   decodeCodeThreadId,
   decodeSpendCeilingReservationId,
+  type AutoReviewer,
   type CodeThread,
   type ProviderCapabilities,
-  type ProviderDriverKind,
   type ProviderExecutionPolicy,
   type ProviderInstanceId,
   type ProviderModelId,
@@ -12,7 +12,6 @@ import {
   type ShieldModelChoice,
   type TurnUsage,
 } from "@octant/contracts";
-import { isNativeHarnessDriverKind } from "@octant/domain";
 import { shieldReviewsPrompts } from "@octant/domain/guardrail-policy";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type { SpendCeilingService } from "../spendCeilingService";
@@ -46,6 +45,8 @@ export interface HostShieldDependencies {
   readonly personMessages: (threadId: CodeThread["id"], limit: number) => ReadonlyArray<string>;
   /** The person's chosen Shield model, when they picked one. */
   readonly chosenModel?: () => ShieldModelChoice | undefined;
+  /** The person's Auto reviewer for a thread: its Project's, else Settings'. */
+  readonly chosenReviewer?: (thread: CodeThread) => AutoReviewer | undefined;
   readonly spendCeiling?: Pick<SpendCeilingService, "admit" | "settle" | "abandon">;
   /**
    * Records what one review's model call used under the reviewed thread, so
@@ -119,6 +120,7 @@ export function createHostShield(deps: HostShieldDependencies): HostShield {
         if (thread === undefined || thread.lifecycle !== "active") return undefined;
         const executionPolicy = deps.readTurnExecutionPolicy?.(threadId) ?? thread.executionPolicy;
         const reviews = shieldReviewsPrompts({
+          reviewer: deps.chosenReviewer?.(thread),
           access: { executionPolicy, autoApprove: thread.autoApprove },
           capabilities: {
             providerReview:
@@ -210,11 +212,4 @@ function shieldSpend(
   };
 }
 
-/**
- * Runtimes whose approval prompts reach Octant before the call runs, so
- * Shield can answer them: the Octant Harness, whose tool calls pass Octant's
- * approval path.
- */
-export function shieldRoutesApprovals(driverKind: ProviderDriverKind): boolean {
-  return isNativeHarnessDriverKind(driverKind);
-}
+export { shieldRoutesApprovals } from "@octant/domain/guardrail-policy";

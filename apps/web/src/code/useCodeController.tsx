@@ -1,5 +1,6 @@
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import type { ProjectId } from "@octant/contracts/projects";
+import type { AutoReviewer, ShieldModelChoice } from "@octant/contracts/shield";
 import {
   CodeClientFailure,
   CodeClientSnapshotRequiredError,
@@ -2566,6 +2567,8 @@ export function useCodeController(options: CodeControllerOptions) {
       readonly defaultDiffLayout?: CodeBootstrap["settings"]["defaultDiffLayout"];
       readonly bundledLanguageServer?: boolean;
       readonly defaultAutoApprove?: boolean;
+      readonly autoReviewer?: AutoReviewer;
+      readonly shieldModel?: ShieldModelChoice | null;
     }): Promise<boolean> => {
       if (bootstrap === undefined) return false;
       const result = await execute({

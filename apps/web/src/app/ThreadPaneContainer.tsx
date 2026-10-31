@@ -97,6 +97,8 @@ export interface ThreadPaneContainerProps {
     | "openThreadBrowser"
     | "openWorkThread"
     | "previewSplitResize"
+    | "addProjectExtraFolder"
+    | "removeProjectExtraFolder"
     | "relinkProject"
     | "renameProject"
     | "revealBrowserActivity"
@@ -126,6 +128,7 @@ export interface ThreadPaneContainerProps {
     | "setProjectColor"
     | "setProjectProviderPolicy"
     | "setProjectPermissionMode"
+    | "setProjectAutoReviewer"
     | "setProjectBrandKit"
     | "setProjectDesktopRecipe"
     | "setProjectActions"
@@ -364,6 +367,8 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     openWorkThread,
     previewSplitResize,
     refuseUnlessCreatableDestination,
+    addProjectExtraFolder,
+    removeProjectExtraFolder,
     relinkProject,
     renameProject,
     resetNewTaskDraft,
@@ -387,6 +392,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     setProjectColor,
     setProjectProviderPolicy,
     setProjectPermissionMode,
+    setProjectAutoReviewer,
     setProjectBrandKit,
     setProjectDesktopRecipe,
     setProjectActions,
@@ -676,11 +682,14 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 )
               }
               onPreviewResize={previewSplitResize}
+              onAddProjectExtraFolder={addProjectExtraFolder}
+              onRemoveProjectExtraFolder={removeProjectExtraFolder}
               onRelinkProject={relinkProject}
               onRenameProject={renameProject}
               onProjectColorChange={setProjectColor}
               onProviderPolicyChange={setProjectProviderPolicy}
               onProjectPermissionModeChange={setProjectPermissionMode}
+              onProjectAutoReviewerChange={setProjectAutoReviewer}
               onBrandKitChange={setProjectBrandKit}
               onDesktopRecipeChange={setProjectDesktopRecipe}
               onActionsChange={setProjectActions}

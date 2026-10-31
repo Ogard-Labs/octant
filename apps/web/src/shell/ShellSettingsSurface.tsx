@@ -72,7 +72,10 @@ export interface ShellSettingsSurfaceProps {
   readonly themeController: ThemeController;
   readonly diagnosticsExportClient: DiagnosticsExportClient;
   readonly hostControlClient: HostControlClient;
-  readonly browserAutomationClient?: Pick<BrowserAutomationClient, "manageProfiles">;
+  readonly browserAutomationClient?: Pick<
+    BrowserAutomationClient,
+    "manageExtensions" | "manageProfiles"
+  >;
   readonly canvasClient?: Pick<CanvasClient, "publicLinkSettings" | "setPublicLinkSettings">;
   readonly desktopPaneClient?: Pick<DesktopPaneClient, "request">;
   readonly replicaStoreSettingsClient?: ReplicaStoreSettingsClient;

@@ -197,8 +197,9 @@ const NATIVE_HARNESS_TOOL_POLICY: Readonly<
     irreversibleUnderTaint: false,
     resultTaintsThread: false,
   },
+  // Work and Code share the shell at the thread's level.
   bash: {
-    modes: ["code"],
+    modes: ["work", "code"],
     requiredCapabilityClass: "shell",
     approvalClass: "shell-commands",
     irreversibleUnderTaint: true,
@@ -287,7 +288,7 @@ const NATIVE_HARNESS_TOOL_POLICY: Readonly<
   },
   // A check runs a command, so it is policed exactly as the shell is.
   "goal-check": {
-    modes: ["code"],
+    modes: ["work", "code"],
     requiredCapabilityClass: "shell",
     approvalClass: "shell-commands",
     irreversibleUnderTaint: true,

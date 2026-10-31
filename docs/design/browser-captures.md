@@ -36,8 +36,8 @@ the Browser pane
   picture the model received, not a full-resolution screenshot.
 - The journal records `browser.capture-kept@1` on one `browser-capture`
   aggregate per thread (aggregate id = thread id): capture id, thread id, page
-  origin, URL, title, SHA-256 content hash, size, media type, and time. Never
-  bytes or a data URL.
+  origin, URL, title, SHA-256 content hash, size, media type, time, and, for a
+  page in a Project or Personal profile, that profile. Never bytes or a data URL.
 - The envelope actor says who took it: the agent (provider instance and thread)
   or the local person.
 - A capture is kept after the observation that produced it was recorded, so the

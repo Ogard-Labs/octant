@@ -79,7 +79,9 @@ function authorityProfileEligible(
   if (requested.executionPolicy === "full-access" || effective.executionPolicy === "full-access") {
     return false;
   }
-  return mode !== "work" || (!effective.shell && !effective.git);
+  // Every Work turn holds the shell and Git, so a Work routine runs only under
+  // a profile that grants them; one without them would never run.
+  return mode !== "work" || (effective.shell && effective.git);
 }
 
 export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProps) {

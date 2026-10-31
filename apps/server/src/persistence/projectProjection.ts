@@ -9,6 +9,7 @@ import {
   decodeCodeProjectAccessChanged,
   decodeCodeProjectNewThreadWorkspaceChanged,
   decodeCodeProjectPermissionModeChanged,
+  decodeCodeProjectAutoReviewerChanged,
   decodeCodeProjectPullRequestBackgroundRefreshChanged,
   decodeProjectProviderPolicyChanged,
   decodeProjectCreated,
@@ -21,6 +22,8 @@ import {
   decodeWorkProjectStatusFileChanged,
   decodeProjectBrandKitChanged,
   decodeCodeProjectActionsChanged,
+  decodeProjectExtraFolderAdded,
+  decodeProjectExtraFolderRemoved,
   decodeCodeProjectDesktopRecipeChanged,
   type EventEnvelope,
   type MemoryEntry,
@@ -172,6 +175,8 @@ const projectDecoders = {
     decodeCodeProjectAccessChanged(payload).project,
   "project.code-permission-mode-changed@1": (payload: unknown) =>
     decodeCodeProjectPermissionModeChanged(payload).project,
+  "project.code-auto-reviewer-changed@1": (payload: unknown) =>
+    decodeCodeProjectAutoReviewerChanged(payload).project,
   "project.code-new-thread-workspace-changed@1": (payload: unknown) =>
     decodeCodeProjectNewThreadWorkspaceChanged(payload).project,
   "project.code-pull-request-background-refresh-changed@1": (payload: unknown) =>
@@ -182,6 +187,10 @@ const projectDecoders = {
     decodeWorkProjectStatusFileChanged(payload).project,
   "project.brand-kit-changed@1": (payload: unknown) =>
     decodeProjectBrandKitChanged(payload).project,
+  "project.extra-folder-added@1": (payload: unknown) =>
+    decodeProjectExtraFolderAdded(payload).project,
+  "project.extra-folder-removed@1": (payload: unknown) =>
+    decodeProjectExtraFolderRemoved(payload).project,
   "project.code-actions-changed@1": (payload: unknown) =>
     decodeCodeProjectActionsChanged(payload).project,
   "project.code-desktop-recipe-changed@1": (payload: unknown) =>
