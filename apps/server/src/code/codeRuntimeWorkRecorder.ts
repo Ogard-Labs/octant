@@ -294,6 +294,7 @@ export function codeRuntimeWorkPlan(
         reachesNetwork: command.kind === "push-git",
       };
     case "create-pull-request":
+    case "update-pull-request":
       return { id: command.operationId, kind: "delivery", starts: true, reachesNetwork: true };
     default:
       return undefined;

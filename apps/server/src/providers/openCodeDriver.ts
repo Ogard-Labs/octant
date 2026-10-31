@@ -2118,7 +2118,8 @@ function makeConnection(
                           // other pending requests it covers. Octant keeps its
                           // own remembered approvals, so 2.x is only answered once.
                           input.approved
-                            ? runtimeKind !== "beta" &&
+                            ? input.scope !== "once" &&
+                              runtimeKind !== "beta" &&
                               (options.permissionPersistence?.() ?? "current-session") ===
                                 "project-default"
                               ? "always"

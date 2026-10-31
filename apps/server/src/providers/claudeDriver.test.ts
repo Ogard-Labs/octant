@@ -1246,6 +1246,60 @@ describe("Claude execution policy", () => {
     await acquired.close();
   });
 
+  it("asks again for the same call after a one-call answer, even when the person reuses approvals for the session", async () => {
+    const f = harness("subscription", "current-session");
+    const acquired = await acquire(f.driver);
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const open = f.opens[0]!;
+    const signal = new AbortController().signal;
+    const input = { file_path: `${projectRoot}/src/app.ts`, old_string: "a", new_string: "b" };
+    const nextApproval = () =>
+      Effect.runPromise(
+        Stream.runHead(
+          Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+            Stream.filter(
+              (event) => event.sessionId === sessionId && event.kind === "approval-request",
+            ),
+          ),
+        ),
+      );
+    const ask = async (toolUseId: string) => {
+      const approval = nextApproval();
+      await Promise.resolve();
+      await open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Edit",
+        input,
+        toolUseId,
+        signal,
+      });
+      const callback = open.canUseTool({ toolName: "Edit", input, toolUseId, signal });
+      const first = await Promise.race([
+        approval.then((result) => ({ kind: "event" as const, result })),
+        callback.then((decision) => ({ kind: "decision" as const, decision })),
+      ]);
+      return { first, callback };
+    };
+    const firstCall = await ask("edit-once");
+    expect(firstCall.first.kind).toBe("event");
+    await Effect.runPromise(
+      acquired.connection.answerApproval({
+        sessionId,
+        requestId: "request-1",
+        approved: true,
+        scope: "once",
+      }),
+    );
+    await expect(firstCall.callback).resolves.toEqual({ behavior: "allow" });
+    // The same call again is asked again: a one-call answer is never reused.
+    const secondCall = await ask("edit-again");
+    expect(secondCall.first.kind).toBe("event");
+    await acquired.close();
+  });
+
   it.each(["current-session", "project-default"] as const)(
     "correlates approval answers atomically and degrades %s reuse to the active session",
     async (persistence) => {

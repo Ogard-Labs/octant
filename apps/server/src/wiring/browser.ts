@@ -5,6 +5,7 @@ import {
   decodeCodeThreadId,
   LOCAL_HOST_ID,
   type ProjectId,
+  type StoredBrowserProfile,
   sameToolActionAuthority,
   type WindowId,
 } from "@octant/contracts";
@@ -17,6 +18,7 @@ import {
 import { decodeCodeEvidenceReference } from "@octant/contracts/code-operations";
 import { ProductFeedbackService } from "../browser/productFeedbackService";
 import { isRoutineHostScope } from "../routineHostScope";
+import { BrowserProfileService } from "../browser/browserProfileService";
 import { ProjectBrowserService } from "../browser/projectBrowserService";
 import { OCTANT_LOCAL_ACTOR_ID, ShellServiceError } from "../shellService";
 import {
@@ -28,7 +30,7 @@ import { readThreadExternalContentTaint } from "../context/externalContentTaintP
 import { createPlaywrightBrowserRuntime } from "../browser/playwrightBrowserRuntime";
 import { createDesktopBrowserRuntimeFromEnvironment } from "../browser/desktopBrowserRuntime";
 import { RoutingBrowserRuntime } from "../browser/routingBrowserRuntime";
-import { defaultShellSettings, enabledModes } from "@octant/domain";
+import { defaultShellSettings, enabledModes, isBrowserProfileSiteRemembered } from "@octant/domain";
 import type { ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
@@ -96,6 +98,43 @@ export function wireBrowser(deps: BrowserDependencies) {
         }
       }
     };
+    const rememberedProfileSites = () =>
+      (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+        .rememberedBrowserProfileSites;
+    // The same journaled path as an origin grant, keyed by the pair so a site
+    // remembered for one profile never covers another.
+    const rememberBrowserProfileSite = (
+      windowId: WindowId,
+      origin: string,
+      profile: StoredBrowserProfile,
+    ) => {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const stored = persistence.readShellSettings();
+        const current = stored?.settings ?? defaultShellSettings();
+        if (
+          isBrowserProfileSiteRemembered(current.rememberedBrowserProfileSites, origin, profile)
+        ) {
+          return;
+        }
+        try {
+          shellService.rememberBrowserProfileSites({
+            windowId,
+            expectedVersion: stored?.aggregateVersion ?? decodeAggregateVersion(0),
+            sites: [{ origin, profile }],
+          });
+          return;
+        } catch (error) {
+          if (!(error instanceof ShellServiceError && error.failure.category === "conflict")) {
+            console.warn(
+              `Octant could not remember a signed-in site approval: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+            return;
+          }
+        }
+      }
+    };
     const browserToolApprovalService = new BrowserToolApprovalService({
       uuid: randomUUID,
       now: Date.now,
@@ -108,8 +147,16 @@ export function wireBrowser(deps: BrowserDependencies) {
           browserAuthority.canAccessWindow(windowId, decodedThreadId, authority.mode)
         );
       },
-      rememberOrigin: (origin, windowId) => rememberBrowserOrigin(windowId, origin),
-      isOriginRemembered: (origin) => rememberedBrowserOrigins().includes(origin),
+      rememberOrigin: (origin, windowId, profile) =>
+        profile === undefined
+          ? rememberBrowserOrigin(windowId, origin)
+          : rememberBrowserProfileSite(windowId, origin, profile),
+      // A remembered Private origin never covers a profile page, and a pair for
+      // one profile never covers another, so each branch reads only its own set.
+      isOriginRemembered: (origin, profile) =>
+        profile === undefined
+          ? rememberedBrowserOrigins().includes(origin)
+          : isBrowserProfileSiteRemembered(rememberedProfileSites(), origin, profile),
       isHostScope: isRoutineHostScope,
       onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
     });
@@ -195,11 +242,29 @@ export function wireBrowser(deps: BrowserDependencies) {
         },
       ),
       recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+      isUnattendedScope: isRoutineHostScope,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
       now: Date.now,
     });
     onWindowRevoked((windowId) => void browserAutomationService.revokeWindow(windowId));
+    // The profiles the desktop app stores, listed and cleared by the person.
+    // Clearing closes the server's own records of the profile's pages first, then
+    // asks the desktop app to remove the store.
+    const browserProfileService = new BrowserProfileService({
+      runtime: browserRuntime,
+      readProject: persistence.readProject,
+      journal: persistence.journal,
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      closePages: async (profile) => {
+        await Promise.all([
+          liveProjectBrowsers.closeProfile(profile),
+          browserAutomationService.closeProfile(profile),
+        ]);
+      },
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    });
     // Notes the user points at the running product. The service owns the
     // authority check and resolves the element itself; the crop lives in the
     // same purgeable evidence store the rest of Code's bulk content uses, and
@@ -256,6 +321,7 @@ export function wireBrowser(deps: BrowserDependencies) {
     });
     return {
       browserAutomationService,
+      browserProfileService,
       browserToolApprovalService,
       liveProjectBrowsers,
       productFeedbackRoutes,

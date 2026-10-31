@@ -10,6 +10,7 @@ import {
   BrowserThreadId,
   MAX_BROWSER_THREAD_CONTEXTS,
 } from "./browserAutomation";
+import { StoredBrowserProfile } from "./browserProfiles";
 import {
   ToolActionAuthority,
   ToolActionCancellation,
@@ -50,6 +51,12 @@ export const BrowserToolApproval = Schema.Struct({
   threadId: BrowserThreadId,
   mode: Schema.Literal("chat", "work", "code"),
   origin: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
+  /**
+   * The Project or Personal profile the page lives in, when it is in one. A
+   * signed-in page acts as the person's account, so the prompt names the profile
+   * and a grant covers that (origin, profile) pair and nothing wider.
+   */
+  profile: Schema.optional(StoredBrowserProfile),
   requestedAt: UtcTimestamp,
 }).annotations({ ...strict, ...personDecides });
 export type BrowserToolApproval = typeof BrowserToolApproval.Type;

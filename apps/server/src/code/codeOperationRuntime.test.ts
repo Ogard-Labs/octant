@@ -96,6 +96,7 @@ import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remote-access";
 import type { PrincipalRouteContext } from "../principalRouteContext";
 import { CODE_BOARD_TOOL_NAME, CODE_TERMINAL_TOOL_NAME } from "./codeAppManagedTools";
+import { GhPullRequestPort, type GhCommandPort } from "./ghPullRequestPort";
 import { createCodeLanguageAgentTools } from "./codeLanguageAgentTools";
 import type { CodeLanguageAgentReadResult } from "./codeLanguageService";
 import {
@@ -1713,6 +1714,88 @@ describe("CodeOperationRuntime", () => {
     },
   );
 
+  it.each([
+    ["a short body", "Verified on the branch.", true],
+    ["a body too long to show whole", "Long notes. ".repeat(400), false],
+  ] as const)(
+    "asks to change a pull request with %s only when the approval can show all of it",
+    async (_name, body, shownWhole) => {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const provider = providerConnection(queue);
+      const update = vi.fn(async () => ({ status: "none" as const }));
+      const fixture = runtimeFixture({
+        provider: providerDriver(provider),
+        approvalValidator: false,
+        supportsAppManagedTools: true,
+        pullRequestTarget: true,
+        gitRemotes: [
+          {
+            name: "origin",
+            fetchUrl: "https://github.com/octant/octant.git",
+            pushUrl: "https://github.com/octant/octant.git",
+          },
+        ],
+        pullRequestPort: {
+          ensure: async () => ({ status: "unavailable" }),
+          update,
+          observeReview: async () => ({ status: "unavailable" }),
+        },
+      });
+      fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "approval-gated" }));
+      try {
+        const operation = operationId(92);
+        await fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operation,
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        });
+        await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+        await Effect.runPromise(
+          Queue.offer(
+            queue,
+            providerEvent({
+              kind: "tool-request",
+              requestId: "pull-request-update",
+              toolName: "octant_pull_request",
+              inputJson: JSON.stringify({ operation: "update", body }),
+            }),
+          ),
+        );
+        if (shownWhole) {
+          let approval:
+            | Extract<OperationFrame["event"], { kind: "approval-requested" }>
+            | undefined;
+          await vi.waitFor(async () => {
+            const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 30);
+            approval = frames
+              .map((frame) => frame.event)
+              .find((event) => event.kind === "approval-requested");
+            expect(approval).toBeDefined();
+          });
+          expect(approval?.summary).toContain(body);
+        } else {
+          await vi.waitFor(() =>
+            expect(provider.answerTool).toHaveBeenCalledWith(
+              expect.objectContaining({ requestId: "pull-request-update", isError: true }),
+            ),
+          );
+          expect(JSON.stringify(vi.mocked(provider.answerTool).mock.calls.at(-1))).toContain(
+            "pull-request-approval-too-large",
+          );
+          const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 30);
+          expect(frames.some((frame) => frame.event.kind === "approval-requested")).toBe(false);
+        }
+        expect(update).not.toHaveBeenCalled();
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    },
+  );
+
   it("reads a posture it cannot resolve as Plan", () => {
     const readPosture = codeTurnExecutionPolicyReader({
       readCodeThread: () => {
@@ -2243,6 +2326,7 @@ describe("CodeOperationRuntime", () => {
           sessionId,
           requestId: "provider-approval-9",
           approved: true,
+          scope: "once",
         }),
       );
       expect(approvalCall).toHaveBeenCalledWith({ sessionId, requestId: "provider-approval-9" });
@@ -2274,6 +2358,7 @@ describe("CodeOperationRuntime", () => {
           sessionId,
           requestId: "provider-approval-9",
           approved: false,
+          scope: "once",
         }),
       );
       expect((await frames()).some((event) => event.kind === "approval-requested")).toBe(false);
@@ -4631,6 +4716,126 @@ describe("CodeOperationRuntime", () => {
       state: "completed",
     });
     expect(fixture.boardActivity()).toMatchObject({ executing: false, awaitingInput: false });
+    fixture.close();
+  });
+
+  it("changes a pull request only with an approval in an approval-gated thread", async () => {
+    let approved = false;
+    const update = vi.fn(async () => ({
+      status: "updated" as const,
+      draft: false,
+      pullRequest: {
+        number: 7,
+        url: "https://github.com/octant/octant/pull/7",
+        baseRepository: "octant/octant",
+        baseBranch: "feature/lexer",
+        headOwner: "octant",
+        headBranch: "feature/runtime",
+      },
+    }));
+    const fixture = runtimeFixture({
+      pullRequestTarget: true,
+      gitRemotes: [
+        {
+          name: "origin",
+          fetchUrl: "https://github.com/octant/octant.git",
+          pushUrl: "https://github.com/octant/octant.git",
+        },
+      ],
+      approvalValidator: () => approved,
+      pullRequestPort: {
+        ensure: async () => ({ status: "unavailable" }),
+        update,
+        observeReview: async () => ({ status: "unavailable" }),
+      },
+    });
+    const command = {
+      kind: "update-pull-request" as const,
+      operationId: operationId(130),
+      threadId,
+      checkoutId,
+      draft: false,
+    };
+
+    const refused = await fixture.runtime.execute(windowId, {
+      ...command,
+      authorization: { kind: "full-access" },
+    });
+    expect(refused).toMatchObject({ failure: { category: "waiting" } });
+    expect(update).not.toHaveBeenCalled();
+
+    approved = true;
+    const changed = await fixture.runtime.execute(windowId, {
+      ...command,
+      authorization: { kind: "approved", approvalId: operationId(131) },
+    });
+
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId, draft: false }),
+      expect.any(AbortSignal),
+    );
+    expect(changed).toMatchObject({
+      kind: "pull-request-state",
+      state: "existing",
+      number: 7,
+      baseBranch: "feature/lexer",
+      draft: false,
+    });
+    fixture.close();
+  });
+
+  it("changes a pull request through the production port class", async () => {
+    // The port keeps its target resolver in a private field, so the update has
+    // to run on the port itself; a detached method has no receiver to read it from.
+    const run = vi.fn<GhCommandPort["run"]>(async (args) =>
+      args[0] === "pr" && args[1] === "list"
+        ? {
+            exitCode: 0,
+            stdout: JSON.stringify([
+              {
+                number: 7,
+                url: "https://github.com/octant/octant/pull/7",
+                state: "OPEN",
+                baseRefName: "development",
+                headRefName: "feature/runtime",
+                headRepositoryOwner: { login: "octant" },
+              },
+            ]),
+          }
+        : { exitCode: 0, stdout: "" },
+    );
+    const fixture = runtimeFixture({
+      pullRequestTarget: true,
+      gitRemotes: [
+        {
+          name: "origin",
+          fetchUrl: "https://github.com/octant/octant.git",
+          pushUrl: "https://github.com/octant/octant.git",
+        },
+      ],
+      approvalValidator: () => true,
+      pullRequestPort: new GhPullRequestPort({
+        command: { run },
+        resolveTarget: async () => ({
+          authorization: "confirmed-delivery-target" as const,
+          baseRepository: "octant/octant",
+          baseBranch: "development",
+          head: "octant:feature/runtime",
+        }),
+      }),
+    });
+
+    const changed = await fixture.runtime.execute(windowId, {
+      kind: "update-pull-request" as const,
+      operationId: operationId(132),
+      threadId,
+      checkoutId,
+      draft: false,
+      authorization: { kind: "approved", approvalId: operationId(133) },
+    });
+
+    expect(changed).toMatchObject({ kind: "pull-request-state", state: "existing", number: 7 });
+    expect(run.mock.calls.some(([args]) => args[0] === "pr" && args[1] === "ready")).toBe(true);
     fixture.close();
   });
 

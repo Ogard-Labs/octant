@@ -2511,7 +2511,11 @@ function makeConnection(
               }
               // A publish is never reused: the same input republishes the
               // file as it is now, which the person has not seen.
-              if (persistence === "current-session" && pending.toolName !== CLAUDE_ARTIFACT_TOOL) {
+              if (
+                answer.scope !== "once" &&
+                persistence === "current-session" &&
+                pending.toolName !== CLAUDE_ARTIFACT_TOOL
+              ) {
                 state.approvalReuse.add(pending.reuseKey);
               }
               pending.decision.resolve({ behavior: "allow" });

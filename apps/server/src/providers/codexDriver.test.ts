@@ -2596,6 +2596,36 @@ describe("Codex execution authority and approvals", () => {
     },
   );
 
+  it.each([
+    ["command", commandApproval],
+    ["file change", fileApproval],
+  ] as const)(
+    "accepts a one-call %s answer for that call only, even under current-session persistence",
+    async (_name, makeRequest) => {
+      const f = fixture();
+      const acquired = await acquireConnection(
+        makeCodexDriver(f.options({ permissionPersistence: () => "current-session" })),
+      );
+      await startSession(acquired.connection);
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "approval", attachments: [], tools: [] }),
+      );
+      const event = takeEvents(acquired.connection, 1);
+      f.emit(makeRequest());
+      await event;
+      await Effect.runPromise(
+        acquired.connection.answerApproval({
+          sessionId,
+          requestId: "request-1",
+          approved: true,
+          scope: "once",
+        }),
+      );
+      expect(f.calls.at(-1)?.input).toMatchObject({ result: { decision: "accept" } });
+      await acquired.close();
+    },
+  );
+
   it("defaults approval persistence to the current session", async () => {
     const f = fixture();
     const acquired = await acquireConnection(makeCodexDriver(f.options()));

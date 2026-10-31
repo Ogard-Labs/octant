@@ -1008,6 +1008,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "data map privacy stored location journal projections artifacts credentials keychain secret-service caches provider calls update checks marketplace",
         },
         {
+          id: settingId("browser-profiles"),
+          label: "Browser profiles",
+          scope: "host",
+          keywords:
+            "browser profiles sign out signed in cookies project personal private site data clear sign-in",
+        },
+        {
           id: settingId("thread-retention"),
           label: "Thread retention",
           scope: "host",
@@ -1254,6 +1261,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Automatic startup",
           scope: "host",
           keywords: "automatic startup launch at login start",
+        },
+        {
+          id: settingId("host-memory-limits"),
+          label: "Memory limits",
+          scope: "host",
+          keywords:
+            "memory limits low very low pressure ram gigabytes gb automatic custom critical",
         },
         {
           id: settingId("host-backup"),

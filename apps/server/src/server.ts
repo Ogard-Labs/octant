@@ -584,6 +584,7 @@ export function startOctantServer(
     });
     const {
       browserAutomationService,
+      browserProfileService,
       browserToolApprovalService,
       liveProjectBrowsers,
       productFeedbackRoutes,
@@ -927,6 +928,7 @@ export function startOctantServer(
         browserAuthority,
         browserAutomationService,
         browserCaptures,
+        browserProfileService,
         canAccessCodeProject,
         capacityScheduler,
         chatService,

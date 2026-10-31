@@ -13,7 +13,10 @@ const PRESSURE_LABEL: Readonly<Record<HostMemoryPressureLevel, string>> = {
   critical: "Very low",
 };
 
-export function hostMemoryFact(memory: HostMemoryStatus): string {
+/** What the notices and the Memory fact read; the limits belong to the Memory limits control. */
+export type HostMemoryReading = Omit<HostMemoryStatus, "limits" | "effectiveLimits">;
+
+export function hostMemoryFact(memory: HostMemoryReading): string {
   return `${PRESSURE_LABEL[memory.pressure]}, host using ${memory.processMegabytes} MB`;
 }
 
@@ -68,7 +71,7 @@ export function formatMemoryEventTime(iso: string): string {
  * that Octant speaks when it stopped something or when memory is very low.
  */
 export function hostMemoryNotices(
-  memory: HostMemoryStatus | undefined,
+  memory: HostMemoryReading | undefined,
 ): ReadonlyArray<HostMemoryNotice> {
   if (memory === undefined) return [];
   const notices: HostMemoryNotice[] = [];

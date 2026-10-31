@@ -1871,6 +1871,9 @@ function collectSessionEvents(
                     sessionId: input.sessionId,
                     requestId: event.requestId,
                     approved,
+                    // A child's request is answered for that one call, by the
+                    // person or by its parent's reviewer; nothing is remembered.
+                    scope: "once",
                   });
                 }),
               );

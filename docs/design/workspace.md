@@ -423,6 +423,14 @@ through `GitHistoryReader` and the authenticated Code checkout-read boundary;
 its Git subprocesses are network-denied and its data is an ephemeral read,
 not a second journal. Pages anchor to immutable Git tips, and commit details
 compare immutable object IDs with an explicit parent for merges.
+Review also owns Local commits: the commits on the thread's branch that its
+upstream does not have, or that its base branch does not have when it has no
+upstream, each opening to its own diff. The host picks the comparison and
+names it in the view; it never fetches. A listing holds the newest 100
+commits and says when older ones are not shown. **Ignore whitespace** is one
+per-person choice, kept in the browser profile and followed by every mounted view, that the Working tree and
+commit diffs apply by asking Git for `-w`. It changes only the diff text: the
+changed-path list, line totals and checkout state token are unchanged.
 A pull request opened in Review shows, under its header, an **Automatic
 actions** section with two switches: **Merge when ready** and **Auto-fix**.
 Each has one status line under its name that says what it is doing now (off,
@@ -543,8 +551,9 @@ which the computer's windows share like a browser's history, and never sent
 to the host; a running server's address is not repeated there, and choosing a row
 opens it. With neither, the start page invites an address. **Browser profiles.**
 A page is Private unless the person picks the Project or Personal profile from
-the control at the left of the address field; the toolbar's puzzle-piece button
-lists the profile's enabled extensions. The rules are in
+the control at the left of the address field, whose menu also signs out of a
+stored profile (the toolbar's extensions button is part of the not-yet-built
+extensions design). The Project browser dock has the same control. The rules are in
 [Browser profiles and extensions](browser-profiles.md). **Browser captures.** The Browser pane toolbar has a
 Screenshot button (a camera icon beside Open in default browser) that keeps the
 page's picture with the thread, and a thread that kept screenshots shows a

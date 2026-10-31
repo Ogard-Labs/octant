@@ -1,4 +1,4 @@
-import type { HostMemoryStatus } from "@octant/contracts/host-control";
+import type { HostMemoryReading } from "./hostMemoryNotice";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useHostMemoryNotice } from "./useHostMemoryNotice";
@@ -9,7 +9,7 @@ const stop = {
   processMegabytes: 4100,
 } as const;
 
-function clientWith(memory: HostMemoryStatus | undefined) {
+function clientWith(memory: HostMemoryReading | undefined) {
   const status = vi.fn(async () => ({ memory }));
   return { status };
 }
@@ -59,7 +59,7 @@ describe("useHostMemoryNotice", () => {
 
   it("rereads the status on an interval so a later relief appears", async () => {
     vi.useFakeTimers();
-    let memory: HostMemoryStatus = { pressure: "normal", processMegabytes: 300 };
+    let memory: HostMemoryReading = { pressure: "normal", processMegabytes: 300 };
     const client = { status: vi.fn(async () => ({ memory })) };
     const { result } = renderHook(() => useHostMemoryNotice(client));
     await act(async () => {

@@ -52,6 +52,27 @@ describe("CodeDiffPane", () => {
     expect(screen.queryByRole("navigation", { name: "Changed files" })).not.toBeInTheDocument();
   });
 
+  it("offers Ignore whitespace only when the owner can reread the diff, and reports the choice", async () => {
+    const onChange = vi.fn();
+    const view = render(
+      <CodeDiffPane client={client()} diff={available()} loadRuntime={runtime().loadRuntime} />,
+    );
+    await screen.findByRole("region", { name: "src/index.ts" });
+    expect(screen.queryByRole("checkbox", { name: "Ignore whitespace" })).not.toBeInTheDocument();
+
+    view.rerender(
+      <CodeDiffPane
+        client={client()}
+        diff={available()}
+        ignoreWhitespace={{ value: false, onChange }}
+        loadRuntime={runtime().loadRuntime}
+      />,
+    );
+    await userEvent.setup().click(screen.getByRole("checkbox", { name: "Ignore whitespace" }));
+
+    expect(onChange).toHaveBeenCalledWith(true);
+  });
+
   it("loads exact Git evidence and compares one changed file at a time", async () => {
     const code = client();
     const fixture = runtime();

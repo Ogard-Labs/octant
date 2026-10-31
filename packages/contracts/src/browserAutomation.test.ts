@@ -11,9 +11,9 @@ import {
 } from "./browserAutomation";
 
 describe("BrowserProfileMode", () => {
-  it("accepts isolated and existing-profile", () => {
+  it("accepts isolated and refuses the retired existing-profile mode", () => {
     expect(decodeBrowserProfileMode("isolated")).toBe("isolated");
-    expect(decodeBrowserProfileMode("existing-profile")).toBe("existing-profile");
+    expect(() => decodeBrowserProfileMode("existing-profile")).toThrow();
   });
   it("rejects unknown modes", () => {
     expect(() => decodeBrowserProfileMode("shared")).toThrow();

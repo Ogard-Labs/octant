@@ -494,6 +494,9 @@ export class TerminalBrowserGrantService {
       modelBindings,
       resolveAuthority: lent.resolveAuthority,
       executionPolicy: readPosture(),
+      // A CLI in a terminal drives this thread's Private pages only; a signed-in
+      // page needs the person, who is not the one typing into that CLI.
+      profileCaller: "terminal-grant",
       ...(thread.toolConstraints === undefined ? {} : { toolConstraints: thread.toolConstraints }),
       browser: {
         inspectThread: lent.automation.inspectThread,
@@ -511,7 +514,10 @@ export class TerminalBrowserGrantService {
         },
         ...(lent.approvals.isRemembered === undefined
           ? {}
-          : { isRemembered: (origin: string) => lent.approvals.isRemembered?.(origin) === true }),
+          : {
+              isRemembered: (origin, profile) =>
+                lent.approvals.isRemembered?.(origin, profile) === true,
+            }),
       },
       uuid: this.#options.uuid,
     });
