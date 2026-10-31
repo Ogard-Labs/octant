@@ -18,6 +18,7 @@ export type CodeOperation =
   | "commit"
   | "push"
   | "create-pr"
+  | "update-pr"
   | "merge-run"
   | "managed-root"
   | "pr-mutation";
@@ -231,7 +232,11 @@ export function authorizeCodeOperation(input: CodePolicyInput): CodePolicyDecisi
   if (input.actor === "remote-client") {
     if (input.operation === "read") return { decision: "host-clamped" };
     if (input.posture === "plan") return { decision: "deny" };
-    if (input.operation === "push" || input.operation === "create-pr") {
+    if (
+      input.operation === "push" ||
+      input.operation === "create-pr" ||
+      input.operation === "update-pr"
+    ) {
       return { decision: "host-thread-credential-clamped" };
     }
     // A remote client may ask for a merge into the person's own checkout, but
