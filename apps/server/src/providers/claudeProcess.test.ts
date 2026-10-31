@@ -29,7 +29,6 @@ import {
   seatbeltExecRule,
   type ProcessConfinementPort,
   type ProcessConfinementPrepareInput,
-  type SecretGuardLaunchInput,
 } from "../process/seatbeltProfile";
 import {
   claudeLoginKeychainPath,
@@ -462,27 +461,18 @@ describe("Claude runtime confinement", () => {
   function recordingConfinement(): {
     readonly port: ProcessConfinementPort;
     readonly prepared: ProcessConfinementPrepareInput[];
-    readonly guarded: SecretGuardLaunchInput[];
     readonly sandboxPath: string;
   } {
     const fake = createFakeSandboxConfinement("octant-claude-confinement-");
     directories.push(fake.root);
     const prepared: ProcessConfinementPrepareInput[] = [];
-    const guarded: SecretGuardLaunchInput[] = [];
     return {
       prepared,
-      guarded,
       sandboxPath: fake.sandboxPath,
       port: {
         prepare: (input) => {
           prepared.push(input);
           return fake.confinement.prepare(input);
-        },
-        guardSecrets: (input) => {
-          guarded.push(input);
-          const guard = fake.confinement.guardSecrets;
-          if (guard === undefined) throw new Error("The fake confinement guards secrets.");
-          return guard(input);
         },
       },
     };
@@ -1027,58 +1017,11 @@ describe("Claude runtime confinement", () => {
     expect(pids(target.root)).toEqual([]);
   });
 
-  it("launches Full access under the secret guard with the account's own state readable", () => {
-    const target = fixture();
-    const confinement = recordingConfinement();
-
-    const child = makePort(target, { confinement: confinement.port }).spawn({
-      projectRoot: target.root,
-      executionPolicy: "full-access",
-    })({
-      command: target.binaryPath,
-      args: ["sdk-test"],
-      cwd: target.root,
-      env: { ...target.environment, CLAUDE_CONFIG_DIR: join(target.root, "account") },
-      signal: new AbortController().signal,
-    });
-    child.kill("SIGTERM");
-
-    expect(confinement.prepared).toEqual([]);
-    expect(confinement.guarded).toEqual([
-      {
-        executable: target.binaryPath,
-        args: ["sdk-test"],
-        cwd: target.root,
-        ownAccountPaths: [join(target.root, "account")],
-      },
-    ]);
-  });
-
-  it("refuses a Full access launch on a host that cannot prepare the secret guard", () => {
-    const target = fixture();
-    const fake = createFakeSandboxConfinement("octant-claude-unguarded-");
-    directories.push(fake.root);
-
-    expect(() =>
-      makePort(target, { confinement: { prepare: fake.confinement.prepare } }).spawn({
-        projectRoot: target.root,
-        executionPolicy: "full-access",
-      })({
-        command: target.binaryPath,
-        args: ["sdk-test"],
-        cwd: target.root,
-        env: target.environment,
-        signal: new AbortController().signal,
-      }),
-    ).toThrow("secret guard");
-    expect(pids(target.root)).toEqual([]);
-  });
-
   it("leaves a posture that still writes on the runtime's own sandbox", () => {
     const target = fixture();
     const confinement = recordingConfinement();
 
-    for (const executionPolicy of ["approval-gated", "auto-accept-edits"] as const) {
+    for (const executionPolicy of ["approval-gated", "auto-accept-edits", "full-access"] as const) {
       const child = makePort(target, { confinement: confinement.port }).spawn({
         projectRoot: target.root,
         executionPolicy,

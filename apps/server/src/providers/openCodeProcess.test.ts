@@ -827,19 +827,14 @@ describe("OpenCodeProcessPort", () => {
     ).toBe(false);
   });
 
-  it("starts Full access under the secret guard with its own state as its own", async () => {
+  it("starts Full access with no wrapper around the runtime", async () => {
     const fixture = probeWrapper("v2-ready");
-    const guarded: Array<Parameters<NonNullable<ProcessConfinementPort["guardSecrets"]>>[0]> = [];
     const prepared: Array<ReadonlyArray<string>> = [];
     const confinement: ProcessConfinementPort = {
-      // The version probe is confined as at every level; only the runtime
-      // launch takes the guard instead.
+      // The version probe is confined as at every level; the runtime launch
+      // is not wrapped at all.
       prepare: (input) => {
         prepared.push(input.args);
-        return { command: input.executable, args: input.args };
-      },
-      guardSecrets: (input) => {
-        guarded.push(input);
         return { command: input.executable, args: input.args };
       },
     };
@@ -858,11 +853,7 @@ describe("OpenCodeProcessPort", () => {
         }),
       ),
     );
-    expect(guarded).toHaveLength(1);
-    expect(guarded[0]?.executable).toBe(fixture.binaryPath);
-    expect(guarded[0]?.args).toContain("serve");
     expect(prepared.some((args) => args.includes("serve"))).toBe(false);
-    expect(guarded[0]?.ownAccountPaths.length).toBeGreaterThan(0);
   });
 
   it.each(["approval-gated", "auto-accept-edits", "full-access"] as const)(

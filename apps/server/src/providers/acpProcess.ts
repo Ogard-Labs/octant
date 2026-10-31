@@ -21,7 +21,6 @@ import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
 import {
   makeProcessConfinementLive,
-  prepareSecretGuardedLaunch,
   ProcessConfinementError,
   seatbeltDenyRule,
   type ProcessConfinementPort,
@@ -393,42 +392,13 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
             root,
           ),
         ];
-        // Full access is unrestricted except for the secret guard and the
-        // static MCP/skills/hooks denials. Darwin uses allow-default plus
-        // trailing denies. Linux binds the host root and overlays the same
-        // paths. The agent's own managed home and provider-owned sign-in stay
-        // its own to read.
+        // Full access runs the agent as its own app does: no sandbox, no
+        // credential-file or extension denials. Octant's own file tools still
+        // refuse protected paths, and secrets are redacted from what it records.
         if (input.executionPolicy === "full-access") {
-          const launch = yield* Effect.try({
-            try: () =>
-              prepareSecretGuardedLaunch(
-                {
-                  executable: input.binaryPath,
-                  args,
-                  cwd: root,
-                  ownAccountPaths: [
-                    managedHome,
-                    ...hostAuthentication.readPaths,
-                    ...hostAuthentication.writePaths,
-                  ],
-                  additionalDenyPaths: denyPaths,
-                },
-                platform,
-                sandboxPath,
-              ),
-            catch: (error) =>
-              failure(
-                error instanceof ProcessConfinementError && error.reason === "invalid-configuration"
-                  ? "invalid-configuration"
-                  : "incompatible",
-                error instanceof ProcessConfinementError
-                  ? error.message
-                  : `${name} Full access extension denials could not be prepared.`,
-              ),
-          });
           return {
-            command: launch.command,
-            args: launch.args,
+            command: input.binaryPath,
+            args,
             cwd: root,
             environment: { ...input.environment, ...hostAuthentication.environment },
           };

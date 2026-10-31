@@ -35,8 +35,9 @@ import { CONFINED_CLAUDE_EXECUTION_POLICIES } from "../providers/claudeProcess";
  *
  * An exception may also narrow to the postures a module still launches
  * unwrapped, which is how the Claude exception closes one posture at a time
- * Full access is never listed: it gets no deny-default profile, only the
- * secret guard's minimal one, which the last test here holds each runtime to.
+ * Full access is never listed: the sandbox rules call it a genuine unrestricted
+ * posture, so no runtime confines it and it is outside this rule rather than an
+ * exception to it.
  */
 const UNWRAPPED: ReadonlyArray<{
   readonly file: string;
@@ -128,19 +129,6 @@ describe("provider runtime confinement", () => {
     expect([...(claude?.postures ?? []), ...CONFINED_CLAUDE_EXECUTION_POLICIES].sort()).toEqual<
       ProviderExecutionPolicy[]
     >(["approval-gated", "auto-accept-edits", "plan"]);
-  });
-
-  it("launches every runtime that reaches Full access under the secret guard", () => {
-    // Oh My Pi runs a readiness probe and no turn; an outside driver has no
-    // posture and always launches through the deny-default builder.
-    const withoutFullAccess = new Set(["ohMyPiProcess.ts", "outsideDriverProcess.ts"]);
-    const unguarded = providerProcessModules()
-      .filter((fileName) => !withoutFullAccess.has(fileName))
-      .filter((fileName) => {
-        const source = readFileSync(join(providersDirectory, fileName), "utf8");
-        return !source.includes("guardSecrets") && !source.includes("prepareSecretGuardedLaunch(");
-      });
-    expect(unguarded).toEqual([]);
   });
 
   it("keeps the architecture's confinement matrix naming every runtime launched unwrapped", () => {

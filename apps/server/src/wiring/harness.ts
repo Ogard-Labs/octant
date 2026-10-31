@@ -66,10 +66,6 @@ import type { IntegrationsWiring } from "./integrations";
 import type { WorkspaceWiring } from "./workspace";
 import type { HarnessStateWiring } from "./harnessState";
 import type { WorkRequestStateWiring } from "./workRequestState";
-import {
-  makeProcessConfinementLive,
-  secretGuardedCommandConfinement,
-} from "../process/seatbeltProfile";
 
 export type HarnessDependencies = Pick<ServerStart, "persistence"> &
   Pick<
@@ -206,14 +202,13 @@ export function wireHarness(deps: HarnessDependencies) {
     harnessShellScriptDirectory: harnessScriptDirectory,
   });
   // Full access runs a command the way the providers' own apps do: outside
-  // Octant's OS sandbox, network open, with only the secret guard's
-  // protected files kept out of reach. The owned process group, receipts and
+  // Octant's OS sandbox, network open. The owned process group, receipts and
   // output capture stay, so the command is still journaled and stoppable.
   const harnessFullAccessProcessPort = new RepositoryTestProcessPort({
     receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
     temporaryDirectory: harnessWorkDirectory,
     harnessShellScriptDirectory: harnessScriptDirectory,
-    confinement: secretGuardedCommandConfinement(makeProcessConfinementLive()),
+    confinement: { prepare: ({ executable, args }) => ({ command: executable, args }) },
   });
   // Approval-gated and auto-accept-edits Code commands run on `proxied`
   // network: each command gets its own egress proxy listener, on loopback

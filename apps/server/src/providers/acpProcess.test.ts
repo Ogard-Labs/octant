@@ -802,30 +802,9 @@ describe.each(denyDefaultProfiles)("ACP deny-default confinement ($displayName)"
         environment: { PATH: "/usr/bin" },
       }),
     );
-    const deniedPaths = [
-      ...(profile.process.forbiddenRootEntries ?? []).map((entry) =>
-        join(target.canonicalRoot, entry),
-      ),
-      ...(hostAuthentication?.kind === "directory"
-        ? (profile.process.hostDeniedEntries ?? []).map((entry) =>
-            join(target.canonicalRoot, "host-auth", entry),
-          )
-        : []),
-    ];
-    // Full access opens everything but the secret guard's files and the
-    // static extension denials: a workspace instruction, project config,
-    // skill root, project MCP server, or the runtime's own folder-trust list
-    // stays denied even when the rest of the sandbox is opened.
-    expect(fullAccess.command).toBe(target.sandboxPath);
-    expect(fullAccess.args.slice(-(args.length + 1))).toEqual([target.binaryPath, ...args]);
-    const fullAccessProfile = fullAccess.args[1] ?? "";
-    expect(fullAccessProfile).toContain("(allow default)");
-    expect(fullAccessProfile).not.toContain("(deny default)");
-    expect(fullAccessProfile).toContain(".ssh");
-    for (const path of deniedPaths) {
-      expect(fullAccessProfile).toContain(`(deny file-read* (subpath "${path}"))`);
-      expect(fullAccessProfile).toContain(`(deny file-write* (subpath "${path}"))`);
-    }
+    // Full access is no sandbox: the credential-file and extension denials
+    // that apply below Full access do not wrap the launch.
+    expect(fullAccess).toMatchObject({ command: target.binaryPath, args });
     for (const file of profile.process.managedFiles({
       managedHome,
       executionPolicy: "full-access",
@@ -1111,8 +1090,7 @@ describe.each(directoryHostProfiles)("ACP host-profile contract ($displayName)",
     const launch = prepared.result.right;
     const hostEnv =
       directoryHostAuthentication(profile).environment?.(prepared.hostAuthenticationPath) ?? {};
-    // The secret guard wraps every Full access launch, extension denials or not.
-    expect(launch.command).toBe(prepared.target.sandboxPath);
+    expect(launch.command).toBe(prepared.target.binaryPath);
     expect(launch.environment).toMatchObject(hostEnv);
     expect(launch.environment.HOME).not.toBe(prepared.hostHome);
     expect(launch.environment.HOME).not.toBe(homedir());

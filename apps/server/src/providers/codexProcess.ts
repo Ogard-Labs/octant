@@ -673,52 +673,16 @@ export function prepareCodexLaunch(input: {
   | { readonly status: "refused"; readonly failure: ProviderFailure } {
   const { authority } = input;
   if (authority.kind === "thread" && authority.executionPolicy === "full-access") {
-    // Full access runs Codex with its own sandbox off, so Octant's minimal
-    // profile can hold it: everything allowed except the protected files,
-    // the account's own sign-in excepted.
-    const guardSecrets = input.confinement.guardSecrets;
-    if (guardSecrets === undefined) {
-      return {
-        status: "refused",
-        failure: failure(
-          "invalid-configuration",
-          "Codex Full access needs the secret guard, which this host cannot prepare.",
-        ),
-      };
-    }
-    const home = input.environment.HOME ?? homedir();
-    try {
-      const launch = guardSecrets({
-        executable: input.binaryPath,
+    return {
+      status: "prepared",
+      launch: {
+        command: input.binaryPath,
         args: input.args,
         cwd: authority.root,
-        ownAccountPaths: existingRealPaths([
-          input.environment.CODEX_HOME ?? join(home, ".codex"),
-          input.environment.CODEX_SQLITE_HOME,
-        ]),
-      });
-      return {
-        status: "prepared",
-        launch: {
-          ...launch,
-          cwd: authority.root,
-          environment: input.environment,
-          release: () => undefined,
-        },
-      };
-    } catch (error) {
-      return {
-        status: "refused",
-        failure: failure(
-          error instanceof ProcessConfinementError && error.reason === "invalid-configuration"
-            ? "invalid-configuration"
-            : "incompatible",
-          error instanceof ProcessConfinementError
-            ? error.message
-            : "Codex Full access secret guard could not be prepared.",
-        ),
-      };
-    }
+        environment: input.environment,
+        release: () => undefined,
+      },
+    };
   }
   let temporaryDirectory: string | undefined;
   const release = () => {

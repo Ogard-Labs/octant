@@ -446,13 +446,13 @@ describe("Claude file tools and the secret guard", () => {
       expect(search("Glob", { pattern: "src/**/*.ts" })).toBeUndefined();
     });
 
-    it("leaves searches to the OS rule where the runtime runs inside Octant's profile", () => {
+    it("leaves searches to the OS rule only where the runtime runs inside Octant's profile", () => {
       expect(
         search("Grep", { pattern: "key", path: join(fakeHome, ".aws") }, undefined, false),
       ).toBeUndefined();
       expect(claudeSearchesRunUnguarded("approval-gated")).toBe(true);
       expect(claudeSearchesRunUnguarded("auto-accept-edits")).toBe(true);
-      expect(claudeSearchesRunUnguarded("full-access")).toBe(false);
+      expect(claudeSearchesRunUnguarded("full-access")).toBe(true);
       expect(claudeSearchesRunUnguarded("plan")).toBe(false);
     });
   });

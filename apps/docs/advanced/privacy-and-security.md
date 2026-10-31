@@ -183,8 +183,8 @@ that hosts the thread, not from a paired phone or browser.
   selected. A per-message posture may only narrow the thread's grant; the
   server clamps composer intent. Full access is what it says: the provider
   runtime runs without Octant's deny-default sandbox, so keep it for folders
-  and providers you trust. Only the [protected files](#protected-files) stay
-  out of reach. No posture grants an agent merge authority; only you merge, from a pull
+  and providers you trust. The [protected files](#protected-files) are guarded
+  by Octant's own tools and redaction only, and a shell command can read them. No posture grants an agent merge authority; only you merge, from a pull
   request's review on the desktop after confirming.
 - App-managed filesystem and shell tools cross an Octant-owned sandbox
   boundary; path checks alone are insufficient. Most provider runtimes cross it
@@ -192,8 +192,7 @@ that hosts the thread, not from a paired phone or browser.
 - The Codex runtime does not: one Codex process serves every thread, which
   Octant cannot bind to a single folder and posture, so the shell it runs falls
   to the provider's own sandbox. That sandbox is on every posture except Full
-  access, which you select explicitly and which is unsandboxed by design apart
-  from the protected files. The
+  access, which you select explicitly and which is unsandboxed by design. The
   Claude runtime crosses the boundary on Plan turns, where Octant's own sandbox
   makes the folder unwritable and stops the runtime starting any process, with
   one exception on macOS: on a Claude subscription account the runtime may run
@@ -217,8 +216,11 @@ that hosts the thread, not from a paired phone or browser.
 
 ### Protected files
 
-Some files are secrets whatever mode a thread is in. No agent, and no command
-an agent runs, can read or change them, at any level, Full access included:
+Some files are secrets whatever mode a thread is in. Below Full access (Ask
+first, Accept edits, Auto, and Plan), no agent, and no command an agent runs,
+can read or change them. At Full access they are guarded by Octant's own file
+tools and redaction only, and a shell command can read them. Full access is
+full access:
 
 - SSH private keys in `~/.ssh` (`id_*`, `*.pem`, `*.key`, and any file with a
   `.pub` companion). `~/.ssh/config`, `known_hosts`, and public keys stay
@@ -252,19 +254,18 @@ it and which channel to use. You see that message in the tool row.
 Change the list in **Settings › Permissions › Protected files**. Add a file or
 folder of your own, absolute or starting with `~/`. Removing a built-in group
 asks you to confirm first, and Octant records the change. **Protect again**
-undoes it. If you remove every group, Full access runs with nothing guarded.
+undoes it.
 
 Octant also redacts known key formats, and every key the credential broker
 handed out, from what agents say and what their tools print, from thread
-exports, and from the service log, at every level.
+exports, and from the service log, at every level, Full access included.
+Octant's own file tools refuse a protected file at every level too.
 
 What to know:
 
-- On macOS the guard is a sandbox profile. A program that starts a sandbox of
-  its own cannot start inside it at Full access. `swift build` and
-  `swift package` need `--disable-sandbox`, and a browser started by a test
-  needs its own sandbox off (`--no-sandbox`). Test runners that already start
-  browsers that way are not affected.
+- At Full access nothing is sandboxed, so programs that start a sandbox of
+  their own, such as `swift package` and headless Chrome, run without extra
+  flags.
 - On Linux a protected file that does not exist yet when the agent starts is
   not covered until the next start.
 - Claude Code's own commands below Full access run in Claude Code's sandbox,

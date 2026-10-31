@@ -143,7 +143,7 @@ One setting says how much a thread's tool calls are guarded, with four levels: A
 - Ask first: the person approves anything with effects, under Octant's OS confinement plus the provider's own sandbox.
 - Accept edits: as Ask first, except file edits inside the folder go through.
 - Auto (Reviewed): a reviewer the person chooses, the provider's own or Octant Shield, answers prompts and escalates to the person what it will not allow.
-- Full access means no sandbox and no prompts, as in the providers' own apps, except that the secret guard still keeps protected files out of reach; outside content is only recorded and marked, and every hard line still holds.
+- Full access means no sandbox and no prompts, as in the providers' own apps, with protected files guarded by Octant's own tools and redaction only, so a shell command can read them; outside content is only recorded and marked, and every hard line still holds.
 - Any level can be set globally, per Project and per thread; the narrowest scope wins, and Full access shows a one-time warning the first time a machine or Project picks it.
 - Lowering is journaled with who, when, from which level and at which scope; the thread header shows the level in force and where it came from (not built yet).
 - Plan is an overlay on any level and always read-only; subagents start at their parent's level and never exceed it; a routine runs at the level its creator picked.
@@ -154,18 +154,19 @@ One setting says how much a thread's tool calls are guarded, with four levels: A
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Security and authority, Guardrail levels](../architecture.md#security-and-authority).
 
-### Secrets stay guarded at every level
+### Secrets are guarded, softly at Full access
 
-Secret files stay out of every agent's reach at every guardrail level, Full access included, with as little friction as the person's normal tools.
+Below Full access, secret files stay out of every agent's reach by an operating-system rule, with as little friction as the person's normal tools. Full access is full access: there the guard is soft and a shell command can read a protected file.
 
 - One operating-system deny list covers SSH private keys, cloud and tool credentials, keychain and password-manager files, browser login stores, Octant's own secrets, and other runtimes' sign-ins; SSH config, known_hosts, public keys and the login keychain stay readable, and a runtime keeps its own sign-in.
-- Below Full access the list joins every confined launch after its grants; at Full access every runtime and its commands run under a minimal allow-all profile whose only rules are those denials.
+- Below Full access (Ask first, Accept edits, Auto, Plan) the list joins every confined launch after its grants. At Full access no launch is wrapped for any runtime, so Swift packages and headless Chrome work without flags.
+- At Full access Octant's own file tools still refuse protected paths with the same plain message, Octant Shield's Judge and Watcher flag protected-path reads and secret-then-network sequences as journaled tags and never block, and redaction stays on.
 - SSH works through the person's SSH agent, Git over HTTPS through the system credential helper, and keys through the credential broker, so agents use credentials without reading them.
 - The person adds paths in Settings › Permissions › Protected files; removing a built-in group needs an explicit confirm and is journaled.
-- A refused read by Octant's or Claude Code's file tools names the rule and the channel to use.
-- Known key formats and broker-issued values are redacted from runtime output, transcripts, the journal, exports and the service log.
+- A refused read by Octant's or Claude Code's file tools names the rule and the channel to use, at every level.
+- Known key formats and broker-issued values are redacted from runtime output, transcripts, the journal, exports and the service log, at every level.
 - Octant Shield's Judge, built for the Octant Harness, sends a command that reaches a secret file to the person and refuses one that reads secrets then sends something off the computer.
-- Not built yet: the Watcher flagging protected-path reads, the Judge reading the person's protected list, and short-lived cloud credentials from the broker.
+- Not built yet: the Watcher's tags for protected-path reads, the Judge reading the person's protected list, and short-lived cloud credentials from the broker.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Secret guard](../architecture.md#secret-guard).
 

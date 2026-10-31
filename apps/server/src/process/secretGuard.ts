@@ -2,10 +2,9 @@
  * The secret guard on the host: the protected-file list in force, turned into
  * Seatbelt rules and Bubblewrap covers.
  *
- * Every launch that goes through the shared builder carries the list, and at
- * Full access, where Octant otherwise confines nothing, a runtime and its
- * commands still run under a minimal allow-all profile whose only rules are
- * these denials (maintainer decision, 2026-10-31). The list is host-wide: the
+ * Every confined launch that goes through the shared builder carries the list.
+ * Full access is not confined at all, so no OS rule reaches it (maintainer
+ * decision, 2026-10-31: "softer guard — full access is full access"). The list is host-wide: the
  * person's changes in Settings › Permissions › Protected files reach every
  * later launch, which is why it is held here once rather than threaded through
  * each launcher's options.
@@ -237,9 +236,9 @@ export interface SecretGuardSeatbeltInput {
    */
   readonly ownAccountPaths: ReadonlyArray<string>;
   /**
-   * `allow-default`: the minimal Full access profile, where a re-allow adds no
-   * reach. `deny-default`: a confined launch, where a re-allow is emitted only
-   * for what the launch was granted anyway.
+   * `deny-default`: a confined launch, where a re-allow is emitted only for
+   * what the launch was granted anyway. `allow-default` is only the person's
+   * own-path rules, which are denials alone.
    */
   readonly profile: "allow-default" | "deny-default";
   /** Deny-default only: roots this launch may read, which bound an exception. */
@@ -338,28 +337,6 @@ function entryRules(
     );
   }
   return { denials, exceptions };
-}
-
-/** The Full access profile: everything allowed, then only the secret files denied. */
-export function buildSecretGuardSeatbeltProfile(input: {
-  readonly entries: ReadonlyArray<ResolvedProtectedEntry>;
-  readonly ownAccountPaths: ReadonlyArray<string>;
-  readonly additionalDenyPaths?: ReadonlyArray<string>;
-}): string {
-  return [
-    "(version 1)",
-    "(allow default)",
-    ...(input.additionalDenyPaths ?? []).flatMap((path) => [
-      `(deny file-read* (subpath "${escapeSeatbeltString(path)}"))`,
-      `(deny file-write* (subpath "${escapeSeatbeltString(path)}"))`,
-    ]),
-    ...secretGuardSeatbeltRules({
-      entries: input.entries,
-      ownAccountPaths: input.ownAccountPaths,
-      profile: "allow-default",
-    }),
-    ...secretGuardPersonRules(input.entries),
-  ].join("\n");
 }
 
 const LINUX_WALK_LIMIT = 4_096;

@@ -973,12 +973,6 @@ function confineClaudeLaunch(
   confinement: ClaudeRuntimeConfinement,
   options: ResolvedClaudeProcessOptions,
 ): { readonly spawnOptions: SpawnOptions; readonly release: () => void } {
-  if (confinement.executionPolicy === "full-access") {
-    return {
-      spawnOptions: guardClaudeSecrets(spawnOptions, confinement, options),
-      release: () => undefined,
-    };
-  }
   if (!CONFINED_CLAUDE_EXECUTION_POLICIES.has(confinement.executionPolicy)) {
     return { spawnOptions, release: () => undefined };
   }
@@ -1176,37 +1170,6 @@ function confineClaudeLaunch(
     release();
     throw error;
   }
-}
-
-/**
- * Full access runs Claude at `bypassPermissions` with its own sandbox off, so
- * nothing nests and Octant's minimal profile can hold the runtime and every
- * command it runs: all allowed except the protected files. The account's own
- * state stays readable, and its Keychain sign-in goes through the login
- * keychain, which the guard leaves to the keychain service.
- */
-function guardClaudeSecrets(
-  spawnOptions: SpawnOptions,
-  confinement: ClaudeRuntimeConfinement,
-  options: ResolvedClaudeProcessOptions,
-): SpawnOptions {
-  const guardSecrets = options.confinement.guardSecrets;
-  if (guardSecrets === undefined) {
-    throw new ProcessConfinementError(
-      "invalid-configuration",
-      "Claude Full access needs the secret guard, which this host cannot prepare.",
-    );
-  }
-  const account = claudeAccountStateDirectories(spawnOptions.env);
-  const launch = guardSecrets({
-    executable: spawnOptions.command,
-    args: spawnOptions.args,
-    cwd: spawnOptions.cwd ?? confinement.projectRoot,
-    ownAccountPaths: [account.configuration, account.secureStorage].filter(
-      (path): path is string => path !== undefined,
-    ),
-  });
-  return { ...spawnOptions, command: launch.command, args: [...launch.args] };
 }
 
 function spawnOwnedClaudeProcess(

@@ -1,32 +1,18 @@
-import { spawn, spawnSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { NO_PROTECTED_FILES_CHANGES } from "@octant/domain/secret-guard-policy";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   applyProtectedFilesChoice,
-  buildSecretGuardSeatbeltProfile,
   configureSecretGuardLocations,
   secretGuardEntries,
   secretGuardLinuxPaths,
   secretGuardRefusal,
   secretGuardSearchRefusal,
 } from "./secretGuard";
-import {
-  buildDenyDefaultSeatbeltProfile,
-  makeProcessConfinementLive,
-  prepareSecretGuardedLaunch,
-  secretGuardedCommandConfinement,
-} from "./seatbeltProfile";
+import { buildDenyDefaultSeatbeltProfile, makeProcessConfinementLive } from "./seatbeltProfile";
 
 const directories: string[] = [];
 
@@ -67,213 +53,10 @@ function fakeHome(): string {
   return home;
 }
 
-function runUnder(launch: { command: string; args: ReadonlyArray<string> }, env = {}) {
-  return spawnSync(launch.command, [...launch.args], {
-    encoding: "utf8",
-    env: { PATH: "/usr/bin:/bin", ...env },
-  });
-}
-
-function guarded(
-  home: string,
-  executable: string,
-  args: ReadonlyArray<string>,
-  ownAccountPaths: ReadonlyArray<string> = [],
-) {
-  return prepareSecretGuardedLaunch(
-    { executable, args, cwd: home, ownAccountPaths },
-    "darwin",
-    "/usr/bin/sandbox-exec",
-    { homeDirectory: home },
-  );
-}
-
-describe("secret guard at Full access", () => {
-  it.skipIf(process.platform !== "darwin")(
-    "refuses a protected file and leaves SSH config, known_hosts, and public keys readable",
-    () => {
-      const home = fakeHome();
-      const read = (relative: string) =>
-        runUnder(guarded(home, "/bin/cat", [join(home, relative)]));
-      for (const secret of [
-        ".ssh/id_test",
-        ".ssh/github_ed25519",
-        ".aws/credentials",
-        ".npmrc",
-        ".codex/auth.json",
-        "Library/Keychains/other.keychain-db",
-      ]) {
-        const result = read(secret);
-        expect(result.status, secret).not.toBe(0);
-        expect(result.stderr, secret).toContain("Operation not permitted");
-      }
-      for (const open of [
-        ".ssh/config",
-        ".ssh/known_hosts",
-        ".ssh/id_test.pub",
-        ".aws/config",
-        "Library/Keychains/login.keychain-db",
-        "project/readme.md",
-      ]) {
-        expect(read(open).status, open).toBe(0);
-      }
-      const write = runUnder(
-        guarded(home, "/bin/sh", ["-c", `printf x > '${join(home, ".ssh/id_new")}'`]),
-      );
-      expect(write.status).not.toBe(0);
-      expect(existsSync(join(home, ".ssh/id_new"))).toBe(false);
-    },
-  );
-
-  it.skipIf(process.platform !== "darwin")(
-    "lets a runtime read its own sign-in and no other runtime's",
-    () => {
-      const home = fakeHome();
-      const own = [join(home, ".codex")];
-      expect(
-        runUnder(guarded(home, "/bin/cat", [join(home, ".codex/auth.json")], own)).stdout,
-      ).toBe("fake codex sign-in");
-      expect(
-        runUnder(guarded(home, "/bin/cat", [join(home, ".claude/.credentials.json")], own)).status,
-      ).not.toBe(0);
-    },
-  );
-
-  it.skipIf(process.platform !== "darwin")(
-    "keeps a managed account home readable inside Octant's denied account folder",
-    () => {
-      const home = fakeHome();
-      const data = join(home, "Library/Application Support/Octant");
-      for (const account of ["codex/a", "codex/b"]) {
-        mkdirSync(join(data, "providers", account), { recursive: true });
-        writeFileSync(join(data, "providers", account, "auth.json"), `fake ${account}`);
-      }
-      configureSecretGuardLocations({ dataDirectory: data });
-      const own = [join(data, "providers/codex/a")];
-      expect(
-        runUnder(guarded(home, "/bin/cat", [join(data, "providers/codex/a/auth.json")], own))
-          .stdout,
-      ).toBe("fake codex/a");
-      expect(
-        runUnder(guarded(home, "/bin/cat", [join(data, "providers/codex/b/auth.json")], own))
-          .status,
-      ).not.toBe(0);
-    },
-  );
-
-  it.skipIf(process.platform !== "darwin")(
-    "runs Git, and SSH through the agent socket, with the private key refused",
-    async () => {
-      const home = fakeHome();
-      const key = join(home, ".ssh/id_agent");
-      expect(
-        spawnSync("/usr/bin/ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", key]).status,
-      ).toBe(0);
-      const socket = join(home, ".ssh/agent.sock");
-      const agent = spawn("/usr/bin/ssh-agent", ["-D", "-a", socket], { stdio: "ignore" });
-      try {
-        for (let attempt = 0; attempt < 50 && !existsSync(socket); attempt += 1) {
-          await new Promise((resolve) => setTimeout(resolve, 50));
-        }
-        const env = { HOME: home, SSH_AUTH_SOCK: socket };
-        expect(spawnSync("/usr/bin/ssh-add", [key], { env, encoding: "utf8" }).status).toBe(0);
-        const listed = runUnder(guarded(home, "/usr/bin/ssh-add", ["-l"]), env);
-        expect(listed.status).toBe(0);
-        expect(listed.stdout).toContain("ED25519");
-        expect(runUnder(guarded(home, "/bin/cat", [key]), env).status).not.toBe(0);
-        // `ssh` finds its configuration through the account database, not
-        // `HOME`, so the fake home's file is named.
-        const config = runUnder(
-          guarded(home, "/usr/bin/ssh", ["-F", join(home, ".ssh/config"), "-G", "example"]),
-          env,
-        );
-        expect(config.stdout).toContain("hostname example.invalid");
-        const repository = join(home, "project");
-        const git = runUnder(
-          guarded(home, "/bin/sh", [
-            "-c",
-            `cd '${repository}' && git init -q && git add readme.md && git -c user.name=t -c user.email=t@example.invalid commit -qm one && git log --oneline | wc -l`,
-          ]),
-          { HOME: home },
-        );
-        expect(git.stderr).toBe("");
-        expect(git.stdout.trim()).toBe("1");
-      } finally {
-        agent.kill();
-      }
-    },
-  );
-
-  it("gives an Octant Harness Full access command the secret guard and nothing else", () => {
+describe("secret guard on the launch builders", () => {
+  it("adds the person's own paths and drops a removed group", () => {
     const home = fakeHome();
-    const port = secretGuardedCommandConfinement(
-      makeProcessConfinementLive({
-        platform: "darwin",
-        // Any executable stands in off macOS, where only the profile text is checked.
-        sandboxPath: process.platform === "darwin" ? "/usr/bin/sandbox-exec" : "/bin/sh",
-        homeDirectory: home,
-      }),
-    );
-    const launch = port.prepare({
-      executable: "/bin/cat",
-      args: [join(home, ".ssh/id_test")],
-      boundRoot: join(home, "project"),
-      temporaryDirectory: join(home, "project"),
-      networkEgress: "none",
-    });
-    const profile = launch.args[1] ?? "";
-    expect(profile).toContain("(allow default)");
-    expect(profile).not.toContain("(deny default)");
-    expect(profile).not.toContain("network");
-    if (process.platform === "darwin") {
-      expect(runUnder(launch).status).not.toBe(0);
-    }
-    expect(() =>
-      secretGuardedCommandConfinement({
-        prepare: () => ({ command: "/bin/cat", args: [] }),
-      }).prepare({
-        executable: "/bin/cat",
-        args: [],
-        boundRoot: home,
-        temporaryDirectory: home,
-        networkEgress: "allow",
-      }),
-    ).toThrow("secret guard");
-  });
-
-  it("never lets an exception reopen a path the person protected", () => {
-    const home = fakeHome();
-    applyProtectedFilesChoice({
-      added: ["~/.ssh", "~/.codex/auth.json", "~/Library/Keychains/login.keychain-db"],
-      removed: [],
-    });
-    const own = [join(home, ".codex")];
-    const profile = buildSecretGuardSeatbeltProfile({
-      entries: secretGuardEntries({ platform: "darwin", homeDirectory: home }),
-      ownAccountPaths: own,
-    }).split("\n");
-    const lastAllow = profile.findLastIndex((line) => line.startsWith("(allow file-"));
-    for (const added of [".ssh", ".codex/auth.json", "Library/Keychains/login.keychain-db"]) {
-      const denial = profile.indexOf(
-        `(deny file-read* file-write* (subpath "${join(home, added)}"))`,
-      );
-      expect(denial, added).toBeGreaterThan(lastAllow);
-    }
-    if (process.platform !== "darwin") return;
-    for (const file of [
-      ".ssh/id_test.pub",
-      ".ssh/config",
-      ".codex/auth.json",
-      "Library/Keychains/login.keychain-db",
-    ]) {
-      expect(runUnder(guarded(home, "/bin/cat", [join(home, file)], own)).status, file).not.toBe(0);
-    }
-  });
-
-  it("keeps a person's path denied after a confined launch's own extra rules", () => {
-    const home = fakeHome();
-    applyProtectedFilesChoice({ added: ["~/Library/Keychains/login.keychain-db"], removed: [] });
-    const keychain = join(home, "Library/Keychains/login.keychain-db");
+    applyProtectedFilesChoice({ added: ["~/project/notes"], removed: ["ssh-private-keys"] });
     const profile = buildDenyDefaultSeatbeltProfile({
       boundRoot: join(home, "project"),
       temporaryDirectory: join(home, "project"),
@@ -281,41 +64,13 @@ describe("secret guard at Full access", () => {
       homeDirectory: home,
       usersDirectory: dirname(home),
       privateHomeAllowPaths: [],
-      extraRules: [`(allow file-read* (literal "${keychain}"))`],
-    }).split("\n");
-    expect(
-      profile.indexOf(`(deny file-read* file-write* (subpath "${keychain}"))`),
-    ).toBeGreaterThan(profile.indexOf(`(allow file-read* (literal "${keychain}"))`));
-  });
-
-  it("adds the person's own paths and drops a removed group", () => {
-    const home = fakeHome();
-    applyProtectedFilesChoice({ added: ["~/project/notes"], removed: ["ssh-private-keys"] });
-    const entries = secretGuardEntries({ platform: "darwin", homeDirectory: home });
-    const profile = buildSecretGuardSeatbeltProfile({ entries, ownAccountPaths: [] });
-    expect(profile).toContain(`(subpath "${join(home, "project/notes")}")`);
-    expect(profile).not.toContain(".ssh");
-  });
-
-  it("launches unwrapped only when the person removed every protected group", () => {
-    const home = fakeHome();
-    applyProtectedFilesChoice({
-      added: [],
-      removed: [
-        "ssh-private-keys",
-        "cloud-credentials",
-        "cluster-configuration",
-        "container-registry-sign-in",
-        "package-registry-tokens",
-        "git-credential-files",
-        "forge-cli-sign-in",
-        "keychains-and-vaults",
-        "browser-cookies-and-logins",
-        "octant-credentials",
-        "provider-sign-ins",
-      ],
     });
-    expect(guarded(home, "/bin/echo", ["ok"])).toEqual({ command: "/bin/echo", args: ["ok"] });
+    expect(profile).toContain(`(subpath "${join(home, "project/notes")}")`);
+    expect(profile).not.toContain(join(home, ".ssh/id_"));
+  });
+
+  it("offers no minimal Full access launch: Full access is not wrapped", () => {
+    expect(makeProcessConfinementLive()).not.toHaveProperty("guardSecrets");
   });
 });
 

@@ -4,10 +4,13 @@ import type {
 } from "@octant/contracts/protected-files";
 
 /**
- * The secret guard: one list of secret files that no runtime, and no command a
- * runtime runs, may read or write, at every guardrail level, Full access
- * included (maintainer decision, 2026-10-31: "guard secrets as much as
- * possible, without making too much friction").
+ * The secret guard: one list of secret files that Octant's own tools never read
+ * or write at any guardrail level, and that no runtime, and no command a
+ * runtime runs, may read or write below Full access. Full access is no
+ * sandbox: there the list is a soft guard (Octant's tools, tags from the
+ * Judge and Watcher, redaction) and a shell command can read the files
+ * (maintainer decision, 2026-10-31: "softer guard — full access is full
+ * access").
  *
  * Friction stays low because the work these files serve goes through a channel
  * instead of the file: SSH through the agent socket, Git over HTTPS through the
@@ -440,7 +443,7 @@ export function protectedFilesChannelGuidance(channel: ProtectedFilesChannel): s
 export function protectedFileRefusal(entry: ResolvedProtectedEntry, homeDirectory: string): string {
   return [
     `Refused by the secret guard: ${protectedEntryDisplay(entry, homeDirectory)} is a protected file (${entry.label}).`,
-    "Octant keeps it out of every agent's reach at every level, Full access included.",
+    "Octant's own tools refuse it at every level, and below Full access no command can open it.",
     protectedFilesChannelGuidance(entry.channel),
     "The list is in Settings › Permissions › Protected files.",
   ].join(" ");

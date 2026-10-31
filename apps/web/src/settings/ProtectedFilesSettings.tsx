@@ -28,7 +28,7 @@ type ProtectedFilesChange = {
 
 /** What the section says the guard is, in the person's words. */
 export const PROTECTED_FILES_FACT =
-  "Agents cannot read or change these files at any level, Full access included. Work goes through the channel instead: SSH through your SSH agent, Git over HTTPS through the system credential helper, and keys through Octant's credential broker.";
+  "Below Full access, agents cannot read or change these files. At Full access they are guarded by Octant's own tools and redaction only, and a shell command can read them. Work goes through the channel instead: SSH through your SSH agent, Git over HTTPS through the system credential helper, and keys through Octant's credential broker.";
 
 const CHANNEL_HINT: Record<BuiltInProtectedFiles["channel"], string> = {
   "ssh-agent": "Use SSH through your SSH agent.",
@@ -232,9 +232,8 @@ export function ProtectedFilesSettings(props: ProtectedFilesSettingsProps) {
           pending={busy}
           title={`Stop protecting ${confirming.label}?`}
         >
-          Every agent on this computer, at every level, will be able to read and change{" "}
-          {confirming.paths.join(", ")}. The change is recorded, and you can protect them again
-          here.
+          Every agent on this computer will be able to read and change {confirming.paths.join(", ")}
+          . The change is recorded, and you can protect them again here.
         </OctantConfirmDialog>
       )}
     </SettingsSection>

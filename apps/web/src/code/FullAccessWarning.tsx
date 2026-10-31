@@ -3,7 +3,7 @@ import { useState, type ReactNode } from "react";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 
 export const FULL_ACCESS_WARNING =
-  "Agents can change any file and run any command without asking, with no sandbox. Only protected files, such as SSH and cloud keys, stay out of their reach.";
+  "Agents can change any file and run any command without asking, with no sandbox. Protected files, such as SSH and cloud keys, are guarded by Octant's own tools and redaction only, and a shell command can read them.";
 
 /**
  * Where the warning was seen: this machine (its Settings default and first

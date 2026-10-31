@@ -335,7 +335,7 @@ export function claudeFileToolSecretRefusal(
     ...(homeDirectory === undefined ? {} : { homeDirectory }),
   };
   if (CLAUDE_SEARCH_TOOLS.has(toolName)) {
-    // Under Plan and Full access the runtime runs inside Octant's profile, so
+    // Under Plan the runtime runs inside Octant's profile, so
     // a search passes over a protected file the OS refuses to open.
     if (!searchesRunUnguarded) return undefined;
     const pattern = typeof input.pattern === "string" ? input.pattern : "";
@@ -361,12 +361,13 @@ export function claudeFileToolSecretRefusal(
 }
 
 /**
- * Whether the runtime process runs outside Octant's profile at this posture,
- * on its own sandbox (which holds only its commands), so a search it runs in
- * process is not held by the secret guard's OS rule.
+ * Whether the runtime process runs outside Octant's profile at this posture
+ * (on its own sandbox, which holds only its commands, or with none at Full
+ * access), so a search it runs in process is not held by the secret guard's
+ * OS rule and Octant's gate has to refuse it.
  */
 export function claudeSearchesRunUnguarded(policy: ProviderExecutionPolicy): boolean {
-  return policy === "approval-gated" || policy === "auto-accept-edits";
+  return policy === "approval-gated" || policy === "auto-accept-edits" || policy === "full-access";
 }
 
 /** The folders of an absolute glob before its first wildcard. */

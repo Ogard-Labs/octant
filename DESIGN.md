@@ -2133,8 +2133,9 @@ which governs Work and Code alike. The levels, top to bottom, are Ask first,
 Accept edits, Auto, and Full access; Full access is the lowest, and there is
 no separate switch below it. The first time a machine or a Project picks Full
 access, a one-time warning asks to confirm, in the warning role: "Agents can
-change any file and run any command without asking, with no sandbox. Only
-protected files, such as SSH and cloud keys, stay out of their reach." It
+change any file and run any command without asking, with no sandbox. Protected
+files, such as SSH and cloud keys, are guarded by Octant's own tools and
+redaction only, and a shell command can read them." It
 offers Cancel (focused) and Use Full access, and is not shown again for that
 scope. **Protected files** opens Settings › Permissions, above Remembered
 websites: one row per built-in group (SSH private keys, cloud credentials,
