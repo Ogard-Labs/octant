@@ -32,7 +32,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | Area                                                                                  | Decisions | Built   | Partly built | Designed, not built |
 | ------------------------------------------------------------------------------------- | --------- | ------- | ------------ | ------------------- |
 | [Principles and hard lines](#principles-and-hard-lines)                               | 5         | 4       | 1            | 0                   |
-| [Guardrails and review](#guardrails-and-review)                                       | 7         | 0       | 5            | 2                   |
+| [Guardrails and review](#guardrails-and-review)                                       | 8         | 0       | 7            | 1                   |
 | [Key providers](#key-providers)                                                       | 1         | 0       | 0            | 1                   |
 | [Release scope](#release-scope)                                                       | 4         | 1       | 3            | 0                   |
 | [Process topology and local trust](#process-topology-and-local-trust)                 | 6         | 6       | 0            | 0                   |
@@ -42,7 +42,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Modes, Projects and authority](#modes-projects-and-authority)                        | 13        | 10      | 3            | 0                   |
 | [Agents and delegation](#agents-and-delegation)                                       | 4         | 4       | 0            | 0                   |
 | [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 2       | 3            | 1                   |
-| [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 3       | 0            | 1                   |
+| [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 3       | 1            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 1       | 0            | 0                   |
 | [Persistence](#persistence)                                                           | 9         | 8       | 1            | 0                   |
 | [Providers](#providers)                                                               | 6         | 6       | 0            | 0                   |
@@ -51,16 +51,16 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Extensions](#extensions)                                                             | 8         | 7       | 1            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 5       | 2            | 0                   |
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 14        | 10      | 2            | 2                   |
-| [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 8         | 6       | 2            | 0                   |
+| [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 8         | 7       | 1            | 0                   |
 | [Remote access and pairing](#remote-access-and-pairing)                               | 8         | 5       | 3            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 4         | 4       | 0            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 4         | 4       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 9         | 9       | 0            | 0                   |
-| [Workspace](#workspace)                                                               | 14        | 13      | 1            | 0                   |
+| [Workspace](#workspace)                                                               | 14        | 14      | 0            | 0                   |
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 9         | 8       | 1            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 4       | 1            | 0                   |
-| [Browser](#browser)                                                                   | 4         | 3       | 0            | 1                   |
+| [Browser](#browser)                                                                   | 4         | 4       | 0            | 0                   |
 | [Provider runtimes](#provider-runtimes)                                               | 6         | 6       | 0            | 0                   |
 | [Model endpoints and organization sign-in](#model-endpoints-and-organization-sign-in) | 6         | 5       | 1            | 0                   |
 | [Outside provider drivers](#outside-provider-drivers)                                 | 3         | 3       | 0            | 0                   |
@@ -68,8 +68,8 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Hubs, relay and Nightly](#hubs-relay-and-nightly)                                    | 5         | 3       | 1            | 1                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 1       | 1            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 3       | 1            | 0                   |
-| [Decided, pending a specification update](#decided-pending-a-specification-update)    | 4         | 0       | 0            | 4                   |
-| **All areas**                                                                         | **222**   | **173** | **36**       | **13**              |
+| [Decided, pending a specification update](#decided-pending-a-specification-update)    | 5         | 0       | 0            | 5                   |
+| **All areas**                                                                         | **222**   | **175** | **34**       | **13**              |
 
 ## Principles and hard lines
 
@@ -143,15 +143,32 @@ One setting says how much a thread's tool calls are guarded, with four levels: A
 - Ask first: the person approves anything with effects, under Octant's OS confinement plus the provider's own sandbox.
 - Accept edits: as Ask first, except file edits inside the folder go through.
 - Auto (Reviewed): a reviewer the person chooses, the provider's own or Octant Shield, answers prompts and escalates to the person what it will not allow.
-- Full access means no sandbox and no prompts, as in the providers' own apps; outside content is only recorded and marked, and every hard line still holds.
+- Full access means no sandbox and no prompts, as in the providers' own apps, with protected files guarded by Octant's own tools and redaction only, so a shell command can read them; outside content is only recorded and marked, and every hard line still holds.
 - Any level can be set globally, per Project and per thread; the narrowest scope wins, and Full access shows a one-time warning the first time a machine or Project picks it.
 - Lowering is journaled with who, when, from which level and at which scope; the thread header shows the level in force and where it came from (not built yet).
 - Plan is an overlay on any level and always read-only; subagents start at their parent's level and never exceed it; a routine runs at the level its creator picked.
 - Older recorded "Trusted" or "Off" levels replay as Full access.
 - Built in Code: Ask first, Accept edits, Auto with the key CLI providers' own reviewers, Plan, and Full access with no sandbox and no prompts for every runtime, with a first-run default, a Settings › Code › Access default, a Project override, and the one-time warning.
-- Not built yet: the shared levels in Work, an ACP agent's own reviewer, and the thread header indicator. The guardrail-level list in the architecture still names some of the Code pieces as not built; its later Code access rules describe them as built.
+- Built in Work: Auto, Ask first, Accept edits and Full access, set from Settings › Work and the composer, with the one-time warning; Work has no Plan.
+- Not built yet: a Work Project override, an ACP agent's own reviewer, and the thread header indicator. The guardrail-level list in the architecture still names some of the Code pieces as not built; its later Code access rules describe them as built.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Security and authority, Guardrail levels](../architecture.md#security-and-authority).
+
+### Secrets are guarded, softly at Full access
+
+Below Full access, secret files stay out of every agent's reach by an operating-system rule, with as little friction as the person's normal tools. Full access is full access: there the guard is soft and a shell command can read a protected file.
+
+- One operating-system deny list covers SSH private keys, cloud and tool credentials, keychain and password-manager files, browser login stores, Octant's own secrets, and other runtimes' sign-ins; SSH config, known_hosts, public keys and the login keychain stay readable, and a runtime keeps its own sign-in.
+- Below Full access (Ask first, Accept edits, Auto, Plan) the list joins every confined launch after its grants. At Full access no launch is wrapped for any runtime, so Swift packages and headless Chrome work without flags.
+- At Full access Octant's own file tools still refuse protected paths with the same plain message, Octant Shield's Judge and Watcher are to flag protected-path reads and secret-then-network sequences as journaled tags and never block (not built yet), and redaction stays on.
+- SSH works through the person's SSH agent, Git over HTTPS through the system credential helper, and keys through the credential broker, so agents use credentials without reading them.
+- The person adds paths in Settings › Permissions › Protected files; removing a built-in group needs an explicit confirm and is journaled.
+- A refused read by Octant's or Claude Code's file tools names the rule and the channel to use, at every level.
+- Known key formats and broker-issued values are redacted from runtime output, transcripts, the journal, exports and the service log, at every level.
+- Octant Shield's Judge, built for the Octant Harness, sends a command that reaches a secret file to the person and refuses one that reads secrets then sends something off the computer.
+- Not built yet: the Watcher's tags for protected-path reads, the Judge reading the person's protected list, and short-lived cloud credentials from the broker.
+
+Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Secret guard](../architecture.md#secret-guard).
 
 ### First run asks which mode new threads start in
 
@@ -161,7 +178,7 @@ The first run asks once which mode new threads start in, with Auto pre-selected 
 - Where no reviewer can run for a thread, that thread falls back to Ask first and the picker says why.
 - The answer is the default for new Work and Code threads; Settings › Access changes it, a Project may override it, and the composer switches a thread's mode in one click.
 - Built for Code: the answer is stored as the Code default, Settings › Code › Access changes it, and a Code Project may override it; a Project that remembered Full access before Project modes existed starts its threads in Full access.
-- Work keeps its own ask-first or auto-accept-edits setting until the shared levels reach Work (not built yet).
+- Work takes the same modes without Plan from Settings › Work, and its composer switches a thread's mode; the first-run answer does not yet set the Work default, and a Work Project has no override (not built yet).
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Security and authority, Guardrail levels](../architecture.md#security-and-authority).
 
@@ -174,7 +191,9 @@ Work and Code run under the same guardrail levels with the same capabilities; th
 - Code is for coding, shows checkouts and worktrees, and keeps its objective delivery target.
 - A thread keeps the kind it was created with; moving work between Work and Code is the person's choice.
 - Work's Developer tools switch is set per Project by a person; no agent, routine or import sets it.
-- Today's drivers still withhold the shell and Git from Work and keep Work below Full access (not built yet).
+- Built: every driver starts a Work session with its shell and Git at the thread's level, Work launches get Code's confinement at the same level, Work threads reach Full access, and each Work turn records shell and Git at its level.
+- Built: the Developer tools switch, set from a window on this host and journaled with who and when; it shows a Work Project's terminal and actions.
+- Not built yet: an in-process ACP shell reporting unsupported below Full access.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Modes](../architecture.md#modes-chat-work-and-code) and [Overview and principles](../architecture.md#overview-and-principles).
 
@@ -202,7 +221,8 @@ Octant Shield is Octant's own automatic approval reviewer for every runtime that
 - A release with Shield requires measuring its false-allow rate on a fixture set of known-safe and known-unsafe calls.
 - Build order: the native harness, every runtime's approval path, the picker and Settings, the Watcher, safe networks, then the server registry and SSH.
 - Built: the Judge (rules, fast allow rules that read a command exactly as written, the model stage, fail-closed, brakes, per-call grants, taint limits, spend reservations with the review's usage recorded under the thread), answering the approvals of the Octant Harness, Claude Code, Codex, OpenCode, ACP agents and Pi on a Code thread in Auto where Shield is the reviewer, and their subagents', each decision journaled and shown on the transcript; Auto offered in the picker wherever a reviewer can run; Settings › Code › Access Auto reviewer and Shield model with a Code Project override of the reviewer; the fixture set with a test of the rule stages and a false-allow measurement script.
-- Not built yet: the Watcher (so the Judge has no labels yet), safe networks, the server registry, and the shared levels in Work; the false-allow rate of a real model is unmeasured.
+- Built: the Watcher, deterministic detectors with no model, over every app-managed tool result and plugin MCP result before the model reads it; each label is journaled as an outside-content source that marks the thread, reaches the Judge as a kind, tags the Code tool row (quietly at Full access) and marks the Code board card.
+- Not built yet: safe networks, the server registry, and the shared levels in Work; the Watcher does not read a runtime's own web search or fetch, the secret guard's path list is not handed to it, and Chat and Work tool rows show no tag; the false-allow rate of a real model is unmeasured.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Octant Shield](../architecture.md#octant-shield).
 
@@ -210,10 +230,15 @@ Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Octant Shield](.
 
 The person names trusted places (hosts, domains, address ranges, private-network tags) whose egress passes by rule.
 
-- Set in Settings › Access as an account default with a Project override.
+- Set in Settings › Access as an account default with a Project override; only a person at a local window changes them, and each list is journaled whole and replayed at startup.
 - Egress to anywhere else goes to the Judge at Reviewed and to the person at Guarded; each decision is journaled per host.
+- Network limits are a host setting in Settings › Access, off by default, journaled (`safe-networks.limits-set@1`), changed only at a local window, replayed at startup, and read at each runtime launch, so a change applies to the next launch. Safe networks stay editable either way, and the page says whether limits are on. Limits ship off until live provider turns have run through the proxy.
+- With limits on, below Full access every wrapped provider runtime runs on its own egress proxy and reaches only its provider's endpoints, its Project's egress rules and these places; Claude's command sandbox sends its network to the same proxy. Full access stays open network, and so does every runtime while limits are off.
+- A refused host is refused with the host named and listed under Recently refused, where the person can trust it.
+- No place or range may reach a link-local address, and a name nothing lists is refused before any lookup.
+- Built on macOS for provider runtimes, behind the Network limits switch (off by default). Not built yet: Linux runtimes (they keep open network), Claude's own process (Plan and its in-process web fetch), a composed reviewer (the hook is in place, so Auto goes to the person), safe networks for harness commands, and taint suspending places. No real runtime turn has run on its proxy yet.
 
-Status: Designed, not built. Since: 2026-10-31. Detail: [Architecture: Octant Shield](../architecture.md#octant-shield).
+Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Provider runtime network](../architecture.md#provider-runtime-network) and [Octant Shield](../architecture.md#octant-shield).
 
 ### Server SSH profiles
 
@@ -449,7 +474,7 @@ Input rides the workbench control channel with actor attribution. Agent device t
 - The grant lives in host memory, so a restart asks again. It ends with the window's authority, a successful shutdown or a discovery that finds the destination no longer booted. It never covers boot, shutdown, Open URL or Rotate. _Here only._
 - Open URL and Rotate are effects confirmed on their own; an input whose delivery is unknown is reported interrupted, and an off-screen point is refused, never clamped.
 - An explicit successful screenshot may deliver one PNG through the provider image channel, read through thread and checkout authority; oversized, unavailable or non-PNG output is refused, never resized. Boot, run, open, input and discovery never send screen images. _Here only._
-- `octant_terminal` still requires Full access.
+- `octant_terminal` follows the thread's level: Plan refuses it, Full access runs it, and below that each command the agent types asks the person with the command shown.
 
 Status: Built. Since: —. Detail: [Architecture: Device transport and evidence](../architecture.md#device-transport-and-evidence).
 
@@ -659,9 +684,10 @@ Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](.
 A Code thread may push its own branch and open, update and stack pull requests from it. Every forge change goes through one journaled Octant pull-request tool.
 
 - Only the repository the Project binds is touched, and a thread never acts on another thread's branch.
-- Plan mode and revoked forge access refuse every action; force-with-lease is the default, and a plain force-push needs the person's request in that turn.
+- Plan mode and revoked forge access refuse every action; force-with-lease on the thread's own branch is the default, and a plain force-push or any push to the default branch needs the person's approval for that one act, which Full access does not stand in for.
 - Each action journals the actor, repository, number and head SHA, and Octant stores no forge token.
-- Push and open-as-ready are built; draft, stacked, amend, edit, label, reply and close actions are allowed (not built yet).
+- Built: push, amend with force-with-lease, plain force-push on approval, open (ready, draft, stacked), edit, labels of existing labels only, comments and review replies (approved for each post at every level), close and reopen, and an agent's merge on request.
+- Approving or requesting changes as a person, and a renderer surface for the person's own comment, reply, label, close and reopen controls, are allowed (not built yet).
 - At Guarded and Reviewed a Code agent's shell can still reach forge credentials, and a change made that way is journaled only as a shell command (known gap).
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
@@ -672,8 +698,9 @@ A person merges one open pull request from its review in a local window. A Code 
 
 - Built: the review enables Merge only for a fresh, mergeable observation, opens an inline confirmation naming the reviewed head, and the server re-reads state and refuses a stale head.
 - Octant uses the host's forge command-line login and strips ambient tokens; every attempt journals the actor, repository, number, method, approved head SHA and result.
-- The route answers 403 to a paired device, and no agent tool, routine or hub or peer host reaches it.
-- Merge from a paired device, a whole-stack merge, and an agent's merge or auto-merge on the person's request, Project setting or routine are allowed (not built yet).
+- A paired phone or web client may merge one pull request or a whole stack, but only with `confirmed: true` for the head it reviewed; the server then requires the repository's required checks to pass and refuses when they fail, are pending or cannot be read. A stack merges bottom first, each child retargeted to the branch the stack lands on before it merges, and is refused whole unless it is one chain. A review reply is posted only after the thread is read back and found on the named pull request.
+- An agent merges on the person's request only after the person approves that one merge in the thread, at every guardrail level; no routine, plugin or hub or peer host reaches it.
+- Auto-merge from a paired device, an agent's merge on a Project setting or routine, and a fresh owner-device unlock are allowed (not built yet).
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
@@ -729,10 +756,11 @@ Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](.
 A routine runs at the guardrail level the person picks when creating it, Full access included, and never at a lower level than its creator chose.
 
 - A Code routine may merge the pull requests it opens when the person allowed that at creation; an agent proposing a routine never picks either for the person.
-- Both choices are captured in the authority snapshot and journaled (not built yet).
-- Today Full access is ineligible, Code runs are created approval-gated, and a Work routine gets no shell or Git authority.
+- Built: a person at a local window may opt a routine into its Project's level, journaled on the definition and copied into each run; each run then takes the level the Project's new threads start at, Full access included. Without it a routine asks first, and a Full access profile stays ineligible.
+- A Work routine captures the shell and Git like a Code routine; one saved without them does not run until a person saves it again.
+- Not built yet: the merge permission, and a level picked on the routine itself rather than taken from its Project.
 
-Status: Designed, not built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
+Status: Partly built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
 ### Follow-ups in the same thread
 
@@ -1117,7 +1145,7 @@ A harness command on an approval-gated or auto-accept-edits Code thread reaches 
 - Every rule expires, a child uses its parent's live rules, and rules never leave the host.
 - Rules arise only from answering a network-access approval, never from a model call, tool result or repository configuration. Project rules need a person at a local window.
 - Taint suspends standing rules, and bytes a proxied command receives from outside taint the thread. Learn mode turns refusals into proposals that grant nothing.
-- Provider runtimes that run their own tools in-process are outside this proxy.
+- Provider runtimes that run their own tools in-process run on a proxy of their own, decided by provider endpoints, Project rules and safe networks rather than thread rules.
 - The reviewer path for per-call network prompts is not built yet.
 
 Status: Built. Since: 2026-10-13. Detail: [Architecture: Harness tool egress rules](../architecture.md#harness-tool-egress-rules).
@@ -1334,7 +1362,7 @@ A provider runtime launch is wrapped when the process carries exactly one thread
 - One key provider's runtime is wrapped in Plan but keeps its own sandbox outside Plan; closing that gap is not an open goal.
 - A runtime used only for a readiness probe is unwrapped and starts no turn.
 - At Full access Octant wraps no provider runtime, so only the operating system's own protections remain; Plan's read-only enforcement is the same at every level.
-- A runtime that makes its own API call resolves provider-endpoints-only below Full access, which the OS profile materializes as plain network allow; the endpoint restriction holds only for Octant-brokered tools and harness commands.
+- A runtime that makes its own API call resolves provider-endpoints-only below Full access. On macOS, with Network limits on (they ship off), the runtime then runs on its own egress proxy, reaching its provider's endpoints, its Project's rules and the person's safe networks; on Linux the OS profile still materializes it as plain network allow.
 - A new module may not launch a provider process without the shared confinement builder unless the matrix names it.
 - Runtimes get no reusable cloud credential the person did not configure for that account; shared-config and default-chain cloud sign-in is refused.
 
@@ -1466,12 +1494,12 @@ Status: Built. Since: 2026-10-31. Detail: [Architecture: Security and authority,
 
 A Project terminal is the person's shell, not an agent's. No provider, tool call, agent run or thread can address it, read its output or type into it.
 
-- Only a person at a local window whose workspace holds the Code Project may start, attach to, type into, resize or stop it; a paired device is refused.
+- Only a person at a local window whose workspace holds the Work or Code Project may start, attach to, type into, resize or stop it; a paired device is refused.
 - It runs at the Project's bound root through the same confinement as a thread terminal, with no credential references; Plan never applies.
 - Its lifecycle is journaled on its own aggregate, its output is never journaled, and archiving the Project or relinking its root ends it as `authority-revoked`.
-- A Work Project shows a terminal only after its Developer tools are turned on (not built yet); Chat has none.
+- A Work Project shows a terminal only after its Developer tools are turned on; Chat has none.
 
-Status: Partly built. Since: —. Detail: [Architecture: Security and authority, Project terminals](../architecture.md#security-and-authority).
+Status: Built. Since: —. Detail: [Architecture: Security and authority, Project terminals](../architecture.md#security-and-authority).
 
 ### Terminal output paths
 
@@ -1538,13 +1566,13 @@ Status: Built. Since: —. Detail: [Architecture: Security and authority](../arc
 
 ### Project actions
 
-A Code Project keeps up to twelve named actions (such as Run, Test and Dev), each a one-line command and a folder inside the bound root, which the person runs in a Project terminal.
+A Work or Code Project keeps up to twelve named actions (such as Run, Test and Dev), each a one-line command and a folder inside the bound root, which the person runs in a Project terminal.
 
 - Only a local window saves the list; a paired device is refused, because a saved line is later typed into the person's own shell.
 - The host suggests actions from the root package scripts and build targets without running anything, and saves nothing until the person confirms.
 - Running one names the action, never its text; the host reads the line from the Project record and types it into a terminal the window owns, under that terminal's confinement and checks.
 - A lost reply is reported and never retried, because the command may not be safe to run twice.
-- A Work Project has no actions while Work's shell is withheld (not built yet).
+- A Work Project's actions appear once its Developer tools are on (2026-10-31).
 
 Status: Built. Since: —. Detail: [Architecture: Security and authority, Project actions](../architecture.md#security-and-authority).
 
@@ -1855,9 +1883,9 @@ Status: Built. Since: —. Detail: [Workspace: Navigation and Projects](workspac
 A Work Project's Developer tools switch is presentation, off by default and set only by a person. A Work thread has the same shell, Git and tools as a Code thread at the same level either way.
 
 - The switch changes what the Project shows, not what its threads may do. Code Projects have no such row.
-- The same-tools rule for a Work thread is allowed, not built yet.
+- Today it shows the Project terminal and Project actions; Work has no Git, pull request or worktree panels yet for it to show.
 
-Status: Partly built. Since: —. Detail: [Workspace: Navigation and Projects](workspace.md#navigation-and-projects).
+Status: Built. Since: —. Detail: [Workspace: Navigation and Projects](workspace.md#navigation-and-projects).
 
 ### Sidebar status and next waiting thread
 
@@ -2171,9 +2199,9 @@ Browser pages may keep sign-in in a Project or Personal profile. Private remains
 - On a profile page the agent needs a site approval for each origin and profile, for reading too. Credential fields stay protected.
 - Routines, subagents, paired devices and terminal grants are refused on profile pages.
 - An extension is installed and enabled only by a person at a local window. Install never enables, and no agent, plugin or skill can install or enable.
-- Profiles, their storage, site approvals, the refusals, and sign out are built; extension install, per-profile enablement, and popups are not built yet.
+- Profiles, their stores, site approvals, refusals, sign out, and extension install, per-profile enablement, and popups are built. Two pieces of the popup design are declared and not built: `chrome.tabs` support for popups and the `chrome.action.onClicked` event.
 
-Status: Partly built. Since: —. Detail: [Browser profiles and extensions: Profiles](browser-profiles.md#profiles) and [The agent on a signed-in page](browser-profiles.md#the-agent-on-a-signed-in-page).
+Status: Built. Since: 2026-10-31. Detail: [Browser profiles and extensions: Profiles](browser-profiles.md#profiles) and [The agent on a signed-in page](browser-profiles.md#the-agent-on-a-signed-in-page).
 
 ### Terminal Browser grant
 
@@ -2599,16 +2627,6 @@ Status: Partly built. Since: 2026-10-28. Detail: [Disposable desktops: provider 
 ## Decided, pending a specification update
 
 The maintainer decided these rules on 2026-10-31. No current specification states them yet; each one's owner is "pending spec update", and the specification change that adopts it moves the entry into its area. Until then they are design direction, not built behaviour, and where one narrows a rule above (Full access means no sandbox), this entry is the newer decision.
-
-### Secrets stay guarded at every level
-
-Secret files and stores stay out of an agent's reach at every guardrail level, Full access included, with as little friction as the person's normal tools.
-
-- An operating-system deny list covers secret files at every level, extending the credential-file denial ACP agents already keep: private keys, cloud and tool credentials, keychain and password-manager files, browser login stores, and other tools' sign-ins.
-- SSH works through the person's SSH agent, Git through the system credential helper, and API keys through the credential broker, so agents use credentials without reading them.
-- Secret values are redacted everywhere Octant records or shows output: logs, the journal, exports and transcripts.
-
-Status: Designed, not built. Since: 2026-10-31. Detail: pending spec update (owner to be [Architecture: Security and authority](../architecture.md#security-and-authority)).
 
 ### Linked external secret stores
 

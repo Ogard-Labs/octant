@@ -120,8 +120,10 @@ in the composer changes it in one click, for new and existing threads alike:
   short list of reading tools, refuses every write they try outside a
   scratch folder of its own, and gives them no network.
 - **Full access**: no sandbox and no prompts, as in the providers' own apps.
-  Agents can change any file and run any command without asking, so they can
-  read your whole home folder, including SSH and cloud keys. Nothing asks,
+  Agents can change any file and run any command without asking.
+  [Protected files](../advanced/privacy-and-security.md#protected-files),
+  such as SSH private keys and cloud credentials, are guarded by Octant's own
+  tools and redaction only, and a shell command can read them. Nothing asks,
   pushing, merging and publishing included; the agent does those because you
   asked in the thread, and every action is recorded. Outside content the
   agent read is tagged on the tool row and the thread card, never blocked.
@@ -302,7 +304,7 @@ Code can create managed git worktrees for isolated feature branches. New managed
 Code exposes repository-valid engineering surfaces:
 
 - Thread conversations, including the tool steps and thinking a turn recorded — a reopened thread replays a bounded number of them and says when it kept only the earliest
-- Terminal (confined to the Project root). A thread's own terminal keeps running when you close its tab and reattaches when you open it again; an extra terminal you opened alongside it belongs to that tab, so closing the tab stops its shell rather than leaving a process nothing can reach.
+- Terminal (confined to the Project root). A thread's own terminal keeps running when you close its tab and reattaches when you open it again; an extra terminal you opened alongside it belongs to that tab, so closing the tab stops its shell rather than leaving a process nothing can reach. The agent can use the thread's terminal too, for dev servers and other long-running commands: in Plan it cannot, at Full access it runs commands there without asking, and in every other mode it asks you before each command it types, showing the command.
 - A thread list you can shape: rename a thread in place (double-click or F2), pin the ones you keep coming back to so they stay at the top, and see which threads moved while you were elsewhere
 - A thread card on hover or keyboard focus: Project, branch, provider, fork origin, recency, and the thread's exact linked pull requests read from the cached snapshot (hovering never asks GitHub). Click a pull request to open it in Review; Cmd-click, the trailing GitHub control, or the row menu's **Open on GitHub** entry opens it in your browser
 - Quick open by file name (`Cmd+P`) and search across file contents (`Cmd+Shift+F`), both confined to the repository bound to the thread and both bounded — Octant says when it stopped before searching everything rather than reporting a partial answer as complete
@@ -337,9 +339,13 @@ When you ask, the agent can open the pull request for the thread's own
 branch, as a draft or ready for review, and stack it on another branch that
 already has an open pull request. It can also change that pull request's
 title and description, or mark a draft ready (or turn it back into a draft).
-It never chooses another branch, and it cannot merge or close anything. A
-thread that asks before acting shows you the exact change first; Full access
-goes ahead; Plan refuses. The thread's pull request shows in Review and on
+It can also add or remove labels the repository already has, close the pull
+request or reopen it, post a comment or a reply in a review thread, and merge
+it. Comments, replies, and merges always ask you first, at every access level;
+the comment shows its whole text. It never chooses another branch, and it never
+approves a pull request or deletes a branch. A thread that asks before acting
+shows you the exact change first; Full access goes ahead for the rest; Plan
+refuses. The thread's pull request shows in Review and on
 its card, stacked ones included.
 The sidebar follows the pane that last received pointer or keyboard input.
 Each thread remembers its open tools and selected tool.

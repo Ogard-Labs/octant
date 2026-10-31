@@ -126,6 +126,15 @@ describe("browser profile copy", () => {
     ).toBe("Let the agent use https://staging.example.com in the Project profile?");
     expect(browserApprovalDetail({ profile: { kind: "personal" } })).toMatch(/signed in as you/);
     expect(browserApprovalDetail({})).toBe("Shell and file access stay unchanged");
+    expect(browserApprovalDetail({ profile: { kind: "personal" }, extensionCount: 2 })).toContain(
+      "2 extensions are on in this profile",
+    );
+    expect(browserApprovalDetail({ profile: { kind: "personal" }, extensionCount: 1 })).toContain(
+      "1 extension is on in this profile",
+    );
+    expect(browserApprovalDetail({ extensionCount: 2 })).toBe(
+      "Shell and file access stay unchanged",
+    );
   });
 
   it("remembers the person's last choice for a Project and falls back to Private", () => {

@@ -63,7 +63,10 @@ import { fileMentionContextBlocks, FileMentionService } from "../fileMentionServ
 import { createAgentMessageTools } from "../agentMessage/agentMessageTools";
 import { codeSiblingThreadSource } from "../siblingThreads/codeSiblingThreadSource";
 import { createSiblingThreadTools } from "../siblingThreads/siblingThreadTools";
-import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
+import {
+  readShieldWatcherLabels,
+  readThreadExternalContentTaint,
+} from "../context/externalContentTaintProjection";
 import { CodeTurnDecisions } from "../turnDecisions/codeTurnDecisions";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
 import { isReplayedAndroidEvidence } from "../android/androidToolchainService";
@@ -269,6 +272,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "codeTestDiscovery"
     | "isCodeProviderModelAllowed"
     | "onPullRequestSnapshotRefreshed"
+    | "projectPullRequestActionService"
     | "projectPullRequestCadence"
     | "projectPullRequestService"
     | "roots"
@@ -365,6 +369,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     persistence,
     probeProviderForThreads,
     productFeedbackService,
+    projectPullRequestActionService,
     projectPullRequestCadence,
     projectPullRequestService,
     projectService,
@@ -1245,6 +1250,19 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             snapshot: () => projectPullRequestService.boardSnapshot(windowId),
           },
           planProgress: codeBoardPlanProgressSource,
+          outsideContent: {
+            read: (threadId) => {
+              if (
+                !readThreadExternalContentTaint(persistence.connection, String(threadId))
+                  .externalContentIngested
+              ) {
+                return undefined;
+              }
+              return readShieldWatcherLabels(persistence.connection, String(threadId)).length > 0
+                ? "flagged"
+                : "read";
+            },
+          },
           clock: () => new Date().toISOString(),
         });
         return board.query(query);
@@ -1397,15 +1415,20 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           command,
           signal ?? new AbortController().signal,
         ),
-      mergeProjectPullRequest: (windowId, command, signal, initiator) => {
-        if (initiator !== "user")
-          return Promise.resolve({ status: "refused", reason: "not-authorized" });
-        return projectPullRequestService.merge(
+      // A paired phone or web client merges under the same head and
+      // required-check rules as the desktop window; it must also carry the
+      // person's confirmation, which the service enforces.
+      mergeProjectPullRequest: (windowId, command, signal, caller) =>
+        projectPullRequestService.merge(
           windowId,
           command,
           signal ?? new AbortController().signal,
-        );
-      },
+          caller,
+        ),
+      mergeProjectPullRequestStack: (windowId, command, signal, caller) =>
+        projectPullRequestActionService.mergeStack(windowId, command, signal, caller),
+      actOnProjectPullRequest: (windowId, command, signal, caller) =>
+        projectPullRequestActionService.act(windowId, command, signal, caller),
       queryProjectPullRequestSwitches: (windowId, target) =>
         pullRequestSwitchService.query(windowId, target),
       setProjectPullRequestMergeWhenReady: (windowId, command, signal, initiator) =>

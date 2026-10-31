@@ -112,7 +112,7 @@ describe("automationCenterModel labels", () => {
 
   it("summarizes effective authority as named text without secrets", () => {
     const summary = automationAuthoritySummary(definition.authorityProfile);
-    expect(summary).toBe("Ask for approvals · filesystem, tools · this session only");
+    expect(summary).toBe("Ask for approvals · filesystem, shell, git, tools · this session only");
     expect(summary).not.toContain("digest");
   });
 });
@@ -161,6 +161,21 @@ describe("buildAutomationDraft", () => {
     expect(result.kind).toBe("valid");
     if (result.kind !== "valid") return;
     expect(result.draft.deliveryTarget.revision).toBe(4);
+  });
+
+  it("refuses a Work routine under a profile without the shell and Git every Work turn holds", () => {
+    const input = validFormInput();
+    const authority = input.authorityProfile;
+    if (authority === undefined) throw new Error("fixture has an authority profile");
+    const result = buildAutomationDraft({
+      ...input,
+      authorityProfile: {
+        ...authority,
+        requested: { ...authority.requested, shell: false, git: false },
+        effective: { ...authority.effective, shell: false, git: false },
+      },
+    });
+    expect(result.kind).toBe("invalid");
   });
 
   it("refuses to build without an explicit delivery-target confirmation", () => {

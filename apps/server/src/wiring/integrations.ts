@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   decodeCodeThreadId,
+  decodeWorkThreadId,
   THREAD_EXTERNAL_CONTENT_AGGREGATE,
   THREAD_RETENTION_EVENT_NAMES,
 } from "@octant/contracts";
@@ -32,6 +33,8 @@ import { createLinearIntegrationService } from "../integration/integrationServic
 import { createIntegrationRouteHandler } from "../integrationRoutes";
 import { makeCredentialBrokerClient } from "../providers/credentialBrokerClient";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import { createSafeNetworkRouteHandler } from "../network/safeNetworkRoutes";
+import { wireRuntimeNetwork } from "./runtimeNetwork";
 import { CacheStatsProjection } from "../cacheStatsProjection";
 import { GistConnection } from "../canvas/gistExportTarget";
 import type { RecordExternalContentIngestionInput } from "../context/externalContentIngestionStore";
@@ -51,7 +54,7 @@ import {
   toolEgressLaunchTaintReference,
   ToolEgressRules,
 } from "../harness/nativeHarnessEgressRules";
-import { isNativeHarnessDriverKind } from "@octant/domain";
+import { isNativeHarnessDriverKind, workThreadAccessOf } from "@octant/domain";
 import type { ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { AgentRunsWiring } from "./agentRuns";
@@ -114,25 +117,49 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
     // thread marks it now.
     const toolEgressRules = new ToolEgressRules({
       journal: persistence.journal,
-      readCodeThread: (threadId) => {
+      readThread: (threadId) => {
         try {
-          const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
-          if (thread === undefined) return undefined;
-          const instance = persistence.readProviderInstance(thread.providerInstanceId);
-          return {
-            projectId: String(thread.projectId),
-            // Mirrors the harness composition: a harness thread's commands on
-            // macOS and Linux run on the network its posture resolves now.
-            commandsProxied:
+          const harnessCommandsProxied = (
+            providerInstanceId: Parameters<typeof persistence.readProviderInstance>[0],
+            executionPolicy: Parameters<
+              typeof resolveDefaultThreadEgressPolicy
+            >[0]["executionPolicy"],
+            mode: "work" | "code",
+          ) => {
+            const instance = persistence.readProviderInstance(providerInstanceId);
+            return (
               (process.platform === "darwin" || process.platform === "linux") &&
               instance !== undefined &&
               isNativeHarnessDriverKind(instance.driverKind) &&
               materializeHarnessToolNetwork(
-                resolveDefaultThreadEgressPolicy({
-                  mode: "code",
-                  executionPolicy: thread.executionPolicy,
-                }),
-              ) === "proxied",
+                resolveDefaultThreadEgressPolicy({ mode, executionPolicy }),
+              ) === "proxied"
+            );
+          };
+          const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+          if (thread !== undefined) {
+            return {
+              projectId: String(thread.projectId),
+              // Mirrors the harness composition: a harness thread's commands on
+              // macOS and Linux run on the network its posture resolves now.
+              commandsProxied: harnessCommandsProxied(
+                thread.providerInstanceId,
+                thread.executionPolicy,
+                "code",
+              ),
+            };
+          }
+          // Work and Code share the shell at the thread's level, so a Work
+          // thread's commands follow the same rules at its stored level.
+          const work = workThreadProjection.read(decodeWorkThreadId(threadId));
+          if (work === undefined) return undefined;
+          return {
+            projectId: String(work.projectId),
+            commandsProxied: harnessCommandsProxied(
+              work.providerInstanceId,
+              workThreadAccessOf(work.access).executionPolicy,
+              "work",
+            ),
           };
         } catch {
           return undefined;
@@ -170,6 +197,17 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       }
     });
     yield* Effect.addFinalizer(() => Effect.sync(unsubscribeToolEgressRules));
+    const { projectExists, providerRuntimeNetwork, safeNetworkStore } = wireRuntimeNetwork({
+      persistence,
+      toolEgressRules,
+    });
+    // Settings › Access › Safe networks; only a local window changes a list.
+    const safeNetworkRoutes = createSafeNetworkRouteHandler({
+      windowAuthorityStore,
+      store: safeNetworkStore,
+      network: providerRuntimeNetwork,
+      projectExists,
+    });
     // Where a mention or a Side Chat reads its source's mark and marks the
     // thread reading that source's transcript.
     const threadOutsideContentMarks = {
@@ -366,6 +404,9 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       terminalSessionRoutes,
       threadOutsideContentMarks,
       toolEgressRules,
+      providerRuntimeNetwork,
+      safeNetworkRoutes,
+      safeNetworkStore,
     };
   });
 }

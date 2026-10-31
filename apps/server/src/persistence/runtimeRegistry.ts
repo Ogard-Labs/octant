@@ -29,7 +29,9 @@ import {
   CodeProjectPermissionModeChanged,
   CodeProjectAutoReviewerChanged,
   CodeProjectPullRequestBackgroundRefreshChanged,
+  CODE_PROJECT_PULL_REQUEST_ACTION_RECORDED,
   CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED,
+  CodeProjectPullRequestActionRecorded,
   CodeProjectPullRequestMergeRecorded,
   CODE_PROJECT_PULL_REQUEST_MERGE_WHEN_READY_RECORDED,
   CodeProjectPullRequestMergeWhenReadyRecorded,
@@ -37,6 +39,8 @@ import {
   CodeProjectPullRequestAutoFixRecorded,
   WorkProjectStatusFileChanged,
   ProjectBrandKitChanged,
+  WorkProjectDeveloperToolsChanged,
+  WorkProjectActionsChanged,
   CodeProjectActionsChanged,
   ProjectExtraFolderAdded,
   ProjectExtraFolderRemoved,
@@ -162,7 +166,13 @@ import {
   RemotePushRegistrationRecordedV1,
   RemoteServerGrantClosedPayload,
   RemoteServerGrantOpenedPayload,
+  BROWSER_EXTENSION_EVENT_NAMES,
   BROWSER_PROFILE_EVENT_NAMES,
+  BrowserExtensionDisabled,
+  BrowserExtensionEnabled,
+  BrowserExtensionInstalled,
+  BrowserExtensionRemoved,
+  BrowserExtensionUpdated,
   BrowserCookiesImported,
   BrowserProfileCleared,
   TERMINAL_BROWSER_GRANT_EVENT_NAMES,
@@ -204,6 +214,17 @@ import {
   ThreadEgressLaunchStartedPayload,
   ThreadEgressLaunchSummarizedPayload,
 } from "@octant/contracts";
+import {
+  RUNTIME_NETWORK_EVENT_NAMES,
+  RuntimeNetworkDecisionsRecordedPayload,
+  RuntimeNetworkLaunchStartedPayload,
+  RuntimeNetworkLaunchSummarizedPayload,
+  RuntimeNetworkReviewerAllowedPayload,
+  SAFE_NETWORKS_EVENT_NAMES,
+  SafeNetworksLimitsSetPayload,
+  SafeNetworksPlacesSetPayload,
+  SafeNetworksProjectOverrideClearedPayload,
+} from "@octant/contracts/safe-networks";
 import {
   CODE_LANGUAGE_SERVER_EVENT_NAMES,
   CodeLanguageServerApprovalGranted,
@@ -309,6 +330,7 @@ import { registerCanvasTagEvents } from "../canvas/canvasTagService";
 import { registerCanvasShareEvents } from "../canvas/canvasShareEventStore";
 import { registerCanvasExportEvents } from "../canvas/canvasExportEventStore";
 import { registerCanvasPublicShareEvents } from "../canvas/canvasPublicShareService";
+import { registerProtectedFilesEvents } from "../protectedFilesService";
 import { registerCanvasExportFolderEvents } from "../canvas/canvasExportFolderEventStore";
 import { registerCanvasOutsideContentEvents } from "../canvas/canvasOutsideContentMark";
 import type { HostIdentityMigrationRegistry } from "./hostIdentityMigration";
@@ -376,6 +398,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       CodeProjectPullRequestBackgroundRefreshChanged,
     )
     .register(CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED, 1, CodeProjectPullRequestMergeRecorded)
+    .register(CODE_PROJECT_PULL_REQUEST_ACTION_RECORDED, 1, CodeProjectPullRequestActionRecorded)
     .register(
       CODE_PROJECT_PULL_REQUEST_MERGE_WHEN_READY_RECORDED,
       1,
@@ -385,6 +408,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("project.provider-policy-changed@1", 1, ProjectProviderPolicyChanged)
     .register("project.native-providers-changed@1", 1, ProjectNativeProvidersChanged)
     .register("project.work-status-file-changed@1", 1, WorkProjectStatusFileChanged)
+    .register("project.work-developer-tools-changed@1", 1, WorkProjectDeveloperToolsChanged)
+    .register("project.work-actions-changed@1", 1, WorkProjectActionsChanged)
     .register("project.brand-kit-changed@1", 1, ProjectBrandKitChanged)
     .register("project.code-actions-changed@1", 1, CodeProjectActionsChanged)
     .register("project.extra-folder-added@1", 1, ProjectExtraFolderAdded)
@@ -492,6 +517,25 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       ThreadEgressDecisionsRecordedPayload,
     )
     .register(CODE_DEBUG_EVENT_NAMES.egressLaunchSummarized, 1, ThreadEgressLaunchSummarizedPayload)
+    .register(SAFE_NETWORKS_EVENT_NAMES.limitsSet, 1, SafeNetworksLimitsSetPayload)
+    .register(SAFE_NETWORKS_EVENT_NAMES.placesSet, 1, SafeNetworksPlacesSetPayload)
+    .register(
+      SAFE_NETWORKS_EVENT_NAMES.projectOverrideCleared,
+      1,
+      SafeNetworksProjectOverrideClearedPayload,
+    )
+    .register(RUNTIME_NETWORK_EVENT_NAMES.launchStarted, 1, RuntimeNetworkLaunchStartedPayload)
+    .register(
+      RUNTIME_NETWORK_EVENT_NAMES.decisionsRecorded,
+      1,
+      RuntimeNetworkDecisionsRecordedPayload,
+    )
+    .register(
+      RUNTIME_NETWORK_EVENT_NAMES.launchSummarized,
+      1,
+      RuntimeNetworkLaunchSummarizedPayload,
+    )
+    .register(RUNTIME_NETWORK_EVENT_NAMES.reviewerAllowed, 1, RuntimeNetworkReviewerAllowedPayload)
     .register(AGENT_RUN_REQUESTED, 1, AgentRunRequested)
     .register(AGENT_RUN_STATUS_CHANGED, 1, AgentRunStatusChanged)
     .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged)
@@ -558,6 +602,11 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(PROJECT_TERMINAL_EVENT_NAMES.started, 1, ProjectTerminalStarted)
     .register(PROJECT_TERMINAL_EVENT_NAMES.ended, 1, ProjectTerminalEnded)
     .register(BROWSER_PROFILE_EVENT_NAMES.cleared, 1, BrowserProfileCleared)
+    .register(BROWSER_EXTENSION_EVENT_NAMES.installed, 1, BrowserExtensionInstalled)
+    .register(BROWSER_EXTENSION_EVENT_NAMES.updated, 1, BrowserExtensionUpdated)
+    .register(BROWSER_EXTENSION_EVENT_NAMES.removed, 1, BrowserExtensionRemoved)
+    .register(BROWSER_EXTENSION_EVENT_NAMES.enabled, 1, BrowserExtensionEnabled)
+    .register(BROWSER_EXTENSION_EVENT_NAMES.disabled, 1, BrowserExtensionDisabled)
     .register(BROWSER_PROFILE_EVENT_NAMES.cookiesImported, 1, BrowserCookiesImported)
     .register(TERMINAL_BROWSER_GRANT_EVENT_NAMES.issued, 1, TerminalBrowserGrantIssued)
     .register(TERMINAL_BROWSER_GRANT_EVENT_NAMES.revoked, 1, TerminalBrowserGrantRevoked)
@@ -591,6 +640,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerCanvasShareEvents(events);
   registerCanvasExportEvents(events);
   registerCanvasPublicShareEvents(events);
+  registerProtectedFilesEvents(events);
   registerCanvasExportFolderEvents(events);
   registerCanvasOutsideContentEvents(events);
   registerCanvasCommentEvents(events);

@@ -9,13 +9,7 @@ import {
 } from "./threadEgressPolicy";
 
 describe("thread egress policy", () => {
-  it("defaults Work and Plan to none", () => {
-    expect(
-      resolveDefaultThreadEgressPolicy({
-        mode: "work",
-        executionPolicy: "approval-gated",
-      }),
-    ).toBe("none");
+  it("defaults Chat and Plan to none", () => {
     expect(
       resolveDefaultThreadEgressPolicy({
         mode: "code",
@@ -101,12 +95,19 @@ describe("thread egress policy", () => {
         executionPolicy: "approval-gated",
       }),
     ).toBe("none");
-    expect(
-      resolveDefaultThreadEgressPolicy({
-        mode: "work",
-        executionPolicy: "approval-gated",
-      }),
-    ).toBe("none");
+  });
+
+  it("gives Work's commands the egress Code's get at the same level", () => {
+    for (const executionPolicy of [
+      "approval-gated",
+      "auto-accept-edits",
+      "full-access",
+      "plan",
+    ] as const) {
+      expect(resolveDefaultThreadEgressPolicy({ mode: "work", executionPolicy })).toBe(
+        resolveDefaultThreadEgressPolicy({ mode: "code", executionPolicy }),
+      );
+    }
   });
 
   it("resolves Full access and explicit network approval to unrestricted", () => {

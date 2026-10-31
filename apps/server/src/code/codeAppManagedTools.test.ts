@@ -294,7 +294,7 @@ describe("Code app-managed tools", () => {
     expect(executeOperation).toHaveBeenCalledOnce();
   });
 
-  it("interrupts through the owner-scoped cleanup path after Full access is revoked", async () => {
+  it("interrupts through the owner-scoped cleanup path after the thread moves to Plan", async () => {
     let current = thread();
     let marker = "";
     const interrupt = vi.fn(async () => ({
@@ -333,7 +333,7 @@ describe("Code app-managed tools", () => {
         terminate: vi.fn(),
       },
       wait: async () => {
-        current = thread({ executionPolicy: "approval-gated" });
+        current = thread({ executionPolicy: "plan" });
       },
     });
 
@@ -344,9 +344,8 @@ describe("Code app-managed tools", () => {
 
     expect(result).toEqual({
       result: {
-        error: "full-access-required",
-        message:
-          "This tool needs Full access for the thread. Raise the thread's access, then try again.",
+        error: "plan-mode-read-only",
+        message: "Plan mode is read-only; this tool cannot run.",
       },
       isError: true,
     });
@@ -1097,7 +1096,7 @@ describe("Code app-managed tools", () => {
     expect(result).toMatchObject({ isError: false, result: { status: "running" } });
   });
 
-  it("fails closed when a Full-access thread is running a narrower turn", async () => {
+  it("fails closed when a Full-access thread is running a Plan turn", async () => {
     const executeOperation = vi.fn();
     const tools = createCodeAppManagedTools({
       windowId,
@@ -1115,16 +1114,57 @@ describe("Code app-managed tools", () => {
       }),
     ).resolves.toEqual({
       result: {
-        error: "full-access-required",
-        message:
-          "This tool needs Full access for the thread. Raise the thread's access, then try again.",
+        error: "plan-mode-read-only",
+        message: "Plan mode is read-only; this tool cannot run.",
       },
       isError: true,
     });
     expect(executeOperation).not.toHaveBeenCalled();
   });
 
-  it("fails closed outside Full access and never invokes a host tool", async () => {
+  it("asks the person before each command below Full access and runs nothing they decline", async () => {
+    const executeOperation = vi.fn(async (_windowId: WindowId, command: CodeOperationCommand) => ({
+      kind: "terminal-state",
+      operationId: command.operationId,
+      terminalId: threadId,
+      state: "running",
+    }));
+    const request = vi.fn(async () => "denied" as const);
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: thread({ executionPolicy: "approval-gated" }),
+      readThread: () => thread({ executionPolicy: "approval-gated" }),
+      uuid: uuidFactory(),
+      executeOperation: executeOperation as never,
+      terminal: { read: vi.fn() },
+      terminalApproval: { request },
+    });
+
+    await expect(
+      tools.execute({
+        name: CODE_TERMINAL_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "run", command: "pwd" }),
+      }),
+    ).resolves.toMatchObject({ result: { error: "terminal-approval-denied" }, isError: true });
+    // The person saw the command, and the start it needs rode the same ask.
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: "pwd",
+        start: expect.objectContaining({ kind: "start-terminal" }),
+      }),
+      undefined,
+    );
+    expect(executeOperation).not.toHaveBeenCalled();
+
+    request.mockResolvedValueOnce("approved" as never);
+    await tools.execute({
+      name: CODE_TERMINAL_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "run", command: "pwd" }),
+    });
+    expect(executeOperation.mock.calls.map((call) => call[1].kind)).toContain("start-terminal");
+  });
+
+  it("refuses the agent terminal below Full access on a host that cannot ask", async () => {
     const executeOperation = vi.fn();
     const tools = createCodeAppManagedTools({
       windowId,
@@ -1140,14 +1180,7 @@ describe("Code app-managed tools", () => {
         name: CODE_TERMINAL_TOOL_NAME,
         inputJson: JSON.stringify({ operation: "run", command: "pwd" }),
       }),
-    ).resolves.toEqual({
-      result: {
-        error: "full-access-required",
-        message:
-          "This tool needs Full access for the thread. Raise the thread's access, then try again.",
-      },
-      isError: true,
-    });
+    ).resolves.toMatchObject({ result: { error: "terminal-approval-required" }, isError: true });
     expect(executeOperation).not.toHaveBeenCalled();
   });
 
@@ -2482,6 +2515,109 @@ describe("the pull request as an agent tool", () => {
       }),
     );
     expect(result).toMatchObject({ result: { status: "updated", draft: false }, isError: false });
+  });
+
+  it("asks for each comment and each merge even in a Full-access thread, but not for a label", async () => {
+    const { tools, request, executeOperation } = pullRequestTools();
+
+    await tools.execute({
+      name: CODE_PULL_REQUEST_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "update", addLabels: ["bug"] }),
+    });
+    expect(request).not.toHaveBeenCalled();
+    expect(executeOperation).toHaveBeenLastCalledWith(
+      windowId,
+      expect.objectContaining({
+        kind: "update-pull-request",
+        addLabels: ["bug"],
+        authorization: { kind: "full-access" },
+      }),
+    );
+
+    const commented = await tools.execute({
+      name: CODE_PULL_REQUEST_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "comment", body: "Fixed.", reviewThreadId: "PRRT_1" }),
+    });
+    expect(request).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: "comment-pull-request", body: "Fixed." }),
+      undefined,
+    );
+    expect(executeOperation).toHaveBeenLastCalledWith(
+      windowId,
+      expect.objectContaining({
+        kind: "comment-pull-request",
+        reviewThreadId: "PRRT_1",
+        authorization: { kind: "approved", approvalId },
+      }),
+    );
+    expect(commented).toMatchObject({ result: { status: "commented" }, isError: false });
+
+    const merged = await tools.execute({
+      name: CODE_PULL_REQUEST_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "merge", method: "squash", headSha: "a".repeat(40) }),
+    });
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(executeOperation).toHaveBeenLastCalledWith(
+      windowId,
+      expect.objectContaining({
+        kind: "merge-pull-request",
+        method: "squash",
+        authorization: { kind: "approved", approvalId },
+      }),
+    );
+    expect(merged).toMatchObject({ result: { status: "merged" }, isError: false });
+  });
+
+  it("sends nothing to GitHub when the person declines a merge or a comment", async () => {
+    const { tools, executeOperation } = pullRequestTools({}, "denied");
+    for (const input of [
+      { operation: "comment", body: "Hello." },
+      { operation: "merge", method: "merge", headSha: "a".repeat(40) },
+    ]) {
+      const result = await tools.execute({
+        name: CODE_PULL_REQUEST_TOOL_NAME,
+        inputJson: JSON.stringify(input),
+      });
+      expect(result).toMatchObject({
+        result: { error: "pull-request-approval-denied" },
+        isError: true,
+      });
+    }
+    expect(executeOperation).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed label, close, comment, and merge input before anything runs", async () => {
+    const { tools, request, executeOperation } = pullRequestTools();
+    for (const input of [
+      { operation: "update", state: "closed", title: "also rename" },
+      { operation: "update", state: "deleted" },
+      { operation: "update", addLabels: [3] },
+      { operation: "update", addLabels: [] },
+      { operation: "comment" },
+      { operation: "comment", body: "   " },
+      { operation: "merge", method: "fast-forward", headSha: "a" },
+      { operation: "merge", method: "merge" },
+      { operation: "create", title: "x", addLabels: ["bug"] },
+    ]) {
+      const result = await tools.execute({
+        name: CODE_PULL_REQUEST_TOOL_NAME,
+        inputJson: JSON.stringify(input),
+      });
+      expect(result).toMatchObject({ isError: true });
+    }
+    expect(request).not.toHaveBeenCalled();
+    expect(executeOperation).not.toHaveBeenCalled();
+  });
+
+  it("refuses a comment or merge in Plan mode", async () => {
+    const { tools, request, executeOperation } = pullRequestTools({ executionPolicy: "plan" });
+    const result = await tools.execute({
+      name: CODE_PULL_REQUEST_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "comment", body: "Hello." }),
+    });
+    expect(result).toMatchObject({ result: { error: "plan-mode-read-only" }, isError: true });
+    expect(request).not.toHaveBeenCalled();
+    expect(executeOperation).not.toHaveBeenCalled();
   });
 
   it("reaches GitHub with nothing when the person declines", async () => {

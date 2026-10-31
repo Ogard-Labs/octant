@@ -4,6 +4,8 @@ import {
   type CodeThreadId,
   type CodeTerminalId,
 } from "@octant/contracts/code";
+import type { ProjectId, ProjectSummary } from "@octant/contracts/projects";
+import type { WindowWorkspace } from "@octant/contracts";
 import type { ZenSourceContext } from "@octant/contracts/zen";
 
 export interface ZenTerminalPinTarget {
@@ -35,4 +37,32 @@ export function resolveZenTerminalPinTarget(
     threadId: thread.id,
     title: thread.title,
   };
+}
+
+/**
+ * The Project whose terminal Zen's "This Project" opens: the window's Project
+ * in the mode it is showing first, then its Project in the other mode. A Work
+ * Project counts only once the person turned on its Developer tools, which is
+ * what shows a Work Project's terminal.
+ */
+export function resolveZenProjectTerminalTarget(
+  workspace: Pick<WindowWorkspace, "activeMode" | "contextByMode">,
+  projects: ReadonlyArray<ProjectSummary>,
+): { readonly projectId: ProjectId; readonly name: string } | undefined {
+  const modes: ReadonlyArray<"work" | "code"> =
+    workspace.activeMode === "work" ? ["work", "code"] : ["code", "work"];
+  for (const mode of modes) {
+    const projectId = workspace.contextByMode[mode].projectId ?? undefined;
+    if (projectId === undefined) continue;
+    const project = projects.find(
+      (candidate) =>
+        String(candidate.id) === String(projectId) &&
+        candidate.lifecycle === "active" &&
+        (candidate.type === "code" ||
+          (candidate.type === "work" && candidate.developerTools?.enabled === true)) &&
+        candidate.type === mode,
+    );
+    if (project !== undefined) return { projectId: project.id, name: project.name };
+  }
+  return undefined;
 }

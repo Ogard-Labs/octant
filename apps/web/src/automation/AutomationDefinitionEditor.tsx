@@ -79,7 +79,9 @@ function authorityProfileEligible(
   if (requested.executionPolicy === "full-access" || effective.executionPolicy === "full-access") {
     return false;
   }
-  return mode !== "work" || (!effective.shell && !effective.git);
+  // Every Work turn holds the shell and Git, so a Work routine runs only under
+  // a profile that grants them; one without them would never run.
+  return mode !== "work" || (effective.shell && effective.git);
 }
 
 export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProps) {
@@ -93,6 +95,8 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
     authority: useId(),
     target: useId(),
     confirm: useId(),
+    projectLevel: useId(),
+    projectLevelNote: useId(),
   };
 
   const [displayName, setDisplayName] = useState(
@@ -128,6 +132,9 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
   const [targetSummary, setTargetSummary] = useState(initial?.deliveryTarget.summary ?? "");
   // Editing always requires an explicit fresh confirmation; never carry it over.
   const [targetConfirmed, setTargetConfirmed] = useState(false);
+  const [runsAtProjectLevel, setRunsAtProjectLevel] = useState(
+    initial?.projectLevel === "opted-in",
+  );
   const [issues, setIssues] = useState<readonly string[]>([]);
   const [serverMessage, setServerMessage] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
@@ -242,6 +249,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
       missedRunPolicy,
       deliveryTargetSummary: targetSummary,
       deliveryTargetConfirmed: targetConfirmed,
+      runsAtProjectLevel,
       ...(initial === undefined
         ? {}
         : { previousDeliveryTargetRevision: initial.deliveryTarget.revision }),
@@ -465,6 +473,20 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
             : "Every run starts a new thread with this delivery target. It is Done when the target is met."}
         </p>
       </div>
+
+      <div className="automation-editor__field automation-editor__confirmation">
+        <OctantCheckbox
+          aria-describedby={ids.projectLevelNote}
+          checked={runsAtProjectLevel}
+          id={ids.projectLevel}
+          onChange={(event) => setRunsAtProjectLevel(event.target.checked)}
+        />
+        <label htmlFor={ids.projectLevel}>Run at this Project&apos;s mode</label>
+      </div>
+      <p className="automation-editor__note" id={ids.projectLevelNote}>
+        Each run uses the mode the Project&apos;s new threads start in, Full access included, so it
+        may change files and run commands with nobody asked. Off, every run asks first.
+      </p>
 
       <div className="automation-editor__field automation-editor__confirmation">
         <OctantCheckbox

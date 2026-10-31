@@ -125,6 +125,9 @@ export function BrowserCaptureList(props: BrowserCaptureListProps) {
               <span className="browser-capture__title">{captureLabel(capture)}</span>
               <span className="oct-meta oct-meta--mono browser-capture__origin">
                 {capture.origin}
+                {capture.profile === undefined
+                  ? ""
+                  : ` · ${capture.profile.kind === "personal" ? "Personal" : "Project"} profile`}
               </span>
             </span>
           </li>

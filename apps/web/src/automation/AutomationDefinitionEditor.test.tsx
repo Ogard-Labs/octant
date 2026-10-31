@@ -95,7 +95,7 @@ describe("AutomationDefinitionEditor creation", () => {
     await chooseLabeledOption("Authority profile", "Ask for approvals Work");
     // The effective authority is summarized as named text, never a token dump.
     expect(
-      screen.getByText("Ask for approvals · filesystem, tools · this session only"),
+      screen.getByText("Ask for approvals · filesystem, shell, git, tools · this session only"),
     ).toBeVisible();
 
     await chooseLabeledOption("Schedule", "Run once");
@@ -127,6 +127,34 @@ describe("AutomationDefinitionEditor creation", () => {
     expect(draft.deliveryTarget.confirmed).toBe(true);
     expect(draft.deliveryTarget.revision).toBe(1);
     expect(draft.targetPolicy).toBe("new-thread");
+    // Asking first is the default; running at the Project's mode is opted into.
+    expect(draft.projectLevel).toBeUndefined();
+  });
+
+  it("records the person's opt-in to run at the Project's mode, Full access included", async () => {
+    const props = editorProps();
+    render(<AutomationDefinitionEditor {...props} />);
+
+    await userEvent.type(screen.getByLabelText("Name"), "Weekly summary");
+    await userEvent.type(screen.getByLabelText("Task for each run"), "Summarize open work.");
+    await chooseLabeledOption("Project", "Docs Project");
+    await chooseLabeledOption("Execution profile", "Work default");
+    await chooseLabeledOption("Authority profile", "Ask for approvals Work");
+    await chooseLabeledOption("Schedule", "Run once");
+    fireEvent.change(screen.getByLabelText("Run at"), { target: { value: "2026-09-01T09:00" } });
+    await userEvent.type(screen.getByLabelText("Delivery"), "A weekly summary exists.");
+    const optIn = screen.getByLabelText("Run at this Project's mode");
+    expect(optIn).toHaveAccessibleDescription(/Full access included/);
+    await userEvent.click(optIn);
+    await userEvent.click(
+      screen.getByLabelText("I confirm this delivery target for every scheduled run"),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Save automation" }));
+
+    await waitFor(() => expect(props.onSubmit).toHaveBeenCalledOnce());
+    const draft = (props.onSubmit as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as AutomationDefinitionDraft;
+    expect(draft.projectLevel).toBe("opted-in");
   });
 
   it("builds a weekly-local trigger with weekdays, wall time, and IANA timezone", async () => {

@@ -143,7 +143,7 @@ describe("the Work thread a delegation becomes on the receiving spoke", () => {
       authority: { confinementPosture: "project-root-confined", workingDirectory: "." },
     });
     expect(firstTurns[0]?.options).toEqual({
-      holdAskFirst: true,
+      accessCeiling: "ask-first",
       admissionCurrent: expect.any(Function),
     });
   });

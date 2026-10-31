@@ -4,12 +4,16 @@ import {
   defaultPermissionModeFor,
   guardrailLevelOf,
   permissionModeOf,
+  clampWorkAccess,
   chosenAutoReviewer,
   resolveAutoReviewer,
   resolveGuardrail,
   shieldReviewsPrompts,
   shieldRoutesApprovals,
   threadAccessOf,
+  workAccessOfPermissionMode,
+  workThreadAccessOf,
+  workTurnCapabilityFacts,
 } from "./guardrailPolicy";
 
 const claudeOrCodex = { providerReview: true, providerSandbox: true } as const;
@@ -95,16 +99,68 @@ describe("guardrail levels", () => {
     }
   });
 
-  it("gives Work no network at any level", () => {
+  it("guards Work exactly as Code at every level, network included", () => {
+    for (const access of [
+      { executionPolicy: "approval-gated" },
+      { executionPolicy: "approval-gated", autoApprove: true },
+      { executionPolicy: "auto-accept-edits" },
+      { executionPolicy: "full-access" },
+    ] as const) {
+      expect(resolveGuardrail({ access, capabilities: claudeOrCodex, mode: "work" })).toEqual(
+        resolveGuardrail({ access, capabilities: claudeOrCodex, mode: "code" }),
+      );
+    }
+  });
+
+  it("gives Chat no network at any level", () => {
     for (const executionPolicy of ["approval-gated", "full-access"] as const) {
       expect(
         resolveGuardrail({
           access: { executionPolicy },
           capabilities: claudeOrCodex,
-          mode: "work",
+          mode: "chat",
         }),
       ).toMatchObject({ egress: "none" });
     }
+  });
+});
+
+describe("Work levels", () => {
+  it("stores each Work level as the Code mode of the same name", () => {
+    expect(workThreadAccessOf("ask-first")).toEqual(threadAccessOf("ask-first"));
+    expect(workThreadAccessOf("auto")).toEqual(threadAccessOf("auto"));
+    expect(workThreadAccessOf("auto-accept-edits")).toEqual(threadAccessOf("accept-edits"));
+    expect(workThreadAccessOf("full-access")).toEqual(threadAccessOf("full-access"));
+    expect(workAccessOfPermissionMode("plan")).toBeUndefined();
+    expect(workAccessOfPermissionMode("accept-edits")).toBe("auto-accept-edits");
+  });
+
+  it("records shell and Git at the level a Work turn ran with", () => {
+    expect(workTurnCapabilityFacts("ask-first")).toMatchObject({
+      shell: "guarded",
+      git: "guarded",
+      confinement: "project-root-confined",
+    });
+    expect(workTurnCapabilityFacts("auto")).toMatchObject({
+      shell: "provider-review",
+      git: "provider-review",
+    });
+    expect(workTurnCapabilityFacts("full-access")).toMatchObject({
+      shell: "full-access",
+      git: "full-access",
+      confinement: "unconfined",
+      worktree: "denied",
+      pullRequest: "denied",
+    });
+  });
+
+  it("never lets a caller's ceiling widen a Work turn", () => {
+    expect(clampWorkAccess("full-access", "ask-first")).toBe("ask-first");
+    expect(clampWorkAccess("full-access", "auto-accept-edits")).toBe("auto-accept-edits");
+    expect(clampWorkAccess("auto-accept-edits", "full-access")).toBe("auto-accept-edits");
+    expect(clampWorkAccess("auto", "auto-accept-edits")).toBe("ask-first");
+    expect(clampWorkAccess("ask-first", "full-access")).toBe("ask-first");
+    expect(clampWorkAccess("auto", "auto")).toBe("auto");
   });
 });
 

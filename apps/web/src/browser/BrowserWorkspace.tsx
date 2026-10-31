@@ -49,7 +49,9 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 import { useLocalServersController } from "../environment/useLocalServersController";
 import { readRecentBrowserPages, recordRecentBrowserPage } from "./recentBrowserPages";
 import { BrowserProfileControl } from "./BrowserProfileControl";
+import { BrowserExtensionsButton } from "./BrowserExtensionsButton";
 import {
+  BROWSER_PROFILE_LABELS,
   profileChoiceOf,
   readRememberedProfileChoice,
   writeRememberedProfileChoice,
@@ -96,6 +98,8 @@ export interface BrowserWorkspaceProps {
   }) => void;
   /** Reports the isolated context created by a repeatable dock tab. */
   readonly onContextCreated?: (contextId: BrowserContextId) => void;
+  /** Opens Settings, where browser extensions are managed. */
+  readonly onManageExtensions?: () => void;
   /** A newly added Browser tab must not attach to another tab's current context. */
   readonly startFresh?: boolean;
 }
@@ -245,7 +249,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   const secureAddress = committedAddress?.toLocaleLowerCase().startsWith("https:") === true;
   const addressSecurityLabel =
     committedAddress === undefined ? "Address" : secureAddress ? "Secure HTTPS" : "Not secure HTTP";
-  const controlLabel = !nativeContext
+  const driverLabel = !nativeContext
     ? "Preview"
     : nativeSurface.failed
       ? "Live page unavailable"
@@ -254,6 +258,13 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         : nativeState?.control === "user"
           ? "You control"
           : "Shared live page";
+  // While the agent drives a signed-in page the indicator names the profile, so
+  // it is plain whose account the agent is acting as.
+  const drivenProfile = storedProfileOf(snapshot?.context?.policy.profile);
+  const controlLabel =
+    drivenProfile !== undefined && nativeState?.control === "agent"
+      ? `${driverLabel} · ${BROWSER_PROFILE_LABELS[drivenProfile.kind]}`
+      : driverLabel;
 
   useEffect(() => {
     let active = true;
@@ -772,6 +783,20 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             ? {}
             : { onSignOut: () => signOutOfProfile() })}
         />
+        {nativeContext && activeContext ? (
+          <BrowserExtensionsButton
+            agentDriving={nativeState?.control === "agent"}
+            client={props.client}
+            hostBridge={props.hostBridge}
+            profile={storedProfileOf(snapshot?.context?.policy.profile)}
+            refreshKey={
+              snapshot?.context === undefined ? undefined : String(snapshot.context.contextId)
+            }
+            {...(props.onManageExtensions === undefined
+              ? {}
+              : { onManage: props.onManageExtensions })}
+          />
+        ) : null}
         <form
           className="browser-workspace__omnibox"
           noValidate

@@ -42,6 +42,21 @@ describe("Octant Shield in a Code turn's activity", () => {
   });
 });
 
+describe("Octant Shield's Watcher in a Code turn's activity", () => {
+  it("keeps a tool row's outside-content mark from the event that set it", () => {
+    const outsideContent = { labels: ["hidden-text" as const] };
+    const started = applyActivityEvent(EMPTY_TURN_ACTIVITY, tool("started"));
+    const completed = applyActivityEvent(started, {
+      ...tool("completed"),
+      outsideContent,
+    } as CodeOperationEvent);
+    expect(completed.rows).toEqual([
+      expect.objectContaining({ state: "completed", outsideContent }),
+    ]);
+    expect(started.rows[0]).not.toHaveProperty("outsideContent");
+  });
+});
+
 describe("transcript activity", () => {
   it("shows an endpoint retry and clears it when content or a tool call arrives", () => {
     const announcedAt = decodeUtcTimestamp("2026-10-06T12:00:00.000Z");

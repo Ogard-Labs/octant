@@ -30,7 +30,10 @@ export interface SettingsContainerProps {
   readonly availableFonts?: ReadonlyArray<string>;
   readonly backgroundImageLibrary: ReturnType<typeof useBackgroundImageLibrary>;
   readonly chatController: ChatController;
-  readonly browserAutomationClient?: Pick<BrowserAutomationClient, "manageProfiles">;
+  readonly browserAutomationClient?: Pick<
+    BrowserAutomationClient,
+    "manageExtensions" | "manageProfiles"
+  >;
   readonly clients: ReturnType<typeof createLaunchedShellClients>;
   readonly codeController: CodeController;
   readonly controller: ReturnType<typeof useShellController>;
@@ -96,12 +99,14 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
     extensionClient,
     folderBrowseClient,
     hostControlClient,
+    protectedFilesClient,
     localUsageHistoryClient,
     nativeHarnessClient,
     providerUsageLimitsClient,
     replicaMembershipClient,
     replicaStoreSettingsClient,
     replicaSyncStatusClient,
+    safeNetworksClient,
     secretStoresClient,
     usageClient,
     usageDashboardClient,
@@ -193,9 +198,11 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
       {...(props.browserAutomationClient === undefined
         ? {}
         : { browserAutomationClient: props.browserAutomationClient })}
+      protectedFilesClient={protectedFilesClient}
       {...(canvasClient === undefined ? {} : { canvasClient })}
       {...(desktopPaneClient === undefined ? {} : { desktopPaneClient })}
       {...(replicaStoreSettingsClient === undefined ? {} : { replicaStoreSettingsClient })}
+      {...(safeNetworksClient === undefined ? {} : { safeNetworksClient })}
       {...(secretStoresClient === undefined ? {} : { secretStoresClient })}
       {...(replicaMembershipClient === undefined ? {} : { replicaMembershipClient })}
       replicaSyncStatusClient={replicaSyncStatusClient}

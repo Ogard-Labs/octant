@@ -2,7 +2,7 @@ import type { ManagedToolAnswer } from "./managedMcpTools";
 import { providerApprovalCall } from "./providerApprovalCall";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
 import {
@@ -83,8 +83,13 @@ import {
 import { claudeProcessPlanUsageLimits, decodeClaudeProcessPlanUsage } from "./claudeProcessUsage";
 import { claudeNativeArtifactsSupport } from "./claudeNativeArtifacts";
 import { readClaudePublishedSnapshot } from "./claudePublishedSnapshot";
+import { secretGuardRefusal, secretGuardSearchRefusal } from "../process/secretGuard";
 import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 import { providerResumeBinding, resumeBindingRefuses } from "./resumeBinding";
+import {
+  acquireProviderRuntimeNetwork,
+  type ProviderRuntimeNetworkPort,
+} from "../network/providerRuntimeNetwork";
 
 const CLAUDE_TOOLS = [
   "Read",
@@ -150,13 +155,9 @@ export function claudeExecutionOptions(
   mode?: ProviderAcquireInput["mode"],
   platform: NodeJS.Platform = process.platform,
 ): ClaudeExecutionOptions {
+  // Work and Code share one capability set at the thread's level, so a Work
+  // session starts with Bash exactly as a Code session at that level does.
   const options = claudePolicyOptions(policy, autoApprove);
-  // Work has no shell or Git authority, so Claude is never offered Bash there
-  // rather than offered it and asked about each call: a person approving a
-  // command would hand a Work thread authority its mode does not have.
-  if (mode === "work") {
-    return { ...options, tools: options.tools.filter((tool) => tool !== "Bash") };
-  }
   // A Code Plan turn may run read-only commands where its sandbox can hold the
   // shell to them (see `claudePlanRunsCommands`). Plan has no approvals, so
   // the sandbox, not a person, is what keeps those commands read-only.
@@ -349,12 +350,24 @@ function claudePolicyOptions(
   }
 }
 
+/** Whether this posture runs Claude's commands in its own sandbox. */
+function claudeRunsSandbox(policy: ProviderExecutionPolicy): boolean {
+  return policy === "approval-gated" || policy === "auto-accept-edits";
+}
+
+/**
+ * Claude's own sandbox for its commands. With `proxyPort` the sandbox's
+ * network goes to Octant's egress proxy for the session, which reaches only
+ * the Project's egress rules and the person's safe networks; without it (a
+ * host that does not route runtimes) the sandbox keeps its own network rules.
+ */
 export function claudeSandboxSettings(
   policy: ProviderExecutionPolicy,
   projectRoot: string,
   extraFolders: ReadonlyArray<string> = [],
+  proxyPort?: number,
 ): ClaudeSandboxSettings | undefined {
-  if (policy !== "approval-gated" && policy !== "auto-accept-edits") return undefined;
+  if (!claudeRunsSandbox(policy)) return undefined;
   return {
     enabled: true,
     failIfUnavailable: true,
@@ -366,7 +379,95 @@ export function claudeSandboxSettings(
       allowRead: [projectRoot, ...extraFolders],
       allowWrite: [projectRoot, ...extraFolders],
     },
+    ...(proxyPort === undefined ? {} : { network: { httpProxyPort: proxyPort } }),
   };
+}
+
+/** The account's own state, which the secret guard leaves to this runtime. */
+function claudeOwnAccountPaths(environment: Readonly<Record<string, string | undefined>>) {
+  const configuration =
+    environment.CLAUDE_CONFIG_DIR !== undefined && environment.CLAUDE_CONFIG_DIR !== ""
+      ? environment.CLAUDE_CONFIG_DIR
+      : join(environment.HOME ?? homedir(), ".claude");
+  return [configuration, environment.CLAUDE_SECURESTORAGE_CONFIG_DIR].filter(
+    (path): path is string => path !== undefined && isAbsolute(path),
+  );
+}
+
+/** Claude's tools that read every file beneath a folder. */
+const CLAUDE_SEARCH_TOOLS = new Set<string>(["Grep", "Glob", "LS"]);
+
+/**
+ * Why a file tool call that touches a protected file is refused, at every
+ * posture. Claude's own file tools run in the runtime process, and below Full
+ * access that process is not wrapped: its own sandbox holds only its commands,
+ * and that sandbox cannot carry the list, because its `allowRead` (the Project
+ * root) takes precedence over any `denyRead` beneath it. So this gate is what
+ * keeps a Project that contains the home folder from handing over a key.
+ *
+ * A search reads every file beneath its root, and Claude's search tools take
+ * no exclusion, so a search rooted at or above an existing protected file is
+ * refused whole: Grep in content mode rooted at `~/.aws` read
+ * `~/.aws/credentials` while only the folder was named. A search with no path
+ * runs in the Project root and is judged there.
+ */
+export function claudeFileToolSecretRefusal(
+  toolName: string,
+  input: Readonly<Record<string, unknown>>,
+  ownAccountPaths: ReadonlyArray<string>,
+  projectRoot: string,
+  searchesRunUnguarded: boolean,
+  homeDirectory?: string,
+): string | undefined {
+  const options = {
+    ownAccountPaths,
+    ...(homeDirectory === undefined ? {} : { homeDirectory }),
+  };
+  if (CLAUDE_SEARCH_TOOLS.has(toolName)) {
+    // Under Plan the runtime runs inside Octant's profile, so
+    // a search passes over a protected file the OS refuses to open.
+    if (!searchesRunUnguarded) return undefined;
+    const pattern = typeof input.pattern === "string" ? input.pattern : "";
+    const roots = [
+      typeof input.path === "string" ? input.path : projectRoot,
+      // An absolute Glob pattern searches from its own fixed prefix.
+      ...(toolName === "Glob" && pattern.startsWith("/") ? [globFixedPrefix(pattern)] : []),
+    ];
+    for (const root of roots) {
+      const refusal = secretGuardSearchRefusal(root, options);
+      if (refusal !== undefined) return refusal;
+    }
+    return undefined;
+  }
+  if (!CLAUDE_READ_TOOLS.has(toolName) && !CLAUDE_EDIT_TOOLS.has(toolName)) return undefined;
+  for (const key of ["file_path", "notebook_path", "path"] as const) {
+    const value = input[key];
+    if (typeof value !== "string") continue;
+    const refusal = secretGuardRefusal(value, options);
+    if (refusal !== undefined) return refusal;
+  }
+  return undefined;
+}
+
+/**
+ * Whether the runtime process runs outside Octant's profile at this posture
+ * (on its own sandbox, which holds only its commands, or with none at Full
+ * access), so a search it runs in process is not held by the secret guard's
+ * OS rule and Octant's gate has to refuse it.
+ */
+export function claudeSearchesRunUnguarded(policy: ProviderExecutionPolicy): boolean {
+  return policy === "approval-gated" || policy === "auto-accept-edits" || policy === "full-access";
+}
+
+/** The folders of an absolute glob before its first wildcard. */
+function globFixedPrefix(pattern: string): string {
+  const segments: string[] = [];
+  for (const segment of pattern.split("/")) {
+    if (/[*?[{]/u.test(segment)) break;
+    segments.push(segment);
+  }
+  const prefix = segments.join("/");
+  return prefix === "" ? "/" : prefix;
 }
 
 /**
@@ -487,6 +588,8 @@ export interface ClaudeDriverOptions {
   readonly artifactDelivery?: () => boolean;
   readonly process: ClaudeProcessPort;
   readonly sdk: ClaudeAgentSdkPort;
+  /** Where the command sandbox sends its network below Full access; absent keeps the sandbox's own rules. */
+  readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly runtimeRegistry: ProviderDriverRuntimeRegistry;
   readonly resumeIdentityPort: ClaudeResumeIdentityPort;
@@ -1739,6 +1842,7 @@ function makeConnection(
           }).pipe(Effect.provideService(Scope.Scope, scope)),
           signal,
         );
+        const ownClaudeAccountPaths = claudeOwnAccountPaths(environment.environment);
         const runtimeVersion = await runSetupEffect(
           options.process.probeVersion(options.binaryPath),
           signal,
@@ -1804,7 +1908,26 @@ function makeConnection(
             projectRoot,
             isProjectConfinedPath: options.isProjectConfinedPath,
           });
-        const sandbox = claudeSandboxSettings(input.executionPolicy, projectRoot, extraFolders);
+        const sandboxNetwork = claudeRunsSandbox(input.executionPolicy)
+          ? await runSetupEffect(
+              acquireProviderRuntimeNetwork(options.runtimeNetwork, {
+                runtime: "claude-sandbox",
+                root: projectRoot,
+                executionPolicy: input.executionPolicy,
+                autoReview: input.autoApprove === true,
+                // The sandbox points its commands at a bare port and sends no
+                // proxy credentials.
+                authentication: "none",
+              }).pipe(Effect.provideService(Scope.Scope, scope)),
+              signal,
+            )
+          : undefined;
+        const sandbox = claudeSandboxSettings(
+          input.executionPolicy,
+          projectRoot,
+          extraFolders,
+          sandboxNetwork?.endpoint.port,
+        );
         let callbackState: SessionState | undefined;
         const canUseTool: ClaudeOpenQueryInput["canUseTool"] = async (request) => {
           const activeState = callbackState;
@@ -2054,6 +2177,17 @@ function makeConnection(
           if (digest === undefined) {
             return deny("Claude tool request has invalid input.");
           }
+          // The secret guard answers before any posture, Full access
+          // included, and says which rule refused and which channel to use.
+          // The runtime's own account state is its own to read.
+          const secretRefusal = claudeFileToolSecretRefusal(
+            request.toolName,
+            requestInput,
+            ownClaudeAccountPaths,
+            projectRoot,
+            claudeSearchesRunUnguarded(input.executionPolicy),
+          );
+          if (secretRefusal !== undefined) return deny(secretRefusal);
           // Claude Code takes a hook "allow" as the final word and runs the
           // tool without calling `canUseTool`. Observed 2026-09-06: an
           // approval-gated thread answered "allow" here for a Project-confined

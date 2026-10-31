@@ -395,10 +395,6 @@ function automationAuthorityDoesNotWiden(
   );
 }
 
-function automationAuthorityFitsMode(authority: AgentRunAuthority, mode: AutomationMode): boolean {
-  return mode !== "work" || (!authority.shell && !authority.git);
-}
-
 function automationAuthorityProfileFitsExecutionProfile(
   authorityProfile: AutomationAuthorityProfileReceipt,
   executionProfile: AutomationExecutionProfileReceipt,
@@ -488,6 +484,17 @@ export const AutomationRunFailureReason = Schema.Union(
 );
 export type AutomationRunFailureReason = typeof AutomationRunFailureReason.Type;
 
+/**
+ * A person's per-routine choice to run at the level its Project's new threads
+ * start at (the Code Project's mode or Settings › Code › Access, or
+ * Settings › Work for a Work Project), Full access included, instead of
+ * asking first. Absent asks first, as every routine did before. Only a person
+ * at a window on this host sets it; a routine an agent proposed never has it.
+ * It is part of the definition, so every change to it is journaled.
+ */
+export const AutomationProjectLevel = Schema.Literal("opted-in");
+export type AutomationProjectLevel = typeof AutomationProjectLevel.Type;
+
 export const AutomationDefinitionDraft = Schema.Struct({
   displayName: boundedText(MAX_AUTOMATION_DISPLAY_NAME_LENGTH),
   taskPrompt: boundedText(MAX_AUTOMATION_TASK_PROMPT_LENGTH),
@@ -502,6 +509,7 @@ export const AutomationDefinitionDraft = Schema.Struct({
   trigger: AutomationTrigger,
   missedRunPolicy: AutomationMissedRunPolicy,
   targetPolicy: AutomationTargetPolicy,
+  projectLevel: Schema.optional(AutomationProjectLevel),
 }).annotations(strict);
 export type AutomationDefinitionDraft = typeof AutomationDefinitionDraft.Type;
 
@@ -522,7 +530,6 @@ function automationDefinitionDraftMatchesPolicy(definition: AutomationDefinition
       definition.authorityProfile.requested,
       definition.authorityProfile.effective,
     ) ||
-    !automationAuthorityFitsMode(definition.authorityProfile.effective, definition.mode) ||
     !automationAuthorityProfileFitsExecutionProfile(
       definition.authorityProfile,
       definition.executionProfile,
@@ -881,12 +888,10 @@ export const AutomationRun = Schema.Struct({
             run.dispatchIntent.authoritySnapshot,
             run.authoritySnapshot,
           ));
-      const authoritySnapshotMatchesDefinition =
-        automationAuthoritySnapshotMatchesDefinition(
-          run.authoritySnapshot,
-          run.definitionSnapshot,
-        ) &&
-        automationAuthorityFitsMode(run.authoritySnapshot.effective, run.definitionSnapshot.mode);
+      const authoritySnapshotMatchesDefinition = automationAuthoritySnapshotMatchesDefinition(
+        run.authoritySnapshot,
+        run.definitionSnapshot,
+      );
       const cancellationTombstoneMatchesLifecycle =
         run.cancellationTombstone === undefined ||
         (run.lifecycle === "cancelled" && run.firstTurnAcceptance === undefined);

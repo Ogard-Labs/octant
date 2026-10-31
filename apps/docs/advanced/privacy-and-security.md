@@ -183,7 +183,8 @@ that hosts the thread, not from a paired phone or browser.
   selected. A per-message posture may only narrow the thread's grant; the
   server clamps composer intent. Full access is what it says: the provider
   runtime runs without Octant's deny-default sandbox, so keep it for folders
-  and providers you trust. No posture grants an agent merge authority; only you merge, from a pull
+  and providers you trust. The [protected files](#protected-files) are guarded
+  by Octant's own tools and redaction only, and a shell command can read them. No posture grants an agent merge authority; only you merge, from a pull
   request's review on the desktop after confirming.
 - App-managed filesystem and shell tools cross an Octant-owned sandbox
   boundary; path checks alone are insufficient. Most provider runtimes cross it
@@ -212,6 +213,66 @@ that hosts the thread, not from a paired phone or browser.
   them, by picking it yourself, through macOS's own Keychain prompt. The agent
   asks you before it uses a signed-in site; a routine, a subagent, a terminal
   CLI, and a paired device cannot open one.
+
+### Protected files
+
+Some files are secrets whatever mode a thread is in. Below Full access (Ask
+first, Accept edits, Auto, and Plan), no agent, and no command an agent runs,
+can read or change them. At Full access they are guarded by Octant's own file
+tools and redaction only, and a shell command can read them. Full access is
+full access:
+
+- SSH private keys in `~/.ssh` (`id_*`, `*.pem`, `*.key`, and any file with a
+  `.pub` companion). `~/.ssh/config`, `known_hosts`, and public keys stay
+  readable.
+- Cloud command-line credentials (`~/.aws/credentials` and its sign-in caches,
+  and the credential and token files under `~/.config/gcloud` and `~/.azure`),
+  `~/.kube/config`, `~/.docker/config.json`, `~/.npmrc`, `~/.pypirc`, and the
+  other package registry token files.
+- `~/.git-credentials`, `~/.netrc`, and the forge command-line sign-in file
+  `~/.config/gh/hosts.yml`.
+- Keychain files other than your login keychain, and the local vault folders
+  of password managers.
+- Browser cookie and saved-login stores.
+- Octant's own secrets, and every provider's stored sign-in except the one the
+  running provider uses itself.
+
+The work those files serve goes through a channel instead, so ordinary work
+keeps working:
+
+- **SSH** uses your SSH agent (`SSH_AUTH_SOCK`), a password manager's SSH
+  agent included. Git over SSH works the same way.
+- **Git over HTTPS** signs in through the system credential helper, which
+  reads the keychain through the keychain service, not the file.
+- **API keys and tokens** go through Octant's credential broker. Link the key
+  in Octant, and the runtime receives it in its environment. For a cluster,
+  point `KUBECONFIG` at a file you keep outside the protected list.
+
+When an agent asks for a protected file, the refusal says which group refused
+it and which channel to use. You see that message in the tool row.
+
+Change the list in **Settings › Permissions › Protected files**. Add a file or
+folder of your own, absolute or starting with `~/`. Removing a built-in group
+asks you to confirm first, and Octant records the change. **Protect again**
+undoes it.
+
+Octant also redacts known key formats, and every key the credential broker
+handed out, from what agents say and what their tools print, from thread
+exports, and from the service log, at every level, Full access included.
+Octant's own file tools refuse a protected file at every level too.
+
+What to know:
+
+- At Full access nothing is sandboxed, so programs that start a sandbox of
+  their own, such as `swift package` and headless Chrome, run without extra
+  flags.
+- On Linux a protected file that does not exist yet when the agent starts is
+  not covered until the next start.
+- Claude Code's own commands below Full access run in Claude Code's sandbox,
+  which keeps them to the Project folder. If the Project folder contains your
+  home folder, Octant refuses Claude's file tools on a protected file, and a
+  search whose folder holds one; its commands are held only by your approval
+  or its reviewer.
 
 ### What the Claude runtime does on its own
 
@@ -253,6 +314,61 @@ telemetry and artifacts off everywhere. A page Claude publishes is
 uploaded to claude.ai and stored there under your account: it leaves this
 computer. Octant keeps the page's address and title and a local snapshot of
 the file you approved publishing, and never downloads the page.
+
+### Network limits for agents and safe networks
+
+Network limits are off by default, because no live turn with a real
+provider has run through the guard yet. Turn them on in **Settings → Access →
+Network limits**. The switch applies to the next runtime you start; runtimes
+already running keep the network they began with. While it is off, runtimes
+have open network and the safe networks lists are saved but not applied. You
+can edit the lists either way, and the page says whether limits are on.
+
+With limits on, on a Mac, below Full access, each provider runtime Octant
+starts (Codex, OpenCode, Pi, and ACP agents such as Mistral Vibe) gets a
+network guard of its own. The runtime can reach:
+
+- its provider's own endpoints, for sign-in and the model;
+- the hosts your Project's network rules allow;
+- the places you trust in **Settings → Access → Safe networks**.
+
+Anything else is refused, and the refusal names the host, for example
+`octant-egress-refused: no-rule registry.npmjs.org:443`. That includes the
+runtime's own web fetch. Claude's commands at Ask first, Accept edits, and
+Auto go through the same guard, because Octant points Claude's own command
+sandbox at it. Full access stays open network.
+
+**Safe networks** lists the places you trust, once for every Project and,
+if you want, a different list for one Project. A place is one of:
+
+- a host (`git.example.com`);
+- a domain, which also covers every name under it (`example.com`);
+- an address range (`192.168.1.0/24`);
+- a private network: **This Mac**, **Local network**, or **Overlay
+  network**.
+
+Any place can be limited to one port. A range that reaches link-local
+addresses, where cloud metadata services answer, cannot be trusted. Only
+someone at this computer can change the lists, and every change is recorded.
+
+**Recently refused** shows the hosts a Project's runtimes were turned away
+from. Choose **Trust** to add one to the list you are editing; the runtime's
+next attempt goes through. Octant does not hold the request open while you
+decide. At Auto, Octant Shield will be able to let a single host through for
+one runtime; until it is available, Auto treats an unlisted host as Ask first
+does.
+
+What this does not cover yet:
+
+- On Linux, runtimes keep open network.
+- Claude's own process keeps open network, including in Plan and for its
+  built-in web fetch; only its commands go through the guard.
+- Octant Harness commands keep their own per-thread network rules (Network
+  access in a Code thread's Agents tab) and do not read safe networks yet.
+- No live turn with a real provider has run through the guard yet, which is
+  why limits ship off. With limits on, a runtime whose network client ignores
+  the proxy settings cannot reach anything; turn the switch off to get its
+  network back.
 
 ## Remote transport
 

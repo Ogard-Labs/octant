@@ -120,6 +120,54 @@ describe("ProjectOverview", () => {
     expect(screen.queryByRole("switch", { name: "Keep a status file" })).not.toBeInTheDocument();
   });
 
+  it("keeps a Work Project's actions hidden until its Developer tools switch is turned on", async () => {
+    const user = userEvent.setup();
+    const onWorkDeveloperToolsChange = vi.fn(async () => true);
+    const workProject = {
+      id: "20000000-0000-4000-8000-000000000003",
+      name: "Acme offer",
+      lifecycle: "active",
+      pinned: false,
+      rank: "0/1",
+      version: 1,
+      createdAt: "2026-07-21T12:00:00.000Z",
+      updatedAt: "2026-07-21T12:00:00.000Z",
+      type: "work",
+      binding: { canonicalRoot: "/opaque/acme" },
+    } as unknown as ProjectSummary;
+    const overview = (project: ProjectSummary) => (
+      <ProjectOverview
+        onActionsChange={vi.fn(async () => true)}
+        onArchive={vi.fn()}
+        onRelink={vi.fn()}
+        onRename={vi.fn()}
+        onWorkDeveloperToolsChange={onWorkDeveloperToolsChange}
+        project={project}
+      />
+    );
+    const { rerender } = render(overview(workProject));
+
+    const toggle = screen.getByRole("switch", { name: "Show developer tools" });
+    expect(toggle).not.toBeChecked();
+    expect(toggle).toHaveAccessibleDescription(/only changes what you see/);
+    expect(screen.queryByRole("button", { name: "Manage Actions" })).not.toBeInTheDocument();
+    await user.click(toggle);
+    expect(onWorkDeveloperToolsChange).toHaveBeenCalledWith(workProject.id, true);
+
+    rerender(
+      overview({
+        ...workProject,
+        developerTools: {
+          enabled: true,
+          changedBy: { kind: "local-user", actorId: "local" },
+          changedAt: "2026-10-31T12:00:00.000Z",
+        },
+      } as ProjectSummary),
+    );
+    expect(screen.getByRole("switch", { name: "Show developer tools" })).toBeChecked();
+    expect(screen.getByRole("button", { name: "Manage Actions" })).toBeVisible();
+  });
+
   it("opens an archived Project and dismisses the collection pane", async () => {
     const user = userEvent.setup();
     const onDismiss = vi.fn();

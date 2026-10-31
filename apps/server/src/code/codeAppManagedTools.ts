@@ -50,6 +50,7 @@ import type {
 } from "../context/externalContentIngestionStore";
 import { withToolFamilyHelp, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
+import { pullRequestChangeNeedsPerActApproval } from "@octant/domain/code-pull-request-action-policy";
 import type { CodeOperationTerminalSnapshot } from "./codeOperationService";
 
 const MAX_TOOL_INPUT_BYTES = 16 * 1024;
@@ -111,15 +112,21 @@ const proposeThreadDefinition = {
 const pullRequestDefinition = {
   name: CODE_PULL_REQUEST_TOOL_NAME,
   description:
-    "Open or change the pull request for this thread's own branch, only when the person asks for it. create opens it with a title and body, as a draft when draft is true, and stacked on another open branch when base names a branch that has an open pull request of its own; without base it targets the thread's delivery base. update changes the open pull request's title, body, or draft state (draft false marks it ready for review). Push the branch first. An approval-gated thread asks the person before GitHub is touched, and refuses a title and body too long to show whole in that approval (about 1.5 KB together); Plan mode refuses. This tool cannot merge, close, or change any other branch's pull request.",
+    "Open or change the pull request for this thread's own branch, only when the person asks for it. create opens it with a title and body, as a draft when draft is true, and stacked on another open branch when base names a branch that has an open pull request of its own; without base it targets the thread's delivery base. update changes the open pull request's title, body, or draft state (draft false marks it ready for review), adds or removes labels the repository already has, or closes it (state closed) or reopens it (state open). comment posts a comment, or a reply in one review thread when reviewThreadId is given, and merge merges it with the method and the head commit the person saw; both always ask the person first, at every access level, because they act under the person's name. Push the branch first. An approval-gated thread asks the person before GitHub is touched, and refuses a title and body too long to show whole in that approval (about 1.5 KB together); Plan mode refuses. This tool cannot create labels, approve or request changes, delete a branch, or change any other branch's pull request.",
   inputSchema: {
     type: "object",
     properties: {
-      operation: { type: "string", enum: ["create", "update"] },
+      operation: { type: "string", enum: ["create", "update", "comment", "merge"] },
       title: { type: "string" },
       body: { type: "string" },
       draft: { type: "boolean" },
       base: { type: "string" },
+      addLabels: { type: "array", items: { type: "string" } },
+      removeLabels: { type: "array", items: { type: "string" } },
+      state: { type: "string", enum: ["closed", "open"] },
+      reviewThreadId: { type: "string" },
+      method: { type: "string", enum: ["merge", "squash", "rebase"] },
+      headSha: { type: "string" },
     },
     required: ["operation"],
   },
@@ -231,7 +238,7 @@ const androidDefinition = {
 const CODE_TOOL_HELP: Readonly<Record<string, string>> = {
   ...BROWSER_TOOL_HELP,
   [CODE_PULL_REQUEST_TOOL_NAME]:
-    "Open or change the pull request for this thread's own branch, only when the person asks. create needs title and takes body, draft (true opens a draft), and base (another branch with an open pull request, to stack on it). update takes title, body, or draft (false marks the pull request ready for review, true turns it back into a draft). Push the branch before create. The result names the pull request's number, url, base, and draft state; report exactly that. An approval-gated thread shows the person the whole title and body, so keep them short enough to read there (about 1.5 KB together). Merging and closing are not available here.",
+    "Open or change the pull request for this thread's own branch, only when the person asks. create needs title and takes body, draft (true opens a draft), and base (another branch with an open pull request, to stack on it). update takes title, body, or draft (false marks the pull request ready for review, true turns it back into a draft). Push the branch before create. The result names the pull request's number, url, base, and draft state; report exactly that. An approval-gated thread shows the person the whole title and body, so keep them short enough to read there (about 1.5 KB together). update also takes addLabels and removeLabels (labels the repository already has; none are created) and state: closed closes the pull request and open reopens a closed one, and neither deletes the branch; state stands alone. comment takes body, and reviewThreadId to reply in one review thread. merge takes method (merge, squash, or rebase) and headSha, the head commit the person saw; the host refuses it when the head moved, the pull request is not open and mergeable, or its required checks have not passed. comment and merge ask the person for each act at every access level, and merge only when the person asked for it. Approving, requesting changes, creating labels, and deleting the branch are not available.",
   [CODE_TERMINAL_TOOL_NAME]:
     "Use Octant's terminal for this Code task: run starts a command, write supplies input to the running terminal, read checks its output, and stop terminates it. command is required for run or write. Check commandCompleted and commandExitCode; a running terminal is not proof that its command succeeded. For document artifacts, create files within the bound checkout and report their real relative paths. Octant's Files and Document tools provide host-authorized previews; never invent an artifact URL or claim a preview opened based on a write alone. Ordinary terminal permissions still apply.",
   [CODE_APPLE_TOOL_NAME]:
@@ -381,6 +388,18 @@ export interface CodeAppManagedToolsOptions {
    * approval returns the host's one-use approval for exactly that command.
    * Absent on a host that cannot ask; the pull-request tool is then omitted.
    */
+  /**
+   * Asks the person, in the thread, to let the agent type one command into its
+   * terminal, naming it; on approval of a command that starts the terminal,
+   * the host also holds the one-use approval the start needs. Absent on a host
+   * that cannot ask, where the terminal then runs only at Full access.
+   */
+  readonly terminalApproval?: {
+    readonly request: (
+      input: { readonly text: string; readonly start?: CodeOperationCommand },
+      signal?: AbortSignal,
+    ) => Promise<"approved" | "denied" | "cancelled" | "expired" | "unavailable">;
+  };
   readonly pullRequestApproval?: {
     readonly request: (
       command: PullRequestToolCommand,
@@ -543,12 +562,18 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
       if (name === CODE_PULL_REQUEST_TOOL_NAME && options.pullRequestApproval !== undefined) {
         return pullRequestTool(options, parsePullRequestInput(inputJson), signal);
       }
+      // The terminal follows the thread's level: Plan refuses it, a prompting
+      // level asks the person before each command, and Full access runs it.
+      if (name === CODE_TERMINAL_TOOL_NAME) {
+        const terminalFailure = terminalAuthorityFailure(options);
+        if (terminalFailure !== undefined) {
+          return failure(terminalFailure, postureRefusal(terminalFailure));
+        }
+        return terminalTool(options, parseTerminalInput(inputJson), signal);
+      }
       const postureFailure = currentAuthorityFailure(options);
       if (postureFailure !== undefined) {
         return failure(postureFailure, postureRefusal(postureFailure));
-      }
-      if (name === CODE_TERMINAL_TOOL_NAME) {
-        return terminalTool(options, parseTerminalInput(inputJson), signal);
       }
       return failure("tool-unavailable");
     },
@@ -638,7 +663,13 @@ async function plannerProposeTool(
 
 export type PullRequestToolCommand = Extract<
   CodeOperationCommand,
-  { readonly kind: "create-pull-request" | "update-pull-request" }
+  {
+    readonly kind:
+      | "create-pull-request"
+      | "update-pull-request"
+      | "comment-pull-request"
+      | "merge-pull-request";
+  }
 >;
 
 type PullRequestToolInput =
@@ -654,6 +685,19 @@ type PullRequestToolInput =
       readonly title?: string;
       readonly body?: string;
       readonly draft?: boolean;
+      readonly addLabels?: ReadonlyArray<string>;
+      readonly removeLabels?: ReadonlyArray<string>;
+      readonly state?: "closed" | "open";
+    }
+  | {
+      readonly operation: "comment";
+      readonly body: string;
+      readonly reviewThreadId?: string;
+    }
+  | {
+      readonly operation: "merge";
+      readonly method: "merge" | "squash" | "rebase";
+      readonly headSha: string;
     };
 
 /**
@@ -695,16 +739,42 @@ async function pullRequestTool(
           idempotencyKey: String(scope.operationId),
           authorization: { kind: "full-access" },
         }
-      : {
-          kind: "update-pull-request",
-          ...scope,
-          ...(input.title === undefined ? {} : { title: input.title }),
-          ...(input.body === undefined ? {} : { body: input.body }),
-          ...(input.draft === undefined ? {} : { draft: input.draft }),
-          authorization: { kind: "full-access" },
-        };
+      : input.operation === "comment"
+        ? {
+            kind: "comment-pull-request",
+            ...scope,
+            body: input.body,
+            ...(input.reviewThreadId === undefined ? {} : { reviewThreadId: input.reviewThreadId }),
+            authorization: { kind: "full-access" },
+          }
+        : input.operation === "merge"
+          ? {
+              kind: "merge-pull-request",
+              ...scope,
+              method: input.method,
+              headSha: input.headSha,
+              authorization: { kind: "full-access" },
+            }
+          : {
+              kind: "update-pull-request",
+              ...scope,
+              ...(input.title === undefined ? {} : { title: input.title }),
+              ...(input.body === undefined ? {} : { body: input.body }),
+              ...(input.draft === undefined ? {} : { draft: input.draft }),
+              ...(input.addLabels === undefined ? {} : { addLabels: input.addLabels }),
+              ...(input.removeLabels === undefined ? {} : { removeLabels: input.removeLabels }),
+              ...(input.state === undefined ? {} : { state: input.state }),
+              authorization: { kind: "full-access" },
+            };
   let command = unauthorized;
-  if (decidesCodeEffectsByApproval(posture)) {
+  // A comment posts under the person's name and a merge cannot be taken back, so
+  // both ask for this one act even at Full access.
+  if (
+    decidesCodeEffectsByApproval(posture) ||
+    pullRequestChangeNeedsPerActApproval(
+      input.operation === "comment" || input.operation === "merge" ? input.operation : "labels",
+    )
+  ) {
     const outcome = await options.pullRequestApproval.request(unauthorized, signal);
     if (outcome.status !== "approved") {
       return failure(
@@ -745,9 +815,13 @@ async function pullRequestTool(
       status:
         input.operation === "update"
           ? "updated"
-          : result.state === "created"
-            ? "created"
-            : "already-open",
+          : input.operation === "comment"
+            ? "commented"
+            : input.operation === "merge"
+              ? "merged"
+              : result.state === "created"
+                ? "created"
+                : "already-open",
       number: result.number,
       url: result.url,
       baseBranch: result.baseBranch,
@@ -769,6 +843,24 @@ function pullRequestRefusal(code: string | undefined): string {
       return "This thread's branch has no open pull request to change. Create one first.";
     case "no-remote":
       return "This checkout has no GitHub remote.";
+    case "invalid":
+      return "GitHub refused that input. Check the text, labels, and review thread id.";
+    case "label-not-found":
+      return "The repository has no such label, and this tool does not create labels.";
+    case "not-open":
+      return "That pull request is not open.";
+    case "not-closed":
+      return "That pull request is not closed, or it was merged and cannot be reopened.";
+    case "already-merged":
+      return "That pull request is already merged.";
+    case "sha-mismatch":
+      return "The pull request's head moved since the person saw it. Read it again and ask again.";
+    case "checks-not-passing":
+      return "The repository's required checks have not all passed, so nothing was merged.";
+    case "checks-unknown":
+      return "The required checks could not be read, so nothing was merged.";
+    case "not-mergeable":
+      return "GitHub says the pull request is not mergeable right now, so nothing was merged.";
     default:
       return "GitHub could not be reached or refused the change. Check that the branch is pushed and GitHub access is signed in.";
   }
@@ -802,15 +894,37 @@ async function terminalTool(
     // A missing terminal is an ordinary first-run state. Starting it remains a
     // server-authorized operation, while reads never replace a UI observer.
   }
-  if (input.operation === "run" && snapshot?.status !== "running") {
-    const started = await options.executeOperation(options.windowId, {
-      kind: "start-terminal",
-      operationId: operationId(options),
-      ...scope,
-      columns: 100,
-      rows: 30,
-      credentialRefs: [],
-    });
+  // Below Full access each command the agent types asks the person first,
+  // naming it, as a provider's own shell asks per command at that level. A
+  // terminal the agent starts is covered by the same answer.
+  const startCommand: CodeOperationCommand | undefined =
+    input.operation === "run" && snapshot?.status !== "running"
+      ? {
+          kind: "start-terminal",
+          operationId: operationId(options),
+          ...scope,
+          columns: 100,
+          rows: 30,
+          credentialRefs: [],
+        }
+      : undefined;
+  if (
+    (input.operation === "run" || input.operation === "write") &&
+    input.command !== undefined &&
+    currentPosture(options) !== "full-access"
+  ) {
+    if (options.terminalApproval === undefined) return failure("terminal-approval-required");
+    const outcome = await options.terminalApproval.request(
+      { text: input.command, ...(startCommand === undefined ? {} : { start: startCommand }) },
+      signal,
+    );
+    if (outcome !== "approved") return failure(`terminal-approval-${outcome}`);
+    const changed = terminalAuthorityFailure(options);
+    if (changed !== undefined) return failure(changed, postureRefusal(changed));
+    if (signal?.aborted === true) return failure("tool-interrupted");
+  }
+  if (startCommand !== undefined) {
+    const started = await options.executeOperation(options.windowId, startCommand);
     if (started.kind !== "terminal-state" || started.state !== "running") {
       return operationResult(started, options, scope);
     }
@@ -858,7 +972,7 @@ async function waitForTerminalCommand(
   const deadline = Date.now() + TERMINAL_COMMAND_TIMEOUT_MS;
   const completion = new RegExp(`\\u001b\\]777;octant=${marker};exit=(\\d+)\\u0007`, "g");
   for (;;) {
-    const authorityFailure = currentAuthorityFailure(options);
+    const authorityFailure = terminalAuthorityFailure(options);
     if (signal?.aborted || authorityFailure !== undefined) {
       await interruptTerminalCommand(options, scope, marker);
       return signal?.aborted
@@ -866,7 +980,7 @@ async function waitForTerminalCommand(
         : failure(authorityFailure!, postureRefusal(authorityFailure!));
     }
     await (options.wait ?? defaultWait)(TERMINAL_COMPLETION_POLL_MS);
-    const postWaitAuthorityFailure = currentAuthorityFailure(options);
+    const postWaitAuthorityFailure = terminalAuthorityFailure(options);
     if (signal?.aborted || postWaitAuthorityFailure !== undefined) {
       await interruptTerminalCommand(options, scope, marker);
       return signal?.aborted
@@ -1985,11 +2099,35 @@ type BrowserToolInput = {
 function parsePullRequestInput(value: string): PullRequestToolInput | undefined {
   const parsed = parseObject(
     value,
-    new Set(["operation", "title", "body", "draft", "base"]),
+    new Set([
+      "operation",
+      "title",
+      "body",
+      "draft",
+      "base",
+      "addLabels",
+      "removeLabels",
+      "state",
+      "reviewThreadId",
+      "method",
+      "headSha",
+    ]),
     MAX_PULL_REQUEST_TOOL_INPUT_BYTES,
   );
   if (parsed === undefined) return undefined;
-  const { operation, title, body, draft, base } = parsed;
+  const {
+    operation,
+    title,
+    body,
+    draft,
+    base,
+    addLabels,
+    removeLabels,
+    state,
+    reviewThreadId,
+    method,
+    headSha,
+  } = parsed;
   if (title !== undefined && (typeof title !== "string" || title.trim().length === 0)) {
     return undefined;
   }
@@ -1998,8 +2136,25 @@ function parsePullRequestInput(value: string): PullRequestToolInput | undefined 
   if (base !== undefined && (typeof base !== "string" || base.trim().length === 0)) {
     return undefined;
   }
+  const labels = (value: unknown): ReadonlyArray<string> | undefined | null =>
+    value === undefined
+      ? undefined
+      : Array.isArray(value) && value.every((entry) => typeof entry === "string")
+        ? (value as ReadonlyArray<string>)
+        : null;
+  const add = labels(addLabels);
+  const remove = labels(removeLabels);
+  if (add === null || remove === null) return undefined;
+  if (state !== undefined && state !== "closed" && state !== "open") return undefined;
   if (operation === "create") {
-    if (typeof title !== "string") return undefined;
+    if (
+      typeof title !== "string" ||
+      add !== undefined ||
+      remove !== undefined ||
+      state !== undefined
+    ) {
+      return undefined;
+    }
     return {
       operation,
       title,
@@ -2008,13 +2163,50 @@ function parsePullRequestInput(value: string): PullRequestToolInput | undefined 
       ...(typeof base === "string" ? { base } : {}),
     };
   }
+  if (operation === "comment") {
+    if (typeof body !== "string" || body.trim().length === 0) return undefined;
+    if (reviewThreadId !== undefined && typeof reviewThreadId !== "string") return undefined;
+    return {
+      operation,
+      body,
+      ...(typeof reviewThreadId === "string" ? { reviewThreadId } : {}),
+    };
+  }
+  if (operation === "merge") {
+    if (
+      (method !== "merge" && method !== "squash" && method !== "rebase") ||
+      typeof headSha !== "string"
+    ) {
+      return undefined;
+    }
+    return { operation, method, headSha };
+  }
   if (operation !== "update" || base !== undefined) return undefined;
-  if (title === undefined && body === undefined && draft === undefined) return undefined;
+  const changesLabels = (add?.length ?? 0) > 0 || (remove?.length ?? 0) > 0;
+  if (
+    title === undefined &&
+    body === undefined &&
+    draft === undefined &&
+    !changesLabels &&
+    state === undefined
+  ) {
+    return undefined;
+  }
+  // Closing or reopening is a change of its own, not a side effect of an edit.
+  if (
+    state !== undefined &&
+    (title !== undefined || body !== undefined || draft !== undefined || changesLabels)
+  ) {
+    return undefined;
+  }
   return {
     operation,
     ...(typeof title === "string" ? { title } : {}),
     ...(typeof body === "string" ? { body } : {}),
     ...(typeof draft === "boolean" ? { draft } : {}),
+    ...(add === undefined ? {} : { addLabels: add }),
+    ...(remove === undefined ? {} : { removeLabels: remove }),
+    ...(state === undefined ? {} : { state }),
   };
 }
 
@@ -2265,6 +2457,16 @@ function browserAuthorityFailure(options: CodeAppManagedToolsOptions): string | 
     thread: current?.executionPolicy ?? options.thread.executionPolicy,
   });
   return posture === "plan" ? "plan-mode-read-only" : undefined;
+}
+
+/**
+ * What keeps the agent terminal from running now: a stale thread, or Plan.
+ * Every other level reaches it, asking per command below Full access.
+ */
+function terminalAuthorityFailure(options: CodeAppManagedToolsOptions): string | undefined {
+  const staleness = currentThreadIdentityFailure(options);
+  if (staleness !== undefined) return staleness;
+  return currentPosture(options) === "plan" ? "plan-mode-read-only" : undefined;
 }
 
 function currentAuthorityFailure(options: CodeAppManagedToolsOptions): string | undefined {

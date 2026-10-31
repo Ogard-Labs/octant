@@ -186,7 +186,7 @@ describe("createAutomationWorkDispatchPort", () => {
           modelId: run.definitionSnapshot.executionProfile.modelId,
         }),
       }),
-      { holdAskFirst: true },
+      { accessCeiling: "ask-first" },
     );
   });
 
@@ -217,8 +217,35 @@ describe("createAutomationWorkDispatchPort", () => {
       });
     }
 
-    const holds = vi.mocked(turns.startFirstTurn).mock.calls.map((call) => call[2]?.holdAskFirst);
-    expect(holds).toEqual([true, false]);
+    const holds = vi.mocked(turns.startFirstTurn).mock.calls.map((call) => call[2]?.accessCeiling);
+    expect(holds).toEqual(["ask-first", "auto-accept-edits"]);
+  });
+
+  it("runs a routine the person opted into its Project's level at the thread's own level, Full access included", async () => {
+    const turns = createTurns();
+    const port = createAutomationWorkDispatchPort({
+      threads: createThreads(),
+      turns,
+      clock: () => now,
+      uuid: () => "aa000000-0000-4000-8000-0000000000e0",
+    });
+    const gated = workRun();
+    const optedIn: AutomationRun = {
+      ...gated,
+      definitionSnapshot: { ...gated.definitionSnapshot, projectLevel: "opted-in" },
+    };
+
+    await port.startOrRecoverFirstTurn({
+      run: optedIn,
+      threadId,
+      firstTurnRequestId: optedIn.firstTurnRequestId,
+      promptDigest: "unused" as never,
+      scopeId,
+    });
+
+    // No ceiling: the turn runs at the thread's level, which a routine thread
+    // takes from Settings › Work, the level a Work Project's threads start at.
+    expect(vi.mocked(turns.startFirstTurn).mock.calls[0]?.[2]).toEqual({});
   });
 
   it("is idempotent on firstTurnRequestId by returning the existing accepted turn", async () => {

@@ -959,8 +959,21 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Permissions",
       scope: "host",
       keywords:
-        "permissions remembered websites sites origins browser always allow forget public links share sharing remembered tool approvals extension tools revoke trust allowed",
+        "permissions protected files secrets ssh keys credentials remembered websites sites origins browser always allow forget public links share sharing remembered tool approvals extension tools revoke trust allowed",
       settings: [
+        {
+          id: settingId("protected-files"),
+          label: "Protected files",
+          scope: "host",
+          keywords:
+            "protected files secret guard ssh private keys cloud credentials cluster container registry package tokens netrc keychain password vault browser cookies sign-in deny full access",
+        },
+        {
+          id: settingId("protected-files-add"),
+          label: "Protect another path",
+          scope: "host",
+          keywords: "protected files add path folder secret deny agents",
+        },
         {
           id: settingId("public-links"),
           label: "Public links",
@@ -987,6 +1000,29 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "remembered tool approvals mcp plugin extension server project allow always revoke ask again permission",
+        },
+      ],
+    },
+    {
+      id: "access",
+      label: "Access",
+      scope: "host",
+      keywords:
+        "access network safe networks trusted hosts domains address ranges local network this mac private network overlay egress proxy refused recently refused trust allow outbound connections",
+      settings: [
+        {
+          id: settingId("network-limits"),
+          label: "Network limits",
+          scope: "host",
+          keywords:
+            "network limits switch on off runtime egress proxy open network restrict outbound next launch",
+        },
+        {
+          id: settingId("safe-networks"),
+          label: "Safe networks",
+          scope: "host",
+          keywords:
+            "safe networks trusted hosts domains address range cidr local network this mac private network overlay egress proxy refused recently refused trust every project own list port",
         },
       ],
     },
@@ -1032,6 +1068,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "browser profiles sign out signed in cookies project personal private site data clear sign-in",
+        },
+        {
+          id: settingId("browser-extensions"),
+          label: "Browser extensions",
+          scope: "host",
+          keywords: "browser extensions install enable disable remove unpacked folder popup",
         },
         {
           id: settingId("thread-retention"),

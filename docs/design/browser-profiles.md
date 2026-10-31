@@ -10,13 +10,11 @@ Workspace owns the Browser pane
 ([Workspace: tool lifecycles](workspace.md#tool-lifecycles)). DESIGN.md owns
 the controls and the approval card.
 
-Status: profiles, their storage, site approvals, refusals, Settings, and cookie
-import are built. Browser extensions are approved design, not yet built; the Extensions
-section below is that design. Four smaller pieces of the profile design are not
-built yet and are marked where they appear: purging a Project removes its
-profile, a kept screenshot's record names the profile, the driver indicator and
-floating preview show the profile's name, and a phone-started turn's approval
-waiting for a local window.
+Status: profiles, their storage, site approvals, refusals, Settings, cookie
+import, and browser extensions (install, per-profile enablement, popups) are
+built. Two pieces of the Popups design are declared and not built, each marked
+where it appears: the `chrome.tabs` support for popups and the
+`chrome.action.onClicked` event for an extension without a popup page.
 
 ## Profiles
 
@@ -109,9 +107,12 @@ and service workers in. There are three kinds:
   before it removes anything, and journals `browser.profile-cleared@1` with the
   profile and the scope. The record names no site, cookie, or count.
 - Archiving a Project closes its profile's pages and keeps the profile.
-  Purging the Project removes the profile with the Project's other data (not
-  built yet: until it is, a purged Project's profile stays listed in Settings,
-  where the person can sign out of it).
+  Purging the Project removes the profile with the Project's other data: its
+  pages close, its extensions turn off, and its whole store is cleared, which
+  journals the same `browser.profile-cleared@1` as signing out. Without the
+  desktop app running there is no store to clear here; the profile then stays
+  listed in Settings as a Project that no longer exists, where the person can
+  sign out of it.
 - Turning a mode off closes its Projects' profile pages and keeps the profiles.
 
 ### Page rules that do not change
@@ -209,9 +210,10 @@ thread made.
   to a profile, answer a profile site approval, act on a profile page, list or
   clear a profile, or see a profile page's picture, text, address, or title. It
   sees "Signed-in page — open it on this Mac." (Built.) A turn that a phone
-  started still raises the approval; the approval waits for a local window (not
-  built yet: today a phone-started turn's approval is answered the way every
-  Browser approval already is).
+  started still raises the approval, and the approval waits for a local window:
+  the phone that started the turn neither sees nor answers a profile approval,
+  and a window that can see the thread does. An approval for a page outside a
+  profile is answered as every Browser approval is.
 - **Unattended turns.** A routine's turn and a subagent's turn are refused on
   profile pages (`profile-needs-a-person`). A subagent's own Browser is Private.
 - **Terminal Browser grant.** A CLI in a thread terminal may drive the thread's
@@ -221,12 +223,12 @@ thread made.
 - **Captures.** A screenshot the agent or person keeps from a profile page is
   kept by the thread under the usual
   [Browser captures](browser-captures.md) rules, and its record names the
-  profile (not built yet: today the record does not name the profile).
+  profile (Project or Personal). A capture of a Private page names none.
 
 The agent's activity on a profile page is visible: while the agent drives one,
-the Browser toolbar's driver indicator and the floating page preview both show
-the profile's name (not built yet; the toolbar's profile control already shows
-the page's profile).
+the Browser toolbar's driver indicator ("Agent active · Personal") and the
+floating page preview both show the profile's name. The toolbar's profile
+control shows the page's profile at all times.
 
 ## Extensions
 
@@ -273,7 +275,7 @@ page they are allowed on, including what the agent reads.
   journals `browser.extension-enabled@1` with the profile; disabling journals
   `browser.extension-disabled@1`.
 - Only a local window enables or disables. A paired device sees the list and
-  changes nothing. An agent cannot install, enable, or disable an extension, and
+  changes nothing (`extension-not-local`). An agent cannot install, enable, or disable an extension, and
   no plugin, skill, or structured reference can either.
 - An extension's own pages (`chrome-extension://` addresses: popups, options)
   are outside every agent allowlist. The agent cannot open or act on them.
@@ -285,14 +287,21 @@ Electron alone does not show an extension's toolbar popup or implement most of
 work without it, and takes no extension-support package:
 
 - Choosing an extension in the extensions button's list opens its
-  `action.default_popup` page in a small Octant popover anchored to the button,
-  loaded in the page's profile. Clicking outside it or pressing Escape closes
-  it. An extension without a popup page gets the `chrome.action.onClicked`
-  event instead.
-- The popup and the background worker get the part of `chrome.tabs` a popup
-  needs, scoped to the page's profile: the active tab's address and title,
-  sending a message to a tab's content script, and opening or updating a tab in
-  that profile. A tab call never reaches another profile or a Private page.
+  `action.default_popup` page, or its options page, in a small Octant popover
+  anchored to the button, loaded in the page's profile. The popover is a
+  sandboxed native view in that profile's session: it cannot open windows, is
+  refused every permission, and cannot navigate away from its extension. At most
+  one is open per window; clicking another, pressing Escape, or the window
+  going away closes it. Only an extension the profile's session has loaded can
+  be shown, so a disabled or removed one has no page to open. An extension
+  without a popup page is listed but cannot be chosen (the
+  `chrome.action.onClicked` event is not built).
+- The popup and the background worker are meant to get the part of `chrome.tabs`
+  a popup needs, scoped to the page's profile: the active tab's address and
+  title, sending a message to a tab's content script, and opening or updating a
+  tab in that profile. A tab call never reaches another profile or a Private
+  page. This support is not built: until it is, every `chrome.tabs` call is
+  unsupported and fails inside the extension, like any other unsupported API.
 - Anything else in `chrome.tabs` stays unsupported and fails inside the
   extension, as other unsupported APIs do.
 - Rationale: the one package that adds popups is offered under GPL-3.0 or a
@@ -306,8 +315,8 @@ work without it, and takes no extension-support package:
   extension's options page, and has "Manage extensions…", which opens Settings.
 - When the agent drives a page whose profile has extensions enabled, the
   button carries a count badge, and the site approval card says so ("2
-  extensions are on in this profile"), because they can read and change what the
-  agent sees.
+  extensions are on in this profile and can read what the agent reads"),
+  because they can read and change what the agent sees.
 - Settings has a Browser extensions list under Data & privacy, beside Browser
   profiles: each extension with its version, where it is enabled, Enable per
   profile, and Remove.

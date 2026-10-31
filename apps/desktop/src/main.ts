@@ -76,6 +76,7 @@ import {
 } from "@octant/contracts/previews";
 import { type AppVersion, isAppReleaseRing } from "@octant/contracts/app-updates";
 import { decodeCodeOperationApprovalRequest } from "@octant/contracts/code-operations";
+import { decodeStoredBrowserProfile } from "@octant/contracts/browser-profiles";
 import {
   DESKTOP_IPC_CHANNELS as IPC_CHANNELS,
   KEYRING_ADVICE_MARKER,
@@ -116,6 +117,12 @@ import {
 } from "./browserSurfaceHost";
 import { startBrowserRuntimeBroker, type BrowserRuntimeBroker } from "./browserRuntimeBroker";
 import { createBrowserProfileStore } from "./browserProfileStore";
+import {
+  createExtensionPopupHost,
+  type ExtensionPopupShellWindow,
+  type ExtensionPopupView,
+} from "./browserExtensionPopupHost";
+import { fitPopupBounds, validateExtensionPopupRequest } from "./browserExtensionPopupRequest";
 import { openCodeExternalEditorFromServer } from "./codeExternalEditor";
 import {
   detectOpenInApplications,
@@ -1279,6 +1286,7 @@ let serveAvdBroker: ServeAvdBroker | undefined;
 let computerUseService: ComputerUseDesktopService | undefined;
 let managedToolService: ManagedToolService | undefined;
 let browserSurfaceHost: ReturnTypeOfBrowserSurfaceHost | undefined;
+let browserExtensionPopupHost: ReturnType<typeof createExtensionPopupHost> | undefined;
 let canvasPrototypeSurface: CanvasPrototypeSurface | undefined;
 let appUpdateService: ReturnType<typeof createAppUpdateService> | undefined;
 let credentialBackendPromise: Promise<DesktopCredentialBackend> | undefined;
@@ -1746,6 +1754,45 @@ async function attachExistingLocalHost(): Promise<LocalHostDescriptor | undefine
   };
 }
 
+/** The popup host's view port over a real native view; each method is a plain pass-through. */
+function popupViewOf(view: WebContentsView): ExtensionPopupView {
+  return {
+    native: view,
+    setBounds: (bounds) => view.setBounds(bounds),
+    webContents: {
+      loadURL: (url) => view.webContents.loadURL(url),
+      close: () => view.webContents.close(),
+      isDestroyed: () => view.webContents.isDestroyed(),
+      on: (event, listener) => {
+        view.webContents.on(event as never, listener as never);
+      },
+      setWindowOpenHandler: (handler) => view.webContents.setWindowOpenHandler(handler),
+      session: {
+        setPermissionCheckHandler: (handler) =>
+          view.webContents.session.setPermissionCheckHandler(handler),
+        setPermissionRequestHandler: (handler) =>
+          view.webContents.session.setPermissionRequestHandler((contents, permission, callback) =>
+            handler(contents, permission, callback),
+          ),
+      },
+    },
+  };
+}
+
+function popupWindowOf(window: BrowserWindow): ExtensionPopupShellWindow {
+  return {
+    isDestroyed: () => window.isDestroyed(),
+    contentView: {
+      addChildView: (view) => {
+        if (view instanceof WebContentsView) window.contentView.addChildView(view);
+      },
+      removeChildView: (view) => {
+        if (view instanceof WebContentsView) window.contentView.removeChildView(view);
+      },
+    },
+  };
+}
+
 /** Where Electron keeps the persistent stores of the Project and Personal Browser profiles. */
 function browserProfilesDirectory(): string {
   return join(app.getPath("userData"), "Partitions");
@@ -1790,14 +1837,17 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
         }) as unknown as BrowserSurfaceViewPort,
     });
     const surfaceHost = browserSurfaceHost;
-    const nextBrowserRuntimeBroker = await startBrowserRuntimeBroker(
-      surfaceHost,
-      createBrowserProfileStore({
-        partitionsDirectory: browserProfilesDirectory(),
-        sessionFor: (partition) => session.fromPartition(partition),
-        closeProfilePages: (profile) => surfaceHost.closeProfileContexts(profile),
-      }),
-    );
+    const profileStore = createBrowserProfileStore({
+      partitionsDirectory: browserProfilesDirectory(),
+      sessionFor: (partition) => session.fromPartition(partition),
+      closeProfilePages: (profile) => surfaceHost.closeProfileContexts(profile),
+    });
+    browserExtensionPopupHost ??= createExtensionPopupHost({
+      store: profileStore,
+      createView: ({ partition, webPreferences }) =>
+        popupViewOf(new WebContentsView({ webPreferences: { partition, ...webPreferences } })),
+    });
+    const nextBrowserRuntimeBroker = await startBrowserRuntimeBroker(surfaceHost, profileStore);
     startingBrowserBroker = nextBrowserRuntimeBroker;
     const nextComputerService = createComputerUseDesktopService({
       bundledPath: resolveDesktopNativeHelperPath(
@@ -3436,6 +3486,25 @@ function installIpcHandlers(): void {
       { windowId: context.windowId, threadId: request.threadId },
       request.command,
     );
+  });
+  ipcMain.handle(IPC_CHANNELS.browserExtensionPopupOpen, async (event, value: unknown) => {
+    const context = ownedTopLevelWindowContext(event);
+    const request = validateExtensionPopupRequest(value);
+    const bounds = fitPopupBounds(request.anchor, request.size, context.window.getContentBounds());
+    validateBrowserSurfaceBounds(bounds, context.window);
+    if (browserExtensionPopupHost === undefined) return { opened: false };
+    return await browserExtensionPopupHost.open({
+      windowId: context.windowId,
+      window: popupWindowOf(context.window),
+      profile: decodeStoredBrowserProfile(request.profile),
+      extensionId: request.extensionId,
+      kind: request.kind,
+      bounds,
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.browserExtensionPopupClose, (event) => {
+    const context = ownedTopLevelWindowContext(event);
+    browserExtensionPopupHost?.close(context.windowId);
   });
   ipcMain.handle(IPC_CHANNELS.computerUseStatus, async (event) => {
     ownedTopLevelWindowContext(event);

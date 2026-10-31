@@ -91,6 +91,7 @@ function harness(
     profiles: {
       list: async () => stored,
       clear,
+      syncExtensions: async () => undefined,
       importCookies: async () => ({ imported: 0, skipped: 0 }),
     },
     createContext: async () => undefined,
@@ -220,6 +221,32 @@ describe("Browser profiles service", () => {
     });
     expect(live.headSequence()).toBe(0);
   });
+
+  it("removes a Project's profile store when the Project is purged, after closing its pages", async () => {
+    const { service, events, clear, journal: live } = harness();
+
+    await service.eraseProject(projectId);
+
+    expect(clear).toHaveBeenCalledWith({ kind: "project", projectId }, "all");
+    expect(events).toEqual(["pages-closed", "store-cleared"]);
+    expect(live.headSequence()).toBe(1);
+  });
+
+  it("leaves the store listed, and the purge done, when the store would not clear", async () => {
+    const { service, journal: live } = harness({ clearFails: true });
+
+    await expect(service.eraseProject(projectId)).resolves.toBeUndefined();
+
+    expect(live.headSequence()).toBe(0);
+  });
+
+  it("has no store to remove without the desktop app", async () => {
+    const { service, clear } = harness({ native: false });
+
+    await service.eraseProject(projectId);
+
+    expect(clear).not.toHaveBeenCalled();
+  });
 });
 
 describe("Browser profile cookie import", () => {
@@ -262,6 +289,7 @@ describe("Browser profile cookie import", () => {
       profiles: {
         list: async () => [],
         clear: async () => undefined,
+        syncExtensions: async () => undefined,
         importCookies:
           options.importCookies ??
           (async (_profile, cookies) => {

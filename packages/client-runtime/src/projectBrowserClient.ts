@@ -3,6 +3,11 @@ import {
   ProjectBrowserResult,
 } from "@octant/contracts/project-browser";
 import {
+  BrowserExtensionsResult,
+  decodeBrowserExtensionsCommand,
+  type BrowserExtensionsCommand,
+} from "@octant/contracts/browser-extensions";
+import {
   BrowserProfilesResult,
   decodeBrowserProfilesCommand,
   type BrowserProfilesCommand,
@@ -18,6 +23,11 @@ export interface ProjectBrowserClientOptions {
 
 export interface ProjectBrowserClient {
   execute(command: ProjectBrowserCommand, signal?: AbortSignal): Promise<ProjectBrowserResult>;
+  /** The extensions enabled in the dock's profile, for the toolbar's extensions button. */
+  manageExtensions?(
+    command: BrowserExtensionsCommand,
+    signal?: AbortSignal,
+  ): Promise<BrowserExtensionsResult>;
   /** Sign out of a stored profile from the dock's own profile menu. */
   manageProfiles?(
     command: BrowserProfilesCommand,
@@ -50,6 +60,7 @@ export function createProjectBrowserClient(
   const fetch = bindFetchPort(options.fetch);
   const url = new URL("/api/browser/project-contexts", options.baseUrl).toString();
   const profilesUrl = new URL("/api/browser/profiles", options.baseUrl).toString();
+  const extensionsUrl = new URL("/api/browser/extensions", options.baseUrl).toString();
 
   async function post(target: string, command: unknown, signal: AbortSignal | undefined) {
     let response: Response;
@@ -83,6 +94,11 @@ export function createProjectBrowserClient(
   return {
     async execute(command, signal) {
       return decodeHostAnswer(ProjectBrowserResult)(await post(url, command, signal));
+    },
+    async manageExtensions(command, signal) {
+      return decodeHostAnswer(BrowserExtensionsResult)(
+        await post(extensionsUrl, decodeBrowserExtensionsCommand(command), signal),
+      );
     },
     async manageProfiles(command, signal) {
       return decodeHostAnswer(BrowserProfilesResult)(

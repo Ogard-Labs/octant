@@ -681,6 +681,47 @@ describe("WorkThreadWorkspace", () => {
     expect(cancelFirstTurn).not.toHaveBeenCalled();
   });
 
+  it("moves the task to Full access from its composer's mode picker, which offers no Plan", async () => {
+    localStorage.setItem(
+      "octant.full-access-warned.project.20000000-0000-4000-8000-000000000101",
+      "1",
+    );
+    const user = userEvent.setup();
+    const execute = vi.fn(async () => ({
+      kind: "thread-updated" as const,
+      thread: workThread({ version: 2, access: "full-access" }),
+    }));
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute,
+    } as unknown as WorkThreadClient;
+
+    render(
+      <WorkThreadWorkspace
+        providerGroups={[providerGroup()]}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+
+    const mode = await screen.findByRole("button", { name: "Mode" });
+    expect(mode).toHaveTextContent("Ask first");
+    await user.click(mode);
+    expect(screen.queryByRole("menuitemradio", { name: /^Plan/ })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("menuitemradio", { name: /^Full access/ }));
+
+    expect(execute).toHaveBeenCalledWith({
+      kind: "change-work-thread-access",
+      threadId,
+      expectedVersion: 1,
+      access: "full-access",
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Mode" })).toHaveTextContent("Full access"),
+    );
+  });
+
   it("lets a person mark the task Done from Task actions, with no evidence text", async () => {
     const user = userEvent.setup();
     const execute = vi.fn(async () => ({

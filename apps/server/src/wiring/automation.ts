@@ -46,7 +46,7 @@ import { createPushGatewaySetting } from "../remote/pushGatewaySetting";
 import type { HostSigningPort } from "../remote/remoteProtocolService";
 import { readDeviceRegistrations } from "../persistence/remoteAccessProjection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
-import { defaultShellSettings } from "@octant/domain";
+import { defaultPermissionModeFor, defaultShellSettings } from "@octant/domain";
 import type { ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
@@ -231,6 +231,19 @@ export function wireAutomation(deps: AutomationDependencies) {
     evidence: automationCodeEvidenceFromText(),
     clock: () => new Date().toISOString() as UtcTimestamp,
     uuid: randomUUID,
+    // Read at each run, so a routine opted into its Project's level runs at
+    // the level that Project's new threads start at then.
+    projectLevel: (projectId) => {
+      const project = persistence.readProject(projectId);
+      const settings = persistence.readCodeSettings()?.settings;
+      return defaultPermissionModeFor({
+        project: project?.type === "code" ? project : undefined,
+        settings: {
+          defaultExecutionPolicy: settings?.defaultExecutionPolicy ?? "approval-gated",
+          defaultAutoApprove: settings?.defaultAutoApprove,
+        },
+      });
+    },
   });
   const automationWorkDispatch = createAutomationWorkDispatchPort({
     threads: {
