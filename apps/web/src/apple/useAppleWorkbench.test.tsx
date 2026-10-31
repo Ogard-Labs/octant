@@ -384,4 +384,46 @@ describe("useAppleWorkbench", () => {
     expect((client.snapshot as any).mock.calls.length).toBe(hiddenAt + 1);
     expect(result.current.runtime).toBe(running);
   });
+
+  it("adds a Simulator the host lists after discovery to an open pane, checking only every fifteen seconds", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const first = { simulatorId: "A", name: "iPhone 16", state: "booted" };
+    const made = { simulatorId: "B", name: "QA", state: "shutdown" };
+    let listed = [first];
+    const client = {
+      discover: vi.fn(async () => ({ workspace: {}, toolchain: {}, simulators: [first] })),
+      snapshot: vi.fn(async () => ({
+        sequence: 1,
+        active: [],
+        recentEvidence: [],
+        simulators: listed,
+      })),
+      execute: vi.fn(),
+      cancel: vi.fn(),
+    } as unknown as AppleToolchainClient;
+    const { result } = renderHook(() =>
+      useAppleWorkbench({
+        client,
+        discoveryRequest: { projectPath: "Fixture.xcodeproj" },
+        snapshotRequest: { kind: "apple-snapshot-request" },
+      }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(result.current.discovery?.simulators).toEqual([first]);
+    const settled = (client.snapshot as any).mock.calls.length;
+
+    listed = [first, made];
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(14_000);
+    });
+    expect((client.snapshot as any).mock.calls.length).toBe(settled);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect((client.snapshot as any).mock.calls.length).toBe(settled + 1);
+    expect(result.current.discovery?.simulators).toEqual([first, made]);
+  });
 });

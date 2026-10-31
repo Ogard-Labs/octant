@@ -289,6 +289,8 @@ export class AppleToolchainService {
   #sequence = 0;
   #lastToolchain: AppleToolchainDiscovery;
   #lastSimulators: ReadonlyArray<AppleSimulatorRecord> = [];
+  #simulatorListReadAt = 0;
+  #simulatorListRefreshing = false;
   readonly #captureDirectory: string;
   readonly #capturePrefix: string;
   /**
@@ -396,13 +398,26 @@ export class AppleToolchainService {
     }
     let projectPath: string;
     try {
+      request = {
+        ...request,
+        projectPath: await checkoutRelativeProjectPath(
+          context.checkoutRoot,
+          request.projectPath,
+          this.#options.realpath,
+        ),
+      };
       projectPath = await confinedProjectPath(
         context.checkoutRoot,
         request.projectPath,
         this.#options.realpath,
       );
-    } catch {
-      return invalidFailure("Apple project selection is unavailable.", "project");
+    } catch (error) {
+      return invalidFailure(
+        error instanceof ProjectPathRefusal
+          ? error.message
+          : "Apple project selection is unavailable.",
+        "project",
+      );
     }
 
     const developer = await this.#command(["xcode-select", "-p"], context, DISCOVERY_TIMEOUT_MS);
@@ -511,6 +526,17 @@ export class AppleToolchainService {
     context: AppleExecutionContext,
   ): Promise<AppleBuildEvidence> {
     const startedAt = this.#options.now();
+    if (isBuildRequest(request) && isAbsolute(request.projectPath)) {
+      // An absolute path inside the checkout names the same project as its
+      // relative form; one outside it stays as given and is refused below.
+      const given = request.projectPath;
+      const projectPath = await checkoutRelativeProjectPath(
+        context.checkoutRoot,
+        given,
+        this.#options.realpath,
+      ).catch(() => given);
+      request = { ...request, projectPath } as AppleBuildRequest;
+    }
     if (
       !isBuildRequest(request) &&
       (isAppleSimulatorInputKind(request.kind) || isAppleSimulatorOpenInputKind(request.kind))
@@ -630,6 +656,7 @@ export class AppleToolchainService {
   }
 
   snapshot(context: AppleExecutionContext): AppleRuntimeSnapshot {
+    this.#refreshListedSimulators(context);
     const paneOpenRequest = this.#paneOpenRequests.get(String(context.threadId));
     return decodeAppleRuntimeSnapshot({
       sequence: this.#sequence,
@@ -803,6 +830,30 @@ export class AppleToolchainService {
     ) {
       return;
     }
+    await this.#addListedSimulators(context, signal);
+  }
+
+  /**
+   * The pane's list follows the host while it is open: a snapshot read after
+   * discovery re-reads the device list in the background, at most once per
+   * interval however many panes or tools ask, and a Simulator made since then
+   * shows up on the next read.
+   */
+  #refreshListedSimulators(context: AppleExecutionContext): void {
+    if (this.#discovery.size === 0 || this.#simulatorListRefreshing) return;
+    const now = Date.now();
+    if (now - this.#simulatorListReadAt < SIMULATOR_LIST_REFRESH_MS) return;
+    this.#simulatorListReadAt = now;
+    this.#simulatorListRefreshing = true;
+    void this.#addListedSimulators(context, new AbortController().signal)
+      .catch(() => undefined)
+      .finally(() => {
+        this.#simulatorListRefreshing = false;
+      });
+  }
+
+  /** Adds Simulators the device list names that no cached list has; known ones keep their state. */
+  async #addListedSimulators(context: AppleExecutionContext, signal: AbortSignal): Promise<void> {
     const listed = await this.#command(
       ["xcrun", "simctl", "list", "devices", "available", "--json"],
       context,
@@ -816,17 +867,21 @@ export class AppleToolchainService {
     } catch {
       return;
     }
-    const addMissing = (records: ReadonlyArray<AppleSimulatorRecord>) => [
-      ...records,
-      ...fresh.filter(
+    let added = false;
+    const addMissing = (records: ReadonlyArray<AppleSimulatorRecord>) => {
+      const missing = fresh.filter(
         (record) =>
           !records.some((owned) => String(owned.simulatorId) === String(record.simulatorId)),
-      ),
-    ];
+      );
+      if (missing.length === 0) return records;
+      added = true;
+      return [...records, ...missing];
+    };
     this.#lastSimulators = addMissing(this.#lastSimulators);
     for (const [key, entry] of this.#discovery) {
       this.#discovery.set(key, { ...entry, simulators: addMissing(entry.simulators) });
     }
+    if (added) this.#sequence += 1;
   }
 
   #findDiscovery(
@@ -1785,6 +1840,39 @@ function isBuildRequest(request: AppleActionRequest): request is AppleBuildReque
   );
 }
 
+/** A refusal whose reason is safe and useful to show the person or agent. */
+class ProjectPathRefusal extends Error {}
+
+/**
+ * The checkout-relative form of a project path. A relative path passes
+ * through; an absolute one is accepted only when it lies inside the checkout.
+ */
+export async function checkoutRelativeProjectPath(
+  checkoutRoot: string,
+  projectPath: string,
+  realpath: (path: string) => Promise<string>,
+): Promise<string> {
+  if (!isAbsolute(projectPath)) return projectPath;
+  const canonicalRoot = await realpath(checkoutRoot);
+  const candidate = await realpath(projectPath).catch(() => {
+    throw new ProjectPathRefusal(
+      "The project path does not exist. Pass a path inside this thread's checkout, relative to its root (for example App/App.xcodeproj).",
+    );
+  });
+  const fromRoot = relative(canonicalRoot, candidate);
+  if (
+    fromRoot === "" ||
+    fromRoot === ".." ||
+    fromRoot.startsWith(`..${sep}`) ||
+    isAbsolute(fromRoot)
+  ) {
+    throw new ProjectPathRefusal(
+      "The project path is outside this thread's checkout. Pass a project inside the checkout; Octant does not open projects elsewhere.",
+    );
+  }
+  return fromRoot.split(sep).join("/");
+}
+
 export async function confinedProjectPath(
   checkoutRoot: string,
   projectPath: string,
@@ -2061,8 +2149,12 @@ const TYPED_TEXT_REFUSAL_CODES: ReadonlySet<string> = new Set([
  */
 function typedTextFailureNote(outcome: AppleBuildEvidence["outcome"], stderr: string): string {
   const code = /^([a-z][a-z-]{2,63}):/.exec(stderr.trimStart())?.[1];
-  return code === undefined || !TYPED_TEXT_REFUSAL_CODES.has(code)
-    ? `type-text ${outcome} (text redacted)`
+  if (code === undefined || !TYPED_TEXT_REFUSAL_CODES.has(code)) {
+    return `type-text ${outcome} (text redacted)`;
+  }
+  // The Simulator did not take the text; say what it can take.
+  return code === "unsupported-character"
+    ? `type-text ${outcome}: ${code}; nothing was typed, the Simulator types only letters A to Z, digits, spaces, and new lines (text redacted)`
     : `type-text ${outcome}: ${code} (text redacted)`;
 }
 
@@ -2292,6 +2384,8 @@ function unavailableFailure(message: string, step: AppleDiscoveryStep): AppleDis
   return { kind: "failure", failure: { category: "unavailable", message, step } };
 }
 
+/** How often an open pane's reads may re-read the device list. */
+const SIMULATOR_LIST_REFRESH_MS = 15_000;
 const CAPTURE_FILE_PREFIX = "octant-apple-capture-";
 /** Every attempt has its own path, so one set serves all services in the process. */
 const capturesInProgress = new Set<string>();

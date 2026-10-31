@@ -671,11 +671,9 @@ describe("managed simulator streams", () => {
   it("keys plain text through the native helper, not serve-sim", async () => {
     const native = nativeHelpers();
     const managed = tools();
-    const copyToPasteboard = vi.fn(async () => true);
     const helpers = createManagedSimulatorHelpers(native, managed, {
       fetch: fetchStream,
       inputConnection: connected,
-      copyToPasteboard,
     });
     try {
       await expect(helpers.send(udid, { op: "text", text: "Hello 42" }, 2_000)).resolves.toEqual({
@@ -687,43 +685,25 @@ describe("managed simulator streams", () => {
         2_000,
         undefined,
       );
-      expect(copyToPasteboard).not.toHaveBeenCalled();
       expect(managed.commands.some((args) => args[0] === "type")).toBe(false);
     } finally {
       helpers.dispose();
     }
   });
 
-  it("pastes punctuation and non-Latin text through the Simulator pasteboard", async () => {
-    const native = nativeHelpers();
-    const copyToPasteboard = vi.fn(async () => true);
-    const helpers = createManagedSimulatorHelpers(native, tools(), {
-      fetch: fetchStream,
-      inputConnection: connected,
-      copyToPasteboard,
-    });
-    try {
-      await expect(
-        helpers.send(udid, { op: "text", text: "héllo, wörld! 日本" }, 2_000),
-      ).resolves.toEqual({ status: "delivered" });
-      expect(copyToPasteboard).toHaveBeenCalledWith(udid, "héllo, wörld! 日本", expect.anything());
-      expect(native.send).toHaveBeenCalledOnce();
-      expect(native.send.mock.calls[0]?.[1]).toEqual({ op: "key", usage: 25, modifiers: [227] });
-    } finally {
-      helpers.dispose();
-    }
-  });
-
-  it("presses nothing when the pasteboard cannot be set", async () => {
+  it("refuses punctuation and non-Latin text whole instead of reporting it typed", async () => {
     const native = nativeHelpers();
     const helpers = createManagedSimulatorHelpers(native, tools(), {
       fetch: fetchStream,
       inputConnection: connected,
-      copyToPasteboard: async () => false,
     });
     try {
-      const reply = await helpers.send(udid, { op: "text", text: "a.b" }, 2_000);
-      expect(reply.status).toBe("unavailable");
+      for (const text of ["a, b! æøå 日本", "a.b", "héllo"]) {
+        await expect(helpers.send(udid, { op: "text", text }, 2_000)).resolves.toMatchObject({
+          status: "refused",
+          code: "unsupported-character",
+        });
+      }
       expect(native.send).not.toHaveBeenCalled();
     } finally {
       helpers.dispose();

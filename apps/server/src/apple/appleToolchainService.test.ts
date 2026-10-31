@@ -252,6 +252,34 @@ describe("AppleToolchainService discovery", () => {
     expect(JSON.stringify(result.workspace)).not.toContain(context.checkoutRoot);
   });
 
+  it("accepts an absolute project path inside the checkout and refuses one outside with its reason", async () => {
+    const service = new AppleToolchainService({
+      execute: discoveryExecutor(),
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+
+    const inside = await service.discover(
+      { ...discoveryRequest, projectPath: `${context.checkoutRoot}/Fixture/Fixture.xcodeproj` },
+      context,
+    );
+    expect(inside.kind).toBe("discovered");
+    expect(inside.workspace.projectPath).toBe("Fixture/Fixture.xcodeproj");
+
+    const outside = await service.discover(
+      { ...discoveryRequest, projectPath: "/Users/someone/Other/Other.xcodeproj" },
+      context,
+    );
+    expect(outside).toMatchObject({
+      kind: "failure",
+      failure: {
+        category: "invalid",
+        message: expect.stringContaining("outside this thread's checkout"),
+      },
+    });
+  });
+
   it("tells the host which Simulators it found and in what state, and says nothing when discovery is refused", async () => {
     const observeSimulators = vi.fn();
     const service = new AppleToolchainService({
@@ -931,6 +959,53 @@ describe("AppleToolchainService lifecycle", () => {
       context,
     );
     expect(service.snapshot(context).simulators[0]?.state).toBe("shutdown");
+  });
+
+  it("lists a Simulator created after discovery on a later snapshot, reading the device list at most once per interval", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-07-27T20:00:00.000Z"));
+      const created = "30000000-0000-4000-8000-000000000030";
+      let listed = false;
+      let listReads = 0;
+      const base = discoveryExecutor();
+      const execute = vi.fn(async (input: Parameters<typeof base>[0]) => {
+        if (input.argv.join(" ") === "xcrun simctl list devices available --json" && listed) {
+          listReads += 1;
+          return processResult(
+            JSON.stringify({
+              devices: {
+                "com.apple.CoreSimulator.SimRuntime.iOS-18-5": [
+                  { name: "iPhone 16", udid: ids.simulator, state: "Booted", isAvailable: true },
+                  { name: "iPhone 18 Pro", udid: created, state: "Shutdown", isAvailable: true },
+                ],
+              },
+            }),
+          );
+        }
+        return base(input);
+      });
+      const service = new AppleToolchainService({
+        execute,
+        realpath: async (path: string) => path,
+        now: () => "2026-07-27T20:00:00.000Z",
+        newId: () => "30000000-0000-4000-8000-000000000012",
+      });
+      await service.discover(discoveryRequest, context);
+      listed = true;
+      vi.setSystemTime(new Date("2026-07-27T20:01:00.000Z"));
+
+      service.snapshot(context);
+      service.snapshot(context);
+      await vi.waitFor(() =>
+        expect(service.snapshot(context).simulators).toContainEqual(
+          expect.objectContaining({ name: "iPhone 18 Pro", state: "shutdown" }),
+        ),
+      );
+      expect(listReads).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("boots a Simulator created after discovery by reading the device list again", async () => {
@@ -2736,6 +2811,38 @@ describe("AppleToolchainService Simulator input", () => {
     // host they can quote what was typed.
     expect(recorded).not.toContain("QWERTY");
     expect(recorded).not.toContain("hunter2");
+  });
+
+  it("tells the agent that text the Simulator cannot type was not typed", async () => {
+    const artifacts = new Map<string, Uint8Array>();
+    const service = new AppleToolchainService({
+      execute: discoveryExecutor(),
+      injectSimulatorInput: async () =>
+        processResult("", { exitCode: 1, stderr: "unsupported-character: cannot type this" }),
+      writeArtifact: async (reference: string, bytes: Uint8Array) => {
+        artifacts.set(reference, bytes);
+      },
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+
+    const evidence = await service.execute(
+      simulatorRequest({
+        kind: "type-text",
+        bundleIdentifier: undefined,
+        text: "a, b! æøå 日本",
+        requestedBy: { kind: "local-user", actorId: "30000000-0000-4000-8000-000000000099" },
+        approval: buildRequest().approval,
+      } as never),
+      context,
+    );
+
+    expect(evidence.outcome).toBe("failed");
+    const recorded = JSON.stringify(evidence.diagnostics);
+    expect(recorded).toContain("nothing was typed");
+    expect(recorded).not.toContain("æøå");
   });
 
   it("keeps nothing of a typed-text failure whose first word is not one of the helper's codes", async () => {

@@ -153,10 +153,8 @@ Simulator maps key positions with its own keyboard language. Keyed typing
 works on a Simulator whose keyboard language uses a QWERTY layout — English,
 the Nordic languages, Dutch, Spanish, Portuguese — and is refused on others,
 such as French or German, with `keyboard-layout-unsupported` in the evidence.
-Text with punctuation or non-Latin characters is placed on that Simulator's
-pasteboard with `simctl pbcopy` and pasted with Command-V, so it replaces
-whatever the Simulator pasteboard held, and iOS may ask in the Simulator to
-**Allow Paste**. **Return**,
+Text with punctuation or non-Latin characters is refused whole with
+`unsupported-character`, and nothing is typed, rather than reported as typed. **Return**,
 **Escape**, Home, and Lock are keys and buttons. Input needs Xcode 27 or
 later. When the host cannot deliver an input action, the evidence names the
 host's refusal rather than reading as interrupted. Remote, Linux, and
@@ -183,8 +181,7 @@ than 80 ms or longer than 2 seconds; on the managed stream a drag up from the
 bottom edge goes Home or unlocks — and, once you have clicked the screen, type
 on your keyboard. Letters, digits, spaces, and new lines go to the device as
 keys on a supported QWERTY layout, and typing is sent when you pause. Other
-text, such as punctuation or non-Latin letters, goes through the Simulator's
-pasteboard instead, as described above. Return, Delete, Escape and the arrow
+text, such as punctuation or non-Latin letters, is refused, as described above. Return, Delete, Escape and the arrow
 keys go to the device, and Command and Control shortcuts stay with Octant. **Home**, **Lock**, and **Type text…**
 are in the device pane's toolbar and wait in the same queue as taps and
 typing, so what you do while an action is still running is kept and sent in

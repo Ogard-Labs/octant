@@ -509,9 +509,7 @@ describe("Simulator frame input", () => {
         kind: "type-text",
         text: "super-secret-password",
       }).message,
-    ).toBe(
-      "type-text completed (length=21; redacted); sent as a paste, so check the screen for the text",
-    );
+    ).toBe("type-text completed (length=21; redacted)");
     expect(redactedAppleInputDiagnostic({ kind: "type-text", text: "octant 42" }).message).toBe(
       "type-text completed (length=9; redacted)",
     );
