@@ -381,6 +381,18 @@ export interface CodeAppManagedToolsOptions {
    * approval returns the host's one-use approval for exactly that command.
    * Absent on a host that cannot ask; the pull-request tool is then omitted.
    */
+  /**
+   * Asks the person, in the thread, to let the agent type one command into its
+   * terminal, naming it; on approval of a command that starts the terminal,
+   * the host also holds the one-use approval the start needs. Absent on a host
+   * that cannot ask, where the terminal then runs only at Full access.
+   */
+  readonly terminalApproval?: {
+    readonly request: (
+      input: { readonly text: string; readonly start?: CodeOperationCommand },
+      signal?: AbortSignal,
+    ) => Promise<"approved" | "denied" | "cancelled" | "expired" | "unavailable">;
+  };
   readonly pullRequestApproval?: {
     readonly request: (
       command: PullRequestToolCommand,
@@ -543,12 +555,18 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
       if (name === CODE_PULL_REQUEST_TOOL_NAME && options.pullRequestApproval !== undefined) {
         return pullRequestTool(options, parsePullRequestInput(inputJson), signal);
       }
+      // The terminal follows the thread's level: Plan refuses it, a prompting
+      // level asks the person before each command, and Full access runs it.
+      if (name === CODE_TERMINAL_TOOL_NAME) {
+        const terminalFailure = terminalAuthorityFailure(options);
+        if (terminalFailure !== undefined) {
+          return failure(terminalFailure, postureRefusal(terminalFailure));
+        }
+        return terminalTool(options, parseTerminalInput(inputJson), signal);
+      }
       const postureFailure = currentAuthorityFailure(options);
       if (postureFailure !== undefined) {
         return failure(postureFailure, postureRefusal(postureFailure));
-      }
-      if (name === CODE_TERMINAL_TOOL_NAME) {
-        return terminalTool(options, parseTerminalInput(inputJson), signal);
       }
       return failure("tool-unavailable");
     },
@@ -802,15 +820,37 @@ async function terminalTool(
     // A missing terminal is an ordinary first-run state. Starting it remains a
     // server-authorized operation, while reads never replace a UI observer.
   }
-  if (input.operation === "run" && snapshot?.status !== "running") {
-    const started = await options.executeOperation(options.windowId, {
-      kind: "start-terminal",
-      operationId: operationId(options),
-      ...scope,
-      columns: 100,
-      rows: 30,
-      credentialRefs: [],
-    });
+  // Below Full access each command the agent types asks the person first,
+  // naming it, as a provider's own shell asks per command at that level. A
+  // terminal the agent starts is covered by the same answer.
+  const startCommand: CodeOperationCommand | undefined =
+    input.operation === "run" && snapshot?.status !== "running"
+      ? {
+          kind: "start-terminal",
+          operationId: operationId(options),
+          ...scope,
+          columns: 100,
+          rows: 30,
+          credentialRefs: [],
+        }
+      : undefined;
+  if (
+    (input.operation === "run" || input.operation === "write") &&
+    input.command !== undefined &&
+    currentPosture(options) !== "full-access"
+  ) {
+    if (options.terminalApproval === undefined) return failure("terminal-approval-required");
+    const outcome = await options.terminalApproval.request(
+      { text: input.command, ...(startCommand === undefined ? {} : { start: startCommand }) },
+      signal,
+    );
+    if (outcome !== "approved") return failure(`terminal-approval-${outcome}`);
+    const changed = terminalAuthorityFailure(options);
+    if (changed !== undefined) return failure(changed, postureRefusal(changed));
+    if (signal?.aborted === true) return failure("tool-interrupted");
+  }
+  if (startCommand !== undefined) {
+    const started = await options.executeOperation(options.windowId, startCommand);
     if (started.kind !== "terminal-state" || started.state !== "running") {
       return operationResult(started, options, scope);
     }
@@ -858,7 +898,7 @@ async function waitForTerminalCommand(
   const deadline = Date.now() + TERMINAL_COMMAND_TIMEOUT_MS;
   const completion = new RegExp(`\\u001b\\]777;octant=${marker};exit=(\\d+)\\u0007`, "g");
   for (;;) {
-    const authorityFailure = currentAuthorityFailure(options);
+    const authorityFailure = terminalAuthorityFailure(options);
     if (signal?.aborted || authorityFailure !== undefined) {
       await interruptTerminalCommand(options, scope, marker);
       return signal?.aborted
@@ -866,7 +906,7 @@ async function waitForTerminalCommand(
         : failure(authorityFailure!, postureRefusal(authorityFailure!));
     }
     await (options.wait ?? defaultWait)(TERMINAL_COMPLETION_POLL_MS);
-    const postWaitAuthorityFailure = currentAuthorityFailure(options);
+    const postWaitAuthorityFailure = terminalAuthorityFailure(options);
     if (signal?.aborted || postWaitAuthorityFailure !== undefined) {
       await interruptTerminalCommand(options, scope, marker);
       return signal?.aborted
@@ -2265,6 +2305,16 @@ function browserAuthorityFailure(options: CodeAppManagedToolsOptions): string | 
     thread: current?.executionPolicy ?? options.thread.executionPolicy,
   });
   return posture === "plan" ? "plan-mode-read-only" : undefined;
+}
+
+/**
+ * What keeps the agent terminal from running now: a stale thread, or Plan.
+ * Every other level reaches it, asking per command below Full access.
+ */
+function terminalAuthorityFailure(options: CodeAppManagedToolsOptions): string | undefined {
+  const staleness = currentThreadIdentityFailure(options);
+  if (staleness !== undefined) return staleness;
+  return currentPosture(options) === "plan" ? "plan-mode-read-only" : undefined;
 }
 
 function currentAuthorityFailure(options: CodeAppManagedToolsOptions): string | undefined {

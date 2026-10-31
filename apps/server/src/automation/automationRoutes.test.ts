@@ -578,9 +578,10 @@ describe("automation routes", () => {
       },
       scopeId: decodeWindowId(remoteDeviceId),
     });
-    expect(decodeAutomationCommandResult(await json(await harness.handler(remote)))).toMatchObject(
-      { kind: "automation-command-failed", reason: "unauthorized" },
-    );
+    expect(decodeAutomationCommandResult(await json(await harness.handler(remote)))).toMatchObject({
+      kind: "automation-command-failed",
+      reason: "unauthorized",
+    });
     expect(harness.projection.getDefinition(automationId("b301"))).toBeUndefined();
 
     const local = decodeAutomationCommandResult(await json(await harness.handler(create("b302"))));

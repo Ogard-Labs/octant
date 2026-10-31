@@ -3163,6 +3163,43 @@ class RuntimeTurnController implements CodeOperationTurnPort {
    * approval for exactly that command, bound to the thread's delivery target,
    * which the operation service validates before `gh` runs.
    */
+  /**
+   * One command the agent wants to type into its thread terminal, asked of the
+   * person in the thread with the command shown. When the terminal must start
+   * first, an approval mints the host's one-use approval for exactly that
+   * start, which the operation gate checks as it checks any approved effect.
+   */
+  async #askTerminalApproval(
+    active: ActiveTurn,
+    input: { readonly text: string; readonly start?: CodeOperationCommand },
+    signal?: AbortSignal,
+  ): Promise<"approved" | "denied" | "cancelled" | "expired" | "unavailable"> {
+    const shown = `Run this in the thread's terminal?\n${input.text}`;
+    const summary = boundProviderSummary(shown);
+    // The person must read the whole command they allow.
+    if (summary === undefined || summary !== shown.trim()) return "unavailable";
+    const outcome = await this.#askToolApproval(active, summary, undefined, signal);
+    if (outcome !== "approved" || input.start === undefined) return outcome;
+    const store = this.#approvalStore;
+    if (store === undefined) return "unavailable";
+    const thread = this.#options.persistence.readCodeThread(active.thread.id);
+    const checkout = this.#options.persistence.readCodeCheckout(active.thread.checkoutId);
+    if (thread === undefined || checkout === undefined) return "unavailable";
+    const context = await approvalContext(this.#options, input.start, thread, checkout);
+    if (context === undefined) return "unavailable";
+    try {
+      const receipt = store.issue({
+        windowId: active.windowId,
+        effect: { kind: "operation", command: input.start },
+        contextDigest: approvalContextDigest(context),
+      });
+      return receipt === undefined ? "unavailable" : "approved";
+    } catch {
+      // Host time recovery refuses to mint approvals; the start stays refused.
+      return "unavailable";
+    }
+  }
+
   async #askPullRequestApproval(
     active: ActiveTurn,
     command: PullRequestToolCommand,
@@ -3568,6 +3605,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           },
           pullRequestApproval: {
             request: (command, signal) => this.#askPullRequestApproval(active, command, signal),
+          },
+          terminalApproval: {
+            request: (input, signal) => this.#askTerminalApproval(active, input, signal),
           },
           browserApproval: {
             isApproved: (contextId) => {

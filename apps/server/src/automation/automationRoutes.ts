@@ -386,7 +386,8 @@ async function handleCommand(
       decodeAutomationCommandResult({
         kind: "automation-command-failed",
         reason: "unauthorized",
-        message: "Running a routine at its Project's level is chosen in the Octant window on this host.",
+        message:
+          "Running a routine at its Project's level is chosen in the Octant window on this host.",
       }),
       200,
       origin,

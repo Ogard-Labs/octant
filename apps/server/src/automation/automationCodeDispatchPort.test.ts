@@ -73,7 +73,10 @@ function codeRun(overrides: Partial<AutomationDefinition> = {}): AutomationRun {
 }
 
 function port() {
-  const execute = vi.fn(async () => ({ kind: "managed-thread-created", thread: { id: threadId } }));
+  const execute = vi.fn(async (_scope: WindowId, _command: unknown) => ({
+    kind: "managed-thread-created",
+    thread: { id: threadId },
+  }));
   const dispatch = createAutomationCodeDispatchPort({
     codeService: { execute, bootstrap: async () => ({ threads: [] }) },
     operations: { execute: vi.fn() as never },

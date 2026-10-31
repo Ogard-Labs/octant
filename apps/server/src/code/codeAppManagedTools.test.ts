@@ -294,7 +294,7 @@ describe("Code app-managed tools", () => {
     expect(executeOperation).toHaveBeenCalledOnce();
   });
 
-  it("interrupts through the owner-scoped cleanup path after Full access is revoked", async () => {
+  it("interrupts through the owner-scoped cleanup path after the thread moves to Plan", async () => {
     let current = thread();
     let marker = "";
     const interrupt = vi.fn(async () => ({
@@ -333,7 +333,7 @@ describe("Code app-managed tools", () => {
         terminate: vi.fn(),
       },
       wait: async () => {
-        current = thread({ executionPolicy: "approval-gated" });
+        current = thread({ executionPolicy: "plan" });
       },
     });
 
@@ -344,9 +344,8 @@ describe("Code app-managed tools", () => {
 
     expect(result).toEqual({
       result: {
-        error: "full-access-required",
-        message:
-          "This tool needs Full access for the thread. Raise the thread's access, then try again.",
+        error: "plan-mode-read-only",
+        message: "Plan mode is read-only; this tool cannot run.",
       },
       isError: true,
     });
@@ -1097,7 +1096,7 @@ describe("Code app-managed tools", () => {
     expect(result).toMatchObject({ isError: false, result: { status: "running" } });
   });
 
-  it("fails closed when a Full-access thread is running a narrower turn", async () => {
+  it("fails closed when a Full-access thread is running a Plan turn", async () => {
     const executeOperation = vi.fn();
     const tools = createCodeAppManagedTools({
       windowId,
@@ -1115,16 +1114,57 @@ describe("Code app-managed tools", () => {
       }),
     ).resolves.toEqual({
       result: {
-        error: "full-access-required",
-        message:
-          "This tool needs Full access for the thread. Raise the thread's access, then try again.",
+        error: "plan-mode-read-only",
+        message: "Plan mode is read-only; this tool cannot run.",
       },
       isError: true,
     });
     expect(executeOperation).not.toHaveBeenCalled();
   });
 
-  it("fails closed outside Full access and never invokes a host tool", async () => {
+  it("asks the person before each command below Full access and runs nothing they decline", async () => {
+    const executeOperation = vi.fn(async (_windowId: WindowId, command: CodeOperationCommand) => ({
+      kind: "terminal-state",
+      operationId: command.operationId,
+      terminalId: threadId,
+      state: "running",
+    }));
+    const request = vi.fn(async () => "denied" as const);
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: thread({ executionPolicy: "approval-gated" }),
+      readThread: () => thread({ executionPolicy: "approval-gated" }),
+      uuid: uuidFactory(),
+      executeOperation: executeOperation as never,
+      terminal: { read: vi.fn() },
+      terminalApproval: { request },
+    });
+
+    await expect(
+      tools.execute({
+        name: CODE_TERMINAL_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "run", command: "pwd" }),
+      }),
+    ).resolves.toMatchObject({ result: { error: "terminal-approval-denied" }, isError: true });
+    // The person saw the command, and the start it needs rode the same ask.
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: "pwd",
+        start: expect.objectContaining({ kind: "start-terminal" }),
+      }),
+      undefined,
+    );
+    expect(executeOperation).not.toHaveBeenCalled();
+
+    request.mockResolvedValueOnce("approved" as never);
+    await tools.execute({
+      name: CODE_TERMINAL_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "run", command: "pwd" }),
+    });
+    expect(executeOperation.mock.calls.map((call) => call[1].kind)).toContain("start-terminal");
+  });
+
+  it("refuses the agent terminal below Full access on a host that cannot ask", async () => {
     const executeOperation = vi.fn();
     const tools = createCodeAppManagedTools({
       windowId,
@@ -1140,14 +1180,7 @@ describe("Code app-managed tools", () => {
         name: CODE_TERMINAL_TOOL_NAME,
         inputJson: JSON.stringify({ operation: "run", command: "pwd" }),
       }),
-    ).resolves.toEqual({
-      result: {
-        error: "full-access-required",
-        message:
-          "This tool needs Full access for the thread. Raise the thread's access, then try again.",
-      },
-      isError: true,
-    });
+    ).resolves.toMatchObject({ result: { error: "terminal-approval-required" }, isError: true });
     expect(executeOperation).not.toHaveBeenCalled();
   });
 

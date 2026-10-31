@@ -975,9 +975,12 @@ yields, validated by the same Apple or Android policy. A denial, expiry, or
 thread that went stale or into Plan while waiting refuses the call. Input to a
 destination the turn's window already holds open under Allow input rides that
 grant without asking; an approved agent input opens or renews it as a pane
-input does. `octant_terminal` still requires Full access: it runs arbitrary
-shell commands, which an approval-gated thread already reaches through its
-provider's own per-command approvals.
+input does. `octant_terminal` follows the thread's level: Plan refuses it,
+Full access runs it, and below Full access each command the agent types into
+it (`run` or `write`) asks the person in the thread with the command shown
+first; an approval for a command that starts the terminal also mints the
+host's one-use approval for that start. Reading and stopping it ask nothing.
+A host that cannot ask refuses it below Full access.
 
 ## Modes: Chat, Work, and Code
 
@@ -2026,21 +2029,27 @@ the thread it came from.
   captures the shell and Git, and one saved without them (every Work routine
   saved before Work had the shell) blocks at dispatch as `authority-mismatch`
   until a person saves it again under a profile that grants them, because a
-  Work turn cannot withhold them and a routine never runs above its snapshot. By
-  default Full access is not eligible, whether or not it was remembered
-  elsewhere: the contract refuses it on the snapshot and dispatch blocks it as
-  `full-access-ineligible`, and Code runs are created approval-gated. The
-  rule is that a routine runs at the [guardrail level](#security-and-authority)
-  the person picks when creating it, Full access included, and a Code routine may
-  merge the pull requests it opens when the person allowed that at creation;
-  an agent proposing a routine never picks either for the person. Both
-  choices are captured in the authority snapshot and journaled (allowed; not
-  built yet). A routine never runs at a level lower than the one its creator
-  chose. Work
-  runs bind the Project's confined root like an interactive Work thread, and
-  their unattended first turn runs ask-first even when the host's Work default
-  is auto-accept-edits, unless the routine's captured effective authority is
-  itself auto-accept-edits; the hold only narrows. A Code first turn runs with
+  Work turn cannot withhold them and a routine never runs above its snapshot. A
+  routine asks first by default: a Full access profile is not eligible,
+  whether or not it was remembered elsewhere (the contract refuses it on the
+  snapshot and dispatch blocks it as `full-access-ineligible`), Code runs are
+  created approval-gated, and a Work run's unattended first turn runs
+  ask-first even when the host's Work default is auto-accept-edits, unless the
+  routine's captured effective authority is itself auto-accept-edits; the hold
+  only narrows. A person may instead opt a routine into its **Project's
+  level** (`projectLevel: "opted-in"` on the definition, journaled with every
+  revision and copied into each run's definition snapshot): each run then
+  takes the level the Project's new threads start at, read at dispatch, Full
+  access included. A Code run's thread is created at that mode (the Project's
+  own, else Settings › Code › Access), and a Work run's turn is not narrowed
+  below its thread's level, which a routine thread takes from Settings ›
+  Work. Only a local window sets the opt-in: a paired device is refused at the
+  route, and a routine an agent proposes never has it. Allowed; not built yet:
+  a Code routine merging the pull requests it opens when the person allowed
+  that at creation, and a level picked on the routine itself rather than
+  taken from its Project. A routine never runs at a level lower than the one
+  its creator chose. Work runs bind the Project's confined root like an
+  interactive Work thread. A Code first turn runs with
   the `agent` initiator, so approvals wait for a person.
 - **Revalidation at every occurrence.** Before creating a thread the dispatcher
   re-reads live host facts and blocks with a typed reason when the host, the
