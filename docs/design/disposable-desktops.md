@@ -19,7 +19,7 @@ the person's other machine are built, and no host offers it yet (see
 authorized this scope as post-preview work and accepted the
 [maintainer decisions](#maintainer-decisions) below on 2026-10-26, naming the
 two cloud providers on 2026-10-27; it is not part of the first release, and the
-[Current Release Boundary](../../AGENTS.md#current-release-boundary) is
+[Current Release Boundary](../architecture.md#current-release-boundary) is
 unchanged by this document. The lease contract, the `desktop-provider` seam
 and its conformance suite, the host lease service, the host-local provider,
 artifact transfer, the agent's binding of `octant_computer` to a lease, the

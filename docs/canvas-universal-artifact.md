@@ -48,7 +48,7 @@ implementation, per the repo's design workflow.
 | CON-1 | No Sheet code, schemas, or distinctive structure may enter Octant (AGPL-3.0 plus the repo originality rule). Ideas and observed capability gaps only. | S2, AGENTS.md               |
 | CON-2 | The mockup stays a closed catalog of inert components carrying typed fields only — no markup, styles, or script.                                      | S3                          |
 | CON-3 | Chasing looks stays in design frames; the typed catalog grows only for structure and reuse.                                                           | S3 (architecture rationale) |
-| CON-4 | Local-first: no hosted service beyond the existing public Canvas share service; no new external calls.                                                | AGENTS.md                   |
+| CON-4 | Local-first: no hosted service beyond the existing public Canvas share service; no new external calls.                                                | architecture principles     |
 | CON-5 | Repo code style: strict TS, branded ids, `readonly` boundaries, oxfmt/oxlint, no `any` or `!`.                                                        | AGENTS.md                   |
 
 | ID    | Assumption                                                                                                                                                                                                       |
