@@ -3329,12 +3329,24 @@ export class CodeService {
   async #requireCreateIssueContexts(command: {
     readonly issueContext?: GithubIssueContextRequest | undefined;
     readonly linearIssueContext?: LinearIssueContextRequest | undefined;
+    readonly terminalSession?: TerminalSessionImportRequest | undefined;
   }): Promise<{
     readonly github: GithubIssueContextResult | { readonly status: "absent" };
     readonly linear: LinearIssueContextResult | { readonly status: "absent" };
   }> {
     if (command.issueContext !== undefined && command.linearIssueContext !== undefined) {
       throw this.#failure("invalid", "Choose either a GitHub issue or a Linear issue, not both.");
+    }
+    // The first turn carries one outside source, so a second one would be
+    // shown as imported and never reach the model.
+    if (
+      command.terminalSession !== undefined &&
+      (command.issueContext !== undefined || command.linearIssueContext !== undefined)
+    ) {
+      throw this.#failure(
+        "invalid",
+        "Choose either an issue or a terminal session to start from, not both.",
+      );
     }
     const github = await prepareOptionalIssueContext(
       this.#issueContext,

@@ -215,7 +215,9 @@ The list reads `projects/<folder>` under `CLAUDE_CONFIG_DIR` (default
 whose recorded working directory is the Project's bound root. Codex titles come
 from its `session_index.jsonl` when it names the session.
 
-A create command's `terminalSession` is read by
+A create command's `terminalSession` is refused when it comes from a paired
+device or arrives together with an issue context (one outside source per
+thread), and is otherwise read by
 `apps/server/src/terminalSessions/terminalSessionImports.ts`: the thread is
 marked under the source label `terminal-session` in the creation's journal
 unit, `thread.terminal-session-imported@1` holds the bounded history on the

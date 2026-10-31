@@ -349,6 +349,31 @@ describe("WorkThreadService", () => {
     expect(elsewhere.persistence.journal.append).not.toHaveBeenCalled();
   });
 
+  it("refuses a thread that starts from both an issue and a terminal session", async () => {
+    const terminalSessions = {
+      prepare: vi.fn<TerminalSessionImportPort["prepare"]>(),
+      journalImported: vi.fn<TerminalSessionImportPort["journalImported"]>(),
+    };
+    const fixture = serviceFixture({ threads: [], terminalSessions });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "create-work-thread",
+        threadId: ids.thread,
+        projectId: ids.project,
+        title: "Draft brief",
+        providerInstanceId: ids.provider,
+        modelId: "model-a",
+        hostId: "local",
+        bindingRevisionId: ids.binding,
+        issueContext: { owner: "octant", name: "octant", number: 7 },
+        terminalSession: { provider: "claude", sessionId: "0b4c1f2e-1111-4111-8111-111111111111" },
+      } as never),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(terminalSessions.prepare).not.toHaveBeenCalled();
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
   it("attributes a routine's thread to the routine, not to an open window", async () => {
     const fixture = serviceFixture({ threads: [] });
 

@@ -1386,6 +1386,32 @@ describe("CodeService commands", () => {
     expect(elsewhere.persistence.journal.append).not.toHaveBeenCalled();
   });
 
+  it("refuses a thread that starts from both an issue and a terminal session", async () => {
+    const terminalSessions = {
+      prepare: vi.fn<TerminalSessionImportPort["prepare"]>(),
+      journalImported: vi.fn<TerminalSessionImportPort["journalImported"]>(),
+    };
+    const fixture = serviceFixture({
+      threads: [],
+      project: rememberedFullAccessProject,
+      terminalSessions,
+    });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "create-code-thread",
+        thread: thread({ executionPolicy: "approval-gated" }),
+        issueContext: { owner: "octant", name: "octant", number: 7 },
+        terminalSession: {
+          provider: "codex",
+          sessionId: "019f6f43-f063-7df2-8216-515b7f7bfe9a",
+        },
+      } as never),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(terminalSessions.prepare).not.toHaveBeenCalled();
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
   it("leaves a thread that asks for less than its profile allows alone", async () => {
     const created = thread({
       executionPolicy: "plan",
