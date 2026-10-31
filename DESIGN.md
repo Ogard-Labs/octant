@@ -2227,6 +2227,14 @@ request from the person.
   failed or stalled window-state save or host stop is logged rather than shown
   in an alert, and a fixed deadline ends the app (after force-stopping the
   managed server) if shutdown has not finished.
+- The **⌘Q keyboard shortcut** needs a second press within 1.5 seconds. The
+  first press quits nothing and shows a short "Press ⌘Q again to quit Octant"
+  toast in the focused window; the second enters the guarded shutdown above
+  unchanged, including its session confirmation. With no window open, the first
+  press quits directly. Choosing Quit with the pointer (app menu, Dock, status
+  menu's Fully quit), OS shutdown or logout, updater restarts and signals stay
+  immediate. A menu accelerator cannot tell a held key from a tap, so a
+  double press stands in for hold-to-quit.
 
 ## Implementation checklist
 

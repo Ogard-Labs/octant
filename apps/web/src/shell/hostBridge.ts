@@ -496,6 +496,8 @@ export interface OctantHostBridge
   ) => () => void;
   readonly subscribeCodeDeepLinks?: (listener: (target: CodeDeepLink) => void) => () => void;
   readonly subscribeOpenSettings?: (listener: () => void) => () => void;
+  /** The first ⌘Q press: the window shows "press again to quit". */
+  readonly subscribeQuitShortcutHint?: (listener: () => void) => () => void;
   readonly subscribeStartNewAgent?: (listener: () => void) => () => void;
 }
 
