@@ -1,4 +1,5 @@
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
+import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
@@ -69,7 +70,7 @@ import {
 import { CodeTurnDecisions } from "../turnDecisions/codeTurnDecisions";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
 import { isReplayedAndroidEvidence } from "../android/androidToolchainService";
-import { isNativeHarnessDriverKind } from "@octant/domain";
+import { isNativeHarnessDriverKind, projectExtraFolderRoots } from "@octant/domain";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { type CodeWiring, stableCodeFileId } from "./code";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
@@ -513,6 +514,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       );
       codeOperationRuntime = createCodeOperationRuntime({
         shield: hostShield,
+        chosenAutoReviewer: (thread) => {
+          const project = persistence.readProject(thread.projectId);
+          return chosenAutoReviewer({
+            project: project?.type === "code" ? project : undefined,
+            settings: persistence.readCodeSettings()?.settings,
+          });
+        },
         liveTurns,
         activeTurns: codeActiveTurns,
         terminalBrowserGrants: grants,
@@ -618,6 +626,12 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             projectId: input.thread.projectId,
           }),
         nativeHarnessTools: (input) => nativeHarnessComposition.forCode(input),
+        readProjectExtraFolders: (projectId) => {
+          const project = persistence.readProject(projectId);
+          return project === undefined || project.type === "chat"
+            ? []
+            : projectExtraFolderRoots(project);
+        },
         nativeHarness: nativeHarnessHooks,
         onProviderTurnRequested: (threadId) => {
           if (codeService instanceof CodeService) codeService.noteProviderTurnRequested(threadId);

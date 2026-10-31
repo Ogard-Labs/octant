@@ -1,4 +1,5 @@
 import type { ChatClient } from "@octant/client-runtime/chat-client";
+import { autoReviewFor } from "../code/autoReview";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
 import type { WorkRequestClient } from "@octant/client-runtime/work-request-client";
@@ -273,13 +274,17 @@ function ZenCodeCardSurface(props: {
     [providerController],
   );
   const nextUuid = useCallback(() => globalThis.crypto.randomUUID(), []);
-  const harnessAutoReviewSupported =
-    controller?.activeView !== undefined &&
-    providerController !== undefined &&
-    providerController.observedByInstance.get(controller.activeView.thread.providerInstanceId)
-      ?.capabilities.harnessAutoReview === "supported"
-      ? true
-      : undefined;
+  const autoReview =
+    providerController === undefined
+      ? undefined
+      : autoReviewFor({
+          providerInstanceId: controller?.activeView?.thread.providerInstanceId,
+          instances: providerController.instances,
+          observedByInstance: providerController.observedByInstance,
+          chosen: controller?.bootstrap?.settings.autoReviewer,
+          shieldModel: controller?.bootstrap?.settings.shieldModel,
+        });
+  const harnessAutoReviewSupported = autoReview?.status === "reviewer" ? true : undefined;
   if (controller === undefined) {
     return (
       <div className="zen-thread-element__unreachable">
@@ -302,6 +307,7 @@ function ZenCodeCardSurface(props: {
         operationClient={props.codeClient}
         providerGroups={providerGroups}
         {...(harnessAutoReviewSupported === undefined ? {} : { harnessAutoReviewSupported })}
+        {...(autoReview === undefined ? {} : { autoReview })}
         threadId={props.threadId}
         {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
         {...(props.windowCapability === undefined

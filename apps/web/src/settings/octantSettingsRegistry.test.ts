@@ -176,6 +176,8 @@ describe("octantSettingsRegistry", () => {
       "code-language-services",
       "project-view-switcher",
       "code-default-access",
+      "code-auto-reviewer",
+      "code-shield-model",
       "code-editor-executable",
       "code-editor-arguments",
       "open-in-applications",

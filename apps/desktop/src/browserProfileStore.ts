@@ -3,12 +3,26 @@ import { join } from "node:path";
 import {
   decodeProjectId,
   type BrowserProfileClearScope,
+  type ImportedCookie,
   type StoredBrowserProfile,
 } from "@octant/contracts";
 import { browserProfilePartition, storedBrowserProfileOfPartitionFolder } from "@octant/domain";
 
 /** The part of an Electron session a stored profile's store needs. */
 export interface BrowserProfileSessionPort {
+  readonly cookies?: {
+    set(details: {
+      readonly url: string;
+      readonly name: string;
+      readonly value: string;
+      readonly domain?: string;
+      readonly path: string;
+      readonly secure: boolean;
+      readonly httpOnly: boolean;
+      readonly expirationDate?: number;
+      readonly sameSite: ImportedCookie["sameSite"];
+    }): Promise<void>;
+  };
   clearStorageData(options?: { readonly storages?: ReadonlyArray<string> }): Promise<void>;
   clearCache(): Promise<void>;
   flushStorageData?(): void;
@@ -30,6 +44,11 @@ export interface StoredBrowserProfileSize {
 export interface BrowserProfileStore {
   readonly list: () => Promise<ReadonlyArray<StoredBrowserProfileSize>>;
   readonly clear: (profile: StoredBrowserProfile, scope: BrowserProfileClearScope) => Promise<void>;
+  /** Sets each cookie in the profile's own session and counts what the session kept. */
+  readonly importCookies: (
+    profile: StoredBrowserProfile,
+    cookies: ReadonlyArray<ImportedCookie>,
+  ) => Promise<{ readonly imported: number; readonly skipped: number }>;
 }
 
 /**
@@ -72,7 +91,41 @@ export function createBrowserProfileStore(
       if (scope === "all") await session.clearCache();
       session.flushStorageData?.();
     },
+    async importCookies(profile, cookies) {
+      const session = options.sessionFor(browserProfilePartition(profile, ""));
+      let imported = 0;
+      let skipped = 0;
+      for (const cookie of cookies) {
+        try {
+          await session.cookies?.set(cookieDetails(cookie));
+          if (session.cookies === undefined) skipped += 1;
+          else imported += 1;
+        } catch {
+          // The session refused this cookie. Which one, and why, is not
+          // reported: the error can name the cookie, and a count is enough.
+          skipped += 1;
+        }
+      }
+      session.flushStorageData?.();
+      return { imported, skipped };
+    },
   });
+}
+
+function cookieDetails(cookie: ImportedCookie) {
+  const host = cookie.domain.startsWith(".") ? cookie.domain.slice(1) : cookie.domain;
+  return {
+    url: `${cookie.secure ? "https" : "http"}://${host}${cookie.path}`,
+    name: cookie.name,
+    value: cookie.value,
+    // A host-only cookie names no domain, so the session keeps it host-only.
+    ...(cookie.hostOnly ? {} : { domain: cookie.domain }),
+    path: cookie.path,
+    secure: cookie.secure,
+    httpOnly: cookie.httpOnly,
+    ...(cookie.expiresAt === undefined ? {} : { expirationDate: cookie.expiresAt }),
+    sameSite: cookie.sameSite,
+  };
 }
 
 async function directorySize(directory: string): Promise<number> {

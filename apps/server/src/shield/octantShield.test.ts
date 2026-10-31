@@ -88,6 +88,32 @@ describe("Octant Shield on the host", () => {
     expect(port.complete).not.toHaveBeenCalled();
   });
 
+  it("allows an edit in a Project's extra folder by rule, and asks the model without it", async () => {
+    const { port } = fakeModel({
+      status: "answered",
+      text: '{"verdict":"ask","reason":"Unsure."}',
+    });
+    const shield = shieldWith(port);
+    const edit: ShieldCall = {
+      ...bash(""),
+      tool: "edit",
+      kind: "edit",
+      command: undefined,
+      paths: ["/Users/dev/notes/today.md"],
+    };
+    expect(
+      await shield.review({
+        threadId: "t",
+        call: edit,
+        boundRoot: root,
+        extraRoots: ["/Users/dev/notes"],
+      }),
+    ).toMatchObject({ verdict: "allow", stage: "fast-allow", rule: "in-root-edit" });
+    expect(port.complete).not.toHaveBeenCalled();
+    await shield.review({ threadId: "t", call: edit, boundRoot: root });
+    expect(port.complete).toHaveBeenCalledOnce();
+  });
+
   it("journals the model's verdict, reason, model and latency", async () => {
     const { port } = fakeModel({
       status: "answered",

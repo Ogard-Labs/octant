@@ -329,7 +329,9 @@ function ShieldReviewLine(props: { readonly row: ReviewRow }) {
       <span className="turn-activity__review-call" title={summary}>
         {summary}
       </span>
-      <span className="turn-activity__review-reason">{decision.reason}</span>
+      <span className="turn-activity__review-reason" title={decision.reason}>
+        {decision.reason}
+      </span>
       <span className="turn-activity__outcome">
         {decidedBy} · {String(decision.latencyMs)} ms
       </span>

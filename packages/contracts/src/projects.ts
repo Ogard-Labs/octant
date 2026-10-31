@@ -4,6 +4,7 @@ import { DesktopRecipe, DesktopRecipeKeyChange } from "./desktopLease";
 import { ActorId, AggregateVersion, EventActor, UtcTimestamp } from "./events";
 import { HostId } from "./host";
 import { PermissionMode, ProviderInstanceId } from "./providers";
+import { AutoReviewer } from "./shield";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -165,12 +166,74 @@ const ProjectFields = {
 export const ProjectOrigin = Schema.Literal("default-folder");
 export type ProjectOrigin = typeof ProjectOrigin.Type;
 
+export const MAX_PROJECT_EXTRA_FOLDERS = 16;
+
+/**
+ * An absolute folder path in its canonical spelling: a leading `/`, no empty,
+ * `.` or `..` segment, no trailing `/`, no NUL. The host stores the real path
+ * the folder picker resolved, so a path that is not already in this form was
+ * never produced by it.
+ */
+export const ProjectFolderPath = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(4_096),
+  Schema.filter(
+    (value) =>
+      value.startsWith("/") &&
+      value !== "/" &&
+      !value.endsWith("/") &&
+      !value.includes("\0") &&
+      value
+        .slice(1)
+        .split("/")
+        .every((segment) => segment !== "" && segment !== "." && segment !== ".."),
+  ),
+);
+export type ProjectFolderPath = typeof ProjectFolderPath.Type;
+
+/**
+ * A folder the person added to a bound Project beside its main folder. It gets
+ * the main folder's access at each thread's level; commands, checkouts and Git
+ * stay in the main folder. Who added it and when are kept with it, and its
+ * removal is journaled with the same facts.
+ */
+export const ProjectExtraFolder = Schema.Struct({
+  canonicalRoot: ProjectFolderPath,
+  addedBy: ProjectActor,
+  addedAt: UtcTimestamp,
+}).annotations(strict);
+export type ProjectExtraFolder = typeof ProjectExtraFolder.Type;
+
+const folderContains = (outer: string, inner: string): boolean =>
+  outer === inner || inner.startsWith(`${outer}/`);
+
+/**
+ * The extra folders of one Project: at most {@link MAX_PROJECT_EXTRA_FOLDERS},
+ * none equal to, inside, or containing another. Where they sit against the
+ * main folder and the host's own folders is judged by the domain policy that
+ * adds them.
+ */
+export const ProjectExtraFolders = Schema.Array(ProjectExtraFolder).pipe(
+  Schema.filter(
+    (folders) =>
+      folders.length <= MAX_PROJECT_EXTRA_FOLDERS &&
+      folders.every((folder, index) =>
+        folders.every(
+          (other, otherIndex) =>
+            index === otherIndex || !folderContains(folder.canonicalRoot, other.canonicalRoot),
+        ),
+      ),
+  ),
+);
+export type ProjectExtraFolders = typeof ProjectExtraFolders.Type;
+
 const BoundProjectFields = {
   binding: CanonicalProjectBinding,
   bindingHistory: Schema.NonEmptyArray(BindingRevision),
   origin: Schema.optional(ProjectOrigin),
   /** Absent on older Projects and interpreted as allow-all. */
   providerPolicy: Schema.optional(ProjectProviderPolicy),
+  /** Absent on every Project made before extra folders existed, and read as none. */
+  extraFolders: Schema.optional(ProjectExtraFolders),
 } as const;
 
 export const ChatProject = Schema.Struct({
@@ -280,6 +343,11 @@ export const CodeProject = Schema.Struct({
    */
   defaultPermissionMode: Schema.optional(PermissionMode),
   /**
+   * Who answers this Project's prompts at Auto, overriding Settings. Absent
+   * follows Settings.
+   */
+  autoReviewer: Schema.optional(AutoReviewer),
+  /**
    * The disposable desktop this Project's threads lease from. Absent means no
    * recipe, so every lease command refuses `no-provider-configured`. A person
    * sets it from a local window; an agent cannot.
@@ -303,6 +371,7 @@ const WorkProjectSummary = Schema.Struct({
   bindingRevisionId: BindingRevisionId,
   origin: Schema.optional(ProjectOrigin),
   providerPolicy: Schema.optional(ProjectProviderPolicy),
+  extraFolders: Schema.optional(ProjectExtraFolders),
   statusFile: Schema.optional(WorkProjectStatusFile),
 }).annotations(strict);
 
@@ -316,10 +385,12 @@ const CodeProjectSummary = Schema.Struct({
   newThreadWorkspace: Schema.optional(CodeNewThreadWorkspace),
   pullRequestBackgroundRefresh: Schema.optional(CodeProjectPullRequestBackgroundRefresh),
   defaultPermissionMode: Schema.optional(PermissionMode),
+  autoReviewer: Schema.optional(AutoReviewer),
   desktopRecipe: Schema.optional(DesktopRecipe),
   actions: Schema.optional(ProjectActions),
   connectedRepository: Schema.optional(ConnectedGitHubRepository),
   providerPolicy: Schema.optional(ProjectProviderPolicy),
+  extraFolders: Schema.optional(ProjectExtraFolders),
 }).annotations(strict);
 
 export const ProjectSummary = Schema.Union(ChatProject, WorkProjectSummary, CodeProjectSummary);
@@ -503,6 +574,21 @@ export const ProjectCommand = Schema.Union(
     ...ProjectCommandFields,
     receiptId: BindingReceiptId,
   }).annotations(strict),
+  /**
+   * Adds the folder a receipt names to a bound Project beside its main folder.
+   * A receipt comes only from a host window's folder picker, so only a person
+   * can add one.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("add-project-extra-folder"),
+    ...ProjectCommandFields,
+    receiptId: BindingReceiptId,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("remove-project-extra-folder"),
+    ...ProjectCommandFields,
+    canonicalRoot: ProjectFolderPath,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-code-project-access"),
     ...ProjectCommandFields,
@@ -513,6 +599,12 @@ export const ProjectCommand = Schema.Union(
     ...ProjectCommandFields,
     /** Absent returns the Project to the Settings default. */
     permissionMode: Schema.optional(PermissionMode),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-code-project-auto-reviewer"),
+    ...ProjectCommandFields,
+    /** Absent returns the Project to the Settings default. */
+    autoReviewer: Schema.optional(AutoReviewer),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-code-project-new-thread-workspace"),
@@ -589,6 +681,14 @@ export const ProjectCommandResult = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("project-relinked"), project: BoundProject }).annotations(
     strict,
   ),
+  Schema.Struct({
+    kind: Schema.Literal("project-extra-folder-added"),
+    project: BoundProject,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("project-extra-folder-removed"),
+    project: BoundProject,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("code-project-access-changed"),
     project: CodeProject,
@@ -717,6 +817,20 @@ export const ProjectLifecycleChanged = Schema.Struct({ project: Project }).annot
 export type ProjectLifecycleChanged = typeof ProjectLifecycleChanged.Type;
 export const ProjectBindingRelinked = Schema.Struct({ project: BoundProject }).annotations(strict);
 export type ProjectBindingRelinked = typeof ProjectBindingRelinked.Type;
+/** The whole Project after the add, and the folder with who added it and when. */
+export const ProjectExtraFolderAdded = Schema.Struct({
+  project: BoundProject,
+  folder: ProjectExtraFolder,
+}).annotations(strict);
+export type ProjectExtraFolderAdded = typeof ProjectExtraFolderAdded.Type;
+/** The whole Project after the removal, and the folder with who removed it and when. */
+export const ProjectExtraFolderRemoved = Schema.Struct({
+  project: BoundProject,
+  canonicalRoot: ProjectFolderPath,
+  removedBy: ProjectActor,
+  removedAt: UtcTimestamp,
+}).annotations(strict);
+export type ProjectExtraFolderRemoved = typeof ProjectExtraFolderRemoved.Type;
 export const CodeProjectAccessChanged = Schema.Struct({ project: CodeProject }).annotations(strict);
 export type CodeProjectAccessChanged = typeof CodeProjectAccessChanged.Type;
 /**
@@ -728,6 +842,11 @@ export const CodeProjectPermissionModeChanged = Schema.Struct({
   project: CodeProject,
 }).annotations(strict);
 export type CodeProjectPermissionModeChanged = typeof CodeProjectPermissionModeChanged.Type;
+/** The Project's Auto reviewer changed; the payload is the whole Project. */
+export const CodeProjectAutoReviewerChanged = Schema.Struct({
+  project: CodeProject,
+}).annotations(strict);
+export type CodeProjectAutoReviewerChanged = typeof CodeProjectAutoReviewerChanged.Type;
 /** Journaled so every window sees the same Project habit after a change. */
 export const CodeProjectNewThreadWorkspaceChanged = Schema.Struct({
   project: CodeProject,
@@ -789,6 +908,7 @@ export const PROJECT_EVENT_NAMES = [
   "project.binding-relinked@1",
   "project.code-access-changed@1",
   "project.code-permission-mode-changed@1",
+  "project.code-auto-reviewer-changed@1",
   "project.code-new-thread-workspace-changed@1",
   "project.code-pull-request-background-refresh-changed@1",
   "project.provider-policy-changed@1",
@@ -796,6 +916,8 @@ export const PROJECT_EVENT_NAMES = [
   "project.brand-kit-changed@1",
   "project.code-desktop-recipe-changed@1",
   "project.code-actions-changed@1",
+  "project.extra-folder-added@1",
+  "project.extra-folder-removed@1",
   "memory.entry-created@1",
   "memory.entry-superseded@1",
   "memory.entry-retracted@1",
@@ -828,9 +950,16 @@ export const decodeProjectColorChanged = Schema.decodeUnknownSync(ProjectColorCh
 export const decodeProjectOrderChanged = Schema.decodeUnknownSync(ProjectOrderChanged);
 export const decodeProjectLifecycleChanged = Schema.decodeUnknownSync(ProjectLifecycleChanged);
 export const decodeProjectBindingRelinked = Schema.decodeUnknownSync(ProjectBindingRelinked);
+export const decodeProjectFolderPath = Schema.decodeUnknownSync(ProjectFolderPath);
+export const decodeProjectExtraFolder = Schema.decodeUnknownSync(ProjectExtraFolder);
+export const decodeProjectExtraFolderAdded = Schema.decodeUnknownSync(ProjectExtraFolderAdded);
+export const decodeProjectExtraFolderRemoved = Schema.decodeUnknownSync(ProjectExtraFolderRemoved);
 export const decodeCodeProjectAccessChanged = Schema.decodeUnknownSync(CodeProjectAccessChanged);
 export const decodeCodeProjectPermissionModeChanged = Schema.decodeUnknownSync(
   CodeProjectPermissionModeChanged,
+);
+export const decodeCodeProjectAutoReviewerChanged = Schema.decodeUnknownSync(
+  CodeProjectAutoReviewerChanged,
 );
 export const decodeCodeProjectNewThreadWorkspaceChanged = Schema.decodeUnknownSync(
   CodeProjectNewThreadWorkspaceChanged,

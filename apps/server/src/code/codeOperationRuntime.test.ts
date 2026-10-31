@@ -2188,6 +2188,41 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it("launches the provider with the Project's extra folders and names them to the agent", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const provider = providerConnection(queue);
+    const acquired: Array<ReadonlyArray<string> | undefined> = [];
+    const driver = {
+      acquire: (input: { readonly extraFolders?: ReadonlyArray<string> }) => {
+        acquired.push(input.extraFolders);
+        return Effect.succeed(provider);
+      },
+    } as unknown as ProviderDriver;
+    const fixture = runtimeFixture({
+      provider: driver,
+      readProjectExtraFolders: () => ["/Users/example/Notes"],
+    });
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(75),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+      expect(acquired).toEqual([["/Users/example/Notes"]]);
+      const sent = vi.mocked(provider.send).mock.calls[0]?.[0];
+      const named = sent?.context?.find(
+        (block) => block.kind === "instructions" && block.text.includes("extra folders"),
+      );
+      expect(named?.text).toContain("- /Users/example/Notes");
+    } finally {
+      fixture.close();
+    }
+  });
+
   it("tells the model to deliver kept work as a Canvas only when Code offers the Canvas tool", async () => {
     const turn = async (
       canvas: boolean,
@@ -2378,6 +2413,39 @@ describe("CodeOperationRuntime", () => {
       await fixture.runtime.close();
       fixture.close();
     });
+
+    it.each([
+      ["provider", true],
+      [undefined, true],
+      ["octant-shield", false],
+    ] as const)(
+      "starts a key provider's own reviewer at Auto only when it is the reviewer chosen (%s)",
+      async (chosen, ownReviewer) => {
+        const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+        const starts: Array<ProviderSessionStart> = [];
+        const connection = providerConnection(queue, starts);
+        const fixture = runtimeFixture({
+          provider: providerDriver(connection),
+          approvalValidator: false,
+          chosenAutoReviewer: () => chosen,
+          resolveProviderCapabilities: () => ({ harnessAutoReview: "supported" }) as never,
+          readThreadExternalContentTaint: () => ({ externalContentIngested: false }),
+        });
+        fixture.setThread(decodeCodeThread({ ...thread(), autoApprove: true }));
+        await fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(48),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        });
+        await vi.waitFor(() => expect(starts).toHaveLength(1));
+        expect(starts[0]?.autoApprove === true).toBe(ownReviewer);
+        await fixture.runtime.close();
+        fixture.close();
+      },
+    );
 
     it("asks the person as before when Shield is not the thread's reviewer", async () => {
       const { connection, fixture, frames } = await runWith(undefined);
@@ -6316,6 +6384,13 @@ function runtimeFixture(options: {
   >[0]["resolveSelectedExtensions"];
   agentMessages?: Parameters<typeof createCodeOperationRuntime>[0]["agentMessages"];
   shield?: Parameters<typeof createCodeOperationRuntime>[0]["shield"];
+  chosenAutoReviewer?: Parameters<typeof createCodeOperationRuntime>[0]["chosenAutoReviewer"];
+  resolveProviderCapabilities?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["resolveProviderCapabilities"];
+  readThreadExternalContentTaint?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["readThreadExternalContentTaint"];
   siblingThreads?: Parameters<typeof createCodeOperationRuntime>[0]["siblingThreads"];
   contributedTools?: Parameters<typeof createCodeOperationRuntime>[0]["contributedTools"];
   canvas?: Parameters<typeof createCodeOperationRuntime>[0]["canvas"];
@@ -6386,6 +6461,9 @@ function runtimeFixture(options: {
     typeof createCodeOperationRuntime
   >[0]["resolveProviderDriver"];
   isProviderModelAllowed?: (thread: CodeThread) => boolean;
+  readProjectExtraFolders?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["readProjectExtraFolders"];
   compactionRunning?: (threadId: CodeThreadId) => boolean;
   sessionCompactions?: Parameters<typeof createCodeOperationRuntime>[0]["sessionCompactions"];
   spendCeiling?: Parameters<typeof createCodeOperationRuntime>[0]["spendCeiling"];
@@ -6626,6 +6704,15 @@ function runtimeFixture(options: {
       : { resolveSelectedExtensions: options.resolveSelectedExtensions }),
     ...(options.agentMessages === undefined ? {} : { agentMessages: options.agentMessages }),
     ...(options.shield === undefined ? {} : { shield: options.shield }),
+    ...(options.chosenAutoReviewer === undefined
+      ? {}
+      : { chosenAutoReviewer: options.chosenAutoReviewer }),
+    ...(options.resolveProviderCapabilities === undefined
+      ? {}
+      : { resolveProviderCapabilities: options.resolveProviderCapabilities }),
+    ...(options.readThreadExternalContentTaint === undefined
+      ? {}
+      : { readThreadExternalContentTaint: options.readThreadExternalContentTaint }),
     ...(options.siblingThreads === undefined ? {} : { siblingThreads: options.siblingThreads }),
     ...(options.contributedTools === undefined
       ? {}
@@ -6716,6 +6803,9 @@ function runtimeFixture(options: {
     ...(options.onProviderTurnRequested === undefined
       ? {}
       : { onProviderTurnRequested: options.onProviderTurnRequested }),
+    ...(options.readProjectExtraFolders === undefined
+      ? {}
+      : { readProjectExtraFolders: options.readProjectExtraFolders }),
     ...(options.isProviderModelAllowed === undefined
       ? {}
       : { isProviderModelAllowed: options.isProviderModelAllowed }),

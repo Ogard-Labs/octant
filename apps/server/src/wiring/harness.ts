@@ -4,6 +4,7 @@ import { realpath, stat as statFromDisk } from "node:fs/promises";
 import { join } from "node:path";
 import { queueSteeringWhereDelivered, withSteerable } from "../harness/nativeHarnessSteerability";
 import { createHostShield, shieldRoutesApprovals } from "../shield/hostShield";
+import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
 import { recordShieldReviewUsage } from "../shield/shieldUsageLedger";
 import {
   AggregateId,
@@ -524,6 +525,14 @@ export function wireHarness(deps: HarnessDependencies) {
   });
   const hostShield = createHostShield({
     readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+    chosenReviewer: (thread) => {
+      const project = persistence.readProject(thread.projectId);
+      return chosenAutoReviewer({
+        project: project?.type === "code" ? project : undefined,
+        settings: persistence.readCodeSettings()?.settings,
+      });
+    },
+    chosenModel: () => persistence.readCodeSettings()?.settings.shieldModel,
     readTurnExecutionPolicy: (threadId) => readTurnExecutionPolicy(threadId),
     providerCapabilities: (providerInstanceId) =>
       providerRuntimeRegistry.observedState(providerInstanceId)?.capabilities,
