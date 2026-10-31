@@ -635,7 +635,8 @@ behavior is in [Workspace](docs/design/workspace.md#start-screen-cards).
 First-run setup asks only what a first task needs — a usable provider, a
 Project folder, a model, and the
 [guardrail level](docs/architecture.md#security-and-authority) new threads
-start at (Guarded recommended, Trusted offered; this question is allowed, not
+start at (Full access pre-selected, Guarded offered; the pick becomes the
+default for every new Work and Code thread until changed; this question is allowed, not
 built yet) — and ends in one primary action, Start a task,
 that opens the new-task composer in that Project. Every step is optional from
 the first one. Opening setup focuses the current step's heading so a long
@@ -2096,9 +2097,10 @@ proceed. Native Code approvals keep their isolated host-owned document. The
 extension tool request names the plugin, its server, and the tool, and adds
 "Always allow in this Project" only when the host marks the call rememberable
 and the window is a local one. Settings › Permissions lists those answers by
-Project, each with Revoke, beside Remembered websites, and lists each Work
-Project whose **Shell and tools** switch is on, with a control to turn it
-off; turning it on happens only on that Project's overview
+Project, each with Revoke, beside Remembered websites, and shows the global
+guardrail level with one-click change, which governs Work and Code alike.
+A Work Project's **Developer tools** switch is presentation, not a
+permission, so it lives on that Project's overview, not here
 ([Workspace](docs/design/workspace.md); allowed, not built yet). A Browser request from a
 CLI in a Code thread's terminal names the origin and the thread and says a
 program in the terminal asked, not the thread's agent

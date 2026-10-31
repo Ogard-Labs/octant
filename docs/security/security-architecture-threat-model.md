@@ -158,13 +158,13 @@ A parent agent (or the model inside it) requests a subagent with broader filesys
 network authority, a more privileged execution policy, a persisted grant, deeper nesting, or a
 workspace pointing at another Project's root.
 
-| Layer              | Control                                                                                                                                                | Module                                                                                   | State        |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- | ------------ |
-| Authority clamp    | Requested authority is intersected with parent, Project, and global ceilings; any widening rejects fail-closed                                         | `packages/domain/src/agentRunPolicy.ts` (`clampAgentRunAuthority`, `authority-widening`) | Exists today |
-| Mode ceiling       | Mode-derived maximum authority (Chat plan-only, Work no shell unless its Project's Shell and tools switch is on, Code approval-gated) caps every child | `packages/domain/src/agentRunAuthorityCeiling.ts`                                        | Exists today |
-| Depth and capacity | Depth ≤ 2; ≤ 32 unfinished global, ≤ 16 per parent; running at once ≤ the person's setting (≤ 16); creation posture Off/Automatic enforced server-side | `agentRunPolicy.ts`, `apps/server/src/agentRun/agentRunSettingsStore.ts`                 | Exists today |
-| Workspace receipt  | A Code child requires a verified isolated worktree receipt; Chat children get virtual scratch only                                                     | `agentRunWorkspacePolicy.ts` (`admitAgentRunWorkspace`), `agentRunWorkspaceService.ts`   | Exists today |
-| Live parent grant  | Clamping against the parent thread's _live_ effective grant, not only the mode ceiling                                                                 | `agentRunLiveGrant.ts` / `clampAgentRunAuthorityAgainstLiveGrant` feeding admission      | Exists today |
+| Layer              | Control                                                                                                                                                          | Module                                                                                   | State        |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ------------ |
+| Authority clamp    | Requested authority is intersected with parent, Project, and global ceilings; any widening rejects fail-closed                                                   | `packages/domain/src/agentRunPolicy.ts` (`clampAgentRunAuthority`, `authority-widening`) | Exists today |
+| Mode ceiling       | Mode-derived maximum authority (Chat plan-only; Work and Code share the guardrail level, though today's Work has no shell; Code approval-gated) caps every child | `packages/domain/src/agentRunAuthorityCeiling.ts`                                        | Exists today |
+| Depth and capacity | Depth ≤ 2; ≤ 32 unfinished global, ≤ 16 per parent; running at once ≤ the person's setting (≤ 16); creation posture Off/Automatic enforced server-side           | `agentRunPolicy.ts`, `apps/server/src/agentRun/agentRunSettingsStore.ts`                 | Exists today |
+| Workspace receipt  | A Code child requires a verified isolated worktree receipt; Chat children get virtual scratch only                                                               | `agentRunWorkspacePolicy.ts` (`admitAgentRunWorkspace`), `agentRunWorkspaceService.ts`   | Exists today |
+| Live parent grant  | Clamping against the parent thread's _live_ effective grant, not only the mode ceiling                                                                           | `agentRunLiveGrant.ts` / `clampAgentRunAuthorityAgainstLiveGrant` feeding admission      | Exists today |
 
 The server prepares, confirms, and admits child workspaces through
 `apps/server/src/agentRun/agentRunWorkspaceService.ts` and the domain
@@ -270,7 +270,7 @@ process; they run on macOS only, in the `macos-15` CI job, and passed there on 2
   2. **Argument schema:** arguments decode against the tool's strict contract schema; excess
      properties, oversize payloads, and non-canonical paths reject.
   3. **Mode policy:** the capability matrix of the rewrite design section 8.1 (Chat: no
-     filesystem/shell; Work: confined root, no coding surfaces, a shell only behind its Project's person-set switch; Code: approval-gated).
+     filesystem/shell; Work: confined root, developer surfaces hidden unless the person shows them, the same shell and Git as Code at the shared guardrail level, though today's drivers withhold the shell; Code: at its guardrail level, approval-gated today).
   4. **Provider capability:** the provider instance's honest capability report must include the
      capability; unsupported providers fail closed rather than downgrade silently.
   5. **Host policy:** host prohibitions (for example computer-use disabled, egress policy).

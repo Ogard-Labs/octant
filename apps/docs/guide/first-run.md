@@ -120,6 +120,13 @@ The thread starts in the authority mode you selected: **Full access**,
 **Approval-gated**, or **Plan** (read-only). Code threads start approval-gated
 unless you explicitly remember Full access.
 
+Planned: first run asks which guardrail level new threads start at, with
+**Full access** pre-selected and **Guarded** offered. Your pick becomes the
+default for every new Work and Code thread until you change it, which takes
+one click per thread, per Project, or for everything. Full access means no
+approval prompts; the provider's own sandbox still applies where it has one.
+Not built yet.
+
 Destinations that this host cannot back — Navigator without a model, a Work
 board that is not wired, GitHub pull requests without a working GitHub
 capability — stay absent rather than advertised. Agents is available on an existing thread even before the first child exists.

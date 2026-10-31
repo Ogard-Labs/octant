@@ -21,14 +21,16 @@ and Provider review until the person turns it on, on at Trusted and Off):
 | Claude Code  | `settingSources: []`, `skills: []`, no subagent tool, `WebSearch` and `WebFetch` left out and refused                                | The person's setting sources (home and trusted Project), skills, plugins, hooks, and MCP servers; its subagent tool; `WebSearch` and `WebFetch`; `permissionMode: "auto"` as Provider review | Provider review in Code only |
 | Codex        | Its subagents; Project skills disabled by path; in Chat each named MCP server switched off                                           | Its subagents; Project skills; the person's MCP servers in Chat; `approvalsReviewer: "auto_review"` as Provider review                                                                       | Provider review in Code only |
 | Mistral Vibe | `VIBE_SKILL_PATHS="[]"`, `VIBE_DISABLED_SKILLS='["*"]'`, `VIBE_INCLUDE_PROJECT_CONTEXT="false"`                                      | Its own skills and Project context; a trusted Project's tools and MCP servers; its auto-approve mode as Provider review, reported `unsupported` until mapped                                 | No                           |
-| OpenCode     | Skills and project config off, `skill` denied; Work `shell` and `subagent` denied; Octant's denies outrank saved grants; `once` only | The person's own permission rules; "always" answers; its `subagent` delegation; its skills; `bash` in a Work Project with Shell and tools on                                                 | No                           |
+| OpenCode     | Skills and project config off, `skill` denied; Work `shell` and `subagent` denied; Octant's denies outrank saved grants; `once` only | The person's own permission rules; "always" answers; its `subagent` delegation; its skills; `bash` and `task` in Work as in Code                                                             | No                           |
 
-Plan, a mode's withheld tools, and the provider's memory, telemetry, and
-self-update channels stay off at every level. Work's shell is withheld only
-while its Project's Shell and tools switch is off; with it on, each runtime
-starts its Work session with its shell at the Project's level, as the
+Plan's read-only rule, Chat's withheld filesystem and shell, and the
+provider's memory, telemetry, and self-update channels stay off at every
+level. Work and Code share one capability set, so each runtime starts a Work
+session with its shell at the thread's level exactly as it starts a Code
+session, as the
 [architecture's Work rules](../architecture.md#modes-chat-work-and-code)
-state per provider (allowed; not built yet). A native child run, a native
+state per provider (allowed; not built yet: today every driver withholds the
+shell in Work). A native child run, a native
 web read, and a provider's review verdict are journaled where the runtime
 reports them; where it does not, the capability report says so.
 
