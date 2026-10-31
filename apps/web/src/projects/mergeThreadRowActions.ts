@@ -75,6 +75,15 @@ export function mergeThreadRowActions(
     ...(openPullRequestOnGithub === undefined
       ? {}
       : { onOpenPullRequestOnGithub: openPullRequestOnGithub }),
+    // Only the kinds that can move offer the item; a row of the other kind
+    // hides it instead of showing a choice that would do nothing.
+    ...(either("onMoveToProject")
+      ? {
+          onMoveToProject: (id: string, title: string, projectId: string | undefined) =>
+            pick(id).onMoveToProject?.(id, title, projectId),
+          canMoveToProject: (id: string) => pick(id).onMoveToProject !== undefined,
+        }
+      : {}),
     ...(either("onStartRenameThread")
       ? { onStartRenameThread: (id: string) => pick(id).onStartRenameThread?.(id) }
       : {}),

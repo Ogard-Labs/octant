@@ -2583,6 +2583,36 @@ describe("ChatService", () => {
     expect(service.read(created.thread.id).thread.projectId).toBeUndefined();
   });
 
+  it("moves a No-project Chat thread into a Chat Project without changing its kind, history or settings", async () => {
+    const { service } = openFixture();
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Filed later",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const before = service.read(created.thread.id);
+
+    const moved = await service.execute({
+      kind: "move-chat-thread",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      projectId: ids.project as never,
+    });
+    expect(moved.kind).toBe("thread-updated");
+
+    const after = service.read(created.thread.id);
+    expect(String(after.thread.projectId)).toBe(ids.project);
+    expect(after.thread).toMatchObject({
+      id: before.thread.id,
+      title: before.thread.title,
+      lifecycle: before.thread.lifecycle,
+      providerInstanceId: before.thread.providerInstanceId,
+      modelId: before.thread.modelId,
+    });
+    expect(after.turns).toEqual(before.turns);
+  });
+
   it("rolls back user content when the turn event cannot commit", async () => {
     const { service, persistence } = openFixture();
     const created = await service.execute({
@@ -4384,6 +4414,116 @@ describe("ChatService", () => {
 
     releaseStop();
     await expect(first).resolves.toMatchObject({ kind: "turn-created" });
+  });
+
+  it("keeps a stopped turn running until it ends and kills only that turn's process on force stop", async () => {
+    const queue = Effect.runSync(Queue.unbounded<never>());
+    const killed: Array<string> = [];
+    let acquired = false;
+    const driver = {
+      acquire: () =>
+        Effect.sync(() => {
+          acquired = true;
+        }).pipe(
+          Effect.as({
+            subscribe: Effect.succeed(Stream.fromQueue(queue)),
+            start: (input: { readonly sessionId: string }) =>
+              Effect.succeed({ sessionId: input.sessionId }),
+            send: () => Effect.never,
+            interrupt: () => Effect.never,
+            stop: () => Effect.void,
+            forceStop: (sessionId: string) =>
+              Effect.sync(() => {
+                killed.push(sessionId);
+              }),
+            answerApproval: () => Effect.void,
+            answerUserInput: () => Effect.void,
+            answerTool: () => Effect.void,
+          }),
+        ),
+    } as unknown as ProviderDriver;
+    const { service } = openFixture({ driver });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Stuck turn",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    void service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Hang",
+    });
+    await until(() => acquired);
+    const running = service.read(created.thread.id);
+    const attempt = running.turns[0]!.attempts[0]!;
+    const command = {
+      threadId: created.thread.id,
+      expectedVersion: running.thread.version,
+      turnId: running.turns[0]!.id,
+      attemptId: attempt.id,
+    };
+
+    await service.execute({ kind: "interrupt-chat-turn", ...command });
+    expect(service.read(created.thread.id).turns[0]!.attempts[0]!.outcome).toBe("queued");
+
+    await service.execute({ kind: "force-stop-chat-turn", ...command });
+    expect(killed).toEqual([String(attempt.providerSessionId)]);
+    expect(service.read(created.thread.id).turns[0]!.attempts[0]!.outcome).toBe("cancelled");
+    await expect(
+      service.execute({ kind: "force-stop-chat-turn", ...command }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+  });
+
+  it("refuses to force-stop a turn whose provider shares one process and still stops it at once", async () => {
+    const queue = Effect.runSync(Queue.unbounded<never>());
+    let acquired = false;
+    const driver = {
+      acquire: () =>
+        Effect.sync(() => {
+          acquired = true;
+        }).pipe(
+          Effect.as({
+            subscribe: Effect.succeed(Stream.fromQueue(queue)),
+            start: (input: { readonly sessionId: string }) =>
+              Effect.succeed({ sessionId: input.sessionId }),
+            send: () => Effect.never,
+            interrupt: () => Effect.never,
+            stop: () => Effect.void,
+            answerApproval: () => Effect.void,
+            answerUserInput: () => Effect.void,
+            answerTool: () => Effect.void,
+          }),
+        ),
+    } as unknown as ProviderDriver;
+    const { service } = openFixture({ driver });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Shared process",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    void service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Hang",
+    });
+    await until(() => acquired);
+    const running = service.read(created.thread.id);
+    const command = {
+      threadId: created.thread.id,
+      expectedVersion: running.thread.version,
+      turnId: running.turns[0]!.id,
+      attemptId: running.turns[0]!.attempts[0]!.id,
+    };
+
+    await expect(
+      service.execute({ kind: "force-stop-chat-turn", ...command }),
+    ).rejects.toMatchObject({ failure: { category: "unsupported" } });
+    await service.execute({ kind: "interrupt-chat-turn", ...command });
+    expect(service.read(created.thread.id).turns[0]!.attempts[0]!.outcome).toBe("cancelled");
   });
 
   it("rejects a queued stale send before it can journal an orphaned context plan", async () => {

@@ -2,7 +2,15 @@ import type { ThreadExportClient } from "@octant/client-runtime/thread-export-cl
 import type { ThreadHandOffClient } from "@octant/client-runtime/thread-hand-off-client";
 import type { ChatThreadView } from "@octant/contracts/chat";
 import type { ThreadHandOffOutcome } from "@octant/contracts/thread-hand-off";
-import { Copy, Download, Ellipsis, FileDown, Handshake, PanelsTopLeft } from "lucide-react";
+import {
+  Copy,
+  Download,
+  Ellipsis,
+  FileDown,
+  FolderInput,
+  Handshake,
+  PanelsTopLeft,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 import { exportThreadBundle, resolveThreadExportClient } from "../thread/threadExport";
 import {
@@ -12,6 +20,7 @@ import {
 } from "../thread/threadHandOff";
 import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";
 import { buildChatMarkdownExport } from "./chatMarkdownExport";
+import { MoveToProjectDialog, type MoveToProjectDialogProps } from "./MoveToProjectDialog";
 
 export interface ChatThreadActionsMenuProps {
   readonly view: ChatThreadView;
@@ -28,6 +37,13 @@ export interface ChatThreadActionsMenuProps {
   readonly handOffClient?: ThreadHandOffClient;
   /** Told what the host wrote so the shell can open it beside the transcript. */
   readonly onHandedOff?: (outcome: ThreadHandOffOutcome) => void;
+  /**
+   * Present when this window can file a No-project thread into a Chat Project.
+   * The menu offers the move only for a thread that has no Project yet.
+   */
+  readonly moveToProject?: Pick<MoveToProjectDialogProps, "projects" | "onCreateProject"> & {
+    readonly onMove: MoveToProjectDialogProps["onMove"];
+  };
   /** Present only when this window has a canvas surface to disclose. */
   readonly canvas?: {
     readonly open: boolean;
@@ -51,6 +67,7 @@ export function ChatThreadActionsMenu(props: ChatThreadActionsMenuProps) {
   const [status, setStatus] = useState<string | undefined>(undefined);
   const [exporting, setExporting] = useState(false);
   const [handingOff, setHandingOff] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
   const handOffClient = useMemo(
     () =>
       resolveThreadHandOffClient({
@@ -202,6 +219,15 @@ export function ChatThreadActionsMenu(props: ChatThreadActionsMenuProps) {
             value: "hand-off",
           },
         ]),
+    ...(props.moveToProject === undefined || props.view.thread.projectId !== undefined
+      ? []
+      : [
+          {
+            icon: <FolderInput aria-hidden="true" size={14} strokeWidth={1.7} />,
+            label: "Move to Project…",
+            value: "move-to-project",
+          },
+        ]),
     ...(props.canvas === undefined
       ? []
       : [
@@ -224,6 +250,7 @@ export function ChatThreadActionsMenu(props: ChatThreadActionsMenuProps) {
           else if (value === "save-markdown") saveConversation();
           else if (value === "export-thread") exportThread();
           else if (value === "hand-off") handOff();
+          else if (value === "move-to-project") setMoveOpen(true);
           else if (value === "canvas") props.canvas?.onToggle();
         }}
         trigger={<Ellipsis aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />}
@@ -233,6 +260,16 @@ export function ChatThreadActionsMenu(props: ChatThreadActionsMenuProps) {
         // fresh action instead of a radio selection that would stop firing.
         value=""
       />
+      {moveOpen && props.moveToProject !== undefined ? (
+        <MoveToProjectDialog
+          onClose={() => setMoveOpen(false)}
+          onMove={props.moveToProject.onMove}
+          projects={props.moveToProject.projects}
+          {...(props.moveToProject.onCreateProject === undefined
+            ? {}
+            : { onCreateProject: props.moveToProject.onCreateProject })}
+        />
+      ) : null}
       {status === undefined ? null : (
         <p aria-live="polite" className="chat-workspace__export-status" role="status">
           {status}

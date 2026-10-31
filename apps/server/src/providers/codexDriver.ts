@@ -450,6 +450,8 @@ const capabilities = {
   nativeChildAgents: "unsupported",
   harnessAutoReview: "supported",
   modelSwitch: "supported",
+  // One app-server process serves every thread, so killing it ends them all.
+  forceStop: "unsupported",
   ...unsupportedChatCapabilities,
   appManagedTools: "supported",
 } as const;

@@ -1394,6 +1394,66 @@ describe("DraftThreadWorkspace", () => {
     );
   });
 
+  it("starts a Work thread from a terminal session picked from Create from", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn();
+    const fetch = vi.fn(async () =>
+      Response.json({
+        sessions: [
+          {
+            provider: "codex",
+            sessionId: "019f6f43-f063-7df2-8216-515b7f7bfe9a",
+            title: "Changelog for the release",
+            updatedAt: new Date(Date.now() - 2 * 3_600_000).toISOString(),
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetch);
+    try {
+      render(
+        <DraftThreadWorkspace
+          {...baseProps}
+          mode="work"
+          onCreateThread={onCreateThread}
+          projectId={workProjectId}
+          projects={projects}
+          serverUrl="http://127.0.0.1:4000"
+          windowCapability="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        />,
+      );
+      await user.click(await screen.findByRole("button", { name: "Create from…" }));
+      await user.click(await screen.findByRole("tab", { name: "Terminal" }));
+      await user.click(
+        await screen.findByRole("button", { name: /Changelog for the release.*Codex · 2h ago/ }),
+      );
+      expect(screen.getByText("Codex: Changelog for the release")).toBeVisible();
+      await user.click(screen.getByRole("button", { name: "Create thread" }));
+
+      expect(fetch).toHaveBeenCalledWith(
+        new URL("http://127.0.0.1:4000/api/terminal-sessions/list"),
+        expect.objectContaining({ body: JSON.stringify({ projectId: workProjectId }) }),
+      );
+      expect(onCreateThread).toHaveBeenCalledWith(
+        "Continue where this session left off.",
+        workProjectId,
+        undefined,
+        [],
+        [],
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { provider: "codex", sessionId: "019f6f43-f063-7df2-8216-515b7f7bfe9a" },
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("prefills the prompt when a Linear issue is picked from Create from", async () => {
     const user = userEvent.setup();
     render(
