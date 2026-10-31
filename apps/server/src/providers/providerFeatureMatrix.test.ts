@@ -289,7 +289,7 @@ describe("provider capability matrix", () => {
     const guide = read(join(repositoryRoot, "apps", "docs", "advanced", "providers.md"));
     expect(agents).not.toMatch(/matrix is not written/i);
     expect(architecture).not.toMatch(/matrix is not written/i);
-    expect(agents).toContain("Claude Code and Codex are the first-class");
+    expect(architecture).toContain("Claude Code and Codex are the first-class");
     expect(guide).toContain("### What each provider can do");
   });
 });

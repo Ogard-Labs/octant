@@ -1,7 +1,7 @@
 # Octant architecture
 
-Octant is a local-first desktop workspace for Chat, Work, and Code across many AI
-providers. The first shipping surface is Apple Silicon macOS; Linux and Windows
+Octant is an original, local-first desktop workspace for Chat, Work, and Code
+across many AI providers. The first shipping surface is Apple Silicon macOS; Linux and Windows
 desktop are the same product, sequenced in the
 [Current Release Boundary](#current-release-boundary).
 This is the current architecture specification. Read the relevant section for
@@ -92,7 +92,64 @@ The design rests on a small set of invariants that every package obeys:
   never widened for one vendor.
 - **Install ≠ trust ≠ enable.** Extensions contribute nothing until each of
   those steps has been taken explicitly, and even then only within the mode,
-  Project, thread, and provider policy that applies.
+  Project, thread, and provider policy that applies. Extension installation
+  never implies trust, activation, enablement, or authority. Disabled
+  components contribute no context; executable components remain quarantined
+  and subject to ordinary sandbox and approval policy. Structured extension or
+  plugin references cannot install, trust, enable, elevate, or bypass policy.
+  Skills are discovered only from valid `.agents/skills/` and
+  `.claude/skills/` packages in the permitted repository ancestry (the closed
+  `PROJECT_SKILL_ROOTS` allow-list) and from the user-global `~/.agents/skills/`
+  directory under the same activation ladder, never from the home folder's own
+  `.claude` ([Extensions and skills](#extensions-and-skills)).
+- **Modes are server-enforced.** Chat, Work, and Code are server-enforced
+  domain modes, not renderer flags. Code is always available; disabling Chat or
+  Work never deletes their data. The shell presents Chat and Work as one
+  visible Work mode beside Code: its new-thread composer chooses Chat (no
+  folder) or Work in a folder, and the server keeps both domains and their
+  authority unchanged. A thread keeps the kind it was created with; the choice
+  never converts or widens a thread
+  ([Modes](#modes-chat-work-and-code)).
+- **Authority follows what a mode binds to.** Chat Projects are virtual,
+  memory-scoped containers with no implicit filesystem or shell authority. Work
+  binds one project root and Code binds one directory, each meant to be
+  OS-confined; Code starts approval-gated unless Full access was explicitly
+  remembered, and Plan mode is always read-only. Below Full access, Octant's own
+  tool launches are OS-confined; some provider runtimes are not yet (Codex in
+  every posture, Claude outside Plan) and rely on the runtime's own sandbox, per
+  the confinement matrix in [Security and authority](#security-and-authority).
+  Work never silently becomes Code. Coding work promotes to a linked Code thread
+  only with explicit user approval.
+- **Core capabilities are app-managed.** Browser/computer use, tests, Apple
+  validation, approvals, memory, and subagents are app-managed,
+  provider-neutral capabilities. Core Apple development cannot depend on an
+  optional extension.
+- **New providers, tools, and capabilities are plugin-shaped.** They reach the
+  system through the published seams (`@octant/provider-sdk`,
+  `@octant/plugin-api`, `@octant/plugin-host`) and take no shortcut a
+  third-party plugin could not take. Shipping in-tree is allowed; wiring a
+  provider or tool directly into server internals, or widening a seam for one
+  vendor, is not. A capability that cannot be expressed through a seam is a
+  reason to extend the seam in its own change, not to bypass it.
+- **Threads, boards, and Done.** Use the unified real-thread hierarchy and
+  server-authoritative Work/Code boards. Chat has no board. A Code thread is
+  Done only when its user-confirmed delivery target is objectively satisfied. A
+  Work thread is Done when a person marks it Done. An agent cannot mark any
+  thread Done.
+- **Remote clients never exceed what the host granted.** Remote clients never
+  exceed host, mode, provider, Project, or thread authority. A hub or peer host
+  acting on another host is a remote client there, held to the grant that
+  host's person chose. A person's own owner device may use a local window's
+  powers on a host only after a fresh unlock on that device; agents, routines,
+  and peer hosts never do
+  ([Hub and spokes: owner devices](design/hub-and-spokes.md#owner-devices)).
+- **Privacy is about third parties.** Preserve local-first and
+  privacy-preserving defaults. Add telemetry, external calls, credential
+  exposure, or cloud dependencies only when the request authorizes them and the
+  current specification documents the boundary. Traffic among a person's own
+  devices over their private network is not an external call and may be
+  generous, but it is always authenticated, encrypted, and held to the owning
+  specification's rules.
 
 Packaged macOS hosts use a restricted executable search path containing system
 utilities and standard package-manager locations. `/usr/sbin` is included so
@@ -8990,11 +9047,61 @@ nothing first-party.
 
 ## Current Release Boundary
 
-The [Current Release Boundary in `AGENTS.md`](../AGENTS.md#current-release-boundary)
-is the one statement of what the first release includes and defers. This
-section owns the architectural rules behind it. On macOS, Squirrel.Mac refuses
-a replacement that does not satisfy the running app's designated requirement,
-so signing, notarization, and update ship as one deliverable.
+This section is the one statement of what the first release includes and
+defers, and it owns the architectural rules behind it.
+
+The first release is the Apple Silicon technical preview with the
+provider-neutral plugin/skill marketplace. It is signed with a Developer ID,
+notarized, and updates itself — those three are one deliverable, because an
+updater on an unsigned app is an unauthenticated code-delivery channel and
+macOS refuses the replacement anyway. On macOS, Squirrel.Mac refuses a
+replacement that does not satisfy the running app's designated requirement, so
+signing, notarization, and update ship as one deliverable. A local package
+built without maintainer signing credentials is unsigned.
+
+Cross-platform desktop (macOS, Linux, Windows) remains authorized: Linux
+desktop shell next, Windows Work/Code only after an explicitly approved Windows
+confinement design is documented. These tracks are authorized as post-preview
+work (maintainer decision, 2026-10-26) and are not part of the technical
+preview: mobile maturity (Android internal builds, redacted push, capture and
+voice, public store distribution), a ciphertext-only hosted relay, a full LSP /
+extension host / debugger companion, enterprise directory OAuth and cloud-IAM
+provider identity, disposable Linux desktops for headless hosts, third-party
+provider-driver plugins, and the EU/GDPR compliance package (pending legal
+review). Remote SSH development environments are out of scope (maintainer
+decision, 2026-10-29): an agent that needs another machine uses its own
+provider tools, and Octant on the person's other computers joins a hub. A
+hub-and-spoke topology on a person's own devices, where one Octant server
+(running without the desktop app and serving the web app over a private network
+such as Tailscale) enrolls the person's other computers and phones, introduces
+them to each other, fails over to a standby, and runs their wake and push
+services, is authorized the same way (maintainer decision, 2026-10-28) under
+[Hub and spokes](design/hub-and-spokes.md). Each is design-first: build it only
+once its owning specification documents its authority, privacy, and release
+boundaries. The authorization covers design and implementation; creating an
+account, spending money, submitting to a store, deploying a hosted service, or
+weakening any invariant each still needs a separate explicit maintainer action.
+Apple physical devices and App Store Connect upload, submission, and release
+are out of scope (maintainer decision, 2026-10-29): Octant drives the iOS
+Simulator only, and an agent that needs a device or the store uses its own
+provider tools.
+
+Connectors (MCP servers added by hand, imported from other tools on this Mac,
+signed in to, or chosen from the bundled catalog) are in scope under the
+[connector rules](#extensions-and-skills): user-added packages through the
+published seams and the credential broker, never a hosted service. The person's
+confirmed pull-request merge from a local window and host-local routines
+(Automation Center) are in scope under the rules in
+[Modes](#modes-chat-work-and-code); other pull-request mutation,
+agent-initiated merge, and cloud scheduling are not. A self-hosted wake service
+that runs in the Octant server on a person's hub and wakes their own spokes is
+in scope under [Hub and spokes](design/hub-and-spokes.md#wake-service); an
+Octant-operated hosted service, deploying anything, creating an account, or
+spending money still needs a separate explicit maintainer action. The public
+Canvas share service is in scope under
+[Canvas public links](design/canvas-public-links.md); its code lives in the
+`octant-webapp` repository. Existing scoped exceptions remain documented in
+this architecture.
 
 Desktop is one product on macOS, Linux, and Windows; platform differences are
 fail-closed posture, never a second app. The desktop process owns its local
@@ -9099,25 +9206,15 @@ Public links on and approves a publish, and a self-hosted service URL is a
 Settings choice. Deploying it, its DNS and TLS, and its operator contact are
 release steps of their own.
 
-The maintainer authorized the previously held post-preview tracks on
-2026-10-26: mobile maturity (Android internal builds, redacted push, capture
-and voice, public store distribution), a ciphertext-only hosted relay, a full
-LSP / extension host / debugger companion, enterprise directory OAuth and
-cloud-IAM provider identity, disposable Linux desktops for headless hosts, third-party
-provider-driver plugins, and the EU/GDPR compliance package (pending legal
-review). On 2026-10-28 the maintainer added a hub-and-spoke topology under the
-same terms ([Hub and spokes](design/hub-and-spokes.md)), including a
-self-hosted wake service that runs in the Octant server on the person's own
-hub; an Octant-operated wake service is not in scope. None of them is part of
-the technical preview, whose ship boundary
-above is unchanged. Each is design-first: implementation starts only once its
-owning specification documents its authority, privacy, and release
-boundaries. The authorization covers design and implementation; creating an
-account, spending money, submitting to a store, deploying a hosted service, or
-weakening an invariant in this document each still needs a separate explicit
-maintainer action. Apple physical devices and App Store distribution are out of
-scope (2026-10-29). The earlier holds and their start gates
-remain as rationale in [release-boundary holds](release-boundary-holds.md).
+The post-preview tracks listed above were previously held and were authorized
+by the maintainer on 2026-10-26. On 2026-10-28 the maintainer added the
+hub-and-spoke topology under the same terms
+([Hub and spokes](design/hub-and-spokes.md)), including a self-hosted wake
+service that runs in the Octant server on the person's own hub; an
+Octant-operated wake service is not in scope. None of them is part of the
+technical preview, whose ship boundary above is unchanged. The earlier holds and
+their start gates remain as rationale in
+[release-boundary holds](release-boundary-holds.md).
 The connector / OAuth marketplace hold was lifted on 2026-10-20 under the
 [Connectors and user-added MCP servers](#extensions-and-skills) rules: a
 bundled first-party catalog, sign-in through the MCP authorization flow, and

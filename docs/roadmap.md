@@ -9,7 +9,7 @@ tracker; this document records direction.
 ## Now — technical preview
 
 What the first release includes and defers is stated once, in the
-[Current Release Boundary](../AGENTS.md#current-release-boundary). Everything
+[Current Release Boundary](architecture.md#current-release-boundary). Everything
 here is merged or being hardened for it.
 
 - **Chat, Work, and Code as server-enforced modes** — virtual Chat Projects, one
@@ -134,7 +134,7 @@ Hardening in progress for the preview:
 Outside the technical preview. Except for Windows, which stays sequenced
 behind the preview, these are post-preview tracks the maintainer authorized on
 2026-10-26 under the
-[Current Release Boundary](../AGENTS.md#current-release-boundary). Each is
+[Current Release Boundary](architecture.md#current-release-boundary). Each is
 design-first: work starts only once its owning specification documents its
 authority, privacy, and release boundaries.
 

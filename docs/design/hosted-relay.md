@@ -15,8 +15,7 @@ review, reached by no transport.** The maintainer unlocked
 this parked workstream as authorized post-preview work and accepted the
 decisions below on 2026-10-26. Nothing below is in force until its slice
 lands; until then the private-network-only rules in Architecture are the whole
-behavior. Opening hosted-relay scope in `AGENTS.md`
-and the architecture's Current Release Boundary is a separate change, and no
+behavior. Opening hosted-relay scope in the architecture's Current Release Boundary is a separate change, and no
 implementation slice merges before it.
 
 ## No reachability gap has been demonstrated
