@@ -672,7 +672,8 @@ describe("createAgentRunSessionRuntime", () => {
 
       answer(true);
       await vi.advanceTimersByTimeAsync(0);
-      expect(provider.answeredApprovals).toMatchObject([{ approved: true }]);
+      // A child's request is answered for that one call, never remembered.
+      expect(provider.answeredApprovals).toMatchObject([{ approved: true, scope: "once" }]);
       await provider.emit({ kind: "text-delta", sessionId, text: "Done." });
       await provider.emit({ kind: "completed", sessionId });
       await vi.advanceTimersByTimeAsync(0);

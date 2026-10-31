@@ -4,7 +4,9 @@ import {
   defaultPermissionModeFor,
   guardrailLevelOf,
   permissionModeOf,
+  resolveAutoReviewer,
   resolveGuardrail,
+  shieldReviewsPrompts,
   threadAccessOf,
 } from "./guardrailPolicy";
 
@@ -124,5 +126,78 @@ describe("the mode a new thread starts in", () => {
     expect(
       defaultPermissionModeFor({ project: { codeAccessPersistence: "project-default" }, settings }),
     ).toBe("full-access");
+  });
+});
+
+describe("who reviews at Auto", () => {
+  const auto = { executionPolicy: "approval-gated", autoApprove: true } as const;
+  const shieldRuns = { available: true } as const;
+
+  it("defaults to the provider's own reviewer where it has one and Octant Shield elsewhere", () => {
+    expect(
+      resolveGuardrail({ access: auto, capabilities: { ...claudeOrCodex, shield: shieldRuns } }),
+    ).toMatchObject({ status: "supported", approver: "provider-review" });
+    expect(
+      resolveGuardrail({ access: auto, capabilities: { ...wrappedRuntime, shield: shieldRuns } }),
+    ).toMatchObject({ status: "supported", level: "provider-review", approver: "octant-shield" });
+  });
+
+  it("uses Octant Shield on Claude or Codex when the person chose it", () => {
+    expect(
+      resolveGuardrail({
+        access: auto,
+        capabilities: { ...claudeOrCodex, shield: shieldRuns },
+        reviewer: "octant-shield",
+      }),
+    ).toMatchObject({ approver: "octant-shield" });
+  });
+
+  it("reads Provider's own on a provider without one as Octant Shield", () => {
+    expect(
+      resolveAutoReviewer({ chosen: "provider", providerReview: false, shield: shieldRuns }),
+    ).toEqual({ status: "reviewer", reviewer: "octant-shield" });
+  });
+
+  it("asks first with the reason when the chosen reviewer cannot run", () => {
+    const reason = "No Octant Shield model is configured for this provider.";
+    expect(
+      resolveGuardrail({
+        access: auto,
+        capabilities: { ...claudeOrCodex, shield: { available: false, reason } },
+        reviewer: "octant-shield",
+      }),
+    ).toMatchObject({ status: "unsupported", reason, fallback: { mode: "ask-first" } });
+    expect(
+      resolveGuardrail({
+        access: auto,
+        capabilities: { ...wrappedRuntime, shield: { available: false, reason } },
+      }),
+    ).toMatchObject({ status: "unsupported", reason });
+  });
+
+  it("lets Shield answer prompts only at Auto on a prompting posture", () => {
+    const capabilities = { ...wrappedRuntime, shield: shieldRuns };
+    expect(shieldReviewsPrompts({ access: auto, capabilities })).toBe(true);
+    expect(
+      shieldReviewsPrompts({
+        access: { executionPolicy: "auto-accept-edits", autoApprove: true },
+        capabilities,
+      }),
+    ).toBe(true);
+    expect(
+      shieldReviewsPrompts({ access: { executionPolicy: "approval-gated" }, capabilities }),
+    ).toBe(false);
+    expect(
+      shieldReviewsPrompts({
+        access: { executionPolicy: "plan", autoApprove: true },
+        capabilities,
+      }),
+    ).toBe(false);
+    expect(
+      shieldReviewsPrompts({
+        access: auto,
+        capabilities: { ...claudeOrCodex, shield: shieldRuns },
+      }),
+    ).toBe(false);
   });
 });

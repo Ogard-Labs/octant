@@ -80,8 +80,9 @@ export interface ClaudeSandboxSettings {
   readonly allowUnsandboxedCommands: false;
   readonly filesystem: {
     readonly denyRead: readonly ["/"];
-    readonly allowRead: readonly [string];
-    readonly allowWrite: readonly [string];
+    /** The Project root, then its extra folders. */
+    readonly allowRead: readonly [string, ...string[]];
+    readonly allowWrite: readonly [string, ...string[]];
   };
 }
 
@@ -95,6 +96,8 @@ export function isClaudeEffortLevel(value: string): value is ClaudeEffortLevel {
 export interface ClaudeOpenQueryInput {
   readonly binaryPath: string;
   readonly projectRoot: string;
+  /** The Project's extra folders, granted what `projectRoot` is granted. */
+  readonly additionalDirectories?: ReadonlyArray<string>;
   readonly authEnvironment: Readonly<Record<string, string | undefined>>;
   readonly model: string;
   /** Agent SDK `effort` for the session; absent means the SDK default. */
@@ -558,7 +561,7 @@ interface ClaudeAgentSdkInvocationOptions {
   readonly skills: readonly [] | "all";
   readonly mcpServers: Readonly<Record<string, never>>;
   readonly strictMcpConfig: boolean;
-  readonly additionalDirectories: readonly [];
+  readonly additionalDirectories: readonly string[];
   readonly tools: readonly string[];
   readonly agents: Readonly<Record<string, never>>;
   readonly plugins: readonly [];
@@ -891,6 +894,9 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
           );
           const bindSpawn = options.spawnClaudeCodeProcess({
             projectRoot: input.projectRoot,
+            ...(input.additionalDirectories === undefined
+              ? {}
+              : { extraFolders: input.additionalDirectories }),
             executionPolicy: input.executionPolicy,
             runsCommands: input.tools.includes("Bash"),
           });
@@ -1063,7 +1069,9 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               skills: native.skills,
               mcpServers: {},
               strictMcpConfig: native.strictMcpConfig,
-              additionalDirectories: [],
+              // The Project's extra folders, which Claude Code then counts as
+              // its workspace beside `cwd`; its sandbox lists them too.
+              additionalDirectories: [...(input.additionalDirectories ?? [])],
               tools: [...input.tools],
               agents: {},
               plugins: [],
