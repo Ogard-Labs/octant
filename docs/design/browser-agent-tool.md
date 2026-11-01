@@ -191,6 +191,10 @@ only after the person approves it.
   before any step runs.
 - A batch is a list of fixed operations, never a script: nothing an agent
   writes runs in the page.
+- An agent's action that names an `expectedObservationRevision` the page has
+  moved past is refused as `stale` and does not run, so a batch stops there
+  rather than carrying on as if the step had run. The person's pane, which
+  re-polls on its own, keeps getting the page back without a refusal.
 - The field a `type` or `select` changes is not page text, so such a step
   reports that the field holds the new value when nothing else changed.
 
