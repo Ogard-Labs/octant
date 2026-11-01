@@ -2388,8 +2388,9 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   display: flex;
   min-width: 0;
   align-items: center;
+  flex-wrap: wrap;
   justify-content: space-between;
-  gap: var(--oct-space-4);
+  gap: var(--oct-space-2) var(--oct-space-4);
   min-height: 40px;
   padding: 4px 0 2px;
   border-bottom: 1px solid var(--oct-hairline);
@@ -2403,7 +2404,8 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 }
 
 .code-project-pull-requests__project-actions {
-  gap: var(--oct-space-2);
+  flex-wrap: wrap;
+  gap: var(--oct-space-2) var(--oct-space-3);
 }
 .code-project-pull-requests__auto-refresh {
   gap: var(--oct-space-2);
