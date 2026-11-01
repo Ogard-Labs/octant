@@ -253,8 +253,16 @@ export type AutomationTrigger = typeof AutomationTrigger.Type;
 
 // ── Authority, principal, and binding receipts ─────────────────────────────
 
-export const AutomationMode = Schema.Literal("work", "code");
+export const AutomationMode = Schema.Literal("chat", "work", "code");
 export type AutomationMode = typeof AutomationMode.Type;
+
+/**
+ * The modes whose threads have a folder, so a routine can be proposed from one
+ * of their threads and a follow-up can return to one. A Chat thread has
+ * neither a folder nor an Environment to propose from.
+ */
+export const AutomationThreadMode = Schema.Literal("work", "code");
+export type AutomationThreadMode = typeof AutomationThreadMode.Type;
 
 const AutomationLocalUserPrincipal = Schema.Struct({
   kind: Schema.Literal("local-user"),
@@ -318,6 +326,14 @@ export const AutomationAuthority = AgentRunAuthority;
 export type AutomationAuthority = AgentRunAuthority;
 
 export const AutomationBindingReceipt = Schema.Union(
+  // A Chat Project holds no folder, so its receipt names only the Project
+  // version the person saw.
+  Schema.Struct({
+    kind: Schema.Literal("chat"),
+    hostId: HostId,
+    projectId: ProjectId,
+    projectVersion: AggregateVersion,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("work"),
     hostId: HostId,
@@ -495,6 +511,22 @@ export type AutomationRunFailureReason = typeof AutomationRunFailureReason.Type;
 export const AutomationProjectLevel = Schema.Literal("opted-in");
 export type AutomationProjectLevel = typeof AutomationProjectLevel.Type;
 
+/**
+ * A level a person picks on the routine itself, for a Work or Code routine.
+ * It is the highest level a run may use, never a grant: each run takes the
+ * lower of this and the level its Project's new threads start at, so it can
+ * lower a run below the Project's level and never raise it above. Only a
+ * person at a window on this host sets it, and a routine an agent proposed
+ * never has it. A Chat routine has no level because Chat has none to widen.
+ */
+export const AutomationRunLevel = Schema.Literal(
+  "ask-first",
+  "auto-accept-edits",
+  "auto",
+  "full-access",
+);
+export type AutomationRunLevel = typeof AutomationRunLevel.Type;
+
 export const AutomationDefinitionDraft = Schema.Struct({
   displayName: boundedText(MAX_AUTOMATION_DISPLAY_NAME_LENGTH),
   taskPrompt: boundedText(MAX_AUTOMATION_TASK_PROMPT_LENGTH),
@@ -510,8 +542,13 @@ export const AutomationDefinitionDraft = Schema.Struct({
   missedRunPolicy: AutomationMissedRunPolicy,
   targetPolicy: AutomationTargetPolicy,
   projectLevel: Schema.optional(AutomationProjectLevel),
+  runLevel: Schema.optional(AutomationRunLevel),
 }).annotations(strict);
 export type AutomationDefinitionDraft = typeof AutomationDefinitionDraft.Type;
+
+function automationAuthorityIsChat(authority: AgentRunAuthority): boolean {
+  return !authority.filesystem && !authority.shell && !authority.git && !authority.subagents;
+}
 
 function automationDefinitionDraftMatchesPolicy(definition: AutomationDefinitionDraft): boolean {
   if (
@@ -537,7 +574,17 @@ function automationDefinitionDraftMatchesPolicy(definition: AutomationDefinition
     // A follow-up runs once, and late rather than never while inside its
     // missed window; the window, not the missed-run policy, bounds it.
     (definition.targetPolicy === "same-thread" &&
-      (definition.trigger.kind !== "once" || definition.missedRunPolicy !== "run-once"))
+      (definition.trigger.kind !== "once" || definition.missedRunPolicy !== "run-once")) ||
+    // One level choice at most: follow the Project's, or name one.
+    (definition.projectLevel !== undefined && definition.runLevel !== undefined) ||
+    // Chat has no level to pick and no thread to return to, and its routine
+    // keeps Chat's authority: no folder, shell, or Git, and no subagents.
+    (definition.mode === "chat" &&
+      (definition.projectLevel !== undefined ||
+        definition.runLevel !== undefined ||
+        definition.targetPolicy === "same-thread" ||
+        !automationAuthorityIsChat(definition.authorityProfile.requested) ||
+        !automationAuthorityIsChat(definition.authorityProfile.effective)))
   ) {
     return false;
   }
@@ -1077,7 +1124,7 @@ export type RoutineProposalId = typeof RoutineProposalId.Type;
 export const RoutineProposal = Schema.Struct({
   proposalId: RoutineProposalId,
   threadId: AutomationThreadId,
-  mode: AutomationMode,
+  mode: AutomationThreadMode,
   projectId: ProjectId,
   displayName: boundedText(MAX_AUTOMATION_DISPLAY_NAME_LENGTH),
   taskPrompt: boundedText(MAX_AUTOMATION_TASK_PROMPT_LENGTH),
@@ -1125,7 +1172,7 @@ export const AutomationFollowUpRequest = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("schedule-follow-up"),
     threadId: AutomationThreadId,
-    mode: AutomationMode,
+    mode: AutomationThreadMode,
     projectId: ProjectId,
     scheduledAt: UtcTimestamp,
     taskPrompt: boundedText(MAX_AUTOMATION_TASK_PROMPT_LENGTH),
@@ -1147,7 +1194,7 @@ export type AutomationFollowUpRequest = typeof AutomationFollowUpRequest.Type;
 export const AutomationThreadRoutineRequest = Schema.Struct({
   kind: Schema.Literal("create-thread-routine"),
   threadId: AutomationThreadId,
-  mode: AutomationMode,
+  mode: AutomationThreadMode,
   projectId: ProjectId,
   displayName: boundedText(MAX_AUTOMATION_DISPLAY_NAME_LENGTH),
   taskPrompt: boundedText(MAX_AUTOMATION_TASK_PROMPT_LENGTH),
@@ -1160,7 +1207,7 @@ export const AutomationQuery = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("list-automations"),
     hostId: HostId,
-    mode: Schema.Literal("all", "work", "code"),
+    mode: Schema.Literal("all", "chat", "work", "code"),
     projectId: Schema.optional(ProjectId),
     search: Schema.optional(boundedText(128)),
     limit: Schema.Int.pipe(

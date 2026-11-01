@@ -150,7 +150,7 @@ describe("automationEditorCatalog", () => {
     expect(automationAuthorityDigest(authority)).toBe(digest);
   });
 
-  it("includes active Work Projects that have a binding revision", () => {
+  it("includes active Work and Chat Projects, and skips archived ones", () => {
     const catalog = buildAutomationEditorCatalog({
       hostId: "local",
       hostLabel: "This Mac",
@@ -178,7 +178,19 @@ describe("automationEditorCatalog", () => {
       providerChoicesByMode: { work: [], code: [] },
     });
 
-    expect(catalog.projects).toHaveLength(1);
+    expect(catalog.projects).toHaveLength(2);
+    // A Chat Project holds no folder, so its binding names only the Project.
+    expect(catalog.projects[1]).toMatchObject({
+      projectId: AUTOMATION_UI_TEST_IDS.otherProject,
+      name: "Chat",
+      mode: "chat",
+      binding: {
+        kind: "chat",
+        hostId: "local",
+        projectId: AUTOMATION_UI_TEST_IDS.otherProject,
+        projectVersion: 1,
+      },
+    });
     expect(catalog.projects[0]).toMatchObject({
       projectId: AUTOMATION_UI_TEST_IDS.project,
       name: "Docs Project",
@@ -417,5 +429,49 @@ describe("automationEditorCatalog", () => {
     expect(catalog.authorityProfiles[0]?.receipt.effective.shell).toBe(false);
     expect(catalog.authorityProfiles[0]?.receipt.effective.git).toBe(false);
     expect(catalog.authorityProfiles[0]?.receipt.effectiveAuthorityDigest).toHaveLength(64);
+  });
+
+  it("offers a Chat Project a profile whose authority has no folder, shell, or Git", () => {
+    const catalog = buildAutomationEditorCatalog({
+      hostId: "local",
+      hostLabel: "This Mac",
+      actorId: AUTOMATION_UI_TEST_IDS.actor,
+      projects: [
+        {
+          id: AUTOMATION_UI_TEST_IDS.otherProject,
+          name: "Briefings",
+          type: "chat",
+          lifecycle: "active",
+          pinned: false,
+          rank: "0/1",
+          version: 3,
+          createdAt: now,
+          updatedAt: now,
+        } as ProjectSummary,
+      ],
+      profiles: [approvalGatedProfile({ compatibleModes: ["chat", "work"] })],
+      providerChoicesByMode: {
+        chat: [
+          {
+            providerInstanceId: AUTOMATION_UI_TEST_IDS.providerInstance,
+            modelId: "approved-model",
+          },
+        ],
+        work: [],
+        code: [],
+      },
+    });
+
+    expect(catalog.executionProfiles).toHaveLength(1);
+    expect(catalog.executionProfiles[0]?.receipt).toMatchObject({
+      mode: "chat",
+      projectId: AUTOMATION_UI_TEST_IDS.otherProject,
+      modelId: "approved-model",
+    });
+    const chat = catalog.authorityProfiles.find((option) => !option.receipt.effective.filesystem);
+    expect(chat?.receipt.effective).toMatchObject({ shell: false, git: false, subagents: false });
+    expect(chat?.receipt.effectiveAuthorityDigest).toHaveLength(64);
+    // The profile's Work authority is still offered beside it.
+    expect(catalog.authorityProfiles).toHaveLength(2);
   });
 });

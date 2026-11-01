@@ -4,6 +4,7 @@ import {
   defaultPermissionModeFor,
   guardrailLevelOf,
   permissionModeOf,
+  permissionModeOfWorkAccess,
   clampWorkAccess,
   chosenAutoReviewer,
   resolveAutoReviewer,
@@ -133,6 +134,13 @@ describe("Work levels", () => {
     expect(workThreadAccessOf("full-access")).toEqual(threadAccessOf("full-access"));
     expect(workAccessOfPermissionMode("plan")).toBeUndefined();
     expect(workAccessOfPermissionMode("accept-edits")).toBe("auto-accept-edits");
+  });
+
+  it("maps each Work level back to the Code mode that stands for it", () => {
+    for (const mode of ["auto", "ask-first", "accept-edits", "full-access"] as const) {
+      const access = workAccessOfPermissionMode(mode);
+      expect(access === undefined ? undefined : permissionModeOfWorkAccess(access)).toBe(mode);
+    }
   });
 
   it("records shell and Git at the level a Work turn ran with", () => {

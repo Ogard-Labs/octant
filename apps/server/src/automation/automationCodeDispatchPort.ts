@@ -4,6 +4,7 @@ import {
   decodeCodeDeliveryTarget,
   decodeCodeOperationId,
   type AutomationRun,
+  type AutomationRunLevel,
   type CodeEvidenceContentId,
   type CodeEvidenceReference,
   type CodeOperationCommand,
@@ -14,7 +15,12 @@ import {
   type UtcTimestamp,
   type WindowId,
 } from "@octant/contracts";
-import { threadAccessOf } from "@octant/domain";
+import {
+  clampWorkAccess,
+  permissionModeOfWorkAccess,
+  threadAccessOf,
+  workAccessOfPermissionMode,
+} from "@octant/domain";
 import type {
   AutomationCodeDispatchPort,
   AutomationFirstTurnLaunchOutcome,
@@ -129,9 +135,13 @@ async function createManagedThread(
       modelId: snapshot.executionProfile.modelId,
       // Asks first unless the person opted this routine into the level the
       // Project's new threads start at, Full access included.
-      ...(snapshot.projectLevel === "opted-in" && options.projectLevel !== undefined
+      ...(options.projectLevel !== undefined && snapshot.projectLevel === "opted-in"
         ? threadAccessOf(options.projectLevel(snapshot.projectId))
-        : { executionPolicy: "approval-gated" as const }),
+        : options.projectLevel !== undefined && snapshot.runLevel !== undefined
+          ? threadAccessOf(
+              runLevelMode(options.projectLevel(snapshot.projectId), snapshot.runLevel),
+            )
+          : { executionPolicy: "approval-gated" as const }),
       permissionPersistence: snapshot.executionProfile.permissionPersistence,
       deliveryTarget,
       sourceBranch: options.sourceBranch ?? "development",
@@ -207,7 +217,9 @@ async function startOrRecover(
     // A follow-up goes into a thread a person may since have widened; its
     // turn asks first all the same unless the person opted the routine into
     // the Project's level, and the host only ever narrows a turn.
-    ...(followUp && input.run.definitionSnapshot.projectLevel !== "opted-in"
+    ...(followUp &&
+    input.run.definitionSnapshot.projectLevel !== "opted-in" &&
+    input.run.definitionSnapshot.runLevel === undefined
       ? { executionPolicy: "approval-gated" as const }
       : {}),
   };
@@ -242,6 +254,17 @@ async function startOrRecover(
       message: error instanceof Error ? error.message : "Code provider turn recovery failed.",
     };
   }
+}
+
+/**
+ * The mode a run uses when the person picked a level on the routine: the lower
+ * of that and the mode the Project's new threads start in, so a pick lowers a
+ * run and never raises it. Plan holds no level here and asks first.
+ */
+function runLevelMode(projectMode: PermissionMode, picked: AutomationRunLevel): PermissionMode {
+  return permissionModeOfWorkAccess(
+    clampWorkAccess(workAccessOfPermissionMode(projectMode) ?? "ask-first", picked),
+  );
 }
 
 async function resolveCheckoutId(

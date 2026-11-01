@@ -248,6 +248,32 @@ describe("createAutomationWorkDispatchPort", () => {
     expect(vi.mocked(turns.startFirstTurn).mock.calls[0]?.[2]).toEqual({});
   });
 
+  it("caps a run at the level picked on the routine", async () => {
+    const turns = createTurns();
+    const port = createAutomationWorkDispatchPort({
+      threads: createThreads(),
+      turns,
+      clock: () => now,
+      uuid: () => "aa000000-0000-4000-8000-0000000000e0",
+    });
+    const gated = workRun();
+    const picked: AutomationRun = {
+      ...gated,
+      definitionSnapshot: { ...gated.definitionSnapshot, runLevel: "auto" },
+    };
+
+    await port.startOrRecoverFirstTurn({
+      run: picked,
+      threadId,
+      firstTurnRequestId: picked.firstTurnRequestId,
+      promptDigest: "unused" as never,
+      scopeId,
+    });
+
+    // The turn still runs at the thread's own level when that is lower.
+    expect(vi.mocked(turns.startFirstTurn).mock.calls[0]?.[2]).toEqual({ accessCeiling: "auto" });
+  });
+
   it("is idempotent on firstTurnRequestId by returning the existing accepted turn", async () => {
     const turns = createTurns({
       startFirstTurn: vi.fn(async () => ({

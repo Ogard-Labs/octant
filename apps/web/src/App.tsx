@@ -3372,6 +3372,25 @@ function LaunchedShell(
       ),
     [workProviderGroups],
   );
+  const chatProviderChoices = useMemo<ReadonlyArray<CodeThreadProviderChoice>>(
+    () =>
+      chatProviderGroups.flatMap((group) =>
+        group.sections.flatMap((section) =>
+          section.models.flatMap((picker) =>
+            picker.unavailableReason === undefined
+              ? [
+                  {
+                    instanceId: group.instance.id,
+                    modelId: picker.model.id,
+                    label: `${group.instance.displayName} — ${picker.model.displayName}`,
+                  },
+                ]
+              : [],
+          ),
+        ),
+      ),
+    [chatProviderGroups],
+  );
   const workProviderChoice = resolveWorkDraftChoice({
     choices: workProviderChoices,
     settingsStatus: workSettings.status,
@@ -3441,6 +3460,10 @@ function LaunchedShell(
     )
     .join("\0");
   const automationCatalogProviderKey = [
+    "chat",
+    ...chatProviderChoices.map(
+      (choice) => `${String(choice.instanceId)}:${String(choice.modelId)}`,
+    ),
     "work",
     ...workProviderChoices.map(
       (choice) => `${String(choice.instanceId)}:${String(choice.modelId)}`,
@@ -3474,6 +3497,10 @@ function LaunchedShell(
         projects: automationCatalogProjects,
         profiles: automationCatalogProfiles,
         providerChoicesByMode: {
+          chat: chatProviderChoices.map((choice) => ({
+            providerInstanceId: String(choice.instanceId),
+            modelId: String(choice.modelId),
+          })),
           work: workProviderChoices.map((choice) => ({
             providerInstanceId: String(choice.instanceId),
             modelId: String(choice.modelId),

@@ -588,7 +588,9 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
         onCloseAutomationCenter={() => actions.setAutomationCenterOpen(false)}
         onOpenAutomationThread={(target) => {
           actions.setAutomationCenterOpen(false);
-          if (target.mode === "code") {
+          if (target.mode === "chat") {
+            void actions.openChatThread(decodeChatThreadId(target.threadId), target.title);
+          } else if (target.mode === "code") {
             void actions.openCodeThread(decodeCodeThreadId(target.threadId), target.title);
           } else {
             void actions.openWorkThread(decodeWorkThreadId(target.threadId), target.title);

@@ -1,15 +1,16 @@
-import type {
-  AutomationBlockReason,
-  AutomationDefinition,
-  AutomationDispatchIntent,
-  AutomationId,
-  AutomationRun,
-  AutomationRunFailureReason,
-  AutomationRuntimeLaunchClaim,
-  AutomationThreadId,
-  CodeThreadId,
-  WorkThreadId,
-  UtcTimestamp,
+import {
+  decodeChatThreadId,
+  type AutomationBlockReason,
+  type AutomationDefinition,
+  type AutomationDispatchIntent,
+  type AutomationId,
+  type AutomationRun,
+  type AutomationRunFailureReason,
+  type AutomationRuntimeLaunchClaim,
+  type AutomationThreadId,
+  type CodeThreadId,
+  type WorkThreadId,
+  type UtcTimestamp,
 } from "@octant/contracts";
 import { decideAutomationFollowUp, type AutomationFollowUpThreadFacts } from "@octant/domain";
 import {
@@ -25,6 +26,7 @@ import type { AutomationProjection } from "./automationProjection";
 import { deterministicAutomationUuid } from "./automationRunIdentity";
 import type {
   AutomationCapacityAdmissionPort,
+  AutomationChatDispatchPort,
   AutomationCodeDispatchPort,
   AutomationWorkDispatchPort,
 } from "./automationModeDispatchPorts";
@@ -42,6 +44,8 @@ export interface AutomationDispatchServiceOptions {
   readonly projection: AutomationProjection;
   readonly code: AutomationCodeDispatchPort;
   readonly work: AutomationWorkDispatchPort;
+  /** Absent, a Chat routine is refused as `unsupported-mode`. */
+  readonly chat?: AutomationChatDispatchPort;
   readonly capacity: AutomationCapacityAdmissionPort;
   readonly resolveFacts: (input: {
     readonly definition: AutomationDefinition;
@@ -88,6 +92,7 @@ export class AutomationDispatchService implements AutomationDispatchPort {
   readonly #projection: AutomationProjection;
   readonly #code: AutomationCodeDispatchPort;
   readonly #work: AutomationWorkDispatchPort;
+  readonly #chat: AutomationChatDispatchPort | undefined;
   readonly #capacity: AutomationCapacityAdmissionPort;
   readonly #resolveFacts: AutomationDispatchServiceOptions["resolveFacts"];
   readonly #readFollowUpThread: AutomationDispatchServiceOptions["readFollowUpThread"];
@@ -102,6 +107,7 @@ export class AutomationDispatchService implements AutomationDispatchPort {
     this.#projection = options.projection;
     this.#code = options.code;
     this.#work = options.work;
+    this.#chat = options.chat;
     this.#capacity = options.capacity;
     this.#resolveFacts = options.resolveFacts;
     this.#readFollowUpThread = options.readFollowUpThread;
@@ -164,6 +170,15 @@ export class AutomationDispatchService implements AutomationDispatchPort {
           "unsupported-mode",
           this.#work.unavailableReason ??
             "Work first-turn runtime is unavailable for Automation dispatch.",
+        );
+        return;
+      }
+      if (run.definitionSnapshot.mode === "chat" && this.#chat === undefined) {
+        this.#refuse(
+          definition,
+          run,
+          "unsupported-mode",
+          "Chat first-turn runtime is unavailable for Automation dispatch.",
         );
         return;
       }
@@ -284,12 +299,18 @@ export class AutomationDispatchService implements AutomationDispatchPort {
             title,
             scopeId: ROUTINE_HOST_SCOPE_ID,
           })
-        : await this.#work.createThread({
-            run,
-            threadId: threadId as unknown as WorkThreadId,
-            title,
-            scopeId: ROUTINE_HOST_SCOPE_ID,
-          });
+        : mode === "chat" && this.#chat !== undefined
+          ? await this.#chat.createThread({
+              run,
+              threadId: decodeChatThreadId(String(threadId)),
+              title,
+            })
+          : await this.#work.createThread({
+              run,
+              threadId: threadId as unknown as WorkThreadId,
+              title,
+              scopeId: ROUTINE_HOST_SCOPE_ID,
+            });
     if (outcome.kind === "failed") {
       this.#failRun(run, "thread-creation-failed", outcome.message);
       return undefined;
@@ -390,6 +411,14 @@ export class AutomationDispatchService implements AutomationDispatchPort {
         firstTurnRequestId: run.firstTurnRequestId,
         promptDigest: intent.promptDigest,
         scopeId: ROUTINE_HOST_SCOPE_ID,
+      });
+    }
+    if (run.definitionSnapshot.mode === "chat" && this.#chat !== undefined) {
+      return this.#chat.startOrRecoverFirstTurn({
+        run,
+        threadId: decodeChatThreadId(String(intent.threadId)),
+        firstTurnRequestId: run.firstTurnRequestId,
+        promptDigest: intent.promptDigest,
       });
     }
     return this.#work.startOrRecoverFirstTurn({

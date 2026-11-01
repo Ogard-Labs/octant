@@ -17,6 +17,7 @@ import {
   automationModeLabel,
   buildAutomationDraft,
   type AutomationAuthorityProfileOption,
+  type AutomationRunLevelChoice,
   type AutomationEditorCatalog,
   type AutomationExecutionProfileOption,
   type AutomationProjectOption,
@@ -55,6 +56,16 @@ export interface AutomationDefinitionEditorProps {
 const FULL_ACCESS_NOTE =
   "Full access profiles are not eligible for automations. Choose an approval-gated profile.";
 
+type RunLevelOption = "" | AutomationRunLevelChoice;
+
+const RUN_LEVEL_OPTIONS: ReadonlyArray<{ readonly id: RunLevelOption; readonly label: string }> = [
+  { id: "", label: "Ask first" },
+  { id: "auto-accept-edits", label: "Accept edits" },
+  { id: "auto", label: "Auto" },
+  { id: "full-access", label: "Full access" },
+  { id: "project", label: "The Project's mode" },
+];
+
 export { localInputFromUtcInstant, utcInstantFromLocalInput } from "./RoutineScheduleFields";
 
 function executionProfileEligible(
@@ -80,8 +91,13 @@ function authorityProfileEligible(
     return false;
   }
   // Every Work turn holds the shell and Git, so a Work routine runs only under
-  // a profile that grants them; one without them would never run.
-  return mode !== "work" || (effective.shell && effective.git);
+  // a profile that grants them; one without them would never run. A Chat
+  // routine keeps Chat's authority, so a profile that grants a folder, a
+  // shell, or Git is not one it can take, and a Code routine needs the folder.
+  if (mode === "chat") {
+    return !(effective.filesystem || effective.shell || effective.git || effective.subagents);
+  }
+  return effective.filesystem && (mode !== "work" || (effective.shell && effective.git));
 }
 
 export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProps) {
@@ -95,8 +111,8 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
     authority: useId(),
     target: useId(),
     confirm: useId(),
-    projectLevel: useId(),
-    projectLevelNote: useId(),
+    runLevel: useId(),
+    runLevelNote: useId(),
   };
 
   const [displayName, setDisplayName] = useState(
@@ -132,8 +148,12 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
   const [targetSummary, setTargetSummary] = useState(initial?.deliveryTarget.summary ?? "");
   // Editing always requires an explicit fresh confirmation; never carry it over.
   const [targetConfirmed, setTargetConfirmed] = useState(false);
-  const [runsAtProjectLevel, setRunsAtProjectLevel] = useState(
-    initial?.projectLevel === "opted-in",
+  const [runLevel, setRunLevel] = useState<RunLevelOption>(
+    initial?.projectLevel === "opted-in"
+      ? "project"
+      : initial?.runLevel === undefined || initial.runLevel === "ask-first"
+        ? ""
+        : initial.runLevel,
   );
   const [issues, setIssues] = useState<readonly string[]>([]);
   const [serverMessage, setServerMessage] = useState<string | undefined>(undefined);
@@ -249,7 +269,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
       missedRunPolicy,
       deliveryTargetSummary: targetSummary,
       deliveryTargetConfirmed: targetConfirmed,
-      runsAtProjectLevel,
+      ...(runLevel === "" ? {} : { runLevel }),
       ...(initial === undefined
         ? {}
         : { previousDeliveryTargetRevision: initial.deliveryTarget.revision }),
@@ -362,7 +382,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
           }}
           value={[mode]}
         >
-          {(["work", "code"] as const).map((option) => (
+          {(["chat", "work", "code"] as const).map((option) => (
             <OctantToggleGroupItem
               className="automation-editor__mode-option"
               key={option}
@@ -468,25 +488,36 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
           value={targetSummary}
         />
         <p className="automation-editor__note">
-          {mode === "work"
-            ? "Every run starts a new thread with this delivery target. It is Done when you mark it Done."
-            : "Every run starts a new thread with this delivery target. It is Done when the target is met."}
+          {mode === "chat"
+            ? "Every run starts a new Chat thread with this delivery target."
+            : mode === "work"
+              ? "Every run starts a new thread with this delivery target. It is Done when you mark it Done."
+              : "Every run starts a new thread with this delivery target. It is Done when the target is met."}
         </p>
       </div>
 
-      <div className="automation-editor__field automation-editor__confirmation">
-        <OctantCheckbox
-          aria-describedby={ids.projectLevelNote}
-          checked={runsAtProjectLevel}
-          id={ids.projectLevel}
-          onChange={(event) => setRunsAtProjectLevel(event.target.checked)}
-        />
-        <label htmlFor={ids.projectLevel}>Run at this Project&apos;s mode</label>
-      </div>
-      <p className="automation-editor__note" id={ids.projectLevelNote}>
-        Each run uses the mode the Project&apos;s new threads start in, Full access included, so it
-        may change files and run commands with nobody asked. Off, every run asks first.
-      </p>
+      {mode === "chat" ? (
+        <p className="automation-editor__note">
+          A Chat routine keeps Chat&apos;s limits: its thread has no files, commands, or Git, so
+          there is no mode to pick.
+        </p>
+      ) : (
+        <div className="automation-editor__field">
+          <label htmlFor={ids.runLevel}>Mode for each run</label>
+          <OctantSelectField
+            className="select"
+            id={ids.runLevel}
+            onValueChange={(value) => setRunLevel(value as RunLevelOption)}
+            options={RUN_LEVEL_OPTIONS}
+            value={runLevel}
+          />
+          <p className="automation-editor__note" id={ids.runLevelNote}>
+            A run never uses a higher mode than the Project&apos;s new threads start in. Full access
+            means no sandbox and no prompts, so a run may change files and run commands with nobody
+            asked. Ask first, every run asks.
+          </p>
+        </div>
+      )}
 
       <div className="automation-editor__field automation-editor__confirmation">
         <OctantCheckbox

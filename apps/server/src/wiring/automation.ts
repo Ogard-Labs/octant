@@ -18,6 +18,7 @@ import {
   automationCodeEvidenceFromText,
   createAutomationCodeDispatchPort,
 } from "../automation/automationCodeDispatchPort";
+import { createAutomationChatDispatchPort } from "../automation/automationChatDispatchPort";
 import { createAutomationWorkDispatchPort } from "../automation/automationWorkDispatchPort";
 import { AutomationDispatchService } from "../automation/automationDispatchService";
 import { AutomationEventStore } from "../automation/automationEventStore";
@@ -269,11 +270,19 @@ export function wireAutomation(deps: AutomationDependencies) {
     clock: () => new Date().toISOString() as UtcTimestamp,
     uuid: randomUUID,
   });
+  const automationChatDispatch = createAutomationChatDispatchPort({
+    chat: {
+      read: (threadId) => chatService.read(threadId),
+      execute: async (command) => chatService.execute(command),
+    },
+    clock: () => new Date().toISOString() as UtcTimestamp,
+  });
   const automationDispatch = new AutomationDispatchService({
     store: automationEventStore,
     projection: persistence.automationProjection,
     code: automationCodeDispatch,
     work: automationWorkDispatch,
+    chat: automationChatDispatch,
     capacity: {
       admit: (input) => {
         try {
@@ -328,6 +337,8 @@ export function wireAutomation(deps: AutomationDependencies) {
       },
     },
     readFollowUpThread: ({ mode, threadId }) => {
+      // Chat has no follow-ups: a Chat definition cannot target a thread.
+      if (mode === "chat") return { kind: "missing" };
       if (mode === "work") {
         const thread = workThreadProjection.read(decodeWorkThreadId(String(threadId)));
         if (

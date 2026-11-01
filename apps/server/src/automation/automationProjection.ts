@@ -82,7 +82,7 @@ const MAX_CONSUMED_OCCURRENCE_KEYS = 1_024;
 
 export interface ListAutomationSummariesInput {
   readonly hostId: HostId;
-  readonly mode: "all" | "work" | "code";
+  readonly mode: "all" | "chat" | "work" | "code";
   readonly projectId?: ProjectId | undefined;
   readonly search?: string | undefined;
   readonly limit: number;

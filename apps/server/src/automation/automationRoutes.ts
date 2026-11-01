@@ -373,21 +373,20 @@ async function handleCommand(
       origin,
     );
   }
-  // Running a routine at its Project's level can mean Full access with nobody
-  // watching, and Full access is chosen at a window on this host, so a paired
-  // device cannot opt a routine into it.
+  // Running a routine at its Project's level, or at a level picked on the
+  // routine, can mean Full access with nobody watching, and Full access is
+  // chosen at a window on this host, so a paired device cannot set either.
   if (
     context.principal.kind === "remote-device" &&
     (body.kind === "create-automation" || body.kind === "update-automation") &&
     isRecord(body.definition) &&
-    body.definition.projectLevel !== undefined
+    (body.definition.projectLevel !== undefined || body.definition.runLevel !== undefined)
   ) {
     return jsonResponse(
       decodeAutomationCommandResult({
         kind: "automation-command-failed",
         reason: "unauthorized",
-        message:
-          "Running a routine at its Project's level is chosen in the Octant window on this host.",
+        message: "A routine's level is chosen in the Octant window on this host.",
       }),
       200,
       origin,
