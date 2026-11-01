@@ -73,7 +73,10 @@ export interface BrowserAppManagedToolsOptions {
       threadId: BrowserThreadId,
     ) => Promise<BrowserAutomationSnapshot>;
     /** Marks the page as the person's to sign in on; see the service. */
-    readonly holdForPerson?: (windowId: WindowId, threadId: BrowserThreadId) => () => void;
+    readonly holdForPerson?: (
+      windowId: WindowId,
+      threadId: BrowserThreadId,
+    ) => (() => void) | undefined;
   };
   readonly approvals?: Pick<BrowserToolApprovalService, "request"> &
     Partial<
@@ -332,6 +335,15 @@ export function createBrowserAppManagedTools(
         await releaseUpload();
         return failure(refusal);
       }
+    }
+    // An approval or an upload question may have waited while the agent
+    // handed the page to the person; the page is theirs until they answer.
+    if (
+      options.browser.inspectThread(options.windowId, options.threadId).waitingForPerson !==
+      undefined
+    ) {
+      await releaseUpload?.();
+      return failure("browser-waiting-for-person");
     }
     // The page reads an uploaded file when its form is sent, which can be a
     // later action, so the service keeps the copies until the page closes.

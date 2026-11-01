@@ -248,6 +248,12 @@ only after the person approves it.
   brings its Browser forward once, through the thread's activity preview, and
   the agent tool holds every other agent Browser call on the page until the
   card is answered (`browser-waiting-for-person`); `stop` still works.
+  The hold is checked again right before an action runs, so a call that was
+  already waiting on an approval when the hand-off began does not act either.
+  One hand-off at a time per page.
+- The page outlives the hand-off: it stays open past its 10-minute session
+  while the person signs in, and for 2 minutes after the card is answered so
+  the agent can read it.
 - The person signs in by typing into the page themselves. Octant saves no
   password and fills none, and the agent never sees what they typed: a
   credential field never shows a value.

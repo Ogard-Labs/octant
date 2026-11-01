@@ -637,6 +637,24 @@ describe("BrowserAutomationService", () => {
     expect(release).toHaveBeenCalledOnce();
   });
 
+  it("keeps a page open while the person signs in past its session limit, one hand-off at a time", async () => {
+    const fixture = harness();
+    await fixture.service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const release = fixture.service.holdForPerson(windowId, threadOne);
+    expect(release).toBeDefined();
+    expect(fixture.service.holdForPerson(windowId, threadOne)).toBeUndefined();
+    expect(fixture.service.inspectThread(windowId, threadOne).waitingForPerson).toBe("sign-in");
+    fixture.advance(400_000);
+    fixture.expire();
+    expect(fixture.service.inspectThread(windowId, threadOne).context?.state).toBe("active");
+    release?.();
+    expect(fixture.service.inspectThread(windowId, threadOne).waitingForPerson).toBeUndefined();
+    fixture.advance(150_000);
+    fixture.expire();
+    await Promise.resolve();
+    expect(fixture.service.inspectThread(windowId, threadOne).context).toBeUndefined();
+  });
+
   it("journals browser observations as tainting tool results once", async () => {
     const recordExternalContentIngestion = vi.fn(() => ({
       kind: "recorded" as const,
