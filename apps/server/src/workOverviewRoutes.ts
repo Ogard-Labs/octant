@@ -10,7 +10,7 @@ import {
   type ProjectId,
   type WindowId,
 } from "@octant/contracts";
-import { workProjectKeepsStatusFile } from "@octant/domain/project-policy";
+import { projectExtraFolderRoots, workProjectKeepsStatusFile } from "@octant/domain/project-policy";
 import { isLoopbackHostname } from "./shellRoutes";
 import { authenticateRouteWindowId } from "./principalRouteContext";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -45,7 +45,10 @@ export interface WorkOverviewRouteDependencies {
    */
   readonly status?: WorkProjectStatusReader;
   /** The top level of the bound folder. Absent means the page shows no folder. */
-  readonly folder?: (canonicalRoot: string) => Promise<ReadonlyArray<WorkOverviewItem>>;
+  readonly folder?: (
+    canonicalRoot: string,
+    extraFolders: ReadonlyArray<string>,
+  ) => Promise<ReadonlyArray<WorkOverviewItem>>;
   readonly now?: () => number;
 }
 
@@ -122,7 +125,9 @@ export function createWorkOverviewRouteHandler(dependencies: WorkOverviewRouteDe
       workProjectKeepsStatusFile(project)
         ? dependencies.status?.read(projectId, project.binding.canonicalRoot).catch(() => undefined)
         : undefined,
-      dependencies.folder?.(project.binding.canonicalRoot).catch(() => undefined),
+      dependencies
+        .folder?.(project.binding.canonicalRoot, projectExtraFolderRoots(project))
+        .catch(() => undefined),
     ]);
     return jsonResponse(
       decodeWorkOverviewProjection({

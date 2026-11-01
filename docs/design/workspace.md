@@ -78,14 +78,17 @@ card for the Project's folders (the main folder first, labelled Main directory
 or Main repository, in mono, read from home as `~/…` with the full path on
 hover and for screen readers, and its availability on the first row; then
 each extra folder as an Extra folder row with Remove; then one line saying
-extra folders get the main folder's access while commands, checkouts and Git
-stay in the main folder, and **Add folder…**, which opens the native folder
+extra folders get the main folder's access while checkouts and Git stay in
+the main folder (a terminal or saved action can start in any folder), and **Add folder…**, which opens the native folder
 picker on desktop and the host folder browser elsewhere; then what the
 binding grants), then labelled groups. A refused folder (the home folder or
 above it, a system or credential folder, one inside or around another folder
 of the Project) shows the host's reason on the card. A thread's environment
 panel lists the Project's extra folders read-only, under the main folder, and
-shows nothing when there are none. Rules for what an extra folder grants are
+shows nothing when there are none. The Files tool lists the extra folders'
+files after the main folder's, each file by its own name with its folder's
+full path beside the size, and the Overview's folder list adds each extra
+folder's top level labelled with the folder's name. Rules for what an extra folder grants are
 in [Architecture: Projects with several folders](../architecture.md#projects-with-several-folders). Threads are rows
 in one card: the title alone on its line, then the state chip, the approval
 posture as quiet text (it is a standing setting, not a state or a control, so
@@ -365,6 +368,24 @@ a thread already attached, something that is not a thread, or a thread this
 window cannot Open leaves the draft unchanged and says so without reading
 the thread. Image and file drops, and dropping a thread on a pane rather
 than its composer, stay pane and attachment behaviour.
+
+### Find in a thread, and a new thread from a selection
+
+⌘/Ctrl+F in an open Chat, Work, or Code thread opens a find bar pinned to the
+top of the transcript. It matches text in every row, including rows the
+transcript has not mounted, shows "n of m" (or "No matches"), highlights the
+matches, and steps with Enter and Shift+Enter or the arrows. Escape or the close
+button dismisses it. The shortcut does nothing while focus is in the code editor
+or a terminal, which have their own find, and it acts only in the thread the
+person is in. This is separate from Thread Search, which looks across threads.
+
+In a Work or Code thread, selecting text inside one assistant reply offers
+"New thread from selection" as a small action under the reply and in the
+reply's right-click menu. It opens the new-thread draft in the same Project and
+mode with the selection prefilled as a Markdown block quote. It is a draft
+only: nothing is sent until the person sends it, and the new thread has exactly
+the authority a new thread in that Project has. A Project that is archived or
+unknown opens nothing. Chat keeps its own "Add to chat" quote chips.
 
 ## Start-screen cards
 

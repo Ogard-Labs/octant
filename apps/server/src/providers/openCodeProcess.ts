@@ -98,6 +98,13 @@ export interface OpenCodeProcessStartInput {
    * plugins stay off either way.
    */
   readonly ownSkills?: true;
+  /**
+   * The person let OpenCode run as itself with its tool servers: these are the
+   * MCP servers they added to their own configuration, written into the
+   * private one, and namespaced tools are no longer denied outright (the
+   * session's rules decide them). Absent keeps every tool server off.
+   */
+  readonly ownToolServers?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 }
 
 export interface OpenCodeProcessPort {
@@ -553,7 +560,7 @@ function stripJsoncComments(content: string): string {
   return output.replace(/,\s*([}\]])/g, "$1");
 }
 
-function parseRoutingConfig(content: string): unknown {
+export function parseRoutingConfig(content: string): unknown {
   if (Buffer.byteLength(content, "utf8") > PROJECTED_CONFIG_LIMIT) {
     throw new Error("OpenCode resolved configuration exceeds the private routing limit.");
   }
@@ -568,7 +575,7 @@ function parseRoutingConfig(content: string): unknown {
   }
 }
 
-function routingConfigCandidates(environment: NodeJS.ProcessEnv): ReadonlyArray<string> {
+export function routingConfigCandidates(environment: NodeJS.ProcessEnv): ReadonlyArray<string> {
   const candidates: string[] = [];
   const explicit = environment.OPENCODE_CONFIG;
   if (explicit !== undefined && isAbsolute(explicit)) candidates.push(explicit);
@@ -661,6 +668,7 @@ export function createPrivateOpenCodeProfile(
   temporaryDirectory: () => string = tmpdir,
   betaPermissions?: ReadonlyArray<PermissionV2Rule>,
   ownSkills = false,
+  ownToolServers?: Readonly<Record<string, Readonly<Record<string, unknown>>>>,
 ): PrivateOpenCodeProfile {
   const root = temporaryDirectory();
   const directories: string[] = [];
@@ -721,8 +729,14 @@ export function createPrivateOpenCodeProfile(
     // executable extensions and compatibility tools stay denied.
     const ownedConfig: Record<string, unknown> = {
       ...projected,
-      permission: ownSkills ? { "*_*": "deny" } : { skill: { "*": "deny" }, "*_*": "deny" },
+      permission: {
+        ...(ownSkills ? {} : { skill: { "*": "deny" } }),
+        ...(ownToolServers === undefined ? { "*_*": "deny" } : {}),
+      },
     };
+    if (ownToolServers !== undefined && Object.keys(ownToolServers).length > 0) {
+      ownedConfig.mcp = ownToolServers;
+    }
     // OpenCode 2 appends configured `permissions` after every agent's
     // built-in rules, and its default agent allows `*`. Without these rules an
     // approval-gated edit or shell command would run without asking.
@@ -1292,6 +1306,7 @@ function acquireOpenCodeServer(
           tmpdir,
           runtime === "beta" ? (input.betaPermissions ?? BETA_DENY_ALL) : undefined,
           input.ownSkills === true,
+          input.ownToolServers,
         );
       } catch {
         resume(

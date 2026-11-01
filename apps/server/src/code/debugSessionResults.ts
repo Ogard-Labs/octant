@@ -1,5 +1,5 @@
 import { isAbsolute, normalize, relative, sep } from "node:path";
-import { decodeCodeRelativePath } from "@octant/contracts";
+import { decodeCodeProjectFilePath } from "@octant/contracts";
 import {
   MAX_CODE_DEBUG_BREAKPOINTS_PER_FILE,
   MAX_CODE_DEBUG_FRAMES,
@@ -33,6 +33,8 @@ const MAX_REFERENCE = 2_147_483_647;
 export interface DebugResultRoots {
   /** The canonical checkout root the session runs in. */
   readonly checkoutRoot: string;
+  /** Set for a session in an extra folder: its paths are named absolute, as the folder's files are. */
+  readonly folderPrefix?: string;
   readonly realpath: (path: string) => Promise<string>;
 }
 
@@ -230,7 +232,9 @@ async function placeSource(
   try {
     return {
       kind: "checkout",
-      path: decodeCodeRelativePath(relative(roots.checkoutRoot, resolved).split(sep).join("/")),
+      path: decodeCodeProjectFilePath(
+        `${roots.folderPrefix === undefined ? "" : `${roots.folderPrefix}/`}${relative(roots.checkoutRoot, resolved).split(sep).join("/")}`,
+      ),
       line: placedLine,
       column: lineOf(column) ?? 1,
     };

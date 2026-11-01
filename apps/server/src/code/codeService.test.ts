@@ -4395,6 +4395,7 @@ describe("CodeService.listTests", () => {
     expect(fixture.tests.discover).toHaveBeenCalledWith({
       checkoutId: String(checkout.id),
       rootPath: "/private/authorized-root",
+      projectId: expect.any(String),
     });
   });
 

@@ -156,8 +156,14 @@ shows each subagent it can see and marks a thread that read the web.
   Project's own settings, hooks, MCP servers, and plugins, code that no
   Octant review step sees. A provider you do not trust there never loads a
   Project's code, even at Full access.
+- **For one thread:** the **Own setup** menu next to the composer's picker
+  offers **Account default**, **On**, and **Off**. **On** loads the
+  provider's own setup in that thread as the account switch would, but never
+  a Project's code, which still needs the Project's trust. **Off** loads none
+  of it in that thread, even at Full access. The choice applies from the
+  thread's next turn.
 - **Full access** turns a provider's own setup on by itself, as in the
-  provider's own app.
+  provider's own app, unless the thread says Off.
 
 What each one loads today:
 
@@ -175,9 +181,18 @@ What each one loads today:
 - **OpenCode:** its skills in `.claude/skills` and `.agents/skills` (below
   Full access only the Project's). If you remember approvals for the
   Project, approving one remembers it in OpenCode's own settings, as OpenCode
-  does; the approval says so, and you clear it in OpenCode. Your own
-  OpenCode configuration, MCP servers, and permission rules do not load in
-  Octant yet.
+  does; the approval says so, and you clear it in OpenCode. The MCP servers
+  in your own OpenCode configuration load too, and their tools follow the
+  thread's level; a password or token typed straight into a server's
+  settings is left out, so give the server an environment variable
+  (`{env:NAME}`) instead. The permission rules you wrote in OpenCode apply
+  over the thread's level: a command or edit you allowed runs without
+  asking, and without Reviewed's reviewer. Plan's denials and the refusal
+  of folders outside the Project always win, and a catch-all rule is
+  ignored, because only the thread's level can lift everything. When
+  OpenCode hands a task to a subagent, it shows in the thread as a
+  subagent run, and any approval it needs reaches you the same way as the
+  main session's.
 - **Mistral Vibe:** its skills, the Project's context files, the MCP
   servers, connectors, and hooks in its own settings, and in a trusted
   Project that Project's `.vibe` tools, MCP servers, hooks, plugins, and
@@ -187,7 +202,7 @@ At Auto in Code, Mistral Vibe now reviews its own approvals with its
 auto-approve mode, as Claude Code and Codex do with theirs, until the thread
 reads something from the web.
 
-Only a window on the computer running Octant can change either switch; a
+Only a window on the computer running Octant can change any of these switches; a
 paired phone or browser cannot. Plan mode stays read-only, so it never runs
 hooks, tool servers, or a Project's code. Chat never gets a folder or a
 shell, so it never runs hooks or a Project's code; your own tool servers do

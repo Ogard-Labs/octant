@@ -374,9 +374,12 @@ export interface CodeOperationRepositoryTestPort {
   readonly discover: (input: {
     readonly checkoutId: string;
     readonly rootPath: string;
+    /** The Project, whose extra folders offer tests of their own. */
+    readonly projectId?: string;
   }) => Promise<ReadonlyArray<CodeRepositoryTestDefinition>>;
   readonly run: (input: {
     readonly runId: string;
+    readonly projectId?: string;
     readonly definition: Extract<
       CodeOperationCommand,
       { readonly kind: "run-repository-test" }
@@ -2639,6 +2642,7 @@ export class CodeOperationService {
           discovered = await this.#options.repositoryTests.discover({
             checkoutId: String(checkout.id),
             rootPath: root.checkoutRoot,
+            projectId: String(thread.projectId),
           });
         } finally {
           this.#pendingTests.delete(command.testRunId);
@@ -2665,6 +2669,7 @@ export class CodeOperationService {
         }
         const run = await this.#options.repositoryTests.run({
           runId: command.testRunId,
+          projectId: String(thread.projectId),
           definition: command.definition,
           threadId: thread.id,
           checkoutId: checkout.id,

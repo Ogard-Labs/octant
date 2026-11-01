@@ -37,10 +37,8 @@ describe("Code debug configuration contracts", () => {
 
   it("refuses a host path, an escape, or an unknown field", () => {
     for (const overrides of [
-      { program: "/usr/bin/node" },
       { program: "../outside.js" },
       { program: "src/../../outside.js" },
-      { cwd: "/tmp" },
       { cwd: "." },
       { request: "attach" },
       { preLaunchTask: "build" },
@@ -183,7 +181,7 @@ describe("Code debug session contracts", () => {
           {
             id: 1,
             name: "main",
-            location: { kind: "checkout", path: "/home/me/main.py", line: 1, column: 1 },
+            location: { kind: "checkout", path: "/home/me/../main.py", line: 1, column: 1 },
           },
         ],
         truncated: false,

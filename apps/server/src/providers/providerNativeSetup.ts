@@ -11,12 +11,16 @@ import { resolveProviderNativeSetup } from "@octant/domain";
 export interface ProviderNativeSetupSources {
   readonly readProviderInstance: (id: ProviderInstanceId) => ProviderInstance | undefined;
   readonly readProject: (id: ProjectId) => Project | undefined;
+  /** The thread's own choice, or undefined when it inherits. */
+  readonly readThreadNativeSetup?: (threadId: string) => "on" | "off" | undefined;
 }
 
 export interface SessionNativeSetupInput {
   readonly providerInstanceId: ProviderInstanceId;
   /** The thread's Work or Code Project; absent for a Chat thread, whose Project has no folder. */
   readonly projectId?: ProjectId;
+  /** The Chat, Work, or Code thread the session serves; its own choice outranks the account's. */
+  readonly threadId?: string;
   readonly mode: "chat" | "work" | "code";
   readonly executionPolicy: ProviderExecutionPolicy;
 }
@@ -48,11 +52,14 @@ export function sessionNativeSetup(
     project !== undefined &&
     project.type !== "chat" &&
     (project.nativeProviders ?? []).some((kind) => kind === instance.driverKind);
+  const threadChoice =
+    input.threadId === undefined ? undefined : sources.readThreadNativeSetup?.(input.threadId);
   return resolveProviderNativeSetup({
     driverKind: instance.driverKind,
     mode: input.mode,
     executionPolicy: input.executionPolicy,
     accountAllows: "nativeSetup" in instance && instance.nativeSetup === true,
     projectTrusts,
+    ...(threadChoice === undefined ? {} : { threadChoice }),
   });
 }

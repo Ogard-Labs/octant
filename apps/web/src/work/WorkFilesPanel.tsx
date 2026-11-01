@@ -138,7 +138,7 @@ export function WorkFilesPanel(props: WorkFilesPanelProps) {
         opaqueRef: entry.preview.opaqueRef,
         hostId: previewHostId,
         projectId,
-        displayName: entry.path,
+        displayName: pathBasename(entry.path),
       });
     };
   }, [onOpenFile, previewHostId, projectId]);

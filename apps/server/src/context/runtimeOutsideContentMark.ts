@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
-import type { ProviderRuntimeEvent } from "@octant/contracts";
+import type { ProviderRuntimeEvent, ShieldWatcherLabel } from "@octant/contracts";
+import {
+  SHIELD_WATCHER_SOURCE_PREFIX,
+  watchOutsideContent,
+} from "@octant/domain/shield-watcher-policy";
 import type { RecordExternalContentIngestionInput } from "./externalContentIngestionStore";
 import type { RecordExternalContentIngestion } from "./inheritedExternalContentMark";
 
@@ -9,6 +13,11 @@ export type RuntimeOutsideContentRead = Extract<
 >;
 
 /** The labels a runtime's own outside-content tools are recorded under. */
+export type RuntimeOutsideContentResult = Extract<
+  ProviderRuntimeEvent,
+  { readonly kind: "outside-content-result" }
+>;
+
 export const RUNTIME_OUTSIDE_CONTENT_SOURCE_LABELS = {
   "web-search": "runtime-web-search",
   "web-fetch": "runtime-web-fetch",
@@ -40,6 +49,18 @@ export interface RuntimeOutsideContentMarking {
    * thread's next turn may resume a provider session that holds that read.
    */
   readonly settleOwed: (threadId: string) => { readonly status: "clear" | "refused" };
+  /**
+   * Runs the Watcher over the text a runtime's own tool returned and journals
+   * each label it finds, which marks the thread. Refused when a label could
+   * not be journaled: the model has already read the page, so the caller stops
+   * the turn as for a read that could not be marked.
+   */
+  readonly watch: (
+    threadId: string,
+    event: RuntimeOutsideContentResult,
+  ) =>
+    | { readonly status: "watched"; readonly labels: ReadonlyArray<ShieldWatcherLabel> }
+    | { readonly status: "refused" };
 }
 
 /**
@@ -89,6 +110,43 @@ export class RuntimeOutsideContentMarks implements RuntimeOutsideContentMarking 
     return { status: "clear" };
   }
 
+  watch(
+    threadId: string,
+    event: RuntimeOutsideContentResult,
+  ):
+    | { readonly status: "watched"; readonly labels: ReadonlyArray<ShieldWatcherLabel> }
+    | { readonly status: "refused" } {
+    const labels = watchOutsideContent(event.text);
+    if (labels.length === 0) return { status: "watched", labels };
+    const digest = createHash("sha256")
+      .update(JSON.stringify([event.toolName, event.correlationId, event.toolCallId, event.text]))
+      .digest("hex");
+    // A label that cannot be journaled is owed like a read that could not be
+    // marked, so the thread's next turn cannot resume this session first. Only
+    // the label's own reference is kept, never the page text.
+    let allRecorded = true;
+    for (const label of labels) {
+      const input: RecordExternalContentIngestionInput = {
+        threadId,
+        provenance: {
+          origin: "tool-result",
+          sourceLabel: `${SHIELD_WATCHER_SOURCE_PREFIX}${label}`,
+        },
+        contentReference: `${SHIELD_WATCHER_SOURCE_PREFIX}${label}-${digest}`,
+        correlationId: event.correlationId,
+        authorized: true,
+      };
+      if (this.#recorded(input)) continue;
+      allRecorded = false;
+      const owed =
+        this.#owed.get(threadId) ?? new Map<string, RecordExternalContentIngestionInput>();
+      owed.set(String(input.contentReference), input);
+      this.#owed.set(threadId, owed);
+    }
+    const recorded = allRecorded;
+    return recorded ? { status: "watched", labels } : { status: "refused" };
+  }
+
   #recorded(input: RecordExternalContentIngestionInput): boolean {
     try {
       const recorded = this.#record(input);
@@ -126,4 +184,5 @@ export function runtimeOutsideContentIngestion(
 export const NO_RUNTIME_OUTSIDE_CONTENT_MARKS: RuntimeOutsideContentMarking = {
   mark: () => ({ status: "refused" }),
   settleOwed: () => ({ status: "clear" }),
+  watch: () => ({ status: "refused" }),
 };

@@ -16,12 +16,12 @@ target wire behaviour, gated by the thread's
 [guardrail level](../architecture.md#security-and-authority) (off at Guarded
 and Reviewed until the person turns it on, on at Full access):
 
-| Provider     | Switched off today                                                                                    | Target                                                                                                                                                                                                   | Built                                                                                                                                                                                                                                                                            |
-| ------------ | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Claude Code  | `settingSources: []`, `skills: []`, no subagent tool, `WebSearch` and `WebFetch` left out and refused | The person's setting sources (home and trusted Project), skills, plugins, hooks, and MCP servers; its subagent tool; `WebSearch` and `WebFetch`; `permissionMode: "auto"` as Reviewed's default reviewer | Reviewed with its own reviewer, in Work and Code                                                                                                                                                                                                                                 |
-| Codex        | Its subagents; Project skills disabled by path; in Chat each named MCP server switched off            | Its subagents; Project skills; the person's MCP servers in Chat; `approvalsReviewer: "auto_review"` as Reviewed's default reviewer                                                                       | Reviewed with its own reviewer, in Work and Code                                                                                                                                                                                                                                 |
-| Mistral Vibe | `VIBE_SKILL_PATHS="[]"`, `VIBE_DISABLED_SKILLS='["*"]'`, `VIBE_INCLUDE_PROJECT_CONTEXT="false"`       | Its own skills and Project context; a trusted Project's tools and MCP servers; its auto-approve mode as Reviewed's default reviewer, reported `unsupported` until mapped                                 | Reviewed with `auto-approve`, in Work and Code (`harnessAutoReview` supported); with the setup on, the skill, Project context, MCP server, connector, and hook guards unset, and in a trusted Project `VIBE_TOOL_PATHS` unset and the `.vibe` entries readable                   |
-| OpenCode     | Skills and project config off, `skill` denied; Octant's denies outrank saved grants; `once` only      | The person's own permission rules; "always" answers; its `subagent` delegation; its skills; `bash` and `task` in Work as in Code; Reviewed through Octant Shield                                         | With the setup on: `skill` asked rather than denied with the three skill switches unset, and a remembered 2.x approval answered `always`; not built yet: the person's own permission rules and config, its delegation followed as child runs, and Reviewed through Octant Shield |
+| Provider     | Switched off today                                                                                    | Target                                                                                                                                                                                                   | Built                                                                                                                                                                                                                                                                                                 |
+| ------------ | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code  | `settingSources: []`, `skills: []`, no subagent tool, `WebSearch` and `WebFetch` left out and refused | The person's setting sources (home and trusted Project), skills, plugins, hooks, and MCP servers; its subagent tool; `WebSearch` and `WebFetch`; `permissionMode: "auto"` as Reviewed's default reviewer | Reviewed with its own reviewer, in Work and Code                                                                                                                                                                                                                                                      |
+| Codex        | Its subagents; Project skills disabled by path; in Chat each named MCP server switched off            | Its subagents; Project skills; the person's MCP servers in Chat; `approvalsReviewer: "auto_review"` as Reviewed's default reviewer                                                                       | Reviewed with its own reviewer, in Work and Code                                                                                                                                                                                                                                                      |
+| Mistral Vibe | `VIBE_SKILL_PATHS="[]"`, `VIBE_DISABLED_SKILLS='["*"]'`, `VIBE_INCLUDE_PROJECT_CONTEXT="false"`       | Its own skills and Project context; a trusted Project's tools and MCP servers; its auto-approve mode as Reviewed's default reviewer, reported `unsupported` until mapped                                 | Reviewed with `auto-approve`, in Work and Code (`harnessAutoReview` supported); with the setup on, the skill, Project context, MCP server, connector, and hook guards unset, and in a trusted Project `VIBE_TOOL_PATHS` unset and the `.vibe` entries readable                                        |
+| OpenCode     | Skills and project config off, `skill` denied; Octant's denies outrank saved grants; `once` only      | The person's own permission rules; "always" answers; its `subagent` delegation; its skills; `bash` and `task` in Work as in Code; Reviewed through Octant Shield                                         | With the setup on: `skill` asked rather than denied with the three skill switches unset, a remembered 2.x approval answered `always`, its delegation followed as child runs, and the MCP servers and permission rules in the person's own configuration; Reviewed through Octant Shield not built yet |
 
 With the setup on, Claude Code starts with `settingSources: ["user"]` (plus
 `project` and `local` in a trusted Project), `skills: "all"`, and the `Agent`,
@@ -265,15 +265,34 @@ after a host restart such an edit fails the turn until it is approved again. App
 same repository: OpenCode keys them by the repository's root commit, keeps
 them in its own data store (shared with the person's own use because
 provider credentials live there), and applies them as allow after Octant's
-rules. Today Octant's denies still win, so Plan's denials hold (Work's shell
+rules. Octant's denies still win, so Plan's denials hold (Work's shell
 and subagents follow the level as Code's do), and Octant itself never writes such a grant because
-it answers approvals `once`. The rule is that the person's OpenCode rules
-apply over Octant's level rules, with Plan and a mode's withheld tools still
-Octant's denies (allowed; not built yet). An edit allowed this way still fails the turn
-through the file-change check, after the write; a shell command allowed
-this way runs without an approval card. Clearing the saved grants in
-OpenCode restores the prompts. A 2.x reject settles every pending request
-in the session, so each settled request is forgotten. Questions are
+it answers approvals `once`. With the setup on, the person's OpenCode rules
+apply over Octant's level rules, with Plan, the outside-directory refusal,
+and a mode's withheld tools still Octant's denies (built). Octant reads the
+`permission` rules (and the 2.x `permissions` list) from the person's
+OpenCode configuration when a session starts, in the order they wrote them,
+and places them ahead of the level's first deny. It drops a bare catch-all
+rule, because only the guardrail level may lift a whole thread, and the
+rules for `external_directory`, `question`, `skill`, and `*_*`, which Octant
+owns. An edit their rules allow for a file is admitted by the file-change
+check, as OpenCode itself would make it; a shell command allowed this way
+runs without an approval card and without Reviewed's reviewer. Clearing the
+saved grants or the rules in OpenCode restores the prompts. A 2.x reject settles every pending request
+in the session, so each settled request is forgotten. With the setup on, the
+MCP servers in the person's own configuration (local commands and remote URLs,
+at most 32) are written into the launch's private configuration and their
+tools follow the level instead of being denied outright; a server's environment and
+headers keep only a reference to a variable the host has (`{env:NAME}`), and a
+server whose command line or URL carries a credential is left out, so the
+secret stays where the person keeps it. Plan keeps them off, and Chat's confinement still applies to
+what they run. Sessions OpenCode's `task` tool delegates to are followed from
+their `session.created` event, which names the parent: each is shown as a
+child run (starting, running, completed or failed), its permission and
+question requests are handled as the parent's own, so the person answers them
+at the same level and the reply goes to the child's session, and a web read it
+makes marks the thread. Nothing else a child says joins the parent's
+transcript. Questions are
 unsupported: 2.0.22 serves no question routes and asks through forms, which
 are not mapped, so the written posture denies `question` and a form that
 still arrives fails the turn. Resume,

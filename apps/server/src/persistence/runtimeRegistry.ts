@@ -215,6 +215,13 @@ import {
   ThreadEgressLaunchSummarizedPayload,
 } from "@octant/contracts";
 import {
+  SHIELD_REMOTE_COMMAND_EVENT_NAMES,
+  SHIELD_SERVERS_EVENT_NAMES,
+  ShieldRemoteCommandRanPayload,
+  ShieldServerRemovedPayload,
+  ShieldServerSetPayload,
+} from "@octant/contracts/shield-servers";
+import {
   RUNTIME_NETWORK_EVENT_NAMES,
   RuntimeNetworkDecisionsRecordedPayload,
   RuntimeNetworkLaunchStartedPayload,
@@ -274,6 +281,11 @@ import { ThemeProjection } from "./themeProjection";
 import { ExtensionProjection, EXTENSION_LIFECYCLE_EVENT } from "./extensionProjection";
 import { ExtensionToolGrantProjection } from "./extensionToolGrantProjection";
 import { ExtensionProjectPinProjection } from "./extensionProjectPinProjection";
+import { ThreadNativeSetupProjection } from "./threadNativeSetupProjection";
+import {
+  THREAD_NATIVE_SETUP_EVENT_NAMES,
+  ThreadNativeSetupChanged,
+} from "@octant/contracts/thread-native-setup";
 import { RemoteAccessProjection } from "./remoteAccessProjection";
 import {
   PRODUCT_FEEDBACK_CAPTURED,
@@ -517,6 +529,9 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       ThreadEgressDecisionsRecordedPayload,
     )
     .register(CODE_DEBUG_EVENT_NAMES.egressLaunchSummarized, 1, ThreadEgressLaunchSummarizedPayload)
+    .register(SHIELD_SERVERS_EVENT_NAMES.serverSet, 1, ShieldServerSetPayload)
+    .register(SHIELD_SERVERS_EVENT_NAMES.serverRemoved, 1, ShieldServerRemovedPayload)
+    .register(SHIELD_REMOTE_COMMAND_EVENT_NAMES.ran, 1, ShieldRemoteCommandRanPayload)
     .register(SAFE_NETWORKS_EVENT_NAMES.limitsSet, 1, SafeNetworksLimitsSetPayload)
     .register(SAFE_NETWORKS_EVENT_NAMES.placesSet, 1, SafeNetworksPlacesSetPayload)
     .register(
@@ -584,6 +599,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(EXTENSION_TOOL_GRANT_EVENT_NAMES.recorded, 1, ExtensionToolGrantRecorded)
     .register(EXTENSION_TOOL_GRANT_EVENT_NAMES.revoked, 1, ExtensionToolGrantRevoked)
     .register(EXTENSION_PROJECT_PIN_EVENT_NAMES.changed, 1, ExtensionProjectPinChanged)
+    .register(THREAD_NATIVE_SETUP_EVENT_NAMES.changed, 1, ThreadNativeSetupChanged)
     .register(REMOTE_ACCESS_EVENT_NAMES.hostIdentityInitialized, 1, HostIdentityInitializedV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.deviceRegistered, 1, DeviceRegisteredV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.deviceKeyRotated, 1, DeviceKeyRotatedV1)
@@ -703,6 +719,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(new ExtensionProjection())
       .register(new ExtensionToolGrantProjection())
       .register(new ExtensionProjectPinProjection())
+      .register(new ThreadNativeSetupProjection())
       .register(new RemoteAccessProjection())
       .register(new ThreadCheckpointProjection())
       .register(new ProductFeedbackProjection())

@@ -177,4 +177,52 @@ describe("RepositoryTestRunner", () => {
       rmSync(parent, { recursive: true, force: true });
     }
   });
+
+  it("runs a definition of an extra folder in that folder and refuses one outside every folder", async () => {
+    const execute = vi.fn().mockResolvedValue({
+      termination: "exited",
+      exitCode: 0,
+      stdout: new Uint8Array(),
+      stderr: new Uint8Array(),
+      parserFailed: false,
+      cleanupUncertain: false,
+    });
+    const artifacts = vi.fn().mockResolvedValue(undefined);
+    const runner = new RepositoryTestRunner({
+      realpath: async (path) => path,
+      execute,
+      readArtifact: artifacts,
+      now: () => "2026-07-21T12:00:00.000Z",
+      newId: () => "20000000-0000-4000-8000-000000000001",
+    });
+    const base = {
+      threadId: "30000000-0000-4000-8000-000000000001" as never,
+      checkoutId: "40000000-0000-4000-8000-000000000001" as never,
+      checkoutRevision: "a".repeat(40),
+      executionPolicy: "approval-gated" as const,
+      checkoutRoot: "/private/repository",
+      extraFolders: ["/private/notes"],
+      environment: {},
+    };
+
+    await runner.run({
+      ...base,
+      definition: { ...definition, cwd: "/private/notes", artifactPaths: ["out.xml"] } as never,
+    });
+    expect(execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({ cwd: "/private/notes" }),
+      undefined,
+    );
+    expect(artifacts).toHaveBeenLastCalledWith(
+      expect.objectContaining({ checkoutRoot: "/private/notes", relativePath: "out.xml" }),
+    );
+
+    execute.mockClear();
+    const refused = await runner.run({
+      ...base,
+      definition: { ...definition, cwd: "/private/elsewhere" } as never,
+    });
+    expect(execute).not.toHaveBeenCalled();
+    expect(refused.termination).toBe("unavailable");
+  });
 });

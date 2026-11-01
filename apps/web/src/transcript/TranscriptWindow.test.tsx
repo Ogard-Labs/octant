@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { TRANSCRIPT_FIND_CLOSED_EVENT, TranscriptWindow } from "./TranscriptWindow";
+import { TranscriptWindow } from "./TranscriptWindow";
 
 interface Row {
   readonly id: string;
@@ -249,18 +249,100 @@ describe("TranscriptWindow", () => {
     expect(mountedCount()).toBe(1000);
   });
 
-  it("collapses the expanded find range when find is dismissed without Escape", async () => {
+  it("opens a find bar that counts matches across rows that were off-window", async () => {
     renderWindow(rows(1000));
     fireEvent.keyDown(window, { key: "f", metaKey: true });
+
+    const input = await screen.findByRole("textbox", { name: "Find in thread" });
+    fireEvent.change(input, { target: { value: "row 5" } });
+
+    // Row 5, 50-59, 500-599.
+    expect(await screen.findByText("1 of 111")).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByText("2 of 111")).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
+    expect(screen.getByText("111 of 111")).toBeInTheDocument();
+  });
+
+  it("says when nothing matches and collapses the expanded range on close", async () => {
+    renderWindow(rows(1000));
+    fireEvent.keyDown(window, { key: "f", metaKey: true });
+    const input = await screen.findByRole("textbox", { name: "Find in thread" });
+    fireEvent.change(input, { target: { value: "no such text" } });
+    expect(await screen.findByText("No matches")).toBeInTheDocument();
     await waitFor(() => {
       expect(mountedCount()).toBe(1000);
     });
 
-    window.dispatchEvent(new Event(TRANSCRIPT_FIND_CLOSED_EVENT));
+    fireEvent.keyDown(input, { key: "Escape" });
 
     await waitFor(() => {
       expect(mountedCount()).toBeLessThan(80);
     });
+    expect(screen.queryByRole("textbox", { name: "Find in thread" })).not.toBeInTheDocument();
+  });
+
+  it("opens the find bar from a composer that sits outside the transcript's column", async () => {
+    render(
+      <section aria-label="Thread workspace">
+        <div>
+          <TranscriptWindow
+            itemKey={(item: Row) => item.id}
+            items={rows(10)}
+            listLabel="Transcript"
+            renderItem={(item: Row) => <button type="button">{item.label}</button>}
+            restoreKey="thread-a"
+          />
+        </div>
+        <textarea aria-label="Message" />
+      </section>,
+    );
+
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Message" }), {
+      key: "f",
+      metaKey: true,
+    });
+
+    expect(await screen.findByRole("textbox", { name: "Find in thread" })).toBeInTheDocument();
+  });
+
+  it("finds a phrase that spans inline formatting but not a block boundary", async () => {
+    const items: ReadonlyArray<Row> = [{ id: "a", label: "x" }];
+    render(
+      <TranscriptWindow
+        itemKey={(item: Row) => item.id}
+        items={items}
+        listLabel="Transcript"
+        renderItem={() => (
+          <div>
+            <p>
+              The <strong>plan</strong> is ready
+            </p>
+            <p>Second</p>
+          </div>
+        )}
+        restoreKey="thread-a"
+      />,
+    );
+    fireEvent.keyDown(window, { key: "f", metaKey: true });
+    const input = await screen.findByRole("textbox", { name: "Find in thread" });
+
+    fireEvent.change(input, { target: { value: "the plan is" } });
+    expect(await screen.findByText("1 of 1")).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: "readysecond" } });
+    expect(await screen.findByText("No matches")).toBeInTheDocument();
+  });
+
+  it("leaves Cmd-F to the code editor and terminal", () => {
+    renderWindow(rows(10));
+    const editor = document.createElement("div");
+    editor.className = "monaco-editor";
+    document.body.append(editor);
+    fireEvent.keyDown(editor, { key: "f", metaKey: true });
+    editor.remove();
+    expect(screen.queryByRole("textbox", { name: "Find in thread" })).not.toBeInTheDocument();
   });
 
   it("places rows of differing heights without overlapping", () => {

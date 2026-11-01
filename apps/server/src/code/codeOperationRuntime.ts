@@ -243,13 +243,19 @@ function defaultAcpTerminalConfinement(): CodeAcpTerminalConfinement {
         executable: input.executable,
         args: input.args,
         boundRoot: input.boundRoot,
+        ...(input.extraBoundRoots === undefined ? {} : { extraBoundRoots: input.extraBoundRoots }),
         temporaryDirectory: input.temporaryDirectory,
         networkEgress: "allow",
         allowProcessExec: true,
         allowProcessFork: true,
         allowFileReadStar: true,
         writeBoundRoot: true,
-        readRoots: [input.boundRoot, input.temporaryDirectory, dirname(input.executable)],
+        readRoots: [
+          input.boundRoot,
+          ...(input.extraBoundRoots ?? []),
+          input.temporaryDirectory,
+          dirname(input.executable),
+        ],
       }),
   };
 }
@@ -916,9 +922,16 @@ export function createCodeOperationRuntime(
     }>
   >();
   const testDiscovery = options.repositoryTestDiscovery ?? new RepositoryTestDiscoveryService();
+  const extraFoldersOf = (projectId: string | undefined): ReadonlyArray<string> =>
+    projectId === undefined
+      ? []
+      : (options.readProjectExtraFolders?.(projectId as CodeThread["projectId"]) ?? []);
   const repositoryTests = {
-    discover: (input: { readonly checkoutId: string; readonly rootPath: string }) =>
-      testDiscovery.discover(input),
+    discover: (input: {
+      readonly checkoutId: string;
+      readonly rootPath: string;
+      readonly projectId?: string;
+    }) => testDiscovery.discover(input),
     run: async (input: Parameters<CodeOperationServiceOptions["repositoryTests"]["run"]>[0]) => {
       if (activeTests.has(input.runId)) throw new Error("Repository test is already running.");
       const controller = new AbortController();
@@ -933,7 +946,11 @@ export function createCodeOperationRuntime(
         done,
       });
       try {
-        return await testRunner.run({ ...input, signal: controller.signal });
+        return await testRunner.run({
+          ...input,
+          extraFolders: extraFoldersOf(input.projectId),
+          signal: controller.signal,
+        });
       } finally {
         activeTests.delete(input.runId);
         markDone();
@@ -3841,6 +3858,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             this.#effectiveThread(active.windowId, active.thread.id)?.executionPolicy ??
             active.thread.executionPolicy,
           checkoutRoot: active.checkoutRoot,
+          ...(active.extraFolders.length === 0 ? {} : { extraFolders: active.extraFolders }),
           uuid: this.#options.uuid,
           pathPort: this.#options.acpPathPort ?? liveCodeTestSourcePort,
           terminalConfinement:

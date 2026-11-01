@@ -428,6 +428,34 @@ describe("probeOpenCodeBinary", () => {
     }
   });
 
+  it("writes the person's own MCP servers into the private configuration and stops denying every namespaced tool", () => {
+    const root = fixtureRoot();
+    const servers = { docs: { type: "local", command: ["docs-server"] } };
+    const loaded = createPrivateOpenCodeProfile(
+      { content: "{}" },
+      { HOME: root },
+      () => root,
+      undefined,
+      false,
+      servers,
+    );
+    const locked = createPrivateOpenCodeProfile({ content: "{}" }, { HOME: root }, () => root);
+    try {
+      const config = (profile: typeof loaded) =>
+        JSON.parse(readFileSync(profile.environment.OPENCODE_CONFIG ?? "", "utf8")) as {
+          readonly permission: Record<string, unknown>;
+          readonly mcp?: unknown;
+        };
+      expect(config(loaded).mcp).toEqual(servers);
+      expect(config(loaded).permission).toEqual({ skill: { "*": "deny" } });
+      expect(config(locked)).not.toHaveProperty("mcp");
+      expect(config(locked).permission).toEqual({ skill: { "*": "deny" }, "*_*": "deny" });
+    } finally {
+      loaded.cleanup();
+      locked.cleanup();
+    }
+  });
+
   it("makes OpenCode's default provider data root explicit for confinement", () => {
     const root = fixtureRoot();
     const profile = createPrivateOpenCodeProfile({ content: "{}" }, { HOME: root }, () => root);

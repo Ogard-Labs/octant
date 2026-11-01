@@ -1270,3 +1270,50 @@ html[data-octant-increased-contrast="true"] .thread-work-shelf form button {
   color: var(--oct-muted);
   font-style: italic;
 }
+
+.transcript-selection-thread {
+  position: relative;
+}
+
+.transcript-selection-thread__offer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--oct-space-2);
+}
+
+/* A zero-height sticky anchor: the bar floats over the transcript without
+   moving the rows or the scroll margin the virtualizer measures. */
+.transcript-find-anchor {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  height: 0;
+}
+
+.transcript-find {
+  position: absolute;
+  top: var(--oct-space-2);
+  right: var(--oct-space-3);
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-1) var(--oct-space-2);
+  border: 1px solid var(--oct-border-soft);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-surface);
+}
+
+.transcript-find__status {
+  min-width: 4.5rem;
+  font-size: var(--oct-text-xs);
+  color: var(--oct-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+::highlight(transcript-find) {
+  background-color: color-mix(in srgb, var(--oct-accent) 28%, transparent);
+}
+
+::highlight(transcript-find-current) {
+  background-color: color-mix(in srgb, var(--oct-accent) 60%, transparent);
+}

@@ -18,6 +18,12 @@ export interface ProviderNativeSetupInput {
   readonly accountAllows: boolean;
   /** The Work or Code Project lists this provider in `nativeProviders`. Always false in Chat. */
   readonly projectTrusts: boolean;
+  /**
+   * The thread's own choice. `off` keeps every feature unloaded at every
+   * level, Full access included; `on` counts as the account switch does and
+   * never grants a Project's own code, which still needs the Project's trust.
+   */
+  readonly threadChoice?: "on" | "off";
 }
 
 /**
@@ -26,6 +32,9 @@ export interface ProviderNativeSetupInput {
  * Project for that provider; at Full access it is on, as it is in the
  * provider's own app. Undefined means every feature stays off, which is the
  * answer for every provider that is not a key provider.
+ *
+ * A thread's own choice overrides all of it: off loads nothing, on loads as
+ * the account switch does.
  *
  * Plan stays read-only and Chat keeps its filesystem and shell withheld at
  * every level, so neither loads hooks or a Project's own code: a hook is a
@@ -40,9 +49,11 @@ export function resolveProviderNativeSetup(
   input: ProviderNativeSetupInput,
 ): ProviderNativeSetup | undefined {
   if (!isKeyProviderDriverKind(input.driverKind)) return undefined;
+  if (input.threadChoice === "off") return undefined;
+  const accountAllows = input.accountAllows || input.threadChoice === "on";
   const projectTrusts = input.mode !== "chat" && input.projectTrusts;
   const fullAccess = input.mode !== "chat" && input.executionPolicy === "full-access";
-  if (!input.accountAllows && !projectTrusts && !fullAccess) return undefined;
+  if (!accountAllows && !projectTrusts && !fullAccess) return undefined;
   const plan = input.executionPolicy === "plan";
   const chat = input.mode === "chat";
   return {

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -19,6 +19,37 @@ afterEach(async () => {
     rmSync(directory, { recursive: true, force: true });
 });
 
+describe("native harness shell environment", () => {
+  it("hands each command the person's SSH agent socket and nothing that names a key", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-harness-agent-"));
+    directories.push(directory);
+    const environments: Array<Readonly<Record<string, string>>> = [];
+    let socket: string | undefined = "/private/tmp/com.example.agent/Listeners";
+    const shell = createNativeHarnessShell({
+      process: {
+        executeShellScript: async (input) => {
+          environments.push(input.environment);
+          return {
+            termination: "exited",
+            exitCode: 0,
+            stdout: new Uint8Array(),
+            stderr: new Uint8Array(),
+          } as never;
+        },
+      },
+      scriptDirectory: directory,
+      sshAgentSocket: () => socket,
+    });
+    await shell.run({ command: "ssh web1 uptime", cwd: directory, timeoutMs: 1_000 });
+    socket = undefined;
+    await shell.run({ command: "ssh web1 uptime", cwd: directory, timeoutMs: 1_000 });
+    expect(environments).toEqual([
+      { NO_COLOR: "1", TERM: "dumb", SSH_AUTH_SOCK: "/private/tmp/com.example.agent/Listeners" },
+      { NO_COLOR: "1", TERM: "dumb" },
+    ]);
+  });
+});
+
 // These run the real `sandbox-exec`: the shell entry point only matters if a
 // command actually starts under the profile a harness turn gets.
 describe.skipIf(process.platform !== "darwin")("native harness shell under Seatbelt", () => {
@@ -34,6 +65,29 @@ describe.skipIf(process.platform !== "darwin")("native harness shell under Seatb
 
     expect(run).toMatchObject({ status: "ran", exitCode: 0 });
     expect(run.output).toBe(`${checkout}|absent|1`);
+  });
+
+  it("reads and writes an extra folder of the Project but not a folder beside it", async () => {
+    const { shell, checkout } = harnessShell("none");
+    const extra = join(checkout, "..", "extra");
+    const beside = join(checkout, "..", "beside");
+    mkdirSync(extra);
+    mkdirSync(beside);
+    writeFileSync(join(extra, "in.txt"), "extra");
+
+    const run = await shell.run({
+      command: `cat "${extra}/in.txt"; echo made > "${extra}/out.txt" && echo wrote-extra
+echo nope > "${beside}/out.txt" 2>/dev/null && echo wrote-beside
+true`,
+      cwd: checkout,
+      extraRoots: [realpathSync(extra)],
+      timeoutMs: 10_000,
+    });
+
+    expect(run).toMatchObject({ status: "ran", exitCode: 0 });
+    expect(run.output).toContain("extra");
+    expect(run.output).toContain("wrote-extra");
+    expect(run.output).not.toContain("wrote-beside");
   });
 
   it("cannot rewrite a pending command script, its own or another call's", async () => {

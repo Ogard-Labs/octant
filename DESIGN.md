@@ -2148,9 +2148,10 @@ files; the host journals the confirmed removal. Paths the person added follow
 as rows with Remove (no confirmation), then one "Protect another path" row with
 a text field and an **Add** button; a refused path is said in the section's
 feedback line. A paired device sees the section as set on the host machine.
-A Code tool row whose result was outside content carries an "Outside content"
-tag, followed by what Octant Shield's Watcher found in it in the warning role,
-and the thread's board card a small mark; at Full access the tag stays quiet.
+A Code, Chat, or Work tool row whose result was outside content carries an
+"Outside content" tag, followed by what Octant Shield's Watcher found in it in
+the warning role, and a Code thread's board card a small mark; at Full access
+the tag stays quiet.
 Neither prompts. The section also shows, each
 as an account default a Project
 may override: **Auto reviewer** (Provider's own / Octant Shield), **Safe
@@ -2161,7 +2162,9 @@ model** (each thread's provider with its smallest model, or a configured
 endpoint). The rules behind them are in
 [Octant Shield](docs/architecture.md#octant-shield). Built for Code: Auto
 reviewer and Shield model in Settings › Code › Access, and the reviewer
-override as a select on a Code Project's overview; Servers are not built. **Safe networks** is built as Settings › Access, in the
+override as a select on a Code Project's overview; **Servers** is built as an
+account list below Safe networks in Settings › Access (a Project override is
+allowed, not built yet). **Safe networks** is built as Settings › Access, in the
 Privacy & data group after Permissions: a **Network limits** panel with a
 switch that is off by default, a sentence saying plainly whether limits are on,
 and a note that a change applies to the next runtime started; then an intro
@@ -2178,6 +2181,14 @@ its count and age, and a quiet **Trust**, which adds that host and port to
 the list being edited. While limits are off, or when the host cannot route
 runtimes through these rules, a plain note says the lists are saved but not applied
 ([Provider runtime network](docs/architecture.md#provider-runtime-network)).
+**Servers** opens with a sentence saying agents reach these servers with the
+person's SSH agent and Octant never reads key files, a quiet note when no SSH
+agent is running, one line per profile (Read-only, Operate, Admin) and one
+saying lock-out and destructive actions always ask. A server row shows
+`user@alias` in the code font, its profile, its runbook path, and how many
+deploys it has, with quiet Change and Remove; the form is Alias, User,
+Profile, Deploy commands (one per line, shown for Operate and Admin), and
+Runbook path. A refusal from the host shows inline in the alert role.
 A Work Project's **Developer tools** switch is presentation, not a
 permission, so it lives on that Project's overview, not here
 ([Workspace](docs/design/workspace.md)). A Browser request from a

@@ -37,6 +37,7 @@
     "./host-client": "./src/hostClient.ts",
     "./host-resource-client": "./src/hostResourceClient.ts",
     "./host-control-client": "./src/hostControlClient.ts",
+    "./shield-servers-client": "./src/shieldServersClient.ts",
     "./host-federation-registry": "./src/hostFederationRegistry.ts",
     "./host-federation-transports": "./src/hostFederationTransports.ts",
     "./host-federation-merged-reads": "./src/hostFederationMergedReads.ts",

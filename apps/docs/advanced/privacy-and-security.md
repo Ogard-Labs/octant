@@ -149,7 +149,11 @@ web search or page fetch the provider runs with its own built-in tool, such as
 Codex's web search or OpenCode's web fetch, and a tool the model's provider
 runs on its own servers. The thread is marked as soon as the call starts, even
 if it later fails or you deny it, because by then the provider may already
-have the page. An agent that reports a web search the same way as a search of
+have the page. Where Octant can see what such a call returned, Octant Shield's Watcher reads
+it for text aimed at the agent, hidden or encoded text, and requests to send
+secrets out; a finding is tagged on the tool row, in Chat and Work as well as
+Code, and never shown to the Judge as text. Some providers do not show Octant
+the page, so their calls are marked but not read. An agent that reports a web search the same way as a search of
 your files cannot always be told apart, so that search may not mark the
 thread. If the provider's own reviewer is answering approvals in a Code
 thread, the turn stops at that point and says why, so you answer the next
@@ -369,6 +373,34 @@ What this does not cover yet:
   why limits ship off. With limits on, a runtime whose network client ignores
   the proxy settings cannot reach anything; turn the switch off to get its
   network back.
+
+### Your servers over SSH
+
+Agents can reach your own servers with `ssh`, in Work and Code alike. Register
+each one in **Settings → Access → Servers**: the host alias from your SSH
+config, the user you sign in as, and a profile.
+
+- **Read-only**: status, logs, disk, processes, and service status.
+- **Operate**: also restarts services, updates packages, and runs the deploy
+  commands you describe, exactly as you wrote them.
+- **Admin**: also edits configuration.
+
+At Auto, Octant Shield lets a command through when the server's profile
+covers it, and asks you about anything else. Some actions always ask you,
+whatever the profile: firewall changes that can cut access, removing users or
+keys, disk and partition changes, deleting data, and reboots. SSH to a host
+you did not register always asks too. Every remote command is recorded with
+its host and exit status.
+
+Octant never reads your key files: `ssh` signs in through your SSH agent. You
+can point each server at a notes file (a runbook); agents read it as
+reference, and nothing written there changes what Shield allows. Only someone
+at this computer can change the list.
+
+What this does not cover yet: below Full access an agent's command runs in a
+sandbox that cannot read your SSH config or open a connection to a server, so
+`ssh` connects only at Full access today, where commands are recorded but not
+reviewed. Exit status and runbook notes reach only Octant Harness threads.
 
 ## Remote transport
 

@@ -96,6 +96,61 @@ describe("WorkFileListingService", () => {
     expect(result.listing.truncated).toBe(false);
   });
 
+  it("lists each extra folder with the main folder, named by absolute path, and one folder alone", async () => {
+    const filesystem = workFilesystemFixture(root);
+    await seed(filesystem, [`${root}/agenda.txt`, "/notes/ideas.md", "/notes/deep/plan.md"]);
+    const extras = ["/notes"];
+    const listing = service(filesystem, [artifact({ relativePath: "/notes/ideas.md" })]);
+
+    const top = await listing.list({ threadId, projectId, rootPath: root, extraFolders: extras });
+    expect(top.status).toBe("listed");
+    if (top.status !== "listed") return;
+    expect(top.listing.entries.map((entry) => entry.path).sort()).toEqual([
+      "/notes",
+      "/notes/deep",
+      "/notes/deep/plan.md",
+      "/notes/ideas.md",
+      "agenda.txt",
+    ]);
+    expect(top.listing.entries.find((entry) => entry.path === "/notes/ideas.md")).toMatchObject({
+      kind: "file",
+      origin: "authored",
+    });
+
+    const inside = await listing.list({
+      threadId,
+      projectId,
+      rootPath: root,
+      extraFolders: extras,
+      directory: "/notes",
+    });
+    expect(inside.status).toBe("listed");
+    if (inside.status !== "listed") return;
+    expect(inside.listing.directory).toBe("/notes");
+    expect(inside.listing.entries.map((entry) => entry.path)).toEqual([
+      "/notes/ideas.md",
+      "/notes/deep",
+      "/notes/deep/plan.md",
+    ]);
+    expect(inside.listing.entries[0]).toMatchObject({ kind: "file", origin: "authored" });
+  });
+
+  it("refuses to list an absolute folder that is not one of the Project's extra folders", async () => {
+    const filesystem = workFilesystemFixture(root);
+    await seed(filesystem, [`${root}/agenda.txt`, "/elsewhere/secrets.txt", "/notes/a.md"]);
+
+    for (const directory of ["/elsewhere", "/notes-old", "/notes/../elsewhere"]) {
+      const result = await service(filesystem).list({
+        threadId,
+        projectId,
+        rootPath: root,
+        extraFolders: ["/notes"],
+        directory,
+      });
+      expect(result).toMatchObject({ status: "failed", failure: { category: "invalid" } });
+    }
+  });
+
   it("refuses to report a file a symlink points at outside the bound folder", async () => {
     const filesystem = workFilesystemFixture(root);
     await seed(filesystem, [`${root}/agenda.txt`, "/elsewhere/secrets.txt"]);

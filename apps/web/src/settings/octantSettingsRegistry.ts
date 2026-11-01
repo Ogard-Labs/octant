@@ -1008,7 +1008,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Access",
       scope: "host",
       keywords:
-        "access network safe networks trusted hosts domains address ranges local network this mac private network overlay egress proxy refused recently refused trust allow outbound connections",
+        "access network safe networks servers ssh trusted hosts domains address ranges local network this mac private network overlay egress proxy refused recently refused trust allow outbound connections",
       settings: [
         {
           id: settingId("network-limits"),
@@ -1023,6 +1023,20 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "safe networks trusted hosts domains address range cidr local network this mac private network overlay egress proxy refused recently refused trust every project own list port",
+        },
+        {
+          id: settingId("shield-servers-list"),
+          label: "Servers",
+          scope: "host",
+          keywords:
+            "servers ssh host alias login user profile read-only operate admin runbook notes change remove shield",
+        },
+        {
+          id: settingId("shield-servers-add"),
+          label: "Add a server",
+          scope: "host",
+          keywords:
+            "add register server ssh host alias user profile read-only operate admin deploy commands runbook notes ssh agent",
         },
       ],
     },

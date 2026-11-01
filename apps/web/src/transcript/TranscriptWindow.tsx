@@ -21,6 +21,14 @@ import {
   useCompactionReceipts,
 } from "../context/CompactionDivider";
 import { TranscriptOutputLimitNote } from "./outputLimitNote";
+import { TranscriptFindBar } from "./TranscriptFindBar";
+import {
+  clearTranscriptMatches,
+  findTranscriptMatches,
+  paintTranscriptMatches,
+  revealTranscriptMatch,
+  type TextMatch,
+} from "./transcriptFind";
 
 /**
  * Windowed transcript rows.
@@ -120,9 +128,6 @@ const MAX_SCROLL_MEMORY = 16;
 const ROW_FOCUSABLE =
   "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex='-1'])";
 
-/** Chromium's find UI close button never sends Escape; tests and hosts dispatch this. */
-export const TRANSCRIPT_FIND_CLOSED_EVENT = "transcriptfindclose";
-
 export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   const estimateSize = props.estimateSize ?? DEFAULT_ESTIMATE_SIZE;
   const overscan = props.overscan ?? DEFAULT_OVERSCAN;
@@ -159,6 +164,12 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   const [scrollMargin, setScrollMargin] = useState(0);
   const [trailSize, setTrailSize] = useState(0);
   const [findActive, setFindActive] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findIndex, setFindIndex] = useState(0);
+  const [findCount, setFindCount] = useState(0);
+  const findInputRef = useRef<HTMLInputElement>(null);
+  const matchesRef = useRef<ReadonlyArray<TextMatch>>([]);
+  const revealAfterQueryRef = useRef(false);
   const [stickyIndexes, setStickyIndexes] = useState<ReadonlySet<number>>(() => new Set());
   const [liveMessage, setLiveMessage] = useState("");
   const items = props.items;
@@ -170,7 +181,6 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   const restored = remembered?.firstKey === firstKey ? remembered : undefined;
   const followingRef = useRef(follows && (restored?.following === true || restored === undefined));
   const appliedRevealKeyRef = useRef<string | undefined>(undefined);
-  const sawFindMatchRef = useRef(false);
   const pendingFocusRef = useRef<
     { readonly index: number; readonly edge: "start" | "end" } | undefined
   >(undefined);
@@ -429,40 +439,58 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   useLayoutEffect(() => {
     function onFindShortcut(event: KeyboardEvent) {
       if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "f") return;
-      // Expand before Chromium's in-page find runs so off-window rows are in the DOM.
-      sawFindMatchRef.current = false;
-      flushSync(() => setFindActive(true));
-    }
-    function onLeaveFind(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
-      setFindActive(false);
-    }
-    function onFindClosed() {
-      setFindActive(false);
-    }
-    function onSelectionChange() {
-      // Chromium's find-in-page close button does not send Escape. A match
-      // selects text; dismissing find then collapses the selection.
-      if (!findActive) return;
-      const selection = document.getSelection();
-      if (selection !== null && !selection.isCollapsed) {
-        sawFindMatchRef.current = true;
-        return;
+      if (event.altKey || event.shiftKey) return;
+      const root = scrollElementRef.current;
+      if (root === null || root.closest("[hidden], [inert]") !== null) return;
+      const target = event.target;
+      if (target instanceof Element) {
+        // The code editor and terminal have their own find.
+        if (target.closest(".monaco-editor, .xterm") !== null) return;
+        // Only the thread the person is in: its transcript and composer sit in
+        // the same workspace section (the transcript's parent can be a column
+        // that leaves the composer outside).
+        const owner = root.closest("section") ?? root.parentElement;
+        if (target !== document.body && owner !== null && !owner.contains(target)) return;
       }
-      if (!sawFindMatchRef.current) return;
-      setFindActive(false);
+      event.preventDefault();
+      // Mount every row before matching so off-window rows can be found.
+      flushSync(() => setFindActive(true));
+      findInputRef.current?.focus();
+      findInputRef.current?.select();
     }
     window.addEventListener("keydown", onFindShortcut, true);
-    window.addEventListener("keydown", onLeaveFind);
-    window.addEventListener(TRANSCRIPT_FIND_CLOSED_EVENT, onFindClosed);
-    document.addEventListener("selectionchange", onSelectionChange);
-    return () => {
-      window.removeEventListener("keydown", onFindShortcut, true);
-      window.removeEventListener("keydown", onLeaveFind);
-      window.removeEventListener(TRANSCRIPT_FIND_CLOSED_EVENT, onFindClosed);
-      document.removeEventListener("selectionchange", onSelectionChange);
-    };
-  }, [findActive]);
+    return () => window.removeEventListener("keydown", onFindShortcut, true);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!findActive) {
+      clearTranscriptMatches();
+      matchesRef.current = [];
+      setFindCount(0);
+      return;
+    }
+    const root = scrollElementRef.current;
+    if (root === null) return;
+    const ranges = findTranscriptMatches(root, findQuery);
+    matchesRef.current = ranges;
+    setFindCount(ranges.length);
+    const index = Math.min(findIndex, Math.max(0, ranges.length - 1));
+    if (index !== findIndex) setFindIndex(index);
+    paintTranscriptMatches(ranges, index);
+    if (revealAfterQueryRef.current) {
+      revealAfterQueryRef.current = false;
+      revealTranscriptMatch(ranges[index]);
+    }
+    return clearTranscriptMatches;
+  }, [findActive, findQuery, findIndex, items, virtualizer.getVirtualItems().length]);
+
+  function stepFind(direction: 1 | -1): void {
+    const count = matchesRef.current.length;
+    if (count === 0) return;
+    const next = (findIndex + direction + count) % count;
+    setFindIndex(next);
+    revealTranscriptMatch(matchesRef.current[next]);
+  }
 
   useLayoutEffect(() => {
     setFindActive(false);
@@ -646,6 +674,23 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
       {...(props.role === undefined ? {} : { role: props.role })}
       style={props.style}
     >
+      {findActive ? (
+        <div className="transcript-find-anchor">
+          <TranscriptFindBar
+            count={findCount}
+            current={findIndex}
+            onClose={() => setFindActive(false)}
+            onQueryChange={(query) => {
+              revealAfterQueryRef.current = true;
+              setFindQuery(query);
+              setFindIndex(0);
+            }}
+            onStep={stepFind}
+            ref={findInputRef}
+            query={findQuery}
+          />
+        </div>
+      ) : null}
       <div data-transcript-lead="" ref={leadRef}>
         {props.lead}
       </div>

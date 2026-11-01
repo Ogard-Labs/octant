@@ -163,6 +163,35 @@ describe("CodeSearchService", () => {
     ]);
   });
 
+  it("searches the Project's extra folders and names the folder each match lies in", async () => {
+    const result = await service(
+      fakePort({
+        ...smallRepository,
+        "/notes": { kind: "dir", children: ["answer.md", "escape"] },
+        "/notes/answer.md": { kind: "file", text: "the answer is here\n" },
+        "/notes/escape": { kind: "symlink", target: "/secrets" },
+        "/secrets": { kind: "dir", children: ["answer.env"] },
+        "/secrets/answer.env": { kind: "file", text: "answer\n" },
+      }),
+    ).search({
+      threadId,
+      checkoutId,
+      rootPath,
+      extraFolders: ["/notes", "/missing"],
+      scope: "content",
+      query: "answer",
+    });
+
+    expect(result.status).toBe("searched");
+    if (result.status !== "searched") return;
+    const inNotes = result.search.matches.filter((match) => "folder" in match);
+    expect(inNotes).toEqual([
+      expect.objectContaining({ path: "answer.md", folder: "/notes", line: 1 }),
+    ]);
+    expect(result.search.matches.some((match) => "folder" in match === false)).toBe(true);
+    expect(JSON.stringify(result.search.matches)).not.toContain("/secrets");
+  });
+
   it("never searches a path that escapes the checkout through a symlink", async () => {
     const result = await service(
       fakePort({
