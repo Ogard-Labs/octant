@@ -802,6 +802,99 @@ describe("Code app-managed tools", () => {
     expect(act).not.toHaveBeenCalled();
   });
 
+  describe("saving a download", () => {
+    function downloadTools(options: {
+      readonly executionPolicy?: "plan";
+      readonly refusal?: string;
+      readonly request?: ReturnType<typeof vi.fn>;
+    }) {
+      const current = thread(
+        options.executionPolicy === undefined ? {} : { executionPolicy: options.executionPolicy },
+      );
+      const saveDownload = vi.fn(
+        async (input: {
+          readonly ask: (
+            facts: { name: string; sizeBytes: number; mediaType: string },
+            origin: string,
+          ) => Promise<unknown>;
+        }) => {
+          await input.ask(
+            { name: "report.pdf", sizeBytes: 1_258_291, mediaType: "application/pdf" },
+            "https://example.com",
+          );
+          return {
+            status: "saved" as const,
+            path: "downloads/report.pdf",
+            sizeBytes: 1_258_291,
+            mediaType: "application/pdf",
+          };
+        },
+      );
+      const request = options.request ?? vi.fn(async () => "approved" as const);
+      const tools = createCodeAppManagedTools({
+        windowId,
+        thread: current,
+        readThread: () => current,
+        uuid: uuidFactory(),
+        executeOperation: vi.fn(),
+        terminal: { read: vi.fn() },
+        browserApproval: {
+          isApproved: () => true,
+          request: vi.fn(),
+          remember: vi.fn(),
+          forget: vi.fn(),
+        },
+        browserDownload: {
+          root: "/checkout",
+          ...(options.refusal === undefined ? {} : { refusal: () => options.refusal }),
+          request: request as never,
+        },
+        browser: {
+          resolveAuthority: () => browserAuthority(),
+          inspectThread: () => browserSnapshot(browserAuthority()),
+          create: vi.fn(),
+          act: vi.fn(),
+          saveDownload: saveDownload as never,
+          releaseThread: vi.fn(),
+        },
+      });
+      return { tools, saveDownload, request };
+    }
+    const save = (tools: ReturnType<typeof downloadTools>["tools"]) =>
+      tools.execute({
+        name: CODE_BROWSER_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "download-save", downloadId: "d1" }),
+      });
+
+    it("asks the thread's tool approval, naming the file, its size, its type and the site", async () => {
+      const { tools, saveDownload, request } = downloadTools({});
+      const result = await save(tools);
+      expect(result).toMatchObject({ isError: false, result: { saved: "downloads/report.pdf" } });
+      expect(saveDownload).toHaveBeenCalledWith(
+        expect.objectContaining({ workspaceRoot: "/checkout", downloadId: "d1" }),
+      );
+      expect(request).toHaveBeenCalledWith(
+        "Let the agent save report.pdf (1.2 MB, PDF) from https://example.com into this thread's workspace?",
+        undefined,
+      );
+    });
+
+    it("refuses on a paired device's turn and in Plan mode, asking no one", async () => {
+      const paired = downloadTools({ refusal: "download-needs-this-computer" });
+      expect(await save(paired.tools)).toEqual({
+        result: { error: "download-needs-this-computer" },
+        isError: true,
+      });
+      expect(paired.saveDownload).not.toHaveBeenCalled();
+      const plan = downloadTools({ executionPolicy: "plan" });
+      expect(await save(plan.tools)).toEqual({
+        result: { error: "plan-mode-read-only" },
+        isError: true,
+      });
+      expect(plan.saveDownload).not.toHaveBeenCalled();
+    });
+  });
+
   it("releases an in-flight browser context when the provider turn is cancelled", async () => {
     let resolveAct!: (snapshot: BrowserAutomationSnapshot) => void;
     const active = browserSnapshot(browserAuthority());
@@ -2396,7 +2489,8 @@ describe("Code tool families", () => {
     // The three flow operations and their name argument added about 65 bytes.
     // Device emulation's preset, touch, and colorScheme arguments added about
     // 305 bytes, most of it their two short value lists.
-    expect(JSON.stringify(families).length).toBeLessThanOrEqual(5_920);
+    // The download-save operation and its downloadId added about 45 bytes.
+    expect(JSON.stringify(families).length).toBeLessThanOrEqual(5_970);
   });
 
   it.each(["octant_browser", "octant_terminal", "octant_apple", "octant_android"])(

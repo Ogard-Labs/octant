@@ -1,5 +1,13 @@
 import type { StoredBrowserProfile } from "@octant/contracts/browser-profiles";
 import type { BrowserProfileChoice } from "@octant/contracts/project-browser";
+import { browserDownloadQuestion } from "@octant/domain";
+
+/** The file a download approval names; see the Browser approval contract. */
+interface BrowserDownloadRequest {
+  readonly name: string;
+  readonly sizeBytes: number;
+  readonly mediaType: string;
+}
 
 /** The files an upload approval names; see the Browser approval contract. */
 interface BrowserUploadRequest {
@@ -31,10 +39,14 @@ export function browserApprovalSummary(approval: {
   readonly origin: string;
   readonly profile?: StoredBrowserProfile | undefined;
   readonly upload?: BrowserUploadRequest | undefined;
+  readonly download?: BrowserDownloadRequest | undefined;
   readonly signIn?: { readonly reason?: string | undefined } | undefined;
 }): string {
   if (approval.signIn !== undefined) {
     return `The agent asks you to sign in on ${approval.origin}`;
+  }
+  if (approval.download !== undefined) {
+    return browserDownloadQuestion(approval.origin, approval.download);
   }
   if (approval.upload !== undefined) {
     const named = approval.upload.files
@@ -50,8 +62,12 @@ export function browserApprovalDetail(approval: {
   readonly profile?: StoredBrowserProfile | undefined;
   readonly extensionCount?: number | undefined;
   readonly upload?: BrowserUploadRequest | undefined;
+  readonly download?: BrowserDownloadRequest | undefined;
   readonly signIn?: { readonly reason?: string | undefined } | undefined;
 }): string {
+  if (approval.download !== undefined) {
+    return "The file comes from the page and is checked here first. This answer covers this file once";
+  }
   if (approval.signIn !== undefined) {
     const reason = approval.signIn.reason === undefined ? "" : `“${approval.signIn.reason}” `;
     return `${reason}Sign in on the Browser page yourself, then press Continue. The agent waits and never sees what you type`;

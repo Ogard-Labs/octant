@@ -59,6 +59,7 @@ import {
   addApiKey,
   ApiKeyPoolError,
   listApiKeys,
+  prepareBrowserDownloadHoldRoot,
   moveApiKey,
   removeApiKey,
   renameApiKey,
@@ -1838,7 +1839,13 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
   let startingManagedToolService: ManagedToolService | undefined;
   try {
     const instanceId = randomUUID();
+    // Files held for the agent are cleared when the app starts; if the folder
+    // cannot be made private, downloads simply stay blocked.
+    const browserDownloadRoot = await prepareBrowserDownloadHoldRoot("desktop").catch(
+      () => undefined,
+    );
     browserSurfaceHost ??= createBrowserSurfaceHost({
+      ...(browserDownloadRoot === undefined ? {} : { downloadRoot: browserDownloadRoot }),
       isOwnerWindowAvailable: (windowId) => desktopWindows.hasWindowId(windowId),
       createView: ({ partition, webPreferences }) =>
         new WebContentsView({

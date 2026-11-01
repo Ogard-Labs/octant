@@ -27,6 +27,7 @@ const MAX_TOOL_INPUT_BYTES = 16 * 1024;
 const MAX_TEXT_RESULT_BYTES = 24 * 1024;
 const REF_PATTERN = /^e[1-9][0-9]{0,3}$/;
 const TAB_PATTERN = /^t[1-9][0-9]{0,3}$/;
+const DOWNLOAD_PATTERN = /^d[1-9][0-9]{0,5}$/;
 
 /** One element to act on: a CSS selector, or a ref from the latest snapshot. */
 export type BrowserToolTarget =
@@ -45,6 +46,7 @@ export type BrowserToolStep = Exclude<
       | "upload"
       | "stop"
       | "sign-in"
+      | "download-save"
       | "flow-save"
       | "flow-list"
       | "flow-run";
@@ -107,6 +109,8 @@ export type BrowserToolInput = {
   | { readonly operation: "tab-switch" | "tab-close"; readonly tabId: string }
   | { readonly operation: "steps"; readonly steps: ReadonlyArray<BrowserToolStep> }
   | { readonly operation: "sign-in"; readonly reason?: string }
+  /** Save a download the page started, named by the id an answer reported. */
+  | { readonly operation: "download-save"; readonly downloadId: string }
   | { readonly operation: "flow-save" | "flow-run"; readonly name: string }
   | { readonly operation: "flow-list" }
 );
@@ -151,6 +155,7 @@ export function parseBrowserToolInput(
       one.operation === "upload" ||
       one.operation === "stop" ||
       one.operation === "sign-in" ||
+      one.operation === "download-save" ||
       isBrowserToolFlowInput(one)
     )
       return undefined;
@@ -316,6 +321,11 @@ function parseBrowserToolRecord(
     )
       return undefined;
     return { ...common, operation, ...named, files: files as ReadonlyArray<string> };
+  }
+  if (operation === "download-save" && only("downloadId")) {
+    return typeof record.downloadId === "string" && DOWNLOAD_PATTERN.test(record.downloadId)
+      ? { ...common, operation, downloadId: record.downloadId }
+      : undefined;
   }
   if (operation === "tab-list" && only()) return { ...common, operation };
   if (operation === "flow-list" && only()) return { ...common, operation };
@@ -600,6 +610,7 @@ export function browserToolAction(
     case "stop":
     case "steps":
     case "sign-in":
+    case "download-save":
     case "flow-save":
     case "flow-list":
     case "flow-run":
@@ -795,6 +806,7 @@ export function browserToolResult(snapshot: BrowserAutomationSnapshot, includeSc
               ...(observation.emulation === undefined ? {} : { emulation: observation.emulation }),
               ...(observation.tabs === undefined ? {} : { tabs: observation.tabs }),
               ...(observation.dialogs === undefined ? {} : { dialogs: observation.dialogs }),
+              ...(observation.downloads === undefined ? {} : { downloads: observation.downloads }),
               ...(bounded === undefined
                 ? {}
                 : {
@@ -831,5 +843,21 @@ export function browserToolResult(snapshot: BrowserAutomationSnapshot, includeSc
           }),
     },
     isError: snapshot.failure !== undefined || snapshot.status === "failed",
+  };
+}
+
+/** The answer to a `download-save` that saved: where the file is now. */
+export function browserDownloadSavedResult(saved: {
+  readonly path: string;
+  readonly sizeBytes: number;
+  readonly mediaType: string;
+}): BrowserToolAnswer {
+  return {
+    result: {
+      saved: saved.path,
+      sizeBytes: saved.sizeBytes,
+      mediaType: saved.mediaType,
+    },
+    isError: false,
   };
 }

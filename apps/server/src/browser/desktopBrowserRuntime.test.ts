@@ -42,6 +42,35 @@ describe("DesktopBrowserRuntime", () => {
     });
   });
 
+  it("forwards the hold flag and claims or discards a held download by id", async () => {
+    const fetch = vi.fn(async (url: string | URL | Request) =>
+      String(url).endsWith("download-claim")
+        ? Response.json({ path: "/tmp/octant-browser-downloads-1/desktop/d-x/file" })
+        : Response.json({ ok: true }),
+    );
+    const runtime = new DesktopBrowserRuntime({
+      brokerUrl: "http://127.0.0.1:41234/",
+      token: "broker-token",
+      fetch,
+    });
+    await runtime.act(
+      contextId,
+      { kind: "click", target: "#get", downloads: "hold" },
+      new AbortController().signal,
+    );
+    const sent = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(sent[1].body)).request).toMatchObject({ downloads: "hold" });
+    await expect(runtime.claimDownload(contextId, "d1")).resolves.toBe(
+      "/tmp/octant-browser-downloads-1/desktop/d-x/file",
+    );
+    await runtime.discardDownload(contextId, "d1");
+    expect(fetch.mock.calls.map((call) => String(call[0]))).toEqual([
+      "http://127.0.0.1:41234/v1/contexts/act",
+      "http://127.0.0.1:41234/v1/contexts/download-claim",
+      "http://127.0.0.1:41234/v1/contexts/download-discard",
+    ]);
+  });
+
   it("fails closed when the desktop broker is unavailable", async () => {
     const runtime = new DesktopBrowserRuntime({
       brokerUrl: "http://127.0.0.1:41234/",

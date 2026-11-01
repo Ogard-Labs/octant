@@ -762,6 +762,7 @@ describe("browser diagnostics reach the provider-facing result", () => {
       "flow-run": { name: "Check the form" },
       resize: { width: 390, height: 844 },
       "sign-in": { reason: "The dashboard needs your account." },
+      "download-save": { downloadId: "d1" },
       "read-page": {},
       click: { selector: "#go" },
       type: { selector: "#name", text: "octant" },
@@ -1248,6 +1249,7 @@ describe("octant_browser flow operations", () => {
       "needs-a-person",
     );
     expect(decide({ operation: "sign-in" })).toBe("needs-a-person");
+    expect(decide({ operation: "download-save", downloadId: "d1" })).toBe("needs-a-person");
     expect(decide({ operation: "stop" })).toBe("needs-a-person");
     expect(decide({ operation: "navigate", url: "https://example.com", profile: "project" })).toBe(
       "needs-a-person",

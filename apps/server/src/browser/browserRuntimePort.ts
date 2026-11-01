@@ -6,6 +6,7 @@ import type {
 import type {
   BrowserActionRequest,
   BrowserContextId,
+  BrowserDownloadReport,
   BrowserContextPolicy,
   BrowserEmulationReport,
   BrowserPresentationKind,
@@ -63,6 +64,8 @@ export interface BrowserRuntimeObservation {
     readonly seq?: number;
   }>;
   readonly diagnosticsCursor?: number;
+  /** Downloads the page started while an action that allowed them ran. */
+  readonly downloads?: ReadonlyArray<BrowserDownloadReport>;
 }
 
 export interface BrowserTargetInspection {
@@ -213,6 +216,13 @@ export type BrowserRuntimeAction = Pick<BrowserActionRequest, "kind"> &
      * `BrowserTargetStaleError` before touching it.
      */
     readonly expected?: { readonly role: string; readonly name: string; readonly url: string };
+    /**
+     * Set only by the server, for an action of the agent tool while the
+     * person's "Let agents download files" switch is on: a download the page
+     * starts while this action runs is held for the agent. Absent, a download
+     * is cancelled. It is not part of the action contract, so no route can set it.
+     */
+    readonly downloads?: "hold";
     /** The same check for a `drag`'s drop target when it came from a ref. */
     readonly destinationExpected?: {
       readonly role: string;
@@ -266,6 +276,17 @@ export interface BrowserRuntimePort {
     contextId: BrowserContextId,
     signal: AbortSignal,
   ) => Promise<BrowserRuntimeObservation>;
+  /**
+   * The absolute path of a download this context holds for the agent, in the
+   * host's private download folder, or undefined if it holds none by that id.
+   * Absent where a runtime holds no downloads.
+   */
+  readonly claimDownload?: (
+    contextId: BrowserContextId,
+    downloadId: string,
+  ) => Promise<string | undefined>;
+  /** Delete one held download. */
+  readonly discardDownload?: (contextId: BrowserContextId, downloadId: string) => Promise<void>;
   readonly closeContext: (contextId: BrowserContextId) => Promise<void>;
   readonly closeAll: () => Promise<void>;
   readonly reconcile?: () => Promise<void>;

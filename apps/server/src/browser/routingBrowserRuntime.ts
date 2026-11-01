@@ -80,6 +80,15 @@ export class RoutingBrowserRuntime implements BrowserRuntimePort {
     return backend.peek(...args);
   }
 
+  claimDownload(contextId: BrowserContextId, downloadId: string): Promise<string | undefined> {
+    const backend = this.#backend.get(contextId);
+    return backend?.claimDownload?.(contextId, downloadId) ?? Promise.resolve(undefined);
+  }
+
+  async discardDownload(contextId: BrowserContextId, downloadId: string): Promise<void> {
+    await this.#backend.get(contextId)?.discardDownload?.(contextId, downloadId);
+  }
+
   async closeContext(contextId: BrowserContextId): Promise<void> {
     const runtime = this.#backend.get(contextId);
     this.#backend.delete(contextId);

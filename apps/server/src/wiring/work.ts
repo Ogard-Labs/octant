@@ -433,6 +433,7 @@ export function wireWork(deps: WorkDependencies) {
                   browserAutomationService.inspectThread(ownerWindowId, threadId),
                 create: (command) => browserAutomationService.create(command),
                 act: (command) => browserAutomationService.act(command),
+                saveDownload: (command) => browserAutomationService.saveDownload(command),
                 releaseThread: (ownerWindowId, threadId) =>
                   browserAutomationService.releaseThread(ownerWindowId, threadId),
                 holdForPerson: (ownerWindowId, threadId) =>

@@ -1021,6 +1021,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "remembered websites browser origin site approval allow always forget revoke open page permission",
         },
         {
+          id: settingId("browser-agent-downloads"),
+          label: "Let agents download files",
+          scope: "host",
+          keywords:
+            "browser downloads agents download files save workspace downloads folder allow block switch",
+        },
+        {
           id: settingId("tool-approvals"),
           label: "Remembered tool approvals",
           scope: "host",

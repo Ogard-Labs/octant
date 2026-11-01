@@ -97,6 +97,7 @@ const settings = {
   skillFolders: { providers: [], folders: [] },
   rememberedBrowserOrigins: [],
   rememberedBrowserProfileSites: [],
+  agentBrowserDownloads: false,
   userProfile: { accent: "indigo", avatar: { kind: "initials" } },
 } as const;
 

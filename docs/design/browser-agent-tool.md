@@ -11,7 +11,8 @@ and [Browser captures](browser-captures.md) owns which screenshots a thread
 keeps.
 
 Status: built. The page snapshot and element refs (frames and open shadow
-roots included), short results, hover, select, drag, key chords, upload, tabs,
+roots included), short results, hover, select, drag, key chords, upload,
+download (behind a person-only switch and an answer for every file), tabs,
 batched steps, waits, settling, dialogs, viewport size and device emulation
 (presets, touch, color scheme), the sign-in handoff, person and agent together
 (the person's input kept, Take over and Hand back), and diagnostics with a
@@ -170,7 +171,8 @@ asking the agent.
   Browser, a tab that followed a redirect off the allowed origins after its own
   action is sent to a blank page before it is listed.
 - A paired device may hover and list tabs. It may not choose an option, drag,
-  upload, or open, switch, or close a tab, as it may not navigate or type
+  upload, save a download, or open, switch, or close a tab, as it may not
+  navigate or type
   ([Architecture: remote access](../architecture.md#security-and-authority)).
 
 ### Upload
@@ -203,13 +205,96 @@ only after the person approves it.
   and the server's Browser service refuses an upload that did not come with
   them, so no route or paired device can hand a runtime a path. A CLI in a
   thread terminal cannot upload.
-- Downloads stay blocked; this adds no download.
 - Rationale: an upload is the one Browser action that reads a file off this
   computer and sends it to a site, so it keeps the narrowest reach the request
   allowed. The workspace is the folder the thread's own file tools already
   treat as its root; a Work Project's extra folders are left out until a person
   asks for them. Asking every time follows the Browser's first-action ask,
   which a separate maintainer decision keeps at every access level.
+
+### Download
+
+A file comes from a page into a thread's workspace only when the person has
+turned on a switch, and then only after they answer for that file.
+
+- **The switch.** Settings › Permissions has "Let agents download files", off
+  by default. It is a host setting in the shell settings, which only a window
+  of this computer writes: the shell route is local-only, so a paired device, a
+  routine, a subagent, a plugin, a CLI in a thread terminal, and an agent have
+  no way to set it, and a change is journaled like every shell setting. Off,
+  every download on every page stays blocked, as before: the runtime cancels
+  it, and the action's answer says nothing about it.
+- **Holding.** With the switch on, a download a page starts while an agent
+  action of the agent tool runs (the action and the settling after it) is held:
+  the runtime keeps the file in a private temporary folder of the host (never
+  the workspace) and cancels it as soon as more than 25 MB has arrived. At
+  most 5 files are held per browsing context, the oldest discarded first. Any
+  other download, including one the person starts in the pane and one a page
+  starts on its own between actions, is cancelled as it is with the switch off.
+- **The report.** The answer to that action carries `downloads`: for each held
+  file a `downloadId` (`d1`, `d2`, and so on), its name (the page's suggestion
+  reduced to a safe basename), its size, and its media type sniffed from the
+  file's own bytes, never from the page's header. A file that was stopped
+  (over the cap, unfinished after 10 seconds, or failed) is reported by name
+  and reason and holds nothing. Each is reported once.
+- **Saving.** `download-save` names a reported `downloadId`. The server checks
+  the file, then asks the person every time: "Let the agent save report.pdf
+  (1.2 MB, PDF) from https://example.com into this thread's workspace?" It
+  names the file, its size, its type, and the site. The answer covers that file
+  once and is never remembered, so the card has no "Always allow", and it is
+  asked at every access level, Full access included. Work asks in the thread's
+  Browser approval card ("Save once" or "Deny"); Code asks in the thread's tool
+  approval.
+- **Where it lands.** In `downloads/` at the root of the thread's workspace:
+  the Work thread's Project folder, or the Code thread's checkout, the same
+  root an upload reads from. The name is the safe basename (no path part, no
+  leading dot, at most 120 characters); a name already taken becomes
+  `report (2).pdf`, and a file is never overwritten. A symbolic link at
+  `downloads/` or anywhere on the path is refused, and the file is created
+  exclusively without following a link.
+- **What is refused.** A program or installer, whatever its name says: bytes
+  that begin like a Mach-O, ELF, or PE/COFF file, and names ending `.app`,
+  `.pkg`, `.dmg`, `.exe`, `.msi`, `.bat`, `.cmd`, `.command`, `.sh`, `.scpt`,
+  `.jar`, `.deb`, `.rpm`, or `.appimage`. This is refused before anyone is
+  asked. Everything else may be saved. A file over 25 MB, as for an upload, is
+  never held.
+- **Clean-up.** A held file is deleted when it is saved, refused, or denied,
+  when its browsing context closes, and when the host starts. The headless
+  and the desktop Browser keep separate folders, so one starting never clears
+  the other's.
+- **Journal.** `browser.download-saved@1` records the thread, the page's
+  origin, the saved path relative to the workspace, the size, the media type,
+  and the SHA-256, and `browser.download-refused@1` records a download that
+  was stopped, refused, or denied with the thread, origin, name, and reason
+  (`too-large`, `executable`, `denied`, `cancelled`, `expired`, `symlink`,
+  `changed`, or `unavailable`). Neither holds bytes. Both sit on one
+  `browser-download` aggregate per thread, so a thread purge removes them with
+  the thread.
+- **Who can save.** Only the agent tool: it names a held file by the id the
+  runtime issued and the server resolves the rest, so no route and no paired
+  device can name a host path or save a file. A paired device's turn, a CLI in
+  a thread terminal, and Plan mode refuse (`download-needs-this-computer`,
+  `download-needs-a-person`, `plan-mode-read-only`), and such a turn holds no
+  download. A routine's or a subagent's turn follows upload: the question goes
+  to a window that can see the thread, and an unanswered question expires and saves nothing. A batch cannot hold `download-save`.
+- Rationale: an agent's download is a file written by a page into a folder the
+  thread's own file tools and a shell can reach, so it keeps the narrowest
+  reach the request allowed: off by default; held outside the workspace until
+  a person says yes to that one file; one folder; never over a file; and no
+  program, which a later shell command would run. The switch is a person-only
+  host setting for the same reason the remembered sites are: an agent must not
+  be able to widen its own reach. Cancelling at the cap, rather than checking
+  afterwards, keeps a page from filling the disk with a file nobody asked for;
+  the headless runtime cannot tell which file in its download folder belongs
+  to which download, so when any file passes the cap it cancels the context's
+  running downloads. The person's own download in the pane stays blocked: this
+  switch is for agents' downloads into the workspace only, and a file the
+  person wants they can fetch themselves.
+- Not covered: a person's own downloads in the Browser pane, and a download
+  that starts after an action's settling has ended (it is cancelled). The check that the file is not written through a
+  link is made on the folder's path before and after the write; a process of
+  the person's own that swaps `downloads/` for a link in between, which can
+  already write anywhere in the workspace, is not stopped.
 
 ## Steps
 
@@ -222,9 +307,9 @@ only after the person approves it.
   its operation, and its own refusal or failure) and lists the steps that ran
   before it with what each changed; no later step runs. A batch that succeeds
   answers as its last step does, with a line per step.
-- A batch cannot hold another batch, an upload, `stop`, a flow operation, or a
-  `navigate` with a profile: each of those needs a call, and for an upload or a
-  signed-in page a question to the person, of its own. A malformed step refuses the whole batch
+- A batch cannot hold another batch, an upload, a `download-save`, `stop`, a flow
+  operation, or a `navigate` with a profile: each of those needs a call, and for
+  an upload, a download, or a signed-in page a question to the person, of its own. A malformed step refuses the whole batch
   before any step runs.
 - A batch is a list of fixed operations, never a script: nothing an agent
   writes runs in the page.
@@ -597,7 +682,9 @@ Several threads of one Project may each drive their own page at the same time.
 - It runs no script an agent wrote inside the page. Every operation is a fixed
   host action, so authority checks stay on the server and never move into page
   code.
-- It downloads nothing: downloads stay blocked on every page
+- It saves no file from a page unless the person turned on "Let agents
+  download files" and answers for that file ([Download](#download)); every
+  other download stays blocked on every page
   ([Browser profiles: page rules](browser-profiles.md#page-rules-that-do-not-change)).
 
 ## Verification
@@ -613,7 +700,15 @@ Several threads of one Project may each drive their own page at the same time.
   `apps/server/src/browser/browserAppManagedTools.test.ts` covers the arguments
   and their refusals.
 - `apps/server/src/browser/browserAutomationService.test.ts` covers ref
-  resolution and refusal on the server.
+  resolution and refusal on the server, and that only an agent action with the
+  switch on asks a runtime to hold a download.
+- The download rules run against real Chromium in both Browsers: the smoke test
+  above (switch off, held and saved with the right bytes, denied, a program
+  refused by its bytes, a file stopped at the cap, a numbered name, a symbolic
+  link at `downloads/`, a paired device) and the desktop real-page test, where a
+  Playwright download stands in for Electron's `will-download` item. The cap
+  while a file is still arriving is covered against a fake session item
+  (`browserDownloadHold.test.ts`) because Electron is not present there.
 - `apps/server/src/browser/browserThreadOwnership.test.ts` covers one thread's
   page being out of reach of another thread, a subagent, and another thread's
   terminal grant, and the Project's page list.

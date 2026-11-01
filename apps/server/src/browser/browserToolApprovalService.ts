@@ -99,6 +99,12 @@ export class BrowserToolApprovalService {
     readonly profile?: StoredBrowserProfile;
     /** Files the agent asks to upload to this origin; see the contract. */
     readonly upload?: ReadonlyArray<{ readonly name: string; readonly sizeBytes: number }>;
+    /** A download the agent asks to save into the workspace; see the contract. */
+    readonly download?: {
+      readonly name: string;
+      readonly sizeBytes: number;
+      readonly mediaType: string;
+    };
     /** The agent asks the person to sign in here; see the contract. */
     readonly signIn?: { readonly reason?: string };
     readonly signal?: AbortSignal;
@@ -125,6 +131,15 @@ export class BrowserToolApprovalService {
                 name: file.name.slice(0, 256),
                 sizeBytes: file.sizeBytes,
               })),
+            },
+          }),
+      ...(input.download === undefined
+        ? {}
+        : {
+            download: {
+              name: input.download.name.slice(0, 256),
+              sizeBytes: input.download.sizeBytes,
+              mediaType: input.download.mediaType.slice(0, 128),
             },
           }),
       ...(input.signIn === undefined
@@ -191,12 +206,13 @@ export class BrowserToolApprovalService {
       return false;
     }
     pending.resolve(decision.decision);
-    // An upload's answer covers those files once; it never becomes a
-    // remembered grant for the origin.
+    // An upload's or a download's answer covers that file once; it never
+    // becomes a remembered grant for the origin.
     if (
       decision.decision === "approved" &&
       decision.remember === true &&
       pending.view.upload === undefined &&
+      pending.view.download === undefined &&
       pending.view.signIn === undefined
     ) {
       // The answering window journals the grant: for a routine it is the
