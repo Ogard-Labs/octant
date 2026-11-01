@@ -302,15 +302,52 @@ const SHIELD_VERDICT_WORDS = {
   deny: "Octant Shield denied",
 } as const;
 
+/** The provider's own reviewer, named as the provider's and never as Shield's. */
+const PROVIDER_VERDICT_WORDS = {
+  allow: "Approved by the provider's review",
+  deny: "Denied by the provider's review",
+} as const;
+
 const SHIELD_VERDICT_ICONS = { allow: ShieldCheck, ask: ShieldAlert, deny: ShieldX } as const;
 
 /**
- * One approval Octant Shield answered: the call, its verdict, and why, with
- * the rule or model that decided and how long it took. Always in Shield's own
- * name, never the provider's or the person's.
+ * One approval a reviewer answered: the call, its verdict, and why. Shield's
+ * line names the rule or model that decided and how long it took; the
+ * provider's names the risk grade it reported. Each is in its own name, never
+ * the other's or the person's.
  */
 function ShieldReviewLine(props: { readonly row: ReviewRow }) {
   const { decision, summary } = props.row;
+  if (decision.reviewer === "provider") {
+    const word = PROVIDER_VERDICT_WORDS[decision.verdict];
+    const Icon = decision.verdict === "allow" ? ShieldCheck : ShieldX;
+    const note = decision.reason ?? "";
+    return (
+      <div
+        aria-label={`${word}: ${boundAccessibleSummary(summary)}. ${note}`.trimEnd()}
+        className="turn-activity__review"
+        data-verdict={decision.verdict}
+        role="note"
+      >
+        <Icon
+          aria-hidden="true"
+          className="turn-activity__review-icon"
+          size={14}
+          strokeWidth={1.8}
+        />
+        <span className="turn-activity__review-verdict">{word}</span>
+        <span className="turn-activity__review-call" title={summary}>
+          {summary}
+        </span>
+        <span className="turn-activity__review-reason" title={note}>
+          {note}
+        </span>
+        {decision.riskLevel === undefined ? null : (
+          <span className="turn-activity__outcome">{decision.riskLevel} risk</span>
+        )}
+      </div>
+    );
+  }
   const Icon = SHIELD_VERDICT_ICONS[decision.verdict];
   const decidedBy =
     decision.rule ??

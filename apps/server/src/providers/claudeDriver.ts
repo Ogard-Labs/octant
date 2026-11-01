@@ -535,6 +535,8 @@ const availableCapabilities: ProviderCapabilities = {
   taskProgress: "supported",
   nativeChildAgents: "unsupported",
   harnessAutoReview: "supported",
+  // Claude's reviewer reports a refusal and nothing for a call it approved.
+  reviewVerdicts: { allow: "unsupported", deny: "supported" },
   modelSwitch: "supported",
   nativeSetup: {
     subagents: "supported",

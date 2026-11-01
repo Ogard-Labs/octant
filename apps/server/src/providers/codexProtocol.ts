@@ -456,11 +456,47 @@ const AccountRateLimitsNotification = Schema.Struct({
   rateLimits: RateLimitSnapshot,
 });
 
+/**
+ * The reviewer's per-call notices. The app-server marks them unstable, so the
+ * fields read here are the few the verdict needs and every one but the ids is
+ * optional: a reshaped notice then degrades to a verdict with less detail
+ * instead of failing the turn.
+ */
+const AutoReviewStartedNotification = Schema.Struct({
+  threadId: Schema.String,
+  turnId: Schema.String,
+  reviewId: Schema.String,
+});
+
+const AutoReviewCompletedNotification = Schema.Struct({
+  threadId: Schema.String,
+  turnId: Schema.String,
+  reviewId: Schema.String,
+  targetItemId: Schema.optional(Schema.NullOr(Schema.String)),
+  action: Schema.optional(
+    Schema.Struct({
+      type: Schema.String,
+      command: Schema.optional(Schema.NullOr(Schema.String)),
+      program: Schema.optional(Schema.NullOr(Schema.String)),
+      files: Schema.optional(Schema.NullOr(Schema.Array(Schema.String))),
+      host: Schema.optional(Schema.NullOr(Schema.String)),
+      toolName: Schema.optional(Schema.NullOr(Schema.String)),
+    }),
+  ),
+  review: Schema.Struct({
+    status: Schema.String,
+    rationale: Schema.optional(Schema.NullOr(Schema.String)),
+    riskLevel: Schema.optional(Schema.NullOr(Schema.String)),
+  }),
+});
+
 const stableNotificationSchemas = {
   "turn/started": TurnStartedNotification,
   "turn/completed": TurnCompletedNotification,
   "item/started": ItemStartedNotification,
   "item/completed": ItemCompletedNotification,
+  "item/autoApprovalReview/started": AutoReviewStartedNotification,
+  "item/autoApprovalReview/completed": AutoReviewCompletedNotification,
   "item/agentMessage/delta": DeltaNotification,
   "item/plan/delta": DeltaNotification,
   "item/commandExecution/outputDelta": ToolProgressNotification,
@@ -494,6 +530,8 @@ const stableNotificationDecoders: Record<
   "turn/completed": decode(TurnCompletedNotification),
   "item/started": decode(ItemStartedNotification),
   "item/completed": decode(ItemCompletedNotification),
+  "item/autoApprovalReview/started": decode(AutoReviewStartedNotification),
+  "item/autoApprovalReview/completed": decode(AutoReviewCompletedNotification),
   "item/agentMessage/delta": decode(DeltaNotification),
   "item/plan/delta": decode(DeltaNotification),
   "item/commandExecution/outputDelta": decode(ToolProgressNotification),
