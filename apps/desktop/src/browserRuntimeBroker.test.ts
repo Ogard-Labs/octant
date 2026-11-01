@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { startBrowserRuntimeBroker } from "./browserRuntimeBroker";
-import { BrowserNavigationBlockedError } from "./browserSurfaceHost";
+import { BrowserNavigationBlockedError, BrowserTargetStaleError } from "./browserSurfaceHost";
 
 const contextId = "10000000-0000-4000-8000-000000000001";
 
@@ -113,6 +113,27 @@ describe("BrowserRuntimeBroker", () => {
         error: "navigation-blocked",
         url: "https://www.example.com/",
       });
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("passes a snapshot ref's expected element through and reports a stale one as a structured 422", async () => {
+    const surface = host();
+    surface.act.mockRejectedValueOnce(new BrowserTargetStaleError());
+    const broker = await startBrowserRuntimeBroker(surface as never);
+    try {
+      const action = {
+        kind: "click",
+        target: "#save",
+        expected: { role: "button", name: "Save", url: "https://example.com/" },
+      };
+      const response = await broker.fetchForTest(
+        request(broker.url, broker.token, { contextId, request: action }),
+      );
+      expect(surface.act).toHaveBeenCalledWith(contextId, action);
+      expect(response.status).toBe(422);
+      expect(await response.json()).toEqual({ error: "target-stale" });
     } finally {
       await broker.close();
     }

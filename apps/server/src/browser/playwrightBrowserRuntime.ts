@@ -1,5 +1,12 @@
 import { createHash } from "node:crypto";
-import { originAllowed } from "@octant/domain";
+import {
+  browserRefStillMatches,
+  formatBrowserPageSnapshot,
+  MAX_BROWSER_SNAPSHOT_NODES,
+  MAX_BROWSER_SNAPSHOT_REFS,
+  originAllowed,
+  readBrowserPage,
+} from "@octant/domain";
 import { constants } from "node:fs";
 import { access } from "node:fs/promises";
 import { isAbsolute } from "node:path";
@@ -14,6 +21,7 @@ import { chromium } from "playwright-core";
 import {
   BrowserNavigationBlockedError,
   BrowserProfileUnavailableError,
+  BrowserTargetStaleError,
   type BrowserPointObservation,
   type BrowserRuntimeObservation,
   type BrowserRuntimePort,
@@ -382,6 +390,19 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     const page = await this.#page(contextId, signal);
     const owned = this.#contexts.get(contextId);
     if (owned !== undefined) owned.blockedNavigationUrl = undefined;
+    if (request.expected !== undefined && request.target !== undefined) {
+      const found = await page.evaluate(readBrowserPage, {
+        mode: "verify",
+        selector: request.target,
+      });
+      const pageUrl = page.url() === "about:blank" ? "about:blank" : bounded(page.url(), 4096);
+      if (
+        found.mode !== "verify" ||
+        !browserRefStillMatches(request.expected, found.element, pageUrl)
+      ) {
+        throw new BrowserTargetStaleError();
+      }
+    }
     switch (request.kind) {
       case "navigate":
         try {
@@ -422,6 +443,8 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
         break;
       case "extract-text":
         break;
+      case "snapshot":
+        break;
       case "observe-diagnostics": {
         // Hand over what the page reported and clear it: the next read answers
         // "what happened since I last looked", which is the question an agent
@@ -456,6 +479,9 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       throw new BrowserNavigationBlockedError(landed);
     }
     throwIfAborted(signal);
+    if (request.kind === "snapshot") {
+      return this.#snapshot(page, owned?.protectCredentials ?? true);
+    }
     return this.#observe(
       page,
       request.kind === "extract-text",
@@ -667,6 +693,34 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       this.#browserPid = undefined;
       throw error;
     }
+  }
+
+  /**
+   * The page as an outline with refs. No picture and no page text: the outline
+   * is the whole answer, and a credential field in it is named, never valued.
+   */
+  async #snapshot(
+    page: PlaywrightPagePort,
+    protectCredentials: boolean,
+  ): Promise<BrowserRuntimeObservation> {
+    const read = await page.evaluate(readBrowserPage, {
+      mode: "snapshot",
+      maxRefs: MAX_BROWSER_SNAPSHOT_REFS,
+      maxNodes: MAX_BROWSER_SNAPSHOT_NODES,
+      protectCredentials,
+      // Every frame and shadow root, which the in-page reader does not walk.
+      withholdValues: protectCredentials && (await sensitiveDocument(page)),
+    });
+    if (read.mode !== "snapshot") throw new Error("Browser snapshot is unavailable.");
+    const title = await page.title();
+    const viewport = page.viewportSize();
+    return {
+      ...(page.url() === "about:blank" ? {} : { url: bounded(page.url(), 4096) }),
+      ...(title.trim() === "" ? {} : { title: bounded(title, 1024) }),
+      snapshot: formatBrowserPageSnapshot(read.snapshot),
+      snapshotRefs: read.snapshot.refs,
+      ...(viewport === null ? {} : { viewport }),
+    };
   }
 
   async #observe(

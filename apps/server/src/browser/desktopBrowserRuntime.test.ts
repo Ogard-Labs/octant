@@ -82,6 +82,26 @@ describe("DesktopBrowserRuntime", () => {
     });
   });
 
+  it("reports a ref whose element changed as stale rather than as a broker failure", async () => {
+    const runtime = new DesktopBrowserRuntime({
+      brokerUrl: "http://127.0.0.1:41234/",
+      token: "broker-token",
+      fetch: vi.fn(async () => Response.json({ error: "target-stale" }, { status: 422 })),
+    });
+
+    await expect(
+      runtime.act(
+        contextId,
+        {
+          kind: "click",
+          target: "#save",
+          expected: { role: "button", name: "Save", url: "https://example.com/" },
+        },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({ name: "BrowserTargetStaleError" });
+  });
+
   it("reports only native contexts whose renderer process disappeared", async () => {
     vi.useFakeTimers();
     try {
