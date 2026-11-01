@@ -4,6 +4,7 @@ import type {
   CodeThread,
   OctantMode,
   WorkAccess,
+  WorkThread,
   ThreadExternalContentTaint,
   ToolActionAuthority,
   ToolHostId,
@@ -37,6 +38,8 @@ export interface NativeHarnessAuthorityOptions {
    * Project catalog the resolver reads.
    */
   readonly holdsServerCodeThread?: (thread: CodeThread) => boolean;
+  /** Whether a Work thread runs in a server Work Project, on the binding that Project derives. */
+  readonly holdsServerWorkThread?: (thread: WorkThread) => boolean;
   readonly clock?: () => string;
 }
 
@@ -85,9 +88,29 @@ export function createNativeHarnessAuthority(
       extension: { kind: "core" },
     };
   };
+  const serverWorkAuthority = (threadId: string): ToolActionAuthority | undefined => {
+    const thread = options.workThreads.read(threadId as never);
+    if (thread === undefined || thread.lifecycle !== "active") return undefined;
+    if (thread.bindingRevisionId === undefined) return undefined;
+    if (options.holdsServerWorkThread?.(thread) !== true) return undefined;
+    const provider = options.persistence.readProviderInstance(thread.providerInstanceId);
+    if (provider?.enabled !== true) return undefined;
+    return {
+      hostId: options.hostId,
+      mode: "work",
+      projectId: thread.projectId,
+      rootId: decodeToolRootId(thread.bindingRevisionId),
+      providerInstanceId: thread.providerInstanceId,
+      extension: { kind: "core" },
+    };
+  };
   const resolve = (threadId: string, mode: OctantMode): ToolActionAuthority | undefined =>
     resolver.resolve(threadId as never, mode) ??
-    (mode === "code" ? serverCodeAuthority(threadId) : undefined);
+    (mode === "code"
+      ? serverCodeAuthority(threadId)
+      : mode === "work"
+        ? serverWorkAuthority(threadId)
+        : undefined);
   const service = new ToolCallAuthorityService({
     resolveGrantedAuthority: (threadId, mode) => resolve(threadId, mode),
     resolveLiveFacts: ({ threadId, mode }) => {

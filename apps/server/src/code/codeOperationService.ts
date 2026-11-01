@@ -5,6 +5,8 @@ import {
 import type { SelectedExtensionResolver } from "../extensions/selectedExtensions";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { chooseThreadTerminalFolder } from "./codeTerminalFolder";
+import { chooseCodeRewindFilePoint } from "./codeForkPoint";
+import { turnChangedFiles } from "./codeTurnChangedFiles";
 import { randomUUID } from "node:crypto";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { isComputerUseSelection } from "@octant/plugin-host/computer-use";
@@ -19,6 +21,8 @@ import {
   type CodeCheckoutId,
   type CodeCheckpoint,
   type CodeCheckoutIdentity,
+  type CodeConversationTurn,
+  type CodeRewindFilesUnavailableReason,
   type CodeEvidenceReference,
   type CodeEvidenceContentId,
   type CodeFailure,
@@ -110,6 +114,10 @@ const REMOTE_FOLDER_UNAVAILABLE =
  * on the server, and its terminals, which are logins there.
  */
 const SERVER_THREAD_OPERATIONS: ReadonlySet<CodeOperationCommand["kind"]> = new Set([
+  // A server thread takes no checkpoints, so it rewinds its conversation
+  // only; the files part refuses with the reason.
+  "preview-code-rewind",
+  "rewind-code-thread",
   "start-provider-turn",
   "answer-provider-input",
   "answer-provider-approval",
@@ -135,6 +143,17 @@ const SERVER_GIT_OPERATIONS: ReadonlySet<CodeOperationCommand["kind"]> = new Set
   "commit-git",
   "push-git",
 ]);
+const REWIND_WHILE_TURN_RUNS =
+  "A turn is running in this thread. Wait for it to finish or stop it, then rewind.";
+/** Why a rewind's files cannot be put back, in the words the person reads. */
+const REWIND_FILES_UNAVAILABLE: Readonly<Record<CodeRewindFilesUnavailableReason, string>> = {
+  "server-project":
+    "A thread in a Project on a server takes no checkpoints, so only its conversation can be rewound. Git on the server is the way back for files.",
+  plan: "This thread is in Plan, which changes no files, so only its conversation can be rewound.",
+  unrecorded:
+    "A turn after this point changed files without a recorded checkpoint, so the files cannot be put back. Rewind the conversation only.",
+  unreadable: "The checkout could not be read, so the files cannot be put back. Try again.",
+};
 /**
  * Pull request operations, which a server thread runs with this host's `gh`
  * by repository and branch name alone. Only the GitHub remote check reads
@@ -643,6 +662,27 @@ export interface CodeOperationGitPort {
     readonly snapshot: CodeCheckpoint;
     readonly executionPolicy: CodeThread["executionPolicy"];
   }) => Promise<GitMutationOutcome & { readonly undo?: CodeCheckpoint }>;
+  /**
+   * What differs between a checkpoint's working tree and the checkout now.
+   * Optional so a host without it previews a rewind's files as unreadable.
+   */
+  readonly changesSince?: (input: {
+    readonly checkoutId: string;
+    readonly checkoutRoot: string;
+    readonly from: string;
+    readonly executionPolicy: CodeThread["executionPolicy"];
+  }) => Promise<
+    | {
+        readonly status: "ready";
+        readonly changes: ReadonlyArray<{
+          readonly path: string;
+          readonly insertions: number;
+          readonly deletions: number;
+          readonly binary: boolean;
+        }>;
+      }
+    | { readonly status: "unavailable" }
+  >;
 }
 
 type GitMutationOutcome =
@@ -913,6 +953,8 @@ export interface CodeOperationTurnPort {
   >;
   /** What running turns are waiting on, before any window's authority is applied. */
   readonly pendingRequests?: () => ReadonlyArray<CodeTurnPendingRequest>;
+  /** Whether a turn of this thread was noted, runs, or waits on the person. */
+  readonly holdsTurn?: (threadId: string) => boolean;
   /**
    * The other threads with a live turn that may write to this checkout root.
    * A port that cannot say refuses nothing, so a restore is never held up by
@@ -1070,6 +1112,17 @@ export interface CodeOperationServiceOptions {
   readonly attachments?: CodeAttachmentStore;
   /** Whether the thread's own provider and model can read an image. */
   readonly supportsAttachments?: (thread: CodeThread) => boolean;
+  /**
+   * Every turn of a thread, oldest first, or undefined when it cannot all be
+   * read. `includeRewound` keeps the turns a rewind removed, in the order they
+   * ran. Absent on a host that cannot rewind, which refuses a rewind.
+   */
+  readonly conversationTurns?: (
+    threadId: CodeThreadId,
+    options?: { readonly includeRewound?: boolean },
+  ) => ReadonlyArray<CodeConversationTurn> | undefined;
+  /** Whether the thread's provider reports it can cut its own session back. */
+  readonly supportsSessionRollback?: (thread: CodeThread) => boolean;
   readonly events: CodeOperationEventPort;
   /**
    * Resolves the `#thread` mentions a Code turn names.
@@ -2456,7 +2509,13 @@ export class CodeOperationService {
     checkout: CodeCheckoutIdentity,
     initiator: CodeOperationInitiator = "agent",
   ): Promise<"allow" | "waiting" | "unauthorized"> {
-    const operation = operationFor(command.kind);
+    // Rewinding only the conversation changes nothing but the thread's own
+    // record, so it is gated as a read; any rewind that puts files back is
+    // gated as the in-place restore it performs.
+    const operation =
+      command.kind === "rewind-code-thread" && command.scope === "conversation"
+        ? "read"
+        : operationFor(command.kind);
     // Opening the person's own confined shell is the only operation this seam
     // lets a caller vouch for. Every other class — including the durable
     // mutations `operationFor` classifies as `edit` — keeps its ordinary gate,
@@ -3024,53 +3083,19 @@ export class CodeOperationService {
         );
       }
       case "restore-git-checkpoint": {
-        const restore = this.#options.git.restoreCheckpoint;
-        if (restore === undefined)
-          return this.#failed(
-            command.operationId,
-            "unavailable",
-            "Restoring a checkpoint is unavailable.",
-          );
-        const writer = this.#threadsWritingIn(root.checkoutRoot, thread.id)[0];
-        if (writer !== undefined) {
-          return this.#failed(
-            command.operationId,
-            "conflict",
-            inPlaceRestoreRefusalText(
-              String(writer.projectId) === String(thread.projectId) ? writer.title : undefined,
-            ),
-          );
-        }
-        // Git queues per checkout id, so two Projects on one folder would
-        // otherwise overwrite it at the same time.
-        if (this.#restoreInFlight(root.checkoutRoot) !== undefined) {
-          return this.#failed(
-            command.operationId,
-            "conflict",
-            "Another restore is overwriting this checkout. Wait for it to finish, then restore.",
-          );
-        }
-        // Registered in the same step as the check above, with nothing
-        // awaited between them, so a turn either was refused here or waits.
-        const restoring = restore({
-          checkoutId: checkout.id,
-          checkoutRoot: root.checkoutRoot,
-          snapshot: command.checkpoint,
-          executionPolicy: thread.executionPolicy,
-        });
-        const inFlight = { checkoutRoot: root.checkoutRoot, settled: restoring };
-        this.#restoresInFlight.add(inFlight);
-        try {
-          return this.#gitMutation(
-            command.operationId,
-            command.gitOperationId,
-            "restore-checkpoint",
-            await restoring,
-          );
-        } finally {
-          this.#restoresInFlight.delete(inFlight);
-        }
+        const refusal = this.#inPlaceRestoreRefusal(thread, root.checkoutRoot);
+        if (refusal !== undefined) return this.#failed(command.operationId, ...refusal);
+        return this.#gitMutation(
+          command.operationId,
+          command.gitOperationId,
+          "restore-checkpoint",
+          await this.#restoreInPlace(thread, checkout, root.checkoutRoot, command.checkpoint),
+        );
       }
+      case "preview-code-rewind":
+        return await this.#previewRewind(command, thread, checkout, root.checkoutRoot);
+      case "rewind-code-thread":
+        return await this.#rewind(command, thread, checkout, root.checkoutRoot);
       case "create-pull-request":
         return this.#pullRequest(command, root.checkoutRoot, git);
       case "update-pull-request":
@@ -3707,6 +3732,241 @@ export class CodeOperationService {
       ...(this.#options.turns.threadsWritingIn?.(checkoutRoot, exceptThreadId) ?? []),
       ...starting,
     ];
+  }
+
+  /**
+   * Why an in-place restore of this checkout root cannot start now, or
+   * undefined when it may. Checked in the same step that registers the
+   * restore, with nothing awaited between them, so a turn either was refused
+   * here or waits for the overwrite.
+   */
+  #inPlaceRestoreRefusal(
+    thread: CodeThread,
+    checkoutRoot: string,
+  ): readonly ["unavailable" | "conflict", string] | undefined {
+    if (this.#options.git.restoreCheckpoint === undefined)
+      return ["unavailable", "Restoring a checkpoint is unavailable."];
+    const writer = this.#threadsWritingIn(checkoutRoot, thread.id)[0];
+    if (writer !== undefined) {
+      return [
+        "conflict",
+        inPlaceRestoreRefusalText(
+          String(writer.projectId) === String(thread.projectId) ? writer.title : undefined,
+        ),
+      ];
+    }
+    // Git queues per checkout id, so two Projects on one folder would
+    // otherwise overwrite it at the same time.
+    if (this.#restoreInFlight(checkoutRoot) !== undefined) {
+      return [
+        "conflict",
+        "Another restore is overwriting this checkout. Wait for it to finish, then restore.",
+      ];
+    }
+    return undefined;
+  }
+
+  /** Overwrite the checkout with a checkpoint; callers check `#inPlaceRestoreRefusal` first. */
+  async #restoreInPlace(
+    thread: CodeThread,
+    checkout: CodeCheckoutIdentity,
+    checkoutRoot: string,
+    checkpoint: CodeCheckpoint,
+  ): Promise<GitMutationOutcome & { readonly undo?: CodeCheckpoint }> {
+    const restore = this.#options.git.restoreCheckpoint;
+    if (restore === undefined) return { status: "unavailable" };
+    const restoring = restore({
+      checkoutId: checkout.id,
+      checkoutRoot,
+      snapshot: checkpoint,
+      executionPolicy: thread.executionPolicy,
+    });
+    const inFlight = { checkoutRoot, settled: restoring };
+    this.#restoresInFlight.add(inFlight);
+    try {
+      return await restoring;
+    } finally {
+      this.#restoresInFlight.delete(inFlight);
+    }
+  }
+
+  /**
+   * The turns a rewind from `fromOperationId` acts on: every turn in the order
+   * they ran (rewound ones included, which place files) and the ones the
+   * thread still shows, with the named turn's place among them. A rewind
+   * acts on a shown turn only, and never while a turn of this thread runs.
+   */
+  #rewindTurns(
+    operationId: CodeOperationId,
+    thread: CodeThread,
+    fromOperationId: CodeOperationId,
+  ):
+    | {
+        readonly status: "ok";
+        readonly all: ReadonlyArray<CodeConversationTurn>;
+        readonly removed: ReadonlyArray<CodeConversationTurn>;
+        readonly kept: ReadonlyArray<CodeConversationTurn>;
+      }
+    | { readonly status: "refused"; readonly result: CodeOperationResult } {
+    const refused = (category: "unavailable" | "conflict" | "invalid", message: string) =>
+      ({ status: "refused", result: this.#failed(operationId, category, message) }) as const;
+    const read = this.#options.conversationTurns;
+    if (read === undefined) return refused("unavailable", "Rewinding this thread is unavailable.");
+    if (
+      this.#options.turns.holdsTurn?.(String(thread.id)) === true ||
+      [...this.#startingTurns].some((turn) => String(turn.thread.id) === String(thread.id))
+    )
+      return refused("conflict", REWIND_WHILE_TURN_RUNS);
+    const all = read(thread.id, { includeRewound: true });
+    const shown = read(thread.id);
+    if (all === undefined || shown === undefined)
+      return refused("unavailable", "This thread's conversation could not be read. Try again.");
+    const from = shown.findIndex((turn) => String(turn.operationId) === String(fromOperationId));
+    if (from === -1)
+      return refused("invalid", "That message is no longer part of this thread's conversation.");
+    if (shown.slice(from).some((turn) => turn.status === "waiting"))
+      return refused("conflict", REWIND_WHILE_TURN_RUNS);
+    return { status: "ok", all, removed: shown.slice(from), kept: shown.slice(0, from) };
+  }
+
+  /**
+   * Which checkpoint a rewind's files come back from, or why they cannot.
+   * A thread on a registered server takes no checkpoints, and Plan writes
+   * nothing, not even the capture a restore takes first.
+   */
+  #rewindFilePoint(
+    thread: CodeThread,
+    checkout: CodeCheckoutIdentity,
+    all: ReadonlyArray<CodeConversationTurn>,
+    fromOperationId: CodeOperationId,
+  ):
+    | { readonly kind: "checkpoint"; readonly checkpoint: CodeCheckpoint }
+    | { readonly kind: "unchanged" }
+    | { readonly kind: "unavailable"; readonly reason: CodeRewindFilesUnavailableReason } {
+    if (checkout.kind === "remote-root") return { kind: "unavailable", reason: "server-project" };
+    if (thread.executionPolicy === "plan") return { kind: "unavailable", reason: "plan" };
+    const point = chooseCodeRewindFilePoint(all, String(fromOperationId));
+    if (point.kind === "refused") return { kind: "unavailable", reason: "unrecorded" };
+    return point;
+  }
+
+  async #previewRewind(
+    command: Extract<CodeOperationCommand, { kind: "preview-code-rewind" }>,
+    thread: CodeThread,
+    checkout: CodeCheckoutIdentity,
+    checkoutRoot: string,
+  ): Promise<CodeOperationResult> {
+    const turns = this.#rewindTurns(command.operationId, thread, command.fromOperationId);
+    if (turns.status === "refused") return turns.result;
+    const point = this.#rewindFilePoint(thread, checkout, turns.all, command.fromOperationId);
+    let files: Extract<CodeOperationResult, { kind: "rewind-preview" }>["files"];
+    if (point.kind !== "checkpoint") files = point;
+    else {
+      const read = this.#options.git.changesSince;
+      const changes = await read?.({
+        checkoutId: checkout.id,
+        checkoutRoot,
+        from: point.checkpoint.worktree,
+        executionPolicy: thread.executionPolicy,
+      }).catch(() => undefined);
+      if (changes?.status !== "ready") files = { kind: "unavailable", reason: "unreadable" };
+      else {
+        const record = turnChangedFiles(changes.changes);
+        files = record === undefined ? { kind: "unchanged" } : { kind: "changes", changes: record };
+      }
+    }
+    return decodeCodeOperationResult({
+      kind: "rewind-preview",
+      operationId: command.operationId,
+      fromOperationId: command.fromOperationId,
+      removedTurns: turns.removed.length,
+      files,
+      // A server thread's session is never copied on this host.
+      rollback:
+        checkout.kind !== "remote-root" && this.#options.supportsSessionRollback?.(thread) === true
+          ? "native"
+          : "handoff",
+    });
+  }
+
+  /**
+   * Rewind the thread in place. The files go first, because they are the
+   * part that can fail: a restore that does not complete leaves the
+   * conversation as it was, and its own journaled result offers the way back.
+   * The conversation part is this operation's result, which the conversation
+   * reads as the record that removed the turns.
+   */
+  async #rewind(
+    command: Extract<CodeOperationCommand, { kind: "rewind-code-thread" }>,
+    thread: CodeThread,
+    checkout: CodeCheckoutIdentity,
+    checkoutRoot: string,
+  ): Promise<CodeOperationResult> {
+    const turns = this.#rewindTurns(command.operationId, thread, command.fromOperationId);
+    if (turns.status === "refused") return turns.result;
+    const first = turns.removed[0];
+    let files: "restored" | "unchanged" | "not-requested" = "not-requested";
+    let undo: CodeCheckpoint | undefined;
+    if (command.scope !== "conversation") {
+      const point = this.#rewindFilePoint(thread, checkout, turns.all, command.fromOperationId);
+      if (point.kind === "unavailable")
+        return this.#failed(
+          command.operationId,
+          "unavailable",
+          REWIND_FILES_UNAVAILABLE[point.reason],
+        );
+      if (point.kind === "unchanged") files = "unchanged";
+      else {
+        // A retry after the files were put back but before this result was
+        // journaled reads that restore's result rather than overwriting again.
+        const filesReplay = this.#replay(thread.id, command.filesOperationId, 0, 16);
+        const journaled = filesReplay.frames.find(
+          (frame) => frame.event.kind === "operation-result",
+        )?.event;
+        let restored: CodeOperationResult;
+        if (journaled?.kind === "operation-result") restored = journaled.result;
+        else {
+          const refusal = this.#inPlaceRestoreRefusal(thread, checkoutRoot);
+          if (refusal !== undefined) return this.#failed(command.operationId, ...refusal);
+          restored = this.#gitMutation(
+            command.filesOperationId,
+            command.gitOperationId,
+            "restore-checkpoint",
+            await this.#restoreInPlace(thread, checkout, checkoutRoot, point.checkpoint),
+          );
+          // Journaled as a restore of its own, so Undo restore offers the way
+          // back from it exactly as it does after Restore files to this point.
+          this.#options.events.append({
+            threadId: thread.id,
+            operationId: command.filesOperationId,
+            expectedCursor: filesReplay.nextCursor,
+            event: { kind: "operation-result", result: restored },
+          });
+        }
+        if (restored.kind !== "git-mutation-state" || restored.state !== "completed")
+          return this.#failed(
+            command.operationId,
+            restored.kind === "git-mutation-state" && restored.state === "rejected"
+              ? "conflict"
+              : "failed",
+            restored.kind === "git-mutation-state" && restored.undo !== undefined
+              ? "The files could not all be put back, and some may already have changed. The conversation was not rewound. Undo restore puts back what was there."
+              : "The files could not be put back. Nothing changed.",
+          );
+        files = "restored";
+        undo = restored.undo;
+      }
+    }
+    return decodeCodeOperationResult({
+      kind: "thread-rewound",
+      operationId: command.operationId,
+      fromOperationId: command.fromOperationId,
+      scope: command.scope,
+      removedTurns: command.scope === "files" ? 0 : turns.removed.length,
+      files,
+      ...(undo === undefined ? {} : { undo }),
+      ...(command.scope === "files" || first === undefined ? {} : { prompt: first.prompt }),
+    });
   }
 
   /** Settles once every in-place restore of this checkout root has; none, nothing to wait on. */
@@ -4784,7 +5044,9 @@ function evidenceReferences(event: CodeOperationEvent): readonly CodeEvidenceRef
     case "diff":
       return [event.content];
     case "context-handoff-attached":
-      return event.reason === "fork-native-session" ? [] : [event.content];
+      return event.reason === "fork-native-session" || event.reason === "rewind-native-session"
+        ? []
+        : [event.content];
     case "fork-context-merged":
       return [event.content];
     case "operation-result":
@@ -4847,7 +5109,9 @@ function operationFor(kind: CodeOperationCommand["kind"]): CodeOperation {
     case "discard-git-changes":
       return "discard";
     case "restore-git-checkpoint":
+    case "rewind-code-thread":
       return "restore-checkpoint";
+    case "preview-code-rewind":
     case "review-run":
       return "read";
     case "merge-run":

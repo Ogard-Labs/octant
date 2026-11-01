@@ -682,6 +682,106 @@ describe("WorkThreadWorkspace", () => {
     expect(note).toHaveTextContent("did not transfer");
   });
 
+  it("rewinds a Work thread to a message, conversation only, and returns that message to the composer", async () => {
+    const user = userEvent.setup();
+    const first = workTurn();
+    const second = workTurn({
+      requestId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      turnId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      prompt: "Shorten it",
+      transcript: [
+        { role: "user", text: "Shorten it" },
+        { role: "assistant", text: "Here is the short one." },
+      ],
+    });
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const rewindThread = vi.fn(async () => ({
+      kind: "thread-rewound" as const,
+      threadId,
+      fromRequestId: second.requestId,
+      removedTurns: 1,
+      prompt: "Shorten it",
+    }));
+    const transcript = vi
+      .fn()
+      .mockResolvedValueOnce({ threadId, turns: [first, second], liveCursor: 0 })
+      .mockResolvedValue({ threadId, turns: [first], liveCursor: 0 });
+    render(
+      <WorkThreadWorkspace
+        providerGroups={[providerGroup()]}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={{ transcript, rewindThread } as never}
+      />,
+    );
+
+    const message = (await screen.findByText("Shorten it")).closest("article")!;
+    await user.click(within(message).getByRole("button", { name: "More actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Rewind to here…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Rewind to here" });
+    // Work keeps no copies of files, so the conversation is the only choice.
+    expect(within(dialog).getByText(/Work takes no file checkpoints/)).toBeVisible();
+    expect(within(dialog).queryByRole("button", { name: "Files only" })).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Rewind" }));
+
+    await waitFor(() =>
+      expect(rewindThread).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "rewind-work-thread", fromRequestId: second.requestId }),
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText("Here is the short one.")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole("textbox", { name: "Work prompt" })).toHaveValue("Shorten it");
+  });
+
+  it("forks a Work thread from a reply into a new thread and opens it", async () => {
+    const user = userEvent.setup();
+    const forked = workThread({
+      id: "20000000-0000-4000-8000-000000000999",
+      title: "Draft brief (fork)",
+    });
+    const execute = vi.fn(async () => ({ kind: "thread-created", thread: forked }));
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute,
+    } as unknown as WorkThreadClient;
+    const onOpenWorkThread = vi.fn();
+    render(
+      <WorkThreadWorkspace
+        onOpenWorkThread={onOpenWorkThread}
+        providerGroups={[providerGroup()]}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={
+          {
+            transcript: vi.fn(async () => ({ threadId, turns: [workTurn()], liveCursor: 0 })),
+          } as never
+        }
+      />,
+    );
+
+    const reply = (await screen.findByText("Here is the confined summary.")).closest("article")!;
+    await user.click(within(reply).getByRole("button", { name: "More actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Fork from here" }));
+
+    await waitFor(() =>
+      expect(execute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "fork-work-thread",
+          sourceThreadId: threadId,
+          throughRequestId: workTurn().requestId,
+        }),
+      ),
+    );
+    expect(onOpenWorkThread).toHaveBeenCalledWith(forked);
+  });
+
   it("tells the person before sending that a provider that keeps its own session will start fresh", async () => {
     const threadClient = {
       bootstrap: vi.fn(async () => ({

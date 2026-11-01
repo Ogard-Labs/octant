@@ -1520,6 +1520,13 @@ export const ProviderCapabilities = Schema.Struct({
    */
   modelSwitch: Schema.optional(ProviderCapabilitySupport),
   /**
+   * Whether the runtime can cut a session it holds back to an earlier turn,
+   * so a thread rewound in place continues that session without the removed
+   * turns. Absent reads as unsupported: a rewound thread then starts a fresh
+   * session with a disclosed text handoff of the turns it kept.
+   */
+  sessionRollback: Schema.optional(ProviderCapabilitySupport),
+  /**
    * Whether one session's runtime process can be killed on its own, through
    * the connection's `forceStop`. A runtime that serves several threads from
    * one process reports `unsupported`, since killing it would end the others.

@@ -27,7 +27,7 @@ import type { Journal } from "../persistence/journal";
 import type { ServerAddress, ServerConnection } from "./serverConnection";
 
 /**
- * The Code Projects bound to a folder on a registered server, journaled and
+ * The Code and Work Projects bound to a folder on a registered server, journaled and
  * rebuilt from the journal at startup. Canonical:
  * docs/design/server-projects.md § Binding.
  *
@@ -122,6 +122,18 @@ export class ServerProjectStore {
     return this.#projects.get(projectId);
   }
 
+  /** A server Project whose threads are Code threads; a Work one is not. */
+  codeProject(projectId: string): ServerProject | undefined {
+    const project = this.#projects.get(projectId);
+    return project === undefined || project.mode === "work" ? undefined : project;
+  }
+
+  /** A server Project whose threads are Work threads. */
+  workProject(projectId: string): ServerProject | undefined {
+    const project = this.#projects.get(projectId);
+    return project?.mode === "work" ? project : undefined;
+  }
+
   /** The server and folder a Project's calls go to, read from the registry now. */
   addressOf(projectId: string): ServerProjectAddress {
     const project = this.#projects.get(projectId);
@@ -138,7 +150,7 @@ export class ServerProjectStore {
   }
 
   /**
-   * Binds a Code Project to a folder on a registered server. The folder is
+   * Binds a Code or Work Project to a folder on a registered server. The folder is
    * resolved on the server first, and only its real path is journaled; a
    * folder that cannot be reached or is not a folder binds nothing.
    */
@@ -146,6 +158,8 @@ export class ServerProjectStore {
     readonly name: string;
     readonly serverId: string;
     readonly folder: string;
+    /** `work` for a Work Project; absent binds a Code Project. */
+    readonly mode?: "work" | undefined;
     readonly principal: ServerProjectPrincipal;
   }): Promise<ServerProjectsChange> {
     if (input.principal !== "local-window") return refused("needs-local-window");
@@ -192,6 +206,7 @@ export class ServerProjectStore {
       serverId: server.serverId,
       folder: folder.value,
       boundAt: decodeTimestamp(this.#options.clock()),
+      ...(input.mode === "work" ? { mode: "work" as const } : {}),
     };
     const payload = { project, principal: { kind: "local-window" as const } };
     if (!this.#append(SERVER_PROJECTS_EVENT_NAMES.bound, payload)) return refused("unavailable");

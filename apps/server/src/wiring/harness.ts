@@ -1,3 +1,4 @@
+import { serverWorkProjectOf } from "../serverProjects/serverWorkThreads";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { realpath, stat as statFromDisk } from "node:fs/promises";
@@ -823,6 +824,8 @@ export function wireHarness(deps: HarnessDependencies) {
       readThreadTaint: (threadId) =>
         readThreadExternalContentTaint(persistence.connection, threadId),
       holdsServerCodeThread: (thread) => serverProjectOf(serverProjectStore, thread) !== undefined,
+      holdsServerWorkThread: (thread) =>
+        serverWorkProjectOf(serverProjectStore, thread) !== undefined,
     }),
     isHarnessProvider: (providerInstanceId) => {
       const instance = persistence.readProviderInstance(providerInstanceId);

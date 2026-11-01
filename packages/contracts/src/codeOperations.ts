@@ -613,6 +613,41 @@ const RestoreGitCheckpoint = Schema.Struct({
   checkpoint: CodeCheckpoint,
 }).annotations(strict);
 /**
+ * What a rewind takes back. `conversation` removes the named turn and every
+ * later one from the thread, `files` puts the checkout back the way it was
+ * just before the named turn, and `both` does the two together.
+ */
+export const CodeRewindScope = Schema.Literal("conversation", "files", "both");
+export type CodeRewindScope = typeof CodeRewindScope.Type;
+/**
+ * Show what rewinding to just before a turn would change, without changing
+ * anything: how many turns would leave the conversation and which files differ
+ * from the checkpoint the files would come back from.
+ */
+const PreviewCodeRewind = Schema.Struct({
+  kind: Schema.Literal("preview-code-rewind"),
+  ...OperationScope,
+  /** The first turn the rewind would remove. */
+  fromOperationId: CodeOperationId,
+}).annotations(strict);
+/**
+ * Rewind a Code thread in place to just before one of its turns.
+ *
+ * The host resolves which checkpoint the files come back from; the client
+ * names only the turn. A file restore is journaled as an ordinary restore
+ * under `filesOperationId`, so it leaves Undo restore behind like any other.
+ * The removed turns stay in the journal, and this operation's own result is
+ * the record that removes them from the thread.
+ */
+const RewindCodeThread = Schema.Struct({
+  kind: Schema.Literal("rewind-code-thread"),
+  ...OperationScope,
+  fromOperationId: CodeOperationId,
+  scope: CodeRewindScope,
+  filesOperationId: CodeOperationId,
+  gitOperationId: CodeGitOperationId,
+}).annotations(strict);
+/**
  * What a finished run amounts to, measured against the branch it is meant to
  * come home to.
  *
@@ -913,6 +948,8 @@ export const CodeOperationCommand = Schema.Union(
   UnstageGit,
   DraftGitText,
   RestoreGitCheckpoint,
+  PreviewCodeRewind,
+  RewindCodeThread,
   CreatePullRequest,
   UpdatePullRequest,
   CommentPullRequest,
@@ -1323,6 +1360,60 @@ const RunReviewResult = Schema.Struct({
   outcome: CodeRunOutcome,
 }).annotations(strict);
 
+/**
+ * Why a rewind's files cannot be put back: a thread on a registered server
+ * takes no checkpoints, a Plan thread writes nothing, a turn wrote files the
+ * host never recorded, or the checkout could not be read.
+ */
+export const CodeRewindFilesUnavailableReason = Schema.Literal(
+  "server-project",
+  "plan",
+  "unrecorded",
+  "unreadable",
+);
+export type CodeRewindFilesUnavailableReason = typeof CodeRewindFilesUnavailableReason.Type;
+/**
+ * What a rewind would change. `rollback` says how the conversation continues
+ * after it: `native` when the provider can cut its own session back to the
+ * last kept turn, `handoff` when the next turn starts a fresh session with a
+ * disclosed text handoff of the kept turns.
+ */
+const RewindPreviewResult = Schema.Struct({
+  kind: Schema.Literal("rewind-preview"),
+  operationId: CodeOperationId,
+  fromOperationId: CodeOperationId,
+  removedTurns: Schema.Int.pipe(Schema.positive()),
+  files: Schema.Union(
+    Schema.Struct({
+      kind: Schema.Literal("changes"),
+      changes: CodeTurnChangedFiles,
+    }).annotations(strict),
+    Schema.Struct({ kind: Schema.Literal("unchanged") }).annotations(strict),
+    Schema.Struct({
+      kind: Schema.Literal("unavailable"),
+      reason: CodeRewindFilesUnavailableReason,
+    }).annotations(strict),
+  ),
+  rollback: Schema.Literal("native", "handoff"),
+}).annotations(strict);
+/**
+ * A rewind that ran. When it took back the conversation, this result is what
+ * removes `fromOperationId` and every later turn from the thread; the person's
+ * message from that turn comes back as `prompt` for the composer.
+ */
+const ThreadRewoundResult = Schema.Struct({
+  kind: Schema.Literal("thread-rewound"),
+  operationId: CodeOperationId,
+  fromOperationId: CodeOperationId,
+  scope: CodeRewindScope,
+  /** Turns removed from the conversation; 0 when only files were rewound. */
+  removedTurns: Schema.Int.pipe(Schema.nonNegative()),
+  files: Schema.Literal("restored", "unchanged", "not-requested"),
+  /** The way back from the file restore, as Undo restore offers it. */
+  undo: Schema.optional(CodeCheckpoint),
+  prompt: Schema.optional(CodeEvidenceReference),
+}).annotations(strict);
+
 export const CodeOperationResult = Schema.Union(
   RunReviewResult,
   OperationAccepted,
@@ -1336,6 +1427,8 @@ export const CodeOperationResult = Schema.Union(
   PullRequestReviewResult,
   ReviewFindingResult,
   ProviderTurnResult,
+  RewindPreviewResult,
+  ThreadRewoundResult,
   OperationFailed,
 );
 export type CodeOperationResult = typeof CodeOperationResult.Type;
@@ -1595,7 +1688,12 @@ const handoffMessages = Schema.Int.pipe(
  * in the content store the event names.
  */
 const ProviderSwitchHandoff = Schema.Struct({
-  reason: Schema.Literal("provider-switch"),
+  /**
+   * `rewind`: the thread was rewound in place and its provider cannot cut its
+   * own session back, so the next turn started a fresh session with the kept
+   * turns as text. The previous fields then name the session it left behind.
+   */
+  reason: Schema.Literal("provider-switch", "rewind"),
   previousProviderInstanceId: ProviderInstanceId,
   previousModelId: ProviderModelId,
   /** Conversation messages the handoff carried, not counting its summary. */
@@ -1646,6 +1744,17 @@ const ForkNativeSessionHandoff = Schema.Struct({
 }).annotations(strict);
 
 /**
+ * The first turn after a rewind resumed a copy of the thread's own provider
+ * session cut back at the last kept turn, so the provider kept that turn's
+ * messages and tool activity and never sees the removed ones.
+ */
+const RewindNativeSessionHandoff = Schema.Struct({
+  reason: Schema.Literal("rewind-native-session"),
+  previousSessionId: ProviderSessionId,
+  throughOperationId: CodeOperationId,
+}).annotations(strict);
+
+/**
  * The most fork merges one turn carries; any later ones wait for the next
  * turn. Each merge is a full bounded handoff (up to 24 blocks of 4,000
  * characters), so a turn never takes an unbounded pile of them at once.
@@ -1676,6 +1785,7 @@ export const CodeConversationTurnHandoff = Schema.Union(
   ProviderSwitchHandoff,
   ForkTextHandoff,
   ForkNativeSessionHandoff,
+  RewindNativeSessionHandoff,
 );
 export type CodeConversationTurnHandoff = typeof CodeConversationTurnHandoff.Type;
 
@@ -1752,10 +1862,20 @@ const ForkContextDeliveredEvent = Schema.Struct({
   mergeOperationId: CodeOperationId,
 }).annotations(strict);
 
+/** A rewind's first turn resumed the thread's own session cut back at the last kept turn. */
+const RewindNativeSessionHandoffAttachedEvent = Schema.Struct({
+  ...RewindNativeSessionHandoff.fields,
+  kind: Schema.Literal("context-handoff-attached"),
+  providerInstanceId: ProviderInstanceId,
+  modelId: ProviderModelId,
+  nativeSessionTransferred: Schema.Literal(true),
+}).annotations(strict);
+
 const ContextHandoffAttachedEvent = Schema.Union(
   ProviderSwitchHandoffAttachedEvent,
   ForkTextHandoffAttachedEvent,
   ForkNativeSessionHandoffAttachedEvent,
+  RewindNativeSessionHandoffAttachedEvent,
 );
 
 export const CodeOperationEvent = Schema.Union(
@@ -2524,6 +2644,8 @@ const APPROVAL_GATED_OPERATION_KINDS = new Set([
   "unstage-git",
   "discard-git-changes",
   "restore-git-checkpoint",
+  // A rewind that puts files back is approved as the restore it performs.
+  "rewind-code-thread",
   "commit-git",
   "push-git",
   "create-pull-request",

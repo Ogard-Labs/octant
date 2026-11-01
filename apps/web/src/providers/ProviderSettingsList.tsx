@@ -73,6 +73,7 @@ import {
   protocolLabel,
   ownReviewerLabel,
   reviewVerdictsLabel,
+  sessionRollbackLabel,
   providerDetectionBlockedReason,
   providerProcessDiagnosticFacts,
   providerProcessFailureSummary,
@@ -1785,6 +1786,10 @@ function ProviderRow(props: ProviderRowProps) {
                           <dd>{titleCase(props.observed!.capabilities[key] ?? "unsupported")}</dd>
                         </div>
                       ))}
+                      <div>
+                        <dt>Session rollback</dt>
+                        <dd>{sessionRollbackLabel(props.observed.capabilities)}</dd>
+                      </div>
                       {ownReviewerLabel(props.instance.driverKind, props.observed.capabilities) ===
                       undefined ? null : (
                         <div>

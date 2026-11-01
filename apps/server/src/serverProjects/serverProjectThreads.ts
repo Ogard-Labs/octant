@@ -128,13 +128,13 @@ export interface ServerThreadPlace {
  * has one.
  */
 export function serverThreadOf(
-  store: Pick<ServerProjectStore, "project">,
+  store: Pick<ServerProjectStore, "codeProject">,
   thread: Pick<
     CodeThread,
     "id" | "projectId" | "bindingRevisionId" | "repositoryId" | "checkoutId"
   >,
 ): ServerThreadPlace | undefined {
-  const project = store.project(String(thread.projectId));
+  const project = store.codeProject(String(thread.projectId));
   if (project === undefined) return undefined;
   const derived = serverCodeCheckout(project);
   if (
@@ -157,7 +157,7 @@ export function serverThreadOf(
  * and checkout are exactly the ones that Project derives.
  */
 export function serverProjectOf(
-  store: Pick<ServerProjectStore, "project">,
+  store: Pick<ServerProjectStore, "codeProject">,
   thread: Pick<
     CodeThread,
     "id" | "projectId" | "bindingRevisionId" | "repositoryId" | "checkoutId"
@@ -168,12 +168,12 @@ export function serverProjectOf(
 
 /** Prepares a Project's checkout for a new thread: a server Project's from the Project alone. */
 export function withServerCodeCheckouts(
-  store: Pick<ServerProjectStore, "project">,
+  store: Pick<ServerProjectStore, "codeProject">,
   local: CodeCheckoutObservationPort,
 ): CodeCheckoutObservationPort {
   return {
     observe: async (windowId, projectId) => {
-      const project = store.project(String(projectId));
+      const project = store.codeProject(String(projectId));
       return project === undefined
         ? local.observe(windowId, projectId)
         : serverCodeCheckout(project);
@@ -187,7 +187,7 @@ export function withServerCodeCheckouts(
  * turn's server tools act on it.
  */
 export function serverCodeCheckoutRoot(
-  store: Pick<ServerProjectStore, "project">,
+  store: Pick<ServerProjectStore, "codeProject">,
   thread: Pick<
     CodeThread,
     "id" | "projectId" | "bindingRevisionId" | "repositoryId" | "checkoutId"
@@ -219,7 +219,7 @@ const SERVER_NOT_REGISTERED =
  */
 export function bindServerCodeTurn(
   options: {
-    readonly store: Pick<ServerProjectStore, "project" | "addressOf">;
+    readonly store: Pick<ServerProjectStore, "codeProject" | "addressOf">;
     readonly connection: Pick<ServerConnection, "run">;
     readonly composition: Pick<NativeHarnessComposition, "forServerCode">;
     readonly record: (

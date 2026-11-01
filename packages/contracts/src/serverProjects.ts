@@ -1,5 +1,5 @@
 /**
- * Code Projects bound to a folder on one of the person's registered servers.
+ * Code and Work Projects bound to a folder on one of the person's registered servers.
  * Canonical: docs/design/server-projects.md.
  *
  * A server Project lives in its own catalog, never in the local Project
@@ -10,7 +10,7 @@
 
 import { Schema } from "effect";
 import { AggregateId, UtcTimestamp } from "./events";
-import { ProjectId } from "./projects";
+import { BindingRevisionId, ProjectId } from "./projects";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
@@ -35,6 +35,13 @@ export const ServerFolderPath = Schema.String.pipe(
 
 export const ServerProjectName = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(120));
 
+/**
+ * The mode a server Project's threads are in. Absent is Code, the only mode
+ * the first catalog had, so a Code Project's record stays exactly what it was
+ * and an older build never reads a Work Project as Code: it cannot decode one.
+ */
+export const ServerProjectMode = Schema.Literal("work");
+
 export const ServerProject = Schema.Struct({
   id: ProjectId,
   name: ServerProjectName,
@@ -43,6 +50,7 @@ export const ServerProject = Schema.Struct({
   /** The folder's real path on the server, resolved when it was bound. */
   folder: ServerFolderPath,
   boundAt: UtcTimestamp,
+  mode: Schema.optional(ServerProjectMode),
 }).annotations(strict);
 export type ServerProject = typeof ServerProject.Type;
 
@@ -68,8 +76,19 @@ export const ServerProjectRemovedPayload = Schema.Struct({
 }).annotations(strict);
 export type ServerProjectRemovedPayload = typeof ServerProjectRemovedPayload.Type;
 
+/**
+ * A server Project as the catalog shows it. A Work Project also names the
+ * binding its threads are created against, which the host derives from the
+ * Project; nothing about it is journaled.
+ */
+export const ServerProjectEntry = Schema.Struct({
+  ...ServerProject.fields,
+  workBindingRevisionId: Schema.optional(BindingRevisionId),
+}).annotations(strict);
+export type ServerProjectEntry = typeof ServerProjectEntry.Type;
+
 export const ServerProjectsView = Schema.Struct({
-  projects: Schema.Array(ServerProject).pipe(Schema.maxItems(MAX_SERVER_PROJECTS)),
+  projects: Schema.Array(ServerProjectEntry).pipe(Schema.maxItems(MAX_SERVER_PROJECTS)),
 }).annotations(strict);
 export type ServerProjectsView = typeof ServerProjectsView.Type;
 
@@ -79,6 +98,7 @@ export const ServerProjectsCommand = Schema.Union(
     name: ServerProjectName,
     serverId: AggregateId,
     folder: ServerFolderPath,
+    mode: Schema.optional(ServerProjectMode),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("rename-server-project"),
