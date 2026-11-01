@@ -306,7 +306,7 @@ function commandPrintsSecretVariable(command: string, depth = 0): boolean {
 /**
  * The command with every `$` that expands nothing neutralised: inside single
  * quotes (`echo '$TOKEN'` prints the name) and after a backslash outside them
- * (`echo \\$TOKEN`, also inside double quotes). The words themselves stay, so
+ * (`echo \$TOKEN`, also inside double quotes). The words themselves stay, so
  * `printenv 'NPM_TOKEN'` still names its variable. A single quote inside double
  * quotes is an ordinary character, so `echo "a='$TOKEN'"` still expands.
  */
