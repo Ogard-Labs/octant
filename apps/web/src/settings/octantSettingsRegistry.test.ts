@@ -174,6 +174,8 @@ describe("octantSettingsRegistry", () => {
     expect(usage?.settings).toEqual([]);
     const providers = octantSettingsRegistry.sections.find((s) => s.id === "providers");
     expect(providers?.settings.map((setting) => setting.id)).toEqual([
+      "automatic-model-judge",
+      "automatic-model-memory",
       "opencode-managed-update",
       "provider-display-name",
       "provider-binary-path",
@@ -195,7 +197,6 @@ describe("octantSettingsRegistry", () => {
       "project-view-switcher",
       "code-default-access",
       "code-auto-reviewer",
-      "code-shield-model",
       "code-editor-executable",
       "code-editor-arguments",
       "open-in-applications",

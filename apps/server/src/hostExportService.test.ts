@@ -1,6 +1,7 @@
 import { CANVAS_SCHEMA_VERSION } from "@octant/contracts/canvas";
 import { decodeHostId } from "@octant/contracts/host";
 import { decodeUtcTimestamp } from "@octant/contracts/events";
+import { decodePersonMemoryEntry } from "@octant/contracts/person-memory";
 import { decodeProjectId } from "@octant/contracts/projects";
 import { ThreadPurgeTombstone } from "@octant/contracts/thread-retention";
 import { decodeWindowId } from "@octant/contracts";
@@ -19,6 +20,22 @@ import { HostExportService, type HostExportServiceOptions } from "./hostExportSe
 const now = "2026-08-19T12:00:00.000Z";
 const generatedAt = decodeUtcTimestamp(now);
 const hostId = decodeHostId("local");
+const MEMORY_ENTRY = decodePersonMemoryEntry({
+  id: "30000000-0000-4000-8000-000000000001",
+  kind: "preference",
+  content: "Prefers short answers.",
+  sources: [
+    {
+      mode: "chat",
+      threadId: "10000000-0000-4000-8000-0000000000c1",
+      title: "Tidy the README",
+      providerInstanceId: "10000000-0000-4000-8000-000000000001",
+      endedAt: "2026-08-19T11:00:00.000Z",
+    },
+  ],
+  createdAt: "2026-08-19T11:00:00.000Z",
+  updatedAt: "2026-08-19T11:00:00.000Z",
+});
 const windowId = decodeWindowId("70000000-0000-4000-8000-000000000002");
 const projectId = decodeProjectId("20000000-0000-4000-8000-000000000001");
 const SEEDED_CREDENTIAL = "seeded-credential-do-not-export";
@@ -144,6 +161,7 @@ function service(
         history: [],
       }),
     },
+    personMemory: { entries: () => [MEMORY_ENTRY] },
     canvases: {
       list: ({ cursor, limit }) =>
         pageHostExportSlice(
@@ -224,6 +242,8 @@ describe("host export", () => {
     // The credential-carrying record is the one omission; the thread-owned
     // Canvas, which names no Project, is carried with its definition.
     expect(assembled.bundle.canvases).toEqual([THREAD_OWNED_CANVAS]);
+    // Person memory leaves with its entries and the threads each came from.
+    expect(assembled.bundle.personMemory).toEqual([MEMORY_ENTRY]);
     expect(assembled.bundle.retention.tombstones).toHaveLength(1);
     expect(assembled.bundle.omissions.map((omission) => omission.subject)).toContain(
       "unrepresentable-record",

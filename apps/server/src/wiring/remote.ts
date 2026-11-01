@@ -145,7 +145,7 @@ export type RemoteDependencies = Pick<
   ServerStart,
   "options" | "persistence" | "serve" | "startedAt" | "version"
 > &
-  Pick<AuthorityWiring, "browserCaptureStore" | "windowAuthorityStore"> &
+  Pick<AuthorityWiring, "browserCaptureStore" | "personMemory" | "windowAuthorityStore"> &
   Pick<
     AgentRunsWiring,
     "agentRunAdmission" | "externalContentIngestionStore" | "remoteDelegationHolder"
@@ -217,6 +217,7 @@ export function wireRemote(deps: RemoteDependencies) {
     automationCommandService,
     automationScheduler,
     browserCaptureStore,
+    personMemory,
     hubPushHandoffSlot,
     nativeHarnessSessions,
     remoteDelegationHolder,
@@ -1217,6 +1218,7 @@ export function wireRemote(deps: RemoteDependencies) {
         })),
       listProjectIds: () => persistence.readProjects().map((project) => String(project.id)),
       readProjectMemory: (projectId) => persistence.readProjectMemory(decodeProjectId(projectId)),
+      personMemoryEntries: () => personMemory.view().entries,
       listCanvases: () =>
         [...persistence.canvasProjection.snapshot().values()].map((entry) => ({
           canvasId: entry.canvasId,

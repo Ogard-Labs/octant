@@ -45,7 +45,7 @@ What it does and does not read:
 
 - It reads only your own messages and the thread's title. It never reads the agent's answers, tool output, web pages, attachments, or files.
 - Passwords, keys, and tokens are removed before anything is sent or kept, and a note that names a protected file is not kept.
-- One short request to a small model runs once for each thread you put away, on that thread's own provider unless you pick another model. It shows in Usage as `person-memory`.
+- One short request to a small model runs once for each thread you put away, on that thread's own provider unless you pick another account in **Settings › Providers & Models › Automatic model calls**. What it reads goes to that provider. It shows in Usage as `person-memory`, with the account that was used. If the account you chose is off or at its limit, memory waits and tries again later; it never switches to another account.
 - Memory stays on this computer. It is not sent to a paired phone, another computer, or a routine.
 
 Agents can also search past threads: asked "what did we do on the invoice export?", an agent gets a few short excerpts, each naming its thread, Project, and date. The search looks only at what memory already holds. It opens no files and no other Project's folder. Each search shows in the thread as a tool step, and the context panel lists the memory a thread was given.
@@ -56,7 +56,6 @@ Everything is in **Settings › Memory**:
 
 - **Remember across threads** turns all of it on or off.
 - **Search past threads** turns the search on or off on its own.
-- **Model that writes memory** picks a different model than each thread's own provider.
 - **Keep a Project out** stops Octant from learning from that Project and from showing what it learned there to other threads.
 - **What Octant remembers** lists each note with the thread it came from. Edit or delete any of them.
 - **Forget everything** erases every note and every remembered thread.

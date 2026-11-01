@@ -1224,14 +1224,17 @@ except where a bullet says otherwise.
   protected path is dropped.
 - **The model call.** One tool-less, single-use session per ended thread, in a
   scratch folder outside every Project, on the thread's own provider with that
-  provider's smallest model, unless Settings › Memory picks another. Its usage
+  provider's smallest model, unless Settings › Providers & Models › Automatic
+  model calls picks another account. Its usage
   is recorded against the thread as a `person-memory` usage row, so the person
   sees it in the usage dashboard. A reply that read outside content is thrown
   away. The call sits behind one seam (`personMemoryDistillationAllowed`) that
   answers per provider kind, so background use can later be limited for one
   provider without touching the rest; today it allows every kind. Open risk:
   whether a provider's terms allow background calls on a subscription sign-in
-  is not settled, and the seam is where an answer would land.
+  is not settled, and the seam is where an answer would land. If the chosen
+  account is off, not ready or at its limit, the thread waits for a later pass;
+  it is never distilled on another account.
 - **Where it goes.** Every new Chat, Work, and Code thread, on every provider,
   gets one `person-memory` context block through Octant's own context
   assembly, placed after Octant's instructions and before Project memory and
@@ -1268,8 +1271,11 @@ except where a bullet says otherwise.
   journal events (`person-memory-*` aggregates) held in host memory and
   rebuilt from the journal at start, so they are local, owner-only, and in no
   diagnostics or telemetry. A thread's digest names the thread as `threadId`,
-  so a thread purge takes it with the thread. Export my data does not carry
-  person memory yet (allowed; not built yet).
+  so a thread purge takes it with the thread. Export my data carries person
+  memory: a `person-memory` page holding every entry with the threads it came
+  from (title, mode, Project, provider account, end time), and no digest or
+  setting. Entries were redacted before storage, so the export adds nothing
+  beyond what Settings › Memory shows.
 - **Who may read it.**
   - A local window: read and change everything in Settings › Memory.
   - A paired device: the memory routes refuse it, and a turn it sends gets no
@@ -11394,8 +11400,36 @@ Not built yet: the credential broker for SSH.
 **Model and privacy.** By default Shield uses the thread's own provider
 account with that provider's smallest model, so no new party sees the work.
 The person may pick another configured
-[model endpoint](design/model-endpoints.md), a local one included. Shield
+account and model under Automatic model calls below, a local endpoint
+included. Shield
 sends no telemetry, and its calls count against the existing spend ceilings.
+
+**Automatic model calls.** The jobs Octant runs on a model without the
+person typing, today the Judge and person memory's distilling, share one
+Settings surface: Settings › Providers & Models › Automatic model calls. For
+each job the person keeps the default (the provider of the thread the work is
+about, with that provider's smallest model, unchanged) or picks one configured
+account and one of its models, an API-key account included. The Judge's choice
+is stored as `CodeSettings.shieldModel` and memory's as
+`PersonMemorySettings.distillModel`; the surface is the one place either is
+chosen, and both are changed only from a window on this host (a paired device
+cannot). The surface says in plain words that what the job reads goes to the
+chosen provider: the Judge's input (the person's recent messages, the pending
+call and the Project's root, never tool results or outside content) and
+memory's (a thread's title and the person's own messages, secrets redacted as
+today). Rationale: account selection is fully manual by decision, so there is
+no rotation and no failover; if the chosen account is removed, turned off, not
+ready or at a reported usage limit, the Judge sends that decision to the person
+(`model-account-unavailable`, journaled with the chosen account) and never
+allows it itself, and distilling returns the thread to the next pass without
+calling another account. A rule that decides without a model (a fast allow, a
+hard line) is unaffected. Each call is journaled with its account: the Judge
+decision names its model, and the call's `shield-review` or `person-memory`
+usage row names the provider account and model, so Usage shows which account
+spent it. The surface keeps the two existing stored fields rather than adding a third
+setting, so no migration is needed and the default is exactly the old behavior;
+"at its limit" means only a limit the provider has reported. The harness's advisor review is a separate, slot-routed job and is
+not folded in.
 
 **Journal.** Every Shield decision is journaled with the reviewer, the model,
 the rule or reason, and the latency, and shows on the tool row in the
@@ -11490,9 +11524,8 @@ built, so Shield is its alternative reviewer; Shield is the only reviewer for
 OpenCode, every other ACP agent, and Pi.
 
 The choices are built for Code: Settings › Code › Access has **Auto
-reviewer** (Provider's own / Octant Shield, stored as `CodeSettings.autoReviewer`)
-and **Shield model** (each thread's provider with its smallest model, or any
-enabled provider's catalogued model, local ones included, stored as
+reviewer** (Provider's own / Octant Shield, stored as `CodeSettings.autoReviewer`);
+the Judge's model is chosen under Automatic model calls (stored as
 `CodeSettings.shieldModel`), and a Code Project's overview overrides the
 reviewer (`change-code-project-auto-reviewer`, journaled
 `project.code-auto-reviewer-changed@1`). The picker offers Auto, marked

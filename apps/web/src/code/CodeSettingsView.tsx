@@ -1,5 +1,4 @@
 import type { CodeDiffLayout, CodeSettings } from "@octant/contracts/code";
-import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import type { AutoReviewer, ShieldModelChoice } from "@octant/contracts/shield";
 import type { PermissionMode, SettingsSettingId } from "@octant/contracts";
 import { permissionModeOf, threadAccessOf } from "@octant/domain/guardrail-policy";
@@ -39,8 +38,6 @@ export interface CodeSettingsViewProps {
   readonly focusedSetting?: SettingsSettingId | undefined;
   readonly onUpdate: (input: CodeSettingsUpdate) => Promise<boolean>;
   readonly settings: CodeSettings;
-  /** The configured providers Octant Shield may judge with. */
-  readonly providerSnapshot?: ProviderRegistrySnapshot | undefined;
 }
 
 const AUTO_REVIEWER_OPTIONS: ReadonlyArray<{ readonly id: AutoReviewer; readonly label: string }> =
@@ -48,51 +45,6 @@ const AUTO_REVIEWER_OPTIONS: ReadonlyArray<{ readonly id: AutoReviewer; readonly
     { id: "provider", label: "Provider's own" },
     { id: "octant-shield", label: "Octant Shield" },
   ];
-
-/** The Shield model choice as one select value; empty is each thread's own provider. */
-export const THREAD_PROVIDER_MODEL = "thread-provider";
-export const modelValue = (choice: ShieldModelChoice | undefined) =>
-  choice === undefined
-    ? THREAD_PROVIDER_MODEL
-    : `${String(choice.providerInstanceId)}/${String(choice.modelId)}`;
-
-/**
- * The endpoints Octant Shield may judge with: each enabled provider's
- * catalogued models, local ones included. The default is each thread's own
- * provider account with that provider's smallest model.
- */
-export function shieldModelOptions(
-  snapshot: ProviderRegistrySnapshot | undefined,
-  current: ShieldModelChoice | undefined,
-): ReadonlyArray<{
-  readonly id: string;
-  readonly label: string;
-  readonly choice?: ShieldModelChoice;
-}> {
-  const options: Array<{ id: string; label: string; choice?: ShieldModelChoice }> = [
-    { id: THREAD_PROVIDER_MODEL, label: "Each thread's provider, smallest model" },
-  ];
-  for (const instance of snapshot?.instances ?? []) {
-    if (!instance.enabled) continue;
-    const catalog = snapshot?.catalogs?.find(
-      (candidate) => String(candidate.instanceId) === String(instance.id),
-    );
-    for (const model of catalog?.models ?? []) {
-      const choice = { providerInstanceId: instance.id, modelId: model.id };
-      options.push({
-        id: modelValue(choice),
-        label: `${instance.displayName} · ${model.displayName}`,
-        choice,
-      });
-    }
-  }
-  // A stored choice whose provider is gone is still shown, so the select
-  // never claims a choice the host does not hold.
-  if (current !== undefined && !options.some((option) => option.id === modelValue(current))) {
-    options.push({ id: modelValue(current), label: String(current.modelId), choice: current });
-  }
-  return options;
-}
 
 /** The section holding the control a change came from. */
 type CodeSettingsSectionId = "access" | "thread-defaults" | "editor" | "external-editor";
@@ -127,8 +79,6 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
   const [autoReviewer, setAutoReviewer] = useState<AutoReviewer>(
     props.settings.autoReviewer ?? "provider",
   );
-  const [shieldModel, setShieldModel] = useState(modelValue(props.settings.shieldModel));
-  const shieldModels = shieldModelOptions(props.providerSnapshot, props.settings.shieldModel);
   const fullAccessWarning = useFullAccessWarning("machine");
   const [requireGitRepository, setRequireGitRepository] = useState(
     props.settings.requireGitRepository,
@@ -194,15 +144,11 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     change: Partial<CodeSettingsDraft> & {
       readonly bundledLanguageServer?: boolean;
       readonly autoReviewer?: AutoReviewer;
-      readonly shieldModel?: ShieldModelChoice | null;
     },
   ) {
     const host = hostSettings.current;
     if (change.autoReviewer !== undefined) {
       setAutoReviewer(host.autoReviewer ?? "provider");
-    }
-    if (change.shieldModel !== undefined) {
-      setShieldModel(modelValue(host.shieldModel));
     }
     if (change.permissionMode !== undefined) {
       setPermissionMode(permissionModeOfSettings(host));
@@ -229,7 +175,6 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     change: Partial<CodeSettingsDraft> & {
       readonly bundledLanguageServer?: boolean;
       readonly autoReviewer?: AutoReviewer;
-      readonly shieldModel?: ShieldModelChoice | null;
     },
   ) {
     const draft: CodeSettingsDraft = {
@@ -271,7 +216,6 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
         // only an Access change carries them.
         ...(change.permissionMode === undefined ? {} : { defaultAutoApprove: access.autoApprove }),
         ...(change.autoReviewer === undefined ? {} : { autoReviewer: change.autoReviewer }),
-        ...(change.shieldModel === undefined ? {} : { shieldModel: change.shieldModel }),
         requireGitRepository: draft.requireGitRepository,
         defaultDiffLayout: draft.defaultDiffLayout,
         // The host keeps the stored switch when a change leaves it out, so
@@ -342,26 +286,6 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
               }}
               options={AUTO_REVIEWER_OPTIONS}
               value={autoReviewer}
-            />
-          </SettingRow>
-          <SettingRow
-            description="The model Octant Shield asks about actions no rule decides. It sees only your messages and the pending action, never files, tool output, or web pages, and its use counts against your spend limits."
-            focused={props.focusedSetting === "code-shield-model"}
-            label="Shield model"
-            scope="mode"
-            settingId="code-shield-model"
-          >
-            <OctantSelectField
-              aria-label="Shield model"
-              className="settings-view__select window-no-drag"
-              onValueChange={(value) => {
-                const option = shieldModels.find((candidate) => candidate.id === value);
-                if (option === undefined || option.id === shieldModel) return;
-                setShieldModel(option.id);
-                void commit("access", { shieldModel: option.choice ?? null });
-              }}
-              options={shieldModels.map(({ id, label }) => ({ id, label }))}
-              value={shieldModel}
             />
           </SettingRow>
         </div>
