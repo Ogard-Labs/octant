@@ -989,8 +989,11 @@ export class ToolEgressProxy {
       rules: this.#rules(),
       now: this.#now(),
     });
-    if (decision.kind === "allow") return decision;
     const placed = safeNetworkPlaceAllows({ host, port }, this.#places());
+    // A place the person named keeps its trust when a rule also matches, so
+    // adding a rule never takes away a private answer the place let through.
+    if (decision.kind === "allow")
+      return placed === undefined ? decision : { ...decision, by: "place" };
     return placed === undefined
       ? decision
       : { kind: "allow", host: placed.host, port: placed.port, ruleId: undefined, by: "place" };

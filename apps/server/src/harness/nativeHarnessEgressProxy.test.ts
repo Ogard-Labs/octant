@@ -197,6 +197,19 @@ describe("native harness tool egress proxy", () => {
     expect(afterTaint.answer).toContain("octant-egress-refused: no-rule git.corp.example:443");
   });
 
+  it("keeps a trusted name's private answer when a thread rule names the same host", async () => {
+    const origin = await tcpFixture();
+    const harness = await startEgressHarness({
+      places: () => [{ kind: "host", host: "nas.example", port: 443 }],
+      resolve: async () => ["10.0.0.7"],
+      rules: [threadRule("nas.example", 443)],
+      routes: new Map([["10.0.0.7", origin.port]]),
+    });
+    const tunnel = await openTunnel(harness.proxy, "nas.example:443", harness.authorization);
+    expect(tunnel.status).toBe(200);
+    tunnel.socket.end();
+  });
+
   it("refuses a private answer for a host a thread rule names when no place holds it", async () => {
     const harness = await startEgressHarness({
       places: () => [{ kind: "host", host: "other.example" }],
