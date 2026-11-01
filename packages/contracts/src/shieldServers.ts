@@ -225,6 +225,7 @@ export const ShieldServersRefusalReason = Schema.Literal(
   "invalid-runbook-path",
   "invalid-deploy-command",
   "server-not-found",
+  "server-has-projects",
   "too-many-servers",
   "project-not-found",
   "signs-in-with-agent",

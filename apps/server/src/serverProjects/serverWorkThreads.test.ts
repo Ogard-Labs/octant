@@ -156,6 +156,7 @@ describe.skipIf(!canRunThrowawaySshd)("a server Work Project's turn", () => {
       {
         store: {
           workProject: storeOf(project).workProject,
+          serverOf: () => undefined,
           addressOf: () =>
             options.registered?.() === false
               ? { kind: "refused", reason: "server-not-registered" }

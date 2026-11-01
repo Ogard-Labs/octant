@@ -17,6 +17,7 @@ import {
   protectedEntryFor,
   protectedFileRefusal,
   resolveProtectedFiles,
+  serverProtectedPathPattern,
   type ProtectedFilesChoice,
   type ProtectedFilesLocations,
   type ResolvedProtectedEntry,
@@ -56,6 +57,37 @@ export function applyProtectedFilesChoice(choice: ProtectedFilesChoice): void {
 
 export function currentProtectedFilesChoice(): ProtectedFilesChoice {
   return state.choice;
+}
+
+let serverPattern:
+  | {
+      readonly choice: ProtectedFilesChoice;
+      readonly text: string;
+      readonly expression: RegExp;
+    }
+  | undefined;
+
+/** One search reads thousands of paths, so the list is built once per change to it. */
+function serverPatternInForce() {
+  if (serverPattern?.choice !== state.choice) {
+    const text = serverProtectedPathPattern(state.choice);
+    serverPattern = { choice: state.choice, text, expression: new RegExp(text, "imu") };
+  }
+  return serverPattern;
+}
+
+/** The list in force, as the expression a person's server is asked to refuse by. */
+export function currentServerProtectedPattern(): string {
+  return serverPatternInForce().text;
+}
+
+/**
+ * Whether a path on a person's server is one the list protects. It never
+ * reads this host's disk or home, so a server path cannot be judged by what
+ * happens to sit at that path here.
+ */
+export function isProtectedPathOnServer(path: string): boolean {
+  return serverPatternInForce().expression.test(path);
 }
 
 export function secretGuardPlatform(platform: NodeJS.Platform): SecretGuardPlatform {

@@ -93,10 +93,71 @@ export const SERVER_CONNECTION_OPTIONS: ReadonlyArray<string> = [
   "LogLevel=ERROR",
 ];
 
-/** Single-quotes a word for the remote login shell. */
-export function quoteForServer(word: string): string {
-  return `'${word.replaceAll("'", `'\\''`)}'`;
+/** Bytes every shell reads literally inside single quotes; anything else travels as an octal escape. */
+const PLAIN_WIRE_BYTES = /^[A-Za-z0-9_./ -]$/;
+
+/**
+ * Raw bytes in one word on the wire, at most five encoded bytes each. csh
+ * refuses a word past about 8 KiB (measured on Debian's csh: "Word too long").
+ */
+const WIRE_CHUNK_BYTES = 1_500;
+
+/**
+ * One value as words no login shell can misread: single-quoted, holding only
+ * plain bytes and `\0ooo` escapes for `printf %b` on the server, then an empty
+ * word that ends the value. There is no quote, newline, `!`, `$`, or doubled
+ * backslash in them for a shell to act on.
+ */
+function encodedWords(value: string): ReadonlyArray<string> {
+  const bytes = Buffer.from(value, "utf8");
+  const words: string[] = [];
+  for (let at = 0; at < bytes.length; at += WIRE_CHUNK_BYTES) {
+    let encoded = "";
+    for (const byte of bytes.subarray(at, at + WIRE_CHUNK_BYTES)) {
+      const character = String.fromCharCode(byte);
+      encoded += PLAIN_WIRE_BYTES.test(character)
+        ? character
+        : `\\0${byte.toString(8).padStart(3, "0")}`;
+    }
+    words.push(`'${encoded}'`);
+  }
+  words.push("''");
+  return words;
 }
+
+/**
+ * Decodes the words into values, keeping trailing newlines, then runs the
+ * first value as a script with the rest as `$1`, `$2`, …. A fixed text with
+ * no single quote, backslash, newline, or `!`, so every login shell hands it
+ * to `sh` unchanged.
+ */
+const SERVER_DECODER =
+  'n=$#;w=;while [ "$n" -gt 0 ];do if [ -z "$1" ];then set -- "$@" "$w";w=;else v=$(printf %b "$1";printf x);w=$w${v%x};fi;shift;n=$((n-1));done;s=$1;shift;exec sh -c "$s" octant "$@"';
+
+/**
+ * The text ssh hands to the person's login shell for one script. Agent text
+ * never reaches that shell as text it parses: quoting rules differ by shell
+ * (measured on fish 3.6: `\'` inside single quotes closed the word and ran
+ * what followed, with no approval; csh and tcsh ran a backtick and rejected a
+ * newline there), so the script and arguments are encoded and only `sh`
+ * decodes them. Canonical: docs/design/server-projects.md § Connection.
+ */
+export function serverRemoteCommand(script: string, args: ReadonlyArray<string> = []): string {
+  return [
+    "sh",
+    "-c",
+    `'${SERVER_DECODER}'`,
+    "octant",
+    ...[script, ...args].flatMap(encodedWords),
+  ].join(" ");
+}
+
+/**
+ * What one exec's argument can hold on Linux is 128 KiB, and the whole remote
+ * command is one argument to the login shell. Past it the call is refused
+ * here with a plain reason instead of failing on the server.
+ */
+const MAX_REMOTE_COMMAND_BYTES = 120 * 1024;
 
 /** How long a shared connection stays open after its last call. */
 const SHARED_CONNECTION_IDLE_SECONDS = 60;
@@ -181,17 +242,27 @@ export class ServerConnection {
 
   run(server: ServerAddress, input: ServerCallInput): Promise<ServerCall> {
     const terminal = input.terminal === true;
-    const remoteCommand = [
-      "sh",
-      "-c",
+    const words = input.args ?? [];
+    // A NUL cannot travel in a server argument: the decoder would drop it and
+    // hand the script a different word than the one this host judged.
+    if ([input.script, ...words].some((word) => word.includes("\0"))) {
+      return Promise.resolve({
+        status: "unreachable",
+        message: "This call holds a NUL byte, which no server command can carry. Nothing ran.",
+      });
+    }
+    const remoteCommand = serverRemoteCommand(
       // The script runs in a subshell whose own 255 becomes 254, so 255 is
       // only ever ssh reporting its own failure.
-      quoteForServer(
-        `printf '\\036'; (${input.script}\n); status=$?; [ "$status" -eq 255 ] && status=254; exit "$status"`,
-      ),
-      "octant",
-      ...(input.args ?? []).map(quoteForServer),
-    ].join(" ");
+      `printf '\\036'; (${input.script}\n); status=$?; [ "$status" -eq 255 ] && status=254; exit "$status"`,
+      words,
+    );
+    if (remoteCommand.length > MAX_REMOTE_COMMAND_BYTES) {
+      return Promise.resolve({
+        status: "unreachable",
+        message: "This call is too long to send to the server. Nothing ran.",
+      });
+    }
     let controlSocket: string;
     try {
       controlSocket = this.#controlSocket(server);

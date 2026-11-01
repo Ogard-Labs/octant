@@ -24,7 +24,7 @@ import {
   forgeShellHardLineMessage,
 } from "@octant/domain/forge-shell-change-policy";
 import { shieldCallFromHarness } from "@octant/domain/shield-judge-policy";
-import { remoteHostsNamedBy } from "@octant/domain/shield-server-policy";
+import { remoteHostsNamedBy, type ShieldServerRule } from "@octant/domain/shield-server-policy";
 import { nativeHarnessResultTaintsThread } from "@octant/domain/untrusted-content-policy";
 import type { ShieldReviewPort } from "../shield/octantShield";
 import {
@@ -40,6 +40,7 @@ import type {
 } from "../context/externalContentIngestionStore";
 import type { GoalService } from "../goal/goalService";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { isProtectedPathOnServer } from "../process/secretGuard";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import type { NativeHarnessAuthority } from "./nativeHarnessAuthority";
 import {
@@ -314,6 +315,8 @@ export interface NativeHarnessComposition {
     readonly shell: NativeHarnessShellPort;
     readonly windowId: string;
     readonly secrets?: ReadonlyArray<string>;
+    /** The server's registered record now, whose profile caps Shield there. */
+    readonly server: () => ShieldServerRule | undefined;
   }) => AppManagedToolSet | undefined;
   /**
    * A Work thread's tools in a server Project: the same tools as `forWork`,
@@ -324,6 +327,8 @@ export interface NativeHarnessComposition {
     readonly thread: WorkThread;
     readonly filesystem: NativeHarnessFileSystemPort;
     readonly shell: NativeHarnessShellPort;
+    /** The server's registered record now, whose profile caps Shield there. */
+    readonly server: () => ShieldServerRule | undefined;
   }) => AppManagedToolSet | undefined;
   readonly forAgentRun: (input: {
     readonly run: AgentRun;
@@ -439,6 +444,8 @@ export function createNativeHarnessComposition(
     readonly ports: NativeHarnessToolPorts;
     readonly executionPolicy?: ProviderExecutionPolicy;
     readonly turnExecutionPolicy?: () => ProviderExecutionPolicy | undefined;
+    /** The Watcher's reading of the list, for a thread whose paths are a server's. */
+    readonly protectedSecretPath?: (path: string) => boolean;
   }): AppManagedToolSet =>
     taintAppManagedToolResults({
       tools: createNativeHarnessTools({
@@ -460,9 +467,11 @@ export function createNativeHarnessComposition(
       recordExternalContentIngestion: options.recordExternalContentIngestion,
       uuid: options.uuid,
       resultTaintsThread,
-      ...(options.protectedSecretPath === undefined
-        ? {}
-        : { protectedSecretPath: options.protectedSecretPath }),
+      ...(input.protectedSecretPath !== undefined
+        ? { protectedSecretPath: input.protectedSecretPath }
+        : options.protectedSecretPath === undefined
+          ? {}
+          : { protectedSecretPath: options.protectedSecretPath }),
     });
   const leadOf = (thread: {
     readonly providerInstanceId: ProviderInstanceId;
@@ -505,9 +514,11 @@ export function createNativeHarnessComposition(
      * Commands run with no sandbox, on a server: a remembered approval for
      * commands was given for ones inside this host's sandbox, so each one
      * asks again. The bound root is then the server's, so Shield reads
-     * nothing at that path on this host.
+     * nothing at that path on this host, and judges the call by that server's
+     * profile, read each call. What it read there counts as outside content
+     * for Shield from the start: a file on a server is not this host's.
      */
-    readonly everyCommandAsks?: boolean;
+    readonly onServer?: () => ShieldServerRule | undefined;
   }): Pick<NativeHarnessToolPorts, "askUser" | "approvals" | "steering" | "callEnded"> => ({
     callEnded: (callId) => {
       confirmedCommandHosts.delete(callId);
@@ -532,7 +543,7 @@ export function createNativeHarnessComposition(
           approvals: async (input) => {
             const singleUse =
               input.freshConfirmation ||
-              (scope.everyCommandAsks === true && input.approvalClass === "shell-commands");
+              (scope.onServer !== undefined && input.approvalClass === "shell-commands");
             let ask: NativeHarnessApprovalAsk = {
               threadId: scope.parentThreadId,
               mode: scope.mode,
@@ -566,7 +577,15 @@ export function createNativeHarnessComposition(
                 }),
                 boundRoot: scope.boundRoot,
                 ...(scope.extraRoots === undefined ? {} : { extraRoots: scope.extraRoots }),
-                ...(scope.everyCommandAsks === true ? { rootOnServer: true } : {}),
+                ...(scope.onServer === undefined
+                  ? {}
+                  : {
+                      rootOnServer: {
+                        server: scope.onServer(),
+                        protectedPath: isProtectedPathOnServer,
+                      },
+                      alsoTainted: true,
+                    }),
                 signal: input.signal,
               });
               if (decision !== undefined) {
@@ -1053,7 +1072,7 @@ export function createNativeHarnessComposition(
         },
       });
     },
-    forServerCode: ({ thread, filesystem, shell, windowId, secrets }) => {
+    forServerCode: ({ thread, filesystem, shell, windowId, secrets, server }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
       const threadId = String(thread.id);
       const planned =
@@ -1064,6 +1083,7 @@ export function createNativeHarnessComposition(
         mode: "code",
         ...(planned ? { executionPolicy: "plan" as const } : {}),
         turnExecutionPolicy: () => options.readCodeExecutionPolicy?.(threadId, windowId),
+        protectedSecretPath: isProtectedPathOnServer,
         ports: {
           ...shared(threadId),
           // No delegation: a child would run on this host, not on the server.
@@ -1074,7 +1094,7 @@ export function createNativeHarnessComposition(
             lead: leadOf(thread),
             windowId,
             boundRoot: filesystem.root,
-            everyCommandAsks: true,
+            onServer: server,
           }),
           filesystem,
           shell,
@@ -1097,12 +1117,13 @@ export function createNativeHarnessComposition(
         },
       });
     },
-    forServerWork: ({ thread, filesystem, shell }) => {
+    forServerWork: ({ thread, filesystem, shell, server }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
       const threadId = String(thread.id);
       return compose({
         threadId,
         mode: "work",
+        protectedSecretPath: isProtectedPathOnServer,
         ports: {
           ...shared(threadId),
           // No delegation: a child would run on this host, not on the server.
@@ -1112,7 +1133,7 @@ export function createNativeHarnessComposition(
             projectId: thread.projectId,
             lead: leadOf(thread),
             boundRoot: filesystem.root,
-            everyCommandAsks: true,
+            onServer: server,
           }),
           filesystem,
           shell,

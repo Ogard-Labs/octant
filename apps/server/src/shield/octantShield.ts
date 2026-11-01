@@ -120,9 +120,17 @@ export interface ShieldReviewRequest {
   /**
    * The bound root is a folder on a server, not on this host, so nothing is
    * read from this host's disk at that path: a local folder of the same name
-   * would otherwise vouch for commands that run on the server.
+   * would otherwise vouch for commands that run on the server. Nor do this
+   * host's safe places or protected paths judge it: `protectedPath` is the
+   * server's reading of the list, and `server`'s profile caps the call. No
+   * server (it left the registry) goes to the person.
    */
-  readonly rootOnServer?: boolean | undefined;
+  readonly rootOnServer?:
+    | {
+        readonly server: ShieldServerRule | undefined;
+        readonly protectedPath: (path: string) => boolean;
+      }
+    | undefined;
   /** A subagent's own taint, which counts beside its parent's. */
   readonly alsoTainted?: boolean | undefined;
   /** What the Watcher found in what a subagent read, beside its parent's. */
@@ -214,6 +222,16 @@ export class OctantShield {
     const brake = shieldBrakeEngaged(this.#brakes.get(request.threadId) ?? SHIELD_BRAKE_RELEASED);
     if (brake.engaged) return decide("ask", "brake", brake.reason, { rule: "denial-brake" });
 
+    const onServer = request.rootOnServer;
+    if (onServer !== undefined && onServer.server === undefined) {
+      return decide(
+        "ask",
+        "hard-line",
+        "This Project's server is no longer registered, so the person decides.",
+        { rule: "unregistered-server" },
+      );
+    }
+
     const ownLabels = facts.watcherLabels(request.threadId);
     const watcherLabels = SHIELD_WATCHER_LABELS.filter(
       (label) => ownLabels.includes(label) || request.alsoWatcherLabels?.includes(label) === true,
@@ -227,13 +245,14 @@ export class OctantShield {
       boundRoot: request.boundRoot,
       ...(request.extraRoots === undefined ? {} : { extraRoots: request.extraRoots }),
       tainted,
-      projectCommands:
-        request.rootOnServer === true ? [] : facts.projectCommands(request.boundRoot),
+      projectCommands: onServer !== undefined ? [] : facts.projectCommands(request.boundRoot),
       servers: facts.servers?.(request.threadId) ?? [],
-      ...(facts.protectedSecretPath === undefined
-        ? {}
-        : { protectedSecretPath: facts.protectedSecretPath }),
-      safePlaces: facts.safePlaces?.(reviewing.projectId) ?? [],
+      ...(onServer !== undefined
+        ? { protectedSecretPath: onServer.protectedPath, rootServer: onServer.server }
+        : facts.protectedSecretPath === undefined
+          ? {}
+          : { protectedSecretPath: facts.protectedSecretPath }),
+      safePlaces: onServer !== undefined ? [] : (facts.safePlaces?.(reviewing.projectId) ?? []),
       level: reviewing.level,
       personMessages: facts.personMessages(request.threadId),
       watcherLabels,

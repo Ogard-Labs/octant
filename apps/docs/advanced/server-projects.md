@@ -35,6 +35,10 @@ Only someone at this computer can bind or remove a server Project.
   again.
 - Removing a server from **Servers** keeps its Projects, but they cannot
   connect until you register the server again or remove them.
+- While a Project is bound to a server, that server's alias and user cannot
+  change, since its folder was checked on that host. To move, remove the Project
+  or register the new address as another server. Its profile can still change.
+- Any login shell works, fish and tcsh included. The server needs a POSIX `sh`.
 
 ## Work in a server Project
 
@@ -51,6 +55,15 @@ Choose one to start a thread there.
   access mean what they mean in any Code Project. Octant cannot sandbox a
   server, so below Full access every command asks again, even when you
   allowed commands earlier in the thread. Full access asks nothing.
+- **Protected files.** Octant's file tools, the Files panel, and search refuse
+  the list in **Settings → Permissions → Protected files** on the server too, at
+  every level, your changes included. A command is different: it can read
+  anything your server user can, so what guards it is the access level. Ask
+  first asks you, Auto hands it to its reviewer, and Full access asks nobody.
+- **Auto follows the server's profile.** With Octant Shield reviewing, a server's
+  action profile caps what passes without asking: a Read-only server gets reads
+  only, and edits in the folder need Admin. Everything a server sends back is
+  treated as possible outside content.
 - **Terminals.** A terminal in the thread is a login shell in the folder on
   the server. When the connection drops, the terminal ends.
 - **Project terminal.** When you start a new task in a server Project, the

@@ -219,7 +219,7 @@ const SERVER_NOT_REGISTERED =
  */
 export function bindServerCodeTurn(
   options: {
-    readonly store: Pick<ServerProjectStore, "codeProject" | "addressOf">;
+    readonly store: Pick<ServerProjectStore, "codeProject" | "addressOf" | "serverOf">;
     readonly connection: Pick<ServerConnection, "run">;
     readonly composition: Pick<NativeHarnessComposition, "forServerCode">;
     readonly record: (
@@ -267,6 +267,7 @@ export function bindServerCodeTurn(
     shell,
     windowId: String(input.windowId),
     secrets: input.secrets,
+    server: () => options.store.serverOf(projectId),
   });
   return tools === undefined
     ? { status: "refused", message: SERVER_RUNTIME_NOT_HARNESS }

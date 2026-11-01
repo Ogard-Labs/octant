@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { judgeShieldCallByRules, type ShieldCall, type ShieldRuleInput } from "./shieldJudgePolicy";
+import {
+  judgeShieldCallByRules,
+  shieldJudgePrompt,
+  type ShieldCall,
+  type ShieldRuleInput,
+} from "./shieldJudgePolicy";
 import { SHIELD_REMOTE_COMMAND_FIXTURES } from "./shieldServerFixtures";
 import {
   classifyRemoteCommand,
@@ -454,5 +459,84 @@ describe("Shield on scp and rsync calls", () => {
 
   it("hands an rsync option no rule names to the model", () => {
     expect(judge("rsync --chown=x:y web1:/a .", [web])).toEqual({ kind: "needs-model" });
+  });
+});
+
+describe("a Project's own call on the server its folder is on", () => {
+  const at = (profile: ShieldServerRule["profile"], extra: Partial<ShieldRuleInput> = {}) => ({
+    rootServer: { ...web, profile },
+    ...extra,
+  });
+  const edit: ShieldCall = {
+    tool: "edit",
+    kind: "edit",
+    paths: ["src/main.ts"],
+    urls: [],
+    arguments: "{}",
+    workingDirectory: root,
+  };
+  const judgeEdit = (profile: ShieldServerRule["profile"]) =>
+    judgeShieldCallByRules({
+      call: edit,
+      boundRoot: root,
+      tainted: false,
+      projectCommands: [],
+      ...at(profile),
+    });
+
+  it("lets each profile do what it includes, and sends the rest to the person", () => {
+    expect(judge("sudo systemctl restart nginx", [], at("read-only"))).toMatchObject({
+      verdict: "ask",
+      rule: "beyond-server-profile",
+    });
+    expect(judge("sudo systemctl restart nginx", [], at("operate"))).toMatchObject({
+      verdict: "allow",
+      rule: "registered-server",
+    });
+    expect(judge("rm -rf ./data", [], at("operate"))).toMatchObject({ verdict: "ask" });
+    expect(judge("cat README.md", [], at("read-only"))).toMatchObject({ verdict: "allow" });
+    expect(judge("git status", [], at("read-only"))).toMatchObject({ verdict: "allow" });
+  });
+
+  it("passes no unread command on a read-only server, and leaves one to the model above it", () => {
+    expect(judge("./run-thing", [], at("read-only"))).toMatchObject({
+      verdict: "ask",
+      rule: "beyond-server-profile",
+    });
+    expect(judge("./run-thing", [], at("admin"))).toEqual({ kind: "needs-model" });
+  });
+
+  it("asks before a lock-out or a server's own secret at every profile", () => {
+    expect(judge("reboot", [], at("admin"))).toMatchObject({ rule: "server-lockout" });
+    expect(judge("cat /etc/shadow", [], at("admin"))).toMatchObject({ rule: "secret-path" });
+  });
+
+  it("treats an edit in the folder as a configuration change", () => {
+    expect(judgeEdit("read-only")).toMatchObject({ rule: "beyond-server-profile" });
+    expect(judgeEdit("operate")).toMatchObject({ rule: "beyond-server-profile" });
+    expect(judgeEdit("admin")).toMatchObject({ verdict: "allow", rule: "in-root-edit" });
+  });
+
+  it("asks before a change once the thread may be steered, and still allows a read", () => {
+    const steered = at("admin", { tainted: true });
+    expect(judge("systemctl restart nginx", [], steered)).toMatchObject({ rule: "tainted-thread" });
+    expect(judge("cat README.md", [], steered)).toMatchObject({ verdict: "allow" });
+  });
+
+  it("names the server and its profile to the model", () => {
+    const prompt = JSON.parse(
+      shieldJudgePrompt({
+        call: bash("./run-thing"),
+        boundRoot: root,
+        tainted: true,
+        projectCommands: [],
+        level: "provider-review",
+        personMessages: [],
+        watcherLabels: [],
+        rootServer: { ...web, profile: "operate" },
+      }),
+    );
+    expect(prompt.boundFolderServer).toEqual({ alias: "web1", profile: "operate" });
+    expect(prompt.threadReadOutsideContent).toBe(true);
   });
 });

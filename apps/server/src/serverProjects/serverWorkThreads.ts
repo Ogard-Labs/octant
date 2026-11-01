@@ -67,7 +67,7 @@ const SERVER_NOT_REGISTERED =
  */
 export function bindServerWorkTurn(
   options: {
-    readonly store: Pick<ServerProjectStore, "workProject" | "addressOf">;
+    readonly store: Pick<ServerProjectStore, "workProject" | "addressOf" | "serverOf">;
     readonly connection: Pick<ServerConnection, "run">;
     readonly composition: Pick<NativeHarnessComposition, "forServerWork">;
     readonly record: (
@@ -104,6 +104,7 @@ export function bindServerWorkTurn(
       root: project.folder,
       record: (record) => options.record({ ...record, threadId: String(input.thread.id) }),
     }),
+    server: () => options.store.serverOf(projectId),
   });
   return tools === undefined
     ? { status: "refused", message: SERVER_RUNTIME_NOT_HARNESS }

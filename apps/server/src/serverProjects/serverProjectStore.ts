@@ -149,6 +149,15 @@ export class ServerProjectStore {
     };
   }
 
+  /** The registered record a Project's server has now, whose profile caps Shield there. */
+  serverOf(projectId: string): ShieldServer | undefined {
+    const project = this.#projects.get(projectId);
+    if (project === undefined) return undefined;
+    return this.#options
+      .servers()
+      .find((candidate) => String(candidate.serverId) === String(project.serverId));
+  }
+
   /**
    * Binds a Code or Work Project to a folder on a registered server. The folder is
    * resolved on the server first, and only its real path is journaled; a
@@ -191,12 +200,17 @@ export class ServerProjectStore {
     }
     // The check above waited on the server, so the limit and the registry are
     // read again: another bind may have filled the catalog, or the server may
-    // have been removed, in the meantime.
+    // have been removed or pointed at another host, in the meantime.
     if (this.#projects.size >= MAX_SERVER_PROJECTS) return refused("too-many-projects");
     if (
       !this.#options
         .servers()
-        .some((candidate) => String(candidate.serverId) === String(server.serverId))
+        .some(
+          (candidate) =>
+            String(candidate.serverId) === String(server.serverId) &&
+            candidate.alias === server.alias &&
+            candidate.user === server.user,
+        )
     ) {
       return refused("server-not-registered");
     }

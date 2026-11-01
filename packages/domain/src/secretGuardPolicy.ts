@@ -449,6 +449,72 @@ export function protectedFileRefusal(entry: ResolvedProtectedEntry, homeDirector
   ].join(" ");
 }
 
+/** Matches no real path: what the server list becomes when the person removed every group. */
+const NOTHING_ON_A_SERVER = "^$";
+
+/**
+ * What a server refuses beyond the list's own files, for a group that is on:
+ * the whole folder, where the list names one file in it, and key files by
+ * name anywhere. Octant's file tools on a server have no use for SSH `config`
+ * or AWS `config`, which the list leaves readable only because local programs
+ * need them, and refusing the folder has been the server rule from the start.
+ */
+const SERVER_WIDENED: Partial<Record<BuiltInProtectedFilesId, ReadonlyArray<string>>> = {
+  "ssh-private-keys": ["(^|/)\\.ssh(/|$)", "\\.(pem|key|p12|pfx|ppk)$"],
+  "cloud-credentials": ["(^|/)\\.aws(/|$)"],
+  "cluster-configuration": ["(^|/)\\.kube(/|$)"],
+  "container-registry-sign-in": ["(^|/)\\.docker(/|$)"],
+  "forge-cli-sign-in": ["(^|/)\\.config/gh(/|$)"],
+  "keychains-and-vaults": ["(^|/)\\.gnupg(/|$)"],
+};
+
+function regexLiteral(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+/**
+ * The secret guard's list as one POSIX extended regular expression for paths
+ * on a person's server, the same text for the server's `grep -Ei` and this
+ * host's check. The one list: both platforms' home entries (a server may be
+ * either), and what the person changed.
+ *
+ * A home entry is matched by name below any folder, not under one home: the
+ * server's home is not known here, and `/root/.aws/credentials` is as secret
+ * as the login user's. An entry's exception is not kept (a regular expression
+ * of this dialect cannot say it), since it exists for programs a launch runs,
+ * and these are Octant's file tools. Entries under Octant's data and runtime
+ * folders are left out: they name this host's folders. A person's `~/x` is
+ * matched as a home entry is, and an absolute path as that path on the server.
+ */
+export function serverProtectedPathPattern(choice: ProtectedFilesChoice): string {
+  const removed = new Set(choice.removed);
+  const parts = new Set<string>();
+  for (const platform of ["darwin", "linux"] as const) {
+    for (const rule of builtInRules(platform)) {
+      if (removed.has(rule.id)) continue;
+      for (const entry of rule.entries) {
+        if (entry.base !== "home") continue;
+        if (entry.kind === "path") {
+          parts.add(`(^|/)${regexLiteral(entry.path)}(/|$)`);
+          continue;
+        }
+        const between = entry.depth > 1 ? `([^/]*/){0,${String(entry.depth - 1)}}` : "";
+        parts.add(`(^|/)${regexLiteral(entry.directory)}/${between}(${entry.name})$`);
+      }
+      for (const widened of SERVER_WIDENED[rule.id] ?? []) parts.add(widened);
+    }
+  }
+  for (const added of choice.added) {
+    const trimmed = withoutTrailingSlashes(added.trim());
+    if (trimmed.startsWith("~/")) {
+      parts.add(`(^|/)${regexLiteral(normalizePosix(trimmed.slice(1)).slice(1))}(/|$)`);
+    } else if (trimmed.startsWith("/") && trimmed.length > 1) {
+      parts.add(`^${regexLiteral(normalizePosix(trimmed))}(/|$)`);
+    }
+  }
+  return parts.size === 0 ? NOTHING_ON_A_SERVER : [...parts].join("|");
+}
+
 /**
  * Credential shapes that identify themselves, so text can be redacted without
  * knowing the value in advance. Each is specific enough that ordinary prose and

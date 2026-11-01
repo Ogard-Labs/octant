@@ -90,7 +90,12 @@ export type ShieldServerPrincipal = "local-window" | "remote-device";
 
 export type ShieldServersChange =
   | { readonly kind: "changed"; readonly server?: ShieldServer }
-  | { readonly kind: "refused"; readonly reason: ShieldServersRefusalReason };
+  | {
+      readonly kind: "refused";
+      readonly reason: ShieldServersRefusalReason;
+      /** A plain sentence naming what stands in the way, in place of the reason's own. */
+      readonly message?: string;
+    };
 
 export interface ShieldServerStoreOptions {
   readonly journal: Pick<Journal, "append" | "replayAggregateType" | "aggregateVersions">;
@@ -101,6 +106,8 @@ export interface ShieldServerStoreOptions {
   readonly clock: () => string;
   /** Reads a runbook, at most `maxBytes`; undefined when the file cannot be read. */
   readonly readRunbook?: (path: string, maxBytes: number) => string | undefined;
+  /** The names of the server Projects bound to a server, whose folders are on that host. */
+  readonly projectsBoundTo?: (serverId: string) => ReadonlyArray<string>;
 }
 
 export class ShieldServerStore {
@@ -273,6 +280,19 @@ export class ShieldServerStore {
     if (input.principal !== "local-window") return refused("needs-local-window");
     const existing = this.#servers.get(input.serverId);
     if (existing === undefined) return refused("server-not-found");
+    // A Project's folder was checked on the host this names. Editing the name
+    // would send its next turn, Git command, or terminal to a different host,
+    // at the same path, with nothing checking the folder there.
+    if (existing.alias !== input.server.alias || existing.user !== input.server.user) {
+      const bound = this.#options.projectsBoundTo?.(input.serverId) ?? [];
+      if (bound.length > 0) {
+        return {
+          kind: "refused",
+          reason: "server-has-projects",
+          message: `${bound.join(", ")} ${bound.length === 1 ? "is" : "are"} bound to ${existing.alias} as ${existing.user}, so its alias and user cannot change. Remove ${bound.length === 1 ? "that Project" : "those Projects"} first, or register the new address as another server.`,
+        };
+      }
+    }
     return this.#set({ ...input.server, serverId: existing.serverId });
   }
 

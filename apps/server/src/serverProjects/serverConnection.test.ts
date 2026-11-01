@@ -1,9 +1,11 @@
-import { existsSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
-  quoteForServer,
   ServerConnection,
+  serverRemoteCommand,
   serverSshArguments,
   serverSshEnvironment,
 } from "./serverConnection";
@@ -76,8 +78,74 @@ describe("a server connection's arguments", () => {
     expect(call.status).toBe("unreachable");
   });
 
-  it("quotes a word so the server's shell reads it whole", () => {
-    expect(quoteForServer("it's $HOME")).toBe(`'it'\\''s $HOME'`);
+  it("runs nothing for a word that cannot travel or a call too long to send", async () => {
+    const connection = new ServerConnection({
+      agentSocket: () => undefined,
+      sshPath: "/nonexistent/ssh",
+    });
+    const send = (args: ReadonlyArray<string>) =>
+      connection.run(
+        { alias: "web1", user: "deploy" },
+        { script: "true", args, timeoutMs: 1_000, maxOutputBytes: 64 },
+      );
+    expect(await send(["a\0b"])).toMatchObject({
+      status: "unreachable",
+      message: expect.stringContaining("NUL"),
+    });
+    expect(await send(["!".repeat(40_000)])).toMatchObject({
+      status: "unreachable",
+      message: expect.stringContaining("too long"),
+    });
+  });
+});
+
+describe("the text a server's login shell is handed", () => {
+  const HOSTILE = [
+    'x\\\'; touch "$MARK"; #',
+    "it's",
+    "\\",
+    "\\\\'",
+    '$(touch "$MARK")',
+    '\`touch "$MARK"\`',
+    "a\nb\n",
+    "!!",
+    "",
+    "-n",
+    "%s\\c",
+    "ünï",
+    "x".repeat(20_000),
+  ];
+
+  it("holds nothing a shell could act on, whatever the argument", () => {
+    const wire = serverRemoteCommand("printf ok", HOSTILE);
+    expect(wire).not.toMatch(/\n|!|\\'|\\\\|\`/);
+    // Past the fixed decoder, only plain bytes, quotes, and octal escapes.
+    const words = wire.slice(wire.indexOf("' octant ") + 9);
+    expect(/^(?:'(?:[\w./ -]|\\0[0-7]{3})*' ?)+$/.test(words)).toBe(true);
+  });
+
+  // What sshd does with the text: the login shell's `-c`. Fish and the csh
+  // family read single quotes differently; the shells here run on every
+  // machine that has them, and all of them in the release's container check.
+  const shells = ["sh", "bash", "dash", "zsh", "ksh", "fish", "tcsh", "csh"]
+    .map((name) => spawnSync("/bin/sh", ["-c", `command -v ${name}`], { encoding: "utf8" }))
+    .map((found) => found.stdout.trim())
+    .filter((path) => path.length > 0);
+
+  it.each(shells)("%s hands every argument to the script unchanged and runs none", (shell) => {
+    const scratch = mkdtempSync(join(tmpdir(), "octant-login-shell-"));
+    const mark = join(scratch, "ran");
+    try {
+      const out = spawnSync(
+        shell,
+        ["-c", serverRemoteCommand(`for a in "$@"; do printf '%s\\0' "$a"; done`, HOSTILE)],
+        { env: { PATH: process.env.PATH, MARK: mark, HOME: scratch }, encoding: "utf8" },
+      );
+      expect(out.stdout === HOSTILE.map((word) => `${word}\0`).join("")).toBe(true);
+      expect(existsSync(mark)).toBe(false);
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
   });
 });
 

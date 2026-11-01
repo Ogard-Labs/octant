@@ -5,7 +5,7 @@ import {
   type PtyProcess,
   type TerminalProcessHandle,
 } from "../code/terminalProcessPort";
-import { quoteForServer, type ServerAddress, type ServerConnection } from "./serverConnection";
+import { serverRemoteCommand, type ServerAddress, type ServerConnection } from "./serverConnection";
 
 /**
  * A terminal in a server Project: an interactive login on the server, in the
@@ -33,8 +33,9 @@ export function serverTerminalLogin(
 ): ServerTerminalLogin {
   return connection.loginCommand(
     server,
-    // The login shell runs this, then the person's own shell replaces it.
-    `cd -- ${quoteForServer(folder)} && exec "\${SHELL:-/bin/sh}" -l`,
+    // `sh` runs this whatever the login shell is, then the person's own shell
+    // replaces it: `${...}` and `&&` are not fish or csh syntax.
+    serverRemoteCommand(`cd -- "$1" && exec "\${SHELL:-/bin/sh}" -l`, [folder]),
   );
 }
 

@@ -53,8 +53,9 @@ function openJournal(directory: string) {
   });
 }
 
-function storeOn(journal: Journal) {
+function storeOn(journal: Journal, projectsBoundTo?: (serverId: string) => ReadonlyArray<string>) {
   const store = new ShieldServerStore({
+    ...(projectsBoundTo === undefined ? {} : { projectsBoundTo }),
     journal,
     personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
     hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
@@ -104,6 +105,38 @@ describe("Shield server registry", () => {
     ]);
     expect(restarted.remove({ serverId, principal: "local-window" }).kind).toBe("changed");
     expect(storeOn(journal).servers()).toEqual([]);
+  });
+
+  it("refuses moving a server with bound Projects to another host, naming them", () => {
+    const store = storeOn(openJournal(scratch()), () => ["Site", "Shop"]);
+    store.register({ server: web, principal: "local-window" });
+    const serverId = String(store.servers()[0]?.serverId);
+    for (const moved of [
+      { ...web, alias: "staging" },
+      { ...web, user: "root" },
+    ]) {
+      const change = store.change({ serverId, server: moved, principal: "local-window" });
+      expect(change).toMatchObject({ kind: "refused", reason: "server-has-projects" });
+      expect(change.kind === "refused" && change.message).toContain("Site, Shop");
+    }
+    expect(store.servers()[0]).toMatchObject({ alias: "web1", user: "deploy" });
+    // Its profile and deploys describe the same host, so they stay editable.
+    expect(
+      store.change({
+        serverId,
+        server: { ...web, profile: "read-only" },
+        principal: "local-window",
+      }).kind,
+    ).toBe("changed");
+  });
+
+  it("lets a server with no bound Project change its alias", () => {
+    const store = storeOn(openJournal(scratch()), () => []);
+    store.register({ server: web, principal: "local-window" });
+    const serverId = String(store.servers()[0]?.serverId);
+    expect(
+      store.change({ serverId, server: { ...web, alias: "web2" }, principal: "local-window" }).kind,
+    ).toBe("changed");
   });
 
   it("refuses a change from a paired device, a second alias in any case, and a runbook among keys", () => {

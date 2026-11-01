@@ -24,7 +24,7 @@ import {
   type CodeFileSaveResult,
 } from "../code/codeFileService";
 import type { ServerAddress, ServerCall, ServerConnection } from "./serverConnection";
-import { RESOLVE_INSIDE, serverCredentialPathRefusal } from "./serverFiles";
+import { RESOLVE_INSIDE, serverCredentialPathRefusal, withProtectedPaths } from "./serverFiles";
 
 /**
  * The Code file browser and editor on a server Project's folder. Canonical:
@@ -147,7 +147,7 @@ export class ServerCodeFiles {
       if ((kind !== "d" && kind !== "f") || !raw.startsWith(`${kind}./`)) continue;
       const below = raw.slice(3);
       const path = base === "" ? below : `${base}/${below}`;
-      if (serverCredentialPathRefusal(path) !== undefined) continue;
+      if (serverCredentialPathRefusal(posix.join(this.#root, path)) !== undefined) continue;
       found.push({ kind, path, depth: below.split("/").length });
     }
     // The local listing names a folder's entries before descending, so a
@@ -390,7 +390,7 @@ export class ServerCodeFiles {
       });
     }
     return this.#options.connection.run(server, {
-      script,
+      script: withProtectedPaths(script),
       args,
       ...(stdin === undefined ? {} : { stdin }),
       timeoutMs: CALL_TIMEOUT_MS,
