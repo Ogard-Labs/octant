@@ -12,7 +12,8 @@ the controls and the approval card.
 
 Status: profiles, their storage, site approvals, refusals, Settings, cookie
 import, and browser extensions (install, per-profile enablement, popups) are
-built, including the `chrome.tabs` support for popups and the
+built, including importing an extension from another browser and importing one
+site's cookies, and the `chrome.tabs` support for popups and the
 `chrome.action.onClicked` event for an extension without a popup page.
 
 ## Profiles
@@ -36,7 +37,9 @@ and service workers in. There are three kinds:
   in place. The `existing-profile` profile mode in the Browser contract is
   retired: the schema no longer decodes it, so no caller can ask for it. The one
   way another browser's sign-ins reach Octant is the person's explicit
-  [cookie import](#cookie-import) into a Project or Personal profile.
+  [cookie import](#cookie-import) into a Project or Personal profile. An
+  extension from another browser reaches Octant only as a copy, through
+  [Importing from another browser](#importing-from-another-browser).
 - Chat has no Browser, so it has no profile. A Chat Project has no Project
   profile.
 - The person signs in by typing into the page themselves. Octant saves no
@@ -138,6 +141,20 @@ into one Project or Personal profile, so they do not sign in again.
 - **Which browsers.** Chromium-family browsers (Chrome, Chromium, Brave, Edge,
   Vivaldi, Arc) and Firefox. Safari is not offered: its cookie store sits behind
   a macOS privacy permission Octant does not ask for.
+- **One site or the whole profile.** The dialog imports every cookie in the
+  chosen profile, or, when the person chooses "One website only" and types a
+  site (a host such as `github.com` or a pasted address), only that site's
+  cookies and its parent domains'. A cookie matches when it is stored for the
+  site itself, or as a domain cookie of a parent (`.example.com` for
+  `app.example.com`); a host-only cookie of a parent, a sibling's cookie, and a
+  bare top-level domain do not. The filter runs on the database rows before any
+  value is decrypted, so another site's cookie is never decrypted, and a Keychain
+  prompt appears only when the site has an encrypted cookie. An input that names
+  no web host is refused before anything is read. Counts "left behind" cover the
+  site's own cookies only. Rationale: the site's rows are selected in the
+  database query, so a very large profile's row cap cannot hide them; a parent
+  domain is any parent of at least two labels, with no public-suffix list, so a
+  domain cookie stored for a suffix such as `co.uk` would be imported.
 - **The browser's own encryption.** A Chromium-family browser on macOS encrypts
   cookie values with a key it keeps in the login Keychain as "<Browser> Safe
   Storage". Octant asks for that key through the platform's documented tool
@@ -171,8 +188,9 @@ into one Project or Personal profile, so they do not sign in again.
   thread, a capture, an export, or anything an agent reads. A failure reports a
   fixed sentence that names no cookie or site.
 - **The record.** The host journals `browser.cookies-imported@1` with the source
-  browser, its profile id, the Octant profile, and the number imported and left
-  behind. It holds no cookie, name, site, or value. A store failure part way
+  browser, its profile id, the Octant profile, the number imported and left
+  behind, and whether the import was limited to one site. It holds no cookie,
+  name, site, or value; the site the person typed is not recorded. A store failure part way
   still records what arrived.
 - **Clearing.** "Clear cookies…" on the same row removes a profile's cookies and
   keeps its other storage (it is the `cookies` scope of the clear described
@@ -250,7 +268,9 @@ page they are allowed on, including what the agent reads.
 
 - Only the person at a local window installs an extension, from an unpacked
   extension folder chosen with the native folder picker (a host-issued binding
-  receipt, as for Add folder). There is no web store.
+  receipt, as for Add folder), or by
+  [importing it from another browser](#importing-from-another-browser) on this
+  Mac. There is no web store.
 - The host validates the manifest (Manifest V3, a name, a version), copies the
   folder into the host data directory under `browser-extensions/<extension id>/`,
   and journals `browser.extension-installed@1` with the name, version, content
@@ -263,6 +283,43 @@ page they are allowed on, including what the agent reads.
   confirmation again, showing what is new. An update that asks for the same or
   less stays enabled where it was, and Settings shows the new version.
 - Removing an extension disables it in every profile and deletes its copy.
+
+### Importing from another browser
+
+Settings › Data & privacy › Browser extensions has "Import from another
+browser…" beside "Install extension…", in a local window only.
+
+- **Which browsers.** Chromium-family browsers (Chrome, Chromium, Brave, Edge,
+  Vivaldi, Arc). The dialog lists each browser's profiles by the names it shows
+  and the extensions installed in the chosen profile by name and version. Listing
+  reads only each extension's manifest and its translated name. The person picks
+  one extension and presses Import.
+- **Copy, never in place.** The host copies the extension's newest version folder
+  into `browser-extensions/<extension id>/` through the same bounded copy a picked
+  folder gets (no links, bounded files and bytes), leaving out the source
+  browser's `_metadata` integrity folder. Octant never loads another browser's
+  profile or extension folder in place, and the pick must be one the listing
+  offers, so a profile or extension name from a window never becomes a path.
+- **Same path from there.** The copy is validated as Manifest V3 and journaled as
+  `browser.extension-installed@1` (or `-updated@1`, when the same name is already
+  installed) with the same fields as a picked folder plus the browser it came
+  from. It is installed but off everywhere, is enabled per profile after the
+  person confirms what it can read and change, and never loads into a Private
+  page. Importing is the person's, at a local window; a paired device is refused
+  and sees no list.
+- **Unsupported, with the reason.** An extension that uses Manifest V2 is listed
+  as unsupported ("It uses the older Manifest V2 format, which Octant cannot
+  run."), and so is one that needs native messaging ("It needs to talk to a
+  program on your Mac (native messaging), which Octant does not support."). An
+  unsupported extension cannot be picked, and a direct request for one is refused
+  with the same words. An extension whose name cannot be read is not listed.
+- **It may not work.** The dialog says some extensions may not work here, because
+  Octant supports only part of the `chrome.*` APIs an extension can call.
+- Rationale: Firefox is not offered, because its add-on format differs from
+  Chrome's; only the newest installed version of an extension is offered, because
+  that is the one the other browser runs; and the dialog has no store sign-in, so
+  an extension that is only installed through one stays unsupported. The narrower
+  choices keep the existing install path and authority unchanged.
 
 ### Enabling
 
@@ -351,10 +408,11 @@ work without it, and takes no extension-support package:
 | `profile-needs-a-person` | A routine, a subagent, or a terminal Browser grant tries to use a profile page                        |
 | `profile-unavailable`    | The Project is archived, its mode is off, the native Browser is not available, or the store is locked |
 | `source-not-found`       | A cookie import names a browser or profile that is not on this Mac                                    |
+| `invalid`                | A cookie import's site names no web host                                                              |
 | `keychain-refused`       | The person declined the Keychain prompt for the browser's cookie key, or macOS would not answer       |
 | `source-unreadable`      | A cookie database could not be opened or decrypted, or the browser keeps no key in the Keychain       |
 | `extension-not-local`    | A paired device or any non-person caller tries to install, enable, or disable an extension            |
-| `extension-unsupported`  | The manifest is not Manifest V3, or the host has no desktop app                                       |
+| `extension-unsupported`  | The manifest is not Manifest V3, it needs native messaging, or the host has no desktop app            |
 
 Each refusal is a value the pane shows in words; none is a silent no-op.
 

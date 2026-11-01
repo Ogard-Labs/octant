@@ -23,6 +23,21 @@ describe("Browser extensions contract", () => {
     ).toThrow();
   });
 
+  it("imports from another browser by the ids its listing gave, never by a path", () => {
+    const command = {
+      kind: "import",
+      browser: "brave",
+      sourceProfile: "Default",
+      sourceExtensionId: "abcdefghijklmnopabcdefghijklmnop",
+    };
+    expect(decodeBrowserExtensionsCommand(command)).toEqual(command);
+    expect(() => decodeBrowserExtensionsCommand({ ...command, browser: "firefox" })).toThrow();
+    expect(() =>
+      decodeBrowserExtensionsCommand({ ...command, sourceExtensionId: "../../etc" }),
+    ).toThrow();
+    expect(() => decodeBrowserExtensionsCommand({ ...command, path: "/x" })).toThrow();
+  });
+
   it("enables an extension in a stored profile for the version the person saw, never in Private", () => {
     expect(
       decodeBrowserExtensionsCommand({

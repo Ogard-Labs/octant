@@ -24,6 +24,7 @@ import {
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
 import type { BrowserRuntimePort } from "./browserRuntimePort";
+import { normalizeImportSite } from "./cookieImport/importedCookie";
 import type { BrowserCookieReader, CookieReadRefusal } from "./cookieImport/browserCookieReader";
 
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
@@ -101,7 +102,13 @@ export class BrowserProfileService {
       });
     }
     if (command.kind === "import-cookies") {
-      return this.#importCookies(store, command.profile, command.browser, command.sourceProfile);
+      return this.#importCookies(
+        store,
+        command.profile,
+        command.browser,
+        command.sourceProfile,
+        command.site,
+      );
     }
     return this.#clear(store, command.profile, command.scope);
   }
@@ -118,12 +125,18 @@ export class BrowserProfileService {
     profile: StoredBrowserProfile,
     browser: CookieImportBrowserId,
     sourceProfile: string,
+    siteInput: string | undefined,
   ): Promise<BrowserProfilesResult> {
+    const site = siteInput === undefined ? undefined : normalizeImportSite(siteInput);
+    if (siteInput !== undefined && site === undefined) {
+      return refused("invalid", "Enter a website like example.com.");
+    }
+    const siteOnly = site !== undefined;
     const reader = this.#options.cookieReader;
     if (reader === undefined) {
       return refused("source-not-found", "This Mac has no other browser to import cookies from.");
     }
-    const read = await reader.read(browser, sourceProfile);
+    const read = await reader.read(browser, sourceProfile, site);
     if (read.status === "refused") return refused(read.reason, IMPORT_REFUSALS[read.reason]);
     let imported = 0;
     let skipped = read.skipped;
@@ -138,10 +151,11 @@ export class BrowserProfileService {
       }
     } catch {
       // Whatever arrived before the failure is in the profile and is recorded.
-      if (imported > 0) this.#journalImported(profile, browser, sourceProfile, imported, skipped);
+      if (imported > 0)
+        this.#journalImported(profile, browser, sourceProfile, imported, skipped, siteOnly);
       return refused("profile-unavailable", "The cookies could not be added to this profile.");
     }
-    this.#journalImported(profile, browser, sourceProfile, imported, skipped);
+    this.#journalImported(profile, browser, sourceProfile, imported, skipped, siteOnly);
     return decodeBrowserProfilesResult({
       kind: "browser-cookies-imported",
       profile,
@@ -149,6 +163,7 @@ export class BrowserProfileService {
       sourceProfile,
       imported,
       skipped,
+      ...(siteOnly ? { siteOnly } : {}),
     });
   }
 
@@ -158,6 +173,7 @@ export class BrowserProfileService {
     sourceProfile: string,
     imported: number,
     skipped: number,
+    siteOnly: boolean,
   ): void {
     this.#append(
       BROWSER_PROFILE_EVENT_NAMES.cookiesImported,
@@ -168,6 +184,7 @@ export class BrowserProfileService {
         sourceProfile,
         imported,
         skipped,
+        ...(siteOnly ? { siteOnly } : {}),
       }),
     );
   }

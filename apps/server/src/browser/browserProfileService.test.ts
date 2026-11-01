@@ -354,6 +354,31 @@ describe("Browser profile cookie import", () => {
     expect(read).not.toHaveBeenCalled();
   });
 
+  it("imports one site's cookies when asked, journals only that it was limited, and never names the site", async () => {
+    const { service, read, journal: live } = importHarness();
+
+    const result = await service.execute("local-window", {
+      ...importCommand,
+      site: "https://App.Example.com/account",
+    });
+
+    expect(read).toHaveBeenCalledWith("chrome", "Default", "app.example.com");
+    expect(result).toMatchObject({ kind: "browser-cookies-imported", imported: 3, siteOnly: true });
+    expect(JSON.stringify(result)).not.toContain("example.com");
+    const events = replay(live);
+    expect(events[0]?.payload).toMatchObject({ siteOnly: true });
+    expect(JSON.stringify(events)).not.toContain("example.com");
+  });
+
+  it("refuses a site that is not a web host before reading anything", async () => {
+    const { service, read } = importHarness();
+
+    const result = await service.execute("local-window", { ...importCommand, site: "not a host" });
+
+    expect(result).toMatchObject({ kind: "browser-profiles-refused", reason: "invalid" });
+    expect(read).not.toHaveBeenCalled();
+  });
+
   it("imports the picked profile's cookies into the picked Octant profile and reports counts only", async () => {
     const { service, read, batches, journal: live } = importHarness();
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
@@ -362,7 +387,7 @@ describe("Browser profile cookie import", () => {
 
     const result = await service.execute("local-window", importCommand);
 
-    expect(read).toHaveBeenCalledWith("chrome", "Default");
+    expect(read).toHaveBeenCalledWith("chrome", "Default", undefined);
     expect(batches.flat()).toHaveLength(3);
     expect(result).toEqual({
       kind: "browser-cookies-imported",

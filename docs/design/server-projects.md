@@ -146,5 +146,7 @@ hands are on the server.
   terminals are built.
 - A Project-level guardrail level or reviewer for a server Project; the
   thread and account levels apply.
-- Linux hosts are untested; the connection uses only `ssh` options both
+- Real servers are untested: the connection, folder check, file tools, commands
+  and terminals were exercised against a throwaway local `sshd` only. Linux
+  hosts are likewise untested; the connection uses only `ssh` options both
   platforms share.

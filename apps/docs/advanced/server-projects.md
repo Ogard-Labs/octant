@@ -53,3 +53,5 @@ Choose one to start a thread there.
 - **Not available there yet:** connectors and plugins, Browser and Computer,
   subagents, forks, checkpoints and rewind, and the Git, Files, and Tests
   panels. Ask the agent to do it on the server, or use a terminal.
+- **Tested on a throwaway local server only.** Octant's tests ran this against
+  an `sshd` started on this computer for the test, never a real server.
