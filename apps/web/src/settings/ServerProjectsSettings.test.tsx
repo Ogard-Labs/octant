@@ -8,7 +8,7 @@ import type { ShieldServer } from "@octant/contracts/shield-servers";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { ServerProjectsSettings } from "./ServerProjectsSettings";
+import { ServerAccessSettings, ServerProjectsSettings } from "./ServerProjectsSettings";
 
 const WEB: ShieldServer = {
   serverId: "5e7e0000-0000-4000-8000-000000000001" as ShieldServer["serverId"],
@@ -99,5 +99,33 @@ describe("ServerProjectsSettings", () => {
 
     expect(await screen.findByText("Register a server above first.")).toBeVisible();
     expect(screen.queryByRole("form", { name: "Bind a folder on a server" })).toBeNull();
+  });
+
+  it("offers a server registered above for binding without reopening Settings", async () => {
+    let registry: ReadonlyArray<ShieldServer> = [];
+    const servers = {
+      read: vi.fn(async () => ({ servers: registry, sshAgent: "available" as const })),
+      command: vi.fn(async () => {
+        registry = [WEB];
+        return {
+          kind: "shield-servers-updated" as const,
+          view: { servers: registry, sshAgent: "available" as const },
+        };
+      }),
+    };
+    const projects = {
+      read: vi.fn(async () => ({ projects: [] })),
+      command: vi.fn(),
+    };
+    const user = userEvent.setup();
+    render(<ServerAccessSettings projects={projects as never} servers={servers as never} />);
+    expect(await screen.findByText("Register a server above first.")).toBeVisible();
+
+    const add = await screen.findByRole("form", { name: "Add a server" });
+    await user.type(within(add).getByLabelText("Host alias"), "web-1");
+    await user.type(within(add).getByLabelText("Login user"), "deploy");
+    await user.click(within(add).getByRole("button", { name: "Add server" }));
+
+    expect(await screen.findByRole("form", { name: "Bind a folder on a server" })).toBeVisible();
   });
 });
