@@ -8066,11 +8066,11 @@ mechanisms are:
   [Extensions and skills](#extensions-and-skills). Work and Code threads
   start in the mode the person picked at first run (Auto
   pre-selected, else Ask first where no reviewer can run), changeable
-  per thread from the composer, per Code Project, or in Settings › Code ›
-  Access (built for Code; allowed; not built yet: a Work Project override);
+  per thread from the composer, per Project, or in Settings › Code › Access;
   Plan mode is read-only; auto-accept-edits waives only project file writes;
-  today a Work thread takes its level from Settings › Work when it is created
-  (Auto, Ask first, the default, Accept edits, or Full access) and changes it
+  a Work thread takes its level from its Project's override, else from
+  Settings › Work or the first-run answer, when it is created (Auto, Ask
+  first, the default, Accept edits, or Full access) and changes it
   from its composer; the host sets it, not the renderer, and a goal-loop round
   runs at it only up to the loop's own ceiling, which today allows at most
   auto-accept-edits. A goal-loop round runs as the host,

@@ -177,7 +177,7 @@ The first run asks once which mode new threads start in, with Auto pre-selected 
 - Where no reviewer can run for a thread, that thread falls back to Ask first and the picker says why.
 - The answer is the default for new Work and Code threads; Settings › Access changes it, a Project may override it, and the composer switches a thread's mode in one click.
 - Built for Code: the answer is stored as the Code default, Settings › Code › Access changes it, and a Code Project may override it; a Project that remembered Full access before Project modes existed starts its threads in Full access.
-- Work takes the same modes without Plan from Settings › Work, and its composer switches a thread's mode; the first-run answer does not yet set the Work default, and a Work Project has no override (not built yet).
+- Work takes the same modes without Plan; a new Work thread starts in its Project's mode, else the default the first-run answer or Settings › Work set, and its composer switches a thread's mode.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Security and authority, Guardrail levels](../architecture.md#security-and-authority).
 
