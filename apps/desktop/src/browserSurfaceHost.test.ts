@@ -1089,6 +1089,44 @@ describe("BrowserSurfaceHost stored profiles", () => {
       });
     });
 
+    it("does not let a redirect from an extension's navigation grant the destination origin", async () => {
+      const views: ReturnType<typeof identified>[] = [];
+      const host = createBrowserSurfaceHost({
+        createView: () => {
+          const next = identified();
+          views.push(next);
+          return next;
+        },
+      });
+      const owner = { windowId: "window-a", threadId };
+      await host.createContext({ contextId, owner, policy: policyIn({ kind: "personal" }) });
+      host.attach(contextId, owner, shellWindow(), bounds);
+      const page = views[0];
+      if (page === undefined) throw new Error("no page");
+      const listener = (name: string) =>
+        vi.mocked(page.webContents.on).mock.calls.find((call) => call[0] === name)?.[1];
+      // The person has been browsing, so the surface is theirs.
+      listener("focus")?.();
+      const redirect = () => {
+        const preventDefault = vi.fn();
+        listener("will-redirect")?.({ url: "https://redirected.test/", preventDefault });
+        return preventDefault;
+      };
+      let refusedDuringLoad = false;
+      vi.mocked(page.webContents.loadURL).mockImplementationOnce(async () => {
+        refusedDuringLoad = redirect().mock.calls.length > 0;
+      });
+      const [tab] = host.profileTabs({ kind: "personal" }, "window-a");
+
+      await host.updateProfileTab({ kind: "personal" }, "window-a", tab?.id ?? -1, {
+        url: "https://example.com/next",
+      });
+
+      expect(refusedDuringLoad).toBe(true);
+      // Once the extension's load is over, the person's own redirect grants again.
+      expect(redirect()).not.toHaveBeenCalled();
+    });
+
     it("has no page to open into when the profile is not on screen in that window", async () => {
       const host = await setup();
       expect(

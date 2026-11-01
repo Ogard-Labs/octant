@@ -88,6 +88,24 @@ describe("an extension's chrome.tabs", () => {
   });
 });
 
+describe("an extension's global", () => {
+  it("is patched in the realm the function runs in when no scope is given", async () => {
+    const { chrome } = world();
+    const holder = globalThis as { chrome?: unknown };
+    holder.chrome = chrome;
+    try {
+      installExtensionBridge(
+        null,
+        vi.fn(async () => []),
+        undefined,
+      );
+      expect(Object.keys(chrome.tabs as object)).toContain("query");
+    } finally {
+      delete holder.chrome;
+    }
+  });
+});
+
 describe("an extension's chrome.action.onClicked", () => {
   function clicks() {
     let deliver: (tab: unknown) => void = () => undefined;

@@ -28,11 +28,20 @@ const call = async (method: string, args: ReadonlyArray<unknown>): Promise<unkno
 
 if (globalThis.location?.protocol === "chrome-extension:") {
   if (typeof window === "undefined") {
-    // The background worker shares one global with the extension's script.
-    installExtensionBridge(globalThis, call, {
-      on: (listener) => {
-        ipcRenderer.on(ACTION_CHANNEL, (_event, tab: unknown) => listener(tab));
-      },
+    // A worker's preload runs in a realm of its own, apart from the extension's
+    // script, so the shim runs in the main realm, where the extension's `chrome`
+    // is. The call and the click source cross over as bridged functions.
+    contextBridge.executeInMainWorld({
+      func: installExtensionBridge,
+      args: [
+        null,
+        call,
+        {
+          on: (listener: (tab: unknown) => void) => {
+            ipcRenderer.on(ACTION_CHANNEL, (_event, tab: unknown) => listener(tab));
+          },
+        },
+      ],
     });
   } else {
     // A page reaches its main world through a script, since the preload's own

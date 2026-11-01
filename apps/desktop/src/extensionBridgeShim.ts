@@ -1,5 +1,6 @@
 /** The global an extension's page or worker sees; only `chrome` matters here. */
-export type ExtensionBridgeScope = object;
+/** The global to patch; null means the global of the realm the function runs in. */
+export type ExtensionBridgeScope = object | null;
 
 /** Where a toolbar click on an extension with no popup page arrives. */
 export interface ExtensionActionSource {
@@ -29,7 +30,7 @@ export function installExtensionBridge(
   call: (method: string, args: ReadonlyArray<unknown>) => Promise<unknown>,
   actionSource: ExtensionActionSource | undefined,
 ): void {
-  const root = (scope as { chrome?: Record<string, unknown> }).chrome;
+  const root = ((scope ?? globalThis) as { chrome?: Record<string, unknown> }).chrome;
   if (typeof root !== "object" || root === null) return;
 
   const nativeTabs = root.tabs as Record<string, unknown> | undefined;

@@ -202,6 +202,12 @@ interface OwnedSurface {
    * action is authorized.
    */
   userGrantedOrigins: string[];
+  /**
+   * Page loads an extension asked for that are still under way. A redirect during
+   * one must not grant its destination as the person's own browsing would: the
+   * extension is not the person, whoever last touched the surface.
+   */
+  extensionLoads: number;
   actionTail: Promise<void>;
   control: BrowserSurfaceState["control"];
   shellWindow: BrowserSurfaceShellWindowPort | undefined;
@@ -493,6 +499,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         nextTabOrdinal: 2,
         lastBounds: undefined,
         userGrantedOrigins: [],
+        extensionLoads: 0,
         actionTail: Promise.resolve(),
         control: "idle",
         shellWindow: undefined,
@@ -816,10 +823,13 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         owned.nextTabOrdinal += 1;
         const opened = openTabView(contextId, owned, tabId);
         showTab(owned, opened);
+        owned.extensionLoads += 1;
         try {
           await opened.view.webContents.loadURL(url ?? "about:blank");
         } catch {
           // A page that fails to load is still a page the person can see.
+        } finally {
+          owned.extensionLoads -= 1;
         }
         publish(contextId, owned);
         const tab = profileTabsOf(profile, windowId).find((entry) => entry.tabId === tabId);
@@ -844,10 +854,13 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         return queueSurfaceAction(owned, async (): Promise<ProfileTabResult> => {
           if (change.active === true) showTab(owned, tab);
           if (change.url !== undefined) {
+            owned.extensionLoads += 1;
             try {
               await tab.view.webContents.loadURL(change.url);
             } catch {
               // The address is the person's to see failing in the page.
+            } finally {
+              owned.extensionLoads -= 1;
             }
           }
           publish(contextId, owned);
@@ -1019,7 +1032,7 @@ function admitNavigation(owned: OwnedSurface, target: string): boolean {
   // Only while the person is demonstrably driving. "idle" is nobody's action:
   // a surface nobody has touched must not grant itself an origin because a
   // page redirected on load.
-  if (owned.control !== "user") return false;
+  if (owned.control !== "user" || owned.extensionLoads > 0) return false;
   const origin = originOf(target);
   if (origin === undefined) return false;
   if (owned.userGrantedOrigins.length >= MAX_USER_GRANTED_ORIGINS) {
