@@ -41,6 +41,32 @@ state per provider. A native child run, a native
 web read, and a provider's review verdict are journaled where the runtime
 reports them; where it does not, the capability report says so.
 
+### Mistral Vibe surface
+
+Mistral Vibe stays on the ACP bridge (`vibe-acp`). Read 2026-11-01 from the
+installed 3.0.3 package, Vibe ships a second stdio surface, `vibe-app-server`
+(JSON-RPC, one object per line), with structured turn history, token and
+price figures, `session/compact`, per-file review diffs, and approval and
+question callbacks. Octant does not adopt it. Rationale: its `initialize`
+negotiates no version, its messages reject any field they do not know, and
+its own model module says client and server ship together, so any Vibe
+release could break a separate client without notice; it is published as an
+entry point but documented nowhere. `vibe-acp` is a projection over the same
+in-process host, so it loses no capability by comparison: the 3.0.3 source
+sends ACP usage updates with context size and cost, a `/compact` command,
+`review/*` extension methods, and questions as elicitation. Reading those is
+allowed, not built yet, and needs a probe against a signed-in install before
+any capability is declared. Revisit `vibe-app-server` when it negotiates a
+version or is documented.
+
+Both surfaces run a short allowlist of read-only shell commands (`ls`,
+`cat`, `grep`, `git status`, and the like) without a permission request in
+its `ask` agent, as Vibe's own app does. Its profile does not set
+`shellWithoutRequest`: every other command still reaches Octant as a request,
+and below Full access the launch's Seatbelt profile confines those reads to
+what the session may already read. Refusing Vibe at Guarded over them would
+be stricter than Vibe's own app.
+
 ## Claude Code
 
 For a selected Haiku model in Plan, the adapter supplies a query-local
@@ -419,6 +445,16 @@ absent rather than imitating them:
   never estimates the window. Resume is `precise` only where the agent
   advertises `loadSession` or session resume.
 
+An agent whose shell runs in-process and sends no `session/request_permission`
+or `terminal/*` request before a command leaves Octant nothing to ask about.
+Its profile sets `shellWithoutRequest`, and a Work or Code session at Guarded
+or Reviewed is refused as `unsupported` before its process starts, with a
+sentence pointing to Full access; Full access runs it, and Chat and Plan have
+no shell. Rationale: an approval Octant never sees is no approval, and
+running it anyway would put a weaker guard under the level than the level
+names. No
+shipped profile sets it.
+
 These are read from `ProviderRuntimeIntegration.context`, which the host
 derives from the driver's reported capabilities
 (`packages/domain/src/providerRuntimeIntegration.ts`); a renderer never
@@ -530,7 +566,8 @@ Nothing is inferred from the registry entry alone.
    to them; a mode with no safe mapping is refused by the profile.
 5. **Prompt.** A streamed reply, tool calls with their declared kinds, a
    permission request answered once, an `execute` request refused at the
-   agent, and the stop reason.
+   agent, and the stop reason. A shell command that runs with no request
+   first sets `shellWithoutRequest` on the profile.
 6. **Cancel.** `session/cancel` during a running turn ends it as cancelled
    and leaves the process usable for the next prompt.
 7. **Confinement.** Below Full access the agent runs under the deny-default

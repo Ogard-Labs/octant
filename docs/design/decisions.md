@@ -190,9 +190,9 @@ Work and Code run under the same guardrail levels with the same capabilities; th
 - Work's Developer tools switch is set per Project by a person; no agent, routine or import sets it.
 - Built: every driver starts a Work session with its shell and Git at the thread's level, Work launches get Code's confinement at the same level, Work threads reach Full access, and each Work turn records shell and Git at its level.
 - Built: the Developer tools switch, set from a window on this host and journaled with who and when; it shows a Work Project's terminal and actions.
-- Not built yet: an in-process ACP shell reporting unsupported below Full access.
+- Built: an ACP agent whose shell runs in-process without a protocol request is refused as unsupported below Full access; no shipped profile has such a shell.
 
-Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Modes](../architecture.md#modes-chat-work-and-code) and [Overview and principles](../architecture.md#overview-and-principles).
+Status: Built. Since: 2026-10-31. Detail: [Architecture: Modes](../architecture.md#modes-chat-work-and-code) and [Overview and principles](../architecture.md#overview-and-principles).
 
 ### Reviewed level: the provider's reviewer or Octant Shield
 
@@ -269,7 +269,7 @@ The key providers run inside Octant as they run on their own, with their native 
 - Codex keeps its Project skills and, in Chat, the person's tool servers and plugins; its own subagents run only at Full access, because their approvals never reach Octant, each shown as a child run, with their web searches marking the thread.
 - OpenCode loads its own skills, the MCP servers in the person's own configuration, and the permission rules they wrote (over the level, under Plan's denials and the outside-directory refusal; a catch-all rule is ignored), follows each session its `task` tool delegates to as a child run with its requests answered through the parent, and answers a remembered 2.x approval `always`, saying the grant lives in OpenCode's own store; Octant Shield answers its approvals at Auto like every other runtime's.
 - OpenCode reports file changes and compacts its own session on request only from the 2.x release whose server was read for them (2.2.0); an older 2.x release reports no file changes and compaction `unavailable`, 1.x reports compaction `unavailable` and reports no file changes (not built yet), and a change no edit grant names still fails the turn. A compaction request is held open until the run that carried it ends, so the closing idle is never read as a completed turn. Rationale: the narrower choice trusts only a release that was read, since routes and events differ between 2.x releases and the claim adds no authority.
-- Mistral Vibe loads its own skills and Project context, the account's MCP servers, connectors and hooks, and a trusted Project's `.vibe` tools, MCP servers, hooks, plugins and agents under its own folder trust; it still runs through the ACP bridge (promotion not built yet).
+- Mistral Vibe loads its own skills and Project context, the account's MCP servers, connectors and hooks, and a trusted Project's `.vibe` tools, MCP servers, hooks, plugins and agents under its own folder trust; it stays on the ACP bridge, because its `vibe-app-server` is an unversioned surface that ships with its own client; reading usage, compaction, review and questions from `vibe-acp`'s own extensions is not built yet.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Providers](../architecture.md#providers) and [Provider runtimes: Key providers](provider-runtimes.md#key-providers).
 
@@ -1388,9 +1388,9 @@ A Work thread launches exactly as a Code thread at the same level would, shell i
 - It never runs commands under a weaker guard than the level names.
 - Each provider runs a Work session as it runs a Code session: prompts to the person at Guarded, a reviewer at Reviewed, no prompts at Full access.
 - Built: Claude Code, Codex, OpenCode, Pi and ACP agents start Work sessions with their shell and Git at the thread's level, and the Octant Harness has the shell port a Code harness thread has, under the same harness authority.
-- Not built yet: an ACP agent whose shell runs in-process, with no protocol request, cannot be asked per command and does not yet report unsupported at Guarded and Reviewed.
+- Built: an ACP agent whose shell runs in-process, with no protocol request, cannot be asked per command and reports unsupported at Guarded and Reviewed; its profile says so, and no shipped profile does.
 
-Status: Partly built. Since: —. Detail: [Architecture: Modes, Work shell and Git](../architecture.md#modes-chat-work-and-code) and [Security and authority, Sandbox](../architecture.md#security-and-authority).
+Status: Built. Since: —. Detail: [Architecture: Modes, Work shell and Git](../architecture.md#modes-chat-work-and-code) and [Security and authority, Sandbox](../architecture.md#security-and-authority).
 
 ### Provider capability matrix
 
