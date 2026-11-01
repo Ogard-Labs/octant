@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { mkdtempSync } from "node:fs";
+import { SERVER_CONTROL_SOCKET_PREFIX } from "../process/seatbeltProfile";
 
 /**
  * One call on a registered server, over this host's own `ssh`. Canonical:
@@ -6,9 +9,10 @@ import { spawn } from "node:child_process";
  *
  * The person's SSH config, known hosts, and agent decide how the server is
  * reached and how the login is signed: Octant names no key file, writes no
- * config, and forwards nothing. Every call is its own connection, and a call
- * that cannot reach the server is `unreachable`; nothing about a server
- * Project ever runs on this host instead.
+ * config, and forwards nothing. Calls to one server share one connection
+ * through a control socket only this host's user can open, and a call that
+ * cannot reach the server is `unreachable`; nothing about a server Project
+ * ever runs on this host instead.
  */
 
 /** The registered server a call goes to: its SSH config alias and login user. */
@@ -57,6 +61,12 @@ export interface ServerConnectionOptions {
   /** An SSH config file in place of the person's own. Tests only: production reads the person's. */
   readonly configFile?: string;
   readonly environment?: NodeJS.ProcessEnv;
+  /**
+   * The private folder the shared connections' control sockets live in,
+   * made on first use. A socket path must stay under 104 bytes, so it is a
+   * short folder under `/tmp` by default.
+   */
+  readonly controlDirectory?: () => string;
 }
 
 /** Written first by every call, so a call that never printed it never reached the server. */
@@ -65,8 +75,9 @@ const SENTINEL = 0x1e;
 /**
  * The options every connection runs with, after the person's config: no
  * prompt, no new or changed host key accepted, nothing forwarded either way,
- * no local command, and no shared control socket. A silent connection ends
- * after about thirty seconds.
+ * and no local command. A silent connection ends after about thirty seconds.
+ * The control socket is set per call: none for a terminal, or the shared
+ * connection's own.
  */
 export const SERVER_CONNECTION_OPTIONS: ReadonlyArray<string> = [
   "BatchMode=yes",
@@ -76,8 +87,6 @@ export const SERVER_CONNECTION_OPTIONS: ReadonlyArray<string> = [
   "ForwardX11=no",
   "ClearAllForwardings=yes",
   "PermitLocalCommand=no",
-  "ControlMaster=no",
-  "ControlPath=none",
   "ConnectTimeout=10",
   "ServerAliveInterval=10",
   "ServerAliveCountMax=3",
@@ -89,15 +98,34 @@ export function quoteForServer(word: string): string {
   return `'${word.replaceAll("'", `'\\''`)}'`;
 }
 
-/** The `ssh` arguments for one call, the remote command last. */
+/** How long a shared connection stays open after its last call. */
+const SHARED_CONNECTION_IDLE_SECONDS = 60;
+
+/**
+ * The `ssh` arguments for one call, the remote command last. With a
+ * `controlSocket`, the call rides that server's shared connection, starting
+ * it when none is open; without one it is a connection of its own.
+ */
 export function serverSshArguments(
   server: ServerAddress,
   remoteCommand: string | undefined,
-  options: { readonly terminal: boolean; readonly configFile?: string | undefined },
+  options: {
+    readonly terminal: boolean;
+    readonly configFile?: string | undefined;
+    readonly controlSocket?: string | undefined;
+  },
 ): ReadonlyArray<string> {
+  const control =
+    options.controlSocket === undefined
+      ? ["ControlMaster=no", "ControlPath=none"]
+      : [
+          "ControlMaster=auto",
+          `ControlPath=${options.controlSocket}`,
+          `ControlPersist=${String(SHARED_CONNECTION_IDLE_SECONDS)}`,
+        ];
   return [
     ...(options.configFile === undefined ? [] : ["-F", options.configFile]),
-    ...SERVER_CONNECTION_OPTIONS.flatMap((option) => ["-o", option]),
+    ...[...SERVER_CONNECTION_OPTIONS, ...control].flatMap((option) => ["-o", option]),
     options.terminal ? "-tt" : "-T",
     "-l",
     server.user,
@@ -126,6 +154,7 @@ export function serverSshEnvironment(
 
 export class ServerConnection {
   readonly #options: ServerConnectionOptions;
+  #controlDirectory: string | undefined;
 
   constructor(options: ServerConnectionOptions) {
     this.#options = options;
@@ -163,9 +192,19 @@ export class ServerConnection {
       "octant",
       ...(input.args ?? []).map(quoteForServer),
     ].join(" ");
+    let controlSocket: string;
+    try {
+      controlSocket = this.#controlSocket(server);
+    } catch {
+      return Promise.resolve({
+        status: "unreachable",
+        message: "Octant could not make the folder its server connections share.",
+      });
+    }
     const args = serverSshArguments(server, remoteCommand, {
       terminal,
       configFile: this.#options.configFile,
+      controlSocket,
     });
     return new Promise((resolve) => {
       if (input.signal?.aborted === true) {
@@ -244,6 +283,21 @@ export class ServerConnection {
         finish({ status: "ran", exitCode: code ?? 1, output, truncated, errorOutput: errorText });
       });
     });
+  }
+
+  /**
+   * One socket per server and user, in a folder only this host's user can
+   * open, so a later call reuses the login instead of making its own. Every
+   * confined launch is denied the folder's sockets.
+   */
+  #controlSocket(server: ServerAddress): string {
+    this.#controlDirectory ??=
+      this.#options.controlDirectory?.() ?? mkdtempSync(SERVER_CONTROL_SOCKET_PREFIX);
+    const name = createHash("sha256")
+      .update(`${server.user}\0${server.alias}`)
+      .digest("hex")
+      .slice(0, 16);
+    return `${this.#controlDirectory}/${name}`;
   }
 
   #environment(): NodeJS.ProcessEnv {

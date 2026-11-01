@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -10,6 +10,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -27,6 +28,8 @@ import {
   makeProcessConfinementLive,
   privateHomeDenyReadRules,
   requireSandboxExec,
+  SEATBELT_DENY_SERVER_CONTROL_SOCKETS,
+  SERVER_CONTROL_SOCKET_PREFIX,
   seatbeltAllowLiteralReadRule,
   seatbeltAllowRule,
   seatbeltExecRule,
@@ -551,7 +554,42 @@ describe("shared Seatbelt profile builder", () => {
 
     expect(denied).not.toContain("(allow network*)");
     expect(allowed).toContain("(allow network*)");
+    for (const profile of [denied, allowed]) {
+      expect(profile.trimEnd().endsWith(SEATBELT_DENY_SERVER_CONTROL_SOCKETS.join("\n"))).toBe(
+        true,
+      );
+    }
   });
+
+  it.skipIf(process.platform !== "darwin")(
+    "keeps a launch with network from opening a server Project's control socket",
+    async () => {
+      const folder = mkdtempSync(SERVER_CONTROL_SOCKET_PREFIX);
+      const socket = join(folder, "control");
+      const listener = createServer((connection) => connection.end("reached\n"));
+      await new Promise<void>((resolve) => listener.listen(socket, resolve));
+      try {
+        const run = (profile: string, script: string) =>
+          new Promise<string>((resolve) => {
+            const child = spawn("/usr/bin/sandbox-exec", ["-p", profile, "/bin/sh", "-c", script]);
+            let output = "";
+            child.stdout.on("data", (chunk: Buffer) => (output += chunk.toString()));
+            child.on("close", () => resolve(output));
+          });
+        const moved = `${folder}-moved`;
+        const open = "(version 1)\n(allow default)\n(allow network*)";
+        const guarded = [open, ...SEATBELT_DENY_SERVER_CONTROL_SOCKETS].join("\n");
+        expect(await run(open, `nc -U '${socket}'`)).toBe("reached\n");
+        expect(await run(guarded, `nc -U '${socket}'`)).toBe("");
+        expect(await run(guarded, `mv '${socket}' '${moved}' && nc -U '${moved}'`)).toBe("");
+        expect(await run(guarded, `ln '${socket}' '${moved}' && nc -U '${moved}'`)).toBe("");
+      } finally {
+        listener.close();
+        rmSync(folder, { recursive: true, force: true });
+        rmSync(`${folder}-moved`, { force: true });
+      }
+    },
+  );
 
   it("opens only the launch's proxy port on proxied network, and refuses a proxy it cannot name", () => {
     const root = temporaryRoot();
@@ -572,7 +610,7 @@ describe("shared Seatbelt profile builder", () => {
       networkEgress: { kind: "proxied", endpoint: { kind: "loopback", port: 50_123 } },
     });
 
-    const network = proxied.split("\n").filter((line) => line.includes("network"));
+    const network = proxied.split("\n").filter((line) => line.startsWith("(allow network"));
     expect(network).toEqual(['(allow network-outbound (remote ip "localhost:50123"))']);
     // TLS still runs in the client, so the trust daemon stays reachable.
     expect(proxied).toContain('(allow mach-lookup (global-name "com.apple.trustd"))');

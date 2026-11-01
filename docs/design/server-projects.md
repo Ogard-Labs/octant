@@ -70,11 +70,27 @@ hands are on the server.
   `StrictHostKeyChecking=yes` (an unknown or changed host key refuses; the
   person accepts a new server's key by running `ssh` to it once themselves),
   `ForwardAgent=no`, `ForwardX11=no`, `ClearAllForwardings=yes`,
-  `PermitLocalCommand=no`, `ControlMaster=no`, a ten-second connect timeout,
-  and keepalives that end a silent connection after about thirty seconds.
-  _Rationale:_ a shared control socket would be one more place a session
-  could be borrowed from; one connection per call costs a login each time and
-  keeps nothing open between calls.
+  `PermitLocalCommand=no`, a ten-second connect timeout, and keepalives that
+  end a silent connection after about thirty seconds.
+- **One shared connection per server.** Calls to one server and user (file
+  tools, commands, folder checks, and Git) share one connection through an
+  OpenSSH control socket, which stays open for sixty seconds after its last
+  call. The socket lives in a folder under `/tmp` that only this host's user
+  can open (`0700`), named by a digest of the server and user. Every Seatbelt
+  profile Octant builds ends by denying a socket there and the folder's files,
+  so a confined launch can neither open the socket nor move or link it out,
+  network or not, and a
+  Linux capsule has a `/tmp` of its own; a confined command's SSH config keeps
+  `ControlMaster no`. A dropped shared connection fails the calls on it, and
+  the next call logs in again. An interactive terminal keeps a connection of
+  its own (`ControlMaster=no`). _Rationale:_ one login per call made every Git
+  command a fresh login. The socket runs commands with no Shield decision, so
+  a confined launch must not reach it; denying the folder's reads is not
+  enough (measured on macOS 27, a launch with network reached a socket in a
+  read-denied folder, and one that could write `/tmp` renamed the socket out
+  and connected), so the profiles deny the socket and its folder. An unconfined
+  process already runs as the person and can reach their SSH agent, so the
+  socket gives it nothing new.
 - Each call runs a short `sh` script through the login shell, its arguments
   single-quoted, so the login shell must read POSIX single quotes (`sh`,
   `bash`, `zsh`, `dash`, and `fish` do; `csh` and `tcsh` are not supported).
@@ -160,8 +176,8 @@ hands are on the server.
   keep Plan read-only there.
 - **Fail closed.** A Git command that cannot reach the server runs nothing and
   the tab says Git is unavailable; a server removed from the registry refuses
-  the next command. One login per command makes the tab slower than a local
-  one; that is the connection rule's known cost.
+  the next command. Its commands share the server's one connection, so only
+  the first after a quiet minute pays for a login.
 - **One queue per Project.** Git changes on one server Project run one after
   another, as they do on one local checkout. A change the tab stops waiting
   for may still finish on the server; the next look at the tab shows it.

@@ -34,6 +34,16 @@ describe("a server connection's arguments", () => {
     expect(args.slice(-5)).toEqual(["-l", "deploy", "--", "web1", "true"]);
   });
 
+  it("shares a connection only through the socket it is given", () => {
+    const args = serverSshArguments({ alias: "web1", user: "deploy" }, "true", {
+      terminal: false,
+      controlSocket: "/tmp/octant-ssh-x/0123456789abcdef",
+    });
+    expect(args).toContain("ControlMaster=auto");
+    expect(args).toContain("ControlPath=/tmp/octant-ssh-x/0123456789abcdef");
+    expect(args).not.toContain("ControlPath=none");
+  });
+
   it("hands ssh the person's agent and none of this host's secrets", () => {
     const environment = serverSshEnvironment(
       {
@@ -49,6 +59,21 @@ describe("a server connection's arguments", () => {
       HOME: "/Users/person",
       SSH_AUTH_SOCK: "/tmp/agent.sock",
     });
+  });
+
+  it("runs nothing when the shared connection's folder cannot be made", async () => {
+    const connection = new ServerConnection({
+      agentSocket: () => undefined,
+      sshPath: "/nonexistent/ssh",
+      controlDirectory: () => {
+        throw new Error("read-only /tmp");
+      },
+    });
+    const call = await connection.run(
+      { alias: "web1", user: "deploy" },
+      { script: "true", timeoutMs: 1_000, maxOutputBytes: 64 },
+    );
+    expect(call.status).toBe("unreachable");
   });
 
   it("quotes a word so the server's shell reads it whole", () => {
@@ -131,6 +156,25 @@ describe.skipIf(!canRunThrowawaySshd)("a call on a throwaway server", () => {
     });
     expect(call.status).toBe("unreachable");
   });
+
+  it("reuses one login for calls to the same server, and logs in again after a drop", async () => {
+    const connectionOf = async () => {
+      const call = await connection.run(server(), {
+        script: `printf '%s' "$SSH_CONNECTION"`,
+        timeoutMs: 10_000,
+        maxOutputBytes: 1_024,
+      });
+      return call.status === "ran" ? call.output.toString() : call.status;
+    };
+    const first = await connectionOf();
+    expect(first).toMatch(/^127\.0\.0\.1 \d+ /);
+    expect(await connectionOf()).toBe(first);
+    sshd.dropConnections();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const after = await connectionOf();
+    expect(after).toMatch(/^127\.0\.0\.1 \d+ /);
+    expect(after).not.toBe(first);
+  }, 40_000);
 
   it("keeps a script's own exit status apart from a lost connection", async () => {
     const call = await connection.run(server(), {

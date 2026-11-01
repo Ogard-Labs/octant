@@ -240,6 +240,23 @@ export interface PrivateHomeDenyReadRulesInput {
 }
 
 export const DEFAULT_SANDBOX_PATH = "/usr/bin/sandbox-exec";
+
+/** Where a server Project's shared SSH connections keep their control sockets. */
+export const SERVER_CONTROL_SOCKET_PREFIX = "/tmp/octant-ssh-";
+
+/**
+ * A control socket runs commands on a registered server with no Shield
+ * decision, so no confined launch may open one, move it, or link it, network
+ * or not. Measured on macOS 27 with `(allow network*)`: `nc -U` reached a
+ * socket under a read- and write-denied subpath, so the connect itself is
+ * denied; and a launch that could write `/tmp` renamed the socket out of the
+ * folder and connected by its new name, so the folder's files are denied too.
+ * These come last in a profile, so no later allow reopens them.
+ */
+export const SEATBELT_DENY_SERVER_CONTROL_SOCKETS: ReadonlyArray<string> = [
+  `(deny network-outbound (remote unix-socket (path-regex #"^/private${SERVER_CONTROL_SOCKET_PREFIX}")))`,
+  `(deny file-read* file-write* (regex #"^/private${SERVER_CONTROL_SOCKET_PREFIX}"))`,
+];
 /**
  * Paths that must remain unreadable even for toolchain launches that need the
  * broad `file-read*` rule. The latter is a compatibility escape hatch for
@@ -893,6 +910,7 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     '(allow file-write-data (literal "/dev/null"))',
     ...(input.extraRules ?? []),
     ...secretGuardPersonRules(guardEntries),
+    ...SEATBELT_DENY_SERVER_CONTROL_SOCKETS,
   ];
   return lines.join("\n");
 }

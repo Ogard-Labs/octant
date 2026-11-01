@@ -21,6 +21,7 @@ import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { promisify } from "node:util";
 import {
   makeProcessConfinementLive,
+  SEATBELT_DENY_SERVER_CONTROL_SOCKETS,
   seatbeltAllowLiteralMetadataRule,
   seatbeltAllowLiteralReadRule,
 } from "../process/seatbeltProfile";
@@ -302,6 +303,7 @@ async function prepareProcessLaunch(
     ...writeRoots.map((path) => seatbeltRule("file-write*", path)),
     '(allow file-write-data (literal "/dev/null"))',
     ...(input.sandbox.allowNetwork ? ["(allow network*)"] : []),
+    ...SEATBELT_DENY_SERVER_CONTROL_SOCKETS,
   ].join("\n");
   return {
     command: sandboxPath,

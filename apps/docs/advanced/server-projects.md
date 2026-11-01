@@ -28,8 +28,11 @@ Only someone at this computer can bind or remove a server Project.
 - Octant uses this computer's own `ssh`, your SSH config, and your SSH agent.
   It names no key file, reads no key, writes no SSH config, and forwards
   nothing to the server: no agent, no ports, no windows.
-- Every call is its own connection. When the server cannot be reached, or the
-  connection drops, that call fails and nothing runs on this computer instead.
+- Octant keeps one connection to each server open while you work and closes
+  it after a quiet minute, so Git and the file tools do not log in for every
+  step. When the server cannot be reached, or the connection drops, that call
+  fails and nothing runs on this computer instead; the next call logs in
+  again.
 - Removing a server from **Servers** keeps its Projects, but they cannot
   connect until you register the server again or remove them.
 
