@@ -5,6 +5,8 @@ import {
   browserToolResult,
   browserToolWantsScreenshot,
   parseBrowserToolInput,
+  runBrowserToolSteps,
+  type BrowserToolInput,
 } from "./browserToolOperations";
 import { BROWSER_TOOL_DEFINITION, BROWSER_TOOL_HELP } from "./browserToolDefinition";
 import type {
@@ -102,6 +104,216 @@ export function createBrowserAppManagedTools(
   const definitions = isToolAllowedByAllowlist(options.toolConstraints ?? [], BROWSER_TOOL_NAME)
     ? [BROWSER_TOOL_DEFINITION]
     : [];
+  // One operation, admitted on its own: a batch runs each step through here.
+  const runOne = async (
+    input: Exclude<BrowserToolInput, { readonly operation: "steps" }>,
+    signal: AbortSignal | undefined,
+  ) => {
+    const authority = options.resolveAuthority(options.threadId, options.mode);
+    if (authority === undefined) return failure("browser-authority-unavailable");
+    if (initialAuthority !== undefined && !sameToolActionAuthority(initialAuthority, authority)) {
+      return failure("browser-authority-stale");
+    }
+    if (input.operation === "stop") {
+      const snapshot = options.browser.inspectThread(options.windowId, options.threadId);
+      if (snapshot.context !== undefined) {
+        options.modelBindings.delete(String(snapshot.context.contextId));
+      }
+      return browserToolResult(
+        await options.browser.releaseThread(options.windowId, options.threadId),
+      );
+    }
+    if (!modelIsCurrent(options)) return failure("browser-model-stale");
+    if (options.executionPolicy === "plan") return failure("plan-mode-read-only");
+    let snapshot = options.browser.inspectThread(options.windowId, options.threadId);
+    const existing = snapshot.context?.state === "active" ? snapshot.context : undefined;
+    if (existing === undefined && snapshot.context !== undefined) {
+      options.modelBindings.delete(String(snapshot.context.contextId));
+    }
+    const origin =
+      existing === undefined
+        ? input.operation === "navigate"
+          ? allowedOrigin(input.url)
+          : undefined
+        : existing.policy.allowedOrigins.join(", ");
+    if (origin === undefined) {
+      return failure(
+        input.operation === "navigate" ? "invalid-browser-url" : "browser-navigation-required",
+      );
+    }
+    // A page's profile is fixed when it opens. An existing page keeps its own,
+    // and the agent cannot move it: stopping the browser and opening again is
+    // how a different profile is chosen, and the person is asked again.
+    const existingProfile = storedBrowserProfile(existing?.policy.profile);
+    if (
+      existing !== undefined &&
+      input.operation === "navigate" &&
+      input.profile !== undefined &&
+      browserProfileKey(existingProfile) !==
+        browserProfileKey(requestedProfile(input.profile, authority))
+    ) {
+      return failure("browser-profile-differs-stop-first");
+    }
+    const profile: StoredBrowserProfile | undefined =
+      existing !== undefined
+        ? existingProfile
+        : input.operation === "navigate" && input.profile !== undefined
+          ? requestedProfile(input.profile, authority)
+          : undefined;
+    if (input.operation === "navigate" && input.profile === "project" && profile === undefined) {
+      return failure("profile-unavailable");
+    }
+    if (
+      profile !== undefined &&
+      (options.profileCaller === "terminal-grant" ||
+        options.approvals?.isUnattendedScope?.(options.windowId) === true)
+    ) {
+      return failure("profile-needs-a-person");
+    }
+    const existingBinding =
+      existing === undefined ? undefined : options.modelBindings.get(String(existing.contextId));
+    const contextApproved =
+      existingBinding !== undefined &&
+      String(existingBinding.modelId) === String(options.modelId) &&
+      sameToolActionAuthority(existingBinding.authority, authority);
+    // A remembered origin grant stands in for the prompt when the context
+    // itself is new: "always allow" answered an open for this origin before.
+    // An existing context still asks when its binding no longer matches —
+    // the remembered grant covers the page, not a new model driving it.
+    const remembered =
+      existing === undefined && options.approvals?.isRemembered?.(origin, profile) === true;
+    if ((existing === undefined || !contextApproved) && !remembered) {
+      if (options.approvals === undefined) return failure("browser-approval-required");
+      const outcome = await options.approvals.request({
+        windowId: options.windowId,
+        threadId: String(options.threadId),
+        authority,
+        origin,
+        ...(profile === undefined ? {} : { profile }),
+        ...(signal === undefined ? {} : { signal }),
+      });
+      if (outcome !== "approved") return failure(`browser-approval-${outcome}`);
+      if (signal?.aborted) return failure("tool-interrupted");
+      const refreshed = options.resolveAuthority(options.threadId, options.mode);
+      if (refreshed === undefined || !sameToolActionAuthority(authority, refreshed)) {
+        return failure("browser-authority-stale");
+      }
+      if (!modelIsCurrent(options)) return failure("browser-model-stale");
+      if (existing !== undefined) {
+        rememberModelBinding(options.modelBindings, String(existing.contextId), {
+          modelId: options.modelId,
+          authority: refreshed,
+        });
+      }
+    }
+    if (existing === undefined) {
+      const created = await options.browser.create({
+        windowId: options.windowId,
+        threadId: options.threadId,
+        action: actionRequest(options, authority),
+        policy: {
+          ...hostPolicy,
+          ...(profile === undefined ? {} : { profile }),
+          allowedOrigins: [origin],
+        },
+        ...(options.profileCaller === undefined ? {} : { profileCaller: options.profileCaller }),
+      });
+      snapshot = created;
+      if (created.context?.state === "active") {
+        const contextId = String(created.context.contextId);
+        rememberModelBinding(options.modelBindings, contextId, {
+          modelId: options.modelId,
+          authority,
+        });
+      }
+    }
+    const context = snapshot.context;
+    if (context === undefined || context.state !== "active") return browserToolResult(snapshot);
+    const contextId = String(context.contextId);
+    const binding = options.modelBindings.get(contextId);
+    const bindingMatches =
+      binding !== undefined &&
+      String(binding.modelId) === String(options.modelId) &&
+      sameToolActionAuthority(binding.authority, authority);
+    if (!bindingMatches && existing !== undefined) {
+      if (options.approvals === undefined) return failure("browser-approval-required");
+      const outcome = await options.approvals.request({
+        windowId: options.windowId,
+        threadId: String(options.threadId),
+        authority,
+        origin,
+        ...(profile === undefined ? {} : { profile }),
+        ...(signal === undefined ? {} : { signal }),
+      });
+      if (outcome !== "approved") return failure(`browser-approval-${outcome}`);
+      if (signal?.aborted) return failure("tool-interrupted");
+      const refreshed = options.resolveAuthority(options.threadId, options.mode);
+      if (refreshed === undefined || !sameToolActionAuthority(authority, refreshed)) {
+        return failure("browser-authority-stale");
+      }
+      if (!modelIsCurrent(options)) return failure("browser-model-stale");
+      rememberModelBinding(options.modelBindings, contextId, {
+        modelId: options.modelId,
+        authority: refreshed,
+      });
+    }
+    const request = browserToolAction(input, context);
+    if (request === undefined) return failure("invalid-browser-input");
+    if (signal?.aborted) return failure("tool-interrupted");
+    let uploadFiles: ReadonlyArray<string> | undefined;
+    let releaseUpload: (() => Promise<void>) | undefined;
+    if (input.operation === "upload") {
+      // A CLI in a terminal is not the person who would be asked.
+      if (options.profileCaller === "terminal-grant") return failure("upload-needs-a-person");
+      const approvals = options.approvals;
+      if (approvals === undefined) return failure("browser-approval-required");
+      const admitted = await admitBrowserUpload({
+        workspaceRoot: options.uploadRoot?.(),
+        files: input.files,
+        ask: (files) =>
+          approvals.request({
+            windowId: options.windowId,
+            threadId: String(options.threadId),
+            authority,
+            origin,
+            ...(profile === undefined ? {} : { profile }),
+            upload: files,
+            ...(signal === undefined ? {} : { signal }),
+          }),
+      });
+      if (admitted.status === "refused") return failure(admitted.reason);
+      uploadFiles = admitted.paths;
+      releaseUpload = admitted.release;
+    }
+    let acted: BrowserAutomationSnapshot;
+    try {
+      if (releaseUpload !== undefined) {
+        if (signal?.aborted) return failure("tool-interrupted");
+        const refreshed = options.resolveAuthority(options.threadId, options.mode);
+        if (refreshed === undefined || !sameToolActionAuthority(authority, refreshed)) {
+          return failure("browser-authority-stale");
+        }
+        if (!modelIsCurrent(options)) return failure("browser-model-stale");
+      }
+      acted = await options.browser.act({
+        windowId: options.windowId,
+        request,
+        capturedBy: "agent",
+        ...(uploadFiles === undefined ? {} : { uploadFiles }),
+      });
+    } finally {
+      await releaseUpload?.();
+    }
+    if (signal?.aborted) return failure("tool-interrupted");
+    if (!modelIsCurrent(options)) return failure("browser-model-stale");
+    if (
+      input.operation === "screenshot" &&
+      browserToolImage(acted.observation?.screenshotDataUrl) === undefined
+    ) {
+      return failure("browser-screenshot-unavailable");
+    }
+    return browserToolResult(acted, browserToolWantsScreenshot(input));
+  };
   const tools: AppManagedToolSet = {
     definitions,
     execute: async ({ inputJson, name, signal }) => {
@@ -111,210 +323,10 @@ export function createBrowserAppManagedTools(
       if (signal?.aborted) return failure("tool-interrupted");
       const input = parseBrowserToolInput(inputJson, { allowProfile: true });
       if (input === undefined) return failure("invalid-browser-input");
-      const authority = options.resolveAuthority(options.threadId, options.mode);
-      if (authority === undefined) return failure("browser-authority-unavailable");
-      if (initialAuthority !== undefined && !sameToolActionAuthority(initialAuthority, authority)) {
-        return failure("browser-authority-stale");
+      if (input.operation === "steps") {
+        return runBrowserToolSteps(input.steps, (step) => runOne(step, signal));
       }
-      if (input.operation === "stop") {
-        const snapshot = options.browser.inspectThread(options.windowId, options.threadId);
-        if (snapshot.context !== undefined) {
-          options.modelBindings.delete(String(snapshot.context.contextId));
-        }
-        return browserToolResult(
-          await options.browser.releaseThread(options.windowId, options.threadId),
-        );
-      }
-      if (!modelIsCurrent(options)) return failure("browser-model-stale");
-      if (options.executionPolicy === "plan") return failure("plan-mode-read-only");
-      let snapshot = options.browser.inspectThread(options.windowId, options.threadId);
-      const existing = snapshot.context?.state === "active" ? snapshot.context : undefined;
-      if (existing === undefined && snapshot.context !== undefined) {
-        options.modelBindings.delete(String(snapshot.context.contextId));
-      }
-      const origin =
-        existing === undefined
-          ? input.operation === "navigate"
-            ? allowedOrigin(input.url)
-            : undefined
-          : existing.policy.allowedOrigins.join(", ");
-      if (origin === undefined) {
-        return failure(
-          input.operation === "navigate" ? "invalid-browser-url" : "browser-navigation-required",
-        );
-      }
-      // A page's profile is fixed when it opens. An existing page keeps its own,
-      // and the agent cannot move it: stopping the browser and opening again is
-      // how a different profile is chosen, and the person is asked again.
-      const existingProfile = storedBrowserProfile(existing?.policy.profile);
-      if (
-        existing !== undefined &&
-        input.operation === "navigate" &&
-        input.profile !== undefined &&
-        browserProfileKey(existingProfile) !==
-          browserProfileKey(requestedProfile(input.profile, authority))
-      ) {
-        return failure("browser-profile-differs-stop-first");
-      }
-      const profile: StoredBrowserProfile | undefined =
-        existing !== undefined
-          ? existingProfile
-          : input.operation === "navigate" && input.profile !== undefined
-            ? requestedProfile(input.profile, authority)
-            : undefined;
-      if (input.operation === "navigate" && input.profile === "project" && profile === undefined) {
-        return failure("profile-unavailable");
-      }
-      if (
-        profile !== undefined &&
-        (options.profileCaller === "terminal-grant" ||
-          options.approvals?.isUnattendedScope?.(options.windowId) === true)
-      ) {
-        return failure("profile-needs-a-person");
-      }
-      const existingBinding =
-        existing === undefined ? undefined : options.modelBindings.get(String(existing.contextId));
-      const contextApproved =
-        existingBinding !== undefined &&
-        String(existingBinding.modelId) === String(options.modelId) &&
-        sameToolActionAuthority(existingBinding.authority, authority);
-      // A remembered origin grant stands in for the prompt when the context
-      // itself is new: "always allow" answered an open for this origin before.
-      // An existing context still asks when its binding no longer matches —
-      // the remembered grant covers the page, not a new model driving it.
-      const remembered =
-        existing === undefined && options.approvals?.isRemembered?.(origin, profile) === true;
-      if ((existing === undefined || !contextApproved) && !remembered) {
-        if (options.approvals === undefined) return failure("browser-approval-required");
-        const outcome = await options.approvals.request({
-          windowId: options.windowId,
-          threadId: String(options.threadId),
-          authority,
-          origin,
-          ...(profile === undefined ? {} : { profile }),
-          ...(signal === undefined ? {} : { signal }),
-        });
-        if (outcome !== "approved") return failure(`browser-approval-${outcome}`);
-        if (signal?.aborted) return failure("tool-interrupted");
-        const refreshed = options.resolveAuthority(options.threadId, options.mode);
-        if (refreshed === undefined || !sameToolActionAuthority(authority, refreshed)) {
-          return failure("browser-authority-stale");
-        }
-        if (!modelIsCurrent(options)) return failure("browser-model-stale");
-        if (existing !== undefined) {
-          rememberModelBinding(options.modelBindings, String(existing.contextId), {
-            modelId: options.modelId,
-            authority: refreshed,
-          });
-        }
-      }
-      if (existing === undefined) {
-        const created = await options.browser.create({
-          windowId: options.windowId,
-          threadId: options.threadId,
-          action: actionRequest(options, authority),
-          policy: {
-            ...hostPolicy,
-            ...(profile === undefined ? {} : { profile }),
-            allowedOrigins: [origin],
-          },
-          ...(options.profileCaller === undefined ? {} : { profileCaller: options.profileCaller }),
-        });
-        snapshot = created;
-        if (created.context?.state === "active") {
-          const contextId = String(created.context.contextId);
-          rememberModelBinding(options.modelBindings, contextId, {
-            modelId: options.modelId,
-            authority,
-          });
-        }
-      }
-      const context = snapshot.context;
-      if (context === undefined || context.state !== "active") return browserToolResult(snapshot);
-      const contextId = String(context.contextId);
-      const binding = options.modelBindings.get(contextId);
-      const bindingMatches =
-        binding !== undefined &&
-        String(binding.modelId) === String(options.modelId) &&
-        sameToolActionAuthority(binding.authority, authority);
-      if (!bindingMatches && existing !== undefined) {
-        if (options.approvals === undefined) return failure("browser-approval-required");
-        const outcome = await options.approvals.request({
-          windowId: options.windowId,
-          threadId: String(options.threadId),
-          authority,
-          origin,
-          ...(profile === undefined ? {} : { profile }),
-          ...(signal === undefined ? {} : { signal }),
-        });
-        if (outcome !== "approved") return failure(`browser-approval-${outcome}`);
-        if (signal?.aborted) return failure("tool-interrupted");
-        const refreshed = options.resolveAuthority(options.threadId, options.mode);
-        if (refreshed === undefined || !sameToolActionAuthority(authority, refreshed)) {
-          return failure("browser-authority-stale");
-        }
-        if (!modelIsCurrent(options)) return failure("browser-model-stale");
-        rememberModelBinding(options.modelBindings, contextId, {
-          modelId: options.modelId,
-          authority: refreshed,
-        });
-      }
-      const request = browserToolAction(input, context);
-      if (request === undefined) return failure("invalid-browser-input");
-      if (signal?.aborted) return failure("tool-interrupted");
-      let uploadFiles: ReadonlyArray<string> | undefined;
-      let releaseUpload: (() => Promise<void>) | undefined;
-      if (input.operation === "upload") {
-        // A CLI in a terminal is not the person who would be asked.
-        if (options.profileCaller === "terminal-grant") return failure("upload-needs-a-person");
-        const approvals = options.approvals;
-        if (approvals === undefined) return failure("browser-approval-required");
-        const admitted = await admitBrowserUpload({
-          workspaceRoot: options.uploadRoot?.(),
-          files: input.files,
-          ask: (files) =>
-            approvals.request({
-              windowId: options.windowId,
-              threadId: String(options.threadId),
-              authority,
-              origin,
-              ...(profile === undefined ? {} : { profile }),
-              upload: files,
-              ...(signal === undefined ? {} : { signal }),
-            }),
-        });
-        if (admitted.status === "refused") return failure(admitted.reason);
-        uploadFiles = admitted.paths;
-        releaseUpload = admitted.release;
-      }
-      let acted: BrowserAutomationSnapshot;
-      try {
-        if (releaseUpload !== undefined) {
-          if (signal?.aborted) return failure("tool-interrupted");
-          const refreshed = options.resolveAuthority(options.threadId, options.mode);
-          if (refreshed === undefined || !sameToolActionAuthority(authority, refreshed)) {
-            return failure("browser-authority-stale");
-          }
-          if (!modelIsCurrent(options)) return failure("browser-model-stale");
-        }
-        acted = await options.browser.act({
-          windowId: options.windowId,
-          request,
-          capturedBy: "agent",
-          ...(uploadFiles === undefined ? {} : { uploadFiles }),
-        });
-      } finally {
-        await releaseUpload?.();
-      }
-      if (signal?.aborted) return failure("tool-interrupted");
-      if (!modelIsCurrent(options)) return failure("browser-model-stale");
-      if (
-        input.operation === "screenshot" &&
-        browserToolImage(acted.observation?.screenshotDataUrl) === undefined
-      ) {
-        return failure("browser-screenshot-unavailable");
-      }
-      return browserToolResult(acted, browserToolWantsScreenshot(input));
+      return runOne(input, signal);
     },
   };
   return withToolFamilyHelp(tools, BROWSER_TOOL_HELP);

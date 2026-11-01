@@ -425,4 +425,72 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     expect(JSON.stringify(listed.result.page?.tabs)).not.toContain("localhost");
     await tool.stop();
   });
+
+  it("runs a batch step by step, stopping at the first step that fails", async () => {
+    const tool = agentTool();
+    await tool.call({ operation: "navigate", url: `${origin}/form` });
+    const outline = (await tool.call({ operation: "snapshot" })).result.page?.snapshot;
+    const filled = (await tool.call({
+      operation: "steps",
+      steps: [
+        { operation: "type", ref: refFor(outline, /"Name"/), text: "Ada" },
+        { operation: "click", ref: refFor(outline, /"Save"/) },
+      ],
+    })) as unknown as {
+      readonly isError: boolean;
+      readonly result: {
+        readonly page?: { readonly title?: string };
+        readonly steps?: ReadonlyArray<{ readonly step: number; readonly changed?: string }>;
+      };
+    };
+    expect(filled.isError).toBe(false);
+    expect(filled.result.page?.title).toBe("Saved Ada");
+    expect(filled.result.steps).toEqual([
+      {
+        step: 1,
+        operation: "type",
+        changed: "The field holds the new value; the page's text did not change.",
+      },
+      { step: 2, operation: "click", changed: 'Title is now "Saved Ada".' },
+    ]);
+
+    const stopped = (await tool.call({
+      operation: "steps",
+      steps: [
+        { operation: "click", ref: refFor(outline, /"Rename save"/) },
+        { operation: "click", ref: refFor(outline, /"Save"/) },
+        { operation: "type", selector: "#name", text: "Grace" },
+      ],
+    })) as unknown as {
+      readonly isError: boolean;
+      readonly result: {
+        readonly completed: ReadonlyArray<unknown>;
+        readonly failedStep: {
+          readonly step: number;
+          readonly answer: { readonly failure?: { readonly category: string } };
+        };
+      };
+    };
+    expect(stopped.isError).toBe(true);
+    expect(stopped.result.completed).toHaveLength(1);
+    expect(stopped.result.failedStep).toMatchObject({
+      step: 2,
+      answer: { failure: { category: "stale" } },
+    });
+    // The step after the failure never ran.
+    const read = await tool.call({ operation: "read-page", selector: "#name" });
+    expect(read.result.page?.title).toBe("Saved Ada");
+
+    for (const steps of [
+      Array.from({ length: 11 }, () => ({ operation: "snapshot" })),
+      [{ operation: "steps", steps: [{ operation: "snapshot" }] }],
+      [{ operation: "upload", selector: "#file", files: ["a.txt"] }],
+      [{ operation: "stop" }],
+      [{ operation: "navigate", url: `${origin}/form`, profile: "personal" }],
+    ]) {
+      const refused = await tool.call({ operation: "steps", steps });
+      expect(refused.result).toEqual({ error: "invalid-browser-input" });
+    }
+    await tool.stop();
+  });
 });

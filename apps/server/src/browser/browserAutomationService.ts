@@ -1292,7 +1292,12 @@ function describeChange(
   } else if (before.contentHash !== undefined && after.contentHash !== before.contentHash) {
     changes.push("The page's text changed.");
   } else if (changes.length === 0 && before.contentHash !== undefined) {
-    changes.push("Nothing visible on the page changed.");
+    // A field's value is not page text, so filling one changes no hash.
+    changes.push(
+      kind === "type" || kind === "select" || kind === "upload"
+        ? "The field holds the new value; the page's text did not change."
+        : "Nothing visible on the page changed.",
+    );
   }
   return changes.length === 0 ? undefined : changes.join(" ").slice(0, 1024);
 }

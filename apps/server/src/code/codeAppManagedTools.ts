@@ -5,6 +5,8 @@ import {
   browserToolResult,
   browserToolWantsScreenshot,
   parseBrowserToolInput,
+  runBrowserToolSteps,
+  type BrowserToolAnswer,
   type BrowserToolInput,
 } from "../browser/browserToolOperations";
 import { BROWSER_TOOL_DEFINITION, BROWSER_TOOL_HELP } from "../browser/browserToolDefinition";
@@ -1094,8 +1096,11 @@ async function browserTool(
   options: CodeAppManagedToolsOptions,
   input: BrowserToolInput | undefined,
   signal?: AbortSignal,
-) {
+): Promise<BrowserToolAnswer> {
   if (input === undefined || options.browser === undefined) return failure("invalid-browser-input");
+  if (input.operation === "steps") {
+    return runBrowserToolSteps(input.steps, (step) => browserTool(options, step, signal));
+  }
   const threadId = options.thread.id as unknown as BrowserThreadId;
   const authority = options.browser.resolveAuthority(threadId, "code");
   if (authority === undefined) return failure("browser-authority-unavailable");
