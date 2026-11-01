@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -157,6 +157,9 @@ describe.skipIf(!canRunThrowawaySshd)("a provider runtime's own ssh signing in",
   }, 30_000);
 });
 
+const canConfine =
+  process.platform === "darwin" || (process.platform === "linux" && existsSync("/usr/bin/bwrap"));
+
 describe.skipIf(!canRunThrowawaySshd)(
   "a provider runtime's own ssh through its server folder",
   () => {
@@ -207,38 +210,41 @@ describe.skipIf(!canRunThrowawaySshd)(
         expect(reached.output).toContain("runtime-alias");
         expect(reached.code).toBe(0);
         // An alias the folder does not name, and the server's address by hand.
-        // Inside Octant's own OS profile for a runtime: the folder is a read root.
-        const work = realpathSync(mkdtempSync(join(socketParent, "work-")));
-        const launch = makeProcessConfinementLive().prepare({
-          executable: "/bin/sh",
-          args: ["-c", `ssh ${sshd.alias} echo runtime-confined`],
-          boundRoot: work,
-          temporaryDirectory: work,
-          networkEgress: "allow",
-          allowFileReadStar: true,
-          readRoots: [access.folder],
-          privateHomeAllowPaths: [work, access.folder],
-          ...(process.platform === "darwin"
-            ? {
-                extraRules: serverAccessSeatbeltRules({
-                  folder: access.folder,
-                  binDirectory: access.binDirectory,
-                  agentSocket: access.agentSocket,
-                }),
-              }
-            : {}),
-        });
-        const confined = await new Promise<string>((done) => {
-          const child = spawn(launch.command, [...launch.args], {
-            env: { ...environment, HOME: work },
-            cwd: work,
+        // Inside Octant's own OS profile for a runtime: the folder is a read
+        // root. Linux needs Bubblewrap for it, which not every runner has.
+        if (canConfine) {
+          const work = realpathSync(mkdtempSync(join(socketParent, "work-")));
+          const launch = makeProcessConfinementLive().prepare({
+            executable: "/bin/sh",
+            args: ["-c", `ssh ${sshd.alias} echo runtime-confined`],
+            boundRoot: work,
+            temporaryDirectory: work,
+            networkEgress: "allow",
+            allowFileReadStar: true,
+            readRoots: [access.folder],
+            privateHomeAllowPaths: [work, access.folder],
+            ...(process.platform === "darwin"
+              ? {
+                  extraRules: serverAccessSeatbeltRules({
+                    folder: access.folder,
+                    binDirectory: access.binDirectory,
+                    agentSocket: access.agentSocket,
+                  }),
+                }
+              : {}),
           });
-          let output = "";
-          child.stdout.on("data", (chunk: Buffer) => (output += chunk.toString()));
-          child.stderr.on("data", (chunk: Buffer) => (output += chunk.toString()));
-          child.on("close", () => done(output));
-        });
-        expect(confined).toContain("runtime-confined");
+          const confined = await new Promise<string>((done) => {
+            const child = spawn(launch.command, [...launch.args], {
+              env: { ...environment, HOME: work },
+              cwd: work,
+            });
+            let output = "";
+            child.stdout.on("data", (chunk: Buffer) => (output += chunk.toString()));
+            child.stderr.on("data", (chunk: Buffer) => (output += chunk.toString()));
+            child.on("close", () => done(output));
+          });
+          expect(confined).toContain("runtime-confined");
+        }
         for (const command of [
           `ssh ${sshd.unknownHostAlias} echo runtime-alias`,
           `ssh -o StrictHostKeyChecking=no -p 1 127.0.0.1 echo runtime-alias`,
