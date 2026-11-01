@@ -138,13 +138,15 @@ different provider. The lead can also name an eligible provider, model, and
 supported reasoning setting for a specific child. All choices retain the same
 authority and budget checks.
 
-Today a provider's own subagent feature is off inside Octant, because a child
-it starts itself would run where Octant cannot show it or answer its approvals.
-Letting Claude, Codex, and OpenCode use their own subagents, shown and
-journaled by Octant, is planned.
-Claude, OpenCode, and Devin turn theirs off through their own settings. Codex
-starts with its multi-agent features and `agents.enabled` switched off for
-that run only; your `CODEX_HOME` and `config.toml` are left as they are.
+A provider's own subagent feature is off by default, because a child it starts
+itself would run where Octant cannot show it or answer its approvals. Claude,
+OpenCode, and Devin turn theirs off through their own settings. Codex starts
+with its multi-agent features and `agents.enabled` switched off for that run
+only; your `CODEX_HOME` and `config.toml` are left as they are. For Claude Code
+and Codex you can let the provider run as itself, which turns its own subagents
+on and shows each one in the thread as a subagent run. Codex also needs the
+thread at Full access before it starts them; see
+[Let a provider run as itself](/advanced/providers#let-a-provider-run-as-itself).
 
 ## Posture and clamps
 
@@ -153,8 +155,8 @@ calls start subagents within the thread's access and the clamps below. Turned
 off, every `delegate` call is refused and the agent does its work itself;
 subagents it already started stay readable and controllable. A host that had
 chosen the retired **Only when I start them** reads as off, because nothing else
-could start a subagent under it. Provider-native subagents are not governed by this posture: Octant
-keeps them off where the provider allows it. The server enforces hard clamps:
+could start a subagent under it. Provider-native subagents are not governed by this posture: they stay off
+unless you let the provider run as itself. The server enforces hard clamps:
 
 - How many children **run at once** is yours to set in **Settings → Octant
   Harness → Helper agents**: **At once in one thread** (default 4) and **At

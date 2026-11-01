@@ -25,7 +25,13 @@ here is merged or being hardened for it.
   worktrees, repository test discovery, PR observation and creation, a
   person's confirmed PR merge from its review, thread board, Environment summary with local-server discovery, external-editor handoff.
 - **Work workspace** — confined document production (docx, pptx, pdf, image),
-  research with citations, project overview, secure split-view previews, board.
+  research with citations, project overview, secure split-view previews, board,
+  and the same shell, Git, and tools as Code at the thread's guardrail level.
+- **Guardrails** — guardrail levels (Ask first, Accept edits, Auto, Full
+  access) set globally, per Project, and per thread;
+  [Octant Shield](architecture.md#octant-shield) and its Watcher; the
+  [secret guard](architecture.md#secret-guard); network limits for provider
+  runtimes; extra folders on a Project.
 - **App-managed, provider-neutral tools** — browser automation, macOS
   computer use with allowlists, confined test runner, Apple Development
   Workbench (Xcode discovery, Simulator, validation evidence).
@@ -193,6 +199,7 @@ Intentionally out of scope; changing this requires an approved design change.
   use, tests, Apple validation, approvals, memory, and subagents stay
   app-managed and provider-neutral. Beyond them, the first-class providers
   (Claude Code, Codex, Mistral Vibe, and OpenCode) are to keep their own
-  native capabilities (mostly not built yet) while every other provider gets a documented degraded form or
+  native capabilities (what each still lacks is listed in the architecture's
+  capability matrix) while every other provider gets a documented degraded form or
   reports the capability unsupported
   ([architecture](architecture.md#overview-and-principles)).
