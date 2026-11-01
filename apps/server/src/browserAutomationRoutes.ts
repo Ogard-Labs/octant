@@ -444,10 +444,16 @@ export function createBrowserAutomationRouteHandler(
             );
           }
         }
+        // A person driving a headless page sees it only as a picture, so their
+        // action brings one back; an agent's action does so only when asked.
+        const include = input.include ?? [];
+        const pictured = include.includes("screenshot")
+          ? input
+          : { ...input, include: [...include, "screenshot" as const] };
         return success(
           shown(
             decodeBrowserAutomationSnapshot(
-              await dependencies.service.act({ windowId, request: input }),
+              await dependencies.service.act({ windowId, request: pictured }),
             ),
           ),
           origin,

@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import type { BrowserContextPolicy, BrowserProfileClearScope } from "@octant/contracts";
 import {
   BrowserActionKind,
+  BrowserObservationPart,
   decodeImportedCookie,
   decodeStoredBrowserProfile,
   MAX_BROWSER_TABS_PER_CONTEXT,
@@ -340,7 +341,16 @@ function isOwner(value: unknown): value is { windowId: string; threadId: string 
 
 function isBrowserAction(value: unknown): value is BrowserSurfaceAction {
   if (!isRecord(value)) return false;
-  const allowedKeys = new Set(["kind", "target", "value", "point", "deltaX", "deltaY", "expected"]);
+  const allowedKeys = new Set([
+    "kind",
+    "target",
+    "value",
+    "point",
+    "deltaX",
+    "deltaY",
+    "expected",
+    "include",
+  ]);
   if (Object.keys(value).some((key) => !allowedKeys.has(key))) return false;
   if (!(BrowserActionKind.literals as ReadonlyArray<unknown>).includes(value.kind)) return false;
   return (
@@ -351,7 +361,13 @@ function isBrowserAction(value: unknown): value is BrowserSurfaceAction {
     (value.point === undefined || isViewportPoint(value.point)) &&
     (value.deltaX === undefined || isBoundedDelta(value.deltaX)) &&
     (value.deltaY === undefined || isBoundedDelta(value.deltaY)) &&
-    (value.expected === undefined || isExpectedElement(value.expected))
+    (value.expected === undefined || isExpectedElement(value.expected)) &&
+    (value.include === undefined ||
+      (Array.isArray(value.include) &&
+        value.include.length <= 3 &&
+        value.include.every((part) =>
+          (BrowserObservationPart.literals as ReadonlyArray<unknown>).includes(part),
+        )))
   );
 }
 

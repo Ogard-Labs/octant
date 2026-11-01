@@ -2,6 +2,7 @@ import { browserToolImage } from "../browser/browserToolImage";
 import {
   browserToolAction,
   browserToolResult,
+  browserToolWantsScreenshot,
   parseBrowserToolInput,
   type BrowserToolInput,
 } from "../browser/browserToolOperations";
@@ -1163,7 +1164,7 @@ async function browserTool(
   ) {
     return failure("browser-screenshot-unavailable");
   }
-  return browserToolResult(acted.snapshot, input.operation === "screenshot");
+  return browserToolResult(acted.snapshot, browserToolWantsScreenshot(input));
 }
 
 /**

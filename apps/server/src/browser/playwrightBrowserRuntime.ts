@@ -379,7 +379,11 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
 
   async peek(contextId: BrowserContextId, signal: AbortSignal): Promise<BrowserRuntimeObservation> {
     const page = await this.#page(contextId, signal);
-    return this.#observe(page, false, this.#contexts.get(contextId)?.protectCredentials ?? true);
+    return this.#observe(page, this.#contexts.get(contextId)?.protectCredentials ?? true, {
+      text: false,
+      screenshot: true,
+      snapshot: false,
+    });
   }
 
   async act(
@@ -478,10 +482,15 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     if (request.kind === "snapshot") {
       return this.#snapshot(page, owned?.protectCredentials ?? true);
     }
+    const include = new Set(request.include ?? []);
     return this.#observe(
       page,
-      request.kind === "extract-text",
-      this.#contexts.get(contextId)?.protectCredentials ?? true,
+      owned?.protectCredentials ?? true,
+      {
+        text: request.kind === "extract-text" || include.has("text"),
+        screenshot: request.kind === "screenshot" || include.has("screenshot"),
+        snapshot: include.has("snapshot"),
+      },
       request.kind === "extract-text" ? request.target : undefined,
     );
   }
@@ -719,33 +728,45 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     };
   }
 
+  /**
+   * The page after an action: its address, title, and a hash of its text, so
+   * the server can say what changed. The text itself, a picture, and an
+   * outline cost the model tokens and the host a capture, so each comes back
+   * only when asked for.
+   */
   async #observe(
     page: PlaywrightPagePort,
-    includeExtractedText: boolean,
     protectCredentials: boolean,
+    parts: { readonly text: boolean; readonly screenshot: boolean; readonly snapshot: boolean },
     selector?: string,
   ): Promise<BrowserRuntimeObservation> {
+    const outline = parts.snapshot ? await this.#snapshot(page, protectCredentials) : {};
     if (protectCredentials && (await sensitiveDocument(page))) {
       const title = await page.title();
       const viewport = page.viewportSize();
       return {
+        ...outline,
         ...(page.url() === "about:blank" ? {} : { url: bounded(page.url(), 4096) }),
         ...(title.trim() === "" ? {} : { title: bounded(title, 1024) }),
         ...(viewport === null ? {} : { viewport }),
       };
     }
-    const [title, text, screenshotDataUrl] = await Promise.all([
+    const [title, text, selected, screenshotDataUrl] = await Promise.all([
       page.title(),
-      page.textContent(selector ?? "body"),
-      boundedScreenshotDataUrl(page),
+      page.textContent("body"),
+      parts.text && selector !== undefined ? page.textContent(selector) : Promise.resolve(null),
+      parts.screenshot ? boundedScreenshotDataUrl(page) : Promise.resolve(undefined),
     ]);
     const boundedText = bounded(text ?? "", 65_536);
     const viewport = page.viewportSize();
     return {
+      ...outline,
       ...(page.url() === "about:blank" ? {} : { url: bounded(page.url(), 4096) }),
       ...(title.trim() === "" ? {} : { title: bounded(title, 1024) }),
       contentHash: createHash("sha256").update(boundedText).digest("hex"),
-      ...(includeExtractedText ? { extractedText: boundedText } : {}),
+      ...(parts.text
+        ? { extractedText: selector === undefined ? boundedText : bounded(selected ?? "", 65_536) }
+        : {}),
       ...(screenshotDataUrl === undefined ? {} : { screenshotDataUrl }),
       ...(viewport === null ? {} : { viewport }),
     };

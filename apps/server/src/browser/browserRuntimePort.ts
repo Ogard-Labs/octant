@@ -143,7 +143,9 @@ export interface BrowserProfileStorePort {
  * ever needed the action itself.
  */
 export type BrowserRuntimeAction = Pick<BrowserActionRequest, "kind"> &
-  Partial<Pick<BrowserActionRequest, "target" | "value" | "point" | "deltaX" | "deltaY">> & {
+  Partial<
+    Pick<BrowserActionRequest, "target" | "value" | "point" | "deltaX" | "deltaY" | "include">
+  > & {
     /**
      * Set when `target` came from a snapshot ref: the element there must still
      * have this role and name, or the runtime refuses with

@@ -2319,8 +2319,10 @@ describe("Code tool families", () => {
     // The upload, submit-for-review, and release-version operations added
     // their names to the enum; their usage is in help too. The Browser's
     // snapshot operation and its ref argument added about 35 bytes after the
-    // description was shortened to pay for most of them.
-    expect(JSON.stringify(families).length).toBeLessThanOrEqual(4_700);
+    // description was shortened to pay for most of them. Its include
+    // argument, which lets an action return a snapshot, text, or picture in
+    // the same answer, added about 70 bytes; its usage is in help.
+    expect(JSON.stringify(families).length).toBeLessThanOrEqual(4_770);
   });
 
   it.each(["octant_browser", "octant_terminal", "octant_apple", "octant_android"])(

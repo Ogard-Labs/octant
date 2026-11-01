@@ -205,4 +205,26 @@ describe.skipIf(chrome === undefined)("the desktop Browser on a real page", () =
     ).rejects.toThrow(/changed since the snapshot/);
     await page.close();
   });
+
+  it("takes no picture and returns no text after an action unless the call asks", async () => {
+    const { host, contextId, page } = await surface("/form");
+    const clicked = await host.act(contextId, { kind: "click", target: "#save" });
+    expect(clicked.screenshotDataUrl).toBeUndefined();
+    expect(clicked.extractedText).toBeUndefined();
+    expect(clicked.contentHash).toMatch(/^[0-9a-f]{64}$/);
+    const asked = await host.act(contextId, {
+      kind: "click",
+      target: "#save",
+      include: ["screenshot", "text", "snapshot"],
+    });
+    expect(asked.screenshotDataUrl).toMatch(/^data:image\/jpeg;base64,/);
+    expect(asked.extractedText).toContain("Save");
+    expect(asked.snapshot).toMatch(/- button "Save" \[ref=e\d+\]/);
+    const pictured = await host.act(contextId, { kind: "screenshot" });
+    expect(pictured.screenshotDataUrl).toMatch(/^data:image\/jpeg;base64,/);
+    expect(pictured.extractedText).toBeUndefined();
+    const preview = await host.peek(contextId);
+    expect(preview.screenshotDataUrl).toMatch(/^data:image\/jpeg;base64,/);
+    await page.close();
+  });
 });

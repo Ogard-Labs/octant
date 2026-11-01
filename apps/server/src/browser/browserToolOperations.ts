@@ -17,8 +17,12 @@ export type BrowserToolTarget =
   | { readonly selector: string; readonly ref?: undefined }
   | { readonly ref: string; readonly selector?: undefined };
 
+/** What an action may bring back besides what changed; see the contract. */
+export type BrowserToolInclude = ReadonlyArray<"text" | "screenshot" | "snapshot">;
+
 export type BrowserToolInput = {
   readonly expectedObservationRevision?: number;
+  readonly include?: BrowserToolInclude;
 } & (
   | {
       readonly operation: "navigate";
@@ -59,12 +63,24 @@ export function parseBrowserToolInput(
     (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 0)
   )
     return undefined;
-  const common = revision === undefined ? {} : { expectedObservationRevision: revision };
+  const include = parseInclude(record.include);
+  if (include === null) return undefined;
+  // Reading operations are the thing `include` would add, so only an action
+  // that changes the page takes it.
+  const acts = ACTING_OPERATIONS.has(String(operation));
+  if (include !== undefined && !acts) return undefined;
+  const common = {
+    ...(revision === undefined ? {} : { expectedObservationRevision: revision }),
+    ...(include === undefined ? {} : { include }),
+  };
   const keys = Object.keys(record);
   const only = (...allowed: ReadonlyArray<string>) =>
     keys.every(
       (key) =>
-        key === "operation" || key === "expectedObservationRevision" || allowed.includes(key),
+        key === "operation" ||
+        key === "expectedObservationRevision" ||
+        (key === "include" && acts) ||
+        allowed.includes(key),
     );
   const text = (key: string, max: number) =>
     typeof record[key] === "string" && record[key] !== "" && record[key].length <= max;
@@ -137,6 +153,35 @@ export function parseBrowserToolInput(
   return undefined;
 }
 
+const ACTING_OPERATIONS: ReadonlySet<string> = new Set([
+  "navigate",
+  "click",
+  "type",
+  "press",
+  "scroll",
+  "wait",
+]);
+const INCLUDE_PARTS: ReadonlySet<unknown> = new Set(["text", "screenshot", "snapshot"]);
+
+/** Absent is undefined; anything but a short list of distinct known parts is null. */
+function parseInclude(value: unknown): BrowserToolInclude | undefined | null {
+  if (value === undefined) return undefined;
+  if (
+    !Array.isArray(value) ||
+    value.length > INCLUDE_PARTS.size ||
+    new Set(value).size !== value.length ||
+    !value.every((part) => INCLUDE_PARTS.has(part))
+  ) {
+    return null;
+  }
+  return value as BrowserToolInclude;
+}
+
+/** Whether the model asked to see the page as a picture after this call. */
+export function browserToolWantsScreenshot(input: BrowserToolInput): boolean {
+  return input.operation === "screenshot" || input.include?.includes("screenshot") === true;
+}
+
 /** The page action one operation asks for, bound to the context that runs it. */
 export function browserToolAction(
   input: BrowserToolInput,
@@ -150,6 +195,7 @@ export function browserToolAction(
     ...(input.expectedObservationRevision === undefined
       ? {}
       : { expectedObservationRevision: input.expectedObservationRevision }),
+    ...(input.include === undefined ? {} : { include: input.include }),
   } as const;
   const element = (named: Partial<BrowserToolTarget>) =>
     named.ref !== undefined
@@ -188,7 +234,11 @@ export function browserToolAction(
   }
 }
 
-/** What the model reads back from one operation. */
+/**
+ * What the model reads back from one operation: the page's address, title,
+ * revision, and what changed, plus whatever the operation read or the call
+ * asked to include. A text hash is the server's to compare, not the model's.
+ */
 export function browserToolResult(snapshot: BrowserAutomationSnapshot, includeScreenshot = false) {
   const image = includeScreenshot
     ? browserToolImage(snapshot.observation?.screenshotDataUrl)
@@ -213,6 +263,7 @@ export function browserToolResult(snapshot: BrowserAutomationSnapshot, includeSc
                 : { observationRevision: observation.revision }),
               ...(observation.url === undefined ? {} : { url: observation.url }),
               ...(observation.title === undefined ? {} : { title: observation.title }),
+              ...(observation.change === undefined ? {} : { changed: observation.change }),
               ...(observation.snapshot === undefined ? {} : { snapshot: observation.snapshot }),
               ...(bounded === undefined
                 ? {}
@@ -220,9 +271,6 @@ export function browserToolResult(snapshot: BrowserAutomationSnapshot, includeSc
                     text: bounded,
                     ...(bounded.length < (text?.length ?? 0) ? { textTruncated: true } : {}),
                   }),
-              ...(observation.contentHash === undefined
-                ? {}
-                : { contentHash: observation.contentHash }),
               ...(observation.consoleErrors === undefined
                 ? {}
                 : { consoleErrors: observation.consoleErrors }),

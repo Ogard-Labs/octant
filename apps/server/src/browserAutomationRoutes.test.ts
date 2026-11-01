@@ -519,6 +519,20 @@ describe("browser automation routes", () => {
       expect(service.act.mock.lastCall?.[0]).not.toHaveProperty("capturedBy");
     });
 
+    it("brings a picture back with a person's click on a page they see only as a picture", async () => {
+      const response = await handler(
+        new Request("http://127.0.0.1/api/browser/actions", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ ...screenshotRequest, kind: "click", target: "#go" }),
+        }),
+      );
+      expect(response?.status).toBe(200);
+      expect(service.act.mock.lastCall?.[0]).toMatchObject({
+        request: { kind: "click", include: ["screenshot"] },
+      });
+    });
+
     it("keeps a screenshot as the person's only through the explicit take route", async () => {
       const { handler: capturing } = withCaptures();
       const response = await capturing(post("/take", { threadId, request: screenshotRequest }));

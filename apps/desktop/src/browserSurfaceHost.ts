@@ -257,7 +257,9 @@ export class BrowserTargetStaleError extends Error {
 
 /** What the server asks a page to do; it carries no authority of its own. */
 export type BrowserSurfaceAction = Pick<BrowserActionRequest, "kind"> &
-  Partial<Pick<BrowserActionRequest, "target" | "value" | "point" | "deltaX" | "deltaY">> & {
+  Partial<
+    Pick<BrowserActionRequest, "target" | "value" | "point" | "deltaX" | "deltaY" | "include">
+  > & {
     /** The role and name a snapshot ref recorded; the target must still match. */
     readonly expected?: { readonly role: string; readonly name: string };
   };
@@ -678,21 +680,9 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
               break;
             case "screenshot":
               break;
-            case "snapshot": {
+            case "snapshot":
               // The outline is the whole answer: no picture and no page text,
               // and a credential field in it is named, never valued.
-              const read = await readPage(contentsView(owned), {
-                mode: "snapshot",
-                maxRefs: MAX_BROWSER_SNAPSHOT_REFS,
-                maxNodes: MAX_BROWSER_SNAPSHOT_NODES,
-                protectCredentials: owned.policy.credentialFieldProtection,
-                // Every frame, which the in-page reader does not walk.
-                withholdValues: await hasSensitiveDocument(
-                  contentsView(owned),
-                  owned.policy.credentialFieldProtection,
-                ),
-              });
-              if (read.mode !== "snapshot") throw new Error("Browser snapshot is unavailable.");
               refuseUnapprovedPage(owned, contents);
               return {
                 ...(contents.getURL() === ""
@@ -701,10 +691,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 ...(contents.getTitle() === ""
                   ? {}
                   : { title: contents.getTitle().slice(0, 1_024) }),
-                snapshot: formatBrowserPageSnapshot(read.snapshot),
-                snapshotRefs: read.snapshot.refs,
+                ...(await snapshotOf(owned)),
               };
-            }
             case "observe-diagnostics":
               // Handed over and cleared before any renderer work: a page that
               // never committed has no document to evaluate, and that is when
@@ -719,13 +707,22 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
               break;
           }
           refuseUnapprovedPage(owned, contents);
-          const extractedText = await execute(
+          const include = new Set(request.include ?? []);
+          const wantsText = request.kind === "extract-text" || include.has("text");
+          // The body's text is always read, for the hash the server compares to
+          // say what changed; it is returned only when asked for.
+          const bodyText = await execute(
             contentsView(owned),
-            request.kind === "extract-text" && request.target !== undefined
-              ? `document.querySelector(${JSON.stringify(request.target)})?.innerText?.slice(0, 65536) ?? ''`
-              : "document.body?.innerText?.slice(0, 65536) ?? ''",
+            "document.body?.innerText?.slice(0, 65536) ?? ''",
           );
-          const text = typeof extractedText === "string" ? extractedText : "";
+          const text = typeof bodyText === "string" ? bodyText : "";
+          const selectedText =
+            wantsText && request.kind === "extract-text" && request.target !== undefined
+              ? await execute(
+                  contentsView(owned),
+                  `document.querySelector(${JSON.stringify(request.target)})?.innerText?.slice(0, 65536) ?? ''`,
+                )
+              : text;
           const measuredViewport = await execute(
             contentsView(owned),
             "({ width: Math.round(window.innerWidth), height: Math.round(window.innerHeight) })",
@@ -735,14 +732,16 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
             contentsView(owned),
             owned.policy.credentialFieldProtection,
           );
-          // Every action's observation carries the page picture, not only an
-          // explicit screenshot request: the activity preview and remote
-          // clients render whatever the agent last saw, which is otherwise
-          // nothing after a navigate or click.
-          const screenshotDataUrl = sensitiveDocument
-            ? undefined
-            : await captureScreenshot(contentsView(owned));
+          // A picture only when one is asked for. The person's activity
+          // preview takes its own through peek, so an agent's click no longer
+          // pays for a capture nobody reads.
+          const screenshotDataUrl =
+            sensitiveDocument || (request.kind !== "screenshot" && !include.has("screenshot"))
+              ? undefined
+              : await captureScreenshot(contentsView(owned));
+          const outline = include.has("snapshot") ? await snapshotOf(owned) : {};
           return {
+            ...outline,
             ...(contents.getURL() === ""
               ? {}
               : { url: redactedObservationUrl(contents.getURL()).slice(0, 4_096) }),
@@ -750,9 +749,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
             ...(sensitiveDocument
               ? {}
               : { contentHash: createHash("sha256").update(text, "utf8").digest("hex") }),
-            ...(!sensitiveDocument &&
-            (request.kind === "extract-text" || request.kind === "screenshot")
-              ? { extractedText: text }
+            ...(!sensitiveDocument && wantsText
+              ? { extractedText: typeof selectedText === "string" ? selectedText : "" }
               : {}),
             ...(screenshotDataUrl === undefined ? {} : { screenshotDataUrl }),
             ...(viewport === undefined ? {} : { viewport }),
@@ -1234,6 +1232,26 @@ async function readPage(
     throw new Error("Browser page read returned nothing.");
   }
   return result as BrowserPageReadResult;
+}
+
+/** The page outline and what each of its refs names, under the context's protection. */
+async function snapshotOf(owned: OwnedSurface): Promise<{
+  readonly snapshot: string;
+  readonly snapshotRefs: ReadonlyArray<BrowserPageSnapshotRef>;
+}> {
+  const read = await readPage(contentsView(owned), {
+    mode: "snapshot",
+    maxRefs: MAX_BROWSER_SNAPSHOT_REFS,
+    maxNodes: MAX_BROWSER_SNAPSHOT_NODES,
+    protectCredentials: owned.policy.credentialFieldProtection,
+    // Every frame, which the in-page reader does not walk.
+    withholdValues: await hasSensitiveDocument(
+      contentsView(owned),
+      owned.policy.credentialFieldProtection,
+    ),
+  });
+  if (read.mode !== "snapshot") throw new Error("Browser snapshot is unavailable.");
+  return { snapshot: formatBrowserPageSnapshot(read.snapshot), snapshotRefs: read.snapshot.refs };
 }
 
 async function targetGeometry(

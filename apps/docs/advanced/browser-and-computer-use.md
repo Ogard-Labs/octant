@@ -191,6 +191,13 @@ shown. Octant keeps the references itself and refuses one that no longer
 matches the page, so the agent snapshots again instead of acting on the wrong
 element.
 
+After a click, typing, or another action, the agent hears back the page's
+address and title and one line on what changed, such as a new title or
+changed text. It gets the page's text, a picture, or a fresh outline only when
+it asks for them, which keeps each step small. Octant takes no picture of the
+page the agent did not ask for; the activity preview still shows the page,
+because it takes its own.
+
 The tool's built-in guidance tells the agent to navigate, take a snapshot, act
 by reference, and inspect the result to verify success. The always-visible description stays short; the agent asks the tool's
 `help` operation for the full usage when it needs it, as it can for Computer
