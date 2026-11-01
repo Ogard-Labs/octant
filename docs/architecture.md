@@ -1235,8 +1235,11 @@ Octant connects with this host's own `ssh`, the person's SSH config, and their
 agent: keys stay with the host, nothing is forwarded, an unknown host key is
 refused, and a call that cannot reach the server fails with nothing run on
 this host instead. Built: the catalog, the connection, and the folder check
-at binding (Settings › Access › Servers). Not built yet: threads and
-terminals there (allowed; not built yet). An agent in a local Project still
+at binding (Settings › Access › Servers); Code threads there, which run only
+on the Octant Harness, with file tools, commands, and Git on the server under
+the same levels, approvals, and journal as a local Project; and thread
+terminals that are logins on the server. Octant has no sandbox on the server,
+so below Full access a remembered approval does not cover a command there. An agent in a local Project still
 reaches a remote machine with `ssh` through its shell (above), and Octant on
 another computer is a hub-and-spoke member
 ([Hub and spokes](design/hub-and-spokes.md)). The earlier SSH target binding
@@ -11323,7 +11326,7 @@ LSP / extension host / debugger companion are release-scope choices the
 maintainer schedules, not safety rules; none of them protects an invariant by
 itself. Remote SSH development environments are in scope (maintainer
 decision, 2026-10-31, replacing the 2026-10-29 out-of-scope rule): a Code
-Project bound to a folder on a registered server is partly built
+Project bound to a folder on a registered server is built for Code
 ([Server Projects](design/server-projects.md)). An agent in a local Project
 reaches another machine with `ssh` through its shell with the person's own
 SSH agent and configuration ([Modes](#modes-chat-work-and-code)), and Octant

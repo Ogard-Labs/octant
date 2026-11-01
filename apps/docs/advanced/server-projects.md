@@ -33,8 +33,23 @@ Only someone at this computer can bind or remove a server Project.
 - Removing a server from **Servers** keeps its Projects, but they cannot
   connect until you register the server again or remove them.
 
-## Not available yet
+## Work in a server Project
 
-Code threads and terminals in a server Project are not available yet. When
-they are, they will run under the same access levels and approvals as any Code
-Project.
+Server Projects are listed in the Code sidebar under **On your servers**.
+Choose one to start a thread there.
+
+- **Octant Harness only.** A thread in a server Project runs on a model the
+  Octant Harness runs. Other runtimes act on this computer's files, so the
+  composer shows them as unavailable there.
+- **Files, commands, and Git run on the server.** The agent reads and edits
+  files in the folder on the server and runs commands there, Git included.
+  Every command is recorded with the server and its exit status.
+- **The same access levels.** Plan, Ask first, Accept edits, Auto, and Full
+  access mean what they mean in any Code Project. Octant cannot sandbox a
+  server, so below Full access every command asks again, even when you
+  allowed commands earlier in the thread. Full access asks nothing.
+- **Terminals.** A terminal in the thread is a login shell in the folder on
+  the server. When the connection drops, the terminal ends.
+- **Not available there yet:** connectors and plugins, Browser and Computer,
+  subagents, forks, checkpoints and rewind, and the Git, Files, and Tests
+  panels. Ask the agent to do it on the server, or use a terminal.
