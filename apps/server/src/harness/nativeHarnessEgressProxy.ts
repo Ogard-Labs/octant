@@ -13,12 +13,15 @@ import {
   type ToolEgressDecisionEntry,
   type ToolEgressLaunch,
   type ToolEgressRefusalReason,
+  type SafeNetworkPlace,
   type ToolEgressRuleId,
   UtcTimestamp,
 } from "@octant/contracts";
-import type {
-  RuntimeEgressAllowedBy,
-  RuntimeEgressDecision,
+import {
+  runtimeEgressPrivateAddressAllowed,
+  safeNetworkPlaceAllows,
+  type RuntimeEgressAllowedBy,
+  type RuntimeEgressDecision,
 } from "@octant/domain/safe-network-policy";
 import {
   canonicalToolEgressHost,
@@ -146,6 +149,23 @@ export interface ToolEgressProxyOptions {
    * is proposed.
    */
   readonly decision?: "tool-rules" | ProviderRuntimeEgressDecider;
+  /**
+   * The person's safe networks for a harness command's `tool-rules`: a
+   * destination its rules refuse passes when a place names it. Read for every
+   * decision and ignored while the thread or its parent is tainted, as
+   * standing rules are. Absent is no places (Network limits off).
+   */
+  readonly places?: () => ReadonlyArray<SafeNetworkPlace>;
+  /**
+   * Asked about a harness command's `no-rule` or `expired` refusal before it
+   * is answered: the reviewer path for a per-call network prompt. Like a
+   * runtime's hook, the proxy decides again once it settles or times out, so
+   * only a `call` rule it granted lets the request through.
+   */
+  readonly escalate?: (destination: {
+    readonly host: string;
+    readonly port: number;
+  }) => Promise<void>;
   /**
    * `launch-token` (the default) refuses a request without the launch's token.
    * `none` serves a client that cannot send one: a provider sandbox that
@@ -613,26 +633,19 @@ export class ToolEgressProxy {
       this.#refuse(socket, "resolve-failed", destination);
       return undefined;
     }
-    const runtime = this.#runtimeDecider();
-    if (runtime === undefined && addresses.some((address) => isPrivateAddress(address))) {
-      this.#refuse(socket, "private-destination", destination);
-      return undefined;
-    }
     const current = this.#decide(destination.host, destination.port);
     if (current.kind === "refuse") {
       this.#refuse(socket, current.reason, destination);
       return undefined;
     }
-    // A provider runtime's private answers pass only where the person
-    // trusted that place or the launch serves that loopback port; every other
-    // private, loopback, and link-local answer refuses as it does for a
-    // harness command.
+    // A private answer passes only where the person trusted that place or a
+    // runtime's launch serves that loopback port; every other private,
+    // loopback, and link-local answer refuses, whatever rule named the host.
     if (
-      runtime !== undefined &&
       addresses.some(
         (address) =>
           isPrivateAddress(address) &&
-          !this.#privateAddressAllowed(runtime, address, destination.port, current.by),
+          !this.#privateAddressAllowed(address, destination.port, current.by),
       )
     ) {
       this.#refuse(socket, "private-destination", destination);
@@ -805,16 +818,14 @@ export class ToolEgressProxy {
       return false;
     }
     const decision = this.#decide(tunnel.host, tunnel.port);
-    // A provider runtime's tunnel to a private address stays only while what
-    // let that address through still does: a person who stops trusting the
-    // network it is on closes the tunnel, whatever the name's allowance says.
-    const runtime = this.#runtimeDecider();
+    // A tunnel to a private address stays only while what let that address
+    // through still does: a person who stops trusting the network it is on
+    // closes the tunnel, whatever the name's allowance says.
     const reason =
       decision.kind === "refuse"
         ? decision.reason
-        : runtime !== undefined &&
-            isPrivateAddress(tunnel.address) &&
-            !this.#privateAddressAllowed(runtime, tunnel.address, tunnel.port, decision.by)
+        : isPrivateAddress(tunnel.address) &&
+            !this.#privateAddressAllowed(tunnel.address, tunnel.port, decision.by)
           ? "private-destination"
           : undefined;
     if (reason === undefined) return true;
@@ -892,25 +903,49 @@ export class ToolEgressProxy {
   }
 
   #privateAddressAllowed(
-    runtime: ProviderRuntimeEgressDecider,
     address: string,
     port: number,
     by: RuntimeEgressAllowedBy | undefined,
   ): boolean {
-    if (by === undefined) return false;
+    const runtime = this.#runtimeDecider();
     try {
-      return runtime.privateAddressAllowed({ address, port, by });
+      if (runtime !== undefined) {
+        return by !== undefined && runtime.privateAddressAllowed({ address, port, by });
+      }
+      // A harness command reaches a private address only through a place:
+      // a name the person trusted, or a rule's host whose answer lies in a
+      // trusted range or tag. Its thread has no loopback ports of its own.
+      return runtimeEgressPrivateAddressAllowed({
+        address,
+        port,
+        by: by ?? "project-rule",
+        places: this.#places(),
+        launchLoopbackPorts: [],
+      });
     } catch {
       return false;
     }
   }
 
+  /** The places a harness command's rules fall back to; none while either thread is tainted. */
+  #places(): ReadonlyArray<SafeNetworkPlace> {
+    const places = this.#options.places;
+    if (places === undefined) return [];
+    try {
+      const taint = this.#options.taint();
+      return taint.threadTainted || taint.parentTainted ? [] : places();
+    } catch {
+      return [];
+    }
+  }
+
   /**
-   * Gives a provider runtime's reviewer hook one chance at an unlisted host,
-   * then decides again. A harness command's refusals go to learn mode instead.
+   * Gives the reviewer hook one chance at an unlisted host, then decides
+   * again. A harness command's refusals that still stand go to learn mode.
    */
   async #escalate(refused: ProxyDecision, host: string, port: number): Promise<ProxyDecision> {
-    const escalate = this.#runtimeDecider()?.escalate;
+    const runtime = this.#runtimeDecider();
+    const escalate = runtime === undefined ? this.#options.escalate : runtime.escalate;
     if (escalate === undefined || refused.kind !== "refuse" || !("host" in refused)) return refused;
     if (this.#pending >= this.#limits.maxPending) return refused;
     this.#pending += 1;
@@ -948,12 +983,17 @@ export class ToolEgressProxy {
         by: decision.by,
       };
     }
-    return decideToolEgress({
+    const decision = decideToolEgress({
       launch: this.#facts(),
       destination: { host, port },
       rules: this.#rules(),
       now: this.#now(),
     });
+    if (decision.kind === "allow") return decision;
+    const placed = safeNetworkPlaceAllows({ host, port }, this.#places());
+    return placed === undefined
+      ? decision
+      : { kind: "allow", host: placed.host, port: placed.port, ruleId: undefined, by: "place" };
   }
 
   /**

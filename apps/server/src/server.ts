@@ -295,6 +295,7 @@ export function startOctantServer(
       externalContentIngestionStore,
       options,
       persistence,
+      shieldHolder,
       windowAuthorityStore,
       workThreadProjection,
     });

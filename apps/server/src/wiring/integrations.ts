@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   decodeCodeThreadId,
+  decodeProjectId,
   decodeWorkThreadId,
   THREAD_EXTERNAL_CONTENT_AGGREGATE,
   THREAD_RETENTION_EVENT_NAMES,
@@ -59,17 +60,22 @@ import type { ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { FoundationsWiring } from "./foundations";
+import type { HarnessStateWiring } from "./harnessState";
+import type { SafeNetworkStore } from "../network/safeNetworkStore";
+import { shieldAllowsNetwork } from "../shield/shieldNetworkReview";
 
 export type IntegrationsDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<AuthorityWiring, "windowAuthorityStore"> &
   Pick<AgentRunsWiring, "externalContentIngestionStore"> &
-  Pick<FoundationsWiring, "workThreadProjection">;
+  Pick<FoundationsWiring, "workThreadProjection"> &
+  Pick<HarnessStateWiring, "shieldHolder">;
 
 export function wireIntegrations(deps: IntegrationsDependencies) {
   const {
     externalContentIngestionStore,
     options,
     persistence,
+    shieldHolder,
     windowAuthorityStore,
     workThreadProjection,
   } = deps;
@@ -115,6 +121,20 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
     // here, before any route admits a turn: a launch the last run never
     // summarized is marked incomplete, and every launch whose bytes taint its
     // thread marks it now.
+    // Safe networks are composed with the runtime network below, from these
+    // rules; commands read them only while Network limits are on.
+    let safeNetworksForCommands: Pick<SafeNetworkStore, "limitsOn" | "placesFor"> | undefined;
+    const limitsOn = () => safeNetworksForCommands?.limitsOn() === true;
+    const projectRootOf = (projectId: string): string | undefined => {
+      try {
+        const project = persistence.readProject(decodeProjectId(projectId));
+        return project === undefined || project.type === "chat"
+          ? undefined
+          : project.binding.canonicalRoot;
+      } catch {
+        return undefined;
+      }
+    };
     const toolEgressRules = new ToolEgressRules({
       journal: persistence.journal,
       readThread: (threadId) => {
@@ -183,6 +203,24 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
+      places: (projectId) =>
+        limitsOn() ? (safeNetworksForCommands?.placesFor(projectId) ?? []) : [],
+      // Octant Shield answers a command's unlisted host on a thread it
+      // reviews, behind the same switch; its allowance is one `call` rule.
+      reviewNetwork: async ({ threadId, host, port }) => {
+        if (!limitsOn()) return false;
+        const projectId = toolEgressRules.threadProject(threadId);
+        const boundRoot = projectId === undefined ? undefined : projectRootOf(projectId);
+        if (boundRoot === undefined) return false;
+        const review = await shieldAllowsNetwork(shieldHolder.port, {
+          threadId,
+          host,
+          port,
+          via: "command",
+          boundRoot,
+        });
+        return review.allowed;
+      },
     });
     toolEgressRules.recover();
     const unsubscribeToolEgressRules = persistence.journal.subscribeCommitted((append) => {
@@ -201,6 +239,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       persistence,
       toolEgressRules,
     });
+    safeNetworksForCommands = safeNetworkStore;
     // Settings › Access › Safe networks; only a local window changes a list.
     const safeNetworkRoutes = createSafeNetworkRouteHandler({
       windowAuthorityStore,
