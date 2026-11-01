@@ -1162,21 +1162,37 @@ describe("CodeComposerAdapter interactions", () => {
       server: { location: "devbox:/home/build/service" },
     };
 
-    it("names the folder, offers no branch or worktree, and starts in the bound folder at any access level", async () => {
+    it("names the folder, lists the server's branches, and starts in the bound folder at any access level", async () => {
       const user = userEvent.setup();
       const onCreateThread = vi.fn();
+      const execute = vi.fn(async (command: { readonly kind: string }) =>
+        command.kind === "list-code-worktree-refs"
+          ? {
+              kind: "worktree-refs-listed",
+              projectId: serverProps.projectId,
+              refs: [{ name: "main", kind: "local", isCurrent: true }],
+            }
+          : undefined,
+      );
       render(
         <CodeComposerAdapter
           {...serverProps}
           defaultPermissionMode="full-access"
           defaultPermissionPersistence="project-default"
+          execute={execute as never}
+          newThreadWorkspace="managed-worktree"
           onCreateThread={onCreateThread}
         />,
       );
 
       expect(screen.getByText("devbox:/home/build/service")).toBeVisible();
-      expect(screen.queryByRole("button", { name: "Workspace" })).toBeNull();
-      expect(screen.queryByRole("button", { name: /branch/i })).toBeNull();
+      // A habit remembered on this host does not choose a worktree on a server.
+      expect(screen.getByRole("button", { name: "Workspace" })).toHaveTextContent(
+        "Current checkout",
+      );
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("main"),
+      );
       expect(screen.getByRole("button", { name: "Mode" })).toHaveTextContent("Full access");
       await user.click(screen.getByRole("button", { name: "Mode" }));
       const levels = (await screen.findAllByRole("menuitemradio")).map((item) => item.textContent);
@@ -1190,9 +1206,23 @@ describe("CodeComposerAdapter interactions", () => {
         executionPolicy: "full-access",
         permissionPersistence: "current-session",
         workspace: "current-checkout",
+        deliveryTarget: { proposedBaseBranch: "main" },
       });
       expect(onCreateThread.mock.calls[0]?.[0]).not.toHaveProperty("computerUseSelection");
       expect(onCreateThread.mock.calls[0]?.[0]).not.toHaveProperty("extensionSelections");
+    });
+
+    it("starts a thread in its own worktree on the server when the person picks one", async () => {
+      const user = userEvent.setup();
+      const onCreateThread = vi.fn();
+      render(<CodeComposerAdapter {...serverProps} onCreateThread={onCreateThread} />);
+
+      await user.click(screen.getByRole("button", { name: "Workspace" }));
+      await user.click(await screen.findByRole("menuitemradio", { name: /Managed worktree/ }));
+      await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the build");
+      await user.click(screen.getByRole("button", { name: "Create thread" }));
+      await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(1));
+      expect(onCreateThread.mock.calls[0]?.[0]).toMatchObject({ workspace: "managed-worktree" });
     });
 
     it("lists other providers unavailable with the reason, and starts nothing on one", async () => {

@@ -1833,7 +1833,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         {...(threadDropKey === undefined ? {} : { threadDropKey })}
         context={
           <CodeCheckoutBar
-            {...(props.onCreatePullRequest === undefined || serverCheckout
+            {...(props.onCreatePullRequest === undefined
               ? {}
               : { onCreatePullRequest: props.onCreatePullRequest })}
             {...(serverProject === undefined ? {} : { serverLocation: serverProject.location })}
