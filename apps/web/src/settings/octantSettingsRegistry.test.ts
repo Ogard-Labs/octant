@@ -363,6 +363,7 @@ const COMPUTED_SETTING_ROWS: Readonly<Record<string, string>> = {
   "provider-*-deployment-ids": "provider-deployment-ids",
   "provider-*-claude-artifacts": "provider-claude-artifacts",
   "provider-*-native-setup": "provider-native-setup",
+  "provider-tooling-*": "provider-tooling-configured",
   "*-config-directory": "provider-claude-account",
   "*-accent": "provider-claude-account",
   "*-auth-login": "provider-claude-account",

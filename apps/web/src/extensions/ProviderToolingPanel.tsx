@@ -87,6 +87,8 @@ export function ProviderToolingPanel(props: ProviderToolingPanelProps) {
   const [step, setStep] = useState<Step>({ kind: "idle" });
   const [refusal, setRefusal] = useState<ProviderToolingRefusal>();
   const generation = useRef(0);
+  /** Counts plan requests; an answer for an earlier one, or another account, is dropped. */
+  const planRequest = useRef(0);
 
   useEffect(() => {
     if (account === undefined && props.accounts[0] !== undefined) {
@@ -116,6 +118,7 @@ export function ProviderToolingPanel(props: ProviderToolingPanelProps) {
   }, [account, client, props.localHost]);
 
   useEffect(() => {
+    planRequest.current += 1;
     setStep({ kind: "idle" });
     setRefusal(undefined);
     void refresh();
@@ -126,14 +129,22 @@ export function ProviderToolingPanel(props: ProviderToolingPanelProps) {
       if (account === undefined) return;
       setRefusal(undefined);
       setStep({ kind: "planning" });
+      const token = ++planRequest.current;
       try {
         const result = await client.plan(account.id as never, request);
+        if (token !== planRequest.current) {
+          // The person moved to another account or asked again while this was
+          // planned; showing it would offer to change the wrong account.
+          if (result.status === "planned") void client.cancel(result.planId).catch(() => undefined);
+          return;
+        }
         if (result.status === "planned") setStep({ kind: "confirm", plan: result });
         else {
           setStep({ kind: "idle" });
           setRefusal(result);
         }
       } catch {
+        if (token !== planRequest.current) return;
         setStep({ kind: "idle" });
         setRefusal({
           status: "refused",

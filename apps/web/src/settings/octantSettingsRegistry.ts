@@ -853,6 +853,18 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "skill folders codex home skills provider index",
         },
         {
+          id: settingId("provider-tooling-account"),
+          label: "Claude and Codex account",
+          scope: "host",
+          keywords: "claude codex account add own folder run as itself",
+        },
+        {
+          id: settingId("provider-tooling-configured"),
+          label: "Tools already added to Claude and Codex",
+          scope: "host",
+          keywords: "claude codex configured list remove",
+        },
+        {
           id: settingId("skill-folders-added"),
           label: "Added skill folders",
           scope: "host",

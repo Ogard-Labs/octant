@@ -8158,7 +8158,7 @@ absolute folder path, nothing may start with a dash where a name or source is
 expected, length is bounded, and no control character passes), a value after
 `--` is one argument whatever it contains, and the scope is named (`user`) on
 every Claude Code command so the account changes and not the folder Octant
-happens to run in. The child gets a minimal environment (the account's folder
+happens to run in. These commands are the program's own management commands, run once after the person confirmed the exact command, not a provider runtime turn, so they sit outside the runtime confinement matrix and its gate; the runner module is named for that (`providerToolingRunner`) rather than as a provider process. The child gets a minimal environment (the account's folder
 variable and the same pass-through list the account's launch uses, no inherited
 provider keys), no input, a 45 second limit for a list and 120 seconds for a
 change, and 64 KiB of output, scrubbed of the secret before it is returned or

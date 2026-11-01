@@ -190,6 +190,29 @@ describe("ProviderToolingPanel", () => {
     await waitFor(() => expect(list.mock.calls.length).toBeGreaterThan(1));
   });
 
+  it("drops a plan that returns after the person moved to another account, and cancels it on the host", async () => {
+    let answer: (value: ProviderToolingPlanResult) => void = () => undefined;
+    const slow = new Promise<ProviderToolingPlanResult>((resolve) => {
+      answer = resolve;
+    });
+    const { user, plan, apply, cancel } = setup({
+      accounts: [CLAUDE, CODEX],
+      list: listing([
+        section("mcp-servers", { entries: [{ name: "files" }] }),
+        section("plugins"),
+        section("marketplaces"),
+      ]),
+    });
+    plan.mockImplementationOnce(() => slow as never);
+    await user.click(await screen.findByRole("button", { name: "Remove files" }));
+    await user.click(screen.getByRole("combobox", { name: "Account" }));
+    await user.click(await screen.findByRole("option", { name: /Codex home/ }));
+    answer(planFor("claude mcp remove --scope user files", { commandKind: "mcp-remove" }));
+    await waitFor(() => expect(cancel).toHaveBeenCalledTimes(1));
+    expect(screen.queryByLabelText("The command")).toBeNull();
+    expect(apply).not.toHaveBeenCalled();
+  });
+
   it("plans a removal and runs nothing when the person cancels", async () => {
     const { user, plan, apply, cancel } = setup({
       list: listing([

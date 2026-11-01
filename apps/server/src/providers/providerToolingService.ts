@@ -25,7 +25,7 @@ import {
   resolveProviderToolingAccount,
   type ProviderToolingAccount,
 } from "./providerToolingAccount";
-import type { ProviderToolingRunner } from "./providerToolingProcess";
+import type { ProviderToolingRunner } from "./providerToolingRunner";
 
 const PLAN_LIFETIME_MS = 10 * 60_000;
 const MAXIMUM_PLANS = 32;
@@ -263,7 +263,23 @@ export class ProviderToolingService {
       );
     }
     plan.used = true;
-    return this.#serialized(String(plan.instanceId), () => this.#run(plan, account));
+    return this.#serialized(String(plan.instanceId), async () => {
+      // The account is read again once this command's turn comes: another window may
+      // have moved or removed it while an earlier command ran, and the queued
+      // command must not run in the folder it had when it was queued.
+      const current = this.#account(plan.instanceId);
+      if (
+        current === undefined ||
+        digestOf(plan.instanceId, current, plan.command) !== plan.digest
+      ) {
+        await this.#discard(plan);
+        return refusal(
+          "changed-plan",
+          "The account changed since the command was shown. Review it again.",
+        );
+      }
+      return this.#run(plan, current);
+    });
   }
 
   async #run(

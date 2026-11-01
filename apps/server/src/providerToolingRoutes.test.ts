@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { createProviderToolingRouteHandler } from "./providerToolingRoutes";
 import type { ProviderCredentialStore } from "./providers/credentialBrokerClient";
-import type { ProviderToolingRun } from "./providers/providerToolingProcess";
+import type { ProviderToolingRun } from "./providers/providerToolingRunner";
 import { ProviderToolingService } from "./providers/providerToolingService";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 

@@ -20,7 +20,7 @@ import {
   type ProviderToolingRequest,
 } from "@octant/contracts";
 import type { ProviderCredentialStore } from "./credentialBrokerClient";
-import { runProviderToolingProcess } from "./providerToolingProcess";
+import { runProviderToolingProcess } from "./providerToolingRunner";
 import { ProviderToolingService, type ProviderToolingCaller } from "./providerToolingService";
 
 const CLAUDE_ID = "80000000-0000-4000-8000-0000000000a1";
@@ -125,7 +125,13 @@ class Broker implements ProviderCredentialStore {
 }
 
 function make(
-  options: { broker?: Broker | null; now?: () => number; replace?: ProviderInstance } = {},
+  options: {
+    broker?: Broker | null;
+    now?: () => number;
+    replace?: ProviderInstance;
+    /** Holds every command until it resolves, to queue a second one behind the first. */
+    gate?: Promise<void>;
+  } = {},
 ) {
   const records: ProviderToolingAppliedRecord[] = [];
   const broker = options.broker === null ? undefined : (options.broker ?? new Broker());
@@ -135,7 +141,13 @@ function make(
   };
   const service = new ProviderToolingService({
     readInstance: (id) => current[String(id)],
-    runner: runProviderToolingProcess,
+    runner:
+      options.gate === undefined
+        ? runProviderToolingProcess
+        : async (input) => {
+            await options.gate;
+            return runProviderToolingProcess(input);
+          },
     hostEnvironment: () => ({
       PATH: `${bin}:/usr/bin:/bin`,
       HOME: root,
@@ -387,6 +399,31 @@ describe("provider tooling service", () => {
       reason: "changed-plan",
     });
     expect(existsSync(`${log}.claude.json`)).toBe(false);
+  });
+
+  it("checks the account again when a queued command's turn comes, so a move while it waited stops it", async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { service, setInstance, records } = make({ gate });
+    const first = await planned(service, CLAUDE_ID, { kind: "mcp-remove", name: "first" });
+    const second = await planned(service, CLAUDE_ID, { kind: "mcp-remove", name: "second" });
+    const firstRun = service.apply(LOCAL, { planId: first.planId, digest: first.digest });
+    const secondRun = service.apply(LOCAL, { planId: second.planId, digest: second.digest });
+    // Let the first command start and block at the gate, then another window
+    // moves the account while it holds the line.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const moved = instance("claude");
+    if (moved.driverKind !== "claude") throw new Error("fixture");
+    setInstance({
+      ...moved,
+      configuration: { ...moved.configuration, configDirectory: join(root, "elsewhere") },
+    });
+    release();
+    expect(await firstRun).toMatchObject({ status: "applied" });
+    expect(await secondRun).toMatchObject({ status: "refused", reason: "changed-plan" });
+    expect(records.map((record) => record.name)).toEqual(["first"]);
   });
 
   it("reports a failing command with its scrubbed output and records the failure", async () => {
