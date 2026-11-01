@@ -192,6 +192,7 @@ describe("Journal", () => {
         voice: {},
         imageGeneration: { customSources: [] },
         standaloneSkillActivations: {},
+        skillFolders: { providers: [], folders: [] },
         rememberedBrowserOrigins: [],
         rememberedBrowserProfileSites: [],
         computerUse: { enabled: false, automaticUpdates: false },

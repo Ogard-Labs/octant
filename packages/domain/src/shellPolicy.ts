@@ -186,6 +186,7 @@ export function defaultShellSettings(): ShellSettings {
     imageGeneration: { customSources: [] },
     userProfile: { accent: DEFAULT_AVATAR_ACCENT, avatar: DEFAULT_USER_AVATAR },
     standaloneSkillActivations: {},
+    skillFolders: { providers: [], folders: [] },
     rememberedBrowserOrigins: [],
     rememberedBrowserProfileSites: [],
   };

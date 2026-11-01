@@ -217,6 +217,7 @@ describe("shell settings policy", () => {
       // name and no address — only the accent the initials avatar falls back to.
       userProfile: { accent: "indigo", avatar: { kind: "initials" } },
       standaloneSkillActivations: {},
+      skillFolders: { providers: [], folders: [] },
       // Nothing has been answered "always allow" yet.
       rememberedBrowserOrigins: [],
       rememberedBrowserProfileSites: [],
@@ -227,6 +228,7 @@ describe("shell settings policy", () => {
       contextSidebarWidth: 960,
       environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
       standaloneSkillActivations: {},
+      skillFolders: { providers: [], folders: [] },
       rememberedBrowserOrigins: [],
       rememberedBrowserProfileSites: [],
     });

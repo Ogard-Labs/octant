@@ -23,6 +23,7 @@ import {
   type WorkThreadId,
   type Project,
   type ProjectId,
+  type WorkAccess,
   type ProviderInstance,
   type ProviderModelId,
   type ProviderModelOptionValues,
@@ -38,6 +39,17 @@ import {
 } from "@octant/contracts";
 import { Schema } from "effect";
 import { unsupportedModelOptionValues } from "@octant/domain/chat-policy";
+import {
+  guardrailLowered,
+  permissionModeOf,
+  workAccessOfPermissionMode,
+  workThreadAccessOf,
+} from "@octant/domain/guardrail-policy";
+import {
+  decodeGuardrailLevelLowered,
+  GUARDRAIL_LEVEL_LOWERED,
+} from "@octant/contracts/guardrail-lowering";
+import type { PermissionMode } from "@octant/contracts/providers";
 import {
   assertProviderAllowedByProjectPolicy,
   hasWorkToolAuthority,
@@ -394,20 +406,27 @@ export class WorkThreadService {
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
-        this.#persistence.journal.append({
-          aggregate: { aggregateType: "work-settings", aggregateId: WORK_SETTINGS_AGGREGATE_ID },
-          expectedVersion: command.expectedVersion,
-          events: [
-            {
-              eventId: decodeEventId(this.#uuid()),
-              eventName: "work.settings-updated@1",
-              eventVersion: 1,
-              correlationId: decodeCorrelationId(this.#uuid()),
-              actor: { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
-              occurredAt: decodeTimestamp(this.#clock()),
-              payload: { kind: "settings-updated", settings },
-            },
-          ],
+        this.#inUnit(() => {
+          this.#persistence.journal.append({
+            aggregate: { aggregateType: "work-settings", aggregateId: WORK_SETTINGS_AGGREGATE_ID },
+            expectedVersion: command.expectedVersion,
+            events: [
+              {
+                eventId: decodeEventId(this.#uuid()),
+                eventName: "work.settings-updated@1",
+                eventVersion: 1,
+                correlationId: decodeCorrelationId(this.#uuid()),
+                actor: { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+                occurredAt: decodeTimestamp(this.#clock()),
+                payload: { kind: "settings-updated", settings },
+              },
+            ],
+          });
+          this.#journalLowering({
+            scope: "global",
+            from: workModeOfAccess(current.defaultAccess),
+            to: workModeOfAccess(settings.defaultAccess),
+          });
         });
         this.#projection.applySettings({ kind: "settings-updated", settings });
         return { kind: "settings-updated", settings };
@@ -518,9 +537,13 @@ export class WorkThreadService {
             : { modelOptionValues: command.modelOptionValues }),
           bindingRevisionId: command.bindingRevisionId,
           workingDirectory,
-          // The host decides the access from its own settings; nothing the
-          // renderer sends can raise it.
-          access: this.#currentSettings().defaultAccess,
+          // The host decides the access from its Project's override, else its
+          // own settings; nothing the renderer sends can raise it.
+          access:
+            (project.defaultPermissionMode === undefined
+              ? undefined
+              : workAccessOfPermissionMode(project.defaultPermissionMode)) ??
+            this.#currentSettings().defaultAccess,
           version: 1,
           createdAt: decodeTimestamp(this.#clock()),
           updatedAt: decodeTimestamp(this.#clock()),
@@ -766,9 +789,18 @@ export class WorkThreadService {
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
-        this.#append(current.id, command.expectedVersion, "work.thread-updated@1", {
-          kind: "thread-updated",
-          thread: updated,
+        this.#inUnit(() => {
+          this.#append(current.id, command.expectedVersion, "work.thread-updated@1", {
+            kind: "thread-updated",
+            thread: updated,
+          });
+          this.#journalLowering({
+            scope: "thread",
+            from: workModeOfAccess(current.access),
+            to: workModeOfAccess(updated.access),
+            projectId: current.projectId,
+            threadId: String(current.id),
+          });
         });
         this.#projection.apply({ kind: "thread-updated", thread: updated });
         return { kind: "thread-updated", thread: updated };
@@ -1305,6 +1337,43 @@ export class WorkThreadService {
     );
   }
 
+  /** Runs `body` as one journal unit where the journal offers one. */
+  #inUnit(body: () => void): void {
+    const journal = this.#persistence.journal;
+    if (journal.transaction === undefined) body();
+    else journal.transaction(body);
+  }
+
+  /**
+   * Records a lowered guardrail as its own single-event aggregate, so no
+   * thread or settings version waits on it. A change that does not lower the
+   * guardrail records nothing.
+   */
+  #journalLowering(change: {
+    readonly scope: "global" | "project" | "thread";
+    readonly from: PermissionMode;
+    readonly to: PermissionMode;
+    readonly projectId?: ProjectId;
+    readonly threadId?: string;
+  }): void {
+    if (!guardrailLowered(change.from, change.to)) return;
+    this.#persistence.journal.append({
+      aggregate: { aggregateType: "guardrail-change", aggregateId: this.#uuid() },
+      expectedVersion: 0,
+      events: [
+        {
+          eventId: decodeEventId(this.#uuid()),
+          eventName: GUARDRAIL_LEVEL_LOWERED,
+          eventVersion: 1,
+          correlationId: decodeCorrelationId(this.#uuid()),
+          actor: { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+          occurredAt: decodeTimestamp(this.#clock()),
+          payload: decodeGuardrailLevelLowered({ surface: "work", ...change }),
+        },
+      ],
+    });
+  }
+
   #append(
     threadId: WorkThreadId,
     expectedVersion: number,
@@ -1442,4 +1511,9 @@ function lifecycleUpdate(
     ...reactivated
   } = current;
   return reactivated as WorkThread;
+}
+
+/** The picker's word for a Work thread's stored level. */
+function workModeOfAccess(access: WorkAccess): PermissionMode {
+  return permissionModeOf(workThreadAccessOf(access));
 }

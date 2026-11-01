@@ -162,6 +162,9 @@ function standaloneSkillSourceLabel(skill: StandaloneSkillRecord): string {
   if (skill.source.kind !== "agents-skills-directory") return sourceLabel(skill.source);
   const sourceRef = String(skill.source.sourceRef);
   if (sourceRef === "user-global") return "User-global · ~/.agents/skills";
+  if (sourceRef === "provider:claude") return "Claude Code skills · ~/.claude/skills";
+  if (sourceRef === "provider:codex") return "Codex skills · ~/.codex/skills";
+  if (sourceRef.startsWith("folder:")) return "Skill folder you added";
   const projectSource =
     /^project:.+?:(?:thread:[^:]+:)?(claude:)?(root|working|parent-(\d+))$/.exec(sourceRef);
   if (projectSource !== null) {
@@ -184,6 +187,9 @@ function standaloneSkillSummarySourceLabel(skill: StandaloneSkillRecord): string
   if (skill.source.kind !== "agents-skills-directory") return sourceLabel(skill.source);
   const sourceRef = String(skill.source.sourceRef);
   if (sourceRef === "user-global") return "User skill";
+  if (sourceRef === "provider:claude") return "Claude Code skill";
+  if (sourceRef === "provider:codex") return "Codex skill";
+  if (sourceRef.startsWith("folder:")) return "Added-folder skill";
   if (/:claude:(?:root|working|parent-\d+)$/.test(sourceRef)) {
     return "Project skill · .claude/skills";
   }
@@ -374,6 +380,8 @@ export interface ExtensionsSettingsViewProps {
    * still does not fetch.
    */
   readonly marketplaceFetchesEnabled?: boolean;
+  /** Changes when the skill folders in Settings change, so discovery runs again. */
+  readonly skillFoldersKey?: string;
   /**
    * Scope used to project the authoritative effective state. Settings is a
    * host-scoped surface with no active thread, so a neutral Project-less scope
@@ -544,6 +552,14 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
     setEffective(undefined);
     void reload();
   }, [reload]);
+
+  // Settings added or removed a skill folder: discover again without clearing the list.
+  const shownSkillFolders = useRef(props.skillFoldersKey);
+  useEffect(() => {
+    if (shownSkillFolders.current === props.skillFoldersKey) return;
+    shownSkillFolders.current = props.skillFoldersKey;
+    void reload();
+  }, [props.skillFoldersKey, reload]);
 
   const runLifecycle = useCallback(
     async (command: ExtensionCommand, packageId?: string, skillId?: string): Promise<boolean> => {
@@ -716,7 +732,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   );
 
   const confirmInstall = useCallback(
-    async (entry: ExtensionCatalogEntry) => {
+    async (entry: ExtensionCatalogEntry, trust = false) => {
       if (installing) return;
       setInstalling(true);
       setFailure(undefined);
@@ -727,6 +743,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
           packageId: entry.packageId,
           version: entry.version,
           digest: entry.digest,
+          ...(trust && npmUpdateOf !== entry.extensionId ? { trust: true } : {}),
         });
         if (installed.kind === "extension-command-failed") {
           setFailure({
@@ -825,7 +842,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   );
 
   const confirmSkillInstall = useCallback(
-    async (preview: SkillPackagePreview) => {
+    async (preview: SkillPackagePreview, trust = false) => {
       if (installingSkill) return;
       const action = skillPackageAction(snapshot, preview);
       if (action === "current") return;
@@ -838,6 +855,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
           packageId: preview.packageId,
           version: preview.entry.version,
           digest: preview.entry.skill.digest,
+          ...(trust && action === "install" ? { trust: true } : {}),
         });
         if (installed.kind === "extension-command-failed") {
           setFailure({
@@ -1567,6 +1585,17 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                             >
                               Confirm install
                             </OctantButton>
+                            {npmUpdateOf === entry.extensionId ? null : (
+                              <OctantButton
+                                variant="outline"
+                                aria-label="Install and trust"
+                                disabled={installing}
+                                onClick={() => void confirmInstall(preview.entry, true)}
+                                type="button"
+                              >
+                                Install and trust
+                              </OctantButton>
+                            )}
                           </div>
                         ) : null}
                       </li>
@@ -1684,9 +1713,20 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                       {npmUpdateOf === undefined ? "Confirm install" : "Confirm update"}
                     </OctantButton>
                     {npmUpdateOf !== undefined ? null : (
+                      <OctantButton
+                        variant="outline"
+                        aria-label="Install and trust"
+                        disabled={installing}
+                        onClick={() => void confirmInstall(localPreview.entry, true)}
+                        type="button"
+                      >
+                        Install and trust
+                      </OctantButton>
+                    )}
+                    {npmUpdateOf !== undefined ? null : (
                       <p className="extensions-settings__state">
-                        Installing adds it untrusted and switched off. Octant ran nothing from the
-                        package.
+                        Confirm install adds it untrusted and switched off; Install and trust also
+                        trusts it, and it stays switched off. Octant ran nothing from the package.
                       </p>
                     )}
                   </div>
@@ -1839,6 +1879,17 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                                   ? "Confirm update"
                                   : "Confirm install"}
                             </OctantButton>
+                            {skillPreviewAction === "install" ? (
+                              <OctantButton
+                                variant="outline"
+                                aria-label="Install and trust skill"
+                                disabled={installingSkill}
+                                onClick={() => void confirmSkillInstall(skillPreview, true)}
+                                type="button"
+                              >
+                                Install and trust
+                              </OctantButton>
+                            ) : null}
                           </div>
                         ) : null}
                       </li>

@@ -202,6 +202,26 @@ describe("Work host queue", () => {
 });
 
 describe("WorkThreadWorkspace", () => {
+  it("shows the thread's guardrail level in its header", async () => {
+    const thread = workThread();
+    render(
+      <WorkThreadWorkspace
+        initialThread={thread}
+        projects={[]}
+        threadClient={{
+          bootstrap: vi.fn(),
+          navigation: vi.fn(),
+          execute: vi.fn(),
+          queryBoard: vi.fn(),
+        }}
+        threadId={thread.id}
+        title={thread.title}
+      />,
+    );
+    const level = await screen.findByText("Ask first", { selector: ".guardrail-level__mode" });
+    expect(level).toBeVisible();
+  });
+
   it.each([true, false])(
     "shows the working folder without borrowing a different binding root (matching: %s)",
     async (matching) => {

@@ -389,7 +389,9 @@ export class StandaloneSkillService {
     }
     const snapshot =
       operation === "install"
-        ? await this.#lifecycle.install(inspection)
+        ? await this.#lifecycle.install(inspection, {
+            trust: command.kind === "install-skill" && command.trust === true,
+          })
         : await this.#lifecycle.update(inspection);
     return { kind: "extension-state-updated", snapshot: this.snapshot(snapshot) };
   }
