@@ -63,6 +63,7 @@ export interface BrowserAppManagedToolsOptions {
       readonly request: BrowserActionRequest;
       readonly capturedBy?: "agent";
       readonly uploadFiles?: ReadonlyArray<string>;
+      readonly releaseUpload?: () => Promise<void>;
     }) => Promise<BrowserAutomationSnapshot>;
     readonly releaseThread: (
       windowId: WindowId,
@@ -285,25 +286,29 @@ export function createBrowserAppManagedTools(
       uploadFiles = admitted.paths;
       releaseUpload = admitted.release;
     }
-    let acted: BrowserAutomationSnapshot;
-    try {
-      if (releaseUpload !== undefined) {
-        if (signal?.aborted) return failure("tool-interrupted");
-        const refreshed = options.resolveAuthority(options.threadId, options.mode);
-        if (refreshed === undefined || !sameToolActionAuthority(authority, refreshed)) {
-          return failure("browser-authority-stale");
-        }
-        if (!modelIsCurrent(options)) return failure("browser-model-stale");
+    if (releaseUpload !== undefined) {
+      const refreshed = options.resolveAuthority(options.threadId, options.mode);
+      const refusal = signal?.aborted
+        ? "tool-interrupted"
+        : refreshed === undefined || !sameToolActionAuthority(authority, refreshed)
+          ? "browser-authority-stale"
+          : !modelIsCurrent(options)
+            ? "browser-model-stale"
+            : undefined;
+      if (refusal !== undefined) {
+        await releaseUpload();
+        return failure(refusal);
       }
-      acted = await options.browser.act({
-        windowId: options.windowId,
-        request,
-        capturedBy: "agent",
-        ...(uploadFiles === undefined ? {} : { uploadFiles }),
-      });
-    } finally {
-      await releaseUpload?.();
     }
+    // The page reads an uploaded file when its form is sent, which can be a
+    // later action, so the service keeps the copies until the page closes.
+    const acted = await options.browser.act({
+      windowId: options.windowId,
+      request,
+      capturedBy: "agent",
+      ...(uploadFiles === undefined ? {} : { uploadFiles }),
+      ...(releaseUpload === undefined ? {} : { releaseUpload }),
+    });
     if (signal?.aborted) return failure("tool-interrupted");
     if (!modelIsCurrent(options)) return failure("browser-model-stale");
     if (

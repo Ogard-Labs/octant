@@ -63,7 +63,7 @@ export interface BrowserAutomationRouteDependencies {
     BrowserAutomationService,
     "create" | "act" | "cancel" | "stop" | "inspect" | "inspectThread" | "releaseThread"
   > &
-    Partial<Pick<BrowserAutomationService, "peekThread" | "profileOf">>;
+    Partial<Pick<BrowserAutomationService, "peekThread" | "peekContext" | "profileOf">>;
   /** The thread's kept screenshots; absent on a host that keeps none. */
   readonly captures?: Pick<BrowserCaptureService, "list" | "read">;
   /**
@@ -314,10 +314,20 @@ export function createBrowserAutomationRouteHandler(
       }
       if (url.pathname === "/api/browser/contexts/inspect") {
         const input = decodeBrowserContextInspectCommand(decoded.value);
+        // The Browser pane polls this once it holds a context's id, so this is
+        // where its picture of a headless page is refreshed after an agent's
+        // action, which takes none.
         return success(
           shown(
             decodeBrowserAutomationSnapshot(
-              dependencies.service.inspect(windowId, input.threadId, input.contextId),
+              dependencies.service.peekContext === undefined
+                ? dependencies.service.inspect(windowId, input.threadId, input.contextId)
+                : await dependencies.service.peekContext(
+                    windowId,
+                    input.threadId,
+                    input.contextId,
+                    request.signal,
+                  ),
             ),
           ),
           origin,

@@ -53,7 +53,10 @@ const pages: Record<string, string> = {
     <div id="done" ondragover="event.preventDefault()" ondrop="event.preventDefault(); document.title = 'Dropped ' + event.dataTransfer.getData('text')">Done</div>
     <input id="keys" aria-label="Keys" onkeydown="if (event.ctrlKey) document.title = 'Chord ' + event.key">
     <label for="file">Attachment</label>
-    <input id="file" type="file" onchange="document.title = 'Attached ' + this.files[0].name + ' ' + this.files[0].size">`,
+    <input id="file" type="file" onchange="document.title = 'Attached ' + this.files[0].name + ' ' + this.files[0].size">
+    <button id="read" onclick="document.getElementById('file').files[0].text().then((text) => { document.title = 'Read ' + text; })">Read</button>`,
+  "/later-leave": `<!doctype html><title>Later</title>
+    <script>setTimeout(() => { location.href = "/leave"; }, 100);</script>`,
   "/other": `<!doctype html><title>Other</title><button>Save</button>`,
 };
 
@@ -285,6 +288,12 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     const clicked = await tool.call({ operation: "click", selector: "#save" });
     const preview = await tool.service.peekThread(windowId, threadId);
     expect(preview.observation?.screenshotDataUrl).toMatch(/^data:image\/jpeg;base64,/);
+    // The Browser pane, which polls the context by its id, gets one too.
+    const contextId = preview.context?.contextId;
+    if (contextId === undefined) throw new Error("No context.");
+    await new Promise((resolve) => setTimeout(resolve, 1_600));
+    const pane = await tool.service.peekContext(windowId, threadId, contextId);
+    expect(pane.observation?.screenshotDataUrl).toMatch(/^data:image\/jpeg;base64,/);
     // The preview's picture does not make the agent's next action stale.
     const next = await tool.call({
       operation: "click",
@@ -343,6 +352,11 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
         files: ["notes.txt"],
       });
       expect(sent.result.page?.title).toBe("Attached notes.txt 5");
+      // The page reads the file when a later action sends it.
+      await tool.call({ operation: "click", selector: "#read" });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const read = await tool.call({ operation: "read-page" });
+      expect(read.result.page?.title).toBe("Read hello");
       expect(tool.asked).toEqual([
         expect.objectContaining({
           origin,
@@ -423,6 +437,13 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     expect(redirected.result.failure?.category).toBe("policy-denied");
     const listed = await tool.call({ operation: "tab-list" });
     expect(JSON.stringify(listed.result.page?.tabs)).not.toContain("localhost");
+    // A tab that wanders off the allowed origins after its own action ended
+    // is listed blank, never with the other site's address or title.
+    await tool.call({ operation: "tab-open", url: `${origin}/later-leave` });
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    const wandered = await tool.call({ operation: "tab-list" });
+    expect(JSON.stringify(wandered.result.page?.tabs)).not.toContain("localhost");
+    expect(JSON.stringify(wandered.result.page?.tabs)).not.toContain("Other");
     await tool.stop();
   });
 

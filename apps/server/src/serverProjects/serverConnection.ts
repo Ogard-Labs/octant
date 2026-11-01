@@ -23,6 +23,8 @@ export type ServerCall =
       readonly exitCode: number;
       readonly output: Buffer;
       readonly truncated: boolean;
+      /** The first few kilobytes of standard error, empty on a terminal. */
+      readonly errorOutput: string;
     }
   | {
       readonly status: "timed-out" | "cancelled";
@@ -239,7 +241,7 @@ export class ServerConnection {
           });
           return;
         }
-        finish({ status: "ran", exitCode: code ?? 1, output, truncated });
+        finish({ status: "ran", exitCode: code ?? 1, output, truncated, errorOutput: errorText });
       });
     });
   }
