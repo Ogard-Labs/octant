@@ -124,10 +124,17 @@ describe("which live tools the dock may offer", () => {
       hasExistingThread: true,
       serverCheckout: true,
     } as const;
-    for (const surface of ["plan", "canvas", "document", "side-chat", "agents"] as const) {
-      expect(isDockToolLaunchable(surface, capabilities)).toBe(true);
+    for (const surface of [
+      "plan",
+      "canvas",
+      "document",
+      "side-chat",
+      "agents",
+      "terminal",
+    ] as const) {
+      expect(isDockToolLaunchable(surface as never, capabilities)).toBe(true);
     }
-    for (const surface of ["delivery", "ios-simulator", "terminal", "browser"] as const) {
+    for (const surface of ["delivery", "ios-simulator", "browser"] as const) {
       expect(isDockToolLaunchable(surface as never, capabilities)).toBe(false);
       expect(isDockToolStillOpenable(surface as never, capabilities)).toBe(false);
     }

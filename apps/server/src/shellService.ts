@@ -1000,11 +1000,11 @@ function resolveTabContext(
     const thread = persistence.readCodeThread(tab.threadId as never);
     if (thread === undefined) return undefined;
     const project = persistence.readProject(thread.projectId);
-    // A server thread opens only its own view. Its terminal, Git, tests,
-    // files, Browser, and Apple surfaces would act on a folder of this host,
-    // so none of them resolves.
+    // A server thread opens its own view and its terminal, which is a login
+    // on the server. Its Git, tests, files, Browser, and Apple surfaces would
+    // act on a folder of this host, so none of them resolves.
     if (project === undefined && server.holdsThread(thread)) {
-      return tab.kind === "code-overview"
+      return tab.kind === "code-overview" || tab.kind === "code-terminal"
         ? { host: LOCAL_HOST_ID, mode: "code", projectId: thread.projectId, boundRoot: null }
         : undefined;
     }

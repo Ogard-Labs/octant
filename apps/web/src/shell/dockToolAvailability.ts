@@ -60,6 +60,7 @@ const SERVER_CHECKOUT_TOOLS: ReadonlySet<RightUtilityDockSurfaceId> = new Set([
   "canvas",
   "plan",
   "agents",
+  "terminal",
 ]);
 
 /**

@@ -28,7 +28,7 @@ describe("CodeWorkspace", () => {
     expect(screen.getByText("Loading exact checkout status and diff evidence.")).toBeVisible();
   });
 
-  it("says a server Project's file, Git, terminal, and test tabs are not available yet, and asks the host nothing", () => {
+  it("says a server Project's file and Git tabs are not available yet, and opens its terminal tab", () => {
     const client = codeClient();
     const serverProjectId = "77777777-7777-4777-8777-777777777777" as ProjectId;
     const base = controller("approval-gated") as {
@@ -42,9 +42,32 @@ describe("CodeWorkspace", () => {
         thread: { ...base.activeView.thread, projectId: serverProjectId },
       },
     } as never;
+    const inServerProject = (children: React.ReactNode) => (
+      <ServerCodeProjectsContext.Provider
+        value={{
+          refresh: () => undefined,
+          projects: [
+            { projectId: serverProjectId, name: "Service", location: "devbox:/home/build/service" },
+          ],
+        }}
+      >
+        {children}
+      </ServerCodeProjectsContext.Provider>
+    );
+    const terminal = render(
+      inServerProject(
+        <CodeWorkspace
+          client={client}
+          controller={server}
+          createUuid={uuidFactory()}
+          tab={tab("code-terminal", "Terminal")}
+        />,
+      ),
+    );
+    expect(screen.queryByText("This is not available for a Project on a server yet.")).toBeNull();
+    terminal.unmount();
     for (const [kind, title] of [
       ["code-git", "Git"],
-      ["code-terminal", "Terminal"],
       ["code-file", "File"],
     ] as const) {
       const { unmount } = render(
@@ -74,7 +97,6 @@ describe("CodeWorkspace", () => {
       ).toBeVisible();
       unmount();
     }
-    expect(client.executeOperation).not.toHaveBeenCalled();
   });
 
   it("says a retired remote thread's Git and terminal tabs are no longer supported, and asks the host nothing", () => {

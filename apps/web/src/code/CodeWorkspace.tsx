@@ -272,10 +272,12 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
     );
   }
 
-  // A thread in a server Project keeps its files, Git, terminal, and tests on
-  // the server, which this host does not read yet, so the tab says so.
+  // A thread in a server Project keeps its files, Git, and tests on the
+  // server, which this host does not read yet, so the tab says so. Its
+  // terminal is a login on the server and opens as any terminal does.
   if (
     view.checkout.kind === "remote-root" &&
+    props.tab.kind !== "code-terminal" &&
     serverCodeProjectFor(serverCodeProjects, view.thread.projectId) !== undefined
   ) {
     return (

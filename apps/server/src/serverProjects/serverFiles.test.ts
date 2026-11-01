@@ -82,6 +82,27 @@ describe.skipIf(!canRunThrowawaySshd)("the harness's file tools on a server fold
     });
   });
 
+  it("never carries a credential's bytes to this host, even through a link or a search", async () => {
+    symlinkSync(join(root, ".ssh", "id_ed25519"), join(root, "innocent.txt"));
+    const seen: string[] = [];
+    const watched = new ServerFileSystem({
+      connection: {
+        run: async (server, input) => {
+          const call = await connection.run(server, input);
+          if (call.status !== "unreachable") seen.push(call.output.toString("utf8"));
+          return call;
+        },
+      },
+      server: () => ({ alias: sshd.alias, user: sshd.user }),
+      root,
+    });
+    expect(await watched.read({ path: "innocent.txt" })).toMatchObject({
+      reason: "protected-file",
+    });
+    await watched.grep({ pattern: "PRIVATE" });
+    expect(seen.join("")).not.toContain("PRIVATE KEY");
+  });
+
   it("writes a new file in a new folder, and edits only what it read, as it read it", async () => {
     const tools = files();
     expect(await tools.write({ path: "notes/today.md", content: "one\n" })).toMatchObject({

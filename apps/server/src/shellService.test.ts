@@ -410,6 +410,26 @@ describe("ShellService", () => {
       kind: "workspace-replaced",
       workspace: { contextByMode: { code: { projectId, boundRoot: null } } },
     });
+
+    // Its terminal is a login on the server, so its tab opens too.
+    const terminal = service.execute({
+      kind: "apply-workspace-operation",
+      windowId: ids.window,
+      expectedVersion: 2,
+      operation: {
+        kind: "open-surface",
+        mode: "code",
+        paneId: code.paneId,
+        surface: {
+          kind: "code-terminal",
+          id: "00000000-0000-4000-8000-000000000254" as never,
+          threadId: serverThreadId as never,
+          mode: "code" as const,
+          title: "Terminal",
+        },
+      },
+    });
+    expect(terminal.kind).toBe("workspace-replaced");
   });
 
   it("leaves the window unbound for a draft thread that names no Project", () => {

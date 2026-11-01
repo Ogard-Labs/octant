@@ -52,10 +52,19 @@ export function serverCredentialPathRefusal(path: string): string | undefined {
     : undefined;
 }
 
-/** Resolves `$1` and refuses one outside the folder `$2` before printing anything. */
+/** The credential locations `SERVER_CREDENTIAL_PATH` names, as `case` patterns on the server. */
+const CREDENTIAL_CASE =
+  "*/.ssh|*/.ssh/*|*/.aws|*/.aws/*|*/.gnupg|*/.gnupg/*|*/.kube|*/.kube/*|*/.docker|*/.docker/*|*/.config/gh|*/.config/gh/*|*/.netrc|*/.git-credentials|*/.npmrc|*/.pypirc|*.pem|*.key";
+
+/**
+ * Resolves `$1` and refuses one outside the folder `$2`, or one in a
+ * credential location, before printing anything: a link with an innocent
+ * name never carries a key's bytes to this host.
+ */
 const RESOLVE_INSIDE = `exec 2>/dev/null
 r=$(realpath -- "$1") || { printf 'm'; exit 0; }
 case "$r" in "$2"|"$2"/*) ;; *) printf 'x'; exit 0;; esac
+case "$r" in ${CREDENTIAL_CASE}) printf 'k'; exit 0;; esac
 printf '%s\\0' "$r"`;
 
 const READ_SCRIPT = `${RESOLVE_INSIDE}
@@ -109,11 +118,11 @@ const GREP_SCRIPT = `${RESOLVE_INSIDE}
 printf '\\0'
 grep -E -e "$3" /dev/null
 [ "$?" -le 1 ] || exit 2
-if [ -n "$4" ]; then
-  grep -rHnIE --null --exclude-dir=.git --exclude-dir=node_modules --include="$4" -e "$3" -- "$r"
-else
-  grep -rHnIE --null --exclude-dir=.git --exclude-dir=node_modules -e "$3" -- "$r"
-fi
+find "$r" \\( -name .git -o -name node_modules -o -name .ssh -o -name .aws -o -name .gnupg \\
+  -o -name .kube -o -name .docker -o -path '*/.config/gh' \\) -prune -o -type f \\
+  ! -name '*.pem' ! -name '*.key' ! -name .netrc ! -name .git-credentials ! -name .npmrc \\
+  ! -name .pypirc -name "\${4:-*}" -print0 |
+  xargs -0 grep -HnIE --null -e "$3" -- /dev/null
 exit 0`;
 
 export interface ServerFileSystemOptions {
@@ -376,6 +385,9 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
     const first = call.output[0];
     if (first === undefined || first === 0x6d /* m */) return refusedWith("path-not-found");
     if (first === 0x78 /* x */) return refusedWith("path-escapes-root");
+    if (first === 0x6b /* k */) {
+      return guard("/.ssh") ?? refusedWith("protected-file");
+    }
     const nul = call.output.indexOf(0);
     if (nul === -1) return refusedWith("path-not-found");
     const path = call.output.subarray(0, nul).toString("utf8");
