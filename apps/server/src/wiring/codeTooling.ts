@@ -20,6 +20,7 @@ import {
   resolveBundledLanguageServerActivation,
 } from "@octant/plugin-host/language-servers";
 import { createCodeRouteHandler, MAX_CODE_FILE_BODY_SIZE } from "../codeRoutes";
+import { createPairedMergeUnlockSlot } from "../hub/pairedMergeUnlock";
 import { createCodeLanguageAgentTools } from "../code/codeLanguageAgentTools";
 import { CodeDebugService } from "../code/codeDebugService";
 import { DebugAdapterProcessPort } from "../code/debugAdapterProcess";
@@ -433,8 +434,12 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
         uuid: randomUUID,
       }),
     );
+    // The hub side is wired after this; it binds the owner unlock a paired
+    // client's merge may need into this slot.
+    const pairedMergeUnlockSlot = createPairedMergeUnlockSlot();
     const codeRoutes = createCodeRouteHandler({
       service: routeCodeService,
+      pairedMergeUnlock: pairedMergeUnlockSlot.current,
       ...(projectTerminals === undefined ? {} : { projectTerminals }),
       language: languageService,
       debug: debugService,
@@ -615,6 +620,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       debugService,
       languageServerApprovals,
       localServerRoutes,
+      pairedMergeUnlockSlot,
       projectTerminals,
       remoteServerGrantLocalRoutes,
       remoteServerGrants,

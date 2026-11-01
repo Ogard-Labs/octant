@@ -1,4 +1,8 @@
-import type { BrowserActionRequest, BrowserAutomationSnapshot } from "@octant/contracts";
+import type {
+  BrowserActionRequest,
+  BrowserAutomationSnapshot,
+  ProviderToolImage,
+} from "@octant/contracts";
 import { MAX_BROWSER_UPLOAD_FILES } from "@octant/contracts";
 import { browserToolImage } from "./browserToolImage";
 
@@ -21,6 +25,15 @@ export type BrowserToolTarget =
 
 /** What an action may bring back besides what changed; see the contract. */
 export type BrowserToolInclude = ReadonlyArray<"text" | "screenshot" | "snapshot">;
+
+/** One operation of a `steps` call: anything but a batch, an upload, stop, or help. */
+export type BrowserToolStep = Exclude<
+  BrowserToolInput,
+  { readonly operation: "steps" | "upload" | "stop" }
+>;
+
+/** How many operations one `steps` call may carry. */
+export const MAX_BROWSER_TOOL_STEPS = 10;
 
 export type BrowserToolInput = {
   readonly expectedObservationRevision?: number;
@@ -48,6 +61,7 @@ export type BrowserToolInput = {
   | { readonly operation: "tab-list" }
   | { readonly operation: "tab-open"; readonly url?: string }
   | { readonly operation: "tab-switch" | "tab-close"; readonly tabId: string }
+  | { readonly operation: "steps"; readonly steps: ReadonlyArray<BrowserToolStep> }
 );
 
 /**
@@ -68,6 +82,38 @@ export function parseBrowserToolInput(
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
   const record = parsed as Record<string, unknown>;
+  if (record.operation !== "steps") return parseBrowserToolRecord(record, options);
+  // A batch is a list of ordinary operations, each read exactly as it would be
+  // alone. It never opens a signed-in page, nests, uploads, or stops: those
+  // need a call, and a question to the person, of their own.
+  const steps = record.steps;
+  if (
+    Object.keys(record).some((key) => key !== "operation" && key !== "steps") ||
+    !Array.isArray(steps) ||
+    steps.length === 0 ||
+    steps.length > MAX_BROWSER_TOOL_STEPS
+  )
+    return undefined;
+  const parsedSteps: BrowserToolStep[] = [];
+  for (const step of steps) {
+    if (typeof step !== "object" || step === null || Array.isArray(step)) return undefined;
+    const one = parseBrowserToolRecord(step as Record<string, unknown>, { allowProfile: false });
+    if (
+      one === undefined ||
+      one.operation === "steps" ||
+      one.operation === "upload" ||
+      one.operation === "stop"
+    )
+      return undefined;
+    parsedSteps.push(one);
+  }
+  return { operation: "steps", steps: parsedSteps };
+}
+
+function parseBrowserToolRecord(
+  record: Record<string, unknown>,
+  options: { readonly allowProfile: boolean },
+): BrowserToolInput | undefined {
   const operation = record.operation;
   const revision = record.expectedObservationRevision;
   if (
@@ -323,8 +369,63 @@ export function browserToolAction(
     case "tab-close":
       return { ...base, kind: "tab-close", tabId: input.tabId };
     case "stop":
+    case "steps":
       return undefined;
   }
+}
+
+/** What one operation answered, as an executor returns it. */
+export interface BrowserToolAnswer {
+  readonly images?: ReadonlyArray<ProviderToolImage>;
+  readonly result: unknown;
+  readonly isError: boolean;
+}
+
+/**
+ * Run a batch one step at a time through the same executor a single call
+ * uses, so the server admits each step on its own: authority, model, origin
+ * approval, Plan, the stale check, and the credential check. The first step
+ * that fails ends the batch; the answer names it and what ran before it, and
+ * otherwise is the last step's answer with a line per step.
+ */
+export async function runBrowserToolSteps(
+  steps: ReadonlyArray<BrowserToolStep>,
+  run: (step: BrowserToolStep) => Promise<BrowserToolAnswer>,
+): Promise<BrowserToolAnswer> {
+  const completed: Array<{
+    readonly step: number;
+    readonly operation: string;
+    readonly changed?: string;
+  }> = [];
+  const images: ProviderToolImage[] = [];
+  let last: BrowserToolAnswer | undefined;
+  for (const [index, step] of steps.entries()) {
+    const answer = await run(step);
+    images.push(...(answer.images ?? []));
+    if (answer.isError) {
+      return {
+        ...(images.length === 0 ? {} : { images }),
+        result: {
+          completed,
+          failedStep: { step: index + 1, operation: step.operation, answer: answer.result },
+        },
+        isError: true,
+      };
+    }
+    const changed = (answer.result as { readonly page?: { readonly changed?: unknown } }).page
+      ?.changed;
+    completed.push({
+      step: index + 1,
+      operation: step.operation,
+      ...(typeof changed === "string" ? { changed } : {}),
+    });
+    last = answer;
+  }
+  return {
+    ...(images.length === 0 ? {} : { images }),
+    result: { ...(last?.result as Record<string, unknown>), steps: completed },
+    isError: false,
+  };
 }
 
 /**

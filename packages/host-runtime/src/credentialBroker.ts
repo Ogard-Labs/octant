@@ -1,6 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingHttpHeaders, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
+import { ensureSshKey, signSshLogin, sshPublicKey } from "./sshKeyBroker";
 import {
   CredentialPurgeFailure,
   CredentialStoreFailure,
@@ -69,6 +70,10 @@ const ROUTES = new Set([
   "/v1/push-platform-credentials/resolve",
   "/v1/push-platform-credentials/set",
   "/v1/push-platform-credentials/delete",
+  "/v1/ssh-keys/ensure",
+  "/v1/ssh-keys/public",
+  "/v1/ssh-keys/sign",
+  "/v1/ssh-keys/delete",
   "/v1/secret-stores/status",
   "/v1/secret-stores/link",
   "/v1/secret-stores/unlink",
@@ -100,6 +105,9 @@ const CANVAS_PUBLIC_SHARE_SECRET_PREFIX = "/v1/canvas-public-share-secrets/";
 const MCP_SERVER_CREDENTIAL_PREFIX = "/v1/mcp-server-credentials/";
 const DESKTOP_PROVIDER_CREDENTIAL_PREFIX = "/v1/desktop-provider-credentials/";
 const PUSH_PLATFORM_CREDENTIAL_PREFIX = "/v1/push-platform-credentials/";
+const SSH_KEY_PREFIX = "/v1/ssh-keys/";
+/** A login request an SSH client asks to sign, base64: a few hundred bytes. */
+const MAX_SSH_SIGN_DATA_BYTES = 8 * 1_024;
 type NamespacedIdField = "instanceId" | "credentialRef" | "secretId";
 const MAX_CREDENTIAL_BYTES = 12 * 1_024;
 const PURGE_FAILURE_STATUS: Readonly<Record<CredentialPurgeFailure["category"], number>> = {
@@ -181,6 +189,13 @@ export async function startCredentialBroker(
    * hold a pointer, and no route returns one.
    */
   linkedSecretStores?: LinkedSecretStores,
+  /**
+   * SSH sign-in keys Octant made for registered servers, keyed by server id,
+   * in a credential namespace of their own. They are served only on
+   * `/v1/ssh-keys/*`, and no route returns one: the broker gives out a key's
+   * public line and signs a login request for that key, nothing else.
+   */
+  sshKeys?: CredentialStore,
 ): Promise<CredentialBroker> {
   const token = randomBytes(32).toString("base64url");
   const runtime = createHostOAuthRuntime({
@@ -228,6 +243,7 @@ export async function startCredentialBroker(
       desktopProviderCredentials,
       pushPlatformCredentials,
       linked,
+      sshKeys,
     ).then(
       ({ destroyIncoming, response }) => {
         const headers: Record<string, string> = {};
@@ -304,6 +320,7 @@ export async function startCredentialBroker(
         desktopProviderCredentials,
         pushPlatformCredentials,
         linked,
+        sshKeys,
       ),
   });
 }
@@ -323,6 +340,7 @@ async function handleIncoming(
   desktopProviderCredentials: CredentialStore | undefined,
   pushPlatformCredentials: CredentialStore | undefined,
   linked: LinkedBrokerStores | undefined,
+  sshKeys: CredentialStore | undefined,
 ): Promise<{ destroyIncoming: boolean; response: ResponseData }> {
   if (brokerUrl === undefined) throw new Error("unavailable");
   const headers = requestHeaders(incoming.headers);
@@ -360,6 +378,7 @@ async function handleIncoming(
         desktopProviderCredentials,
         pushPlatformCredentials,
         linked,
+        sshKeys,
       ),
     ),
   };
@@ -380,6 +399,7 @@ async function handleBrokerRequest(
   desktopProviderCredentials: CredentialStore | undefined,
   pushPlatformCredentials: CredentialStore | undefined,
   linked: LinkedBrokerStores | undefined,
+  sshKeys: CredentialStore | undefined,
 ): Promise<Response> {
   const url = new URL(request.url);
   if (!isAuthorized(peerAddress, request.headers, token)) {
@@ -487,6 +507,11 @@ async function handleBrokerRequest(
     );
   }
 
+  if (url.pathname.startsWith(SSH_KEY_PREFIX)) {
+    if (sshKeys === undefined) return failure("not-found", 404);
+    return handleSshKeyRoute(url.pathname.slice(SSH_KEY_PREFIX.length), request, sshKeys);
+  }
+
   if (url.pathname === "/v1/credentials/purge") {
     if (purgeStore === undefined) return failure("not-found", 404);
     const decoded = await readPurgeJson(request);
@@ -592,6 +617,54 @@ async function handleNamespacedRoute(
       return followLinkedSecret(credential, linkedSecretStores);
     }
     return Response.json({ credential });
+  } catch (error) {
+    return credentialStoreFailure(error);
+  }
+}
+
+/**
+ * The SSH key routes. Every one names a server by its id; `sign` also carries
+ * the login request, base64. A key's private half never leaves this process.
+ */
+async function handleSshKeyRoute(
+  operation: string,
+  request: Request,
+  store: CredentialStore,
+): Promise<Response> {
+  const decoded = await readJsonRecord(request);
+  if (decoded.kind === "too-large") return failure("too-large", 413);
+  if (decoded.kind === "invalid") return failure("invalid-request", 400);
+  const { serverId, data, ...rest } = decoded.value;
+  if (typeof serverId !== "string" || !UUID_PATTERN.test(serverId) || Object.keys(rest).length > 0)
+    return failure("invalid-request", 400);
+  if ((operation === "sign") !== (data !== undefined)) return failure("invalid-request", 400);
+  try {
+    if (operation === "ensure") {
+      return Response.json({ publicKey: await ensureSshKey(store, serverId) });
+    }
+    if (operation === "public") {
+      const publicKey = await sshPublicKey(store, serverId);
+      return publicKey === undefined ? failure("missing", 404) : Response.json({ publicKey });
+    }
+    if (operation === "delete") {
+      await store.delete(serverId);
+      return Response.json({ deleted: true });
+    }
+    if (
+      typeof data !== "string" ||
+      data.length > MAX_SSH_SIGN_DATA_BYTES ||
+      !/^[A-Za-z0-9+/]*={0,2}$/.test(data)
+    )
+      return failure("invalid-request", 400);
+    const signed = await signSshLogin(store, serverId, Buffer.from(data, "base64"));
+    switch (signed.status) {
+      case "signed":
+        return Response.json({ signature: signed.signature.toString("base64") });
+      case "missing":
+        return failure("missing", 404);
+      case "refused":
+        return failure("refused", 403);
+    }
   } catch (error) {
     return credentialStoreFailure(error);
   }

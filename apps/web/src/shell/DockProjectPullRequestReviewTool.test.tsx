@@ -184,6 +184,24 @@ describe("DockProjectPullRequestReviewTool", () => {
     ).toBeVisible();
   });
 
+  it("says plainly that nothing merged when the host asks for an owner unlock this browser cannot give", async () => {
+    const user = userEvent.setup();
+    render(
+      <DockProjectPullRequestReviewTool
+        load={async () => detailView("Ready to merge.", "mergeable")}
+        onMerge={async () => ({ status: "owner-unlock-not-given", reason: "no-owner-device" })}
+        query={query}
+        refresh={async () => detailView("Ready to merge.", "mergeable")}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Merge" }));
+    await user.click(screen.getByRole("button", { name: "Confirm merge" }));
+
+    expect(
+      await screen.findByText(/this device is not one of its owners.*Nothing merged\./),
+    ).toBeVisible();
+  });
+
   it("restores Merge after cancelling a failed inline attempt", async () => {
     const user = userEvent.setup();
     const onMerge = vi.fn(async () => {

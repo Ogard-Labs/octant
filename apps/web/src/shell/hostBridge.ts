@@ -245,6 +245,7 @@ export type HubAdministrationOperation =
   | "owners-add"
   | "owners-remove"
   | "confirm-new-members"
+  | "paired-merge-unlock"
   | "confirm-member"
   | "alert-dismiss"
   | "alert-remove"

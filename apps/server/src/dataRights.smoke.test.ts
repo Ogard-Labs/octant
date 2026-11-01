@@ -242,6 +242,7 @@ describe("data-rights smoke: export, purge, re-export on a throwaway host", () =
       listWorkThreadIds: () => workThreads.map((thread) => String(thread.id)),
       listProjects: () => [{ projectId, name: "Smoke project", type: "chat", lifecycle: "active" }],
       readProjectMemory: (id) => readProjectMemory(connection, decodeProjectId(id)),
+      personMemoryEntries: () => [],
       listCanvases: () => [],
       readSettings: () => ({ chatEnabled: true, workEnabled: true, themeMode: "dark" }),
       listProjectIds: () => [String(projectId)],

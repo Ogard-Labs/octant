@@ -189,6 +189,34 @@ export function OwnerDevices(props: {
   );
 }
 
+/**
+ * Whether a paired phone or web client's merge here needs a fresh unlock on one
+ * of this computer's owner devices first. Only this window sets it.
+ */
+export function PairedMergeUnlockSwitch(props: {
+  readonly enabled: boolean;
+  readonly busy: boolean;
+  readonly onChange: (enabled: boolean) => void;
+}) {
+  return (
+    <div className="setgroup">
+      <SettingRow
+        description="A phone or browser paired with this computer merges a pull request only after a fresh unlock on one of the owner devices above. A merge from this window needs none. Off by default."
+        label="Owner unlock before a phone or browser merges"
+        scope="host"
+        settingId="hub-paired-merge-unlock"
+      >
+        <OctantSwitch
+          checked={props.enabled}
+          disabled={props.busy}
+          label="Owner unlock before a phone or browser merges"
+          onCheckedChange={props.onChange}
+        />
+      </SettingRow>
+    </div>
+  );
+}
+
 /** Confirm new members, the members held for it, and the alerts newer rosters raised. */
 export function NewMemberChecks(props: {
   readonly confirmNewMembers: boolean;

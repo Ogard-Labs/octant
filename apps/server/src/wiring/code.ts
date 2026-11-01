@@ -87,6 +87,10 @@ import type { FoundationsWiring } from "./foundations";
 import type { HarnessStateWiring } from "./harnessState";
 import { createServerGitHistory } from "../serverProjects/serverGit";
 import { serverProjectOf, withServerCodeCheckouts } from "../serverProjects/serverProjectThreads";
+import {
+  listServerWorktreeRefs,
+  withServerWorktreeCreation,
+} from "../serverProjects/serverWorktrees";
 
 export function createExistingWorktreeCodeFileRootAuthority(options: {
   readonly projects: Pick<ProjectService, "bootstrap">;
@@ -813,8 +817,14 @@ export function wireCode(deps: CodeDependencies) {
           worktreeSourcePreview: {
             preview: (input, signal) => managedWorktreeSourcePreview(input, signal),
           },
+          // A server Project's branches and worktrees are its server's.
           worktreeRefs: {
-            list: (input, signal) => managedWorktreeRefsList(input, signal),
+            list: async (input, signal) =>
+              (await listServerWorktreeRefs(
+                { store: serverProjectStore, connection: serverConnection },
+                String(input.projectId),
+                signal,
+              )) ?? managedWorktreeRefsList(input, signal),
           },
           // The operation runtime reads a thread's turns and checkout.
           forkPoints: {
@@ -836,12 +846,15 @@ export function wireCode(deps: CodeDependencies) {
                 ? { status: "refused", reason: "unsupported" }
                 : codeOperationRuntime.mergeForkContext(windowId, forkThreadId, throughOperationId),
           },
-          managedThreadCreation: {
-            prepare: (input, signal) => managedCodeThreadCreation.prepare(input, signal),
-            commit: (input, preparation, signal) =>
-              managedCodeThreadCreation.commit(input, preparation, signal),
-            cleanup: (input, signal) => managedCodeThreadCreation.cleanup(input, signal),
-          },
+          managedThreadCreation: withServerWorktreeCreation(
+            { store: serverProjectStore, connection: serverConnection },
+            {
+              prepare: (input, signal) => managedCodeThreadCreation.prepare(input, signal),
+              commit: (input, preparation, signal) =>
+                managedCodeThreadCreation.commit(input, preparation, signal),
+              cleanup: (input, signal) => managedCodeThreadCreation.cleanup(input, signal),
+            },
+          ),
           workingDirectories: {
             resolve: async (windowId, thread, checkout, workingDirectory) => {
               const root = await roots.resolve(

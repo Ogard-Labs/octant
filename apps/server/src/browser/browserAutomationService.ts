@@ -393,6 +393,12 @@ export class BrowserAutomationService {
      * action, so the copies stay until the context closes.
      */
     readonly releaseUpload?: () => Promise<void>;
+    /**
+     * Refuse an action whose expected revision is out of date as `stale`,
+     * rather than answering with the page unchanged. The agent tool asks for
+     * this; the person's pane does not.
+     */
+    readonly refuseStaleRevision?: boolean;
   }): Promise<BrowserAutomationSnapshot> {
     const owned = this.#contexts.get(input.request.contextId);
     if (owned === undefined || owned.windowId !== input.windowId) {
@@ -448,6 +454,7 @@ export class BrowserAutomationService {
       readonly request: BrowserActionRequest;
       readonly capturedBy?: BrowserCaptureTaker;
       readonly uploadFiles?: ReadonlyArray<string>;
+      readonly refuseStaleRevision?: boolean;
     },
   ): Promise<BrowserAutomationSnapshot> {
     if (owned.abort.signal.aborted || owned.record.state !== "active") {
@@ -498,7 +505,17 @@ export class BrowserAutomationService {
       input.request.expectedObservationRevision !== undefined &&
       input.request.expectedObservationRevision !== owned.observation?.revision
     ) {
-      return snapshot(owned);
+      // The pane re-polls and tries again; the agent is told, so a batch
+      // stops instead of carrying on as if the skipped step had run.
+      if (input.refuseStaleRevision !== true) return snapshot(owned);
+      return this.#failure(
+        owned,
+        {
+          category: "stale",
+          message: `The page changed since revision ${String(input.request.expectedObservationRevision)}; read it again before acting.`,
+        },
+        owned.status,
+      );
     }
     const resolved = this.#resolveRef(owned, input.request);
     if (resolved.kind === "refused") return this.#failure(owned, resolved.failure, "failed");
@@ -1367,7 +1384,12 @@ function describeChange(
   } else if (before.contentHash !== undefined && after.contentHash !== before.contentHash) {
     changes.push("The page's text changed.");
   } else if (changes.length === 0 && before.contentHash !== undefined) {
-    changes.push("Nothing visible on the page changed.");
+    // A field's value is not page text, so filling one changes no hash.
+    changes.push(
+      kind === "type" || kind === "select" || kind === "upload"
+        ? "The field holds the new value; the page's text did not change."
+        : "Nothing visible on the page changed.",
+    );
   }
   return changes.length === 0 ? undefined : changes.join(" ").slice(0, 1024);
 }

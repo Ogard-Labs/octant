@@ -239,6 +239,27 @@ describe("Octant Shield on the host", () => {
     ).toMatchObject({ verdict: "ask", stage: "fail-closed", rule: "no-model" });
   });
 
+  it("sends the decision to the person, naming the chosen account, when that account cannot be asked", async () => {
+    const { port } = fakeModel({
+      status: "answered",
+      text: '{"verdict":"allow","reason":"Fine."}',
+    });
+    const blocked: ShieldModelPort = { ...port, unavailable: "Work Claude is at its usage limit." };
+    const decision = await shieldWith(blocked).review({
+      threadId: "t",
+      call: bash("ls"),
+      boundRoot: root,
+    });
+    expect(decision).toMatchObject({
+      verdict: "ask",
+      stage: "fail-closed",
+      rule: "model-account-unavailable",
+      reason: "Work Claude is at its usage limit. The person decides this call.",
+      model,
+    });
+    expect(port.complete).not.toHaveBeenCalled();
+  });
+
   it("counts its model calls against the spend ceilings and asks when one refuses", async () => {
     const { port } = fakeModel({
       status: "answered",

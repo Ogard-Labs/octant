@@ -2161,11 +2161,13 @@ as an account default a Project
 may override: **Auto reviewer** (Provider's own / Octant Shield), **Safe
 networks** (trusted hosts, domains, address ranges, and private-network tags),
 and **Servers** (registered SSH hosts, each with a Read-only, Operate, or Admin
-profile and an optional notes file), and as an account setting **Shield
-model** (each thread's provider with its smallest model, or a configured
-endpoint). The rules behind them are in
+profile and an optional notes file), and, with the memory distiller's model, the account choices under **Automatic
+model calls** (each thread's provider with its smallest model, or one configured
+account and model). The rules behind them are in
 [Octant Shield](docs/architecture.md#octant-shield). Built for Code: Auto
-reviewer and Shield model in Settings › Code › Access, and the reviewer
+reviewer in Settings › Code › Access, **Automatic model calls** in Settings ›
+Providers & Models (a section with one select per job, a plain note of where the
+work goes, and the account's problem when it has one), and the reviewer
 override as a select on a Code Project's overview; **Servers** is built below
 Safe networks in Settings › Access as an account list and a **Project**
 picker that says whether the chosen Project uses the account's servers or
@@ -2188,13 +2190,18 @@ the list being edited. While limits are off, or when the host cannot route
 runtimes through these rules, a plain note says the lists are saved but not applied
 ([Provider runtime network](docs/architecture.md#provider-runtime-network)).
 **Servers** opens with a sentence saying agents reach these servers with the
-person's SSH agent and Octant never reads key files, a quiet note when no SSH
-agent is running, one line per profile (Read-only, Operate, Admin) and one
-saying lock-out and destructive actions always ask. A server row shows
-`user@alias` in the code font, its profile, its runbook path, and how many
-deploys it has, with quiet Change and Remove; the form is Alias, User,
-Profile, Deploy commands (one per line, shown for Operate and Admin), and
-Runbook path. A refusal from the host shows inline in the alert role.
+person's SSH agent or a key Octant makes and keeps for one server, and Octant
+never reads key files, a quiet note when no SSH agent is running, one line per
+profile (Read-only, Operate, Admin) and one saying lock-out and destructive
+actions always ask. A server row shows `user@alias` in the code font, its
+profile, its runbook path, how many deploys it has, and "Key Octant keeps"
+when it signs in with one, with quiet Change and Remove, and **Show key** for
+such a server. Show key opens a line under the row: "Add this line to
+`~/.ssh/authorized_keys` for <user> on <alias>.", the public key in the code
+font, wrapping, and a quiet Copy that reads Copied once it has; a refusal
+shows there in the alert role. The form is Alias, User, Profile, Sign in with
+(Your SSH agent, the default, or A key Octant keeps), Deploy commands (one per
+line, shown for Operate and Admin), and Runbook path. A refusal from the host shows inline in the alert role.
 Below it, **Code Projects on your servers** lists each server Project as its
 name and `alias:folder` in the code font with a quiet Remove, and a form of
 Project name, Server (`user@alias`), and Folder on the server whose button

@@ -6,6 +6,7 @@ import { queueSteeringWhereDelivered, withSteerable } from "../harness/nativeHar
 import { createHostShield, shieldRoutesApprovals } from "../shield/hostShield";
 import { chosenAutoReviewer } from "@octant/domain/guardrail-policy";
 import { readsSecretsThenEgress } from "@octant/domain/shield-judge-policy";
+import { createAutomaticModelAccountCheck } from "../automaticModels/automaticModelAccount";
 import { createPersonMemorySweep } from "../personMemory/personMemoryWiring";
 import { isProtectedSecretPath } from "../process/secretGuard";
 import { recordShieldReviewUsage } from "../shield/shieldUsageLedger";
@@ -81,6 +82,7 @@ import { createShieldServerRouteHandler } from "../shield/shieldServerRoutes";
 import { createServerProjectRouteHandler } from "../serverProjects/serverProjectRoutes";
 import { serverProjectOf } from "../serverProjects/serverProjectThreads";
 import { openServerSshAccessFor } from "../shield/serverSshAccess";
+import { makeServerSshKeysBrokerClient } from "../shield/sshKeyBrokerClient";
 import { RuntimeRemoteCommands } from "../shield/runtimeRemoteCommands";
 import {
   personSshAgentSocket,
@@ -123,6 +125,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "nativeHarnessLeadFallback"
     | "nativeHarnessTranscripts"
     | "providerDataDirectory"
+    | "providerUsageLimitsService"
   > &
   Pick<
     HarnessStateWiring,
@@ -167,6 +170,7 @@ export function wireHarness(deps: HarnessDependencies) {
     goalService,
     nativeHarnessApprovals,
     providerRuntimeRegistry,
+    providerUsageLimitsService,
     shieldHolder,
     spendCeiling,
     nativeHarnessLeadFallback,
@@ -189,6 +193,14 @@ export function wireHarness(deps: HarnessDependencies) {
     workTurnProjection,
     personMemory,
   } = deps;
+  // The keys Octant keeps for servers that sign in with one, in the broker.
+  const serverSshKeys =
+    options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+      ? undefined
+      : makeServerSshKeysBrokerClient({
+          url: options.credentialBrokerUrl,
+          token: options.credentialBrokerToken,
+        });
 
   // Octant Shield's server registry: SSH to these servers is judged by their
   // profiles, and every remote command a harness shell runs is recorded.
@@ -216,6 +228,7 @@ export function wireHarness(deps: HarnessDependencies) {
     windowAuthorityStore,
     store: shieldServerStore,
     sshAgentAvailable: () => sshAgentSocket() !== undefined,
+    ...(serverSshKeys === undefined ? {} : { sshKeys: serverSshKeys }),
     projectExists: (projectId) => persistence.readProject(projectId as never) !== undefined,
   });
   // Code Projects bound to a folder on one of those servers.
@@ -323,6 +336,7 @@ export function wireHarness(deps: HarnessDependencies) {
                 shieldServerStore.serversFor(scope.projectId),
                 {
                   personAgentSocket: sshAgentSocket,
+                  keys: serverSshKeys,
                   ...(harnessEgressEndpoint.kind === "unix-socket"
                     ? { relays: "unix-socket" as const }
                     : {}),
@@ -616,6 +630,13 @@ export function wireHarness(deps: HarnessDependencies) {
       return undefined;
     }
   };
+  // The account the person chose for an automatic call is asked as it is: off,
+  // not ready or at its limit, it is reported and no other account is tried.
+  const automaticModelAccountUnavailable = createAutomaticModelAccountCheck({
+    readProviderInstance: (id) => persistence.readProviderInstance(id),
+    readiness: (id) => providerRuntimeRegistry.observedState(id)?.readiness,
+    limits: () => providerUsageLimitsService.snapshot(),
+  });
   const readTurnExecutionPolicy = codeTurnExecutionPolicyReader({
     readCodeThread: (threadId) => persistence.readCodeThread(threadId),
     codeSessionAuthority,
@@ -632,6 +653,7 @@ export function wireHarness(deps: HarnessDependencies) {
       });
     },
     chosenModel: () => persistence.readCodeSettings()?.settings.shieldModel,
+    chosenModelUnavailable: (choice) => automaticModelAccountUnavailable(choice.providerInstanceId),
     readTurnExecutionPolicy: (threadId) => readTurnExecutionPolicy(threadId),
     // Work threads are reviewed at Auto as Code threads are; a Work turn's
     // level is its running turn's, else the thread's own.
@@ -717,6 +739,7 @@ export function wireHarness(deps: HarnessDependencies) {
           return text === undefined ? [] : [text];
         }),
     resolveDriver: resolveConfiguredDriver,
+    accountUnavailable: automaticModelAccountUnavailable,
     scratchRoot: harnessWorkDirectory,
     protectedSecretPath: (path) => isProtectedSecretPath(path),
   });

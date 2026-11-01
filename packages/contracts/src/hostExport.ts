@@ -12,6 +12,7 @@ import { CanvasDefinition, CanvasId } from "./canvas";
 import { UtcTimestamp } from "./events";
 import { HostId } from "./host";
 import { OctantMode } from "./modes";
+import { PersonMemoryEntry } from "./personMemory";
 import { ProjectId, ProjectMemoryView } from "./projects";
 import { ThreadExportBundle } from "./threadExport";
 import { ThreadPurgeTombstone, ThreadRetentionWindowEntry } from "./threadRetention";
@@ -139,6 +140,10 @@ export const HostExportPage = Schema.Union(
     projectMemory: pageItems(HostExportProjectMemory),
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("person-memory"),
+    entries: pageItems(PersonMemoryEntry),
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("canvases"),
     canvases: pageItems(HostExportCanvas),
   }).annotations(strict),
@@ -188,6 +193,8 @@ export const HostExportBundle = Schema.Struct({
   threads: Schema.Array(ThreadExportBundle),
   projects: Schema.Array(HostExportProject),
   projectMemory: Schema.Array(HostExportProjectMemory),
+  /** The person's memory entries, each with the threads it came from. Absent in older cuts. */
+  personMemory: Schema.optional(Schema.Array(PersonMemoryEntry)),
   canvases: Schema.Array(HostExportCanvas),
   settings: HostExportSettingsSummary,
   usage: Schema.Array(HostExportUsageRow),

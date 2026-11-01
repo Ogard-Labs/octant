@@ -154,6 +154,7 @@ async function runScript(
                   : { relaySockets: servers.relaySockets }),
                 socketDirectory: servers.socketDirectory,
                 agentSocket: servers.agentSocket,
+                ...(servers.keySockets === undefined ? {} : { keySockets: servers.keySockets }),
               },
             }),
       },
