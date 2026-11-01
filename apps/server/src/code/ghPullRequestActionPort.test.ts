@@ -222,6 +222,67 @@ describe("pull-request action port", () => {
     });
   });
 
+  it("records a review on the named head through the review API, with the note on stdin", async () => {
+    const head = "c".repeat(40);
+    const { port, run } = fixture([{ exitCode: 0, stdout: "{}" }, { exitCode: 0, stdout: "{}" }]);
+    await expect(
+      port.review({ ...identity, event: "approve", headSha: head }, signal),
+    ).resolves.toEqual({ status: "done" });
+    await expect(
+      port.review(
+        { ...identity, event: "request-changes", headSha: head, body: "Please rename it." },
+        signal,
+      ),
+    ).resolves.toEqual({ status: "done" });
+    const [approve, requestChanges] = run.mock.calls;
+    expect(approve?.[0]).toEqual([
+      "api",
+      "--method",
+      "POST",
+      "repos/octant/octant/pulls/7/reviews",
+      "--input",
+      "-",
+    ]);
+    expect(JSON.parse(approve?.[1].stdin ?? "")).toEqual({ event: "APPROVE", commit_id: head });
+    expect(JSON.parse(requestChanges?.[1].stdin ?? "")).toEqual({
+      event: "REQUEST_CHANGES",
+      commit_id: head,
+      body: "Please rename it.",
+    });
+    expect(requestChanges?.[0].join(" ")).not.toContain("Please rename it.");
+  });
+
+  it("refuses a review with no note to request changes, or a head that is not a commit id", async () => {
+    const { port, run } = fixture([]);
+    for (const request of [
+      { event: "request-changes", headSha: "c".repeat(40) },
+      { event: "approve", headSha: "main" },
+      { event: "approve", headSha: "c".repeat(40), body: "  " },
+    ] as const) {
+      await expect(port.review({ ...identity, ...request }, signal)).resolves.toEqual({
+        status: "refused",
+        reason: "invalid",
+      });
+    }
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("names the forge's refusal of your own pull request and of a moved head", async () => {
+    const { port } = fixture([
+      { exitCode: 1, stdout: "", stderr: "Can not approve your own pull request (HTTP 422)" },
+      { exitCode: 1, stdout: "", stderr: "Unprocessable Entity: commit_id is not part of the pull request" },
+    ]);
+    const request = { ...identity, event: "approve", headSha: "c".repeat(40) } as const;
+    await expect(port.review(request, signal)).resolves.toEqual({
+      status: "refused",
+      reason: "own-pull-request",
+    });
+    await expect(port.review(request, signal)).resolves.toEqual({
+      status: "refused",
+      reason: "stale",
+    });
+  });
+
   it("refuses an empty comment, an oversized comment, and a malformed thread id", async () => {
     const { port, run } = fixture([]);
     await expect(port.comment({ ...identity, body: "  " }, signal)).resolves.toEqual({

@@ -51,6 +51,14 @@ export interface CodeProjectPullRequestActionForge {
     },
     signal: AbortSignal,
   ): Promise<GhPullRequestActionResult>;
+  review(
+    request: GhPullRequestIdentityRequest & {
+      readonly event: "approve" | "request-changes";
+      readonly headSha: string;
+      readonly body?: string;
+    },
+    signal: AbortSignal,
+  ): Promise<GhPullRequestActionResult>;
   retarget(
     request: GhPullRequestIdentityRequest & { readonly baseBranch: string },
     signal: AbortSignal,
@@ -147,8 +155,11 @@ export class CodeProjectPullRequestActionService {
         ...(command.kind === "labels"
           ? { labels: { add: command.add, remove: command.remove } }
           : {}),
-        ...(command.kind === "comment" || command.kind === "reply"
-          ? { bodyBytes: Buffer.byteLength(command.body) }
+        ...((command.kind === "comment" ||
+          command.kind === "reply" ||
+          command.kind === "request-changes") ||
+        (command.kind === "approve" && command.body !== undefined)
+          ? { bodyBytes: Buffer.byteLength(command.body ?? "") }
           : {}),
         result,
       });
@@ -297,6 +308,32 @@ export class CodeProjectPullRequestActionService {
     return { status: "merged", merged };
   }
 
+  /**
+   * A review is for the head the person read. The host reads the pull request
+   * first and refuses a review for a head that moved or a pull request that is
+   * no longer open; the forge repeats the head check when it records the review.
+   */
+  async #review(
+    identity: GhPullRequestIdentityRequest,
+    command: Extract<CodeProjectPullRequestActionCommand, { readonly kind: "approve" | "request-changes" }>,
+    signal: AbortSignal,
+  ): Promise<GhPullRequestActionResult> {
+    const summary = await this.#forge.summary(identity, signal);
+    if (summary.status !== "read") return { status: "unavailable", reason: "unavailable" };
+    if (summary.state === "merged") return { status: "refused", reason: "merged" };
+    if (summary.state !== "open") return { status: "refused", reason: "not-open" };
+    if (summary.headSha !== command.headSha) return { status: "refused", reason: "stale" };
+    return this.#forge.review(
+      {
+        ...identity,
+        event: command.kind === "approve" ? "approve" : "request-changes",
+        headSha: command.headSha,
+        ...(command.body === undefined ? {} : { body: command.body }),
+      },
+      signal,
+    );
+  }
+
   #send(
     command: CodeProjectPullRequestActionCommand,
     signal: AbortSignal,
@@ -319,6 +356,9 @@ export class CodeProjectPullRequestActionService {
           { ...identity, threadNodeId: command.reviewThreadId, body: command.body },
           signal,
         );
+      case "approve":
+      case "request-changes":
+        return this.#review(identity, command, signal);
       case "close":
         return this.#forge.setState({ ...identity, state: "closed" }, signal);
       case "reopen":

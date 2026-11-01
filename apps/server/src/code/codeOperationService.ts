@@ -3894,6 +3894,8 @@ export class CodeOperationService {
           "not-closed": "not-closed",
           merged: "already-merged",
           "label-not-found": "label-not-found",
+          stale: "sha-mismatch",
+          "own-pull-request": undefined,
           failed: undefined,
         } as const
       )[done.reason],

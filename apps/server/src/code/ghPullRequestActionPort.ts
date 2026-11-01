@@ -24,7 +24,15 @@ export type GhPullRequestActionResult =
   | Readonly<{ status: "done" }>
   | Readonly<{
       status: "refused";
-      reason: "invalid" | "not-open" | "not-closed" | "merged" | "label-not-found" | "failed";
+      reason:
+        | "invalid"
+        | "not-open"
+        | "not-closed"
+        | "merged"
+        | "label-not-found"
+        | "stale"
+        | "own-pull-request"
+        | "failed";
     }>
   | Readonly<{
       status: "unavailable";
@@ -317,6 +325,39 @@ export class GhPullRequestActionPort {
   }
 
   /**
+   * Approves or requests changes on the named head through the review API, so
+   * the forge records the review on that commit and refuses one for a head that
+   * has since moved. The review is posted under the person's name.
+   */
+  async review(
+    request: GhPullRequestIdentityRequest & {
+      readonly event: "approve" | "request-changes";
+      readonly headSha: string;
+      readonly body?: string;
+    },
+    signal: AbortSignal,
+  ): Promise<GhPullRequestActionResult> {
+    const repository = repositoryOf(request);
+    if (
+      repository === undefined ||
+      !/^[0-9a-f]{40}$/.test(request.headSha) ||
+      (request.body !== undefined && !validComment(request.body)) ||
+      (request.event === "request-changes" && request.body === undefined)
+    ) {
+      return { status: "refused", reason: "invalid" };
+    }
+    return this.#act(
+      ["api", "--method", "POST", `repos/${repository}/pulls/${request.number}/reviews`, "--input", "-"],
+      JSON.stringify({
+        event: request.event === "approve" ? "APPROVE" : "REQUEST_CHANGES",
+        commit_id: request.headSha,
+        ...(request.body === undefined ? {} : { body: request.body }),
+      }),
+      signal,
+    );
+  }
+
+  /**
    * Replies in one review thread by the thread's node id. The thread is read
    * first and must belong to the named pull request: a node id is global, so
    * an id from another pull request or repository would otherwise post under
@@ -452,6 +493,12 @@ export class GhPullRequestActionPort {
     }
     if (/label.*not found|could not add label|could not remove label/i.test(diagnostic)) {
       return { status: "refused", reason: "label-not-found" };
+    }
+    if (/own pull request/i.test(diagnostic)) {
+      return { status: "refused", reason: "own-pull-request" };
+    }
+    if (/commit_id|commit.*(not found|not part|no longer)/i.test(diagnostic)) {
+      return { status: "refused", reason: "stale" };
     }
     return { status: "refused", reason: "failed" };
   }
