@@ -626,7 +626,18 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
                 }),
               )
             : ({ kind: "proxied", endpoint: input.network.endpoint } as const);
-        if (input.toolBridge !== undefined && platform === "linux" && networkEgress !== "allow") {
+        // On Linux a proxied capsule reaches the bridge through the forwarder's
+        // loopback relay; with no proxy there is nothing to carry it.
+        const linuxBridgeRelay =
+          input.toolBridge !== undefined && platform === "linux" && typeof networkEgress === "object"
+            ? loopbackPortOf(input.toolBridge)
+            : [];
+        if (
+          input.toolBridge !== undefined &&
+          platform === "linux" &&
+          networkEgress !== "allow" &&
+          linuxBridgeRelay.length === 0
+        ) {
           return yield* Effect.fail(
             failure(
               "incompatible",
@@ -680,6 +691,7 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
                 ...credentialPaths,
               ],
               ...(bridgeRule === undefined ? {} : { extraRules: [bridgeRule] }),
+              ...(linuxBridgeRelay.length === 0 ? {} : { loopbackRelayPorts: linuxBridgeRelay }),
             }),
           catch: (error) =>
             failure(

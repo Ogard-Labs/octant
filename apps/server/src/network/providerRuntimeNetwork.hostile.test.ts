@@ -10,6 +10,7 @@ import { Schema } from "effect";
 import { decodeWindowId, ToolEgressRuleId, type AggregateId } from "@octant/contracts";
 import {
   RUNTIME_NETWORK_AGGREGATE,
+  type RuntimeNetworkRuntime,
   RUNTIME_NETWORK_EVENT_NAMES,
   SAFE_NETWORKS_AGGREGATE,
   SAFE_NETWORKS_EVENT_NAMES,
@@ -30,6 +31,7 @@ import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { makeProcessConfinementLive } from "../process/seatbeltProfile";
+import type { EgressProxyEndpoint } from "../process/threadEgressPolicy";
 import { prepareCodexLaunch } from "../providers/codexProcess";
 import { resolveRuntimeProject } from "../wiring/runtimeNetwork";
 import {
@@ -85,6 +87,8 @@ interface HostOptions {
   readonly routes?: ReadonlyMap<string, number>;
   readonly resolve?: (host: string) => ReadonlyArray<string>;
   readonly directory?: string;
+  readonly socketDirectory?: string;
+  readonly openRuntimes?: ReadonlySet<RuntimeNetworkRuntime>;
 }
 
 function runtimeHost(options: HostOptions = {}) {
@@ -125,6 +129,8 @@ function runtimeHost(options: HostOptions = {}) {
           : undefined,
     enforced: options.enforced ?? true,
     ...(options.reviewer === undefined ? {} : { reviewer: options.reviewer }),
+    ...(options.socketDirectory === undefined ? {} : { socketDirectory: options.socketDirectory }),
+    ...(options.openRuntimes === undefined ? {} : { openRuntimes: options.openRuntimes }),
     // An address resolves to itself, as the system lookup answers it.
     resolveAll: async (host) =>
       isIP(host) !== 0
@@ -164,7 +170,8 @@ function tokenOf(environment: Readonly<Record<string, string>>): string {
   return url.password;
 }
 
-function proxyOf(endpoint: { readonly port: number }) {
+function proxyOf(endpoint: EgressProxyEndpoint) {
+  if (endpoint.kind !== "loopback") throw new Error("Expected a loopback listener.");
   return {
     endpoint: { kind: "loopback" as const, host: "127.0.0.1" as const, port: endpoint.port },
   };
@@ -311,6 +318,38 @@ describe("provider runtime network", () => {
       }),
     ).toEqual({ status: "open" });
     expect(host.events(RUNTIME_NETWORK_AGGREGATE)).toEqual([]);
+  });
+
+  it("gives a Linux capsule launch a socket of its own, a loopback launch a port, and leaves an open runtime alone", async () => {
+    // A Unix socket path has a short limit, and macOS's own temporary folder is long.
+    const sockets = mkdtempSync("/tmp/octant-runtime-sockets-");
+    directories.push(sockets);
+    const host = runtimeHost({ socketDirectory: sockets, openRuntimes: new Set(["opencode"]) });
+    const capsule = await started(
+      host.network.start({ runtime: "codex", root: "/projects/app", executionPolicy: "plan" }),
+    );
+    expect(capsule.endpoint).toMatchObject({ kind: "unix-socket" });
+    expect(capsule.endpoint.kind === "unix-socket" && capsule.endpoint.path).toMatch(
+      new RegExp(`^${sockets}/egress-[^/]+/proxy\\.sock$`),
+    );
+    // The capsule's forwarder listens on its fixed port; the variables name it.
+    expect(new URL(capsule.environment.HTTPS_PROXY ?? "").port).toBe("3128");
+    const loopback = await started(
+      host.network.start({
+        runtime: "claude",
+        root: "/projects/app",
+        executionPolicy: "approval-gated",
+        listener: "loopback",
+      }),
+    );
+    expect(loopback.endpoint).toMatchObject({ kind: "loopback", port: expect.any(Number) });
+    expect(
+      await host.network.start({
+        runtime: "opencode",
+        root: "/projects/app",
+        executionPolicy: "approval-gated",
+      }),
+    ).toEqual({ status: "open" });
   });
 
   it("lets a host the Project's egress rules allow through, and only for that Project's runtimes", async () => {

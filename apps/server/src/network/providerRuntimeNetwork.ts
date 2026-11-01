@@ -94,6 +94,13 @@ export interface ProviderRuntimeNetworkStartInput {
    * points its commands at a bare loopback port.
    */
   readonly authentication?: "launch-token" | "none";
+  /**
+   * `loopback` for a process Octant does not run in a capsule of its own
+   * (Claude's sandbox, Claude's own process outside Plan), which reaches the
+   * listener on the host's loopback. Otherwise a Linux launch gets a Unix
+   * socket its capsule's forwarder relays to.
+   */
+  readonly listener?: "loopback";
 }
 
 export type ProviderRuntimeNetworkStart =
@@ -101,7 +108,7 @@ export type ProviderRuntimeNetworkStart =
   | { readonly status: "open" }
   | {
       readonly status: "proxied";
-      readonly endpoint: Extract<EgressProxyEndpoint, { readonly kind: "loopback" }>;
+      readonly endpoint: EgressProxyEndpoint;
       /** The proxy variables the runtime's clients read; empty for an unauthenticated listener. */
       readonly environment: Readonly<Record<string, string>>;
       /** Closes the listener and every tunnel and records the launch's summary. */
@@ -147,8 +154,19 @@ export interface ProviderRuntimeNetworkOptions {
   /** The Project that owns a runtime's folder, or `undefined` for a folder no Project holds. */
   readonly resolveProject: (root: string) => string | undefined;
   readonly reviewer?: RuntimeNetworkReviewer;
-  /** Whether this host routes runtimes through the proxy; macOS does today. */
+  /** Whether this host routes runtimes through the proxy: macOS and Linux. */
   readonly enforced: boolean;
+  /**
+   * Linux: where each capsule launch's listener socket goes, in a fresh
+   * private folder of its own. Absent, every launch listens on loopback.
+   */
+  readonly socketDirectory?: string;
+  /**
+   * Runtimes this host leaves on open network while limits are on. Linux
+   * leaves OpenCode: it is a server the host connects into, and a private
+   * network namespace would cut that connection.
+   */
+  readonly openRuntimes?: ReadonlySet<RuntimeNetworkRuntime>;
   readonly resolveAll?: ToolEgressProxyOptions["resolveAll"];
   readonly connect?: ToolEgressProxyOptions["connect"];
   readonly limits?: ToolEgressProxyOptions["limits"];
@@ -247,6 +265,7 @@ export class ProviderRuntimeNetwork implements ProviderRuntimeNetworkPort {
     if (
       input.executionPolicy === "full-access" ||
       !this.#options.enforced ||
+      this.#options.openRuntimes?.has(input.runtime) === true ||
       !this.#options.safeNetworks.limitsOn()
     )
       return { status: "open" };
@@ -338,7 +357,10 @@ export class ProviderRuntimeNetwork implements ProviderRuntimeNetworkPort {
       // Read only to wake an idle tunnel when the Project rule it rides expires.
       rules: projectRules,
       clock: this.#options.clock,
-      endpoint: { kind: "loopback" },
+      endpoint:
+        this.#options.socketDirectory === undefined || input.listener === "loopback"
+          ? { kind: "loopback" }
+          : { kind: "unix-socket", parentDirectory: this.#options.socketDirectory },
       ...(this.#options.resolveAll === undefined ? {} : { resolveAll: this.#options.resolveAll }),
       ...(this.#options.connect === undefined ? {} : { connect: this.#options.connect }),
       ...(this.#options.limits === undefined ? {} : { limits: this.#options.limits }),
@@ -435,18 +457,16 @@ export class ProviderRuntimeNetwork implements ProviderRuntimeNetworkPort {
       await proxy.close().catch(() => undefined);
       return refused;
     }
-    const endpoint = proxy.endpoint;
-    if (endpoint.kind !== "loopback") {
-      await proxy.close().catch(() => undefined);
-      return refused;
-    }
-    const loopback = { kind: "loopback", port: endpoint.port } as const;
+    const endpoint: EgressProxyEndpoint =
+      proxy.endpoint.kind === "loopback"
+        ? { kind: "loopback", port: proxy.endpoint.port }
+        : { kind: "unix-socket", path: proxy.endpoint.path };
     let released: Promise<void> | undefined;
     return {
       status: "proxied",
-      endpoint: loopback,
+      endpoint,
       environment:
-        input.authentication === "none" ? {} : proxiedLaunchEnvironment(loopback, proxy.token),
+        input.authentication === "none" ? {} : proxiedLaunchEnvironment(endpoint, proxy.token),
       release: () => {
         released ??= (async () => {
           leaveRecheck();
@@ -504,7 +524,8 @@ export class ProviderRuntimeNetwork implements ProviderRuntimeNetworkPort {
 
 /** The network a proxied runtime launch takes into its confinement. */
 export interface ProviderRuntimeProxiedNetwork {
-  readonly endpoint: Extract<EgressProxyEndpoint, { readonly kind: "loopback" }>;
+  /** A loopback port on macOS and for a `loopback` listener; on Linux a capsule's Unix socket. */
+  readonly endpoint: EgressProxyEndpoint;
   readonly environment: Readonly<Record<string, string>>;
 }
 

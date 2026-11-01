@@ -1870,6 +1870,11 @@ function makeConnection(
             executionPolicy: input.executionPolicy,
             environment: environment.environment,
             autoReview: input.autoApprove === true,
+            // Only Plan runs the process in Octant's own capsule; outside it
+            // the process reads the proxy variables on the host's loopback.
+            ...(CONFINED_CLAUDE_EXECUTION_POLICIES.has(input.executionPolicy)
+              ? {}
+              : { listener: "loopback" as const }),
             sessionId: String(input.sessionId),
             ...(workThreadId === undefined ? {} : { threadId: workThreadId }),
           }).pipe(Effect.provideService(Scope.Scope, scope)),
@@ -1955,18 +1960,22 @@ function makeConnection(
                 autoReview: input.autoApprove === true,
                 sessionId: String(input.sessionId),
                 ...(workThreadId === undefined ? {} : { threadId: workThreadId }),
-                // The sandbox points its commands at a bare port and sends no
-                // proxy credentials.
+                // The sandbox points its commands at a bare port on the
+                // host's loopback and sends no proxy credentials.
                 authentication: "none",
+                listener: "loopback",
               }).pipe(Effect.provideService(Scope.Scope, scope)),
               signal,
             )
           : undefined;
+        if (sandboxNetwork !== undefined && sandboxNetwork.endpoint.kind !== "loopback") {
+          throw failure("incompatible", "Claude's sandbox needs its egress proxy on loopback.");
+        }
         const sandbox = claudeSandboxSettings(
           input.executionPolicy,
           projectRoot,
           extraFolders,
-          sandboxNetwork?.endpoint.port,
+          sandboxNetwork?.endpoint.kind === "loopback" ? sandboxNetwork.endpoint.port : undefined,
         );
         let callbackState: SessionState | undefined;
         const canUseTool: ClaudeOpenQueryInput["canUseTool"] = async (request) => {
