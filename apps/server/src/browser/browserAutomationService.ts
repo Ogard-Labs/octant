@@ -40,7 +40,7 @@ import type {
   RecordExternalContentIngestionInput,
 } from "../context/externalContentIngestionStore";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
-import type { KeepBrowserCaptureInput } from "./browserCaptureService";
+import type { KeepBrowserCaptureInput, RecordBrowserStepInput } from "./browserCaptureService";
 import {
   BrowserNavigationBlockedError,
   BrowserProfileUnavailableError,
@@ -77,6 +77,11 @@ export interface BrowserAutomationServiceOptions {
    */
   readonly captures?: {
     readonly keep: (input: KeepBrowserCaptureInput) => Promise<BrowserCaptureOutcome>;
+    /**
+     * Records one step of the agent's Browser check, for the thread's proof.
+     * Called only for an action the agent tool named itself as the caller of.
+     */
+    readonly recordStep?: (input: RecordBrowserStepInput) => void;
   };
   /**
    * Whether a scope is the host acting for a routine, a goal loop, or a
@@ -426,7 +431,13 @@ export class BrowserAutomationService {
       );
     }
     try {
-      return await this.#queueAction(owned, () => this.#actOwned(owned, input));
+      return await this.#queueAction(owned, async () => {
+        // Read before the action: it may replace the snapshot the ref names.
+        const element = this.#elementOf(owned, input.request);
+        const result = await this.#actOwned(owned, input);
+        if (input.capturedBy === "agent") this.#recordStep(owned, input.request, element, result);
+        return result;
+      });
     } finally {
       if (input.releaseUpload !== undefined) this.#keepUpload(owned, input.releaseUpload);
     }
@@ -841,6 +852,57 @@ export class BrowserAutomationService {
    * has already succeeded, so a copy that cannot be kept is reported on the
    * observation instead of failing the action.
    */
+  /** The role and accessible name of the element a ref names, never a selector or a value. */
+  #elementOf(
+    owned: OwnedContext,
+    request: BrowserActionRequest,
+  ): { readonly role: string; readonly name: string } | undefined {
+    if (request.ref === undefined) return undefined;
+    const entry = owned.refs?.byRef.get(request.ref);
+    return entry === undefined ? undefined : { role: entry.role, name: entry.name };
+  }
+
+  /**
+   * Add the action to the thread's proof. Facts are copied out of the result
+   * here, one by one: the request, which holds what was typed, is never handed
+   * on, so a value cannot reach the record by accident.
+   */
+  #recordStep(
+    owned: OwnedContext,
+    request: BrowserActionRequest,
+    element: { readonly role: string; readonly name: string } | undefined,
+    result: BrowserAutomationSnapshot,
+  ): void {
+    const captures = this.#captures;
+    if (captures?.recordStep === undefined) return;
+    const failed = result.failure !== undefined;
+    const observation = result.observation;
+    const profile = storedBrowserProfile(owned.record.policy.profile);
+    try {
+      captures.recordStep({
+        threadId: owned.threadId,
+        facts: {
+          operation: request.kind,
+          element,
+          url: observation?.url,
+          // A failed step has no result of its own: the observation on a
+          // failure is the previous action's.
+          changed: failed ? undefined : observation?.change,
+          failure: result.failure?.category,
+          captureId:
+            observation?.capture?.status === "kept" && !failed
+              ? observation.capture.captureId
+              : undefined,
+          profile,
+        },
+        providerInstanceId: owned.record.authority.providerInstanceId,
+        correlationId: owned.action.correlationId,
+      });
+    } catch {
+      // Proof is best effort beside the action.
+    }
+  }
+
   async #keepCapture(
     owned: OwnedContext,
     input: {

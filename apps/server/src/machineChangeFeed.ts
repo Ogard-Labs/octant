@@ -1,5 +1,6 @@
 import {
   BROWSER_CAPTURE_AGGREGATE_TYPE,
+  BROWSER_STEP_AGGREGATE_TYPE,
   CONTEXT_COMPACTION_EVENT_NAMES,
   IMAGE_JOB_AGGREGATE_TYPE,
   NATIVE_HARNESS_SESSION_AGGREGATE_TYPE,
@@ -223,7 +224,11 @@ function topicsForEvent(event: {
   readonly payload?: unknown;
 }): ReadonlyArray<MachineChangeTopic> {
   const { aggregateType } = event;
-  if (aggregateType === BROWSER_CAPTURE_AGGREGATE_TYPE) return ["browser-captures"];
+  if (
+    aggregateType === BROWSER_CAPTURE_AGGREGATE_TYPE ||
+    aggregateType === BROWSER_STEP_AGGREGATE_TYPE
+  )
+    return ["browser-captures"];
   if (
     aggregateType === THREAD_SIDE_TASKS_AGGREGATE_TYPE ||
     aggregateType === THREAD_FOLLOW_UP_SUGGESTIONS_AGGREGATE_TYPE

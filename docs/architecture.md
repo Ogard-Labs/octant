@@ -3423,7 +3423,13 @@ flowchart LR
   a diagnostics export. They leave the host only in an export the local owner
   takes: that thread's export, or the host-wide data export that embeds it. A capture adds no Project filesystem authority and no
   second taint mechanism: the observation that produced it already taints the
-  thread. Detail is in [Browser captures](design/browser-captures.md).
+  thread. A thread also keeps the agent's last 50 Browser steps as `browser.step-recorded@1`
+  events on a per-thread aggregate, bounded and erased like captures: the
+  operation, the element's role and name, the page's origin and path, and the
+  one-line result or failure category, never typed text or a field's value. With the
+  captures they are the thread's Browser proof, read only by a local window,
+  added to a pull request body only when the person chooses, and never in
+  telemetry. Detail is in [Browser captures](design/browser-captures.md).
 - **Journal growth.** A diagnostics export carries journal events per aggregate
   kind per day for the last 14 days, the journal head sequence, and the database
   size, as kind names and counts only: no payload, identifier, or thread or

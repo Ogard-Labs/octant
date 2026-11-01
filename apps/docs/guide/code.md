@@ -423,6 +423,16 @@ branch. A thread that asks before acting
 shows you the exact change first; Full access goes ahead for the rest; Plan
 refuses. The thread's pull request shows in Review and on
 its card, stacked ones included.
+The **New pull request** form in Review has an **Include Browser proof**
+choice, off unless you turn it on. When the agent checked its work in the
+Browser, turning it on adds a **Browser check** section to the description with
+the agent's steps as a numbered list (the action, the element, the page address
+without its query, and the result; never typed text or field values). GitHub
+cannot take pictures from here, so the screenshots are not uploaded: **Save
+screenshots…** in the Octant desktop app asks you for a folder and writes them
+as `browser-check-01.png`, `-02`, and so on, and the section names those files so
+you can drag them into the description. A paired device cannot read, include, or
+save the proof. See [Browser proof](../advanced/browser-and-computer-use.md#browser-proof).
 The sidebar follows the pane that last received pointer or keyboard input.
 Each thread remembers its open tools and selected tool.
 

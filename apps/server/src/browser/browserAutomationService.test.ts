@@ -15,7 +15,7 @@ import {
   BrowserAutomationService,
   createBrowserToolCallAuthorityService,
 } from "./browserAutomationService";
-import type { KeepBrowserCaptureInput } from "./browserCaptureService";
+import type { KeepBrowserCaptureInput, RecordBrowserStepInput } from "./browserCaptureService";
 import { BrowserNavigationBlockedError, type BrowserRuntimePort } from "./browserRuntimePort";
 
 const windowId = "10000000-0000-4000-8000-000000000001" as WindowId;
@@ -832,6 +832,113 @@ describe("BrowserAutomationService", () => {
       expect(completed.failure).toBeUndefined();
       expect(captures.keep).not.toHaveBeenCalled();
       expect(completed.observation?.capture).toEqual({ status: "not-kept", reason: "no-picture" });
+    });
+  });
+
+  describe("thread proof steps", () => {
+    const recorder = () => vi.fn((_input: RecordBrowserStepInput) => undefined);
+    const withSnapshot = async (harnessed: ReturnType<typeof harness>): Promise<void> => {
+      await harnessed.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      vi.mocked(harnessed.runtime.act).mockResolvedValueOnce({
+        url: "https://example.com/form",
+        snapshot: '- textbox "Email" [ref=e1]',
+        snapshotRefs: [{ ref: "e1", selector: "#email", role: "textbox", name: "Email" }],
+      });
+      await harnessed.service.act({
+        windowId,
+        request: request({ kind: "snapshot", target: undefined }),
+        capturedBy: "agent",
+      });
+    };
+
+    it("records the agent's action by role and name, never by what it typed", async () => {
+      const recordStep = recorder();
+      const harnessed = harness({ captures: { keep: vi.fn(), recordStep } });
+      await withSnapshot(harnessed);
+      await harnessed.service.act({
+        windowId,
+        request: request({ kind: "type", target: undefined, ref: "e1", value: "hunter2" }),
+        capturedBy: "agent",
+      });
+
+      const typed = recordStep.mock.calls.at(-1)?.[0];
+      expect(typed?.facts).toMatchObject({
+        operation: "type",
+        element: { role: "textbox", name: "Email" },
+      });
+      expect(JSON.stringify(recordStep.mock.calls)).not.toContain("hunter2");
+      expect(typed?.providerInstanceId).toBe(authorityOne.providerInstanceId);
+    });
+
+    it("records a refused action with its failure category and no result line", async () => {
+      const recordStep = recorder();
+      const harnessed = harness({ captures: { keep: vi.fn(), recordStep } });
+      await withSnapshot(harnessed);
+      await harnessed.service.act({
+        windowId,
+        request: request({ kind: "click", target: undefined, ref: "e9" }),
+        capturedBy: "agent",
+      });
+      const refused = recordStep.mock.calls.at(-1)?.[0];
+      expect(refused?.facts).toMatchObject({ operation: "click", failure: "stale" });
+      expect(refused?.facts.changed).toBeUndefined();
+    });
+
+    it("names the capture a kept screenshot produced", async () => {
+      const captureId = "a0000000-0000-4000-8000-000000000009" as BrowserCaptureId;
+      const recordStep = recorder();
+      const harnessed = harness({
+        captures: { keep: vi.fn(async () => ({ status: "kept" as const, captureId })), recordStep },
+      });
+      await harnessed.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      await harnessed.service.act({
+        windowId,
+        request: request({ kind: "screenshot" }),
+        capturedBy: "agent",
+      });
+      expect(recordStep.mock.calls.at(-1)?.[0].facts).toMatchObject({
+        operation: "screenshot",
+        captureId,
+      });
+    });
+
+    it("records nothing for the person's pane or a caller that names no one", async () => {
+      const recordStep = recorder();
+      const { service } = harness({ captures: { keep: vi.fn(), recordStep } });
+      await service.create({ windowId, threadId: threadOne, action: action(), policy });
+      await service.act({ windowId, request: request(), capturedBy: "person" });
+      await service.act({ windowId, request: request() });
+      expect(recordStep).not.toHaveBeenCalled();
+    });
+
+    it("records through the service object itself, as the host's capture service needs", async () => {
+      const seen: string[] = [];
+      // A class method reads its own private state, so it fails when called loose.
+      const captures = {
+        label: "capture-service",
+        keep: vi.fn(),
+        recordStep(this: { readonly label: string }) {
+          seen.push(this.label);
+        },
+      };
+      const { service } = harness({ captures });
+      await service.create({ windowId, threadId: threadOne, action: action(), policy });
+      await service.act({ windowId, request: request(), capturedBy: "agent" });
+      expect(seen).toEqual(["capture-service"]);
+    });
+
+    it("lets the action succeed when the step cannot be recorded", async () => {
+      const { service } = harness({
+        captures: {
+          keep: vi.fn(),
+          recordStep: () => {
+            throw new Error("journal is gone");
+          },
+        },
+      });
+      await service.create({ windowId, threadId: threadOne, action: action(), policy });
+      const completed = await service.act({ windowId, request: request(), capturedBy: "agent" });
+      expect(completed.failure).toBeUndefined();
     });
   });
 

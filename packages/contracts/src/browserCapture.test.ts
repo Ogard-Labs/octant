@@ -4,7 +4,10 @@ import {
   decodeBrowserCapture,
   decodeBrowserCaptureImage,
   decodeBrowserCapturesResponse,
+  decodeBrowserStep,
+  decodeBrowserStepsResponse,
   MAX_BROWSER_CAPTURE_BYTES,
+  MAX_BROWSER_STEPS_PER_THREAD,
   MAX_BROWSER_CAPTURES_PER_THREAD,
 } from "./browserCapture";
 
@@ -93,5 +96,42 @@ describe("BrowserObservation capture outcome", () => {
         capture: { status: "not-kept", reason: "disk on fire" },
       }),
     ).toThrow();
+  });
+});
+
+describe("BrowserStep", () => {
+  const step = {
+    stepId: "b0000000-0000-4000-8000-000000000010",
+    threadId: capture.threadId,
+    operation: "click",
+    element: { role: "button", name: "Save" },
+    origin: "https://example.com",
+    path: "/settings",
+    changed: "The page's text changed.",
+    recordedAt: "2026-10-12T09:00:00.000Z",
+  };
+
+  it("records the operation, the element, the page, and the one-line result", () => {
+    expect(decodeBrowserStep(step).element).toEqual({ role: "button", name: "Save" });
+    expect(decodeBrowserStep({ ...step, failure: "stale", changed: undefined }).failure).toBe(
+      "stale",
+    );
+  });
+
+  it("has no place for what was typed, a field's value, or a page's text", () => {
+    for (const extra of [{ text: "hunter2" }, { value: "x" }, { url: "https://a.test/?q=1" }]) {
+      expect(() => decodeBrowserStep({ ...step, ...extra })).toThrow();
+    }
+    expect(() =>
+      decodeBrowserStep({ ...step, element: { role: "textbox", name: "Email", value: "a@b.c" } }),
+    ).toThrow();
+  });
+
+  it("refuses more steps than a thread keeps in one listing", () => {
+    const many = Array.from({ length: MAX_BROWSER_STEPS_PER_THREAD + 1 }, () => step);
+    expect(() => decodeBrowserStepsResponse({ steps: many })).toThrow();
+    expect(decodeBrowserStepsResponse({ steps: many.slice(1) }).steps).toHaveLength(
+      MAX_BROWSER_STEPS_PER_THREAD,
+    );
   });
 });

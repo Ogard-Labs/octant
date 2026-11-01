@@ -194,7 +194,9 @@ import {
   ImageJobQueued,
   ImageJobStatusChanged,
   BROWSER_CAPTURE_KEPT,
+  BROWSER_STEP_RECORDED,
   BrowserCaptureKept,
+  BrowserStep,
   HOST_MEMORY_LIMITS_EVENT_NAME,
   HostMemoryLimitsChanged,
   THREAD_RETENTION_EVENT_NAMES,
@@ -673,6 +675,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(IMAGE_JOB_QUEUED, 1, ImageJobQueued)
     .register(IMAGE_JOB_STATUS_CHANGED, 1, ImageJobStatusChanged)
     .register(BROWSER_CAPTURE_KEPT, 1, BrowserCaptureKept)
+    .register(BROWSER_STEP_RECORDED, 1, BrowserStep)
     .register(HOST_MEMORY_LIMITS_EVENT_NAME, 1, HostMemoryLimitsChanged)
     .register(THREAD_RETENTION_EVENT_NAMES.windowSet, 1, ThreadRetentionWindowSet)
     .register(THREAD_RETENTION_EVENT_NAMES.threadPurged, 1, ThreadRetentionThreadPurged)

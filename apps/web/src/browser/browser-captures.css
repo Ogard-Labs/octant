@@ -85,3 +85,55 @@
   border: 1px solid var(--octant-border);
   border-radius: var(--oct-radius-md);
 }
+
+/*
+ * The Browser proof: the agent's steps as a numbered list, folded until the
+ * person asks for it. A picture sits under the step that took it.
+ */
+.browser-proof {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+  min-width: 0;
+}
+
+.browser-proof__bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+}
+
+.browser-proof__steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+  margin: 0;
+  padding-left: var(--oct-space-6);
+  list-style: decimal outside;
+  color: var(--oct-fg);
+}
+
+.browser-proof__step {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.browser-proof__failed {
+  color: var(--octant-danger-text);
+}
+
+.browser-proof__figure {
+  margin: var(--oct-space-1) 0 0;
+}
+
+.browser-proof__shot {
+  display: block;
+  width: 100%;
+  max-width: 240px;
+  aspect-ratio: 3 / 2;
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-inset);
+  background: var(--octant-surface-canvas);
+  object-fit: cover;
+  object-position: top center;
+}

@@ -1,15 +1,17 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import {
   BrowserAutomationClientFailure,
   type BrowserAutomationClient,
 } from "@octant/client-runtime/browser-automation-client";
-import type { BrowserCapture, BrowserThreadId } from "@octant/contracts";
+import type { BrowserCapture, BrowserStep, BrowserThreadId } from "@octant/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceContentViewContext } from "../shell/WorkspaceContentView";
 import { ThreadActivityRevisionsContext } from "../polling/ThreadActivityRevisions";
 import { BrowserCaptureList } from "./BrowserCaptureList";
+import { BrowserProofPanel } from "./BrowserProofPanel";
+import type { OctantHostBridge } from "../shell/hostBridge";
 
 const threadId = "c1000000-0000-4000-8000-000000000001" as BrowserThreadId;
 
@@ -234,5 +236,161 @@ describe("BrowserCaptureList", () => {
     view.rerender(revisions(1));
     await waitFor(() => expect(listCaptures).toHaveBeenCalledTimes(3));
     expect(screen.getByTestId("browser-capture-list")).toBeVisible();
+  });
+});
+
+function step(index: number, overrides: Partial<BrowserStep> = {}): BrowserStep {
+  return {
+    stepId: `c3000000-0000-4000-8000-00000000000${index}`,
+    threadId,
+    operation: "click",
+    origin: "https://example.com",
+    path: `/page-${index}`,
+    recordedAt: `2026-10-12T09:00:0${index}.000Z`,
+    ...overrides,
+  } as BrowserStep;
+}
+
+describe("Browser proof", () => {
+  function proofClient(steps: ReadonlyArray<BrowserStep>, captures: ReadonlyArray<BrowserCapture>) {
+    const { client } = clientWith(captures);
+    const listSteps = vi.fn(async () => ({ steps }));
+    return { client: { ...client, listSteps } as unknown as BrowserAutomationClient, listSteps };
+  }
+
+  it("shows a folded panel for a thread that took steps but no screenshot", async () => {
+    const { client } = proofClient([step(1), step(2)], []);
+    render(<BrowserCaptureList client={client} threadId={threadId} />);
+
+    const panel = await screen.findByRole("region", { name: "Browser proof" });
+    expect(panel).toHaveTextContent("Browser proof");
+    expect(screen.queryByRole("region", { name: "Browser captures" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("list")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show 2 steps" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  it("lists the steps as a numbered list with a capture right after the step that took it", async () => {
+    const shot = capture(1, {
+      capturedAt: "2026-10-12T09:00:02.500Z" as BrowserCapture["capturedAt"],
+    });
+    const { client } = proofClient(
+      [
+        step(1, { element: { role: "button", name: "Save" }, changed: "The page's text changed." }),
+        step(2, { operation: "screenshot", captureId: shot.captureId }),
+        step(3, { failure: "stale" }),
+      ],
+      [shot],
+    );
+    render(<BrowserCaptureList client={client} threadId={threadId} />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Show 3 steps" }));
+    const panel = screen.getByRole("region", { name: "Browser proof" });
+    const steps = within(panel).getAllByRole("listitem");
+    expect(steps).toHaveLength(3);
+    expect(steps[0]).toHaveTextContent(
+      'click button "Save" on https://example.com/page-1 — The page\'s text changed.',
+    );
+    expect(steps[1]).toHaveTextContent("screenshot on https://example.com/page-2");
+    // The picture belongs to the second step, not the first or the third.
+    expect(within(steps[1] as HTMLElement).getByRole("img", { name: /Capture of/ })).toBeVisible();
+    expect(within(steps[0] as HTMLElement).queryByRole("img")).not.toBeInTheDocument();
+    expect(steps[2]).toHaveTextContent("failed (stale)");
+    expect(within(panel).getByRole("list").tagName).toBe("OL");
+  });
+
+  it("shows nothing of the proof when the host refuses this window", async () => {
+    const { client } = clientWith([]);
+    const listSteps = vi
+      .fn()
+      .mockRejectedValue(new BrowserAutomationClientFailure("unauthorized", "No."));
+    render(<BrowserCaptureList client={{ ...client, listSteps } as never} threadId={threadId} />);
+    await waitFor(() => expect(listSteps).toHaveBeenCalled());
+    expect(screen.queryByRole("region", { name: "Browser proof" })).not.toBeInTheDocument();
+  });
+
+  it("saves the screenshots through the desktop app's folder picker, numbered oldest first", async () => {
+    const older = capture(1, {
+      capturedAt: "2026-10-12T09:00:01.000Z" as BrowserCapture["capturedAt"],
+    });
+    const newer = capture(2, {
+      capturedAt: "2026-10-12T09:00:05.000Z" as BrowserCapture["capturedAt"],
+    });
+    const { client } = proofClient([step(1)], [newer, older]);
+    const saveBrowserProofScreenshots = vi.fn(async () => ({
+      kind: "saved" as const,
+      count: 2,
+      folderName: "pr-12",
+    }));
+    render(
+      <BrowserProofPanel
+        captures={[newer, older]}
+        client={client}
+        hostBridge={{ saveBrowserProofScreenshots } as unknown as OctantHostBridge}
+        steps={[step(1)]}
+        threadId={threadId}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Save screenshots…" }));
+    expect(await screen.findByText("Saved 2 screenshots to “pr-12”.")).toBeVisible();
+    expect(saveBrowserProofScreenshots).toHaveBeenCalledWith([
+      { fileNumber: 1, dataUrl: "data:image/png;base64,AAAA" },
+      { fileNumber: 2, dataUrl: "data:image/png;base64,AAAA" },
+    ]);
+    const read = vi.mocked(client.readCapture as never) as unknown as ReturnType<typeof vi.fn>;
+    expect(read.mock.calls.map(([input]) => (input as { captureId: string }).captureId)).toEqual(
+      expect.arrayContaining([older.captureId, newer.captureId]),
+    );
+  });
+
+  it("offers no save outside the desktop app, such as a paired device's browser", () => {
+    const { client } = proofClient([step(1)], [capture(1)]);
+    render(
+      <BrowserProofPanel
+        captures={[capture(1)]}
+        client={client}
+        hostBridge={undefined}
+        steps={[step(1)]}
+        threadId={threadId}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Save screenshots…" })).not.toBeInTheDocument();
+  });
+
+  it("says why a save failed and writes nothing when the person cancels", async () => {
+    const { client } = proofClient([step(1)], [capture(1)]);
+    const cancel = vi.fn(async () => ({ kind: "cancelled" as const }));
+    const view = render(
+      <BrowserProofPanel
+        captures={[capture(1)]}
+        client={client}
+        hostBridge={{ saveBrowserProofScreenshots: cancel } as unknown as OctantHostBridge}
+        steps={[step(1)]}
+        threadId={threadId}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Save screenshots…" }));
+    await waitFor(() => expect(cancel).toHaveBeenCalled());
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    view.unmount();
+
+    const failing = vi.fn(async () => {
+      throw new Error(
+        "A file named browser-check-01.png is already in that folder. Nothing was written.",
+      );
+    });
+    render(
+      <BrowserProofPanel
+        captures={[capture(1)]}
+        client={client}
+        hostBridge={{ saveBrowserProofScreenshots: failing } as unknown as OctantHostBridge}
+        steps={[step(1)]}
+        threadId={threadId}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Save screenshots…" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("already in that folder");
   });
 });

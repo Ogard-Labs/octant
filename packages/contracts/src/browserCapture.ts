@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import {
+  BrowserActionKind,
   BrowserActionRequest,
   BrowserCaptureId,
   BrowserThreadId,
@@ -95,6 +96,70 @@ export const BrowserCaptureImage = Schema.Struct({
 }).annotations(strict);
 export type BrowserCaptureImage = typeof BrowserCaptureImage.Type;
 
+/**
+ * The Browser steps a thread keeps as proof of a check: the agent's own
+ * actions, newest 50, oldest first when read. Same shape as captures, so the
+ * journal bounds them the same way: one aggregate per thread whose newest
+ * `MAX_BROWSER_STEPS_PER_THREAD` versions are the steps that survive.
+ */
+export const MAX_BROWSER_STEPS_PER_THREAD = 50;
+export const BROWSER_STEP_AGGREGATE_TYPE = "browser-step";
+export const BROWSER_STEP_RECORDED = "browser.step-recorded@1";
+
+export const BrowserStepFailureCategory = Schema.Literal(
+  "invalid",
+  "unauthorized",
+  "unavailable",
+  "policy-denied",
+  "context-expired",
+  "credential-protected",
+  "interrupted",
+  "failed",
+  "stale",
+);
+export type BrowserStepFailureCategory = typeof BrowserStepFailureCategory.Type;
+
+/**
+ * One step as the journal records it. It never holds what the agent typed, a
+ * field's value, a query or fragment of the page's address, or a page's text:
+ * only the operation, the element it acted on by ref (role and accessible
+ * name), the page's origin and path, the one-line `changed` result, and, for a
+ * step that failed, the failure category.
+ */
+export const BrowserStep = Schema.Struct({
+  stepId: BrowserCaptureId,
+  threadId: BrowserThreadId,
+  operation: BrowserActionKind,
+  element: Schema.optional(
+    Schema.Struct({
+      role: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+      name: Schema.String.pipe(Schema.maxLength(160)),
+    }).annotations(strict),
+  ),
+  origin: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048))),
+  path: Schema.optional(Schema.String.pipe(Schema.maxLength(512))),
+  changed: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
+  failure: Schema.optional(BrowserStepFailureCategory),
+  /** The capture this step kept, when it was a screenshot that was kept. */
+  captureId: Schema.optional(BrowserCaptureId),
+  recordedAt: UtcTimestamp,
+  /** The Project or Personal profile the page lived in, as a capture records it. */
+  profile: Schema.optional(StoredBrowserProfile),
+}).annotations(strict);
+export type BrowserStep = typeof BrowserStep.Type;
+
+export const BrowserStepsCommand = BrowserCapturesCommand;
+export type BrowserStepsCommand = BrowserCapturesCommand;
+
+/** Oldest first. */
+export const BrowserStepsResponse = Schema.Struct({
+  steps: Schema.Array(BrowserStep).pipe(Schema.maxItems(MAX_BROWSER_STEPS_PER_THREAD)),
+}).annotations(strict);
+export type BrowserStepsResponse = typeof BrowserStepsResponse.Type;
+
+export const decodeBrowserStep = Schema.decodeUnknownSync(BrowserStep);
+export const decodeBrowserStepsCommand = Schema.decodeUnknownSync(BrowserStepsCommand);
+export const decodeBrowserStepsResponse = Schema.decodeUnknownSync(BrowserStepsResponse);
 export const decodeBrowserCapture = Schema.decodeUnknownSync(BrowserCapture);
 export const decodeBrowserCaptureKept = Schema.decodeUnknownSync(BrowserCaptureKept);
 export const decodeBrowserCapturesCommand = Schema.decodeUnknownSync(BrowserCapturesCommand);

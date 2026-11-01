@@ -139,8 +139,95 @@ the Browser pane
   retries on the next beat.
 - Visual rules are in [DESIGN.md](../../DESIGN.md#transcript).
 
+## Proof
+
+Proof is a thread's record of a Browser check: the agent's recent Browser steps
+and the captures it kept, read together. A person can attach it to a pull
+request, and only by choosing to.
+
+- **The step list.** A thread keeps a short record of the agent's Browser
+  steps: at most the last 50. A step is one fixed host action the agent tool
+  asked for, never anything the person did in the pane, a terminal CLI, or a
+  caller that names no one (the rule that decides who takes a capture).
+- **What a step holds.** The operation (`navigate`, `click`, `type`, and so on);
+  for an action that named its element by ref, the element's role and
+  accessible name; the page's origin and path; the one-line `changed` result or,
+  for an action that failed, the failure category; the capture it kept, when it
+  was a screenshot that was kept; the recording time; and, for a page in a
+  Project or Personal profile, that profile.
+- **What a step never holds.** Text the agent typed, the value of any field,
+  a selector, the page's text, a picture, a query string or fragment of the
+  address, or anything from a failure message. The record has no field for
+  them, and the request itself is never handed to the recorder. Any address the
+  `changed` line quotes passes through the same redaction a diagnostic's
+  address does: no user or password, no fragment, and every query value whose
+  name suggests a secret replaced.
+- **Same keeping as captures.** One `browser-step` aggregate per thread
+  (aggregate id = thread id) with one `browser.step-recorded@1` event per step,
+  actor the agent (provider instance and thread). The newest 50 aggregate
+  versions are the steps, by the same rule as captures: listing reads that
+  window, and a confirmed thread purge erases the events with the thread's
+  others. Recording is best effort and never fails the action. Steps are not in
+  telemetry, diagnostics exports, Canvas shares, or replica sync.
+- Rationale: a step holds the element by role and accessible name rather than
+  by selector so the list reads as what a person would have done, and so
+  nothing a page or the agent made up (an id, a class) is kept. A field's value
+  is not part of an accessible name, so typing leaves no trace of what was
+  typed.
+- **Reads.** `POST /api/browser/steps` lists them, oldest first, and answers
+  exactly the callers `POST /api/browser/captures` answers: a local window that
+  can open the thread, archived or not. The product route classifier leaves it
+  unlisted, so a paired device is stopped before the route.
+- Rationale: the proof names pages and elements the person browsed and sits
+  beside pictures a paired device may not read, so reading it is the same
+  authority as reading a capture, not wider. A paired device therefore cannot
+  view, attach, or save the proof; Code threads' pull-request flow reads it
+  from the person's own window.
+- **The agent.** It reads its own step list only as it reads any tool result
+  today (`changed` and the failure it gets back). No new operation reads the
+  list back.
+- **The panel.** Beside the strip, a thread with steps shows a "Browser proof"
+  panel: folded, with a "Show N steps" control, then the steps as a numbered
+  list. Each capture appears under the step that took it; a capture no
+  retained step names (the person's own, or one whose step has aged out)
+  appears under the last step recorded before it. A failed step is marked in
+  words and in the danger colour.
+- **Attaching to a pull request.** The Code pull-request form, which writes a
+  pull request body, offers "Include Browser proof", off by default. Choosing
+  it reads the proof, says how many steps it will add, and on Create adds a
+  "Browser check" section to the body after the person's text: the numbered
+  steps, and for each capture the name of its screenshot file. The proof is
+  read again at Create, so the section reflects the steps as they stand then.
+  If it cannot be read, nothing is created and the form says why. The form is
+  the only place pull-request text is written by a person; the agent's own
+  pull-request operations do not read the proof. There is no description-edit
+  flow in the app, so the choice is not offered anywhere else.
+- **Screenshots.** GitHub offers no way to put pictures into a pull request body
+  from here, and sending them to another host would send a page's picture off
+  this computer. "Save screenshots…" (in the panel and beside the choice) opens
+  the desktop app's native folder picker and writes the thread's captures
+  there as `browser-check-01.png`, `-02`, ... (oldest first, extension from the
+  media type), so the person can drag them into the description. The names in
+  the section are those files. The desktop main process writes the files, never
+  overwrites one (a name already in the folder stops the whole save), and tells
+  the page only the count and the folder's name.
+- Rationale: saving to a folder the person picks is the narrowest option that
+  works: nothing is uploaded, no new credential or host is involved, and the
+  picker is the person's consent for the one folder.
+- **Paired devices.** Reading the proof is refused for a paired device, so a
+  pull-request form reached from one says "Browser proof can be attached only
+  from a window on this computer." and creates nothing until the person turns
+  the choice off. "Save screenshots…" exists only where the desktop app's bridge
+  does. The product route classifier already lets a paired device send other
+  Code commands; this adds nothing to what it may do there.
+- **Signed-in pages.** A capture or step of a page in a Project or Personal
+  profile follows the capture rules: it is kept, names its profile, and is read
+  only by a local window. Attaching it to a pull request is the person's
+  choice like any other proof.
+
 ## Verification
 
 `browserCapturePolicy.test.ts`, `browserCaptureService.test.ts`,
 `browserAutomationService.test.ts`, `browserAutomationRoutes.test.ts`,
 `threadPurge.test.ts`, `threadExportService.test.ts`, `canvasDesignAssets.test.ts`, `BrowserCaptureList.test.tsx`, and `BrowserWorkspace.test.tsx`.
+Proof adds `browserProofPolicy.test.ts`, the steps cases of `browserCaptureService.test.ts`, `browserAutomationService.test.ts`, and `browserAutomationRoutes.test.ts`, `CodePullRequestPane.test.tsx`, and the desktop `browserProofSaver.test.ts` and `preload.test.ts`.

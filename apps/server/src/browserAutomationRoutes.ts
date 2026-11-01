@@ -25,6 +25,8 @@ import {
   decodeBrowserCaptureTakeCommand,
   decodeBrowserCapturesCommand,
   decodeBrowserCapturesResponse,
+  decodeBrowserStepsCommand,
+  decodeBrowserStepsResponse,
 } from "@octant/contracts/browser-capture";
 import type {
   BrowserAuthorityResolver,
@@ -65,7 +67,7 @@ export interface BrowserAutomationRouteDependencies {
   > &
     Partial<Pick<BrowserAutomationService, "peekThread" | "peekContext" | "profileOf">>;
   /** The thread's kept screenshots; absent on a host that keeps none. */
-  readonly captures?: Pick<BrowserCaptureService, "list" | "read">;
+  readonly captures?: Pick<BrowserCaptureService, "list" | "read" | "listSteps">;
   /**
    * Whether this window can open the thread, archived or not. Reading what a
    * thread kept asks this rather than live Browser authority, which an archived
@@ -361,6 +363,19 @@ export function createBrowserAutomationRouteHandler(
         return success(
           decodeBrowserCapturesResponse({
             captures: dependencies.captures?.list(input.threadId) ?? [],
+          }),
+          origin,
+        );
+      }
+      if (url.pathname === "/api/browser/steps") {
+        // The step list is the Browser's history beside the captures, so it
+        // answers the same callers: a local window that can open the thread.
+        const input = decodeBrowserStepsCommand(decoded.value);
+        const refusal = await captureReadRefusal(windowId, callerKind, input.threadId, origin);
+        if (refusal !== undefined) return refusal;
+        return success(
+          decodeBrowserStepsResponse({
+            steps: dependencies.captures?.listSteps(input.threadId) ?? [],
           }),
           origin,
         );
