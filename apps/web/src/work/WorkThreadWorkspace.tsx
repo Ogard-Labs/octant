@@ -127,6 +127,7 @@ import {
   scheduleVisibleInterval,
   waitUntilDocumentVisible,
 } from "../polling/documentVisibility";
+import { SelectionThreadScope } from "../transcript/SelectionThread";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { ImportedTerminalHistory } from "../terminalSessions/ImportedTerminalHistory";
 import {
@@ -1870,298 +1871,307 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         </OctantConfirmDialog>
       ) : null}
 
-      <TranscriptWindow
-        ariaLabel="Work transcript"
-        className="work-thread-workspace__conversation transcript-scroll"
-        estimateSize={92}
-        gap={20}
-        compactionSubject={threadCompactionSubject("work-thread", String(props.threadId))}
-        itemAt={workRowHappenedAt}
-        itemKey={(row) => row.key}
-        items={transcriptRows}
-        lead={
-          <>
-            <ImportedTerminalHistory
-              threadId={String(props.threadId)}
-              {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
-              {...(props.windowCapability === undefined
-                ? {}
-                : { windowCapability: props.windowCapability })}
-            />
-            {earlierRow === undefined ? null : (
-              <LoadEarlierMessages onLoad={() => void loadEarlier()} state={earlierRow} />
-            )}
-          </>
-        }
-        listClassName="thread-column"
-        {...(canvasClient === undefined
-          ? {}
-          : {
-              afterItem: (row: WorkTranscriptRow) => (
-                <>
-                  <ThreadCanvases
-                    cards={canvasPlacement.byRow.get(row.key)}
-                    client={canvasClient}
-                    {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}
-                  />
-                  {row.key === artifactsOfferRow ? (
-                    <ThreadArtifactsOffer
-                      onChoose={(choice) => void changeDocumentDelivery(choice)}
-                      pending={deliveryChanging}
-                    />
-                  ) : null}
-                </>
-              ),
-            })}
-        renderItem={(row) => {
-          if (row.kind === "empty") {
-            return (
-              <p className="work-thread-workspace__opening">
-                Describe what you want made. Files this task writes stay inside its folder.
-              </p>
-            );
+      <SelectionThreadScope mode="work" projectId={thread?.projectId ?? projectId}>
+        <TranscriptWindow
+          ariaLabel="Work transcript"
+          className="work-thread-workspace__conversation transcript-scroll"
+          estimateSize={92}
+          gap={20}
+          compactionSubject={threadCompactionSubject("work-thread", String(props.threadId))}
+          itemAt={workRowHappenedAt}
+          itemKey={(row) => row.key}
+          items={transcriptRows}
+          lead={
+            <>
+              <ImportedTerminalHistory
+                threadId={String(props.threadId)}
+                {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+                {...(props.windowCapability === undefined
+                  ? {}
+                  : { windowCapability: props.windowCapability })}
+              />
+              {earlierRow === undefined ? null : (
+                <LoadEarlierMessages onLoad={() => void loadEarlier()} state={earlierRow} />
+              )}
+            </>
           }
-          if (row.kind === "message") {
-            if (row.entry.role === "user") {
-              if (row.delivered === true) {
+          listClassName="thread-column"
+          {...(canvasClient === undefined
+            ? {}
+            : {
+                afterItem: (row: WorkTranscriptRow) => (
+                  <>
+                    <ThreadCanvases
+                      cards={canvasPlacement.byRow.get(row.key)}
+                      client={canvasClient}
+                      {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}
+                    />
+                    {row.key === artifactsOfferRow ? (
+                      <ThreadArtifactsOffer
+                        onChoose={(choice) => void changeDocumentDelivery(choice)}
+                        pending={deliveryChanging}
+                      />
+                    ) : null}
+                  </>
+                ),
+              })}
+          renderItem={(row) => {
+            if (row.kind === "empty") {
+              return (
+                <p className="work-thread-workspace__opening">
+                  Describe what you want made. Files this task writes stay inside its folder.
+                </p>
+              );
+            }
+            if (row.kind === "message") {
+              if (row.entry.role === "user") {
+                if (row.delivered === true) {
+                  return (
+                    <article aria-label="Subagent results" className="turn-child-result">
+                      <ChildResultCards
+                        providerGroups={props.providerGroups}
+                        text={row.entry.text}
+                      />
+                    </article>
+                  );
+                }
+                const followUpPrompt = parseAutomationFollowUpTurnPrompt(row.entry.text);
+                if (followUpPrompt !== undefined) {
+                  return (
+                    <article aria-label="Scheduled follow-up" className="turn-user">
+                      <ScheduledFollowUpMark />
+                      <div className="bubble">
+                        <TrackerReferenceText asParagraph text={followUpPrompt} />
+                      </div>
+                      {row.at === undefined ? null : (
+                        <TurnTime at={row.at} copyValue={followUpPrompt} />
+                      )}
+                    </article>
+                  );
+                }
                 return (
-                  <article aria-label="Subagent results" className="turn-child-result">
-                    <ChildResultCards providerGroups={props.providerGroups} text={row.entry.text} />
-                  </article>
-                );
-              }
-              const followUpPrompt = parseAutomationFollowUpTurnPrompt(row.entry.text);
-              if (followUpPrompt !== undefined) {
-                return (
-                  <article aria-label="Scheduled follow-up" className="turn-user">
-                    <ScheduledFollowUpMark />
+                  <article aria-label="Your message" className="turn-user">
                     <div className="bubble">
-                      <TrackerReferenceText asParagraph text={followUpPrompt} />
+                      <TrackerReferenceText asParagraph text={row.entry.text} />
                     </div>
                     {row.at === undefined ? null : (
-                      <TurnTime at={row.at} copyValue={followUpPrompt} />
+                      <TurnTime at={row.at} copyValue={row.entry.text} />
                     )}
                   </article>
                 );
               }
+              // A reply is markdown, as it is in Chat and Code: the same headings,
+              // lists, and code blocks render the same way here.
               return (
-                <article aria-label="Your message" className="turn-user">
-                  <div className="bubble">
-                    <TrackerReferenceText asParagraph text={row.entry.text} />
-                  </div>
-                  {row.at === undefined ? null : (
-                    <TurnTime at={row.at} copyValue={row.entry.text} />
+                <article aria-label="Assistant message" className="turn-agent">
+                  {row.head === undefined ? null : (
+                    <>
+                      <WorkTurnHeader
+                        copyValue={row.entry.text}
+                        onRestorePrompt={composerDraft.setDraft}
+                        onCancelResume={cancelUsageResume}
+                        onScheduleResume={scheduleUsageResume}
+                        providerGroups={props.providerGroups ?? []}
+                        resumable={
+                          String(row.head.turnId) === String(turns.at(-1)?.turnId) &&
+                          row.head.status === "waiting"
+                        }
+                        {...(thread?.snooze === undefined
+                          ? { onSnoozeAtReset: snoozeAtUsageReset }
+                          : {})}
+                        turn={row.head}
+                        {...(thread?.usageResume === undefined ||
+                        String(thread.usageResume.record.turnId) !== String(row.head.turnId)
+                          ? {}
+                          : { usageResume: thread.usageResume })}
+                      />
+                      <HarnessRetryStatus
+                        events={workRetryEvents(retries, String(row.head.requestId))}
+                      />
+                      <WorkToolGroup
+                        turn={row.head}
+                        {...(props.canvasClient === undefined
+                          ? {}
+                          : { canvasClient: props.canvasClient })}
+                      />
+                    </>
+                  )}
+                  {row.entry.text === "" ? null : (
+                    <AssistantMessageBody body={row.entry.text} streaming={row.streaming} />
                   )}
                 </article>
               );
             }
-            // A reply is markdown, as it is in Chat and Code: the same headings,
-            // lists, and code blocks render the same way here.
-            return (
-              <article aria-label="Assistant message" className="turn-agent">
-                {row.head === undefined ? null : (
-                  <>
-                    <WorkTurnHeader
-                      copyValue={row.entry.text}
-                      onRestorePrompt={composerDraft.setDraft}
-                      onCancelResume={cancelUsageResume}
-                      onScheduleResume={scheduleUsageResume}
-                      providerGroups={props.providerGroups ?? []}
-                      resumable={
-                        String(row.head.turnId) === String(turns.at(-1)?.turnId) &&
-                        row.head.status === "waiting"
-                      }
-                      {...(thread?.snooze === undefined
-                        ? { onSnoozeAtReset: snoozeAtUsageReset }
-                        : {})}
-                      turn={row.head}
-                      {...(thread?.usageResume === undefined ||
-                      String(thread.usageResume.record.turnId) !== String(row.head.turnId)
-                        ? {}
-                        : { usageResume: thread.usageResume })}
-                    />
-                    <HarnessRetryStatus
-                      events={workRetryEvents(retries, String(row.head.requestId))}
-                    />
-                    <WorkToolGroup
-                      turn={row.head}
-                      {...(props.canvasClient === undefined
-                        ? {}
-                        : { canvasClient: props.canvasClient })}
-                    />
-                  </>
-                )}
-                {row.entry.text === "" ? null : (
-                  <AssistantMessageBody body={row.entry.text} streaming={row.streaming} />
-                )}
-              </article>
-            );
-          }
-          if (row.kind === "head") {
-            return (
-              <div className="turn-agent">
-                <WorkTurnHeader
-                  onCancelResume={cancelUsageResume}
-                  onRestorePrompt={composerDraft.setDraft}
-                  onScheduleResume={scheduleUsageResume}
-                  providerGroups={props.providerGroups ?? []}
-                  resumable={
-                    String(row.turn.turnId) === String(turns.at(-1)?.turnId) &&
-                    row.turn.status === "waiting"
-                  }
-                  {...(thread?.snooze === undefined ? { onSnoozeAtReset: snoozeAtUsageReset } : {})}
-                  turn={row.turn}
-                  {...(thread?.usageResume === undefined ||
-                  String(thread.usageResume.record.turnId) !== String(row.turn.turnId)
-                    ? {}
-                    : { usageResume: thread.usageResume })}
-                />
-                <HarnessRetryStatus events={workRetryEvents(retries, String(row.turn.requestId))} />
-                <WorkToolGroup
-                  turn={row.turn}
-                  {...(props.canvasClient === undefined
-                    ? {}
-                    : { canvasClient: props.canvasClient })}
-                />
-              </div>
-            );
-          }
-          if (row.kind === "files") {
-            return (
-              <section
-                aria-label="Files this turn changed"
-                className="work-thread-workspace__files"
-              >
-                <h3 className="oct-section-label">
-                  {/* A watcher that failed reports no paths and marks itself
+            if (row.kind === "head") {
+              return (
+                <div className="turn-agent">
+                  <WorkTurnHeader
+                    onCancelResume={cancelUsageResume}
+                    onRestorePrompt={composerDraft.setDraft}
+                    onScheduleResume={scheduleUsageResume}
+                    providerGroups={props.providerGroups ?? []}
+                    resumable={
+                      String(row.turn.turnId) === String(turns.at(-1)?.turnId) &&
+                      row.turn.status === "waiting"
+                    }
+                    {...(thread?.snooze === undefined
+                      ? { onSnoozeAtReset: snoozeAtUsageReset }
+                      : {})}
+                    turn={row.turn}
+                    {...(thread?.usageResume === undefined ||
+                    String(thread.usageResume.record.turnId) !== String(row.turn.turnId)
+                      ? {}
+                      : { usageResume: thread.usageResume })}
+                  />
+                  <HarnessRetryStatus
+                    events={workRetryEvents(retries, String(row.turn.requestId))}
+                  />
+                  <WorkToolGroup
+                    turn={row.turn}
+                    {...(props.canvasClient === undefined
+                      ? {}
+                      : { canvasClient: props.canvasClient })}
+                  />
+                </div>
+              );
+            }
+            if (row.kind === "files") {
+              return (
+                <section
+                  aria-label="Files this turn changed"
+                  className="work-thread-workspace__files"
+                >
+                  <h3 className="oct-section-label">
+                    {/* A watcher that failed reports no paths and marks itself
                       truncated. Counting that as zero told the person nothing
                       changed, which is not what the host observed. An empty
                       list that is not truncated really is nothing. */}
-                  {row.wrote.paths.length === 0 && row.wrote.truncated
-                    ? "Changed files could not be observed while this ran"
-                    : row.wrote.paths.length === 1
-                      ? "1 file changed while this ran"
-                      : `${String(row.wrote.paths.length)} files changed while this ran`}
-                </h3>
-                <ul className="work-thread-workspace__file-list">
-                  {row.wrote.paths.map((path) => (
-                    <li className="work-thread-workspace__file" key={path}>
-                      <FileText aria-hidden="true" size={14} strokeWidth={1.7} />
-                      <span>{path}</span>
-                    </li>
-                  ))}
-                </ul>
-                {row.wrote.truncated ? (
-                  <p className="oct-row-detail" role="status">
-                    {/* "More changed" claims a file changed. A watcher that
+                    {row.wrote.paths.length === 0 && row.wrote.truncated
+                      ? "Changed files could not be observed while this ran"
+                      : row.wrote.paths.length === 1
+                        ? "1 file changed while this ran"
+                        : `${String(row.wrote.paths.length)} files changed while this ran`}
+                  </h3>
+                  <ul className="work-thread-workspace__file-list">
+                    {row.wrote.paths.map((path) => (
+                      <li className="work-thread-workspace__file" key={path}>
+                        <FileText aria-hidden="true" size={14} strokeWidth={1.7} />
+                        <span>{path}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  {row.wrote.truncated ? (
+                    <p className="oct-row-detail" role="status">
+                      {/* "More changed" claims a file changed. A watcher that
                         failed establishes no such thing. */}
-                    {row.wrote.paths.length === 0
-                      ? "Octant could not watch the folder while this ran. Open Files for the folder itself."
-                      : "More changed than Octant could record. Open Files for the folder itself."}
-                  </p>
-                ) : null}
-              </section>
-            );
-          }
-          if (row.kind === "tasks") {
-            return (
-              <ThreadTasksPanel
-                tasks={{
-                  running: row.turn.status === "accepted" || row.turn.status === "running",
-                  tasks: row.tasks.map((task) => ({
-                    id: task.taskId,
-                    state: task.state,
-                    summary: task.summary,
-                  })),
-                }}
-              />
-            );
-          }
-          if (row.kind === "request") {
-            if (props.requestClient !== undefined && row.request.detail.kind === "approval") {
+                      {row.wrote.paths.length === 0
+                        ? "Octant could not watch the folder while this ran. Open Files for the folder itself."
+                        : "More changed than Octant could record. Open Files for the folder itself."}
+                    </p>
+                  ) : null}
+                </section>
+              );
+            }
+            if (row.kind === "tasks") {
               return (
-                <ProviderApprovalPrompt
-                  onAnswer={(decision) => {
-                    void answerWorkRequest(row.request, {
-                      kind: "approval",
-                      approved: decision === "approved",
-                    });
+                <ThreadTasksPanel
+                  tasks={{
+                    running: row.turn.status === "accepted" || row.turn.status === "running",
+                    tasks: row.tasks.map((task) => ({
+                      id: task.taskId,
+                      state: task.state,
+                      summary: task.summary,
+                    })),
                   }}
-                  summary={`${row.request.detail.action}: ${row.request.detail.description}`}
                 />
               );
             }
-            if (props.requestClient !== undefined && row.request.detail.kind === "user-input") {
-              return (
-                <ProviderQuestionCard
-                  onAnswer={(answer) => {
-                    void answerWorkRequest(row.request, { kind: "user-input", answer });
-                  }}
-                  options={row.request.detail.options.map((label) => ({ label }))}
-                  prompt={row.request.detail.prompt}
-                />
-              );
-            }
-            return (
-              <div className="approval-row approval-row--request" role="status">
-                <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
-                <span className="approval-row__text">
-                  {row.request.detail.kind === "approval"
-                    ? `Approval required — ${row.request.detail.action}: ${row.request.detail.description}`
-                    : `Input required — ${row.request.detail.prompt}`}
-                </span>
-              </div>
-            );
-          }
-          return (
-            // The surrounding list is already a live region; a nested status
-            // here would announce the same trail line twice.
-            <p className="oct-row-detail">{row.text}</p>
-          );
-        }}
-        restoreKey={`work:${String(props.threadId)}`}
-        role="log"
-        trail={
-          (props.imageGenerationClient === undefined ||
-            props.imageGenerationProfiles === undefined) &&
-          props.browserAutomationClient === undefined ? null : (
-            <div className="work-thread-workspace__transcript-trail">
-              {props.imageGenerationClient === undefined ||
-              props.imageGenerationProfiles === undefined ? null : (
-                <GeneratedImageList
-                  canSaveToProject
-                  client={props.imageGenerationClient}
-                  onAttach={(file) => images.attach([file])}
-                  onSaveToProject={(job, artifact) => {
-                    void props.imageGenerationClient
-                      ?.save({
-                        jobId: job.id,
-                        attachmentId: artifact.attachmentId,
-                        relativePath: `generated/${String(artifact.attachmentId).slice(0, 8)}.png`,
-                      })
-                      .then((result) => {
-                        if (result.status === "saved") setStatus(`Saved ${result.relativePath}.`);
-                        else setStatus(result.reason);
-                      })
-                      .catch(() => {
-                        setStatus("The image could not be saved.");
+            if (row.kind === "request") {
+              if (props.requestClient !== undefined && row.request.detail.kind === "approval") {
+                return (
+                  <ProviderApprovalPrompt
+                    onAnswer={(decision) => {
+                      void answerWorkRequest(row.request, {
+                        kind: "approval",
+                        approved: decision === "approved",
                       });
-                  }}
-                  profiles={props.imageGenerationProfiles}
-                  scopeId={decodeImageGenerationScopeId(String(props.threadId))}
-                  threadKind="work-thread"
-                />
-              )}
-              {props.browserAutomationClient === undefined ? null : (
-                <BrowserCaptureList
-                  client={props.browserAutomationClient}
-                  threadId={decodeBrowserThreadId(String(props.threadId))}
-                />
-              )}
-            </div>
-          )
-        }
-      />
+                    }}
+                    summary={`${row.request.detail.action}: ${row.request.detail.description}`}
+                  />
+                );
+              }
+              if (props.requestClient !== undefined && row.request.detail.kind === "user-input") {
+                return (
+                  <ProviderQuestionCard
+                    onAnswer={(answer) => {
+                      void answerWorkRequest(row.request, { kind: "user-input", answer });
+                    }}
+                    options={row.request.detail.options.map((label) => ({ label }))}
+                    prompt={row.request.detail.prompt}
+                  />
+                );
+              }
+              return (
+                <div className="approval-row approval-row--request" role="status">
+                  <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
+                  <span className="approval-row__text">
+                    {row.request.detail.kind === "approval"
+                      ? `Approval required — ${row.request.detail.action}: ${row.request.detail.description}`
+                      : `Input required — ${row.request.detail.prompt}`}
+                  </span>
+                </div>
+              );
+            }
+            return (
+              // The surrounding list is already a live region; a nested status
+              // here would announce the same trail line twice.
+              <p className="oct-row-detail">{row.text}</p>
+            );
+          }}
+          restoreKey={`work:${String(props.threadId)}`}
+          role="log"
+          trail={
+            (props.imageGenerationClient === undefined ||
+              props.imageGenerationProfiles === undefined) &&
+            props.browserAutomationClient === undefined ? null : (
+              <div className="work-thread-workspace__transcript-trail">
+                {props.imageGenerationClient === undefined ||
+                props.imageGenerationProfiles === undefined ? null : (
+                  <GeneratedImageList
+                    canSaveToProject
+                    client={props.imageGenerationClient}
+                    onAttach={(file) => images.attach([file])}
+                    onSaveToProject={(job, artifact) => {
+                      void props.imageGenerationClient
+                        ?.save({
+                          jobId: job.id,
+                          attachmentId: artifact.attachmentId,
+                          relativePath: `generated/${String(artifact.attachmentId).slice(0, 8)}.png`,
+                        })
+                        .then((result) => {
+                          if (result.status === "saved") setStatus(`Saved ${result.relativePath}.`);
+                          else setStatus(result.reason);
+                        })
+                        .catch(() => {
+                          setStatus("The image could not be saved.");
+                        });
+                    }}
+                    profiles={props.imageGenerationProfiles}
+                    scopeId={decodeImageGenerationScopeId(String(props.threadId))}
+                    threadKind="work-thread"
+                  />
+                )}
+                {props.browserAutomationClient === undefined ? null : (
+                  <BrowserCaptureList
+                    client={props.browserAutomationClient}
+                    threadId={decodeBrowserThreadId(String(props.threadId))}
+                  />
+                )}
+              </div>
+            )
+          }
+        />
+      </SelectionThreadScope>
 
       {props.canvasClient === undefined ? null : (
         <div className="thread-column">

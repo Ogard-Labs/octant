@@ -449,3 +449,15 @@ Octant sends only the new message and never silently starts a replacement sessio
 If the saved session cannot be resumed, the task reports that failure. Older tasks
 without a saved session reference need a new task; a host restart also requires
 an adapter that supports durable resume identity.
+
+## Find in a thread
+
+Press **⌘/Ctrl+F** in an open thread to search its conversation. A bar at the top
+shows "n of m", highlights each match, and moves with **Enter** (next) and
+**Shift+Enter** (previous). **Escape** closes it. Inside the code editor or a
+terminal, ⌘/Ctrl+F stays with that tool.
+
+Select text in one of the agent's replies and choose **New thread from
+selection**, from the small button under the reply or the right-click menu. A
+new Code draft opens in the same Project with your selection quoted at the top.
+Nothing is sent until you send it.

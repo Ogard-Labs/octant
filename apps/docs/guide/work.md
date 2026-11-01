@@ -240,6 +240,18 @@ on another provider or model; if the computer was asleep, it runs when Octant
 is back, unless it is more than a day late, in which case it is recorded as
 missed. Automation Center keeps its history. Chat threads have no follow-ups.
 
+## Find in a thread
+
+Press **⌘/Ctrl+F** in an open thread to search its conversation. A bar at the top
+shows "n of m", highlights each match, and moves with **Enter** (next) and
+**Shift+Enter** (previous). **Escape** closes it. Inside the code editor or a
+terminal, ⌘/Ctrl+F stays with that tool.
+
+Select text in one of the agent's replies and choose **New thread from
+selection**, from the small button under the reply or the right-click menu. A
+new Work draft opens in the same Project with your selection quoted at the top.
+Nothing is sent until you send it.
+
 ## Next steps
 
 - [Work Thread Board](/advanced/work-board) for derived status, grouping, and marking a thread Done

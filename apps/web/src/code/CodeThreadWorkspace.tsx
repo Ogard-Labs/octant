@@ -107,6 +107,7 @@ import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApproval
 import { RoutineProposalPrompt } from "../automation/RoutineProposalPrompt";
 import { TerminalBrowserApprovalPrompt } from "./TerminalBrowserApprovalPrompt";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
+import { SelectionThreadScope } from "../transcript/SelectionThread";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { LoadEarlierMessages } from "../transcript/LoadEarlierMessages";
 import { ImportedTerminalHistory } from "../terminalSessions/ImportedTerminalHistory";
@@ -1298,367 +1299,372 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           </div>
         </div>
       ) : (
-        <TranscriptWindow
-          className="code-thread-workspace__conversation transcript-scroll"
-          estimateSize={96}
-          gap={20}
-          compactionSubject={threadCompactionSubject("code-thread", String(props.threadId))}
-          itemAt={messageHappenedAt}
-          itemKey={(message) => message.id}
-          items={messages}
-          key={String(props.threadId)}
-          listClassName="code-thread-workspace__transcript thread-column"
-          {...(confirmingRestore === undefined ? {} : { pinnedKeys: [confirmingRestore] })}
-          lead={
-            <>
-              <ImportedTerminalHistory
-                threadId={String(props.threadId)}
-                {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
-                {...(props.windowCapability === undefined
-                  ? {}
-                  : { windowCapability: props.windowCapability })}
-              />
-              {props.controller.earlierConversation === undefined ? null : (
-                <LoadEarlierMessages
-                  onLoad={props.controller.loadEarlierConversation}
-                  state={props.controller.earlierConversation}
-                />
-              )}
-            </>
-          }
-          {...(canvasClient === undefined
-            ? {}
-            : {
-                afterItem: (message: (typeof messages)[number]) => (
-                  <>
-                    <ThreadCanvases
-                      cards={canvasPlacement.byRow.get(message.id)}
-                      client={canvasClient}
-                      {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}
-                    />
-                    {message.id === artifactsOfferRow ? (
-                      <ThreadArtifactsOffer
-                        onChoose={(choice) => void changeDocumentDelivery(choice)}
-                        pending={deliveryChanging}
-                      />
-                    ) : null}
-                  </>
-                ),
-              })}
-          renderItem={(message, index) => {
-            const previousAssistant = previousAssistantMessage(messages, index);
-            const handoff =
-              message.role === "assistant" && previousAssistant !== undefined
-                ? providerIdentityChange(previousAssistant, message)
-                : undefined;
-            const activity =
-              message.role === "assistant" && message.operationId !== undefined
-                ? props.controller.turnActivity.get(String(message.operationId))
-                : undefined;
-            const markedCheckpoint =
-              message.operationId === undefined
-                ? undefined
-                : checkpoints.byAnchor.get(String(message.operationId));
-            const gallery =
-              message.attachments === undefined ? null : (
-                <CodeAttachmentGallery
-                  attachments={message.attachments}
-                  {...(props.attachmentClient === undefined
+        <SelectionThreadScope mode="code" projectId={view?.thread.projectId}>
+          <TranscriptWindow
+            className="code-thread-workspace__conversation transcript-scroll"
+            estimateSize={96}
+            gap={20}
+            compactionSubject={threadCompactionSubject("code-thread", String(props.threadId))}
+            itemAt={messageHappenedAt}
+            itemKey={(message) => message.id}
+            items={messages}
+            key={String(props.threadId)}
+            listClassName="code-thread-workspace__transcript thread-column"
+            {...(confirmingRestore === undefined ? {} : { pinnedKeys: [confirmingRestore] })}
+            lead={
+              <>
+                <ImportedTerminalHistory
+                  threadId={String(props.threadId)}
+                  {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+                  {...(props.windowCapability === undefined
                     ? {}
-                    : { client: props.attachmentClient })}
-                  threadId={message.sourceThreadId ?? props.threadId}
+                    : { windowCapability: props.windowCapability })}
                 />
-              );
-            // Code's conversation turns do not carry the delivery mark, so the
-            // host's own delivery wording is what says this is a subagent's
-            // result and not something the person typed.
-            const delivered = message.role === "user" && isChildResultDelivery(message.text);
-            // A follow-up's turn is marked the same way, by the host's heading.
-            const followUpPrompt =
-              message.role === "user" ? parseAutomationFollowUpTurnPrompt(message.text) : undefined;
-            const workedFor =
-              message.role === "assistant" &&
-              message.status === "completed" &&
-              message.startedAt !== undefined &&
-              message.at !== undefined
-                ? turnWorkedFor("completed", message.startedAt, message.at)
-                : undefined;
-            return (
-              <div className="code-thread-workspace__row">
-                {handoff === "provider" ? (
-                  <OctantSeparatorWithLabel aria-label="Provider handoff">
-                    Provider handoff ·{" "}
-                    {providerModelLabel(providerGroups, {
-                      providerInstanceId: message.providerInstanceId,
-                      modelId: message.modelId,
-                    })}
-                  </OctantSeparatorWithLabel>
-                ) : handoff === "model" ? (
-                  <OctantSeparatorWithLabel aria-label="Model switch">
-                    Switched to{" "}
-                    {modelDisplayName(providerGroups, {
-                      providerInstanceId: message.providerInstanceId,
-                      modelId: message.modelId,
-                    })}
-                  </OctantSeparatorWithLabel>
-                ) : null}
-                {message.role === "assistant" && message.handoff !== undefined ? (
-                  <p className="code-thread-workspace__handoff" role="note">
-                    {conversationHandoffDisclosure(message.handoff, (selection) =>
-                      providerModelLabel(providerGroups, selection),
-                    )}
-                  </p>
-                ) : null}
-                {message.role === "assistant"
-                  ? (message.forkMergeBacks ?? []).map((mergeBack) => (
-                      <p
-                        className="code-thread-workspace__handoff"
-                        key={`${String(mergeBack.forkThreadId)}:${String(mergeBack.throughOperationId)}`}
-                        role="note"
-                      >
-                        {forkMergeBackDisclosure(mergeBack)}
-                      </p>
-                    ))
-                  : null}
-                <article
-                  aria-label={
-                    delivered
-                      ? "Subagent results"
-                      : followUpPrompt !== undefined
-                        ? "Scheduled follow-up"
-                        : message.role === "user"
-                          ? "Your message"
-                          : "Assistant message"
-                  }
-                  className={`code-thread-workspace__message ${delivered ? "turn-child-result" : message.role === "user" ? "turn-user" : "turn-agent"}`}
-                >
-                  <TurnActionMenu
-                    actions={codeTurnActions({
-                      canFork:
-                        message.role === "assistant" &&
-                        message.operationId !== undefined &&
-                        message.status === "completed" &&
-                        props.onOpenCodeThread !== undefined,
-                      // A fork's own finished replies; inherited ones are the source's.
-                      canMergeBack:
-                        view?.thread.forkedFrom !== undefined &&
-                        message.sourceThreadId === undefined &&
-                        message.role === "assistant" &&
-                        message.operationId !== undefined &&
-                        message.status === "completed",
-                      merging,
-                      canCopyMarkdown:
-                        message.role === "assistant" &&
-                        message.status === "completed" &&
-                        message.text.trim().length > 0,
-                      canCheckpoint:
-                        message.sourceThreadId === undefined &&
-                        message.role === "assistant" &&
-                        message.operationId !== undefined &&
-                        message.status === "completed" &&
-                        checkpoints.available,
-                      canRestoreFiles:
-                        message.sourceThreadId === undefined &&
-                        message.role === "user" &&
-                        message.checkpoint !== undefined &&
-                        mayRestore,
-                      checkpointBusy: checkpoints.busy,
-                      forking,
-                      marked: markedCheckpoint !== undefined,
-                      restoring,
-                    })}
-                    onAction={(value) => {
-                      if (value === "fork") void forkFrom(message);
-                      else if (value === "merge-back") void mergeBackThrough(message);
-                      else if (value === "checkpoint-mark") {
-                        setCheckpointDraft({ messageId: message.id, kind: "mark" });
-                      } else if (value === "checkpoint-restore") {
-                        setCheckpointDraft({ messageId: message.id, kind: "restore" });
-                      } else if (value === "checkpoint-forget") {
-                        if (markedCheckpoint !== undefined)
-                          void checkpoints.forget(markedCheckpoint);
-                      } else if (value === "restore-files") {
-                        setRestoreMessage(undefined);
-                        setConfirmingRestore(message.id);
-                      } else if (value === "copy-markdown") {
-                        void copyText(message.text);
-                      } else if (value === "copy-references") {
-                        void copyText(message.text);
-                      }
-                    }}
-                  >
-                    {delivered ? (
-                      <ChildResultCards providerGroups={providerGroups} text={message.text} />
-                    ) : message.role === "user" ? (
-                      <>
-                        {/* What the user typed stays exactly as they typed it,
-                            in the shared bubble, with the time beneath it. */}
-                        {followUpPrompt === undefined ? null : <ScheduledFollowUpMark />}
-                        <div className="bubble">
-                          {gallery}
-                          {message.text.length > 0 ? (
-                            <TrackerReferenceText
-                              asParagraph
-                              text={followUpPrompt ?? message.text}
-                            />
-                          ) : null}
-                        </div>
-                        {message.at === undefined ? null : (
-                          <TurnTime at={message.at} copyValue={message.text} />
-                        )}
-                      </>
-                    ) : (
-                      <>
-                        <TurnHeader
-                          copyValue={message.text}
-                          onFork={
-                            message.operationId !== undefined &&
-                            message.status === "completed" &&
-                            props.onOpenCodeThread !== undefined
-                              ? () => void forkFrom(message)
-                              : undefined
-                          }
-                          forkDisabled={forking}
-                          outcome={turnHeaderOutcome(message.status)}
-                          {...(workedFor === undefined ? {} : { workedFor })}
-                          provider={
-                            message.providerInstanceId === undefined ||
-                            message.modelId === undefined
-                              ? "Octant Code"
-                              : providerModelLabel(providerGroups, {
-                                  providerInstanceId: message.providerInstanceId,
-                                  modelId: message.modelId,
-                                })
-                          }
-                          {...(message.status === undefined || message.status === "completed"
-                            ? {}
-                            : {
-                                label: turnStatusLabel(
-                                  message.status,
-                                  props.controller.providerRequests,
-                                ),
-                              })}
-                          {...(message.at === undefined ? {} : { at: message.at })}
+                {props.controller.earlierConversation === undefined ? null : (
+                  <LoadEarlierMessages
+                    onLoad={props.controller.loadEarlierConversation}
+                    state={props.controller.earlierConversation}
+                  />
+                )}
+              </>
+            }
+            {...(canvasClient === undefined
+              ? {}
+              : {
+                  afterItem: (message: (typeof messages)[number]) => (
+                    <>
+                      <ThreadCanvases
+                        cards={canvasPlacement.byRow.get(message.id)}
+                        client={canvasClient}
+                        {...(openInSidebar === undefined ? {} : { onOpen: openInSidebar })}
+                      />
+                      {message.id === artifactsOfferRow ? (
+                        <ThreadArtifactsOffer
+                          onChoose={(choice) => void changeDocumentDelivery(choice)}
+                          pending={deliveryChanging}
                         />
-                        {activity?.retrying === undefined ? null : (
-                          <HarnessRetryStatus
-                            events={[
-                              {
-                                kind: "retrying",
-                                attempt: activity.retrying.attempt,
-                                maxAttempts: activity.retrying.maxAttempts,
-                                delayMs: activity.retrying.delayMs,
-                                reason: activity.retrying.reason,
-                                announcedAt: activity.retrying.announcedAt,
-                              },
-                            ]}
-                          />
-                        )}
-                        {gallery}
-                        {activity === undefined ? null : (
-                          <TurnActivityRows
-                            activity={activity}
-                            publishedSnapshotRuntime={(toolCallId) =>
-                              publishedSnapshotRunRuntimeFor(props.canvasClient, {
-                                mode: "code",
-                                threadId: String(thread.id),
-                                toolCallId,
-                              })
+                      ) : null}
+                    </>
+                  ),
+                })}
+            renderItem={(message, index) => {
+              const previousAssistant = previousAssistantMessage(messages, index);
+              const handoff =
+                message.role === "assistant" && previousAssistant !== undefined
+                  ? providerIdentityChange(previousAssistant, message)
+                  : undefined;
+              const activity =
+                message.role === "assistant" && message.operationId !== undefined
+                  ? props.controller.turnActivity.get(String(message.operationId))
+                  : undefined;
+              const markedCheckpoint =
+                message.operationId === undefined
+                  ? undefined
+                  : checkpoints.byAnchor.get(String(message.operationId));
+              const gallery =
+                message.attachments === undefined ? null : (
+                  <CodeAttachmentGallery
+                    attachments={message.attachments}
+                    {...(props.attachmentClient === undefined
+                      ? {}
+                      : { client: props.attachmentClient })}
+                    threadId={message.sourceThreadId ?? props.threadId}
+                  />
+                );
+              // Code's conversation turns do not carry the delivery mark, so the
+              // host's own delivery wording is what says this is a subagent's
+              // result and not something the person typed.
+              const delivered = message.role === "user" && isChildResultDelivery(message.text);
+              // A follow-up's turn is marked the same way, by the host's heading.
+              const followUpPrompt =
+                message.role === "user"
+                  ? parseAutomationFollowUpTurnPrompt(message.text)
+                  : undefined;
+              const workedFor =
+                message.role === "assistant" &&
+                message.status === "completed" &&
+                message.startedAt !== undefined &&
+                message.at !== undefined
+                  ? turnWorkedFor("completed", message.startedAt, message.at)
+                  : undefined;
+              return (
+                <div className="code-thread-workspace__row">
+                  {handoff === "provider" ? (
+                    <OctantSeparatorWithLabel aria-label="Provider handoff">
+                      Provider handoff ·{" "}
+                      {providerModelLabel(providerGroups, {
+                        providerInstanceId: message.providerInstanceId,
+                        modelId: message.modelId,
+                      })}
+                    </OctantSeparatorWithLabel>
+                  ) : handoff === "model" ? (
+                    <OctantSeparatorWithLabel aria-label="Model switch">
+                      Switched to{" "}
+                      {modelDisplayName(providerGroups, {
+                        providerInstanceId: message.providerInstanceId,
+                        modelId: message.modelId,
+                      })}
+                    </OctantSeparatorWithLabel>
+                  ) : null}
+                  {message.role === "assistant" && message.handoff !== undefined ? (
+                    <p className="code-thread-workspace__handoff" role="note">
+                      {conversationHandoffDisclosure(message.handoff, (selection) =>
+                        providerModelLabel(providerGroups, selection),
+                      )}
+                    </p>
+                  ) : null}
+                  {message.role === "assistant"
+                    ? (message.forkMergeBacks ?? []).map((mergeBack) => (
+                        <p
+                          className="code-thread-workspace__handoff"
+                          key={`${String(mergeBack.forkThreadId)}:${String(mergeBack.throughOperationId)}`}
+                          role="note"
+                        >
+                          {forkMergeBackDisclosure(mergeBack)}
+                        </p>
+                      ))
+                    : null}
+                  <article
+                    aria-label={
+                      delivered
+                        ? "Subagent results"
+                        : followUpPrompt !== undefined
+                          ? "Scheduled follow-up"
+                          : message.role === "user"
+                            ? "Your message"
+                            : "Assistant message"
+                    }
+                    className={`code-thread-workspace__message ${delivered ? "turn-child-result" : message.role === "user" ? "turn-user" : "turn-agent"}`}
+                  >
+                    <TurnActionMenu
+                      actions={codeTurnActions({
+                        canFork:
+                          message.role === "assistant" &&
+                          message.operationId !== undefined &&
+                          message.status === "completed" &&
+                          props.onOpenCodeThread !== undefined,
+                        // A fork's own finished replies; inherited ones are the source's.
+                        canMergeBack:
+                          view?.thread.forkedFrom !== undefined &&
+                          message.sourceThreadId === undefined &&
+                          message.role === "assistant" &&
+                          message.operationId !== undefined &&
+                          message.status === "completed",
+                        merging,
+                        canCopyMarkdown:
+                          message.role === "assistant" &&
+                          message.status === "completed" &&
+                          message.text.trim().length > 0,
+                        canCheckpoint:
+                          message.sourceThreadId === undefined &&
+                          message.role === "assistant" &&
+                          message.operationId !== undefined &&
+                          message.status === "completed" &&
+                          checkpoints.available,
+                        canRestoreFiles:
+                          message.sourceThreadId === undefined &&
+                          message.role === "user" &&
+                          message.checkpoint !== undefined &&
+                          mayRestore,
+                        checkpointBusy: checkpoints.busy,
+                        forking,
+                        marked: markedCheckpoint !== undefined,
+                        restoring,
+                      })}
+                      onAction={(value) => {
+                        if (value === "fork") void forkFrom(message);
+                        else if (value === "merge-back") void mergeBackThrough(message);
+                        else if (value === "checkpoint-mark") {
+                          setCheckpointDraft({ messageId: message.id, kind: "mark" });
+                        } else if (value === "checkpoint-restore") {
+                          setCheckpointDraft({ messageId: message.id, kind: "restore" });
+                        } else if (value === "checkpoint-forget") {
+                          if (markedCheckpoint !== undefined)
+                            void checkpoints.forget(markedCheckpoint);
+                        } else if (value === "restore-files") {
+                          setRestoreMessage(undefined);
+                          setConfirmingRestore(message.id);
+                        } else if (value === "copy-markdown") {
+                          void copyText(message.text);
+                        } else if (value === "copy-references") {
+                          void copyText(message.text);
+                        }
+                      }}
+                    >
+                      {delivered ? (
+                        <ChildResultCards providerGroups={providerGroups} text={message.text} />
+                      ) : message.role === "user" ? (
+                        <>
+                          {/* What the user typed stays exactly as they typed it,
+                            in the shared bubble, with the time beneath it. */}
+                          {followUpPrompt === undefined ? null : <ScheduledFollowUpMark />}
+                          <div className="bubble">
+                            {gallery}
+                            {message.text.length > 0 ? (
+                              <TrackerReferenceText
+                                asParagraph
+                                text={followUpPrompt ?? message.text}
+                              />
+                            ) : null}
+                          </div>
+                          {message.at === undefined ? null : (
+                            <TurnTime at={message.at} copyValue={message.text} />
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <TurnHeader
+                            copyValue={message.text}
+                            onFork={
+                              message.operationId !== undefined &&
+                              message.status === "completed" &&
+                              props.onOpenCodeThread !== undefined
+                                ? () => void forkFrom(message)
+                                : undefined
                             }
-                            running={message.status === "incomplete"}
-                            settled={
-                              message.status === "completed" ||
-                              message.status === "failed" ||
-                              message.status === "interrupted"
+                            forkDisabled={forking}
+                            outcome={turnHeaderOutcome(message.status)}
+                            {...(workedFor === undefined ? {} : { workedFor })}
+                            provider={
+                              message.providerInstanceId === undefined ||
+                              message.modelId === undefined
+                                ? "Octant Code"
+                                : providerModelLabel(providerGroups, {
+                                    providerInstanceId: message.providerInstanceId,
+                                    modelId: message.modelId,
+                                  })
                             }
+                            {...(message.status === undefined || message.status === "completed"
+                              ? {}
+                              : {
+                                  label: turnStatusLabel(
+                                    message.status,
+                                    props.controller.providerRequests,
+                                  ),
+                                })}
+                            {...(message.at === undefined ? {} : { at: message.at })}
                           />
-                        )}
-                        {/* An assistant reply is markdown — a plan arrives as a
+                          {activity?.retrying === undefined ? null : (
+                            <HarnessRetryStatus
+                              events={[
+                                {
+                                  kind: "retrying",
+                                  attempt: activity.retrying.attempt,
+                                  maxAttempts: activity.retrying.maxAttempts,
+                                  delayMs: activity.retrying.delayMs,
+                                  reason: activity.retrying.reason,
+                                  announcedAt: activity.retrying.announcedAt,
+                                },
+                              ]}
+                            />
+                          )}
+                          {gallery}
+                          {activity === undefined ? null : (
+                            <TurnActivityRows
+                              activity={activity}
+                              publishedSnapshotRuntime={(toolCallId) =>
+                                publishedSnapshotRunRuntimeFor(props.canvasClient, {
+                                  mode: "code",
+                                  threadId: String(thread.id),
+                                  toolCallId,
+                                })
+                              }
+                              running={message.status === "incomplete"}
+                              settled={
+                                message.status === "completed" ||
+                                message.status === "failed" ||
+                                message.status === "interrupted"
+                              }
+                            />
+                          )}
+                          {/* An assistant reply is markdown — a plan arrives as a
                             heading and a numbered list, and rendering it as one
                             long line is what made plans unreadable here. */}
-                        {message.text.length > 0 ? (
-                          <AssistantMessageBody
-                            body={message.text}
-                            streaming={
-                              message.status === "incomplete" || message.status === "waiting"
-                            }
-                          />
-                        ) : (
-                          <p>{busy ? "Thinking…" : ""}</p>
-                        )}
-                      </>
-                    )}
-                    {/* After the reply, like Work's: the files are what the turn
-                        left behind, read once the answer has been. */}
-                    {message.role === "assistant" && message.changedFiles !== undefined ? (
-                      <CodeTurnChangedFilesCard changedFiles={message.changedFiles} />
-                    ) : null}
-                    {(markedCheckpoint !== undefined ||
-                      checkpointDraft?.messageId === message.id) &&
-                    message.role === "assistant" &&
-                    message.operationId !== undefined &&
-                    message.status === "completed" &&
-                    checkpoints.available ? (
-                      <footer className="code-thread-workspace__checkpoint">
-                        <ThreadCheckpointControls
-                          busy={checkpoints.busy}
-                          {...(markedCheckpoint === undefined
-                            ? {}
-                            : { checkpoint: markedCheckpoint })}
-                          defaultLabel="Checkpoint"
-                          {...(checkpointDraft?.messageId === message.id
-                            ? { draft: checkpointDraft.kind }
-                            : {})}
-                          onCancelDraft={() => setCheckpointDraft(undefined)}
-                          onMark={(label) => {
-                            const operationId = message.operationId;
-                            if (operationId === undefined || view === undefined) return;
-                            void checkpoints.mark(
-                              { mode: "code", threadId: view.thread.id, operationId },
-                              label,
-                            );
-                            setCheckpointDraft(undefined);
-                          }}
-                          onRestore={(title) => {
-                            const activeView = view;
-                            if (markedCheckpoint === undefined || activeView === undefined) return;
-                            setCheckpointDraft(undefined);
-                            void (async () => {
-                              const restored = await checkpoints.restore(markedCheckpoint, title);
-                              // The new thread runs on its own worktree at the
-                              // marked revision; opening it is what makes that
-                              // visible, and this thread is untouched either way.
-                              if (restored?.mode === "code") {
-                                props.onOpenCodeThread?.(
-                                  restored.threadId,
-                                  title,
-                                  activeView.thread.projectId,
-                                );
+                          {message.text.length > 0 ? (
+                            <AssistantMessageBody
+                              body={message.text}
+                              streaming={
+                                message.status === "incomplete" || message.status === "waiting"
                               }
-                            })();
-                          }}
+                            />
+                          ) : (
+                            <p>{busy ? "Thinking…" : ""}</p>
+                          )}
+                        </>
+                      )}
+                      {/* After the reply, like Work's: the files are what the turn
+                        left behind, read once the answer has been. */}
+                      {message.role === "assistant" && message.changedFiles !== undefined ? (
+                        <CodeTurnChangedFilesCard changedFiles={message.changedFiles} />
+                      ) : null}
+                      {(markedCheckpoint !== undefined ||
+                        checkpointDraft?.messageId === message.id) &&
+                      message.role === "assistant" &&
+                      message.operationId !== undefined &&
+                      message.status === "completed" &&
+                      checkpoints.available ? (
+                        <footer className="code-thread-workspace__checkpoint">
+                          <ThreadCheckpointControls
+                            busy={checkpoints.busy}
+                            {...(markedCheckpoint === undefined
+                              ? {}
+                              : { checkpoint: markedCheckpoint })}
+                            defaultLabel="Checkpoint"
+                            {...(checkpointDraft?.messageId === message.id
+                              ? { draft: checkpointDraft.kind }
+                              : {})}
+                            onCancelDraft={() => setCheckpointDraft(undefined)}
+                            onMark={(label) => {
+                              const operationId = message.operationId;
+                              if (operationId === undefined || view === undefined) return;
+                              void checkpoints.mark(
+                                { mode: "code", threadId: view.thread.id, operationId },
+                                label,
+                              );
+                              setCheckpointDraft(undefined);
+                            }}
+                            onRestore={(title) => {
+                              const activeView = view;
+                              if (markedCheckpoint === undefined || activeView === undefined)
+                                return;
+                              setCheckpointDraft(undefined);
+                              void (async () => {
+                                const restored = await checkpoints.restore(markedCheckpoint, title);
+                                // The new thread runs on its own worktree at the
+                                // marked revision; opening it is what makes that
+                                // visible, and this thread is untouched either way.
+                                if (restored?.mode === "code") {
+                                  props.onOpenCodeThread?.(
+                                    restored.threadId,
+                                    title,
+                                    activeView.thread.projectId,
+                                  );
+                                }
+                              })();
+                            }}
+                          />
+                        </footer>
+                      ) : null}
+                      {message.role === "user" &&
+                      message.checkpoint !== undefined &&
+                      mayRestore &&
+                      confirmingRestore === message.id ? (
+                        <RestoreFilesConfirm
+                          onKeep={() => setConfirmingRestore(undefined)}
+                          onRestore={() => void restoreCheckpoint(message)}
+                          restoring={restoring}
                         />
-                      </footer>
-                    ) : null}
-                    {message.role === "user" &&
-                    message.checkpoint !== undefined &&
-                    mayRestore &&
-                    confirmingRestore === message.id ? (
-                      <RestoreFilesConfirm
-                        onKeep={() => setConfirmingRestore(undefined)}
-                        onRestore={() => void restoreCheckpoint(message)}
-                        restoring={restoring}
-                      />
-                    ) : null}
-                  </TurnActionMenu>
-                </article>
-              </div>
-            );
-          }}
-          restoreKey={String(props.threadId)}
-          role="region"
-          {...(pendingMessage === null ? {} : { trail: pendingMessage })}
-        />
+                      ) : null}
+                    </TurnActionMenu>
+                  </article>
+                </div>
+              );
+            }}
+            restoreKey={String(props.threadId)}
+            role="region"
+            {...(pendingMessage === null ? {} : { trail: pendingMessage })}
+          />
+        </SelectionThreadScope>
       )}
 
       {props.canvasClient === undefined || view === undefined ? null : (

@@ -369,6 +369,24 @@ window cannot Open leaves the draft unchanged and says so without reading
 the thread. Image and file drops, and dropping a thread on a pane rather
 than its composer, stay pane and attachment behaviour.
 
+### Find in a thread, and a new thread from a selection
+
+⌘/Ctrl+F in an open Chat, Work, or Code thread opens a find bar pinned to the
+top of the transcript. It matches text in every row, including rows the
+transcript has not mounted, shows "n of m" (or "No matches"), highlights the
+matches, and steps with Enter and Shift+Enter or the arrows. Escape or the close
+button dismisses it. The shortcut does nothing while focus is in the code editor
+or a terminal, which have their own find, and it acts only in the thread the
+person is in. This is separate from Thread Search, which looks across threads.
+
+In a Work or Code thread, selecting text inside one assistant reply offers
+"New thread from selection" as a small action under the reply and in the
+reply's right-click menu. It opens the new-thread draft in the same Project and
+mode with the selection prefilled as a Markdown block quote. It is a draft
+only: nothing is sent until the person sends it, and the new thread has exactly
+the authority a new thread in that Project has. A Project that is archived or
+unknown opens nothing. Chat keeps its own "Add to chat" quote chips.
+
 ## Start-screen cards
 
 Every start screen shows one question and its composer. **New task**, in
