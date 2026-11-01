@@ -1467,6 +1467,7 @@ function serviceFixture(
     readonly turnProjection?: WorkThreadServiceDependencies["turnProjection"];
     readonly isMarked?: WorkThreadServiceDependencies["isMarked"];
     readonly uuid?: () => string;
+    readonly serverProjects?: WorkThreadServiceDependencies["serverProjects"];
   } = {},
 ) {
   const projection = new WorkThreadProjection();
@@ -1566,6 +1567,7 @@ function serviceFixture(
     ...(options.terminalSessions === undefined
       ? {}
       : { terminalSessions: options.terminalSessions }),
+    ...(options.serverProjects === undefined ? {} : { serverProjects: options.serverProjects }),
   });
   return {
     service,
@@ -1620,6 +1622,100 @@ function thread(overrides: Partial<ReturnType<typeof decodeWorkThread>> = {}) {
     ...overrides,
   });
 }
+
+describe("a Work thread in a Project on a server", () => {
+  const serverProject = decodeProjectId("72000000-0000-4000-8000-000000000021");
+  const serverBinding = "72000000-0000-4000-8000-000000000022";
+  const serverProjects: NonNullable<WorkThreadServiceDependencies["serverProjects"]> = {
+    bindingRevisionId: (projectId) =>
+      String(projectId) === String(serverProject) ? (serverBinding as never) : undefined,
+    holdsThread: (candidate) =>
+      String(candidate.projectId) === String(serverProject) &&
+      String(candidate.bindingRevisionId) === serverBinding,
+  };
+  const create = {
+    kind: "create-work-thread",
+    threadId: ids.thread,
+    projectId: serverProject,
+    title: "Server notes",
+    providerInstanceId: ids.provider,
+    modelId: "model-a",
+    hostId: "local",
+    bindingRevisionId: serverBinding,
+  } as const;
+  // The server Project is in its own catalog: the local one names nothing.
+  const fixture = () => {
+    const made = serviceFixture({ threads: [], serverProjects, accessibleProjects: [] });
+    made.persistence.readProject.mockReturnValue(undefined as never);
+    return made;
+  };
+
+  it("is created against the Project's derived binding, in its folder, resolving nothing here", async () => {
+    const made = fixture();
+    const created = await made.service.execute(ids.window, create);
+    expect(created).toMatchObject({
+      kind: "thread-created",
+      thread: { projectId: serverProject, bindingRevisionId: serverBinding, workingDirectory: "." },
+    });
+    expect(made.workingDirectories.resolve).not.toHaveBeenCalled();
+    expect(made.projects.bootstrap).toHaveBeenCalledWith(ids.window);
+    await expect(made.service.read(ids.window, ids.thread)).resolves.toMatchObject({
+      id: ids.thread,
+    });
+    expect((await made.service.bootstrap(ids.window)).threads.map((one) => one.id)).toEqual([
+      ids.thread,
+    ]);
+    expect((await made.service.navigation(ids.window)).threads.map((one) => one.id)).toEqual([
+      ids.thread,
+    ]);
+  });
+
+  it("refuses a stale binding, another folder, or a source read from this host", async () => {
+    const made = fixture();
+    await expect(
+      made.service.execute(ids.window, { ...create, bindingRevisionId: ids.binding }),
+    ).rejects.toMatchObject({ failure: { category: "stale" } });
+    await expect(
+      made.service.execute(ids.window, { ...create, workingDirectory: "docs" }),
+    ).rejects.toMatchObject({ failure: { category: "unsupported" } });
+    await expect(
+      made.service.execute(ids.window, {
+        ...create,
+        terminalSession: { provider: "claude", sessionId: "0b4c1f2e-1111-4111-8111-111111111111" },
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unsupported" } });
+    expect(made.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("stays in its folder: it is not moved, nor sent to another folder", async () => {
+    const made = fixture();
+    await made.service.execute(ids.window, create);
+    await expect(
+      made.service.execute(ids.window, {
+        kind: "change-work-thread-working-directory",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        workingDirectory: "docs",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unsupported" } });
+    await expect(
+      made.service.execute(ids.window, {
+        kind: "move-work-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        projectId: ids.project,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unsupported" } });
+    await expect(
+      made.service.execute(ids.window, {
+        kind: "rename-work-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        title: "Renamed",
+      }),
+    ).resolves.toMatchObject({ kind: "thread-updated", thread: { title: "Renamed" } });
+  });
+});
 
 describe("moving a Work thread to another Project", () => {
   const otherProject = decodeProjectId("72000000-0000-4000-8000-000000000011");

@@ -220,6 +220,23 @@ export interface WorkTurnStartOptions {
   readonly admissionCurrent?: () => boolean;
 }
 
+/**
+ * Work threads in a Project on a registered server. Canonical:
+ * docs/design/server-projects.md § Work Projects. The Project is in its own
+ * catalog, so `readProject` never names it; its turn runs on the Octant
+ * Harness with every tool on the server, or not at all.
+ */
+export interface ServerWorkTurns {
+  /** Whether the thread runs in a server Work Project, on the binding that Project derives. */
+  readonly holds: (thread: WorkThread) => boolean;
+  /** The turn's folder on the server and its tools there, or why it cannot run. */
+  readonly bind: (
+    thread: WorkThread,
+  ) =>
+    | { readonly status: "bound"; readonly folder: string; readonly tools: AppManagedToolSet }
+    | { readonly status: "refused"; readonly message: string };
+}
+
 export interface WorkTurnServiceDependencies {
   readonly resolveSelectedExtensions?: SelectedExtensionResolver;
   /** The plugins pinned to a Project, offered on every turn there without a per-send selection. */
@@ -329,6 +346,8 @@ export interface WorkTurnServiceDependencies {
     readonly extraFolders?: ReadonlyArray<string>;
     readonly windowId: WindowId;
   }) => AppManagedToolSet | undefined;
+  /** Work threads in a Project on a registered server, whose turns act there. */
+  readonly serverProjects?: ServerWorkTurns;
   /** The harness around a turn: stable instructions in front, the reply observed after. */
   /**
    * A person asked the thread for a turn. Fires once the thread and its
@@ -485,6 +504,7 @@ export class WorkTurnService {
   readonly #forgeChanges: RuntimeForgeChangeObserver | undefined;
   readonly #onRequestSettled: WorkTurnServiceDependencies["onRequestSettled"];
   readonly #resolveAppManagedTools: WorkTurnServiceDependencies["resolveAppManagedTools"];
+  readonly #serverProjects: ServerWorkTurns | undefined;
   readonly #nativeHarness: WorkTurnServiceDependencies["nativeHarness"];
   readonly #personMemoryBlock: WorkTurnServiceDependencies["personMemoryBlock"];
   readonly #spendCeiling: WorkTurnServiceDependencies["spendCeiling"];
@@ -537,6 +557,7 @@ export class WorkTurnService {
     this.#forgeChanges = dependencies.forgeChanges;
     this.#onRequestSettled = dependencies.onRequestSettled;
     this.#resolveAppManagedTools = dependencies.resolveAppManagedTools;
+    this.#serverProjects = dependencies.serverProjects;
     this.#nativeHarness = dependencies.nativeHarness;
     this.#personMemoryBlock = dependencies.personMemoryBlock;
     this.#spendCeiling = dependencies.spendCeiling;
@@ -717,6 +738,9 @@ export class WorkTurnService {
   turnStandingRefusal(thread: WorkThread): "project-unavailable" | "binding-changed" | undefined {
     const last = this.#projection.latestForThread(thread.id)?.authority;
     if (last === undefined) return undefined;
+    // A server thread's binding is the one its Project derives; it stands
+    // while the Project is in the catalog, which `holds` reads.
+    if (this.#serverProjects?.holds(thread) === true) return undefined;
     const project = this.#persistence.readProject(thread.projectId);
     const currentBinding = project?.type === "work" ? project.bindingHistory.at(-1) : undefined;
     const decision = decideWorkTurnAuthority({
@@ -758,15 +782,25 @@ export class WorkTurnService {
         ? (thread?.access ?? DEFAULT_WORK_ACCESS)
         : clampWorkAccess(thread?.access ?? DEFAULT_WORK_ACCESS, options.accessCeiling);
     const projectBootstrap = await this.#projects.bootstrap(authenticatedWindowId);
-    const accessible = projectBootstrap.active.some(
-      (project) =>
-        project.type === "work" &&
-        project.lifecycle === "active" &&
-        String(project.id) === String(command.authority.projectId),
-    );
+    // A thread in a server Work Project binds its turn here, before anything
+    // starts: the harness's tools on the server, or why it cannot run there.
+    const server =
+      thread === undefined || this.#serverProjects?.holds(thread) !== true
+        ? undefined
+        : this.#serverProjects.bind(thread);
+    const accessible =
+      server !== undefined
+        ? String(thread?.projectId) === String(command.authority.projectId)
+        : projectBootstrap.active.some(
+            (project) =>
+              project.type === "work" &&
+              project.lifecycle === "active" &&
+              String(project.id) === String(command.authority.projectId),
+          );
     if (!accessible) {
       throw this.#failure("unauthorized", "Work Project is unavailable for this window.");
     }
+    if (server?.status === "refused") throw this.#failure("unavailable", server.message);
     // A person's Done mark locks the thread for every turn: a typed message,
     // a queued follow-up, a usage-limit continuation, a child's result, a
     // routine or goal round. The window's lock alone let all of these
@@ -823,17 +857,32 @@ export class WorkTurnService {
     // so it must not wake a snooze or reopen a completion the way their turn
     // would; the spent limit-owned snooze goes in the settle instead.
     if (thread !== undefined && options?.limitRecovery !== true) this.#onTurnRequested?.(thread.id);
-    const project = this.#persistence.readProject(command.authority.projectId);
+    const localProject =
+      server === undefined ? this.#persistence.readProject(command.authority.projectId) : undefined;
     const decision = decideWorkTurnAuthority({
       authority: command.authority,
       expectedHostId: this.#expectedHostId,
-      project: workTurnProjectFacts(project),
+      // A server Project's facts are its derived binding and its folder there,
+      // which the decision compares and never opens.
+      project:
+        server === undefined
+          ? workTurnProjectFacts(localProject)
+          : {
+              type: "work",
+              lifecycle: "active",
+              bindingHistory:
+                thread?.bindingRevisionId === undefined
+                  ? []
+                  : [{ revisionId: String(thread.bindingRevisionId) }],
+              binding: { canonicalRoot: server.folder },
+            },
       thread: workTurnThreadFacts(thread),
     });
     if (decision.kind === "deny") {
       throw this.#failure(decision.category, decision.message);
     }
-    if (project?.type !== "work") {
+    const project = localProject?.type === "work" ? localProject : undefined;
+    if (server === undefined && project === undefined) {
       throw this.#failure("unauthorized", "Work Project is unavailable for this turn.");
     }
 
@@ -841,13 +890,21 @@ export class WorkTurnService {
     if (delivered !== undefined) return delivered;
 
     let projectRoot: string;
-    try {
-      projectRoot = await this.#workingDirectories.resolve(
-        project.binding.canonicalRoot,
-        command.authority.workingDirectory,
-      );
-    } catch {
-      throw this.#failure("invalid", "Work working directory is unavailable.");
+    if (server !== undefined) {
+      // The folder as the server names it; nothing on this host opens it.
+      if (String(command.authority.workingDirectory) !== ".") {
+        throw this.#failure("invalid", "Work working directory is unavailable.");
+      }
+      projectRoot = server.folder;
+    } else {
+      try {
+        projectRoot = await this.#workingDirectories.resolve(
+          project?.binding.canonicalRoot ?? "",
+          command.authority.workingDirectory,
+        );
+      } catch {
+        throw this.#failure("invalid", "Work working directory is unavailable.");
+      }
     }
 
     const provider = this.#persistence.readProviderInstance(command.authority.providerInstanceId);
@@ -855,14 +912,16 @@ export class WorkTurnService {
       throw this.#failure("unavailable", "Selected Work provider is unavailable.");
     }
     try {
-      assertProviderAllowedByProjectPolicy(
-        project,
-        provider,
-        this.#persistence.readProviderModel?.(
-          command.authority.providerInstanceId,
-          command.authority.modelId,
-        ),
-      );
+      if (project !== undefined) {
+        assertProviderAllowedByProjectPolicy(
+          project,
+          provider,
+          this.#persistence.readProviderModel?.(
+            command.authority.providerInstanceId,
+            command.authority.modelId,
+          ),
+        );
+      }
     } catch (error) {
       if (error instanceof ProjectProviderPolicyRejected) {
         throw this.#failure("unauthorized", error.message);
@@ -897,6 +956,12 @@ export class WorkTurnService {
       thread === undefined ? [] : (this.#pinnedExtensionIds?.(String(thread.projectId)) ?? []);
     let skillContext: ReadonlyArray<ProviderContextBlock> = [];
     let extensionTools: AppManagedToolSet | undefined;
+    if (server !== undefined && (selections.length > 0 || pinnedExtensionIds.length > 0)) {
+      throw this.#failure(
+        "unsupported",
+        "Extensions act on this computer, so a thread in a Project on a server does not use them.",
+      );
+    }
     if (selections.length > 0 || pinnedExtensionIds.length > 0) {
       const resolved =
         thread === undefined
@@ -1058,8 +1123,10 @@ export class WorkTurnService {
             ? undefined
             : this.#personMemoryBlock?.({ thread, windowId: authenticatedWindowId }),
         ),
-        ...extraFolderContributions(project),
-        ...(await this.#projectBriefContributions(project, command.threadId)),
+        ...(project === undefined ? [] : extraFolderContributions(project)),
+        ...(project === undefined
+          ? []
+          : await this.#projectBriefContributions(project, command.threadId)),
         ...priorTranscript,
         ...(handoff === undefined
           ? []
@@ -1223,8 +1290,9 @@ export class WorkTurnService {
       providerSessionId,
       ...(resumeCursor === undefined ? {} : { resumeCursor }),
       projectRoot,
-      projectCanonicalRoot: project.binding.canonicalRoot,
-      extraFolders: projectExtraFolderRoots(project),
+      projectCanonicalRoot: project?.binding.canonicalRoot ?? projectRoot,
+      extraFolders: project === undefined ? [] : projectExtraFolderRoots(project),
+      ...(server === undefined ? {} : { serverTools: server.tools }),
       driver,
       attachments: attachmentInputs,
       contextPlan: planned,
@@ -1572,6 +1640,11 @@ export class WorkTurnService {
     readonly projectCanonicalRoot: string;
     /** The Project's extra folders, granted what the bound root is granted. */
     readonly extraFolders: ReadonlyArray<string>;
+    /**
+     * A server Work thread's tools, all acting on the server. Its folder is a
+     * path there, so nothing watches it here and no host tool is offered.
+     */
+    readonly serverTools?: AppManagedToolSet;
     readonly driver: ProviderDriver;
     readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
     readonly contextPlan: Extract<WorkTurnContextPlan, { readonly kind: "ok" }>;
@@ -1596,17 +1669,22 @@ export class WorkTurnService {
     // moments of the turn is seen. The provider writes with its own tools
     // inside the bound folder and never calls the mutation service, so this is
     // the only way the host learns what a turn produced.
-    const observation = this.#turnFileObserver?.observe(input.projectRoot, input.extraFolders);
+    const observation =
+      input.serverTools === undefined
+        ? this.#turnFileObserver?.observe(input.projectRoot, input.extraFolders)
+        : undefined;
 
     const hostTools =
-      input.thread === undefined
-        ? undefined
-        : this.#resolveAppManagedTools?.({
-            thread: input.thread,
-            projectRoot: input.projectRoot,
-            ...(input.extraFolders.length === 0 ? {} : { extraFolders: input.extraFolders }),
-            windowId: input.windowId,
-          });
+      input.serverTools !== undefined
+        ? input.serverTools
+        : input.thread === undefined
+          ? undefined
+          : this.#resolveAppManagedTools?.({
+              thread: input.thread,
+              projectRoot: input.projectRoot,
+              ...(input.extraFolders.length === 0 ? {} : { extraFolders: input.extraFolders }),
+              windowId: input.windowId,
+            });
     const appManagedTools =
       input.extensionTools === undefined
         ? hostTools

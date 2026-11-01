@@ -22,6 +22,7 @@ import {
   type WorkThreadFailure,
   type WorkThreadId,
   type Project,
+  type BindingRevisionId,
   type ProjectId,
   type WorkAccess,
   type ProviderInstance,
@@ -133,6 +134,9 @@ const decodeWorkSettings = Schema.decodeUnknownSync(WorkSettingsSchema);
 /** Work's defaults are one aggregate, like Code's. */
 const WORK_SETTINGS_AGGREGATE_ID = "00000000-0000-4000-8000-000000000030";
 
+const SERVER_THREAD_STAYS_IN_FOLDER =
+  "A thread in a Project on a server works in that Project's folder there, so it cannot move to another folder or Project.";
+
 export interface WorkThreadServiceDependencies {
   readonly persistence: {
     readonly status: () => {
@@ -232,6 +236,20 @@ export interface WorkThreadServiceDependencies {
    * needs nothing.
    */
   readonly recordExternalContentIngestion?: RecordExternalContentIngestion;
+  readonly serverProjects?: ServerWorkProjectThreads;
+}
+
+/**
+ * The Work Projects bound to a folder on a registered server. They are a
+ * catalog of their own, so `readProject` never names one; a thread there is
+ * created against the binding its Project derives, and nothing here resolves
+ * its folder, which is a path on the server.
+ */
+export interface ServerWorkProjectThreads {
+  /** The binding a new thread in this server Work Project is created against. */
+  readonly bindingRevisionId: (projectId: ProjectId) => BindingRevisionId | undefined;
+  /** Whether the thread runs in a server Work Project, on the binding that Project derives. */
+  readonly holdsThread: (thread: WorkThread) => boolean;
 }
 
 /** Host-only facts a caller adds to a command; the wire commands cannot carry them. */
@@ -269,6 +287,7 @@ export class WorkThreadService {
   readonly #terminalSessions: TerminalSessionImportPort | undefined;
   readonly #linearIssueContext?: LinearIssueContextPort;
   readonly #recordExternalContentIngestion: RecordExternalContentIngestion | undefined;
+  readonly #serverProjects: ServerWorkProjectThreads | undefined;
 
   constructor(dependencies: WorkThreadServiceDependencies) {
     this.#persistence = dependencies.persistence;
@@ -283,6 +302,7 @@ export class WorkThreadService {
     this.#workingDirectories = dependencies.workingDirectories;
     this.#onWorkingDirectoryChanged = dependencies.onWorkingDirectoryChanged;
     this.#recordExternalContentIngestion = dependencies.recordExternalContentIngestion;
+    this.#serverProjects = dependencies.serverProjects;
     if (dependencies.observeRuntime !== undefined) {
       this.#observeRuntime = dependencies.observeRuntime;
     }
@@ -304,7 +324,11 @@ export class WorkThreadService {
       const accessible = await this.#activeWorkProjectIds(authenticatedWindowId);
       const threads = this.#projection
         .list()
-        .filter((thread) => accessible.has(String(thread.projectId)));
+        .filter(
+          (thread) =>
+            accessible.has(String(thread.projectId)) ||
+            this.#serverProjects?.holdsThread(thread) === true,
+        );
       const reminders = await this.#dueRemindersByThread(threads);
       const runtime = [];
       if (this.#observeRuntime !== undefined || reminders.size > 0) {
@@ -344,6 +368,9 @@ export class WorkThreadService {
     this.#assertReady();
     const thread = this.#projection.read(threadId);
     if (thread === undefined) return undefined;
+    if (thread.lifecycle === "active" && this.#serverProjects?.holdsThread(thread) === true) {
+      return thread;
+    }
     const project = this.#persistence.readProject(thread.projectId);
     return thread.lifecycle === "active" &&
       project?.type === "work" &&
@@ -361,12 +388,10 @@ export class WorkThreadService {
     this.#assertReady();
     try {
       const threads = this.#projection.list().filter((thread) => {
+        if (thread.lifecycle !== "active") return false;
+        if (this.#serverProjects?.holdsThread(thread) === true) return true;
         const project = this.#persistence.readProject(thread.projectId);
-        return (
-          project?.type === "work" &&
-          project.lifecycle === "active" &&
-          thread.lifecycle === "active"
-        );
+        return project?.type === "work" && project.lifecycle === "active";
       });
       const reminders = await this.#dueRemindersByThread(threads);
       const runtime = [];
@@ -444,6 +469,15 @@ export class WorkThreadService {
       if (command.kind === "create-work-thread") {
         if (command.hostId !== "local") {
           throw this.#failure("unauthorized", "Work thread host is not authorized.");
+        }
+        const serverBinding = this.#serverProjects?.bindingRevisionId(command.projectId);
+        if (serverBinding !== undefined) {
+          return await this.#createServerThread(
+            authenticatedWindowId,
+            command,
+            serverBinding,
+            executionContext,
+          );
         }
         const project = await this.#requireAccessibleActiveWorkProject(
           authenticatedWindowId,
@@ -623,12 +657,24 @@ export class WorkThreadService {
       if (current === undefined || current.lifecycle === "deleted") {
         throw this.#failure("invalid", "Work thread was not found.");
       }
-      const project = await this.#requireAccessibleActiveWorkProject(
-        authenticatedWindowId,
-        current.projectId,
-      );
-      const bindingRevision = project.bindingHistory.at(-1);
+      // A server thread's binding is the one its Project derives, which
+      // `holdsThread` has just matched; it has no local Project to read.
+      const onServer = this.#serverProjects?.holdsThread(current) === true;
+      if (onServer) {
+        await this.#projects.bootstrap(authenticatedWindowId);
+        if (
+          command.kind === "move-work-thread" ||
+          command.kind === "change-work-thread-working-directory"
+        ) {
+          throw this.#failure("unsupported", SERVER_THREAD_STAYS_IN_FOLDER);
+        }
+      }
+      const project = onServer
+        ? undefined
+        : await this.#requireAccessibleActiveWorkProject(authenticatedWindowId, current.projectId);
+      const bindingRevision = project?.bindingHistory.at(-1);
       if (
+        project !== undefined &&
         current.bindingRevisionId !== undefined &&
         bindingRevision?.revisionId !== current.bindingRevisionId
       ) {
@@ -694,6 +740,8 @@ export class WorkThreadService {
         }
       }
       if (command.kind === "move-work-thread") {
+        if (project === undefined)
+          throw this.#failure("unsupported", SERVER_THREAD_STAYS_IN_FOLDER);
         return await this.#moveThread(authenticatedWindowId, current, project, command);
       }
       const usageResumeUpdatedAt = decodeTimestamp(this.#clock());
@@ -826,6 +874,8 @@ export class WorkThreadService {
           command.modelOptionValues,
         );
       } else if (command.kind === "change-work-thread-working-directory") {
+        if (project === undefined)
+          throw this.#failure("unsupported", SERVER_THREAD_STAYS_IN_FOLDER);
         try {
           await this.#workingDirectories.resolve(
             project.binding.canonicalRoot,
@@ -1088,6 +1138,85 @@ export class WorkThreadService {
     }
   }
 
+  /**
+   * A Work thread in a server Work Project. It starts in the Project's own
+   * folder on the server, at the account's default access (a server Project
+   * has no override of its own), and takes no issue or terminal session,
+   * which this host reads from its own folders and accounts.
+   */
+  async #createServerThread(
+    authenticatedWindowId: WindowId,
+    command: Extract<WorkThreadCommand, { readonly kind: "create-work-thread" }>,
+    bindingRevisionId: BindingRevisionId,
+    executionContext: WorkThreadExecutionContext | undefined,
+  ): Promise<WorkThreadCommandResult> {
+    // The window must be one this host serves; the Project is the person's.
+    await this.#projects.bootstrap(authenticatedWindowId);
+    if (String(command.bindingRevisionId) !== String(bindingRevisionId)) {
+      throw this.#failure("stale", "Work Project binding changed; reload and retry.");
+    }
+    if (command.workingDirectory !== undefined && String(command.workingDirectory) !== ".") {
+      throw this.#failure("unsupported", SERVER_THREAD_STAYS_IN_FOLDER);
+    }
+    if (
+      command.issueContext !== undefined ||
+      command.linearIssueContext !== undefined ||
+      command.terminalSession !== undefined
+    ) {
+      throw this.#failure(
+        "unsupported",
+        "A thread in a Project on a server starts without an issue or a terminal session.",
+      );
+    }
+    await this.#requireProviderModel(
+      command.providerInstanceId,
+      command.modelId,
+      undefined,
+      command.modelOptionValues,
+    );
+    if (this.#projection.read(command.threadId) !== undefined) {
+      throw this.#failure("invalid", "Work thread already exists.");
+    }
+    const created = decodeWorkThread({
+      id: command.threadId,
+      projectId: command.projectId,
+      title: command.title,
+      lifecycle: "active",
+      providerInstanceId: command.providerInstanceId,
+      modelId: command.modelId,
+      ...(command.modelOptionValues === undefined
+        ? {}
+        : { modelOptionValues: command.modelOptionValues }),
+      bindingRevisionId,
+      workingDirectory: ".",
+      access: this.#currentSettings().defaultAccess,
+      version: 1,
+      createdAt: decodeTimestamp(this.#clock()),
+      updatedAt: decodeTimestamp(this.#clock()),
+    });
+    const journaled = journalWithInheritedMark({
+      journal: this.#persistence.journal,
+      record: this.#recordExternalContentIngestion,
+      threadId: String(created.id),
+      mark: executionContext?.inheritedMark,
+      correlationId: () => this.#uuid(),
+      journalThread: () => {
+        this.#append(
+          created.id,
+          0,
+          "work.thread-created@1",
+          { kind: "thread-created", thread: created },
+          isRoutineHostScope(authenticatedWindowId) ? "system" : "local-user",
+        );
+      },
+    });
+    if (journaled.status === "refused") {
+      throw this.#failure("unavailable", INHERITED_MARK_REFUSAL);
+    }
+    this.#projection.apply({ kind: "thread-created", thread: created });
+    return { kind: "thread-created", thread: created };
+  }
+
   async #requireAccessibleActiveWorkProject(
     authenticatedWindowId: WindowId,
     projectId: ProjectId,
@@ -1152,22 +1281,29 @@ export class WorkThreadService {
   async #requireProviderModel(
     providerInstanceId: WorkThread["providerInstanceId"],
     modelId: ProviderModelId,
-    project: Project,
+    /**
+     * The local Work Project whose provider policy applies; absent for a
+     * server Project, which has none of its own: its turn admits only the
+     * Octant Harness, which the turn checks before it binds.
+     */
+    project: Project | undefined,
     modelOptionValues?: ProviderModelOptionValues,
   ): Promise<void> {
     const provider = this.#persistence.readProviderInstance(providerInstanceId);
     if (provider === undefined || !provider.enabled) {
       throw this.#failure("unavailable", "Selected Work provider is unavailable.");
     }
-    if (project.type !== "work") {
+    if (project !== undefined && project.type !== "work") {
       throw this.#failure("unauthorized", "Work Project is unavailable for this window.");
     }
     try {
-      assertProviderAllowedByProjectPolicy(
-        project,
-        provider,
-        this.#readProviderModel?.(providerInstanceId, modelId),
-      );
+      if (project !== undefined) {
+        assertProviderAllowedByProjectPolicy(
+          project,
+          provider,
+          this.#readProviderModel?.(providerInstanceId, modelId),
+        );
+      }
     } catch (error) {
       if (error instanceof ProjectProviderPolicyRejected) {
         throw this.#failure("unauthorized", error.message);
@@ -1205,20 +1341,24 @@ export class WorkThreadService {
     if (!modelAvailable) {
       throw this.#failure("invalid", "Selected Work model is unavailable.");
     }
-    const refreshedProject = this.#persistence.readProject(project.id);
+    const refreshedProject =
+      project === undefined ? undefined : this.#persistence.readProject(project.id);
     if (
-      refreshedProject?.type !== "work" ||
-      refreshedProject.lifecycle !== "active" ||
-      refreshedProject.version !== project.version
+      project !== undefined &&
+      (refreshedProject?.type !== "work" ||
+        refreshedProject.lifecycle !== "active" ||
+        refreshedProject.version !== project.version)
     ) {
       throw this.#failure("unauthorized", "Work Project is unavailable for this window.");
     }
     try {
-      assertProviderAllowedByProjectPolicy(
-        refreshedProject,
-        provider,
-        this.#readProviderModel?.(providerInstanceId, modelId) ?? selectedModel,
-      );
+      if (refreshedProject?.type === "work") {
+        assertProviderAllowedByProjectPolicy(
+          refreshedProject,
+          provider,
+          this.#readProviderModel?.(providerInstanceId, modelId) ?? selectedModel,
+        );
+      }
     } catch (error) {
       if (error instanceof ProjectProviderPolicyRejected) {
         throw this.#failure("unauthorized", error.message);

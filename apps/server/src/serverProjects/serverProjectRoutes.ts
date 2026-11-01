@@ -1,9 +1,12 @@
 import {
   decodeServerProjectsCommand,
+  type ServerProject,
   type ServerProjectsCommand,
   type ServerProjectsCommandResult,
   type ServerProjectsRefusalReason,
+  type ServerProjectsView,
 } from "@octant/contracts/server-projects";
+import { serverWorkBindingRevisionId } from "./serverWorkThreads";
 import { authenticateRoutePrincipal } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
@@ -89,7 +92,7 @@ export function createServerProjectRouteHandler(dependencies: ServerProjectRoute
     }
 
     if (request.method === "GET") {
-      return json({ view: { projects: dependencies.store.projects() } }, 200, origin);
+      return json({ view: catalogView(dependencies.store.projects()) }, 200, origin);
     }
     let command: ServerProjectsCommand;
     try {
@@ -103,6 +106,7 @@ export function createServerProjectRouteHandler(dependencies: ServerProjectRoute
             name: command.name,
             serverId: String(command.serverId),
             folder: command.folder,
+            mode: command.mode,
             principal,
           })
         : command.kind === "rename-server-project"
@@ -114,13 +118,24 @@ export function createServerProjectRouteHandler(dependencies: ServerProjectRoute
           : dependencies.store.remove({ projectId: String(command.projectId), principal });
     const result: ServerProjectsCommandResult =
       change.kind === "changed"
-        ? { kind: "server-projects-updated", view: { projects: dependencies.store.projects() } }
+        ? { kind: "server-projects-updated", view: catalogView(dependencies.store.projects()) }
         : {
             kind: "server-projects-refused",
             reason: change.reason,
             message: change.message ?? MESSAGES[change.reason],
           };
     return json(result, result.kind === "server-projects-updated" ? 200 : 409, origin);
+  };
+}
+
+/** The catalog as a window reads it: each Work Project with the binding its threads are made against. */
+function catalogView(projects: ReadonlyArray<ServerProject>): ServerProjectsView {
+  return {
+    projects: projects.map((project) =>
+      project.mode === "work"
+        ? { ...project, workBindingRevisionId: serverWorkBindingRevisionId(project) }
+        : project,
+    ),
   };
 }
 
