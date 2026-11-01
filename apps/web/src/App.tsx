@@ -6819,6 +6819,7 @@ function LaunchedShell(
       createCodeOperationId={createCodeOperationId}
       {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
       navigatorAssistant={navigatorAssistant}
+      onOpenThread={openCommandThread}
       serverUrl={props.launch.serverUrl}
       windowCapability={props.projectWindowCapability}
       workspace={controller.workspace}

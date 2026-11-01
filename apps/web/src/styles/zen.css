@@ -950,6 +950,95 @@ img.zen-appearance__thumb {
   color: var(--oct-fg);
 }
 
+/*
+ * The tab strip of a Project's live agent pages. The primitive owns the tab
+ * look; this only lets each tab hold a page name over its owning thread and
+ * wrap onto a second row in the narrow dock, so no tab hides off its edge.
+ */
+.project-agent-pages__rail {
+  width: 100%;
+  height: auto;
+  flex-wrap: wrap;
+  padding: var(--oct-space-1) var(--oct-space-2);
+  border-bottom: 1px solid var(--oct-border-soft);
+}
+
+.project-agent-pages__tab {
+  height: auto;
+  min-width: 0;
+  max-width: 100%;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  padding: var(--oct-space-1) var(--oct-space-2);
+}
+
+/* The tab primitive paints its selected fill from an attribute this Base UI
+   version does not set, so the selected tab is read from its ARIA state. */
+.project-agent-pages__tab[aria-selected="true"] {
+  background: var(--oct-fg-soft);
+  color: var(--oct-fg);
+}
+
+.project-agent-pages__page,
+.project-agent-pages__thread,
+.project-agent-page__owner {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-agent-pages__page {
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-display);
+}
+
+.project-agent-pages__owner {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: var(--oct-space-1);
+  font-size: var(--oct-text-xs);
+  color: var(--oct-muted);
+}
+
+.project-agent-page {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.project-agent-page__head {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-2);
+  border-bottom: 1px solid var(--oct-border-soft);
+}
+
+.project-agent-page__owner {
+  flex: 1;
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-display);
+}
+
+.project-agent-page__picture {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.project-agent-page__note {
+  margin: 0;
+  padding: var(--oct-space-3);
+  font-size: var(--oct-text-sm);
+  color: var(--oct-muted);
+}
+
 .zen-research__chrome {
   display: flex;
   align-items: center;

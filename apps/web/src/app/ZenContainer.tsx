@@ -23,6 +23,7 @@ import {
   resolveZenProjectTerminalTarget,
   resolveZenTerminalPinTarget,
 } from "../zen/zenThreadActions";
+import type { CommandThread } from "../palette/buildOctantCommands";
 import { ZenRoot } from "../zen/ZenRoot";
 import type { useZenController } from "../zen/useZenController";
 import type { ShellActions } from "./shellActions";
@@ -40,6 +41,8 @@ export interface ZenContainerProps {
   readonly codeThreads: ReadonlyArray<CodeThread> | undefined;
   readonly createCodeOperationId: () => CodeOperationId;
   readonly hostBridge?: OctantHostBridge;
+  /** Opens a thread in the shell; the Project browser's agent pages use it. */
+  readonly onOpenThread?: (thread: CommandThread) => void;
   readonly navigatorAssistant: ReturnType<typeof useNavigatorAssistant>;
   readonly serverUrl: string;
   readonly windowCapability: string;
@@ -145,7 +148,10 @@ export const ZenContainer = memo(function ZenContainer(props: ZenContainerProps)
                       createOperationId={createCodeOperationId}
                       executionPolicy={owner.executionPolicy}
                       live={activity.activity === "live"}
-                      scope={{ checkoutId: element.checkoutId, threadId: owner.id }}
+                      scope={{
+                        checkoutId: element.checkoutId,
+                        threadId: owner.id,
+                      }}
                       terminalId={element.terminalId}
                     />
                   </Suspense>
@@ -172,6 +178,17 @@ export const ZenContainer = memo(function ZenContainer(props: ZenContainerProps)
                       <ZenProjectResearchDock
                         client={projectBrowserClient}
                         dock={dock}
+                        {...(props.onOpenThread === undefined
+                          ? {}
+                          : {
+                              onOpenThread: (threadId, title, mode) =>
+                                props.onOpenThread?.({
+                                  threadId,
+                                  title,
+                                  mode,
+                                  projectId: String(dock.project.projectId),
+                                }),
+                            })}
                         {...(props.hostBridge === undefined
                           ? {}
                           : { hostBridge: props.hostBridge })}
@@ -268,7 +285,10 @@ export const ZenContainer = memo(function ZenContainer(props: ZenContainerProps)
               onCloseAssistant={() => zen.setAssistantOpen(false)}
               onCloseThreadPicker={() => zen.setThreadPickerOpen(false)}
               renderLiveThread={(input) =>
-                resolveZenLiveThreadCard({ ...input, clients: zenLiveThreadClients })
+                resolveZenLiveThreadCard({
+                  ...input,
+                  clients: zenLiveThreadClients,
+                })
               }
               onConfirmRecipePreview={(action) => void zen.confirmRecipePreview(action)}
               onCreateReference={(url, label) =>

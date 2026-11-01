@@ -33,7 +33,9 @@ function browser(page?: { readonly title: string; readonly url: string }): Proje
 }
 
 function client(answer: (command: ProjectBrowserCommand) => ProjectBrowserResult) {
-  return { execute: vi.fn(async (command: ProjectBrowserCommand) => answer(command)) };
+  return {
+    execute: vi.fn(async (command: ProjectBrowserCommand) => answer(command)),
+  };
 }
 
 describe("ZenProjectResearchDock", () => {
@@ -182,7 +184,12 @@ describe("ZenProjectResearchDock", () => {
         projectId,
         mode: "work",
         subjectId,
-        context: { contextId, state: "active", presentation: "headless", profile: "personal" },
+        context: {
+          contextId,
+          state: "active",
+          presentation: "headless",
+          profile: "personal",
+        },
         page: { title: "Example", url: "https://example.com/" },
       },
     }));
@@ -198,5 +205,86 @@ describe("ZenProjectResearchDock", () => {
     expect(
       await screen.findByRole("button", { name: "Browser profile: Personal" }),
     ).toBeInTheDocument();
+  });
+
+  it("lists the Project's agent pages beside the person's and shows one read-only", async () => {
+    const pages = {
+      ...client(() => browser()),
+      agentPages: vi.fn(async () => ({
+        projectId,
+        mode: "work" as const,
+        pages: [
+          {
+            threadId: "00000000-0000-4000-8000-0000000000a1" as never,
+            contextId: "00000000-0000-4000-8000-0000000000b1" as never,
+            threadTitle: "Research pricing",
+            title: "Pricing",
+            host: "example.com",
+            agentActive: true,
+          },
+        ],
+      })),
+      agentPageSnapshot: vi.fn(async () => ({
+        status: "running" as const,
+        threadId: "00000000-0000-4000-8000-0000000000a1" as never,
+        evidence: [],
+        observation: {
+          stale: false,
+          screenshotDataUrl: "data:image/png;base64,AAAA",
+        },
+      })),
+    };
+    const onOpenThread = vi.fn();
+    render(
+      <ZenProjectResearchDock
+        client={pages as never}
+        dock={dock}
+        onCollapse={() => undefined}
+        onOpenThread={onOpenThread}
+        onUndock={() => undefined}
+      />,
+    );
+
+    const tab = await screen.findByRole("tab", { name: /Research pricing/ });
+    expect(tab).toHaveTextContent("Agent active");
+    expect(pages.agentPages).toHaveBeenCalledWith(
+      { projectId, mode: "work" },
+      expect.any(AbortSignal),
+    );
+    fireEvent.click(tab);
+    await waitFor(() =>
+      expect(screen.getByRole("img", { name: "Picture of Pricing" })).toBeInTheDocument(),
+    );
+    // The person's own address bar gives way to the thread's read-only page.
+    expect(screen.queryByRole("textbox", { name: "Project browser address" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Open thread/ }));
+    expect(onOpenThread).toHaveBeenCalledWith(
+      "00000000-0000-4000-8000-0000000000a1",
+      "Research pricing",
+      "work",
+    );
+    fireEvent.click(screen.getByRole("tab", { name: /Your page/ }));
+    expect(
+      await screen.findByRole("textbox", { name: "Project browser address" }),
+    ).toBeInTheDocument();
+  });
+
+  it("draws no strip when the host lists no agent page or cannot", async () => {
+    const pages = {
+      ...client(() => browser()),
+      agentPages: vi.fn(async () => {
+        throw new Error("unavailable");
+      }),
+    };
+    render(
+      <ZenProjectResearchDock
+        client={pages as never}
+        dock={dock}
+        onCollapse={() => undefined}
+        onUndock={() => undefined}
+      />,
+    );
+    await waitFor(() => expect(pages.agentPages).toHaveBeenCalled());
+    expect(screen.queryByRole("tablist")).toBeNull();
   });
 });

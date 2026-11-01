@@ -501,9 +501,10 @@ export class TerminalBrowserGrantService {
       browser: {
         inspectThread: lent.automation.inspectThread,
         create: lent.automation.create,
-        act: ({ windowId: actingWindow, request, refuseStaleRevision }) =>
+        act: ({ windowId: actingWindow, threadId: actingThread, request, refuseStaleRevision }) =>
           lent.automation.act({
             windowId: actingWindow,
+            ...(actingThread === undefined ? {} : { threadId: actingThread }),
             request,
             ...(refuseStaleRevision === undefined ? {} : { refuseStaleRevision }),
           }),
