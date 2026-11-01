@@ -681,6 +681,21 @@ describe("Browser preview", () => {
     );
   });
 
+  it("brings the Browser forward once when the agent hands the page over to sign in", async () => {
+    const onShowBrowser = vi.fn();
+    const browser = {
+      inspectThread: vi.fn(async () => ({
+        ...browserSnapshot(threadId, "34000000-0000-4000-8000-000000000009"),
+        waitingForPerson: "sign-in" as const,
+      })),
+    } as unknown as BrowserAutomationClient;
+    renderPreview(browser, { onShowBrowser, pollIntervalMs: 20 });
+
+    await waitFor(() => expect(onShowBrowser).toHaveBeenCalledOnce());
+    await waitFor(() => expect(browser.inspectThread).toHaveBeenCalledTimes(3));
+    expect(onShowBrowser).toHaveBeenCalledOnce();
+  });
+
   it("appears when the Browser is closed and a session is live, then opens the Browser on click", async () => {
     const user = userEvent.setup();
     const onShowBrowser = vi.fn();

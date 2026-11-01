@@ -431,6 +431,8 @@ export function wireWork(deps: WorkDependencies) {
                 act: (command) => browserAutomationService.act(command),
                 releaseThread: (ownerWindowId, threadId) =>
                   browserAutomationService.releaseThread(ownerWindowId, threadId),
+                holdForPerson: (ownerWindowId, threadId) =>
+                  browserAutomationService.holdForPerson(ownerWindowId, threadId),
               },
               approvals: browserToolApprovalService,
               uploadRoot: () => input.projectRoot,
