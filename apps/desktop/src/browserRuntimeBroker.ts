@@ -366,6 +366,8 @@ function isBrowserAction(value: unknown): value is BrowserSurfaceAction {
     "tabId",
     "waitFor",
     "viewport",
+    "diagnosticsSince",
+    "diagnosticsWarnings",
   ]);
   if (Object.keys(value).some((key) => !allowedKeys.has(key))) return false;
   if (!(BrowserActionKind.literals as ReadonlyArray<unknown>).includes(value.kind)) return false;
@@ -389,6 +391,9 @@ function isBrowserAction(value: unknown): value is BrowserSurfaceAction {
           (file) => typeof file === "string" && file.length <= 4096 && file.startsWith("/"),
         ))) &&
     (value.waitFor === undefined || isWaitFor(value.waitFor)) &&
+    (value.diagnosticsSince === undefined ||
+      (Number.isSafeInteger(value.diagnosticsSince) && (value.diagnosticsSince as number) >= 0)) &&
+    (value.diagnosticsWarnings === undefined || typeof value.diagnosticsWarnings === "boolean") &&
     (value.viewport === undefined || isViewportSize(value.viewport)) &&
     (value.tabId === undefined ||
       (typeof value.tabId === "string" && /^t[1-9][0-9]{0,3}$/.test(value.tabId))) &&

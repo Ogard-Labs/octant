@@ -15,6 +15,7 @@ import {
   originAllowed,
   parseBrowserKeyChord,
   readBrowserPage,
+  redactedBrowserUrl,
 } from "@octant/domain";
 import { constants } from "node:fs";
 import { access } from "node:fs/promises";
@@ -83,6 +84,14 @@ export interface PlaywrightPagePort {
       message(): string;
       accept(): Promise<void>;
       dismiss(): Promise<void>;
+    }) => void,
+  ): void;
+  on?(
+    event: "response",
+    listener: (response: {
+      status(): number;
+      url(): string;
+      request(): { method(): string };
     }) => void,
   ): void;
   on?(
@@ -195,14 +204,18 @@ interface OwnedRuntimeContext {
    * not on read: a page that logs in a loop must not grow this without limit
    * while the agent is looking elsewhere.
    */
-  consoleErrors: Array<{ text: string; url?: string }>;
+  consoleErrors: Array<{ text: string; url?: string; seq: number }>;
+  consoleWarnings: Array<{ text: string; url?: string; seq: number }>;
+  httpErrors: Array<{ url: string; method?: string; status: number; seq: number }>;
+  /** The last diagnostic entry's number; every kind shares the count. */
+  diagnosticSeq: number;
   /** The pages' own dialogs since the last action, answered by the fixed policy. */
   dialogs: Array<{
     type: "alert" | "confirm" | "prompt" | "beforeunload";
     message: string;
     answer: "accepted" | "dismissed";
   }>;
-  failedRequests: Array<{ url: string; method?: string; failure: string }>;
+  failedRequests: Array<{ url: string; method?: string; failure: string; seq: number }>;
   /**
    * Pages already carrying diagnostic listeners.
    *
@@ -286,6 +299,9 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       openingTab: false,
       blockedNavigationUrl: undefined,
       consoleErrors: [],
+      consoleWarnings: [],
+      httpErrors: [],
+      diagnosticSeq: 0,
       dialogs: [],
       failedRequests: [],
       instrumentedPages: new WeakSet(),
@@ -510,18 +526,8 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
         break;
       case "snapshot":
         break;
-      case "observe-diagnostics": {
-        // Hand over what the page reported and clear it: the next read answers
-        // "what happened since I last looked", which is the question an agent
-        // actually has, and keeps one failure from being reported forever.
-        const diagnostics = {
-          consoleErrors: [...owned!.consoleErrors],
-          failedRequests: [...owned!.failedRequests],
-        };
-        owned!.consoleErrors.length = 0;
-        owned!.failedRequests.length = 0;
-        return diagnostics;
-      }
+      case "observe-diagnostics":
+        return readDiagnostics(required(owned, "Browser context is unavailable."), request);
       case "wait":
         if (request.waitFor !== undefined) {
           await waitForConditions(page, request.waitFor, signal);
@@ -780,12 +786,30 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     if (owned.instrumentedPages.has(page)) return;
     owned.instrumentedPages.add(page);
     page.on?.("console", (message) => {
-      if (message.type() !== "error") return;
+      const type = message.type();
+      if (type !== "error" && type !== "warning") return;
       const text = bounded(message.text(), MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS);
       if (text === "") return;
-      const url = page.url() === "about:blank" ? undefined : bounded(page.url(), 4096);
-      if (owned.consoleErrors.length >= MAX_BROWSER_DIAGNOSTIC_ENTRIES) owned.consoleErrors.shift();
-      owned.consoleErrors.push({ text, ...(url === undefined ? {} : { url }) });
+      const url =
+        page.url() === "about:blank" ? undefined : bounded(redactedBrowserUrl(page.url()), 4096);
+      keepDiagnostic(owned, type === "error" ? owned.consoleErrors : owned.consoleWarnings, {
+        text,
+        ...(url === undefined ? {} : { url }),
+      });
+    });
+    // A completed request's status, never its headers or body: the response
+    // object is read for its status and address and let go.
+    page.on?.("response", (response) => {
+      const status = response.status();
+      if (status < 400 || status > 599) return;
+      const url = bounded(redactedBrowserUrl(response.url()), 4096);
+      if (url === "") return;
+      const method = bounded(response.request().method(), 16);
+      keepDiagnostic(owned, owned.httpErrors, {
+        url,
+        ...(method === "" ? {} : { method }),
+        status,
+      });
     });
     page.on?.("dialog", (dialog) => {
       const type = dialogType(dialog.type());
@@ -795,16 +819,14 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       void (answer === "accepted" ? dialog.accept() : dialog.dismiss()).catch(() => undefined);
     });
     page.on?.("requestfailed", (request) => {
-      const url = bounded(request.url(), 4096);
+      const url = bounded(redactedBrowserUrl(request.url()), 4096);
       if (url === "") return;
       const method = bounded(request.method(), 16);
       const failure = bounded(
         request.failure()?.errorText ?? "The request did not complete.",
         MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS,
       );
-      if (owned.failedRequests.length >= MAX_BROWSER_DIAGNOSTIC_ENTRIES)
-        owned.failedRequests.shift();
-      owned.failedRequests.push({
+      keepDiagnostic(owned, owned.failedRequests, {
         url,
         ...(method === "" ? {} : { method }),
         failure: failure === "" ? "The request did not complete." : failure,
@@ -1063,6 +1085,43 @@ function playwrightKey(value: string): string {
 }
 
 const DEFAULT_VIEWPORT = { width: 1280, height: 720 } as const;
+
+/** Number one diagnostic entry and keep it, dropping the oldest of its kind past the bound. */
+function keepDiagnostic<T extends { seq: number }>(
+  owned: { diagnosticSeq: number },
+  list: T[],
+  entry: Omit<T, "seq">,
+): void {
+  owned.diagnosticSeq += 1;
+  if (list.length >= MAX_BROWSER_DIAGNOSTIC_ENTRIES) list.shift();
+  list.push({ ...entry, seq: owned.diagnosticSeq } as T);
+}
+
+/**
+ * What the page reported after the reader's cursor. Nothing is cleared: two
+ * readers (the agent, a person's pane) each keep their own place, and the
+ * answer's cursor is where the next read starts.
+ */
+function readDiagnostics(
+  owned: Pick<
+    OwnedRuntimeContext,
+    "consoleErrors" | "consoleWarnings" | "failedRequests" | "httpErrors" | "diagnosticSeq"
+  >,
+  request: BrowserRuntimeAction,
+): BrowserRuntimeObservation {
+  const since = request.diagnosticsSince ?? 0;
+  const after = <T extends { readonly seq: number }>(list: ReadonlyArray<T>) =>
+    list.filter((entry) => entry.seq > since);
+  return {
+    consoleErrors: after(owned.consoleErrors),
+    failedRequests: after(owned.failedRequests),
+    httpErrors: after(owned.httpErrors),
+    ...(request.diagnosticsWarnings === true
+      ? { consoleWarnings: after(owned.consoleWarnings) }
+      : {}),
+    diagnosticsCursor: owned.diagnosticSeq,
+  };
+}
 
 /** The actions after which the page is given a moment to settle before it is read. */
 const SETTLING_ACTIONS: ReadonlySet<BrowserRuntimeAction["kind"]> = new Set([
