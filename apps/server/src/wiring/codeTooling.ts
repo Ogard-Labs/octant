@@ -70,6 +70,13 @@ import type { WorkspaceWiring } from "./workspace";
 import { stableCodeFileId, type CodeWiring } from "./code";
 import { withProjectExtraFolders } from "../code/codeProjectFolderRoot";
 import type { CodeRuntimeWiring } from "./codeRuntime";
+import type { HarnessStateWiring } from "./harnessState";
+import { serverCodeCheckout } from "../serverProjects/serverProjectThreads";
+import { serverTerminalLogin } from "../serverProjects/serverTerminal";
+import {
+  decodeServerProjectRemovedPayload,
+  SERVER_PROJECTS_EVENT_NAMES,
+} from "@octant/contracts/server-projects";
 import type { FoundationsWiring } from "./foundations";
 import type { IntegrationsWiring } from "./integrations";
 import type { ProvidersWiring } from "./providers";
@@ -88,6 +95,7 @@ export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence
     "codeOperationRuntime" | "contributeCodeTools" | "routeCodeService" | "terminalProcessPort"
   > &
   Pick<FoundationsWiring, "browserAuthority"> &
+  Pick<HarnessStateWiring, "serverConnection" | "serverProjectStore"> &
   Pick<IntegrationsWiring, "toolEgressRules"> &
   Pick<ProvidersWiring, "extensionLifecycleService" | "extensionPackageStore">;
 
@@ -95,6 +103,8 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
   const {
     browserAuthority,
     canAccessCodeProject,
+    serverConnection,
+    serverProjectStore,
     codeFileWatch,
     codeOperationRuntime,
     codeSessionAuthority,
@@ -175,6 +185,20 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
               }
             },
             suggestActions: suggestProjectActions,
+            serverProject: (projectId) => {
+              const project = serverProjectStore.codeProject(String(projectId));
+              if (project === undefined) return undefined;
+              return {
+                bindingRevisionId: serverCodeCheckout(project).bindingRevisionId,
+                // Read at each start, so a server removed from the registry refuses.
+                login: () => {
+                  const address = serverProjectStore.addressOf(String(projectId));
+                  return address.kind === "address"
+                    ? serverTerminalLogin(serverConnection, address.server, address.folder)
+                    : undefined;
+                },
+              };
+            },
             readRunning: persistence.readRunningProjectTerminals,
             journal: persistence.journal,
             actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
@@ -191,6 +215,12 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
             event.eventName === "project.binding-relinked@1")
         ) {
           void projectTerminals.settleProject(decodeProjectId(event.aggregateId));
+        }
+        // A removed server Project ends the shells logged in for it.
+        if (event.eventName === SERVER_PROJECTS_EVENT_NAMES.removed) {
+          void projectTerminals.revokeProject(
+            decodeServerProjectRemovedPayload(event.payload).projectId,
+          );
         }
       }
     });
