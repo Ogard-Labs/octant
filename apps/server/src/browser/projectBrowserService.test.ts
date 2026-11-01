@@ -172,7 +172,11 @@ describe("Project browsers", () => {
     ]);
     expect(runtime.actions).toEqual([
       expect.objectContaining({
-        action: { kind: "navigate", target: "https://example.com/start" },
+        action: {
+          kind: "navigate",
+          target: "https://example.com/start",
+          include: ["screenshot"],
+        },
       }),
     ]);
   });

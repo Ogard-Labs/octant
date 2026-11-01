@@ -2224,10 +2224,11 @@ The agent's Browser tool reads a page as an outline with element refs and acts b
 
 - A snapshot lists headings, text, and controls with refs, states, and values. A credential field reads protected with no value, and a page that holds one shows no field values.
 - Refs are kept and resolved on the server. A ref the latest snapshot did not list, or whose element no longer has the recorded role and name, is refused as stale before the action runs.
+- An action answers with the address, title, revision, and one line on what changed. Page text, a picture, or an outline come back only when the call includes them, and the runtime takes no picture an agent did not ask for. The person's activity preview keeps its picture through the host's peek.
 - No password saving, no agent-written script in the page, and downloads stay blocked.
-- Not built yet: cheaper results, hover, select, drag, key chords, upload, tabs, batched steps, richer waits, dialogs, viewport size, the sign-in handoff, and fuller diagnostics.
+- Not built yet: hover, select, drag, key chords, upload, tabs, batched steps, richer waits, dialogs, viewport size, the sign-in handoff, and fuller diagnostics.
 
-Status: Partly built. Since: 2026-11-01. Detail: [Browser for agents: Page snapshot](browser-agent-tool.md#page-snapshot).
+Status: Partly built. Since: 2026-11-01. Detail: [Browser for agents: Page snapshot](browser-agent-tool.md#page-snapshot) and [Results](browser-agent-tool.md#results).
 
 ### Browser profiles and extensions
 

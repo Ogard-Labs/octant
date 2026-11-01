@@ -10,7 +10,7 @@ approval covers
 and [Browser captures](browser-captures.md) owns which screenshots a thread
 keeps.
 
-Status: the page snapshot and element refs are built. Cheaper results, more
+Status: the page snapshot, element refs, and short results are built. More
 actions, batched steps, richer waits, dialogs and viewport size, the sign-in
 handoff, and fuller diagnostics are allowed; not built yet.
 
@@ -69,10 +69,38 @@ handoff, and fuller diagnostics are allowed; not built yet.
 
 ## Results
 
-Allowed; not built yet. An action answers with the page's address, title,
-revision, and a short line saying what changed. The full page text and a
-screenshot come back only when the call asks for them. The person's activity
-preview keeps its picture.
+- An action (`navigate`, `click`, `type`, `press`, `scroll`, `wait`) answers with
+  the page's address, title, observation revision, and `changed`: one line on
+  what the action did, from the page before and after it: a new address, a new
+  title, changed page text, or "Nothing visible on the page changed." A page
+  that holds a credential field is not compared, and the line says so.
+- An action returns no page text, picture, or outline unless the call asks with
+  `include` (any of `snapshot`, `text`, `screenshot`). Asking costs what the
+  matching reading operation costs, in the same answer. An included snapshot
+  replaces the refs exactly as a `snapshot` operation does.
+- `read-page`, `snapshot`, and `screenshot` return what they read and carry no
+  `changed` line. The page's text hash stays on the server, which compares it;
+  the model no longer receives it.
+- **The runtime takes no picture an agent did not ask for.** Neither the headless
+  nor the desktop Browser captures the page after an agent's action unless the
+  call is a `screenshot` or includes one, and neither returns the page's text
+  unless it is a `read-page` or includes it. Each still reads the page's text
+  for the hash.
+- **The person keeps their picture.** The activity preview takes its own
+  picture through the host's peek, which now runs right after an agent action
+  that took none (at most once per 1.5 seconds), so the preview shows the page
+  the agent left. A person's own action from the Browser pane or a paired
+  device still brings a picture back, because a headless page is seen only as
+  one, and so does opening a page in the thread-less Project browser.
+- A preview's picture of the same page (same address and title) keeps the
+  observation revision, so an agent's next action that names the revision its
+  last action returned still runs while a preview is open.
+- Rationale: measured on a local page with 40 paragraphs and a two-field form
+  (headless Chromium), the per-action observation the host built and kept fell
+  from 31.7 to 40.4 KB (a picture and the page text on every action) to about
+  0.7 KB. A navigate, read, type, click, and verifying read cost the model
+  15,903 bytes of tool results before; navigate, snapshot, type, and click,
+  whose result says what changed, cost 4,538 bytes after.
 
 ## Actions
 

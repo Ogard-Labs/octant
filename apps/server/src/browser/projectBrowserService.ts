@@ -346,7 +346,8 @@ export class ProjectBrowserService {
     try {
       const observed = await this.#options.runtime.act(
         owned.contextId,
-        { kind: "navigate", target: href },
+        // The person sees a headless page only as this picture.
+        { kind: "navigate", target: href, include: ["screenshot"] },
         owned.abort.signal,
       );
       owned.page = pageFrom(observed);

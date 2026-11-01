@@ -405,10 +405,7 @@ describe("BrowserSurfaceHost", () => {
       },
     });
 
-    const observation = await host.act(contextId, {
-      kind: "navigate",
-      target: "https://example.com/docs",
-    });
+    const observation = await host.act(contextId, { kind: "screenshot" });
 
     expect(resize).toHaveBeenCalledWith({ width: 1_280 });
     expect(observation.screenshotDataUrl).toBe("data:image/jpeg;base64,AQID");
@@ -439,10 +436,7 @@ describe("BrowserSurfaceHost", () => {
       },
     });
 
-    const observation = await host.act(contextId, {
-      kind: "navigate",
-      target: "https://example.com/docs",
-    });
+    const observation = await host.act(contextId, { kind: "screenshot" });
 
     expect(created.webContents.debugger.sendCommand).toHaveBeenCalledWith(
       "Page.captureScreenshot",

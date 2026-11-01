@@ -174,6 +174,7 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
           ...(request.deltaX === undefined ? {} : { deltaX: request.deltaX }),
           ...(request.deltaY === undefined ? {} : { deltaY: request.deltaY }),
           ...(request.expected === undefined ? {} : { expected: request.expected }),
+          ...(request.include === undefined ? {} : { include: request.include }),
         },
       },
       signal,
