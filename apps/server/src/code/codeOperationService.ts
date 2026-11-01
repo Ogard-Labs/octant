@@ -120,6 +120,21 @@ const SERVER_THREAD_OPERATIONS: ReadonlySet<CodeOperationCommand["kind"]> = new 
   "resize-terminal",
   "stop-terminal",
 ]);
+/**
+ * The Git panel's operations, which a server thread runs with Git on its
+ * server. Run review, merge, and checkpoints stay refused: each reads or
+ * writes a scratch place of this host. A drafted message stays refused too:
+ * its model session is opened with the checkout as its folder, which here
+ * would name a server path as a folder of this host.
+ */
+const SERVER_GIT_OPERATIONS: ReadonlySet<CodeOperationCommand["kind"]> = new Set([
+  "observe-git",
+  "stage-git",
+  "unstage-git",
+  "discard-git-changes",
+  "commit-git",
+  "push-git",
+]);
 const SERVER_OPERATION_UNAVAILABLE =
   "This is not available for a Project on a server yet. Ask the thread to do it there, or use a terminal on the server.";
 const SERVER_CONNECTORS_UNAVAILABLE =
@@ -977,6 +992,11 @@ export interface CodeOperationServiceOptions {
   /** The login a server thread's terminal opens on its server, or undefined when it has none now. */
   readonly serverTerminalLogin?: (thread: CodeThread) => ServerTerminalLogin | undefined;
   /**
+   * Git on a server thread's server, for the Git panel, or undefined when the
+   * thread has none now. Every command it runs is on the server.
+   */
+  readonly serverGit?: (thread: CodeThread) => CodeOperationGitPort | undefined;
+  /**
    * Runs after the command has passed thread, checkout, lifecycle, and Project
    * scope checks, but before operation approval or any side effect. Runtime
    * work uses this seam so an inaccessible command cannot leave a durable
@@ -1214,7 +1234,10 @@ export class CodeOperationService {
       if (this.#options.holdsServerThread?.(scope.thread) !== true) {
         return this.#failed(command.operationId, "unavailable", REMOTE_FOLDER_UNAVAILABLE);
       }
-      if (!SERVER_THREAD_OPERATIONS.has(command.kind)) {
+      const serverGit = SERVER_GIT_OPERATIONS.has(command.kind)
+        ? this.#options.serverGit?.(scope.thread)
+        : undefined;
+      if (!SERVER_THREAD_OPERATIONS.has(command.kind) && serverGit === undefined) {
         return this.#failed(command.operationId, "unavailable", SERVER_OPERATION_UNAVAILABLE);
       }
       if (
@@ -2515,6 +2538,9 @@ export class CodeOperationService {
     initiator: CodeOperationInitiator = "agent",
   ): Promise<CodeOperationResult> {
     const workingDirectory = root.workingDirectory ?? root.checkoutRoot;
+    // A server thread's Git runs on its server; it never reaches this host's.
+    const git =
+      checkout.kind === "remote-root" ? this.#options.serverGit?.(thread) : this.#options.git;
     switch (command.kind) {
       case "start-terminal": {
         // A server thread's terminal is a login on its server, in its folder,
@@ -2872,17 +2898,21 @@ export class CodeOperationService {
         });
       }
       case "observe-git":
-        return this.#gitObservation(command, root.checkoutRoot);
+        if (git === undefined)
+          return this.#failed(command.operationId, "unavailable", SERVER_OPERATION_UNAVAILABLE);
+        return this.#gitObservation(command, root.checkoutRoot, git);
       case "review-run":
         return this.#reviewRun(command, thread, root.checkoutRoot);
       case "merge-run":
         return this.#mergeRun(command, thread, root.checkoutRoot);
       case "stage-git":
+        if (git === undefined)
+          return this.#failed(command.operationId, "unavailable", SERVER_OPERATION_UNAVAILABLE);
         return this.#gitMutation(
           command.operationId,
           command.gitOperationId,
           "stage",
-          await this.#options.git.stage({
+          await git.stage({
             checkoutId: checkout.id,
             checkoutRoot: root.checkoutRoot,
             paths: command.paths,
@@ -2891,11 +2921,13 @@ export class CodeOperationService {
           }),
         );
       case "unstage-git":
+        if (git === undefined)
+          return this.#failed(command.operationId, "unavailable", SERVER_OPERATION_UNAVAILABLE);
         return this.#gitMutation(
           command.operationId,
           command.gitOperationId,
           "unstage",
-          await this.#options.git.unstage({
+          await git.unstage({
             checkoutId: checkout.id,
             checkoutRoot: root.checkoutRoot,
             paths: command.paths,
@@ -2904,13 +2936,17 @@ export class CodeOperationService {
           }),
         );
       case "draft-git-text":
-        return this.#gitDraft(command, thread, root.checkoutRoot);
+        if (git === undefined)
+          return this.#failed(command.operationId, "unavailable", SERVER_OPERATION_UNAVAILABLE);
+        return this.#gitDraft(command, thread, root.checkoutRoot, git);
       case "discard-git-changes":
+        if (git === undefined)
+          return this.#failed(command.operationId, "unavailable", SERVER_OPERATION_UNAVAILABLE);
         return this.#gitMutation(
           command.operationId,
           command.gitOperationId,
           "discard",
-          await this.#options.git.discard({
+          await git.discard({
             checkoutId: checkout.id,
             checkoutRoot: root.checkoutRoot,
             paths: command.paths,
@@ -2919,11 +2955,13 @@ export class CodeOperationService {
           }),
         );
       case "commit-git":
+        if (git === undefined)
+          return this.#failed(command.operationId, "unavailable", SERVER_OPERATION_UNAVAILABLE);
         return this.#gitMutation(
           command.operationId,
           command.gitOperationId,
           "commit",
-          await this.#options.git.commit({
+          await git.commit({
             checkoutId: checkout.id,
             checkoutRoot: root.checkoutRoot,
             message: command.message,
@@ -2933,6 +2971,8 @@ export class CodeOperationService {
           }),
         );
       case "push-git": {
+        if (git === undefined)
+          return this.#failed(command.operationId, "unavailable", SERVER_OPERATION_UNAVAILABLE);
         const remoteBranch = command.remoteRef.replace(/^refs\/heads\//, "");
         const decision = decidePushBranch({
           remoteBranch,
@@ -2954,7 +2994,7 @@ export class CodeOperationService {
           command.operationId,
           command.gitOperationId,
           "push",
-          await this.#options.git.push({
+          await git.push({
             checkoutId: checkout.id,
             checkoutRoot: root.checkoutRoot,
             remote: command.remote,
@@ -3510,8 +3550,9 @@ export class CodeOperationService {
   async #gitObservation(
     command: Extract<CodeOperationCommand, { readonly kind: "observe-git" }>,
     checkoutRoot: string,
+    git: CodeOperationGitPort,
   ): Promise<CodeOperationResult> {
-    const result = await this.#options.git.observe({
+    const result = await git.observe({
       checkoutRoot,
       maxDiffBytes: command.maxDiffBytes,
       ...(command.ignoreWhitespace === true ? { ignoreWhitespace: true } : {}),
@@ -3610,8 +3651,9 @@ export class CodeOperationService {
     command: Extract<CodeOperationCommand, { readonly kind: "draft-git-text" }>,
     thread: CodeThread,
     checkoutRoot: string,
+    git: CodeOperationGitPort,
   ): Promise<CodeOperationResult> {
-    const draft = this.#options.git.draft;
+    const draft = git.draft;
     const result =
       draft === undefined
         ? ({ status: "unavailable" } as const)

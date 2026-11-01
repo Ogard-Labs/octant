@@ -11,12 +11,16 @@ import type {
   BrowserThreadId,
 } from "@octant/contracts/browser-automation";
 import type { WindowId } from "@octant/contracts/shell";
+import type { BrowserPageSnapshotRef } from "@octant/domain";
 
 export interface BrowserRuntimeObservation {
   readonly url?: string;
   readonly title?: string;
   readonly contentHash?: string;
   readonly extractedText?: string;
+  /** Only a snapshot action fills these: the outline, and what each ref names. */
+  readonly snapshot?: string;
+  readonly snapshotRefs?: ReadonlyArray<BrowserPageSnapshotRef>;
   readonly screenshotDataUrl?: string;
   readonly viewport?: { readonly width: number; readonly height: number };
   /** Only the observe-diagnostics action fills these; see the contract. */
@@ -81,6 +85,17 @@ export class BrowserNavigationBlockedError extends Error {
 }
 
 /**
+ * The element a snapshot ref named is no longer there, or is no longer the
+ * element the snapshot described. The action did not run.
+ */
+export class BrowserTargetStaleError extends Error {
+  constructor() {
+    super("The element behind that ref changed since the snapshot.");
+    this.name = "BrowserTargetStaleError";
+  }
+}
+
+/**
  * A page asked for a stored Browser profile and this runtime cannot hold one.
  * Only the desktop app's own Browser keeps a profile's store, so a runtime
  * without it refuses instead of opening a headless copy that would disagree
@@ -128,7 +143,15 @@ export interface BrowserProfileStorePort {
  * ever needed the action itself.
  */
 export type BrowserRuntimeAction = Pick<BrowserActionRequest, "kind"> &
-  Partial<Pick<BrowserActionRequest, "target" | "value" | "point" | "deltaX" | "deltaY">>;
+  Partial<Pick<BrowserActionRequest, "target" | "value" | "point" | "deltaX" | "deltaY">> & {
+    /**
+     * Set when `target` came from a snapshot ref: the page must still be at the
+     * snapshot's address (as an observation reports it) and the element there
+     * must still have this role and name, or the runtime refuses with
+     * `BrowserTargetStaleError` before touching it.
+     */
+    readonly expected?: { readonly role: string; readonly name: string; readonly url: string };
+  };
 
 export interface BrowserRuntimePort {
   readonly available: () => Promise<boolean>;

@@ -183,6 +183,8 @@ export interface CodeThreadWorkspaceProps {
   readonly onOpenImageSettings?: () => void;
   /** Opens the pull-request surface from the checkout bar. Absent hides the control. */
   readonly onCreatePullRequest?: () => void;
+  /** Opens this thread's Git tab. */
+  readonly onOpenGit?: () => void;
   readonly hostId?: HostId;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
   /** Opens the dock's Canvas tool on this Canvas; a Canvas drawn in the thread offers it. */
@@ -1835,6 +1837,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               ? {}
               : { onCreatePullRequest: props.onCreatePullRequest })}
             {...(serverProject === undefined ? {} : { serverLocation: serverProject.location })}
+            {...(serverProject === undefined || props.onOpenGit === undefined
+              ? {}
+              : { onOpenServerGit: props.onOpenGit })}
           />
         }
         className="thread-composer code-thread-workspace__composer thread-column"

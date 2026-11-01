@@ -74,6 +74,7 @@ const resolvedTo = (folder: string): ServerCall => ({
   exitCode: 0,
   output: Buffer.from(`${folder}\n`),
   truncated: false,
+  errorOutput: "",
 });
 
 function storeOn(
@@ -141,8 +142,13 @@ describe("server Project catalog", () => {
     ).toMatchObject({ kind: "refused", reason: "server-unreachable" });
     const missing = storeOn(
       journal,
-      answering(() => ({ status: "ran", exitCode: 2, output: Buffer.alloc(0), truncated: false }))
-        .connection,
+      answering(() => ({
+        status: "ran",
+        exitCode: 2,
+        output: Buffer.alloc(0),
+        truncated: false,
+        errorOutput: "",
+      })).connection,
     );
     expect(
       await missing.bind({
