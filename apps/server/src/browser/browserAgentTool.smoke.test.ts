@@ -53,7 +53,10 @@ const pages: Record<string, string> = {
     <div id="done" ondragover="event.preventDefault()" ondrop="event.preventDefault(); document.title = 'Dropped ' + event.dataTransfer.getData('text')">Done</div>
     <input id="keys" aria-label="Keys" onkeydown="if (event.ctrlKey) document.title = 'Chord ' + event.key">
     <label for="file">Attachment</label>
-    <input id="file" type="file" onchange="document.title = 'Attached ' + this.files[0].name + ' ' + this.files[0].size">`,
+    <input id="file" type="file" onchange="document.title = 'Attached ' + this.files[0].name + ' ' + this.files[0].size">
+    <button id="read" onclick="document.getElementById('file').files[0].text().then((text) => { document.title = 'Read ' + text; })">Read</button>`,
+  "/later-leave": `<!doctype html><title>Later</title>
+    <script>setTimeout(() => { location.href = "/leave"; }, 100);</script>`,
   "/slow": `<!doctype html><title>Slow</title>
     <button id="go" onclick="setTimeout(() => { const p = document.createElement('p'); p.id = 'done'; p.textContent = 'Saved at last'; document.body.append(p); document.getElementById('go').disabled = true; }, 400)">Go</button>
     <button id="later" onclick="setTimeout(() => { document.title = 'Settled'; }, 150)">Later</button>
@@ -291,6 +294,12 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     const clicked = await tool.call({ operation: "click", selector: "#save" });
     const preview = await tool.service.peekThread(windowId, threadId);
     expect(preview.observation?.screenshotDataUrl).toMatch(/^data:image\/jpeg;base64,/);
+    // The Browser pane, which polls the context by its id, gets one too.
+    const contextId = preview.context?.contextId;
+    if (contextId === undefined) throw new Error("No context.");
+    await new Promise((resolve) => setTimeout(resolve, 1_600));
+    const pane = await tool.service.peekContext(windowId, threadId, contextId);
+    expect(pane.observation?.screenshotDataUrl).toMatch(/^data:image\/jpeg;base64,/);
     // The preview's picture does not make the agent's next action stale.
     const next = await tool.call({
       operation: "click",
@@ -349,6 +358,11 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
         files: ["notes.txt"],
       });
       expect(sent.result.page?.title).toBe("Attached notes.txt 5");
+      // The page reads the file when a later action sends it.
+      await tool.call({ operation: "click", selector: "#read" });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const read = await tool.call({ operation: "read-page" });
+      expect(read.result.page?.title).toBe("Read hello");
       expect(tool.asked).toEqual([
         expect.objectContaining({
           origin,
@@ -429,6 +443,13 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     expect(redirected.result.failure?.category).toBe("policy-denied");
     const listed = await tool.call({ operation: "tab-list" });
     expect(JSON.stringify(listed.result.page?.tabs)).not.toContain("localhost");
+    // A tab that wanders off the allowed origins after its own action ended
+    // is listed blank, never with the other site's address or title.
+    await tool.call({ operation: "tab-open", url: `${origin}/later-leave` });
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    const wandered = await tool.call({ operation: "tab-list" });
+    expect(JSON.stringify(wandered.result.page?.tabs)).not.toContain("localhost");
+    expect(JSON.stringify(wandered.result.page?.tabs)).not.toContain("Other");
     await tool.stop();
   });
 
@@ -486,6 +507,40 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     // The step after the failure never ran.
     const read = await tool.call({ operation: "read-page", selector: "#name" });
     expect(read.result.page?.title).toBe("Saved Ada");
+
+    // A step whose revision is out of date does not run, and stops the batch.
+    const revision = Number(
+      (await tool.call({ operation: "read-page", selector: "#name" })).result.page
+        ?.observationRevision,
+    );
+    const outdated = (await tool.call({
+      operation: "steps",
+      steps: [
+        {
+          operation: "type",
+          selector: "#name",
+          text: "Grace",
+          expectedObservationRevision: revision - 1,
+        },
+        { operation: "click", selector: "#save" },
+      ],
+    })) as unknown as {
+      readonly isError: boolean;
+      readonly result: {
+        readonly failedStep: {
+          readonly step: number;
+          readonly answer: { readonly failure?: { readonly category: string } };
+        };
+      };
+    };
+    expect(outdated.isError).toBe(true);
+    expect(outdated.result.failedStep).toMatchObject({
+      step: 1,
+      answer: { failure: { category: "stale" } },
+    });
+    expect(
+      (await tool.call({ operation: "read-page", selector: "#name" })).result.page?.title,
+    ).toBe("Saved Ada");
 
     for (const steps of [
       Array.from({ length: 11 }, () => ({ operation: "snapshot" })),

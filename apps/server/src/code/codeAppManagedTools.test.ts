@@ -820,6 +820,7 @@ describe("Code app-managed tools", () => {
     expect(act).toHaveBeenLastCalledWith({
       windowId,
       capturedBy: "agent",
+      refuseStaleRevision: true,
       request: expect.objectContaining({
         kind: "press",
         value: "Enter",
@@ -833,6 +834,7 @@ describe("Code app-managed tools", () => {
     expect(act).toHaveBeenLastCalledWith({
       windowId,
       capturedBy: "agent",
+      refuseStaleRevision: true,
       request: expect.objectContaining({ kind: "scroll", deltaX: 100, deltaY: -500 }),
     });
     act.mockClear();

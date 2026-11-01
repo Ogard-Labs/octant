@@ -142,6 +142,8 @@ const hostPolicy: BrowserContextPolicy = {
   sessionTimeoutMs: 600_000,
 };
 const MAX_RETAINED_BROWSER_EVIDENCE = 32;
+/** How many uploads' copies one context keeps for forms not yet sent. */
+const MAX_STAGED_UPLOADS = 8;
 /** The actions that name one element, and so may name it by a snapshot ref. */
 const REF_ACTIONS: ReadonlySet<BrowserActionRequest["kind"]> = new Set([
   "click",
@@ -173,6 +175,8 @@ export class BrowserAutomationService {
   readonly #now: () => number;
   readonly #schedule: (delayMs: number, callback: () => void) => () => void;
   readonly #contexts = new Map<BrowserContextId, OwnedContext>();
+  /** Each context's staged upload copies, deleted when the context closes. */
+  readonly #stagedUploads = new Map<BrowserContextId, Array<() => Promise<void>>>();
   readonly #removeProcessExitListener: (() => void) | undefined;
 
   constructor(options: BrowserAutomationServiceOptions) {
@@ -206,6 +210,7 @@ export class BrowserAutomationService {
         }
         owned.evidence.splice(0);
         owned.record = stoppedRecord(owned.record, this.#clock(), "error", "failed");
+        this.#releaseUploads(contextId);
       }
     });
   }
@@ -383,8 +388,23 @@ export class BrowserAutomationService {
      * approved. Nothing else supplies a path to a runtime.
      */
     readonly uploadFiles?: ReadonlyArray<string>;
+    /**
+     * Deletes the copies `uploadFiles` names. The service owns it from here:
+     * a page reads an attached file when its form is sent, often in a later
+     * action, so the copies stay until the context closes.
+     */
+    readonly releaseUpload?: () => Promise<void>;
+    /**
+     * Refuse an action whose expected revision is out of date as `stale`,
+     * rather than answering with the page unchanged. The agent tool asks for
+     * this; the person's pane does not.
+     */
+    readonly refuseStaleRevision?: boolean;
   }): Promise<BrowserAutomationSnapshot> {
     const owned = this.#contexts.get(input.request.contextId);
+    if (owned === undefined || owned.windowId !== input.windowId) {
+      if (input.releaseUpload !== undefined) void input.releaseUpload().catch(() => undefined);
+    }
     if (owned === undefined) {
       throw new Error("Browser context is stale or unknown.");
     }
@@ -395,7 +415,37 @@ export class BrowserAutomationService {
         "failed",
       );
     }
-    return this.#queueAction(owned, () => this.#actOwned(owned, input));
+    try {
+      return await this.#queueAction(owned, () => this.#actOwned(owned, input));
+    } finally {
+      if (input.releaseUpload !== undefined) this.#keepUpload(owned, input.releaseUpload);
+    }
+  }
+
+  /**
+   * Hold an upload's copies for as long as its context lives, so a later
+   * action can still send the form they were attached to. A context that is
+   * already closing releases them at once; past the bound, the oldest go.
+   */
+  #keepUpload(owned: OwnedContext, release: () => Promise<void>): void {
+    const contextId = owned.record.contextId;
+    if (owned.record.state !== "active" || !this.#contexts.has(contextId)) {
+      void release().catch(() => undefined);
+      return;
+    }
+    const kept = this.#stagedUploads.get(contextId) ?? [];
+    kept.push(release);
+    while (kept.length > MAX_STAGED_UPLOADS)
+      void kept
+        .shift()?.()
+        .catch(() => undefined);
+    this.#stagedUploads.set(contextId, kept);
+  }
+
+  #releaseUploads(contextId: BrowserContextId): void {
+    const kept = this.#stagedUploads.get(contextId);
+    this.#stagedUploads.delete(contextId);
+    for (const release of kept ?? []) void release().catch(() => undefined);
   }
 
   async #actOwned(
@@ -405,6 +455,7 @@ export class BrowserAutomationService {
       readonly request: BrowserActionRequest;
       readonly capturedBy?: BrowserCaptureTaker;
       readonly uploadFiles?: ReadonlyArray<string>;
+      readonly refuseStaleRevision?: boolean;
     },
   ): Promise<BrowserAutomationSnapshot> {
     if (owned.abort.signal.aborted || owned.record.state !== "active") {
@@ -455,7 +506,17 @@ export class BrowserAutomationService {
       input.request.expectedObservationRevision !== undefined &&
       input.request.expectedObservationRevision !== owned.observation?.revision
     ) {
-      return snapshot(owned);
+      // The pane re-polls and tries again; the agent is told, so a batch
+      // stops instead of carrying on as if the skipped step had run.
+      if (input.refuseStaleRevision !== true) return snapshot(owned);
+      return this.#failure(
+        owned,
+        {
+          category: "stale",
+          message: `The page changed since revision ${String(input.request.expectedObservationRevision)}; read it again before acting.`,
+        },
+        owned.status,
+      );
     }
     const resolved = this.#resolveRef(owned, input.request);
     if (resolved.kind === "refused") return this.#failure(owned, resolved.failure, "failed");
@@ -988,11 +1049,41 @@ export class BrowserAutomationService {
     signal?: AbortSignal,
   ): Promise<BrowserAutomationSnapshot> {
     const owned = this.#current(windowId, threadId);
+    if (owned !== undefined) await this.#refreshPicture(owned, signal);
+    return this.inspectThread(windowId, threadId);
+  }
+
+  /**
+   * One context as it stands, with a fresh picture when the last one is
+   * stale: the Browser pane that holds a context's id polls this, and an
+   * agent's action no longer leaves a picture behind for it.
+   */
+  async peekContext(
+    windowId: WindowId,
+    threadId: BrowserThreadId,
+    contextId: BrowserContextId,
+    signal?: AbortSignal,
+  ): Promise<BrowserAutomationSnapshot> {
+    const owned = this.#contexts.get(contextId);
+    if (
+      owned !== undefined &&
+      owned.windowId === windowId &&
+      String(owned.threadId) === String(threadId) &&
+      // A native page is on the person's screen already; only a headless one
+      // is seen as a picture.
+      owned.record.presentation !== "native-live" &&
+      this.#authorityIsActive(owned)
+    ) {
+      await this.#refreshPicture(owned, signal);
+    }
+    return this.inspect(windowId, threadId, contextId);
+  }
+
+  async #refreshPicture(owned: OwnedContext, signal: AbortSignal | undefined): Promise<void> {
     // Called on the runtime, never detached: a runtime's peek reaches for its
     // own state, and a bare reference to it arrived there with no `this`.
     const runtime = this.#runtime;
     if (
-      owned !== undefined &&
       runtime.peek !== undefined &&
       // A live context is "running" for as long as it exists; "waiting" is one
       // still being created, whose page is not there to look at yet.
@@ -1036,7 +1127,6 @@ export class BrowserAutomationService {
         );
       }
     }
-    return this.inspectThread(windowId, threadId);
   }
 
   /**
@@ -1089,6 +1179,7 @@ export class BrowserAutomationService {
 
   async close(): Promise<void> {
     this.#removeProcessExitListener?.();
+    for (const contextId of this.#stagedUploads.keys()) this.#releaseUploads(contextId);
     for (const owned of this.#contexts.values()) {
       owned.abort.abort();
       owned.cancelExpiry?.();
@@ -1280,6 +1371,7 @@ export class BrowserAutomationService {
   }
 
   async #safeClose(contextId: BrowserContextId): Promise<void> {
+    this.#releaseUploads(contextId);
     try {
       await this.#runtime.closeContext(contextId);
     } catch {

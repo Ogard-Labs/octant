@@ -2464,6 +2464,41 @@ describe("CodeOperationService", () => {
     expect(fixture.turns.start).toHaveBeenCalledOnce();
   });
 
+  it("runs a server Project's Git panel with Git on its server, and refuses it when the server has none", async () => {
+    const localStage = vi.fn(async () => ({ status: "applied" as const }));
+    const serverStage = vi.fn(async () => ({ status: "applied" as const }));
+    const stage = {
+      kind: "stage-git",
+      operationId: decodeCodeOperationId("4c4c4c4c-4c4c-44c4-84c4-4c4c4c4c4c4c"),
+      threadId: ids.thread,
+      checkoutId: ids.checkout,
+      gitOperationId: "4d4d4d4d-4d4d-44d4-84d4-4d4d4d4d4d4d" as never,
+      paths: ["README.md"],
+      expectedStateToken: "a".repeat(64),
+    } as const;
+    let serverHasGit = true;
+    const fixture = providerTurnFixture({
+      remoteRoot: true,
+      holdsServerThread: () => true,
+      git: { stage: localStage } as never,
+      serverGit: () => (serverHasGit ? ({ stage: serverStage } as never) : undefined),
+      thread: decodeCodeThread({ ...thread(), executionPolicy: "full-access" }),
+    });
+    expect(await fixture.service.execute(ids.window, stage)).toMatchObject({
+      kind: "git-mutation-state",
+    });
+    expect(serverStage).toHaveBeenCalledOnce();
+    serverHasGit = false;
+    expect(
+      await fixture.service.execute(ids.window, {
+        ...stage,
+        operationId: decodeCodeOperationId("4e4e4e4e-4e4e-44e4-84e4-4e4e4e4e4e4e"),
+      }),
+    ).toMatchObject({ kind: "operation-failed", failure: { category: "unavailable" } });
+    expect(serverStage).toHaveBeenCalledOnce();
+    expect(localStage).not.toHaveBeenCalled();
+  });
+
   it("refuses a selected skill before Code provider execution when no material resolver exists", async () => {
     const fixture = providerTurnFixture();
     const result = await fixture.service.execute(ids.window, {
@@ -2963,6 +2998,7 @@ function providerTurnFixture(
       | "confirmAgentMessagesDelivered"
       | "takeProductFeedbackForTurn"
       | "holdsServerThread"
+      | "serverGit"
     >
   > & {
     readonly thread?: CodeThread;

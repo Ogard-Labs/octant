@@ -50,8 +50,11 @@ Choose one to start a thread there.
   allowed commands earlier in the thread. Full access asks nothing.
 - **Terminals.** A terminal in the thread is a login shell in the folder on
   the server. When the connection drops, the terminal ends.
+- **Git tab.** Choose **Git** on the thread's checkout bar to see the
+  changes in the folder on the server, stage, commit, and push. Git runs on
+  the server with the server's own Git setup. At Plan it changes nothing.
 - **Not available there yet:** connectors and plugins, Browser and Computer,
-  subagents, forks, checkpoints and rewind, and the Git, Files, and Tests
-  panels. Ask the agent to do it on the server, or use a terminal.
+  subagents, forks, checkpoints and rewind, pull requests, and the Files and
+  Tests panels. Ask the agent to do it on the server, or use a terminal.
 - **Tested on a throwaway local server only.** Octant's tests ran this against
   an `sshd` started on this computer for the test, never a real server.

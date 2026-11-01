@@ -877,6 +877,10 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
   async #tabsObservation(owned: OwnedRuntimeContext): Promise<BrowserRuntimeObservation> {
     const tabs = await Promise.all(
       owned.tabs.map(async (tab) => {
+        // A tab can follow a redirect off the allowed origins after its own
+        // action ended; it is sent to a blank page before anything of it is
+        // read, as the tab in front is after every action.
+        await leaveUnapprovedLanding(tab.page, owned.allowedOrigins).catch(() => undefined);
         const title = await tab.page.title().catch(() => "");
         const url = tab.page.url();
         return {

@@ -701,7 +701,11 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
             // it reads nothing — its own target check is the guard — but its
             // result is checked below, so a navigation that fails cannot leave
             // the agent extracting the page it did not manage to leave.
-            if (request.kind !== "navigate") refuseUnapprovedPage(owned, contents);
+            // A tab action reads no page: it names tabs and moves between them,
+            // so a front tab the person took elsewhere does not strand the agent.
+            if (request.kind !== "navigate" && !request.kind.startsWith("tab-")) {
+              refuseUnapprovedPage(owned, contents);
+            }
             await refuseStaleTarget(contentsView(owned), request.target, request.expected);
             await refuseStaleTarget(
               contentsView(owned),
@@ -819,6 +823,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
               case "tab-select": {
                 const chosen = owned.tabs.find((tab) => agentTabId(tab.tabId) === request.tabId);
                 if (chosen === undefined) throw new Error("Octant Browser tab is unknown.");
+                // The person's tab on a site no approval covers stays theirs.
+                refuseUnapprovedPage(owned, chosen.view.webContents);
                 showTab(owned, chosen);
                 return agentTabs(owned);
               }

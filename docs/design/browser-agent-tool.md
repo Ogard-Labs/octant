@@ -128,7 +128,10 @@ diagnostics are allowed; not built yet.
   page and the action is refused.
 - On the desktop Browser the person's own tabs share the context. A tab the
   person took to a site no approval covers is listed without its address or
-  title, and the agent cannot read or act on it.
+  title; the agent cannot switch to it, read it, or act on it, and with it in
+  front the agent can still list tabs and switch to another. On the headless
+  Browser, a tab that followed a redirect off the allowed origins after its own
+  action is sent to a blank page before it is listed.
 - A paired device may hover and list tabs. It may not choose an option, drag,
   upload, or open, switch, or close a tab, as it may not navigate or type
   ([Architecture: remote access](../architecture.md#security-and-authority)).
@@ -149,7 +152,10 @@ only after the person approves it.
   asks, reading it through a descriptor that does not follow a link and that
   must still be the file it checked, and the page receives the copies. A file
   swapped for a link while the person reads the question is therefore never
-  what is sent. The copies are deleted when the action ends.
+  what is sent. A page reads an attached file when its form is sent, often in
+  a later action, so the copies stay until the page's browsing context closes
+  (at most 8 uploads' worth per context, the oldest deleted first), and are
+  deleted then, or at once if the upload never reached the page.
 - The person is asked every time, naming each file with its size and the site:
   "Let the agent upload report.pdf (12 KB) to https://example.com?" The answer
   covers those files to that site once. It is never remembered, so the card has
@@ -185,6 +191,10 @@ only after the person approves it.
   before any step runs.
 - A batch is a list of fixed operations, never a script: nothing an agent
   writes runs in the page.
+- An agent's action that names an `expectedObservationRevision` the page has
+  moved past is refused as `stale` and does not run, so a batch stops there
+  rather than carrying on as if the step had run. The person's pane, which
+  re-polls on its own, keeps getting the page back without a refusal.
 - The field a `type` or `select` changes is not page text, so such a step
   reports that the field holds the new value when nothing else changed.
 
