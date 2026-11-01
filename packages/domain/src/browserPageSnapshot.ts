@@ -56,14 +56,27 @@ export type BrowserPageReadRequest =
        */
       readonly withholdValues: boolean;
     }
-  | { readonly mode: "verify"; readonly selector: string };
+  | { readonly mode: "verify"; readonly selector: string }
+  | { readonly mode: "check"; readonly conditions: ReadonlyArray<BrowserPageCondition> };
+
+/** One wait condition as the page checks it, with any ref already resolved. */
+export type BrowserPageCondition =
+  | { readonly kind: "text"; readonly text: string; readonly present: boolean }
+  | { readonly kind: "url"; readonly contains: string }
+  | { readonly kind: "load"; readonly state: "domcontentloaded" | "load" }
+  | {
+      readonly kind: "element";
+      readonly target: string;
+      readonly state: "attached" | "detached" | "visible" | "hidden" | "enabled" | "disabled";
+    };
 
 export type BrowserPageReadResult =
   | { readonly mode: "snapshot"; readonly snapshot: BrowserPageSnapshot }
   | {
       readonly mode: "verify";
       readonly element: { readonly role: string; readonly name: string } | null;
-    };
+    }
+  | { readonly mode: "check"; readonly met: ReadonlyArray<boolean> };
 
 /**
  * Runs inside the page. See the module comment: nothing outside this body is
@@ -190,6 +203,43 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
     const title = element.getAttribute("title") ?? element.getAttribute("placeholder");
     return title === null ? "" : clip(title, 120);
   };
+
+  if (request.mode === "check") {
+    const shown = (element: Element): boolean => {
+      const style = window.getComputedStyle(element);
+      const box = element.getBoundingClientRect();
+      return (
+        style.display !== "none" && style.visibility !== "hidden" && box.width > 0 && box.height > 0
+      );
+    };
+    const met = request.conditions.map((condition) => {
+      if (condition.kind === "text") {
+        const found = (document.body?.innerText ?? "").includes(condition.text);
+        return found === condition.present;
+      }
+      if (condition.kind === "url") return location.href.includes(condition.contains);
+      if (condition.kind === "load") {
+        return condition.state === "load"
+          ? document.readyState === "complete"
+          : document.readyState !== "loading";
+      }
+      let element: Element | null = null;
+      try {
+        element = document.querySelector(condition.target);
+      } catch {
+        element = null;
+      }
+      if (condition.state === "attached") return element !== null;
+      if (condition.state === "detached") return element === null;
+      if (condition.state === "visible") return element !== null && shown(element);
+      if (condition.state === "hidden") return element === null || !shown(element);
+      const disabled =
+        element !== null &&
+        (element.hasAttribute("disabled") || element.getAttribute("aria-disabled") === "true");
+      return element !== null && (condition.state === "disabled" ? disabled : !disabled);
+    });
+    return { mode: "check", met };
+  }
 
   if (request.mode === "verify") {
     let element: Element | null = null;
@@ -397,4 +447,101 @@ export function browserRefStillMatches(
     found.role === expected.role &&
     found.name === expected.name
   );
+}
+
+/**
+ * Runs inside the page: resolve once the document has stopped changing for a
+ * short quiet window, or when the cap runs out, whichever comes first. A page
+ * that keeps changing (a clock, an animation) costs the cap and no more.
+ */
+export function awaitQuietPage(argument: {
+  readonly quietMs: number;
+  readonly capMs: number;
+}): Promise<boolean> {
+  return new Promise((resolve) => {
+    let quietTimer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (quiet: boolean) => {
+      observer.disconnect();
+      clearTimeout(capTimer);
+      if (quietTimer !== undefined) clearTimeout(quietTimer);
+      resolve(quiet);
+    };
+    const restart = () => {
+      if (quietTimer !== undefined) clearTimeout(quietTimer);
+      quietTimer = setTimeout(() => finish(true), argument.quietMs);
+    };
+    const observer = new MutationObserver(restart);
+    observer.observe(document, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      characterData: true,
+    });
+    const capTimer = setTimeout(() => finish(false), argument.capMs);
+    restart();
+  });
+}
+
+/** How long the page must stay unchanged after an action, and the most a settle waits. */
+export const BROWSER_SETTLE_QUIET_MS = 250;
+export const BROWSER_SETTLE_CAP_MS = 2_000;
+
+/**
+ * How the Browser answers a page's own dialog, whoever is driving: it accepts
+ * what only informs or lets the page close, and declines what asks a question
+ * the agent was not asked. The answer is reported, never hidden.
+ */
+export const BROWSER_DIALOG_POLICY = {
+  alert: "accepted",
+  confirm: "dismissed",
+  prompt: "dismissed",
+  beforeunload: "accepted",
+} as const satisfies Record<string, "accepted" | "dismissed">;
+
+export function dialogType(value: string): keyof typeof BROWSER_DIALOG_POLICY {
+  return value === "confirm" || value === "prompt" || value === "beforeunload" ? value : "alert";
+}
+
+/** The conditions a page checks, with element targets the host already resolved. */
+export function browserPageConditions(waitFor: {
+  readonly conditions: ReadonlyArray<
+    | { readonly kind: "text"; readonly text: string; readonly present: boolean }
+    | { readonly kind: "url"; readonly contains: string }
+    | { readonly kind: "load"; readonly state: "domcontentloaded" | "load" }
+    | {
+        readonly kind: "element";
+        readonly target?: string | undefined;
+        readonly state: "attached" | "detached" | "visible" | "hidden" | "enabled" | "disabled";
+      }
+  >;
+}): ReadonlyArray<BrowserPageCondition> {
+  return waitFor.conditions.map((condition) =>
+    condition.kind === "element"
+      ? { kind: "element", target: condition.target ?? ":not(*)", state: condition.state }
+      : condition,
+  );
+}
+
+export function waitSatisfied(match: "all" | "any", met: ReadonlyArray<boolean>): boolean {
+  return match === "all" ? met.every(Boolean) : met.some(Boolean);
+}
+
+/** The sentence a timed-out wait answers with: which conditions never held. */
+export function describeUnmetWait(
+  timeoutMs: number,
+  conditions: ReadonlyArray<BrowserPageCondition>,
+  met: ReadonlyArray<boolean>,
+): string {
+  const unmet = conditions
+    .filter((_condition, index) => met[index] !== true)
+    .map((condition) => {
+      if (condition.kind === "text") {
+        return `text ${JSON.stringify(condition.text.slice(0, 80))} ${condition.present ? "present" : "absent"}`;
+      }
+      if (condition.kind === "url")
+        return `address containing ${JSON.stringify(condition.contains.slice(0, 80))}`;
+      if (condition.kind === "load") return `page ${condition.state}`;
+      return `element ${JSON.stringify(condition.target.slice(0, 80))} ${condition.state}`;
+    });
+  return `The wait timed out after ${String(timeoutMs)} ms. Not met: ${unmet.join("; ")}.`;
 }

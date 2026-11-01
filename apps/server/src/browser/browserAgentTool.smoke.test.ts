@@ -54,6 +54,12 @@ const pages: Record<string, string> = {
     <input id="keys" aria-label="Keys" onkeydown="if (event.ctrlKey) document.title = 'Chord ' + event.key">
     <label for="file">Attachment</label>
     <input id="file" type="file" onchange="document.title = 'Attached ' + this.files[0].name + ' ' + this.files[0].size">`,
+  "/slow": `<!doctype html><title>Slow</title>
+    <button id="go" onclick="setTimeout(() => { const p = document.createElement('p'); p.id = 'done'; p.textContent = 'Saved at last'; document.body.append(p); document.getElementById('go').disabled = true; }, 400)">Go</button>
+    <button id="later" onclick="setTimeout(() => { document.title = 'Settled'; }, 150)">Later</button>
+    <button id="ask" onclick="const ok = confirm('Delete everything?'); alert(ok ? 'deleted' : 'kept'); document.title = ok ? 'Deleted' : 'Kept'">Ask</button>
+    <p>Width <span id="width"></span></p>
+    <script>const show = () => { document.getElementById('width').textContent = String(innerWidth); }; show(); addEventListener('resize', show);</script>`,
   "/other": `<!doctype html><title>Other</title><button>Save</button>`,
 };
 
@@ -491,6 +497,73 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
       const refused = await tool.call({ operation: "steps", steps });
       expect(refused.result).toEqual({ error: "invalid-browser-input" });
     }
+    await tool.stop();
+  });
+
+  it("waits for text, an element's state, and an address, and says what never held", async () => {
+    const tool = agentTool();
+    await tool.call({ operation: "navigate", url: `${origin}/slow` });
+    await tool.call({ operation: "click", selector: "#go" });
+    const waited = await tool.call({
+      operation: "wait",
+      conditions: [
+        { text: "Saved at last" },
+        { selector: "#go", state: "disabled" },
+        { urlContains: "/slow" },
+      ],
+      timeoutMs: 5_000,
+    });
+    expect(waited.isError).toBe(false);
+    const either = await tool.call({
+      operation: "wait",
+      conditions: [{ text: "Never there" }, { load: "load" }],
+      match: "any",
+    });
+    expect(either.isError).toBe(false);
+    const timedOut = await tool.call({
+      operation: "wait",
+      conditions: [{ text: "Never there" }, { text: "Saved at last", present: false }],
+      timeoutMs: 300,
+    });
+    expect(timedOut.result.failure).toMatchObject({
+      category: "failed",
+      message: expect.stringMatching(
+        /timed out after 300 ms.*"Never there" present.*"Saved at last" absent/,
+      ),
+    });
+    const tooLong = await tool.call({ operation: "wait", selector: "#go", timeoutMs: 60_000 });
+    expect(tooLong.result).toEqual({ error: "invalid-browser-input" });
+    await tool.stop();
+  });
+
+  it("lets the page settle after an action, and answers its dialogs by the fixed rule", async () => {
+    const tool = agentTool();
+    await tool.call({ operation: "navigate", url: `${origin}/slow` });
+    const settled = await tool.call({ operation: "click", selector: "#later" });
+    expect(settled.result.page?.title).toBe("Settled");
+    const asked = await tool.call({ operation: "click", selector: "#ask" });
+    expect(asked.result.page?.title).toBe("Kept");
+    expect(asked.result.page?.dialogs).toEqual([
+      { type: "confirm", message: "Delete everything?", answer: "dismissed" },
+      { type: "alert", message: "kept", answer: "accepted" },
+    ]);
+    await tool.stop();
+  });
+
+  it("resizes the agent's page within bounds and restores it", async () => {
+    const tool = agentTool();
+    await tool.call({ operation: "navigate", url: `${origin}/slow` });
+    const narrow = await tool.call({
+      operation: "resize",
+      width: 390,
+      height: 844,
+      include: ["text"],
+    });
+    expect(narrow.result.page?.text).toContain("Width 390");
+    const tooWide = await tool.call({ operation: "resize", width: 9000, height: 800 });
+    expect(tooWide.result).toEqual({ error: "invalid-browser-input" });
+    const restored = await tool.call({ operation: "resize", include: ["text"] });
+    expect(restored.result.page?.text).toContain("Width 1280");
     await tool.stop();
   });
 });

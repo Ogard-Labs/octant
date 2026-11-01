@@ -45,6 +45,7 @@ import {
   BrowserNavigationBlockedError,
   BrowserProfileUnavailableError,
   BrowserTargetStaleError,
+  BrowserWaitTimedOutError,
   type BrowserPointObservation,
   type BrowserRuntimeAction,
   type BrowserRuntimePort,
@@ -561,6 +562,9 @@ export class BrowserAutomationService {
           : { screenshotDataUrl: observed.screenshotDataUrl }),
         ...(observed.viewport === undefined ? {} : { viewport: observed.viewport }),
         ...(observed.tabs === undefined ? {} : { tabs: observed.tabs }),
+        ...(observed.dialogs === undefined || observed.dialogs.length === 0
+          ? {}
+          : { dialogs: observed.dialogs.slice(0, 8) }),
         // Only the observe-diagnostics action collects these, and it reports
         // them as absent rather than empty when the runtime did not supply
         // them: an empty array would claim the page logged nothing, which is a
@@ -623,6 +627,13 @@ export class BrowserAutomationService {
       return snapshot(owned);
     } catch (error) {
       const interrupted = owned.abort.signal.aborted;
+      if (!interrupted && error instanceof BrowserWaitTimedOutError) {
+        return this.#failure(
+          owned,
+          { category: "failed", message: error.message.slice(0, 1024) },
+          "failed",
+        );
+      }
       if (!interrupted && error instanceof BrowserTargetStaleError) {
         return this.#failure(owned, staleRefFailure, "failed");
       }
@@ -664,6 +675,37 @@ export class BrowserAutomationService {
         readonly destinationExpected?: NonNullable<BrowserRuntimeAction["expected"]>;
       }
     | { readonly kind: "refused"; readonly failure: BrowserAutomationFailure } {
+    const waitRefs = (request.waitFor?.conditions ?? []).flatMap((condition) =>
+      condition.kind === "element" && condition.ref !== undefined ? [condition] : [],
+    );
+    if (waitRefs.some((condition) => condition.target !== undefined)) {
+      return {
+        kind: "refused",
+        failure: {
+          category: "invalid",
+          message: "Name the element with a ref or a selector, not both.",
+        },
+      };
+    }
+    if (waitRefs.some((condition) => owned.refs?.byRef.get(condition.ref ?? "") === undefined)) {
+      return { kind: "refused", failure: staleRefFailure };
+    }
+    // A wait names an element to watch, not one to act on, so its ref becomes
+    // the snapshot's selector without the identity check an action makes:
+    // waiting for an element to change or go is the point.
+    if (waitRefs.length > 0 && request.waitFor !== undefined) {
+      request = {
+        ...request,
+        waitFor: {
+          ...request.waitFor,
+          conditions: request.waitFor.conditions.map((condition) => {
+            if (condition.kind !== "element" || condition.ref === undefined) return condition;
+            const { ref, ...rest } = condition;
+            return { ...rest, target: owned.refs?.byRef.get(ref)?.selector ?? "" };
+          }),
+        },
+      };
+    }
     if (request.ref === undefined && request.destinationRef === undefined) {
       return { kind: "resolved", request };
     }

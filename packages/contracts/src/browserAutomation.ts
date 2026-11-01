@@ -147,6 +147,7 @@ export const BrowserActionKind = Schema.Literal(
   "tab-open",
   "tab-select",
   "tab-close",
+  "resize",
 );
 export type BrowserActionKind = typeof BrowserActionKind.Type;
 
@@ -188,6 +189,64 @@ export const MAX_BROWSER_UPLOAD_FILES = 5;
 /** The largest file an upload may send. */
 export const MAX_BROWSER_UPLOAD_FILE_BYTES = 25 * 1024 * 1024;
 
+/** The longest any wait may last; a wait names its own limit up to this. */
+export const MAX_BROWSER_WAIT_MS = 30_000;
+/** How long a wait lasts when it names no limit. */
+export const DEFAULT_BROWSER_WAIT_MS = 10_000;
+
+/**
+ * One thing a `wait` waits for. Text is the page's visible text, not a field's
+ * value; an address matches when it contains `contains`; an element is named
+ * by a CSS selector the host resolved from a selector or a snapshot ref.
+ */
+export const BrowserWaitCondition = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("text"),
+    text: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024)),
+    present: Schema.Boolean,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("url"),
+    contains: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("load"),
+    state: Schema.Literal("domcontentloaded", "load"),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("element"),
+    target: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096))),
+    ref: Schema.optional(BrowserElementRef),
+    state: Schema.Literal("attached", "detached", "visible", "hidden", "enabled", "disabled"),
+  }).annotations(strict),
+);
+export type BrowserWaitCondition = typeof BrowserWaitCondition.Type;
+
+export const BrowserWaitFor = Schema.Struct({
+  conditions: Schema.Array(BrowserWaitCondition).pipe(Schema.minItems(1), Schema.maxItems(5)),
+  match: Schema.Literal("all", "any"),
+  timeoutMs: Schema.optional(
+    Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(MAX_BROWSER_WAIT_MS)),
+  ),
+}).annotations(strict);
+export type BrowserWaitFor = typeof BrowserWaitFor.Type;
+
+/** The bounds a `resize` keeps the agent's page inside. */
+export const BROWSER_RESIZE_BOUNDS = {
+  minWidth: 320,
+  maxWidth: 3840,
+  minHeight: 320,
+  maxHeight: 2160,
+} as const;
+
+/** How a page's own dialog was answered; see the fixed policy in the spec. */
+export const BrowserDialogReport = Schema.Struct({
+  type: Schema.Literal("alert", "confirm", "prompt", "beforeunload"),
+  message: Schema.String.pipe(Schema.maxLength(512)),
+  answer: Schema.Literal("accepted", "dismissed"),
+}).annotations(strict);
+export type BrowserDialogReport = typeof BrowserDialogReport.Type;
+
 /** The longest page outline an observation carries, in characters. */
 export const MAX_BROWSER_SNAPSHOT_OUTLINE_CHARACTERS = 32 * 1024;
 
@@ -216,6 +275,10 @@ export const BrowserActionRequest = Schema.Struct({
   ),
   /** The tab a `tab-select` or `tab-close` names. */
   tabId: Schema.optional(BrowserTabId),
+  /** What a `wait` waits for, beyond a bare `target`. */
+  waitFor: Schema.optional(BrowserWaitFor),
+  /** The size a `resize` sets; absent, the page returns to its own size. */
+  viewport: Schema.optional(BrowserViewportSize),
   value: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(65_536))),
   point: Schema.optional(BrowserViewportPoint),
   deltaX: Schema.optional(Schema.Number.pipe(Schema.between(-2000, 2000))),
@@ -319,6 +382,8 @@ export const BrowserObservation = Schema.Struct({
     ),
   ),
   viewport: Schema.optional(BrowserViewportSize),
+  /** The page's own dialogs since the last action, and how each was answered. */
+  dialogs: Schema.optional(Schema.Array(BrowserDialogReport).pipe(Schema.maxItems(8))),
   /** The context's tabs, after a tab action. */
   tabs: Schema.optional(
     Schema.Array(
@@ -391,5 +456,6 @@ export const decodeBrowserPresentationKind = Schema.decodeUnknownSync(BrowserPre
 export const decodeBrowserContextRecord = Schema.decodeUnknownSync(BrowserContextRecord);
 export const decodeBrowserActionKind = Schema.decodeUnknownSync(BrowserActionKind);
 export const decodeBrowserActionRequest = Schema.decodeUnknownSync(BrowserActionRequest);
+export const decodeBrowserWaitFor = Schema.decodeUnknownSync(BrowserWaitFor);
 export const decodeBrowserObservation = Schema.decodeUnknownSync(BrowserObservation);
 export const decodeBrowserAutomationFailure = Schema.decodeUnknownSync(BrowserAutomationFailure);

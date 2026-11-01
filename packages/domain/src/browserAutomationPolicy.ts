@@ -6,7 +6,7 @@ import type {
   BrowserObservation,
   ToolActionAuthority,
 } from "@octant/contracts";
-import { sameToolActionAuthority } from "@octant/contracts";
+import { BROWSER_RESIZE_BOUNDS, sameToolActionAuthority } from "@octant/contracts";
 
 export type BrowserPolicyDecision =
   | { readonly kind: "allowed" }
@@ -80,6 +80,30 @@ export function evaluateBrowserAction(
     request.tabId === undefined
   ) {
     return { kind: "denied", reason: `A ${request.kind} action requires a tab.` };
+  }
+  if (request.kind === "wait" && request.target === undefined && request.waitFor === undefined) {
+    return { kind: "denied", reason: "Wait action requires an element or conditions." };
+  }
+  if (
+    request.waitFor?.conditions.some(
+      (condition) => condition.kind === "element" && condition.target === undefined,
+    ) === true
+  ) {
+    return { kind: "denied", reason: "A wait for an element requires the element." };
+  }
+  if (request.kind === "resize" && request.viewport !== undefined) {
+    const { width, height } = request.viewport;
+    if (
+      width < BROWSER_RESIZE_BOUNDS.minWidth ||
+      width > BROWSER_RESIZE_BOUNDS.maxWidth ||
+      height < BROWSER_RESIZE_BOUNDS.minHeight ||
+      height > BROWSER_RESIZE_BOUNDS.maxHeight
+    ) {
+      return {
+        kind: "denied",
+        reason: `A page may be resized to ${String(BROWSER_RESIZE_BOUNDS.minWidth)}-${String(BROWSER_RESIZE_BOUNDS.maxWidth)} by ${String(BROWSER_RESIZE_BOUNDS.minHeight)}-${String(BROWSER_RESIZE_BOUNDS.maxHeight)} pixels.`,
+      };
+    }
   }
   if (request.kind === "tab-open" && request.target !== undefined) {
     // A new tab reaches its page through the same admission as a navigation.
@@ -218,6 +242,7 @@ export function remoteBrowserActionReach(kind: BrowserActionKind): BrowserPolicy
     kind === "select" ||
     kind === "drag" ||
     kind === "upload" ||
+    kind === "resize" ||
     kind === "tab-open" ||
     kind === "tab-select" ||
     kind === "tab-close"

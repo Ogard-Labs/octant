@@ -649,6 +649,7 @@ describe("browser diagnostics reach the provider-facing result", () => {
       "tab-switch": { tabId: "t1" },
       "tab-close": { tabId: "t2" },
       steps: { steps: [{ operation: "snapshot" }] },
+      resize: { width: 390, height: 844 },
       "read-page": {},
       click: { selector: "#go" },
       type: { selector: "#name", text: "octant" },

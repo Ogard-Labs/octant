@@ -216,6 +216,13 @@ it asks for them, which keeps each step small. Octant takes no picture of the
 page the agent did not ask for; the activity preview still shows the page,
 because it takes its own.
 
+The agent can wait for text to appear, an address to change, or a button to
+become enabled, for at most 30 seconds, and every action waits a moment for the
+page to settle before it reports back. If a page shows its own alert, Octant
+accepts it; if it asks to confirm something or to type an answer, Octant
+declines. The agent is told about each one. The agent can also resize its page,
+for example to phone width, and set it back.
+
 The agent can send up to 10 of these steps in one call, such as filling three
 fields and pressing Save. Octant checks each step on its own, exactly as if it
 came alone, and stops at the first one that fails.

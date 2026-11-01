@@ -11,8 +11,8 @@ and [Browser captures](browser-captures.md) owns which screenshots a thread
 keeps.
 
 Status: the page snapshot, element refs, short results, the actions below
-(hover, select, drag, key chords, upload, tabs), and batched steps are built.
-Richer waits, dialogs and viewport size, the sign-in handoff, and fuller
+(hover, select, drag, key chords, upload, tabs), batched steps, waits, settling,
+dialogs, and viewport size are built. The sign-in handoff and fuller
 diagnostics are allowed; not built yet.
 
 ## One tool for every provider
@@ -190,10 +190,40 @@ only after the person approves it.
 
 ## Waiting, dialogs, and viewport
 
-Allowed; not built yet. Waits for text, an address, a load state, or an
-element's state, with a hard time limit; actions that wait for the page to
-settle; dialogs answered by a fixed policy and reported; and a viewport size
-within bounds on the agent's own page.
+- `wait` waits for an element to appear (a selector or ref), or for up to 5
+  conditions: text present or absent in the page's visible text (never a
+  field's value), an address that contains a string, the page's
+  `domcontentloaded` or `load`, or an element attached, detached, visible,
+  hidden, enabled, or disabled. `match` is `all` (the default) or `any`.
+- Every wait has a hard limit: `timeoutMs` up to 30 seconds, 10 seconds when
+  it names none, on both Browsers. A wait that runs out fails and names the
+  conditions that never held. A ref in a wait becomes the snapshot's selector
+  without the identity check an action makes, because waiting for an element
+  to change or leave is the point.
+- **Settling.** After `navigate`, `click`, `type`, `press`, `scroll`, `hover`,
+  `select`, `drag`, `upload`, and `resize`, the Browser waits for the page's
+  load and then for the document to stop changing for 250 ms, at most 2
+  seconds in all, before it reads the page and answers. A page that never stops
+  changing costs the cap and still answers.
+- **Dialogs.** A page's own dialogs are answered by one fixed rule: an alert and
+  a leave-page question are accepted; a confirm and a prompt are dismissed, so
+  the page never gets an answer the agent was not asked for. Each dialog is
+  reported in the next answer as `dialogs`, with its type, its message (at most
+  512 characters), and the answer. The headless Browser applies the rule to
+  every dialog; the desktop Browser applies it while an agent's action runs,
+  and a dialog that opens while the person drives stays theirs. The desktop
+  Browser leaves alone a page whose developer tools someone else attached.
+- **Viewport.** `resize` sets the page to a width of 320 to 3840 and a height
+  of 320 to 2160 CSS pixels, and `resize` with neither restores the page's own
+  size. It acts only on the agent's own page, the thread's Browser context: the
+  headless Browser sets its viewport, and the desktop Browser emulates the size
+  inside the pane without moving or resizing the person's view, so the person
+  sees the page at that size until it is restored. A paired device cannot
+  resize.
+- Rationale: answering a dialog by a fixed rule instead of asking keeps the
+  agent from deciding what the page asked the person, and dismissing a
+  confirm is the answer that changes nothing. Bounding the viewport to common
+  phone and desktop sizes keeps the page renderable at any size it reaches.
 
 ## Asking the person to sign in
 

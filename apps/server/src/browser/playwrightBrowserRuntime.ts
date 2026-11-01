@@ -1,7 +1,15 @@
 import { createHash } from "node:crypto";
 import {
+  awaitQuietPage,
+  BROWSER_DIALOG_POLICY,
+  BROWSER_SETTLE_CAP_MS,
+  BROWSER_SETTLE_QUIET_MS,
+  browserPageConditions,
   browserRefStillMatches,
+  describeUnmetWait,
+  dialogType,
   formatBrowserPageSnapshot,
+  waitSatisfied,
   MAX_BROWSER_SNAPSHOT_NODES,
   MAX_BROWSER_SNAPSHOT_REFS,
   originAllowed,
@@ -12,7 +20,11 @@ import { constants } from "node:fs";
 import { access } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import type { BrowserContextId, BrowserContextPolicy } from "@octant/contracts/browser-automation";
-import { MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS } from "@octant/contracts/browser-automation";
+import {
+  DEFAULT_BROWSER_WAIT_MS,
+  MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS,
+  MAX_BROWSER_WAIT_MS,
+} from "@octant/contracts/browser-automation";
 import {
   MAX_BROWSER_DIAGNOSTIC_ENTRIES,
   MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS,
@@ -23,6 +35,7 @@ import {
   BrowserNavigationBlockedError,
   BrowserProfileUnavailableError,
   BrowserTargetStaleError,
+  BrowserWaitTimedOutError,
   type BrowserPointObservation,
   type BrowserRuntimeObservation,
   type BrowserRuntimePort,
@@ -64,6 +77,15 @@ export interface PlaywrightPagePort {
    */
   on?(event: "console", listener: (message: { type(): string; text(): string }) => void): void;
   on?(
+    event: "dialog",
+    listener: (dialog: {
+      type(): string;
+      message(): string;
+      accept(): Promise<void>;
+      dismiss(): Promise<void>;
+    }) => void,
+  ): void;
+  on?(
     event: "requestfailed",
     listener: (request: {
       url(): string;
@@ -73,8 +95,13 @@ export interface PlaywrightPagePort {
   ): void;
   locator(selector: string): {
     evaluate<T>(expression: (element: Element) => T): Promise<T>;
-    waitFor(): Promise<void>;
+    waitFor(options?: { readonly timeout: number }): Promise<void>;
   };
+  /** Optional, like the event listeners: a test double need not model loading. */
+  waitForLoadState?(
+    state: "load" | "domcontentloaded",
+    options: { readonly timeout: number },
+  ): Promise<void>;
   screenshot(options: {
     readonly type: "jpeg";
     readonly quality: number;
@@ -169,6 +196,12 @@ interface OwnedRuntimeContext {
    * while the agent is looking elsewhere.
    */
   consoleErrors: Array<{ text: string; url?: string }>;
+  /** The pages' own dialogs since the last action, answered by the fixed policy. */
+  dialogs: Array<{
+    type: "alert" | "confirm" | "prompt" | "beforeunload";
+    message: string;
+    answer: "accepted" | "dismissed";
+  }>;
   failedRequests: Array<{ url: string; method?: string; failure: string }>;
   /**
    * Pages already carrying diagnostic listeners.
@@ -253,6 +286,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       openingTab: false,
       blockedNavigationUrl: undefined,
       consoleErrors: [],
+      dialogs: [],
       failedRequests: [],
       instrumentedPages: new WeakSet(),
     };
@@ -414,6 +448,19 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     request: BrowserRuntimeAction,
     signal: AbortSignal,
   ): Promise<BrowserRuntimeObservation> {
+    const observed = await this.#act(contextId, request, signal);
+    // Every dialog the page raised since the last action is reported once,
+    // with how the fixed policy answered it.
+    const owned = this.#contexts.get(contextId);
+    const dialogs = owned?.dialogs.splice(0) ?? [];
+    return dialogs.length === 0 ? observed : { ...observed, dialogs };
+  }
+
+  async #act(
+    contextId: BrowserContextId,
+    request: BrowserRuntimeAction,
+    signal: AbortSignal,
+  ): Promise<BrowserRuntimeObservation> {
     const page = await this.#page(contextId, signal);
     const owned = this.#contexts.get(contextId);
     if (owned !== undefined) owned.blockedNavigationUrl = undefined;
@@ -476,7 +523,22 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
         return diagnostics;
       }
       case "wait":
-        await page.locator(required(request.target, "Wait actions require a selector.")).waitFor();
+        if (request.waitFor !== undefined) {
+          await waitForConditions(page, request.waitFor, signal);
+        } else {
+          try {
+            await page
+              .locator(required(request.target, "Wait actions require a selector."))
+              .waitFor({ timeout: DEFAULT_BROWSER_WAIT_MS });
+          } catch {
+            throw new BrowserWaitTimedOutError(
+              `The wait timed out after ${String(DEFAULT_BROWSER_WAIT_MS)} ms: the element never appeared.`,
+            );
+          }
+        }
+        break;
+      case "resize":
+        await page.setViewportSize(request.viewport ?? DEFAULT_VIEWPORT);
         break;
       case "hover":
         await page.hover(required(request.target, "Hover actions require an element."));
@@ -570,6 +632,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
         return {};
       }
     }
+    if (SETTLING_ACTIONS.has(request.kind)) await settle(page);
     if (owned !== undefined) await leaveUnapprovedLanding(page, owned.allowedOrigins);
     throwIfAborted(signal);
     if (request.kind === "snapshot") {
@@ -723,6 +786,13 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       const url = page.url() === "about:blank" ? undefined : bounded(page.url(), 4096);
       if (owned.consoleErrors.length >= MAX_BROWSER_DIAGNOSTIC_ENTRIES) owned.consoleErrors.shift();
       owned.consoleErrors.push({ text, ...(url === undefined ? {} : { url }) });
+    });
+    page.on?.("dialog", (dialog) => {
+      const type = dialogType(dialog.type());
+      const answer = BROWSER_DIALOG_POLICY[type];
+      if (owned.dialogs.length >= 8) owned.dialogs.shift();
+      owned.dialogs.push({ type, message: bounded(dialog.message(), 512), answer });
+      void (answer === "accepted" ? dialog.accept() : dialog.dismiss()).catch(() => undefined);
     });
     page.on?.("requestfailed", (request) => {
       const url = bounded(request.url(), 4096);
@@ -986,6 +1056,63 @@ function playwrightKey(value: string): string {
           : chord.key.toLowerCase()
         : chord.key;
   return [...chord.modifiers, key].join("+");
+}
+
+const DEFAULT_VIEWPORT = { width: 1280, height: 720 } as const;
+
+/** The actions after which the page is given a moment to settle before it is read. */
+const SETTLING_ACTIONS: ReadonlySet<BrowserRuntimeAction["kind"]> = new Set([
+  "navigate",
+  "click",
+  "type",
+  "press",
+  "scroll",
+  "hover",
+  "select",
+  "drag",
+  "upload",
+  "resize",
+]);
+
+/**
+ * Let the page finish what the action started: its load, then a short window in
+ * which the document stops changing. Bounded either way, so a page that never
+ * settles costs the cap and the action still answers.
+ */
+async function settle(page: PlaywrightPagePort): Promise<void> {
+  await page.waitForLoadState?.("load", { timeout: BROWSER_SETTLE_CAP_MS }).catch(() => undefined);
+  await page
+    .evaluate(awaitQuietPage, { quietMs: BROWSER_SETTLE_QUIET_MS, capMs: BROWSER_SETTLE_CAP_MS })
+    .catch(() => undefined);
+}
+
+/**
+ * Check a wait's conditions until they hold or its time runs out. The time is
+ * the wait's own, never more than the hard limit the contract sets.
+ */
+async function waitForConditions(
+  page: PlaywrightPagePort,
+  waitFor: NonNullable<BrowserRuntimeAction["waitFor"]>,
+  signal: AbortSignal,
+): Promise<void> {
+  const conditions = browserPageConditions(waitFor);
+  const timeoutMs = Math.min(waitFor.timeoutMs ?? DEFAULT_BROWSER_WAIT_MS, MAX_BROWSER_WAIT_MS);
+  const deadline = Date.now() + timeoutMs;
+  let met: ReadonlyArray<boolean> = conditions.map(() => false);
+  while (true) {
+    throwIfAborted(signal);
+    try {
+      const checked = await page.evaluate(readBrowserPage, { mode: "check", conditions });
+      if (checked.mode === "check") met = checked.met;
+    } catch {
+      // A page between documents cannot be read; the next check will be.
+    }
+    if (waitSatisfied(waitFor.match, met)) return;
+    if (Date.now() >= deadline) {
+      throw new BrowserWaitTimedOutError(describeUnmetWait(timeoutMs, conditions, met));
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+  }
 }
 
 /**

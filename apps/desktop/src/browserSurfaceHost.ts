@@ -2,8 +2,16 @@ import { createHash } from "node:crypto";
 import {
   browserProfileKey,
   browserProfilePartition,
+  awaitQuietPage,
+  BROWSER_DIALOG_POLICY,
+  BROWSER_SETTLE_CAP_MS,
+  BROWSER_SETTLE_QUIET_MS,
+  browserPageConditions,
   browserRefStillMatches,
+  describeUnmetWait,
+  dialogType,
   parseBrowserKeyChord,
+  waitSatisfied,
   formatBrowserPageSnapshot,
   MAX_BROWSER_SNAPSHOT_NODES,
   MAX_BROWSER_SNAPSHOT_REFS,
@@ -15,7 +23,9 @@ import {
 } from "@octant/domain";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
 import {
+  DEFAULT_BROWSER_WAIT_MS,
   MAX_BROWSER_DIAGNOSTIC_ENTRIES,
+  MAX_BROWSER_WAIT_MS,
   MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS,
   type BrowserActionRequest,
   type BrowserContextId,
@@ -134,7 +144,26 @@ export interface BrowserSurfaceViewPort {
       detach(): void;
       isAttached(): boolean;
       sendCommand(method: string, commandParams?: Record<string, unknown>): Promise<unknown>;
+      /** Protocol events, such as a page's dialog opening; Electron's debugger emits them. */
+      on?(
+        event: "message",
+        listener: (event: unknown, method: string, params: unknown) => void,
+      ): void;
+      removeListener?(
+        event: "message",
+        listener: (event: unknown, method: string, params: unknown) => void,
+      ): void;
     };
+    /** Electron's device emulation, which sizes the page without moving the view. */
+    enableDeviceEmulation?(parameters: {
+      readonly screenPosition: "desktop" | "mobile";
+      readonly screenSize: { readonly width: number; readonly height: number };
+      readonly viewPosition: { readonly x: number; readonly y: number };
+      readonly deviceScaleFactor: number;
+      readonly viewSize: { readonly width: number; readonly height: number };
+      readonly scale: number;
+    }): void;
+    disableDeviceEmulation?(): void;
     executeJavaScriptInIsolatedWorld(
       worldId: number,
       scripts: ReadonlyArray<{ readonly code: string }>,
@@ -249,12 +278,34 @@ export class BrowserNavigationBlockedError extends Error {
  * The element a snapshot ref named is gone or is no longer the element the
  * snapshot described, so the action was refused before it touched the page.
  */
+/** A wait ran out its time; the message names the conditions that never held. */
+export class BrowserWaitTimedOutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BrowserWaitTimedOutError";
+  }
+}
+
 export class BrowserTargetStaleError extends Error {
   constructor() {
     super("The element behind that ref changed since the snapshot.");
     this.name = "BrowserTargetStaleError";
   }
 }
+
+/** The actions after which the page is given a moment to settle before it is read. */
+const SETTLING_ACTIONS: ReadonlySet<string> = new Set([
+  "navigate",
+  "click",
+  "type",
+  "press",
+  "scroll",
+  "hover",
+  "select",
+  "drag",
+  "upload",
+  "resize",
+]);
 
 /** What the server asks a page to do; it carries no authority of its own. */
 export type BrowserSurfaceAction = Pick<BrowserActionRequest, "kind"> &
@@ -270,6 +321,8 @@ export type BrowserSurfaceAction = Pick<BrowserActionRequest, "kind"> &
       | "destination"
       | "files"
       | "tabId"
+      | "waitFor"
+      | "viewport"
     >
   > & {
     /** The role and name a snapshot ref recorded; the target must still match. */
@@ -290,6 +343,7 @@ export interface BrowserSurfaceRuntimeObservation {
   /** Only a snapshot read fills these: the outline, and what each ref names. */
   readonly snapshot?: string;
   readonly snapshotRefs?: ReadonlyArray<BrowserPageSnapshotRef>;
+  readonly dialogs?: ReadonlyArray<DialogReport>;
   /** Only a tab action fills this, with the ids the agent knows tabs by. */
   readonly tabs?: ReadonlyArray<{
     readonly tabId: string;
@@ -635,203 +689,232 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         owned.control = "agent";
         owned.blockedNavigationUrl = undefined;
         publish(contextId, owned);
+        const dialogs: DialogReport[] = [];
+        const releaseDialogs = await guardDialogs(contentsView(owned), dialogs);
         try {
-          const contents = contentsView(owned).webContents;
-          // Reading or driving a page is authorized by the origin approval put
-          // on this context, and the page in front is not always one approval
-          // covered: the person can take their own view somewhere else, and
-          // tabs of a context share its session. Navigating is exempt because
-          // it reads nothing — its own target check is the guard — but its
-          // result is checked below, so a navigation that fails cannot leave
-          // the agent extracting the page it did not manage to leave.
-          if (request.kind !== "navigate") refuseUnapprovedPage(owned, contents);
-          await refuseStaleTarget(contentsView(owned), request.target, request.expected);
-          await refuseStaleTarget(
-            contentsView(owned),
-            request.destination,
-            request.destinationExpected,
-          );
-          switch (request.kind) {
-            case "navigate": {
-              if (
-                request.target === undefined ||
-                !originAllowed(request.target, owned.policy.allowedOrigins)
-              ) {
-                throw new Error("Navigation target origin is not in the allowlist.");
+          const observed = await (async (): Promise<BrowserSurfaceRuntimeObservation> => {
+            const contents = contentsView(owned).webContents;
+            // Reading or driving a page is authorized by the origin approval put
+            // on this context, and the page in front is not always one approval
+            // covered: the person can take their own view somewhere else, and
+            // tabs of a context share its session. Navigating is exempt because
+            // it reads nothing — its own target check is the guard — but its
+            // result is checked below, so a navigation that fails cannot leave
+            // the agent extracting the page it did not manage to leave.
+            if (request.kind !== "navigate") refuseUnapprovedPage(owned, contents);
+            await refuseStaleTarget(contentsView(owned), request.target, request.expected);
+            await refuseStaleTarget(
+              contentsView(owned),
+              request.destination,
+              request.destinationExpected,
+            );
+            switch (request.kind) {
+              case "navigate": {
+                if (
+                  request.target === undefined ||
+                  !originAllowed(request.target, owned.policy.allowedOrigins)
+                ) {
+                  throw new Error("Navigation target origin is not in the allowlist.");
+                }
+                try {
+                  await contents.loadURL(normalizeUrl(request.target));
+                } catch (error) {
+                  if (owned.blockedNavigationUrl === undefined) throw error;
+                  throw new BrowserNavigationBlockedError(owned.blockedNavigationUrl);
+                }
+                break;
               }
-              try {
-                await contents.loadURL(normalizeUrl(request.target));
-              } catch (error) {
-                if (owned.blockedNavigationUrl === undefined) throw error;
-                throw new BrowserNavigationBlockedError(owned.blockedNavigationUrl);
-              }
-              break;
-            }
-            case "click":
-              await clickTarget(contentsView(owned), request.target, request.point);
-              break;
-            case "type":
-              await typeIntoTarget(
-                contentsView(owned),
-                request.target,
-                request.value,
-                owned.policy.credentialFieldProtection,
-              );
-              break;
-            case "press":
-              await pressFocusedTarget(
-                contentsView(owned),
-                request.value,
-                owned.policy.credentialFieldProtection,
-              );
-              break;
-            case "scroll":
-              await execute(
-                contentsView(owned),
-                `window.scrollBy({ left: ${request.deltaX ?? 0}, top: ${request.deltaY ?? 500}, behavior: 'smooth' });`,
-                true,
-              );
-              break;
-            case "extract-text":
-              break;
-            case "wait":
-              await waitForSelector(contentsView(owned), request.target);
-              break;
-            case "hover":
-              await hoverTarget(contentsView(owned), request.target);
-              break;
-            case "select":
-              await selectOption(contentsView(owned), request.target, request.value);
-              break;
-            case "drag":
-              await dragTarget(contentsView(owned), request.target, request.destination);
-              break;
-            case "upload":
-              await uploadFiles(contentsView(owned), request.target, request.files);
-              break;
-            case "tab-list":
-              return agentTabs(owned);
-            case "tab-open": {
-              // The agent's own new tab: the same guards as every tab, and its
-              // page is reached through the same navigation admission, while
-              // the agent drives so nothing it reaches is granted as browsing.
-              if (owned.tabs.length >= owned.policy.maxConcurrentTabs) {
-                throw new Error("Octant Browser context is already at its tab limit.");
-              }
-              if (
-                request.target !== undefined &&
-                !originAllowed(request.target, owned.policy.allowedOrigins)
-              ) {
-                throw new Error("Navigation target origin is not in the allowlist.");
-              }
-              const tabId = `${String(contextId)}:${owned.nextTabOrdinal}`;
-              owned.nextTabOrdinal += 1;
-              const opened = openTabView(contextId, owned, tabId);
-              showTab(owned, opened);
-              try {
-                await opened.view.webContents.loadURL(
-                  request.target === undefined ? "about:blank" : normalizeUrl(request.target),
-                );
-              } catch (error) {
-                if (owned.blockedNavigationUrl === undefined) throw error;
-                throw new BrowserNavigationBlockedError(owned.blockedNavigationUrl);
-              }
-              refuseUnapprovedPage(owned, opened.view.webContents);
-              return agentTabs(owned);
-            }
-            case "tab-select": {
-              const chosen = owned.tabs.find((tab) => agentTabId(tab.tabId) === request.tabId);
-              if (chosen === undefined) throw new Error("Octant Browser tab is unknown.");
-              showTab(owned, chosen);
-              return agentTabs(owned);
-            }
-            case "tab-close": {
-              const chosen = owned.tabs.find((tab) => agentTabId(tab.tabId) === request.tabId);
-              if (chosen === undefined) throw new Error("Octant Browser tab is unknown.");
-              if (owned.tabs.length === 1) {
-                throw new Error("Octant Browser cannot close a context's only tab.");
-              }
-              forgetTab(String(contextId), owned, chosen);
-              return agentTabs(owned);
-            }
-            case "screenshot":
-              break;
-            case "snapshot":
-              // The outline is the whole answer: no picture and no page text,
-              // and a credential field in it is named, never valued.
-              refuseUnapprovedPage(owned, contents);
-              return {
-                ...(contents.getURL() === ""
-                  ? {}
-                  : { url: redactedObservationUrl(contents.getURL()).slice(0, 4_096) }),
-                ...(contents.getTitle() === ""
-                  ? {}
-                  : { title: contents.getTitle().slice(0, 1_024) }),
-                ...(await snapshotOf(owned)),
-              };
-            case "observe-diagnostics":
-              // Handed over and cleared before any renderer work: a page that
-              // never committed has no document to evaluate, and that is when
-              // the failed request is the whole answer. The next read answers
-              // what happened since this one.
-              return {
-                consoleErrors: owned.consoleErrors.splice(0),
-                failedRequests: owned.failedRequests.splice(0),
-              };
-            case "close-tab":
-              await contents.loadURL("about:blank");
-              break;
-          }
-          refuseUnapprovedPage(owned, contents);
-          const include = new Set(request.include ?? []);
-          const wantsText = request.kind === "extract-text" || include.has("text");
-          // The body's text is always read, for the hash the server compares to
-          // say what changed; it is returned only when asked for.
-          const bodyText = await execute(
-            contentsView(owned),
-            "document.body?.innerText?.slice(0, 65536) ?? ''",
-          );
-          const text = typeof bodyText === "string" ? bodyText : "";
-          const selectedText =
-            wantsText && request.kind === "extract-text" && request.target !== undefined
-              ? await execute(
+              case "click":
+                await clickTarget(contentsView(owned), request.target, request.point);
+                break;
+              case "type":
+                await typeIntoTarget(
                   contentsView(owned),
-                  `document.querySelector(${JSON.stringify(request.target)})?.innerText?.slice(0, 65536) ?? ''`,
-                )
-              : text;
-          const measuredViewport = await execute(
-            contentsView(owned),
-            "({ width: Math.round(window.innerWidth), height: Math.round(window.innerHeight) })",
-          );
-          const viewport = viewportSize(measuredViewport);
-          const sensitiveDocument = await hasSensitiveDocument(
-            contentsView(owned),
-            owned.policy.credentialFieldProtection,
-          );
-          // A picture only when one is asked for. The person's activity
-          // preview takes its own through peek, so an agent's click no longer
-          // pays for a capture nobody reads.
-          const screenshotDataUrl =
-            sensitiveDocument || (request.kind !== "screenshot" && !include.has("screenshot"))
-              ? undefined
-              : await captureScreenshot(contentsView(owned));
-          const outline = include.has("snapshot") ? await snapshotOf(owned) : {};
-          return {
-            ...outline,
-            ...(contents.getURL() === ""
-              ? {}
-              : { url: redactedObservationUrl(contents.getURL()).slice(0, 4_096) }),
-            ...(contents.getTitle() === "" ? {} : { title: contents.getTitle().slice(0, 1_024) }),
-            ...(sensitiveDocument
-              ? {}
-              : { contentHash: createHash("sha256").update(text, "utf8").digest("hex") }),
-            ...(!sensitiveDocument && wantsText
-              ? { extractedText: typeof selectedText === "string" ? selectedText : "" }
-              : {}),
-            ...(screenshotDataUrl === undefined ? {} : { screenshotDataUrl }),
-            ...(viewport === undefined ? {} : { viewport }),
-          };
+                  request.target,
+                  request.value,
+                  owned.policy.credentialFieldProtection,
+                );
+                break;
+              case "press":
+                await pressFocusedTarget(
+                  contentsView(owned),
+                  request.value,
+                  owned.policy.credentialFieldProtection,
+                );
+                break;
+              case "scroll":
+                await execute(
+                  contentsView(owned),
+                  `window.scrollBy({ left: ${request.deltaX ?? 0}, top: ${request.deltaY ?? 500}, behavior: 'smooth' });`,
+                  true,
+                );
+                break;
+              case "extract-text":
+                break;
+              case "wait":
+                if (request.waitFor === undefined) {
+                  await waitForSelector(contentsView(owned), request.target);
+                } else {
+                  await waitForConditions(contentsView(owned), request.waitFor, signal);
+                }
+                break;
+              case "resize": {
+                const webContents = contentsView(owned).webContents;
+                if (request.viewport === undefined) {
+                  webContents.disableDeviceEmulation?.();
+                } else {
+                  webContents.enableDeviceEmulation?.({
+                    screenPosition: "desktop",
+                    screenSize: request.viewport,
+                    viewPosition: { x: 0, y: 0 },
+                    deviceScaleFactor: 0,
+                    viewSize: request.viewport,
+                    scale: 1,
+                  });
+                }
+                break;
+              }
+              case "hover":
+                await hoverTarget(contentsView(owned), request.target);
+                break;
+              case "select":
+                await selectOption(contentsView(owned), request.target, request.value);
+                break;
+              case "drag":
+                await dragTarget(contentsView(owned), request.target, request.destination);
+                break;
+              case "upload":
+                await uploadFiles(contentsView(owned), request.target, request.files);
+                break;
+              case "tab-list":
+                return agentTabs(owned);
+              case "tab-open": {
+                // The agent's own new tab: the same guards as every tab, and its
+                // page is reached through the same navigation admission, while
+                // the agent drives so nothing it reaches is granted as browsing.
+                if (owned.tabs.length >= owned.policy.maxConcurrentTabs) {
+                  throw new Error("Octant Browser context is already at its tab limit.");
+                }
+                if (
+                  request.target !== undefined &&
+                  !originAllowed(request.target, owned.policy.allowedOrigins)
+                ) {
+                  throw new Error("Navigation target origin is not in the allowlist.");
+                }
+                const tabId = `${String(contextId)}:${owned.nextTabOrdinal}`;
+                owned.nextTabOrdinal += 1;
+                const opened = openTabView(contextId, owned, tabId);
+                showTab(owned, opened);
+                try {
+                  await opened.view.webContents.loadURL(
+                    request.target === undefined ? "about:blank" : normalizeUrl(request.target),
+                  );
+                } catch (error) {
+                  if (owned.blockedNavigationUrl === undefined) throw error;
+                  throw new BrowserNavigationBlockedError(owned.blockedNavigationUrl);
+                }
+                refuseUnapprovedPage(owned, opened.view.webContents);
+                return agentTabs(owned);
+              }
+              case "tab-select": {
+                const chosen = owned.tabs.find((tab) => agentTabId(tab.tabId) === request.tabId);
+                if (chosen === undefined) throw new Error("Octant Browser tab is unknown.");
+                showTab(owned, chosen);
+                return agentTabs(owned);
+              }
+              case "tab-close": {
+                const chosen = owned.tabs.find((tab) => agentTabId(tab.tabId) === request.tabId);
+                if (chosen === undefined) throw new Error("Octant Browser tab is unknown.");
+                if (owned.tabs.length === 1) {
+                  throw new Error("Octant Browser cannot close a context's only tab.");
+                }
+                forgetTab(String(contextId), owned, chosen);
+                return agentTabs(owned);
+              }
+              case "screenshot":
+                break;
+              case "snapshot":
+                // The outline is the whole answer: no picture and no page text,
+                // and a credential field in it is named, never valued.
+                refuseUnapprovedPage(owned, contents);
+                return {
+                  ...(contents.getURL() === ""
+                    ? {}
+                    : { url: redactedObservationUrl(contents.getURL()).slice(0, 4_096) }),
+                  ...(contents.getTitle() === ""
+                    ? {}
+                    : { title: contents.getTitle().slice(0, 1_024) }),
+                  ...(await snapshotOf(owned)),
+                };
+              case "observe-diagnostics":
+                // Handed over and cleared before any renderer work: a page that
+                // never committed has no document to evaluate, and that is when
+                // the failed request is the whole answer. The next read answers
+                // what happened since this one.
+                return {
+                  consoleErrors: owned.consoleErrors.splice(0),
+                  failedRequests: owned.failedRequests.splice(0),
+                };
+              case "close-tab":
+                await contents.loadURL("about:blank");
+                break;
+            }
+            if (SETTLING_ACTIONS.has(request.kind)) await settlePage(contentsView(owned));
+            refuseUnapprovedPage(owned, contents);
+            const include = new Set(request.include ?? []);
+            const wantsText = request.kind === "extract-text" || include.has("text");
+            // The body's text is always read, for the hash the server compares to
+            // say what changed; it is returned only when asked for.
+            const bodyText = await execute(
+              contentsView(owned),
+              "document.body?.innerText?.slice(0, 65536) ?? ''",
+            );
+            const text = typeof bodyText === "string" ? bodyText : "";
+            const selectedText =
+              wantsText && request.kind === "extract-text" && request.target !== undefined
+                ? await execute(
+                    contentsView(owned),
+                    `document.querySelector(${JSON.stringify(request.target)})?.innerText?.slice(0, 65536) ?? ''`,
+                  )
+                : text;
+            const measuredViewport = await execute(
+              contentsView(owned),
+              "({ width: Math.round(window.innerWidth), height: Math.round(window.innerHeight) })",
+            );
+            const viewport = viewportSize(measuredViewport);
+            const sensitiveDocument = await hasSensitiveDocument(
+              contentsView(owned),
+              owned.policy.credentialFieldProtection,
+            );
+            // A picture only when one is asked for. The person's activity
+            // preview takes its own through peek, so an agent's click no longer
+            // pays for a capture nobody reads.
+            const screenshotDataUrl =
+              sensitiveDocument || (request.kind !== "screenshot" && !include.has("screenshot"))
+                ? undefined
+                : await captureScreenshot(contentsView(owned));
+            const outline = include.has("snapshot") ? await snapshotOf(owned) : {};
+            return {
+              ...outline,
+              ...(contents.getURL() === ""
+                ? {}
+                : { url: redactedObservationUrl(contents.getURL()).slice(0, 4_096) }),
+              ...(contents.getTitle() === "" ? {} : { title: contents.getTitle().slice(0, 1_024) }),
+              ...(sensitiveDocument
+                ? {}
+                : { contentHash: createHash("sha256").update(text, "utf8").digest("hex") }),
+              ...(!sensitiveDocument && wantsText
+                ? { extractedText: typeof selectedText === "string" ? selectedText : "" }
+                : {}),
+              ...(screenshotDataUrl === undefined ? {} : { screenshotDataUrl }),
+              ...(viewport === undefined ? {} : { viewport }),
+            };
+          })();
+          // Every dialog the page raised during the action is reported once,
+          // with how the fixed policy answered it.
+          return dialogs.length === 0 ? observed : { ...observed, dialogs: dialogs.slice(0, 8) };
         } finally {
+          await releaseDialogs();
           owned.control = "idle";
           publish(contextId, owned);
         }
@@ -1738,6 +1821,107 @@ async function dispatchTrustedClick(
   });
 }
 
+/**
+ * Debuggers the agent's own action attached to, so the action's input and
+ * capture reuse the attachment instead of mistaking it for someone else's.
+ */
+const agentDebuggers = new WeakSet<object>();
+
+interface DialogReport {
+  readonly type: "alert" | "confirm" | "prompt" | "beforeunload";
+  readonly message: string;
+  readonly answer: "accepted" | "dismissed";
+}
+
+/**
+ * Answer the page's own dialogs by the fixed policy for as long as an agent's
+ * action runs, and record each one. A dialog left open would hold the page,
+ * and the agent behind it, until a person found it. A debugger someone else
+ * attached (developer tools) is left alone and the page's dialogs stay theirs.
+ */
+async function guardDialogs(
+  view: BrowserSurfaceViewPort,
+  reports: DialogReport[],
+): Promise<() => Promise<void>> {
+  const client = view.webContents.debugger;
+  if (view.webContents.getURL() === "" || client.isAttached() || client.on === undefined) {
+    return async () => undefined;
+  }
+  try {
+    client.attach("1.3");
+  } catch {
+    return async () => undefined;
+  }
+  agentDebuggers.add(client);
+  const listener = (_event: unknown, method: string, params: unknown) => {
+    if (method !== "Page.javascriptDialogOpening") return;
+    const opened = (params ?? {}) as { readonly type?: unknown; readonly message?: unknown };
+    const type = dialogType(typeof opened.type === "string" ? opened.type : "alert");
+    const answer = BROWSER_DIALOG_POLICY[type];
+    if (reports.length < 8) {
+      reports.push({
+        type,
+        message: (typeof opened.message === "string" ? opened.message : "").slice(0, 512),
+        answer,
+      });
+    }
+    void client
+      .sendCommand("Page.handleJavaScriptDialog", { accept: answer === "accepted" })
+      .catch(() => undefined);
+  };
+  client.on("message", listener);
+  await client.sendCommand("Page.enable").catch(() => undefined);
+  return async () => {
+    client.removeListener?.("message", listener);
+    agentDebuggers.delete(client);
+    if (client.isAttached()) client.detach();
+  };
+}
+
+/**
+ * Check a wait's conditions until they hold or its time runs out, never more
+ * than the hard limit the contract sets.
+ */
+async function waitForConditions(
+  view: BrowserSurfaceViewPort,
+  waitFor: NonNullable<BrowserSurfaceAction["waitFor"]>,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  const conditions = browserPageConditions(waitFor);
+  const timeoutMs = Math.min(waitFor.timeoutMs ?? DEFAULT_BROWSER_WAIT_MS, MAX_BROWSER_WAIT_MS);
+  const deadline = Date.now() + timeoutMs;
+  let met: ReadonlyArray<boolean> = conditions.map(() => false);
+  while (true) {
+    throwIfAborted(signal);
+    try {
+      const checked = await readPage(view, { mode: "check", conditions });
+      if (checked.mode === "check") met = checked.met;
+    } catch {
+      // A page between documents cannot be read; the next check will be.
+    }
+    if (waitSatisfied(waitFor.match, met)) return;
+    if (Date.now() >= deadline) {
+      throw new BrowserWaitTimedOutError(describeUnmetWait(timeoutMs, conditions, met));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
+/**
+ * Give the page a moment to finish what an action started: its load, then a
+ * short window in which the document stops changing, bounded either way.
+ */
+async function settlePage(view: BrowserSurfaceViewPort): Promise<void> {
+  await waitForPageSettled(view);
+  await execute(
+    view,
+    `(${awaitQuietPage.toString()})(${JSON.stringify({
+      quietMs: BROWSER_SETTLE_QUIET_MS,
+      capMs: BROWSER_SETTLE_CAP_MS,
+    })})`,
+  ).catch(() => undefined);
+}
+
 async function withDebugger(
   view: BrowserSurfaceViewPort,
   action: (
@@ -1745,6 +1929,10 @@ async function withDebugger(
   ) => Promise<void>,
 ): Promise<void> {
   const client = view.webContents.debugger;
+  if (client.isAttached() && agentDebuggers.has(client)) {
+    await action((method, parameters) => client.sendCommand(method, parameters));
+    return;
+  }
   if (client.isAttached()) throw new Error("Browser automation control is already in use.");
   client.attach("1.3");
   try {
@@ -1879,7 +2067,9 @@ async function waitForSelector(
       return;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  throw new Error("Timed out waiting for Browser target.");
+  throw new BrowserWaitTimedOutError(
+    "The wait timed out after 10000 ms: the element never appeared.",
+  );
 }
 
 /** What the observation contract carries for a picture, data URL included. */
@@ -1927,9 +2117,10 @@ async function captureScreenshot(view: BrowserSurfaceViewPort): Promise<string |
   // captures its view directly instead of a compositor surface it does not
   // have.
   const client = view.webContents.debugger;
-  if (client.isAttached()) return undefined;
+  const ours = agentDebuggers.has(client);
+  if (client.isAttached() && !ours) return undefined;
   try {
-    client.attach("1.3");
+    if (!ours) client.attach("1.3");
     const metrics = (await client.sendCommand("Page.getLayoutMetrics")) as
       | {
           readonly cssLayoutViewport?: {
@@ -1965,6 +2156,6 @@ async function captureScreenshot(view: BrowserSurfaceViewPort): Promise<string |
   } catch {
     return undefined;
   } finally {
-    if (client.isAttached()) client.detach();
+    if (!ours && client.isAttached()) client.detach();
   }
 }
