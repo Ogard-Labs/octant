@@ -249,6 +249,7 @@ describe("Octant Shield's Watcher", () => {
     "(echo $GITHUB_TOKEN)",
     "sh -c 'echo $GITHUB_TOKEN'",
     'cd app && bash -lc "printenv DB_PASS"',
+    "printenv 'NPM_TOKEN'",
   ])("flags a command that prints a secret-holding variable: %s", (command) => {
     expect(callPrintsSecretEnvironment({ command }, "")).toBe(true);
   });
@@ -263,6 +264,8 @@ describe("Octant Shield's Watcher", () => {
     "printenv HOME",
     "sh -c 'echo $HOME'",
     "echo $AUTH_METHOD $PASS",
+    "echo \\$GITHUB_TOKEN",
+    'echo "use \\$NPM_TOKEN here"',
   ])("leaves a command that prints no secret-holding variable alone: %s", (command) => {
     expect(callPrintsSecretEnvironment({ command }, "")).toBe(false);
   });

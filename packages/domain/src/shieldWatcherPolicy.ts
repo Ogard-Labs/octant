@@ -271,7 +271,7 @@ function commandPrintsSecretVariable(command: string, depth = 0): boolean {
       if (commandPrintsSecretVariable(match[1] ?? match[2] ?? "", depth + 1)) return true;
     }
   }
-  const expanding = withoutSingleQuotedSpans(bounded);
+  const expanding = withoutLiteralDollars(bounded);
   const simpleCommands = expanding.split(/[;&|\n()]+|`/).slice(0, MAX_SIMPLE_COMMANDS);
   return simpleCommands.some((simple) => {
     const words = simple
@@ -304,24 +304,25 @@ function commandPrintsSecretVariable(command: string, depth = 0): boolean {
 }
 
 /**
- * The command with each single-quoted span emptied, since such a span expands
- * nothing (`echo '$TOKEN'` prints the name). A quote inside double quotes is
- * an ordinary character, so `echo "a='$TOKEN'"` still expands.
+ * The command with every `$` that expands nothing neutralised: inside single
+ * quotes (`echo '$TOKEN'` prints the name) and after a backslash outside them
+ * (`echo \\$TOKEN`, also inside double quotes). The words themselves stay, so
+ * `printenv 'NPM_TOKEN'` still names its variable. A single quote inside double
+ * quotes is an ordinary character, so `echo "a='$TOKEN'"` still expands.
  */
-function withoutSingleQuotedSpans(command: string): string {
+function withoutLiteralDollars(command: string): string {
   let result = "";
   let quote: "'" | '"' | undefined;
   for (let index = 0; index < command.length; index += 1) {
     const character = command[index] ?? "";
     if (quote === "'") {
-      if (character === "'") {
-        quote = undefined;
-        result += character;
-      }
+      if (character === "'") quote = undefined;
+      result += character === "$" ? "_" : character;
       continue;
     }
-    if (character === "\\" && quote === undefined) {
-      result += character + (command[index + 1] ?? "");
+    if (character === "\\") {
+      const next = command[index + 1] ?? "";
+      result += next === "$" ? "\\_" : character + next;
       index += 1;
       continue;
     }
