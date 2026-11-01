@@ -23,6 +23,12 @@ export interface BrowserRuntimeObservation {
   readonly snapshotRefs?: ReadonlyArray<BrowserPageSnapshotRef>;
   readonly screenshotDataUrl?: string;
   readonly viewport?: { readonly width: number; readonly height: number };
+  /** The page's own dialogs since the last action, as the fixed policy answered them. */
+  readonly dialogs?: ReadonlyArray<{
+    readonly type: "alert" | "confirm" | "prompt" | "beforeunload";
+    readonly message: string;
+    readonly answer: "accepted" | "dismissed";
+  }>;
   /** Only a tab action fills this: the context's tabs as they now stand. */
   readonly tabs?: ReadonlyArray<{
     readonly tabId: string;
@@ -103,6 +109,17 @@ export class BrowserTargetStaleError extends Error {
 }
 
 /**
+ * A wait ran out its time before its conditions were met. The message says
+ * which were not, so the agent knows what to wait for differently.
+ */
+export class BrowserWaitTimedOutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BrowserWaitTimedOutError";
+  }
+}
+
+/**
  * A page asked for a stored Browser profile and this runtime cannot hold one.
  * Only the desktop app's own Browser keeps a profile's store, so a runtime
  * without it refuses instead of opening a headless copy that would disagree
@@ -162,6 +179,8 @@ export type BrowserRuntimeAction = Pick<BrowserActionRequest, "kind"> &
       | "destination"
       | "files"
       | "tabId"
+      | "waitFor"
+      | "viewport"
     >
   > & {
     /**

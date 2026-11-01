@@ -126,6 +126,40 @@ describe("server Project catalog", () => {
     expect(storeOn(openJournal(directory), server.connection).projects()).toEqual([]);
   });
 
+  it("keeps a Work Project apart from Code ones, and a Code Project's record as it was", async () => {
+    const directory = scratch();
+    const server = answering(() => resolvedTo("/srv/notes"));
+    const journal = openJournal(directory);
+    const store = storeOn(journal, server.connection);
+    const code = await store.bind({
+      name: "Site",
+      serverId: String(web.serverId),
+      folder: "/srv/notes",
+      principal: "local-window",
+    });
+    const work = await store.bind({
+      name: "Notes",
+      serverId: String(web.serverId),
+      folder: "/srv/notes",
+      mode: "work",
+      principal: "local-window",
+    });
+    const codeId = String(code.kind === "changed" ? code.project?.id : "");
+    const workId = String(work.kind === "changed" ? work.project?.id : "");
+    const bound = journal
+      .replayAggregateType({ aggregateType: "server-projects", afterSequence: 0, limit: 10 })
+      .map((envelope) => envelope.payload as { project: Record<string, unknown> });
+    // An older build reads a Code Project's record exactly as before.
+    expect(Object.keys(bound[0]?.project ?? {})).not.toContain("mode");
+    expect(bound[1]?.project).toMatchObject({ mode: "work" });
+
+    const reloaded = storeOn(openJournal(directory), server.connection);
+    expect(reloaded.codeProject(codeId)?.name).toBe("Site");
+    expect(reloaded.workProject(codeId)).toBeUndefined();
+    expect(reloaded.workProject(workId)?.name).toBe("Notes");
+    expect(reloaded.codeProject(workId)).toBeUndefined();
+  });
+
   it("binds nothing when the server cannot be reached or the folder is not there", async () => {
     const journal = openJournal(scratch());
     const unreachable = storeOn(

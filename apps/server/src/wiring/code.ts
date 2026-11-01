@@ -664,7 +664,7 @@ export function wireCode(deps: CodeDependencies) {
     // host for it, and no local root resolves it.
     const checkouts = withServerCodeCheckouts(serverProjectStore, localCheckouts);
     const isServerCodeProject = (projectId: ProjectId) =>
-      serverProjectStore.project(String(projectId)) !== undefined;
+      serverProjectStore.codeProject(String(projectId)) !== undefined;
     const isCodeProject = (projectId: ProjectId) =>
       projectService.hasActiveProject(projectId, "code") || isServerCodeProject(projectId);
     const roots = createExistingWorktreeCodeFileRootAuthority({

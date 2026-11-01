@@ -139,6 +139,26 @@ describe("BrowserRuntimeBroker", () => {
     }
   });
 
+  it("refuses a resize outside the bounds and a malformed wait before the page is touched", async () => {
+    const surface = host();
+    const broker = await startBrowserRuntimeBroker(surface as never);
+    try {
+      for (const action of [
+        { kind: "resize", viewport: { width: 9000, height: 800 } },
+        { kind: "wait", waitFor: { conditions: [], match: "all" } },
+        { kind: "wait", waitFor: { conditions: [{ kind: "text", text: "x" }], match: "all" } },
+      ]) {
+        const response = await broker.fetchForTest(
+          request(broker.url, broker.token, { contextId, request: action }),
+        );
+        expect(response.status).toBe(400);
+      }
+      expect(surface.act).not.toHaveBeenCalled();
+    } finally {
+      await broker.close();
+    }
+  });
+
   it("rejects remote or unauthenticated callers", async () => {
     const broker = await startBrowserRuntimeBroker(host() as never);
     try {
