@@ -430,6 +430,17 @@ describe("Shield on scp and rsync calls", () => {
     });
   });
 
+  it("hands a remote path the server's shell would run to the model, and asks on a tainted thread", () => {
+    for (const command of [
+      "scp -O 'web1:/tmp/$(touch /tmp/proof)' ./result",
+      "rsync 'web1:/tmp/a;reboot' ./result",
+    ]) {
+      expect(judge(command, [web]), command).toEqual({ kind: "needs-model" });
+      expect(judge(command, [web], { tainted: true }), command).toMatchObject({ verdict: "ask" });
+    }
+    expect(judge("scp 'web1:/var/log/*.log' logs/", [web])).toMatchObject({ verdict: "allow" });
+  });
+
   it("lets a tainted thread only download", () => {
     const admin = [{ ...web, profile: "admin" as const }];
     expect(judge("scp web1:/var/log/a.log .", admin, { tainted: true })).toMatchObject({

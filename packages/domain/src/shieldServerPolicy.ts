@@ -352,6 +352,8 @@ const RSYNC_PLAIN_LONG = new Set([
   "ignore-existing",
   "mkpath",
 ]);
+/** Text a server's shell would expand or act on in a remote path. */
+const REMOTE_SHELL_TEXT = /[$`;|&<>(){}\\'"!\n\r]/;
 /** rsync long options that take a value, as `--name=value` or as the next word. */
 const RSYNC_VALUE_LONG = new Set([
   "exclude",
@@ -518,7 +520,12 @@ export function fileCopyTier(
   ) {
     return "lockout";
   }
-  if (copy.unknownOption) return "unknown";
+  // Legacy scp (`-O`) and rsync hand a remote path to the server's shell,
+  // so a path it would expand or run (`$(…)`, a separator, a redirection) is
+  // a command, not a file name; a glob only matches files.
+  if (copy.unknownOption || copy.remotes.some((remote) => REMOTE_SHELL_TEXT.test(remote.path))) {
+    return "unknown";
+  }
   return copy.direction === "download" ? "read" : "admin";
 }
 

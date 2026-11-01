@@ -10843,7 +10843,9 @@ applies them to every command that starts with `ssh`:
   server goes to the person, and a secret file on this computer is refused as
   reading secrets then sending them out, as for any command. Every file on
   this computer must lie inside the Project, else the person decides. An
-  rsync option the rules do not name goes to the model.
+  rsync option the rules do not name, or a remote path the server's shell
+  would expand or run (legacy scp and rsync pass it to that shell), goes to
+  the model, and on a tainted thread to the person.
 
 Every `ssh` command an Octant Harness shell runs, at every level, is journaled
 under its thread as `shield-remote-commands.ran@1` with the host (left out
