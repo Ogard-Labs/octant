@@ -2317,8 +2317,10 @@ describe("Code tool families", () => {
     // A paired device as an Apple destination added its own operations and
     // parameters (about 250 bytes of schema); its usage lives behind help.
     // The upload, submit-for-review, and release-version operations added
-    // their names to the enum; their usage is in help too.
-    expect(JSON.stringify(families).length).toBeLessThanOrEqual(4_650);
+    // their names to the enum; their usage is in help too. The Browser's
+    // snapshot operation and its ref argument added about 35 bytes after the
+    // description was shortened to pay for most of them.
+    expect(JSON.stringify(families).length).toBeLessThanOrEqual(4_700);
   });
 
   it.each(["octant_browser", "octant_terminal", "octant_apple", "octant_android"])(

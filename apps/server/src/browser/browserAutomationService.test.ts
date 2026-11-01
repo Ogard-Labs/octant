@@ -557,6 +557,49 @@ describe("BrowserAutomationService", () => {
     );
   });
 
+  it("resolves a snapshot ref on the server and refuses one the latest snapshot did not list", async () => {
+    const { runtime, service } = harness();
+    await service.create({ windowId, threadId: threadOne, action: action(), policy });
+    vi.mocked(runtime.act).mockResolvedValueOnce({
+      url: "https://example.com/start",
+      snapshot: '- button "Save" [ref=e1]',
+      snapshotRefs: [{ ref: "e1", selector: "#save", role: "button", name: "Save" }],
+    });
+    const read = await service.act({
+      windowId,
+      request: request({ kind: "snapshot", target: undefined }),
+    });
+    expect(read.observation?.snapshot).toBe('- button "Save" [ref=e1]');
+
+    const unknown = await service.act({
+      windowId,
+      request: request({ kind: "click", target: undefined, ref: "e2" }),
+    });
+    expect(unknown.failure?.category).toBe("stale");
+    expect(runtime.act).toHaveBeenCalledTimes(1);
+
+    await service.act({
+      windowId,
+      request: request({ kind: "click", target: undefined, ref: "e1" }),
+    });
+    expect(runtime.act).toHaveBeenLastCalledWith(
+      contextOne,
+      expect.objectContaining({
+        kind: "click",
+        target: "#save",
+        expected: { role: "button", name: "Save" },
+      }),
+      expect.anything(),
+    );
+
+    await service.act({ windowId, request: request() });
+    const afterNavigation = await service.act({
+      windowId,
+      request: request({ kind: "click", target: undefined, ref: "e1" }),
+    });
+    expect(afterNavigation.failure?.category).toBe("stale");
+  });
+
   it("journals browser observations as tainting tool results once", async () => {
     const recordExternalContentIngestion = vi.fn(() => ({
       kind: "recorded" as const,

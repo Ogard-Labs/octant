@@ -138,6 +138,7 @@ export const BrowserActionKind = Schema.Literal(
   "wait",
   "close-tab",
   "observe-diagnostics",
+  "snapshot",
 );
 export type BrowserActionKind = typeof BrowserActionKind.Type;
 
@@ -153,6 +154,18 @@ export const BrowserViewportSize = Schema.Struct({
 }).annotations(strict);
 export type BrowserViewportSize = typeof BrowserViewportSize.Type;
 
+/**
+ * A reference to one element of the page's latest snapshot. The host keeps
+ * what each reference names and resolves it itself, so a caller can neither
+ * point a reference at an element the snapshot did not list nor reuse one after
+ * the page has changed under it.
+ */
+export const BrowserElementRef = Schema.String.pipe(Schema.pattern(/^e[1-9][0-9]{0,3}$/));
+export type BrowserElementRef = typeof BrowserElementRef.Type;
+
+/** The longest page outline an observation carries, in characters. */
+export const MAX_BROWSER_SNAPSHOT_OUTLINE_CHARACTERS = 32 * 1024;
+
 export const BrowserActionRequest = Schema.Struct({
   actionId: ToolActionId,
   contextId: BrowserContextId,
@@ -160,6 +173,8 @@ export const BrowserActionRequest = Schema.Struct({
   authority: ToolActionAuthority,
   kind: BrowserActionKind,
   target: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096))),
+  /** An element of the latest snapshot, in place of a CSS selector `target`. */
+  ref: Schema.optional(BrowserElementRef),
   value: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(65_536))),
   point: Schema.optional(BrowserViewportPoint),
   deltaX: Schema.optional(Schema.Number.pipe(Schema.between(-2000, 2000))),
@@ -228,6 +243,14 @@ export const BrowserObservation = Schema.Struct({
   title: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
   contentHash: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
   extractedText: Schema.optional(Schema.String.pipe(Schema.maxLength(65_536))),
+  /**
+   * The page outline a `snapshot` action read: one line per element, with a
+   * reference on each one an action can name. A credential field is listed as
+   * protected and never carries a value.
+   */
+  snapshot: Schema.optional(
+    Schema.String.pipe(Schema.maxLength(MAX_BROWSER_SNAPSHOT_OUTLINE_CHARACTERS)),
+  ),
   /**
    * What the page reported while the agent was driving it. Only the
    * `observe-diagnostics` action fills these: an agent that wants to know why a
