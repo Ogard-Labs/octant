@@ -12,9 +12,10 @@ Code threads there on the Octant Harness, with file tools, commands, and Git
 on the server at every level; thread terminals there; the Git tab, whose Git
 runs on the server; a thread's own worktree on the server and its pull
 request ([Worktrees and pull requests](#worktrees-and-pull-requests)); and
-the Code sidebar, composer, and thread view that open them. On the host: Work
-Projects there, whose Work threads run on the Octant Harness with file tools
-and commands on the server ([Work Projects](#work-projects)). Not built yet:
+the Code sidebar, composer, and thread view that open them; and Work Projects
+there, whose Work threads run on the Octant Harness with file tools and
+commands on the server, with the Work sidebar, composer, and thread view that
+open them ([Work Projects](#work-projects)). Not built yet:
 the items under [Not built yet](#not-built-yet).
 
 ## Outcome
@@ -197,6 +198,13 @@ hands are on the server.
 - **Windows.** A window binds a server Work Project, and its threads, with no
   folder of this host (`boundRoot: null`), so Work Files, Browser, and every
   root-backed Work surface fail closed for it.
+- **Views.** Settings › Access › Servers binds one with **Project kind: Work**.
+  The Work sidebar lists it under **On your servers** with its threads; the
+  Work composer offers it, with only Octant Harness models choosable and no
+  extension, issue, or terminal session to start from; and its thread view
+  names its server and folder and offers no Browser, extension, image
+  generation, or file mention. The dock keeps only the tools a Code thread on
+  a server keeps.
 
 ### Panels
 
@@ -285,8 +293,8 @@ hands are on the server.
 
 ## Not built yet
 
-- The Work sidebar, composer, and thread view for a Work Project on a server,
-  and the choice of mode when binding one in Settings; the host side is built.
+- Work Files, research sources, and the status file and due dates for a Work
+  Project on a server; its threads are built.
 - Extra folders in a server Project.
 - The file browser and tests for a server Project, and the dock's Review
   tool there; the Git tab, managed worktrees, and pull requests are built.

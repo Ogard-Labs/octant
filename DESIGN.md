@@ -2202,9 +2202,10 @@ font, wrapping, and a quiet Copy that reads Copied once it has; a refusal
 shows there in the alert role. The form is Alias, User, Profile, Sign in with
 (Your SSH agent, the default, or A key Octant keeps), Deploy commands (one per
 line, shown for Operate and Admin), and Runbook path. A refusal from the host shows inline in the alert role.
-Below it, **Code Projects on your servers** lists each server Project as its
-name and `alias:folder` in the code font with a quiet Remove, and a form of
-Project name, Server (`user@alias`), and Folder on the server whose button
+Below it, **Projects on your servers** lists each server Project as its
+name and its kind and `alias:folder` (`Work · web-1:/srv/notes`) in the code
+font with a quiet Remove, and a form of Project kind (Code, the default, or
+Work), Project name, Server (`user@alias`), and Folder on the server whose button
 reads **Bind folder** and **Checking the folder…** while the host checks it
 over SSH; with no registered server the form is replaced by a line asking for
 one ([Server Projects](docs/design/server-projects.md)).

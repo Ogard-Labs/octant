@@ -1,3 +1,4 @@
+import { ServerCodeProjectsContext } from "../projects/serverProjectEntries";
 import { automationFollowUpTurnPrompt } from "@octant/contracts/automation";
 import { queueTestHost } from "../messageQueue/queueTestHost.test-fixture";
 import {
@@ -264,6 +265,42 @@ describe("WorkThreadWorkspace", () => {
       expect(strip.closest(".thread-composer__context")).not.toBeNull();
     },
   );
+
+  it("names the server and folder a thread on a server works in", async () => {
+    const thread = workThread({ workingDirectory: "." });
+    render(
+      <ServerCodeProjectsContext.Provider
+        value={{
+          projects: [],
+          workProjects: [
+            {
+              projectId: thread.projectId,
+              name: "Notes",
+              location: "devbox:/home/build/notes",
+              bindingRevisionId: thread.bindingRevisionId as never,
+            },
+          ],
+          refresh: () => undefined,
+        }}
+      >
+        <WorkThreadWorkspace
+          initialThread={thread}
+          providerGroups={[providerGroup()]}
+          threadClient={{
+            bootstrap: vi.fn(),
+            navigation: vi.fn(),
+            execute: vi.fn(),
+            queryBoard: vi.fn(),
+          }}
+          threadId={thread.id}
+          title={thread.title}
+        />
+      </ServerCodeProjectsContext.Provider>,
+    );
+    const strip = await screen.findByRole("group", { name: "Project and folder" });
+    expect(within(strip).getByText("Notes")).toBeVisible();
+    expect(within(strip).getByText("notes")).toHaveAttribute("title", "devbox:/home/build/notes");
+  });
 
   it("keeps a Browser approval visible and explains a failed decision", async () => {
     const user = userEvent.setup();

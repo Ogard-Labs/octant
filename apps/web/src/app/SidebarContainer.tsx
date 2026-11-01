@@ -542,10 +542,15 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
   const codeThreadRowActions = rowActions.code;
   // Projects on the person's servers are not in the Project catalog, so their
   // threads are listed under them in a group of their own rather than as unfiled.
-  const serverCodeProjects = useServerCodeProjects().projects;
+  const serverProjects = useServerCodeProjects();
+  const serverCodeProjects = serverProjects.projects;
+  const serverWorkProjects = serverProjects.workProjects;
   const serverProjectIds = useMemo(
-    () => new Set(serverCodeProjects.map((project) => String(project.projectId))),
-    [serverCodeProjects],
+    () =>
+      new Set(
+        [...serverCodeProjects, ...serverWorkProjects].map((project) => String(project.projectId)),
+      ),
+    [serverCodeProjects, serverWorkProjects],
   );
   const outsideServerProjects = useCallback(
     <T extends { readonly projectId?: string | undefined }>(threads: ReadonlyArray<T>) =>
@@ -821,9 +826,20 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
                             threadActions: workThreadRowActions,
                             ...(markedThreadGroups === undefined
                               ? workStatus === "ready"
-                                ? { threads: workProjectThreads.map(withProviderMark) }
+                                ? {
+                                    threads:
+                                      outsideServerProjects(workProjectThreads).map(
+                                        withProviderMark,
+                                      ),
+                                  }
                                 : {}
-                              : { threadGroups: markedThreadGroups }),
+                              : {
+                                  threadGroups: {
+                                    recents: outsideServerProjects(markedThreadGroups.recents),
+                                    all: outsideServerProjects(markedThreadGroups.all),
+                                    unfiled: outsideServerProjects(markedThreadGroups.unfiled),
+                                  },
+                                }),
                           }
                         : {})}
                   {...(activeMode === "chat"
@@ -864,6 +880,22 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
                     onSelectThread={selectCodeThread}
                     projects={serverCodeProjects}
                     threads={codeProjectThreads.map(withProviderMark)}
+                  />
+                ) : null}
+                {activeMode === "work" && workStatus === "ready" ? (
+                  <ServerProjectsSidebarGroup
+                    actions={workThreadRowActions}
+                    {...(activeProjectId === undefined ? {} : { activeProjectId })}
+                    {...(activeSidebarDestination === undefined && activeWorkThreadId !== undefined
+                      ? { activeThreadId: String(activeWorkThreadId) }
+                      : {})}
+                    {...(openSidebarThreadIds === undefined
+                      ? {}
+                      : { openThreadIds: openSidebarThreadIds })}
+                    onOpenProject={(projectId) => void openDraftInProject(projectId)}
+                    onSelectThread={selectWorkThread}
+                    projects={serverWorkProjects}
+                    threads={workProjectThreads.map(withProviderMark)}
                   />
                 ) : null}
               </>

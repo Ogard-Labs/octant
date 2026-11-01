@@ -1,3 +1,5 @@
+import { serverCodeThreadProviderGroups } from "../code/composer/serverCodeComposer";
+import { serverCodeProjectFor, useServerCodeProjects } from "../projects/serverProjectEntries";
 import { threadCompactionSubject } from "../context/CompactionDivider";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
@@ -707,8 +709,28 @@ async function waitForWorkStreamReconnect(signal: AbortSignal, delayMs: number):
   });
 }
 
-export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
-  const [projectId, setProjectId] = useState<ProjectId | undefined>(props.initialThread?.projectId);
+/**
+ * A Work thread in a Project on a server runs on the Octant Harness with every
+ * tool on the server, so the view offers nothing that acts on this host: no
+ * Browser, extension, image generation, or file mention, and only the Octant
+ * Harness among runtimes. The host refuses each of them for such a thread.
+ */
+function withoutHostTools(props: WorkThreadWorkspaceProps): WorkThreadWorkspaceProps {
+  const {
+    browserAutomationClient: _browser,
+    extensionClient: _extensions,
+    fileMentionClient: _files,
+    imageGenerationClient: _images,
+    mutationClient: _mutations,
+    ...rest
+  } = props;
+  return { ...rest, providerGroups: serverCodeThreadProviderGroups(props.providerGroups ?? []) };
+}
+
+export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
+  const [projectId, setProjectId] = useState<ProjectId | undefined>(given.initialThread?.projectId);
+  const serverWorkProject = serverCodeProjectFor(useServerCodeProjects().workProjects, projectId);
+  const props = serverWorkProject === undefined ? given : withoutHostTools(given);
   const [thread, setThread] = useState<WorkThread | undefined>(props.initialThread);
   const composerDraft = useComposerThreadDraft({
     mode: "work",
@@ -1946,11 +1968,15 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   const project = props.projects?.find(
     (entry) => entry.type === "work" && String(entry.id) === String(thread?.projectId),
   );
+  const projectLabel = project?.name ?? serverWorkProject?.name;
   const folder = thread?.workingDirectory;
+  // A server thread's folder is named where it is: `alias:folder` on its server.
   const root =
-    project?.type === "work" && project.bindingRevisionId === thread?.bindingRevisionId
-      ? project.binding.canonicalRoot
-      : undefined;
+    serverWorkProject !== undefined
+      ? serverWorkProject.location
+      : project?.type === "work" && project.bindingRevisionId === thread?.bindingRevisionId
+        ? project.binding.canonicalRoot
+        : undefined;
   const path =
     root === undefined
       ? folder
@@ -2430,9 +2456,9 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         context={
           <div className="work-folder-bar" role="group" aria-label="Project and folder">
             <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
-            {project === undefined ? null : (
-              <span className="work-folder-bar__project" title={project.name}>
-                {project.name}
+            {projectLabel === undefined ? null : (
+              <span className="work-folder-bar__project" title={projectLabel}>
+                {projectLabel}
               </span>
             )}
             {path === undefined ? null : (

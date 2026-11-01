@@ -6,14 +6,14 @@ import { ProjectThreadList, type ProjectThreadListProps } from "./ProjectThreadL
 import type { ServerCodeProject } from "./serverProjectEntries";
 
 /**
- * The Code sidebar's Projects on the person's servers, under the local ones.
+ * The Code or Work sidebar's Projects on the person's servers, under the local ones.
  * Each says where it is (`alias:folder`) and lists its threads. Choosing a
  * Project opens a new thread's composer in it, which is what binds the window
  * to it; the host refuses every command a server Project does not take.
  */
 export function ServerProjectsSidebarGroup(props: {
   readonly projects: ReadonlyArray<ServerCodeProject>;
-  /** The Code threads of this window; only those in a listed Project appear here. */
+  /** The mode's threads in this window; only those in a listed Project appear here. */
   readonly threads: ReadonlyArray<ChatThreadNavigationItem>;
   readonly activeProjectId?: ProjectId;
   readonly activeThreadId?: string;
