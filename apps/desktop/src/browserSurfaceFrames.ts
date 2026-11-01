@@ -176,7 +176,7 @@ export function surfaceFrames(options: {
     child: async (parent: SurfaceFrame, selector: string): Promise<SurfaceFrameChild> => {
       const owner = await objectId(
         parent,
-        `(${resolveBrowserElement.toString()})(${JSON.stringify(selector)})`,
+        `(${resolveBrowserElement.toString()})(${scriptString(selector)})`,
       );
       if (owner === undefined) return { status: "excluded" };
       const described = (await options.send(
@@ -215,7 +215,7 @@ export function surfaceFrames(options: {
       if (!options.admits(url)) return { status: "excluded", ...originOf(url) };
       const offset = (await evaluate(
         parent,
-        `(${browserFrameContentOffset.toString()})((${resolveBrowserElement.toString()})(${JSON.stringify(selector)}))`,
+        `(${browserFrameContentOffset.toString()})((${resolveBrowserElement.toString()})(${scriptString(selector)}))`,
       )) as {
         readonly x?: unknown;
         readonly y?: unknown;
@@ -300,6 +300,18 @@ function pageError(details: NonNullable<ProtocolEvaluation["exceptionDetails"]>)
   const description = details.exception?.description ?? details.text ?? "";
   const first = description.split("\n")[0] ?? "";
   return new Error(first.replace(/^\w*Error: /, "") || "Browser frame script failed.");
+}
+
+/**
+ * A value as a string literal inside page code. JSON quoting already makes it
+ * one; the characters that could end a script element or a line are escaped
+ * too, so the literal stays one wherever the code is placed.
+ */
+export function scriptString(value: string): string {
+  return JSON.stringify(value).replace(
+    /[<>/\u2028\u2029]/g,
+    (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
 }
 
 function originOf(url: string): { readonly origin?: string } {

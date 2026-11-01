@@ -27,6 +27,7 @@ import {
 } from "@octant/domain";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
 import {
+  scriptString,
   surfaceFrames,
   watchSurfaceFrameTargets,
   type SurfaceFrame,
@@ -1546,7 +1547,7 @@ async function snapshotOf(owned: OwnedSurface): Promise<{
 
 /** How page code names the element a selector reaches, open shadow roots included. */
 function elementExpression(selector: string): string {
-  return `(${resolveBrowserElement.toString()})(${JSON.stringify(selector)})`;
+  return `(${resolveBrowserElement.toString()})(${scriptString(selector)})`;
 }
 
 /**
