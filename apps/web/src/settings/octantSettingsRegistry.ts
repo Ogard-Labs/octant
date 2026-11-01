@@ -1059,6 +1059,63 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
+      id: "memory",
+      label: "Memory",
+      scope: "host",
+      keywords:
+        "memory remember person preferences past threads other projects forget learn privacy no trace distill",
+      settings: [
+        {
+          id: settingId("person-memory"),
+          label: "Remember across threads",
+          scope: "host",
+          keywords: "memory remember across threads projects on off automatic",
+        },
+        {
+          id: settingId("past-thread-search"),
+          label: "Search past threads",
+          scope: "host",
+          keywords: "search past threads earlier other projects what did we do tool",
+        },
+        {
+          id: settingId("person-memory-model"),
+          label: "Model that writes memory",
+          scope: "host",
+          keywords: "memory model smallest provider usage distill",
+        },
+        {
+          id: settingId("person-memory-exclude"),
+          label: "Keep a Project out",
+          scope: "host",
+          keywords: "keep project out of memory exclude private",
+        },
+        {
+          id: settingId("person-memory-excluded-project"),
+          label: "Projects kept out of memory",
+          scope: "host",
+          keywords: "projects kept out excluded remember again",
+        },
+        {
+          id: settingId("person-memory-untraced"),
+          label: "Threads that leave no trace",
+          scope: "host",
+          keywords: "threads leave no trace private allow memory",
+        },
+        {
+          id: settingId("person-memory-entry"),
+          label: "What Octant remembers",
+          scope: "host",
+          keywords: "entries remembered edit delete source thread",
+        },
+        {
+          id: settingId("person-memory-forget"),
+          label: "Forget everything",
+          scope: "host",
+          keywords: "forget erase delete all memory entries",
+        },
+      ],
+    },
+    {
       id: "secret-stores",
       label: "Secret stores",
       scope: "host",
@@ -1077,6 +1134,25 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Check an item",
           scope: "host",
           keywords: "check item reference op vault found locked missing test",
+        },
+        {
+          id: settingId("secret-store-aws-cli"),
+          label: "AWS command line",
+          scope: "host",
+          keywords:
+            "aws cli command line access key id secret access key session token sts short-lived cloud credentials shell",
+        },
+        {
+          id: settingId("secret-store-aws-cli-key-id"),
+          label: "AWS access key ID item",
+          scope: "host",
+          keywords: "aws access key id item reference op vault",
+        },
+        {
+          id: settingId("secret-store-aws-cli-secret"),
+          label: "AWS secret access key item",
+          scope: "host",
+          keywords: "aws secret access key item reference op vault",
         },
       ],
     },

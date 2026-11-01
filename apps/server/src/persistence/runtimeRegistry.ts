@@ -358,6 +358,7 @@ import { registerCanvasTagEvents } from "../canvas/canvasTagService";
 import { registerCanvasShareEvents } from "../canvas/canvasShareEventStore";
 import { registerCanvasExportEvents } from "../canvas/canvasExportEventStore";
 import { registerCanvasPublicShareEvents } from "../canvas/canvasPublicShareService";
+import { registerPersonMemoryEvents } from "../personMemory/personMemoryStore";
 import { registerProtectedFilesEvents } from "../protectedFilesService";
 import { registerCanvasExportFolderEvents } from "../canvas/canvasExportFolderEventStore";
 import { registerCanvasOutsideContentEvents } from "../canvas/canvasOutsideContentMark";
@@ -687,6 +688,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerCanvasExportEvents(events);
   registerCanvasPublicShareEvents(events);
   registerProtectedFilesEvents(events);
+  registerPersonMemoryEvents(events);
   registerCanvasExportFolderEvents(events);
   registerCanvasOutsideContentEvents(events);
   registerCanvasCommentEvents(events);

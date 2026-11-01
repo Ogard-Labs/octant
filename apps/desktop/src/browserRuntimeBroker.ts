@@ -6,6 +6,7 @@ import {
   BrowserActionKind,
   BrowserObservationPart,
   decodeImportedCookie,
+  MAX_BROWSER_UPLOAD_FILES,
   decodeStoredBrowserProfile,
   MAX_BROWSER_TABS_PER_CONTEXT,
   MAX_COOKIES_PER_IMPORT_BATCH,
@@ -350,6 +351,10 @@ function isBrowserAction(value: unknown): value is BrowserSurfaceAction {
     "deltaY",
     "expected",
     "include",
+    "destination",
+    "destinationExpected",
+    "files",
+    "tabId",
   ]);
   if (Object.keys(value).some((key) => !allowedKeys.has(key))) return false;
   if (!(BrowserActionKind.literals as ReadonlyArray<unknown>).includes(value.kind)) return false;
@@ -362,6 +367,18 @@ function isBrowserAction(value: unknown): value is BrowserSurfaceAction {
     (value.deltaX === undefined || isBoundedDelta(value.deltaX)) &&
     (value.deltaY === undefined || isBoundedDelta(value.deltaY)) &&
     (value.expected === undefined || isExpectedElement(value.expected)) &&
+    (value.destination === undefined ||
+      (typeof value.destination === "string" && value.destination.length <= 4096)) &&
+    (value.destinationExpected === undefined || isExpectedElement(value.destinationExpected)) &&
+    (value.files === undefined ||
+      (Array.isArray(value.files) &&
+        value.files.length >= 1 &&
+        value.files.length <= MAX_BROWSER_UPLOAD_FILES &&
+        value.files.every(
+          (file) => typeof file === "string" && file.length <= 4096 && file.startsWith("/"),
+        ))) &&
+    (value.tabId === undefined ||
+      (typeof value.tabId === "string" && /^t[1-9][0-9]{0,3}$/.test(value.tabId))) &&
     (value.include === undefined ||
       (Array.isArray(value.include) &&
         value.include.length <= 3 &&

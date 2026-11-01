@@ -67,7 +67,7 @@ export default defineConfig({
           text: "Projects And Context",
           items: [
             { text: "Projects", link: "/guide/projects" },
-            { text: "Shared Memory", link: "/guide/memory" },
+            { text: "Memory", link: "/guide/memory" },
             { text: "Promotions", link: "/guide/promotions" },
             { text: "Sync artifacts across your computers", link: "/guide/sync-artifacts" },
             { text: "Export a Canvas or artifact", link: "/guide/export" },

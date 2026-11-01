@@ -1,5 +1,6 @@
 import type { SecretStoresClient } from "@octant/client-runtime/secret-stores-client";
 import type {
+  AwsCliKeyReference,
   SecretStoreCheckOutcome,
   SecretStoreSummary,
   SecretStoresCommand,
@@ -52,6 +53,10 @@ export function SecretStoresSettingsSection(props: SecretStoresSettingsSectionPr
   const [unlinking, setUnlinking] = useState<SecretStoreSummary>();
   const [reference, setReference] = useState("");
   const [checked, setChecked] = useState<SecretStoreCheckOutcome>();
+  const [awsKey, setAwsKey] = useState<AwsCliKeyReference | null>();
+  const [awsKeyIdReference, setAwsKeyIdReference] = useState("");
+  const [awsSecretReference, setAwsSecretReference] = useState("");
+  const [awsProblem, setAwsProblem] = useState<string>();
 
   const accept = useCallback((result: SecretStoresResult): boolean => {
     if (result.kind === "secret-stores-view") {
@@ -76,6 +81,16 @@ export function SecretStoresSettingsSection(props: SecretStoresSettingsSectionPr
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (client === undefined) return;
+    void client
+      .execute({ kind: "read-aws-cli-key" })
+      .then((result) => {
+        if (result.kind === "secret-stores-aws-cli-key") setAwsKey(result.reference);
+      })
+      .catch(() => undefined);
+  }, [client]);
 
   const run = async (command: SecretStoresCommand): Promise<SecretStoresResult | undefined> => {
     if (client === undefined) return undefined;
@@ -116,6 +131,32 @@ export function SecretStoresSettingsSection(props: SecretStoresSettingsSectionPr
       reference: reference.trim(),
     }).then((result) => {
       if (result?.kind === "secret-stores-checked") setChecked(result.outcome);
+    });
+  };
+
+  const runAws = (command: SecretStoresCommand) => {
+    setAwsProblem(undefined);
+    void run(command).then((result) => {
+      if (result?.kind === "secret-stores-aws-cli-key") {
+        setAwsKey(result.reference);
+        setAwsKeyIdReference("");
+        setAwsSecretReference("");
+      } else if (result?.kind === "secret-stores-refused") {
+        setAwsProblem(result.message);
+        setProblem(undefined);
+      }
+    });
+  };
+
+  const pointAws = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (linkedStore === undefined) return;
+    if (awsKeyIdReference.trim() === "" || awsSecretReference.trim() === "") return;
+    runAws({
+      kind: "point-aws-cli-key",
+      store: linkedStore.kind,
+      accessKeyIdReference: awsKeyIdReference.trim(),
+      secretAccessKeyReference: awsSecretReference.trim(),
     });
   };
 
@@ -230,6 +271,104 @@ export function SecretStoresSettingsSection(props: SecretStoresSettingsSectionPr
               <SettingsState kind={checked === "found" ? "success" : "error"}>
                 {SECRET_STORE_CHECK_TEXT[checked]}
               </SettingsState>
+            )}
+          </div>
+        </SettingsSection>
+      ) : null}
+
+      {view?.brokerAvailable === true ? (
+        <SettingsSection
+          description="Let the AWS command line in Octant's own shell sign in without your credentials file. Point it at the two items that hold your access key pair. Each command gets a session that lasts one hour, made from that pair; the pair itself never leaves the credential broker."
+          title="AWS command line"
+        >
+          <form aria-label="AWS command line" noValidate onSubmit={pointAws}>
+            <div className="setgroup">
+              <SettingRow
+                description={
+                  awsKey === undefined
+                    ? "Reading…"
+                    : awsKey === null
+                      ? "Not set. Commands get no AWS credentials from Octant."
+                      : `Set. The key ID comes from ${awsKey.accessKeyIdReference} and the secret key from ${awsKey.secretAccessKeyReference}.`
+                }
+                focused={props.focusedSetting === "secret-store-aws-cli"}
+                label="Key pair"
+                scope="host"
+                settingId="secret-store-aws-cli"
+              >
+                <OctantButton
+                  disabled={
+                    busy ||
+                    linkedStore === undefined ||
+                    awsKeyIdReference.trim() === "" ||
+                    awsSecretReference.trim() === ""
+                  }
+                  size="sm"
+                  type="submit"
+                >
+                  {awsKey === null || awsKey === undefined ? "Use these items" : "Replace"}
+                </OctantButton>
+                {awsKey === null || awsKey === undefined ? null : (
+                  <OctantButton
+                    disabled={busy}
+                    onClick={() => runAws({ kind: "clear-aws-cli-key" })}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    Remove
+                  </OctantButton>
+                )}
+              </SettingRow>
+              <SettingRow
+                description={
+                  linkedStore === undefined ? "Link a store first." : "The item holding the key ID."
+                }
+                htmlFor="secret-store-aws-key-id"
+                label="Access key ID item"
+                scope="host"
+                settingId="secret-store-aws-cli-key-id"
+              >
+                <OctantInput
+                  autoComplete="off"
+                  className="settings-view__text-input"
+                  disabled={busy || linkedStore === undefined}
+                  id="secret-store-aws-key-id"
+                  maxLength={512}
+                  onChange={(event) => setAwsKeyIdReference(event.target.value)}
+                  placeholder="op://Vault/AWS/key id"
+                  spellCheck={false}
+                  value={awsKeyIdReference}
+                />
+              </SettingRow>
+              <SettingRow
+                description={
+                  linkedStore === undefined
+                    ? "Link a store first."
+                    : "The item holding the secret access key."
+                }
+                htmlFor="secret-store-aws-secret"
+                label="Secret access key item"
+                scope="host"
+                settingId="secret-store-aws-cli-secret"
+              >
+                <OctantInput
+                  autoComplete="off"
+                  className="settings-view__text-input"
+                  disabled={busy || linkedStore === undefined}
+                  id="secret-store-aws-secret"
+                  maxLength={512}
+                  onChange={(event) => setAwsSecretReference(event.target.value)}
+                  placeholder="op://Vault/AWS/secret"
+                  spellCheck={false}
+                  value={awsSecretReference}
+                />
+              </SettingRow>
+            </div>
+          </form>
+          <div aria-live="polite">
+            {awsProblem === undefined ? null : (
+              <SettingsState kind="error">{awsProblem}</SettingsState>
             )}
           </div>
         </SettingsSection>

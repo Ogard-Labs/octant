@@ -3,6 +3,7 @@ import {
   browserProfileKey,
   browserProfilePartition,
   browserRefStillMatches,
+  parseBrowserKeyChord,
   formatBrowserPageSnapshot,
   MAX_BROWSER_SNAPSHOT_NODES,
   MAX_BROWSER_SNAPSHOT_REFS,
@@ -258,10 +259,27 @@ export class BrowserTargetStaleError extends Error {
 /** What the server asks a page to do; it carries no authority of its own. */
 export type BrowserSurfaceAction = Pick<BrowserActionRequest, "kind"> &
   Partial<
-    Pick<BrowserActionRequest, "target" | "value" | "point" | "deltaX" | "deltaY" | "include">
+    Pick<
+      BrowserActionRequest,
+      | "target"
+      | "value"
+      | "point"
+      | "deltaX"
+      | "deltaY"
+      | "include"
+      | "destination"
+      | "files"
+      | "tabId"
+    >
   > & {
     /** The role and name a snapshot ref recorded; the target must still match. */
     readonly expected?: { readonly role: string; readonly name: string; readonly url: string };
+    /** The same for a drag's drop target. */
+    readonly destinationExpected?: {
+      readonly role: string;
+      readonly name: string;
+      readonly url: string;
+    };
   };
 
 export interface BrowserSurfaceRuntimeObservation {
@@ -272,6 +290,13 @@ export interface BrowserSurfaceRuntimeObservation {
   /** Only a snapshot read fills these: the outline, and what each ref names. */
   readonly snapshot?: string;
   readonly snapshotRefs?: ReadonlyArray<BrowserPageSnapshotRef>;
+  /** Only a tab action fills this, with the ids the agent knows tabs by. */
+  readonly tabs?: ReadonlyArray<{
+    readonly tabId: string;
+    readonly url?: string;
+    readonly title?: string;
+    readonly active: boolean;
+  }>;
   readonly screenshotDataUrl?: string;
   readonly viewport?: { readonly width: number; readonly height: number };
   /** Only an observe-diagnostics read fills these; each read clears what it returns. */
@@ -619,19 +644,17 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           // it reads nothing — its own target check is the guard — but its
           // result is checked below, so a navigation that fails cannot leave
           // the agent extracting the page it did not manage to leave.
-          if (request.kind !== "navigate") refuseUnapprovedPage(owned, contents);
-          if (request.expected !== undefined && request.target !== undefined) {
-            const found = await readPage(contentsView(owned), {
-              mode: "verify",
-              selector: request.target,
-            });
-            if (
-              found.mode !== "verify" ||
-              !browserRefStillMatches(request.expected, found.element, observedUrl(contents))
-            ) {
-              throw new BrowserTargetStaleError();
-            }
+          // A tab action reads no page: it names tabs and moves between them,
+          // so a front tab the person took elsewhere does not strand the agent.
+          if (request.kind !== "navigate" && !request.kind.startsWith("tab-")) {
+            refuseUnapprovedPage(owned, contents);
           }
+          await refuseStaleTarget(contentsView(owned), request.target, request.expected);
+          await refuseStaleTarget(
+            contentsView(owned),
+            request.destination,
+            request.destinationExpected,
+          );
           switch (request.kind) {
             case "navigate": {
               if (
@@ -678,6 +701,65 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
             case "wait":
               await waitForSelector(contentsView(owned), request.target);
               break;
+            case "hover":
+              await hoverTarget(contentsView(owned), request.target);
+              break;
+            case "select":
+              await selectOption(contentsView(owned), request.target, request.value);
+              break;
+            case "drag":
+              await dragTarget(contentsView(owned), request.target, request.destination);
+              break;
+            case "upload":
+              await uploadFiles(contentsView(owned), request.target, request.files);
+              break;
+            case "tab-list":
+              return agentTabs(owned);
+            case "tab-open": {
+              // The agent's own new tab: the same guards as every tab, and its
+              // page is reached through the same navigation admission, while
+              // the agent drives so nothing it reaches is granted as browsing.
+              if (owned.tabs.length >= owned.policy.maxConcurrentTabs) {
+                throw new Error("Octant Browser context is already at its tab limit.");
+              }
+              if (
+                request.target !== undefined &&
+                !originAllowed(request.target, owned.policy.allowedOrigins)
+              ) {
+                throw new Error("Navigation target origin is not in the allowlist.");
+              }
+              const tabId = `${String(contextId)}:${owned.nextTabOrdinal}`;
+              owned.nextTabOrdinal += 1;
+              const opened = openTabView(contextId, owned, tabId);
+              showTab(owned, opened);
+              try {
+                await opened.view.webContents.loadURL(
+                  request.target === undefined ? "about:blank" : normalizeUrl(request.target),
+                );
+              } catch (error) {
+                if (owned.blockedNavigationUrl === undefined) throw error;
+                throw new BrowserNavigationBlockedError(owned.blockedNavigationUrl);
+              }
+              refuseUnapprovedPage(owned, opened.view.webContents);
+              return agentTabs(owned);
+            }
+            case "tab-select": {
+              const chosen = owned.tabs.find((tab) => agentTabId(tab.tabId) === request.tabId);
+              if (chosen === undefined) throw new Error("Octant Browser tab is unknown.");
+              // The person's tab on a site no approval covers stays theirs.
+              refuseUnapprovedPage(owned, chosen.view.webContents);
+              showTab(owned, chosen);
+              return agentTabs(owned);
+            }
+            case "tab-close": {
+              const chosen = owned.tabs.find((tab) => agentTabId(tab.tabId) === request.tabId);
+              if (chosen === undefined) throw new Error("Octant Browser tab is unknown.");
+              if (owned.tabs.length === 1) {
+                throw new Error("Octant Browser cannot close a context's only tab.");
+              }
+              forgetTab(String(contextId), owned, chosen);
+              return agentTabs(owned);
+            }
             case "screenshot":
               break;
             case "snapshot":
@@ -1333,21 +1415,275 @@ async function pressFocusedTarget(
   protectCredentials: boolean,
 ): Promise<void> {
   if (key === undefined) throw new Error("Press requires a key.");
-  await targetGeometry(view, ":focus", undefined, true, protectCredentials);
+  const chord = parseBrowserKeyChord(key);
+  if (chord === undefined) throw new Error("Press requires a supported key.");
+  // A key goes to whatever has focus, a field or the page itself; only a
+  // focused credential field refuses it.
+  if (protectCredentials) {
+    const sensitive = await execute(
+      view,
+      `(() => {
+      const element = document.activeElement;
+      if (!(element instanceof HTMLElement) || element === document.body) return false;
+      const hint = [element.getAttribute("type"), element.getAttribute("autocomplete"), element.getAttribute("name"), element.id, element.getAttribute("aria-label")].join(" ").toLowerCase();
+      return /(?:password|passcode|one-time-code|otp|webauthn|cc-|credit|card|ssn|secret|token|api.?key)/.test(hint);
+    })()`,
+    );
+    if (sensitive === true) {
+      throw new Error("Octant will not type into a sensitive or credential field.");
+    }
+  }
+  const event = keyEvent(chord);
+  // On macOS the editing shortcuts are the system's, not the page's: a Command
+  // chord reaches a text field as the editing command it stands for.
+  const command =
+    process.platform === "darwin" && chord.modifiers.includes("Meta")
+      ? MAC_EDITING_COMMANDS[
+          `${chord.modifiers.includes("Shift") ? "Shift+" : ""}${chord.key.toLowerCase()}`
+        ]
+      : undefined;
   await withDebugger(view, async (send) => {
-    const shifted = key === "Shift+Tab";
-    const normalized = shifted ? "Tab" : key;
     await send("Input.dispatchKeyEvent", {
       type: "keyDown",
-      key: normalized,
-      ...(shifted ? { modifiers: 8 } : {}),
+      ...event,
+      ...(command === undefined ? {} : { commands: [command] }),
     });
-    await send("Input.dispatchKeyEvent", {
-      type: "keyUp",
-      key: normalized,
-      ...(shifted ? { modifiers: 8 } : {}),
+    const { text: _text, ...released } = event;
+    await send("Input.dispatchKeyEvent", { type: "keyUp", ...released });
+  });
+}
+
+const MODIFIER_BITS = { Alt: 1, Control: 2, Meta: 4, Shift: 8 } as const;
+const MAC_EDITING_COMMANDS: Readonly<Record<string, string>> = {
+  a: "selectAll",
+  c: "copy",
+  x: "cut",
+  v: "paste",
+  z: "undo",
+  "Shift+z": "redo",
+};
+const NAMED_KEYS: Readonly<Record<string, { code: string; keyCode: number; text?: string }>> = {
+  Enter: { code: "Enter", keyCode: 13, text: "\r" },
+  Tab: { code: "Tab", keyCode: 9 },
+  Backspace: { code: "Backspace", keyCode: 8 },
+  Delete: { code: "Delete", keyCode: 46 },
+  Escape: { code: "Escape", keyCode: 27 },
+  ArrowUp: { code: "ArrowUp", keyCode: 38 },
+  ArrowDown: { code: "ArrowDown", keyCode: 40 },
+  ArrowLeft: { code: "ArrowLeft", keyCode: 37 },
+  ArrowRight: { code: "ArrowRight", keyCode: 39 },
+  Home: { code: "Home", keyCode: 36 },
+  End: { code: "End", keyCode: 35 },
+  PageUp: { code: "PageUp", keyCode: 33 },
+  PageDown: { code: "PageDown", keyCode: 34 },
+  Space: { code: "Space", keyCode: 32, text: " " },
+};
+
+/**
+ * What Chromium's input protocol needs to deliver one key as a real keyboard
+ * would: the key, its physical code, the legacy key code pages still read, the
+ * modifier bits, and the text it types when no command modifier is held.
+ */
+function keyEvent(chord: {
+  readonly modifiers: ReadonlyArray<keyof typeof MODIFIER_BITS>;
+  readonly key: string;
+}): {
+  readonly key: string;
+  readonly code: string;
+  readonly windowsVirtualKeyCode: number;
+  readonly modifiers: number;
+  readonly text?: string;
+} {
+  const modifiers = chord.modifiers.reduce((bits, modifier) => bits | MODIFIER_BITS[modifier], 0);
+  const commanded = chord.modifiers.some((modifier) => modifier !== "Shift");
+  const named = NAMED_KEYS[chord.key];
+  if (named !== undefined) {
+    return {
+      key: chord.key === "Space" ? " " : chord.key,
+      code: named.code,
+      windowsVirtualKeyCode: named.keyCode,
+      modifiers,
+      ...(named.text === undefined || commanded ? {} : { text: named.text }),
+    };
+  }
+  const fn = /^F([1-9]|1[0-2])$/.exec(chord.key);
+  if (fn?.[1] !== undefined) {
+    return {
+      key: chord.key,
+      code: chord.key,
+      windowsVirtualKeyCode: 111 + Number(fn[1]),
+      modifiers,
+    };
+  }
+  const upper = chord.key.toUpperCase();
+  const shifted = chord.modifiers.includes("Shift");
+  const key = /[A-Z]/.test(upper) ? (shifted ? upper : chord.key.toLowerCase()) : chord.key;
+  return {
+    key,
+    code: /[0-9]/.test(chord.key) ? `Digit${chord.key}` : `Key${upper}`,
+    windowsVirtualKeyCode: upper.charCodeAt(0),
+    modifiers,
+    ...(commanded ? {} : { text: key }),
+  };
+}
+
+async function hoverTarget(view: BrowserSurfaceViewPort, selector: string | undefined) {
+  const point = await targetGeometry(view, selector, undefined, false, false);
+  await withDebugger(view, async (send) => {
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y });
+  });
+}
+
+/**
+ * Choose one option of a list by its value or its label, and tell the page the
+ * way a person's choice would. The option is set in the isolated world, which
+ * shares the document with the page; the events are what a page listens for.
+ */
+async function selectOption(
+  view: BrowserSurfaceViewPort,
+  selector: string | undefined,
+  choice: string | undefined,
+) {
+  if (selector === undefined || choice === undefined) {
+    throw new Error("Select requires a list and an option.");
+  }
+  const chosen = await execute(
+    view,
+    `(() => {
+    const element = document.querySelector(${JSON.stringify(selector)});
+    if (!(element instanceof HTMLSelectElement)) return "not-a-list";
+    const choice = ${JSON.stringify(choice)};
+    const option = Array.from(element.options).find((candidate) => candidate.value === choice || candidate.label === choice);
+    if (option === undefined) return "no-option";
+    element.value = option.value;
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+    return "chosen";
+  })()`,
+  );
+  if (chosen === "not-a-list") throw new Error("Browser target is not a list.");
+  if (chosen !== "chosen") throw new Error("The list has no option with that value or label.");
+}
+
+/**
+ * Press on one element, move in steps, and release on another: the pointer
+ * path a person's drag takes, so a page that follows pointer or mouse events
+ * sees a drag.
+ */
+async function dragTarget(
+  view: BrowserSurfaceViewPort,
+  source: string | undefined,
+  destination: string | undefined,
+) {
+  const from = await targetGeometry(view, source, undefined, false, false);
+  const to = await targetGeometry(view, destination, undefined, false, false);
+  await withDebugger(view, async (send) => {
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: from.x, y: from.y });
+    await send("Input.dispatchMouseEvent", {
+      type: "mousePressed",
+      button: "left",
+      buttons: 1,
+      clickCount: 1,
+      x: from.x,
+      y: from.y,
+    });
+    for (let step = 1; step <= 10; step += 1) {
+      await send("Input.dispatchMouseEvent", {
+        type: "mouseMoved",
+        button: "left",
+        buttons: 1,
+        x: from.x + ((to.x - from.x) * step) / 10,
+        y: from.y + ((to.y - from.y) * step) / 10,
+      });
+    }
+    await send("Input.dispatchMouseEvent", {
+      type: "mouseReleased",
+      button: "left",
+      buttons: 0,
+      clickCount: 1,
+      x: to.x,
+      y: to.y,
     });
   });
+  await waitForPageSettled(view);
+}
+
+/** Put files into one file field through Chromium's own file chooser path. */
+async function uploadFiles(
+  view: BrowserSurfaceViewPort,
+  selector: string | undefined,
+  files: ReadonlyArray<string> | undefined,
+) {
+  if (selector === undefined || files === undefined || files.length === 0) {
+    throw new Error("Upload requires a file field and files.");
+  }
+  const isFileField = await execute(
+    view,
+    `document.querySelector(${JSON.stringify(selector)}) instanceof HTMLInputElement && document.querySelector(${JSON.stringify(selector)}).type === "file"`,
+  );
+  if (isFileField !== true) throw new Error("Browser target is not a file field.");
+  await withDebugger(view, async (send) => {
+    const document = (await send("DOM.getDocument", { depth: 0 })) as {
+      readonly root?: { readonly nodeId?: number };
+    };
+    const rootId = document.root?.nodeId;
+    if (rootId === undefined) throw new Error("Browser page has no document.");
+    const found = (await send("DOM.querySelector", { nodeId: rootId, selector })) as {
+      readonly nodeId?: number;
+    };
+    if (found.nodeId === undefined || found.nodeId === 0) {
+      throw new Error("Browser target was not found.");
+    }
+    await send("DOM.setFileInputFiles", { files: [...files], nodeId: found.nodeId });
+  });
+}
+
+/** The id the agent knows a tab by: `t` and the tab's ordinal in its context. */
+function agentTabId(tabId: string): string {
+  return `t${tabId.slice(tabId.lastIndexOf(":") + 1)}`;
+}
+
+/** The context's tabs as the agent sees them, after a tab action. */
+function agentTabs(owned: OwnedSurface): BrowserSurfaceRuntimeObservation {
+  const front = contentsView(owned).webContents;
+  const frontShown =
+    front.getURL() !== "" &&
+    front.getURL() !== "about:blank" &&
+    originAllowed(front.getURL(), owned.policy.allowedOrigins);
+  return {
+    ...(frontShown ? { url: redactedObservationUrl(front.getURL()).slice(0, 4_096) } : {}),
+    ...(frontShown && front.getTitle() !== "" ? { title: front.getTitle().slice(0, 1_024) } : {}),
+    tabs: owned.tabs.map((tab) => {
+      const url = tab.view.webContents.getURL();
+      // A tab the person took to a site approval never covered is theirs:
+      // the agent learns that it exists, not where it is or what it shows.
+      const shown =
+        url !== "" && url !== "about:blank" && originAllowed(url, owned.policy.allowedOrigins);
+      const title = tab.view.webContents.getTitle();
+      return {
+        tabId: agentTabId(tab.tabId),
+        ...(shown ? { url: redactedObservationUrl(url).slice(0, 4_096) } : {}),
+        ...(shown && title !== "" ? { title: title.slice(0, 1_024) } : {}),
+        active: tab.tabId === owned.activeTabId,
+      };
+    }),
+  };
+}
+
+/** Refuse a ref whose page moved on or whose element is no longer the one named. */
+async function refuseStaleTarget(
+  view: BrowserSurfaceViewPort,
+  selector: string | undefined,
+  expected: BrowserSurfaceAction["expected"],
+): Promise<void> {
+  if (expected === undefined || selector === undefined) return;
+  const found = await readPage(view, { mode: "verify", selector });
+  if (
+    found.mode !== "verify" ||
+    !browserRefStillMatches(expected, found.element, observedUrl(view.webContents))
+  ) {
+    throw new BrowserTargetStaleError();
+  }
 }
 
 function validPoint(value: unknown): { readonly x: number; readonly y: number } {

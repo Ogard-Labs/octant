@@ -6937,6 +6937,7 @@ function LaunchedShell(
                 : { threadErrorMessage: projectThreadsAccess.errorMessage })}
               threadExportClient={threadExportClient}
               threadHandOffClient={threadHandOffClient}
+              personMemoryClient={launchedClients.personMemoryClient}
               threadStatus={projectThreadsAccess.status}
               workStatus={workNavigation.status}
               workspace={controller.workspace}

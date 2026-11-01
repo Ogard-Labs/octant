@@ -1,4 +1,5 @@
 import type { BrowserActionRequest, BrowserAutomationSnapshot } from "@octant/contracts";
+import { MAX_BROWSER_UPLOAD_FILES } from "@octant/contracts";
 import { browserToolImage } from "./browserToolImage";
 
 /**
@@ -11,6 +12,7 @@ import { browserToolImage } from "./browserToolImage";
 const MAX_TOOL_INPUT_BYTES = 16 * 1024;
 const MAX_TEXT_RESULT_BYTES = 24 * 1024;
 const REF_PATTERN = /^e[1-9][0-9]{0,3}$/;
+const TAB_PATTERN = /^t[1-9][0-9]{0,3}$/;
 
 /** One element to act on: a CSS selector, or a ref from the latest snapshot. */
 export type BrowserToolTarget =
@@ -36,6 +38,16 @@ export type BrowserToolInput = {
   | ({ readonly operation: "click" | "wait" } & BrowserToolTarget)
   | { readonly operation: "press"; readonly key: string }
   | ({ readonly operation: "type"; readonly text: string } & BrowserToolTarget)
+  | ({ readonly operation: "hover" } & BrowserToolTarget)
+  | ({ readonly operation: "select"; readonly value: string } & BrowserToolTarget)
+  | ({
+      readonly operation: "drag";
+      readonly to: { readonly selector: string } | { readonly ref: string };
+    } & BrowserToolTarget)
+  | ({ readonly operation: "upload"; readonly files: ReadonlyArray<string> } & BrowserToolTarget)
+  | { readonly operation: "tab-list" }
+  | { readonly operation: "tab-open"; readonly url?: string }
+  | { readonly operation: "tab-switch" | "tab-close"; readonly tabId: string }
 );
 
 /**
@@ -125,6 +137,56 @@ export function parseBrowserToolInput(
   }
   if (operation === "press" && only("key") && text("key", 64))
     return { ...common, operation, key: record.key as string };
+  if (operation === "hover" && only("selector", "ref")) {
+    const named = target();
+    return named === undefined ? undefined : { ...common, operation, ...named };
+  }
+  if (operation === "select" && only("selector", "ref", "value") && text("value", 1024)) {
+    const named = target();
+    return named === undefined
+      ? undefined
+      : { ...common, operation, ...named, value: record.value as string };
+  }
+  if (operation === "drag" && only("selector", "ref", "toSelector", "toRef")) {
+    const named = target();
+    if (named === undefined || (record.toSelector === undefined) === (record.toRef === undefined))
+      return undefined;
+    if (record.toRef !== undefined) {
+      return typeof record.toRef === "string" && REF_PATTERN.test(record.toRef)
+        ? { ...common, operation, ...named, to: { ref: record.toRef } }
+        : undefined;
+    }
+    return text("toSelector", 4096)
+      ? { ...common, operation, ...named, to: { selector: record.toSelector as string } }
+      : undefined;
+  }
+  if (operation === "upload" && only("selector", "ref", "files")) {
+    const named = target();
+    const files = record.files;
+    if (
+      named === undefined ||
+      !Array.isArray(files) ||
+      files.length === 0 ||
+      files.length > MAX_BROWSER_UPLOAD_FILES ||
+      !files.every((file) => typeof file === "string" && file !== "" && file.length <= 4096)
+    )
+      return undefined;
+    return { ...common, operation, ...named, files: files as ReadonlyArray<string> };
+  }
+  if (operation === "tab-list" && only()) return { ...common, operation };
+  if (operation === "tab-open" && only("url")) {
+    if (record.url !== undefined && !text("url", 4096)) return undefined;
+    return {
+      ...common,
+      operation,
+      ...(typeof record.url === "string" ? { url: record.url } : {}),
+    };
+  }
+  if ((operation === "tab-switch" || operation === "tab-close") && only("tabId")) {
+    return typeof record.tabId === "string" && TAB_PATTERN.test(record.tabId)
+      ? { ...common, operation, tabId: record.tabId }
+      : undefined;
+  }
   if (operation === "scroll" && only("deltaX", "deltaY")) {
     const deltaX = record.deltaX;
     const deltaY = record.deltaY;
@@ -160,6 +222,10 @@ const ACTING_OPERATIONS: ReadonlySet<string> = new Set([
   "press",
   "scroll",
   "wait",
+  "hover",
+  "select",
+  "drag",
+  "upload",
 ]);
 const INCLUDE_PARTS: ReadonlySet<unknown> = new Set(["text", "screenshot", "snapshot"]);
 
@@ -229,6 +295,33 @@ export function browserToolAction(
       return { ...base, kind: "screenshot" };
     case "diagnostics":
       return { ...base, kind: "observe-diagnostics" };
+    case "hover":
+      return { ...base, kind: "hover", ...element(input) };
+    case "select":
+      return { ...base, kind: "select", ...element(input), value: input.value };
+    case "drag":
+      return {
+        ...base,
+        kind: "drag",
+        ...element(input),
+        ...("ref" in input.to
+          ? { destinationRef: input.to.ref }
+          : { destination: input.to.selector }),
+      };
+    case "upload":
+      return { ...base, kind: "upload", ...element(input), files: input.files };
+    case "tab-list":
+      return { ...base, kind: "tab-list" };
+    case "tab-open":
+      return {
+        ...base,
+        kind: "tab-open",
+        ...(input.url === undefined ? {} : { target: input.url }),
+      };
+    case "tab-switch":
+      return { ...base, kind: "tab-select", tabId: input.tabId };
+    case "tab-close":
+      return { ...base, kind: "tab-close", tabId: input.tabId };
     case "stop":
       return undefined;
   }
@@ -265,6 +358,7 @@ export function browserToolResult(snapshot: BrowserAutomationSnapshot, includeSc
               ...(observation.title === undefined ? {} : { title: observation.title }),
               ...(observation.change === undefined ? {} : { changed: observation.change }),
               ...(observation.snapshot === undefined ? {} : { snapshot: observation.snapshot }),
+              ...(observation.tabs === undefined ? {} : { tabs: observation.tabs }),
               ...(bounded === undefined
                 ? {}
                 : {
