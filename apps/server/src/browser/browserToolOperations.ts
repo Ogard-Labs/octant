@@ -538,6 +538,17 @@ export async function handBrowserToPerson(input: {
   return input.snapshotAfter();
 }
 
+/**
+ * A page the person can sign in on: the desktop app's own Browser, which they
+ * type into directly. A headless page reaches the person as a picture, and
+ * typing into its password field is refused like any other relayed typing.
+ */
+export function signInPageRefusal(snapshot: BrowserAutomationSnapshot): string | undefined {
+  const context = snapshot.context;
+  if (context === undefined || context.state !== "active") return undefined;
+  return context.presentation === "native-live" ? undefined : "sign-in-needs-the-app-browser";
+}
+
 /** What one operation answered, as an executor returns it. */
 export interface BrowserToolAnswer {
   readonly images?: ReadonlyArray<ProviderToolImage>;

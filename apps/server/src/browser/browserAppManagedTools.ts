@@ -7,6 +7,7 @@ import {
   parseBrowserToolInput,
   handBrowserToPerson,
   runBrowserToolSteps,
+  signInPageRefusal,
   type BrowserToolAnswer,
   type BrowserToolInput,
 } from "./browserToolOperations";
@@ -141,7 +142,7 @@ export function createBrowserAppManagedTools(
     // reaches it until they press Continue or the ask ends.
     if (snapshot.waitingForPerson !== undefined) return failure("browser-waiting-for-person");
     if (input.operation === "sign-in") {
-      const refusal = signInRefusal(options);
+      const refusal = signInRefusal(options) ?? signInPageRefusal(snapshot);
       if (refusal !== undefined) return failure(refusal);
     }
     const existing = snapshot.context?.state === "active" ? snapshot.context : undefined;

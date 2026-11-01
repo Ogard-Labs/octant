@@ -118,6 +118,11 @@ function agentTool(
     readonly unattended?: boolean;
     readonly pairedDevice?: boolean;
     readonly terminal?: boolean;
+    /**
+     * Report the page as the desktop app's own Browser. The page is still the
+     * headless one here; only the presentation the sign-in check reads changes.
+     */
+    readonly presentAsApp?: boolean;
   } = {},
 ) {
   const asked: Array<Record<string, unknown>> = [];
@@ -138,7 +143,15 @@ function agentTool(
     executionPolicy: "approval-gated",
     resolveAuthority: () => authority,
     browser: {
-      inspectThread: (window, thread) => service.inspectThread(window, thread),
+      inspectThread: (window, thread) => {
+        const inspected = service.inspectThread(window, thread);
+        return options.presentAsApp === true && inspected.context !== undefined
+          ? {
+              ...inspected,
+              context: { ...inspected.context, presentation: "native-live" as const },
+            }
+          : inspected;
+      },
       create: (input) => service.create(input),
       act: (input) => service.act(input),
       releaseThread: (window, thread) => service.releaseThread(window, thread),
@@ -646,6 +659,7 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     let duringHandOff: unknown;
     let waiting: unknown;
     tool = agentTool({
+      presentAsApp: true,
       whileSigningIn: async () => {
         waiting = tool?.service.inspectThread(windowId, threadId).waitingForPerson;
         duringHandOff = (await tool?.call({ operation: "snapshot" }))?.result;
@@ -681,7 +695,7 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     expect(tool.service.inspectThread(windowId, threadId).waitingForPerson).toBeUndefined();
     await tool.stop();
 
-    const declined = agentTool({ whileSigningIn: async () => "denied" });
+    const declined = agentTool({ presentAsApp: true, whileSigningIn: async () => "denied" });
     await declined.call({ operation: "navigate", url: `${origin}/login` });
     expect((await declined.call({ operation: "sign-in" })).result).toEqual({
       error: "browser-sign-in-denied",
@@ -692,6 +706,8 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
 
   it("refuses to ask for a sign-in on a routine, subagent, terminal, or paired-device turn", async () => {
     for (const [options, reason] of [
+      // A headless page reaches the person only as a picture they cannot type into.
+      [{}, "sign-in-needs-the-app-browser"],
       [{ unattended: true }, "sign-in-needs-a-person"],
       [{ terminal: true }, "sign-in-needs-a-person"],
       [{ pairedDevice: true }, "sign-in-needs-this-computer"],

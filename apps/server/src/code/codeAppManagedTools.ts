@@ -7,6 +7,7 @@ import {
   parseBrowserToolInput,
   handBrowserToPerson,
   runBrowserToolSteps,
+  signInPageRefusal,
   type BrowserToolAnswer,
   type BrowserToolInput,
 } from "../browser/browserToolOperations";
@@ -1143,7 +1144,7 @@ async function browserTool(
     const refusal =
       options.browserSignIn === undefined
         ? "sign-in-unavailable"
-        : options.browserSignIn.refusal(options.windowId);
+        : (options.browserSignIn.refusal(options.windowId) ?? signInPageRefusal(snapshot));
     if (refusal !== undefined) return failure(refusal);
   }
   const existing = snapshot.context?.state === "active" ? snapshot.context : undefined;
