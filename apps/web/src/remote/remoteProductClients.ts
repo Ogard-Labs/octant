@@ -1,4 +1,8 @@
-import { createRemoteProductFetch, type RemoteSessionBridge } from "@octant/client-runtime";
+import {
+  createDefaultDeviceKeyStore,
+  createRemoteProductFetch,
+  type RemoteSessionBridge,
+} from "@octant/client-runtime";
 import { createChatClient, type ChatClient } from "@octant/client-runtime/chat-client";
 import { createCodeClient, type CodeClient } from "@octant/client-runtime/code-client";
 import { createProjectClient, type ProjectClient } from "@octant/client-runtime/project-client";
@@ -20,6 +24,9 @@ import {
   type ReplicaSyncStatusClient,
 } from "@octant/client-runtime/replica-sync-status-client";
 import { createWorkTurnClient, type WorkTurnClient } from "@octant/client-runtime/work-turn-client";
+import { createBrowserHostRegistryStorage } from "../host/browserHostRegistryStorage";
+import { browserOwnerMergeUnlock, createBrowserGuestStore } from "../host/browserHubGuest";
+import { platformPasskeys } from "../host/ownerPasskey";
 
 export interface RemoteProductClients {
   readonly chat: ChatClient;
@@ -54,7 +61,17 @@ export function createRemoteProductClients(bridge: RemoteSessionBridge): RemoteP
   };
   return {
     chat: createChatClient(port),
-    code: createCodeClient(port),
+    // A host may ask this paired browser's merge for an owner unlock first;
+    // the browser gives it with its passkey if it is an owner of that host.
+    code: createCodeClient({
+      ...port,
+      ownerMergeUnlock: browserOwnerMergeUnlock({
+        store: createBrowserGuestStore(createBrowserHostRegistryStorage()),
+        deviceKeyStore: createDefaultDeviceKeyStore(),
+        credentials: platformPasskeys,
+        pageOrigin: globalThis.location.origin,
+      }),
+    }),
     project: createProjectClient(port),
     provider: createProviderClient(port),
     workThread: createWorkThreadClient(port),

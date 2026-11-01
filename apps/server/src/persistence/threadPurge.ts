@@ -76,7 +76,7 @@ export function erasePurgedThread(input: {
  * new head keeps it current; leaving it past the head is what the store
  * verifier reports as corruption.
  */
-function clampCheckpointsToJournalHead(connection: SqliteConnection): void {
+export function clampCheckpointsToJournalHead(connection: SqliteConnection): void {
   connection.exec(
     `UPDATE projection_checkpoints
      SET last_sequence = (SELECT coalesce(max(global_sequence), 0) FROM event_journal)
@@ -89,7 +89,7 @@ function clampCheckpointsToJournalHead(connection: SqliteConnection): void {
  * with surviving events falls back to the surviving version and sequence, so
  * a later append expects a version that exists.
  */
-function reconcileAggregateHeads(connection: SqliteConnection): void {
+export function reconcileAggregateHeads(connection: SqliteConnection): void {
   connection.exec(
     `DELETE FROM aggregate_heads WHERE NOT EXISTS (
        SELECT 1 FROM event_journal

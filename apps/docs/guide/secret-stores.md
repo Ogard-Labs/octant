@@ -65,6 +65,28 @@ Octant checks the item before it adds the server, keeps only the address in the
 host's credential store, and fetches the value each time the server starts.
 Removing the server removes the address, not the item.
 
+## Let the AWS command line sign in
+
+Octant keeps agents away from `~/.aws/credentials`. To let the AWS command
+line work in Octant's own shell anyway, keep your access key pair in your
+password manager and point Octant at it:
+
+1. Open **Settings › Secret stores › AWS command line**.
+2. Enter the address of the item that holds the access key ID, and of the item
+   that holds the secret access key.
+3. Choose **Use these items**.
+
+Octant checks both items first. From then on, each command in Octant's own
+shell gets a session that lasts one hour, made by AWS from your key pair. The
+command never sees the key pair itself, and Octant never keeps it. A session's
+secret is removed from any output Octant keeps.
+
+If the store is locked or an item is gone, the command runs without AWS
+credentials and the AWS command line says it found none. **Remove** stops
+handing out sessions. Claude Code, Codex, and other providers' own commands
+do not get a session. The Google Cloud and Azure command lines are not
+supported yet.
+
 ## When the store is locked or the item is gone
 
 Requests fail the way a missing key does, with a message that names the cause:

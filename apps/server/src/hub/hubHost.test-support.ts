@@ -46,6 +46,7 @@ import { TestCredentialBroker, TestPostureHost } from "./hubOwner.test-support";
 import { OwnerCredentialCopyService } from "./ownerCredentialCopy";
 import { createPeerCredentialRouteHandler } from "./peerCredentialRoutes";
 import { OwnerUnlockService } from "./ownerUnlock";
+import { PairedMergeUnlockService } from "./pairedMergeUnlock";
 import { createHubStateStore, type HubStatePort } from "./hubStateStore";
 import { HubService, type HubHostIdentity, type HubPairingPort } from "./hubService";
 import { createPeerDelegationRouteHandler } from "./peerDelegationRoutes";
@@ -183,6 +184,8 @@ export interface HubTestHost {
   readonly signIn: SignInService;
   /** This host's side of hub-started sign-in as a spoke. */
   readonly spokeSignIn: SpokeSignInService;
+  /** The owner unlock a paired client's merge may need here, over the same challenges the owner route issues. */
+  readonly pairedMergeUnlock: PairedMergeUnlockService;
   /** Whether the provider's own app on this host holds each sign-in; a test changes it as the person would in a terminal. */
   readonly accounts: Record<HubSignInKind, SignInAccountState>;
   /** The sign-in command this host's provider settings would show for each kind; unset means none. */
@@ -659,10 +662,21 @@ export async function startHubTestHost(input: {
     record: (change) => records.push(change),
     now: Date.now,
   });
+  const ownerUnlock = new OwnerUnlockService({
+    now: ownerNow,
+    hostMemberId: () => hub.hubMemberId(),
+  });
+  const pairedMergeUnlock = new PairedMergeUnlockService({
+    state,
+    hub,
+    spoke,
+    unlock: ownerUnlock,
+    record: (change) => records.push(change),
+  });
   const hubOwnerRoutes = createHubOwnerRouteHandler({
     hub,
     spoke,
-    unlock: new OwnerUnlockService({ now: ownerNow, hostMemberId: () => hub.hubMemberId() }),
+    unlock: ownerUnlock,
     postures,
     credentials: credentialCopy,
     provision: spokeProvision,
@@ -793,6 +807,7 @@ export async function startHubTestHost(input: {
     provisioned,
     signIn,
     spokeSignIn,
+    pairedMergeUnlock,
     accounts,
     signInCommands,
     accountGate,

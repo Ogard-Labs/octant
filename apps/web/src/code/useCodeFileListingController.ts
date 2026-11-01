@@ -38,6 +38,11 @@ export interface CodeFileListingControllerOptions {
    */
   readonly watch?: boolean;
   /**
+   * With `watch`, follow this extra folder of the Project (absolute path)
+   * instead of the checkout.
+   */
+  readonly watchFolder?: string;
+  /**
    * Called for every change the host reports, before the listing reloads, so a
    * surface holding an open file can decide for itself whether that file is
    * one of the changed paths.
@@ -157,6 +162,7 @@ export function useCodeFileListingController(
     ...(client === undefined ? {} : { client }),
     ...(options.threadId === undefined ? {} : { threadId: options.threadId }),
     ...(options.checkoutId === undefined ? {} : { checkoutId: options.checkoutId }),
+    ...(options.watchFolder === undefined ? {} : { folder: options.watchFolder }),
     onChanged: (notice) => {
       onFilesChanged.current?.(notice);
       void reload.current();

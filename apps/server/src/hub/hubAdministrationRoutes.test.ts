@@ -44,6 +44,7 @@ async function setup(
     windowAuthorityStore: authority,
     hub: host.hub,
     spoke: host.spoke,
+    pairedMergeUnlock: host.pairedMergeUnlock,
     failover: host.failover,
     wake: host.wake,
     spokeWake: host.spokeWake,
@@ -150,6 +151,33 @@ describe("hub administration over the loopback channel", () => {
     expect(host.records.map((record) => [record.change, record.actingPrincipal.kind])).toEqual([
       ["hub-role-enabled", "local-window"],
       ["hub-role-disabled", "local-window"],
+    ]);
+  });
+
+  it("turns the owner unlock before a paired client's merge on and off for a window, and shows it in the status", async () => {
+    const { host, handle } = await setup();
+    const status = async () =>
+      (
+        await handle(
+          new Request(`http://127.0.0.1${HUB_ADMINISTRATION_ROUTES.status}`, {
+            headers: {
+              "x-octant-desktop-secret": secret,
+              "x-octant-window-capability": capability,
+            },
+          }),
+        )
+      )?.json();
+
+    expect(await status()).toMatchObject({ pairedMergeUnlock: false });
+    const on = await handle(post(HUB_ADMINISTRATION_ROUTES.pairedMergeUnlock, { enabled: true }));
+    expect(await on?.json()).toEqual({ status: "changed", enabled: true });
+    expect(await status()).toMatchObject({ pairedMergeUnlock: true });
+    await handle(post(HUB_ADMINISTRATION_ROUTES.pairedMergeUnlock, { enabled: false }));
+
+    expect(host.pairedMergeUnlock.required()).toBe(false);
+    expect(host.records.map((record) => [record.change, record.actingPrincipal.kind])).toEqual([
+      ["paired-merge-unlock-on", "local-window"],
+      ["paired-merge-unlock-off", "local-window"],
     ]);
   });
 

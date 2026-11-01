@@ -194,6 +194,9 @@ export function startOctantServer(
       machineChangeFeed,
       onAgentRunExecutionAccepted,
       onWindowRevoked,
+      personMemory,
+      personMemoryAccess,
+      personMemoryRoutes,
       protectedFilesRoutes,
       processAuthorityNow,
       routineProposalService,
@@ -458,6 +461,7 @@ export function startOctantServer(
       workThreadProjection,
     });
     const {
+      personMemorySweep,
       runtimeForgeChanges,
       followUpCreation,
       restartContinuation,
@@ -478,6 +482,7 @@ export function startOctantServer(
       hostShield,
       threadWork,
     } = wireHarness({
+      personMemory,
       safeNetworkStore,
       projectService,
       agentRunInteractions,
@@ -486,6 +491,7 @@ export function startOctantServer(
       shieldHolder,
       codeEvidence,
       providerRuntimeRegistry,
+      providerUsageLimitsService,
       spendCeiling,
       nativeHarnessApprovals,
       nativeHarnessQuestions,
@@ -508,6 +514,7 @@ export function startOctantServer(
       goalService,
       nativeHarnessLeadFallback,
       nativeHarnessTranscripts,
+      options,
       persistence,
       providerDataDirectory,
       runningWorkTurnAccess,
@@ -540,6 +547,7 @@ export function startOctantServer(
       roots,
       workAttachments,
     } = yield* wireCode({
+      serverConnection,
       serverProjectStore,
       codeBoardEventStore,
       codeEvidence,
@@ -663,6 +671,7 @@ export function startOctantServer(
       routeCodeService,
       terminalProcessPort,
     } = yield* wireCodeRuntime({
+      personMemoryAccess,
       serverConnection,
       serverProjectStore,
       shieldServerStore,
@@ -768,6 +777,7 @@ export function startOctantServer(
       debugService,
       languageServerApprovals,
       localServerRoutes,
+      pairedMergeUnlockSlot,
       projectTerminals,
       remoteServerGrantLocalRoutes,
       remoteServerGrants,
@@ -808,6 +818,7 @@ export function startOctantServer(
       threadMentionService,
       workspacePresetRoutes,
     } = yield* wireChat({
+      personMemoryAccess,
       workRequestRuntime,
       threadAwaitsHarnessApproval,
       agentMessageProjection,
@@ -871,6 +882,7 @@ export function startOctantServer(
       workTurnService,
       workflowService,
     } = yield* wireWork({
+      personMemoryAccess,
       runtimeForgeChanges,
       nativeHarnessSessions,
       restartContinuation,
@@ -1176,6 +1188,7 @@ export function startOctantServer(
       productFeedbackRoutes,
       projectBindingRoutes,
       projectRoutes,
+      personMemoryRoutes,
       protectedFilesRoutes,
       providerOAuthRoutes,
       providerRoutes,
@@ -1238,10 +1251,12 @@ export function startOctantServer(
       automationCommandService,
       automationScheduler,
       browserCaptureStore,
+      personMemory,
       canvasRoutes,
       chatAttachmentStore,
       codeAttachments,
       hubPushHandoffSlot,
+      pairedMergeUnlockSlot,
       pushGatewaySetting,
       codeProjectAccess,
       credentialBroker,
@@ -1395,6 +1410,7 @@ export function startOctantServer(
           // so a host that fails to bind never archives anything on its own,
           // and the stop below is registered before the first pass runs.
           completedThreadArchiveSweep.start();
+          personMemorySweep.start();
           // The memory guard reads the last run's state before it overwrites
           // it, so the next-start notice survives a crash.
           await hostMemoryGuard.start();
@@ -1478,6 +1494,8 @@ export function startOctantServer(
             shutdownFailure ??= error;
           }
           completedThreadArchiveSweep.stop();
+          personMemorySweep.stop();
+          personMemory.close();
           try {
             await hostMemoryGuard.stop();
           } catch (error) {

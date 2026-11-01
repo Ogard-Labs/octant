@@ -564,6 +564,32 @@ describe("remote route policy", () => {
     }
   });
 
+  it("lets a paired client's merge carry an owner unlock, and no other product route", async () => {
+    const fixture = handler();
+    const preflight = (path: string) =>
+      fixture.route(
+        request(path, {
+          method: "OPTIONS",
+          headers: {
+            origin,
+            "sec-fetch-site": "same-origin",
+            "access-control-request-method": "POST",
+            "access-control-request-headers":
+              "content-type, x-octant-device-proof, x-octant-owner-unlock",
+          },
+        }),
+      );
+
+    for (const path of [
+      "/api/code/project-pull-requests/merge",
+      "/api/code/project-pull-requests/merge-stack",
+      "/api/code/project-pull-requests/merge-when-ready",
+    ]) {
+      expect([path, (await preflight(path)).status]).toEqual([path, 204]);
+    }
+    expect((await preflight("/api/code/project-pull-requests/auto-fix")).status).toBe(403);
+  });
+
   it("rejects oversized requests and prevents a rejected response from leaking raw headers", async () => {
     const fixture = handler();
     const response = await fixture.route(

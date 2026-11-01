@@ -130,6 +130,7 @@ describe("composeHostDataMap", () => {
         { service: "app.octant.mcp-server-credentials.v1" },
         { service: "app.octant.desktop-provider-credentials.v1" },
         { service: "app.octant.push-platform-credentials.v1" },
+        { service: "app.octant.ssh-keys.v1" },
       ],
     });
     expect(decoded.host.outbound.map((entry) => entry.category)).toEqual([

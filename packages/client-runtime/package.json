@@ -85,6 +85,7 @@
     "./provider-usage-history-client": "./src/providerUsageHistoryClient.ts",
     "./terminal-session-client": "./src/terminalSessionClient.ts",
     "./spend-ceiling-client": "./src/spendCeilingClient.ts",
+    "./person-memory-client": "./src/personMemoryClient.ts",
     "./protected-files-client": "./src/protectedFilesClient.ts",
     "./provider-federation": "./src/providerFederation.ts",
     "./shell-client": "./src/shellClient.ts",

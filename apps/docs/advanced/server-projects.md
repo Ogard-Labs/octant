@@ -28,8 +28,11 @@ Only someone at this computer can bind or remove a server Project.
 - Octant uses this computer's own `ssh`, your SSH config, and your SSH agent.
   It names no key file, reads no key, writes no SSH config, and forwards
   nothing to the server: no agent, no ports, no windows.
-- Every call is its own connection. When the server cannot be reached, or the
-  connection drops, that call fails and nothing runs on this computer instead.
+- Octant keeps one connection to each server open while you work and closes
+  it after a quiet minute, so Git and the file tools do not log in for every
+  step. When the server cannot be reached, or the connection drops, that call
+  fails and nothing runs on this computer instead; the next call logs in
+  again.
 - Removing a server from **Servers** keeps its Projects, but they cannot
   connect until you register the server again or remove them.
 
@@ -53,8 +56,18 @@ Choose one to start a thread there.
 - **Git tab.** Choose **Git** on the thread's checkout bar to see the
   changes in the folder on the server, stage, commit, and push. Git runs on
   the server with the server's own Git setup. At Plan it changes nothing.
+- **A worktree of its own.** In the composer, choose **Workspace** ›
+  **Managed worktree** to start the thread on a new branch in its own
+  worktree on the server, beside the Project's folder, from the branch you
+  pick. The Project's folder must be its repository's top folder. Octant
+  never removes that worktree; remove it on the server when you are done
+  (`git worktree remove`). Plan cannot start a thread in a new worktree.
+- **Pull requests.** Push the thread's branch from **Git**, then choose
+  **Create pull request** on the checkout bar. Octant opens it with this
+  computer's GitHub sign-in, on the GitHub repository of the remote on the
+  server.
 - **Not available there yet:** connectors and plugins, Browser and Computer,
-  subagents, forks, checkpoints and rewind, pull requests, and the Files and
-  Tests panels. Ask the agent to do it on the server, or use a terminal.
+  subagents, forks, checkpoints and rewind, and the Files and Tests panels.
+  Ask the agent to do it on the server, or use a terminal.
 - **Tested on a throwaway local server only.** Octant's tests ran this against
   an `sshd` started on this computer for the test, never a real server.

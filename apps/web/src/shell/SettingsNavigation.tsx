@@ -2,6 +2,7 @@ import type { SettingsSectionId } from "@octant/contracts";
 import {
   Bell,
   Blocks,
+  Brain,
   ChartNoAxesColumnIncreasing,
   Code2,
   Database,
@@ -82,6 +83,7 @@ const SETTINGS_NAVIGATION_META: Readonly<
   github: { group: "Tools", icon: FolderGit2 },
   linear: { group: "Tools", icon: ListTodo },
   permissions: { group: "Privacy & data", icon: ShieldCheck },
+  memory: { group: "Privacy & data", icon: Brain },
   access: { group: "Privacy & data", icon: Network },
   "secret-stores": { group: "Privacy & data", icon: KeyRound },
   data: { group: "Privacy & data", icon: Database },

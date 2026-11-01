@@ -74,6 +74,7 @@ export const ContextEntryCategory = Schema.Literal(
   "octant-policy",
   "user-instructions",
   "project-instructions",
+  "person-memory",
   "project-memory",
   "conversation",
   "current-request",
@@ -508,6 +509,18 @@ export const SHIELD_REVIEW_REQUEST_SHAPE = "shield-review";
  */
 export const SHIELD_REVIEW_USAGE_AGGREGATE_TYPE = "shield-review-usage";
 
+/**
+ * One person-memory distillation of an ended thread. Like a Shield review it
+ * has no context plan, so it reconciles against nothing.
+ */
+export const PERSON_MEMORY_REQUEST_SHAPE = "person-memory";
+
+/**
+ * The per-thread aggregate a thread's distillation is journaled on. The usage
+ * ledger records it under the distilled Chat, Work, or Code thread.
+ */
+export const PERSON_MEMORY_USAGE_AGGREGATE_TYPE = "person-memory-usage";
+
 export const UsageReconciliation = Schema.Struct({
   id: UsageReconciliationId,
   planId: Schema.optional(ContextPlanId),
@@ -546,7 +559,8 @@ export const UsageReconciliation = Schema.Struct({
       if (imageGeneration) return reconciliation.imageUnits !== undefined;
       if (
         reconciliation.requestShape === AGENT_RUN_TURN_REQUEST_SHAPE ||
-        reconciliation.requestShape === SHIELD_REVIEW_REQUEST_SHAPE
+        reconciliation.requestShape === SHIELD_REVIEW_REQUEST_SHAPE ||
+        reconciliation.requestShape === PERSON_MEMORY_REQUEST_SHAPE
       ) {
         return reconciliation.planId === undefined && reconciliation.imageUnits === undefined;
       }
