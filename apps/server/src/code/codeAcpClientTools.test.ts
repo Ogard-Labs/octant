@@ -1,10 +1,11 @@
 import { existsSync } from "node:fs";
-import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { CodeThread, WindowId } from "@octant/contracts";
 import { makeProcessConfinementLive } from "../process/seatbeltProfile";
+import { secretGuardRefusal } from "../process/secretGuard";
 import { liveCodeTestSourcePort, type CodeTestSourcePort } from "./codeDirectoryPort";
 import { createCodeAcpClientTools, type CodeAcpTerminalConfinement } from "./codeAcpClientTools";
 
@@ -42,12 +43,14 @@ function tools(
     environment: { PATH: "/usr/bin:/bin", TMPDIR: "/tmp" },
     prepare: ({ executable, args }) => ({ command: executable, args }),
   },
+  extraFolders: ReadonlyArray<string> = [],
 ) {
   return createCodeAcpClientTools({
     windowId,
     thread: thread(executionPolicy),
     readExecutionPolicy: () => executionPolicy,
     checkoutRoot: root,
+    ...(extraFolders.length === 0 ? {} : { extraFolders }),
     uuid: () => "fixed-id",
     pathPort: liveCodeTestSourcePort,
     terminalConfinement,
@@ -82,6 +85,110 @@ describe("ACP Code client tools", () => {
           inputJson: JSON.stringify({ path: join(root, "..", "outside.txt") }),
         }),
       ).resolves.toMatchObject({ result: { error: "path-outside-checkout" }, isError: true });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("reads, writes and starts a terminal in an extra folder but refuses a folder beside it", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-acp-"));
+    const extra = await mkdtemp(join(tmpdir(), "octant-acp-extra-"));
+    const beside = await mkdtemp(join(tmpdir(), "octant-acp-beside-"));
+    try {
+      await writeFile(join(extra, "note.txt"), "extra note", "utf8");
+      await writeFile(join(beside, "note.txt"), "not yours", "utf8");
+      const prepared: Array<ReadonlyArray<string> | undefined> = [];
+      const appTools = tools(
+        root,
+        "full-access",
+        {
+          environment: { PATH: "/usr/bin:/bin", TMPDIR: "/tmp" },
+          prepare: ({ executable, args, extraBoundRoots }) => {
+            prepared.push(extraBoundRoots);
+            return { command: executable, args };
+          },
+        },
+        [extra],
+      );
+      await expect(
+        appTools.execute({
+          name: "octant_acp_fs_read_text_file",
+          inputJson: JSON.stringify({ path: join(extra, "note.txt") }),
+        }),
+      ).resolves.toEqual({ result: { content: "extra note" } });
+      await expect(
+        appTools.execute({
+          name: "octant_acp_fs_write_text_file",
+          inputJson: JSON.stringify({ path: join(extra, "made.txt"), content: "saved" }),
+        }),
+      ).resolves.toEqual({ result: {} });
+      await expect(readFile(join(extra, "made.txt"), "utf8")).resolves.toBe("saved");
+      await expect(
+        appTools.execute({
+          name: "octant_acp_fs_read_text_file",
+          inputJson: JSON.stringify({ path: join(beside, "note.txt") }),
+        }),
+      ).resolves.toMatchObject({ result: { error: "path-outside-checkout" }, isError: true });
+      await expect(
+        appTools.execute({
+          name: "octant_acp_terminal_create",
+          inputJson: JSON.stringify({ command: "/bin/pwd", args: [], cwd: extra }),
+        }),
+      ).resolves.toMatchObject({ result: { terminalId: expect.any(String) } });
+      await expect(
+        appTools.execute({
+          name: "octant_acp_terminal_create",
+          inputJson: JSON.stringify({ command: "/bin/pwd", args: [], cwd: beside }),
+        }),
+      ).resolves.toMatchObject({ result: { error: "cwd-outside-checkout" }, isError: true });
+      // The terminal in the extra folder is jailed with the checkout as an extra root.
+      expect(prepared.at(-1)).toBeDefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(extra, { recursive: true, force: true });
+      await rm(beside, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a protected file at Full access and names the rule and channel", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "octant-acp-home-")));
+    try {
+      await mkdir(join(root, ".aws"), { recursive: true });
+      await writeFile(join(root, ".aws", "credentials"), "fake", "utf8");
+      await writeFile(join(root, ".aws", "config"), "[default]\n", "utf8");
+      const appTools = createCodeAcpClientTools({
+        windowId,
+        thread: thread("full-access"),
+        readExecutionPolicy: () => "full-access",
+        checkoutRoot: root,
+        uuid: () => "fixed-id",
+        pathPort: liveCodeTestSourcePort,
+        terminalConfinement: {
+          environment: { PATH: "/usr/bin:/bin", TMPDIR: "/tmp" },
+          prepare: ({ executable, args }) => ({ command: executable, args }),
+        },
+        protectedFileRefusal: (path) =>
+          secretGuardRefusal(path, { platform: "darwin", homeDirectory: root }),
+        wait: async () => undefined,
+      });
+      for (const [name, input] of [
+        ["octant_acp_fs_read_text_file", { path: join(root, ".aws", "credentials") }],
+        [
+          "octant_acp_fs_write_text_file",
+          { path: join(root, ".aws", "credentials"), content: "x" },
+        ],
+      ] as const) {
+        const outcome = await appTools.execute({ name, inputJson: JSON.stringify(input) });
+        expect(outcome).toMatchObject({ result: { error: "protected-file" }, isError: true });
+        expect(JSON.stringify(outcome)).toContain("credential broker");
+      }
+      await expect(readFile(join(root, ".aws", "credentials"), "utf8")).resolves.toBe("fake");
+      await expect(
+        appTools.execute({
+          name: "octant_acp_fs_read_text_file",
+          inputJson: JSON.stringify({ path: join(root, ".aws", "config") }),
+        }),
+      ).resolves.toEqual({ result: { content: "[default]\n" } });
     } finally {
       await rm(root, { recursive: true, force: true });
     }

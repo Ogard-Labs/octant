@@ -1757,6 +1757,16 @@ function collectSessionEvents(
             state.handledEvents += 1;
             // Marked before the budget is looked at: what the runtime read
             // reached its model either way.
+            if (event.kind === "outside-content-result") {
+              const watched = input.outsideContentMarks.watch(String(input.run.id), event);
+              if (watched.status === "refused") {
+                return yield* Effect.fail({
+                  category: "provider-failed",
+                  message: RUNTIME_OUTSIDE_CONTENT_REFUSAL,
+                } satisfies ProviderFailure);
+              }
+              return;
+            }
             if (event.kind === "outside-content-read") {
               const marked = input.outsideContentMarks.mark(String(input.run.id), event);
               if (marked.status === "refused") {

@@ -194,7 +194,9 @@ export function CodeSearchDialog(props: CodeSearchDialogProps) {
   }
 
   function open(match: CodeSearchMatch | undefined): void {
-    if (match === undefined) return;
+    // The editor opens files of the checkout; a match in an extra folder is
+    // listed so it can be found, and stays in the list when chosen.
+    if (match === undefined || match.folder !== undefined) return;
     setScope(undefined);
     props.onOpenFile(match.path);
   }
@@ -284,6 +286,7 @@ export function CodeSearchDialog(props: CodeSearchDialogProps) {
           >
             <span className="command-palette__result-title">
               <FileText aria-hidden="true" size={12} strokeWidth={1.8} />
+              {match.folder === undefined ? "" : `${folderName(match.folder)}/`}
               {match.scope === "content"
                 ? `${String(match.path)}:${match.line}`
                 : String(match.path)}
@@ -302,4 +305,9 @@ export function CodeSearchDialog(props: CodeSearchDialogProps) {
       </div>
     </OctantDialog>
   );
+}
+
+/** The last segment of an extra folder's path, which is how a person knows it. */
+function folderName(folder: string): string {
+  return folder.slice(folder.lastIndexOf("/") + 1);
 }

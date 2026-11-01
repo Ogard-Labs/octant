@@ -78,14 +78,17 @@ card for the Project's folders (the main folder first, labelled Main directory
 or Main repository, in mono, read from home as `~/…` with the full path on
 hover and for screen readers, and its availability on the first row; then
 each extra folder as an Extra folder row with Remove; then one line saying
-extra folders get the main folder's access while commands, checkouts and Git
-stay in the main folder, and **Add folder…**, which opens the native folder
+extra folders get the main folder's access while checkouts and Git stay in
+the main folder (a terminal or saved action can start in any folder), and **Add folder…**, which opens the native folder
 picker on desktop and the host folder browser elsewhere; then what the
 binding grants), then labelled groups. A refused folder (the home folder or
 above it, a system or credential folder, one inside or around another folder
 of the Project) shows the host's reason on the card. A thread's environment
 panel lists the Project's extra folders read-only, under the main folder, and
-shows nothing when there are none. Rules for what an extra folder grants are
+shows nothing when there are none. The Files tool lists the extra folders'
+files after the main folder's, each file by its own name with its folder's
+full path beside the size, and the Overview's folder list adds each extra
+folder's top level labelled with the folder's name. Rules for what an extra folder grants are
 in [Architecture: Projects with several folders](../architecture.md#projects-with-several-folders). Threads are rows
 in one card: the title alone on its line, then the state chip, the approval
 posture as quiet text (it is a standing setting, not a state or a control, so
@@ -102,8 +105,8 @@ issue-tracker integrations, the worktree and checkout pickers, and the
 Project terminal), off by default, set only by a person. Its row says it
 changes what the Project shows, not what its threads may do: a Work thread
 has the same shell, Git, and tools as a Code thread at the same level either
-way ([Modes](../architecture.md#modes-chat-work-and-code); allowed, not built
-yet). Code Projects have no such row, since Code always shows them. Over an application ground the cards keep the
+way ([Modes](../architecture.md#modes-chat-work-and-code)). Built today it
+shows the Project terminal and Project actions. Code Projects have no such row, since Code always shows them. Over an application ground the cards keep the
 opaque card step even under Glass, and the header's text takes the start
 screen's page-colour glow: set straight on the ground, the overview's rows
 read through the ground's letters (October 2026).
@@ -468,8 +471,16 @@ woke the thread and which try, stopped and why). Auto-fix names the linked
 thread it wakes, the first linked one; with none linked it stays off and its
 hover reason says to link a thread. A refused or unsupported change keeps the
 switch where it was and says why in one alert line under the section. The
-review re-reads the switches every 20 seconds while open. Rules and limits are
-owned by [Architecture: modes](../architecture.md#modes-chat-work-and-code).
+review re-reads the switches every 20 seconds while open. Turning Merge when
+ready on first opens an inline confirmation naming the reviewed head, as Merge
+does. Under the switches a **Your actions** section holds the person's own
+controls: the pull request's labels (a button removes one) and the
+repository's other labels (a button adds one; no free-text label), a comment
+box, a reply box on each open review thread, and Close or Reopen pull request.
+A comment or reply says it posts under the person's name; a refusal is one
+alert line under the section, and a paired device is told only the desktop
+window can do it. Rules and limits are owned by
+[Architecture: modes](../architecture.md#modes-chat-work-and-code).
 The top-right control reveals the dock only when the active pane has a bound thread
 or a valid launchable tool. A new Code task's pane, before its thread exists, keeps
 the dock: its title band shows the common tools disabled ("Available once the task

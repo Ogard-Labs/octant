@@ -39,6 +39,8 @@ import {
   CodeProjectPullRequestAutoFixRecorded,
   WorkProjectStatusFileChanged,
   ProjectBrandKitChanged,
+  WorkProjectDeveloperToolsChanged,
+  WorkProjectActionsChanged,
   CodeProjectActionsChanged,
   ProjectExtraFolderAdded,
   ProjectExtraFolderRemoved,
@@ -272,6 +274,11 @@ import { ThemeProjection } from "./themeProjection";
 import { ExtensionProjection, EXTENSION_LIFECYCLE_EVENT } from "./extensionProjection";
 import { ExtensionToolGrantProjection } from "./extensionToolGrantProjection";
 import { ExtensionProjectPinProjection } from "./extensionProjectPinProjection";
+import { ThreadNativeSetupProjection } from "./threadNativeSetupProjection";
+import {
+  THREAD_NATIVE_SETUP_EVENT_NAMES,
+  ThreadNativeSetupChanged,
+} from "@octant/contracts/thread-native-setup";
 import { RemoteAccessProjection } from "./remoteAccessProjection";
 import {
   PRODUCT_FEEDBACK_CAPTURED,
@@ -328,6 +335,7 @@ import { registerCanvasTagEvents } from "../canvas/canvasTagService";
 import { registerCanvasShareEvents } from "../canvas/canvasShareEventStore";
 import { registerCanvasExportEvents } from "../canvas/canvasExportEventStore";
 import { registerCanvasPublicShareEvents } from "../canvas/canvasPublicShareService";
+import { registerProtectedFilesEvents } from "../protectedFilesService";
 import { registerCanvasExportFolderEvents } from "../canvas/canvasExportFolderEventStore";
 import { registerCanvasOutsideContentEvents } from "../canvas/canvasOutsideContentMark";
 import type { HostIdentityMigrationRegistry } from "./hostIdentityMigration";
@@ -405,6 +413,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("project.provider-policy-changed@1", 1, ProjectProviderPolicyChanged)
     .register("project.native-providers-changed@1", 1, ProjectNativeProvidersChanged)
     .register("project.work-status-file-changed@1", 1, WorkProjectStatusFileChanged)
+    .register("project.work-developer-tools-changed@1", 1, WorkProjectDeveloperToolsChanged)
+    .register("project.work-actions-changed@1", 1, WorkProjectActionsChanged)
     .register("project.brand-kit-changed@1", 1, ProjectBrandKitChanged)
     .register("project.code-actions-changed@1", 1, CodeProjectActionsChanged)
     .register("project.extra-folder-added@1", 1, ProjectExtraFolderAdded)
@@ -579,6 +589,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(EXTENSION_TOOL_GRANT_EVENT_NAMES.recorded, 1, ExtensionToolGrantRecorded)
     .register(EXTENSION_TOOL_GRANT_EVENT_NAMES.revoked, 1, ExtensionToolGrantRevoked)
     .register(EXTENSION_PROJECT_PIN_EVENT_NAMES.changed, 1, ExtensionProjectPinChanged)
+    .register(THREAD_NATIVE_SETUP_EVENT_NAMES.changed, 1, ThreadNativeSetupChanged)
     .register(REMOTE_ACCESS_EVENT_NAMES.hostIdentityInitialized, 1, HostIdentityInitializedV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.deviceRegistered, 1, DeviceRegisteredV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.deviceKeyRotated, 1, DeviceKeyRotatedV1)
@@ -635,6 +646,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerCanvasShareEvents(events);
   registerCanvasExportEvents(events);
   registerCanvasPublicShareEvents(events);
+  registerProtectedFilesEvents(events);
   registerCanvasExportFolderEvents(events);
   registerCanvasOutsideContentEvents(events);
   registerCanvasCommentEvents(events);
@@ -697,6 +709,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(new ExtensionProjection())
       .register(new ExtensionToolGrantProjection())
       .register(new ExtensionProjectPinProjection())
+      .register(new ThreadNativeSetupProjection())
       .register(new RemoteAccessProjection())
       .register(new ThreadCheckpointProjection())
       .register(new ProductFeedbackProjection())

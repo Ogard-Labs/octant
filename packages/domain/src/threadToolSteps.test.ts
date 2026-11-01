@@ -1,6 +1,11 @@
 import type { ProviderRuntimeEvent } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
-import { recordThreadToolStep, type ThreadToolSteps } from "./threadToolSteps";
+import {
+  markThreadToolStepOutsideContent,
+  recordThreadShieldReview,
+  recordThreadToolStep,
+  type ThreadToolSteps,
+} from "./threadToolSteps";
 
 const base = {
   instanceId: "20000000-0000-4000-8000-000000000001",
@@ -93,5 +98,106 @@ describe("a turn's tool steps", () => {
 
   it("ignores events that are not tool calls", () => {
     expect(fold([event({ kind: "text-delta", text: "hi" })])).toBeUndefined();
+  });
+});
+
+describe("the Watcher's tag on a tool step", () => {
+  it("keeps the tag through the call's later progress and result", () => {
+    const started = fold([event({ kind: "tool-start", toolCallId: "w", toolName: "Fetch" })]);
+    const marked = markThreadToolStepOutsideContent(started, {
+      toolCallId: "w",
+      toolName: "Fetch",
+      mark: { labels: ["agent-instructions"] },
+    });
+    const done = recordThreadToolStep(
+      recordThreadToolStep(
+        marked,
+        event({ kind: "tool-progress", toolCallId: "w", message: "Fetching" }),
+      ),
+      event({ kind: "tool-success", toolCallId: "w", summary: "Fetched" }),
+    );
+    expect(done?.steps).toEqual([
+      {
+        toolCallId: "w",
+        toolName: "Fetch",
+        state: "completed",
+        summary: "Fetched",
+        outsideContent: { labels: ["agent-instructions"] },
+      },
+    ]);
+  });
+
+  it("keeps labels already found when a later mark adds none, and adds new ones", () => {
+    const first = markThreadToolStepOutsideContent(undefined, {
+      toolCallId: "w",
+      toolName: "Fetch",
+      mark: { labels: ["hidden-text"] },
+    });
+    const same = markThreadToolStepOutsideContent(first, {
+      toolCallId: "w",
+      toolName: "Fetch",
+      mark: { labels: [] },
+    });
+    expect(same).toBe(first);
+    const more = markThreadToolStepOutsideContent(first, {
+      toolCallId: "w",
+      toolName: "Fetch",
+      mark: { labels: ["encoded-text"] },
+    });
+    expect(more?.steps[0]?.outsideContent?.labels).toEqual(["hidden-text", "encoded-text"]);
+  });
+
+  it("gives a call that announced no start a completed row to carry the tag", () => {
+    const steps = markThreadToolStepOutsideContent(undefined, {
+      toolCallId: "t1",
+      toolName: "web-fetch",
+      mark: { labels: [] },
+    });
+    expect(steps?.steps).toEqual([
+      {
+        toolCallId: "t1",
+        toolName: "web-fetch",
+        state: "completed",
+        outsideContent: { labels: [] },
+      },
+    ]);
+  });
+});
+
+describe("Octant Shield's decisions among a turn's tool steps", () => {
+  const decision = {
+    reviewer: "octant-shield",
+    verdict: "allow",
+    stage: "fast-allow",
+    rule: "read-only-git",
+    reason: "A read-only Git command.",
+    latencyMs: 1,
+    decidedAt: "2026-10-31T10:00:00.000Z",
+  } as unknown as Parameters<typeof recordThreadShieldReview>[1]["decision"];
+  const review = { requestId: "approval-1", toolName: "Bash", summary: "git status", decision };
+
+  it("shows a decision as a completed step of its own beside the tool's", () => {
+    const tool = fold([event({ kind: "tool-start", toolCallId: "a", toolName: "Bash" })]);
+    const steps = recordThreadShieldReview(tool, review);
+    expect(steps.steps.map((step) => step.toolCallId)).toEqual(["a", "shield:approval-1"]);
+    expect(steps.steps[1]).toMatchObject({ state: "completed", shield: decision });
+  });
+
+  it("replaces the step when the same request is reviewed again and drops a decision past the limit", () => {
+    const once = recordThreadShieldReview(undefined, review);
+    const twice = recordThreadShieldReview(once, { ...review, summary: "git log" });
+    expect(twice.steps).toHaveLength(1);
+    expect(twice.steps[0]?.summary).toBe("git log");
+
+    let full: ThreadToolSteps | undefined;
+    for (let index = 0; index < 64; index += 1) {
+      full = recordThreadToolStep(
+        full,
+        event({ kind: "tool-start", toolCallId: `t${index}`, toolName: "Read" }),
+      );
+    }
+    const over = recordThreadShieldReview(full, review);
+    expect(over.steps).toHaveLength(64);
+    expect(over.truncated).toBe(true);
   });
 });

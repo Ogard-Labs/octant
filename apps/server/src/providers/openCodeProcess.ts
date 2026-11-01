@@ -91,6 +91,20 @@ export interface OpenCodeProcessStartInput {
    * the host routes runtimes through it. A caller's value is ignored.
    */
   readonly network?: ProviderRuntimeProxiedNetwork;
+  /**
+   * The person let OpenCode load its own skills: the launch keeps the
+   * `.claude/skills` and `.agents/skills` discovery OpenCode does by itself and
+   * does not deny the `skill` permission. Its project configuration and
+   * plugins stay off either way.
+   */
+  readonly ownSkills?: true;
+  /**
+   * The person let OpenCode run as itself with its tool servers: these are the
+   * MCP servers they added to their own configuration, written into the
+   * private one, and namespaced tools are no longer denied outright (the
+   * session's rules decide them). Absent keeps every tool server off.
+   */
+  readonly ownToolServers?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 }
 
 export interface OpenCodeProcessPort {
@@ -144,6 +158,25 @@ const OPENCODE_GUARDS = {
   OPENCODE_DISABLE_MODELS_FETCH: "1",
   OPENCODE_DISABLE_PROJECT_CONFIG: "1",
 } as const;
+
+/**
+ * The guards for a launch whose person let OpenCode load its own skills: the
+ * switches that keep OpenCode from reading `.claude/skills` and
+ * `.agents/skills` go, and every other guard (updater, model fetch, the
+ * borrowed `CLAUDE.md` prompt, default plugins, project configuration)
+ * stays. Read from the installed opencode v2.2.0 binary: its server reads
+ * `.claude` skills only when neither `OPENCODE_DISABLE_CLAUDE_CODE` nor
+ * `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS` is set, so both go.
+ */
+function openCodeGuardsWithOwnSkills(): Readonly<Record<string, string>> {
+  const {
+    OPENCODE_DISABLE_CLAUDE_CODE: _compatibilityOff,
+    OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: _compatibilitySkillsOff,
+    OPENCODE_DISABLE_EXTERNAL_SKILLS: _externalSkillsOff,
+    ...kept
+  } = OPENCODE_GUARDS;
+  return kept;
+}
 
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 2_000;
 const DEFAULT_STARTUP_TIMEOUT_MS = 10_000;
@@ -527,7 +560,7 @@ function stripJsoncComments(content: string): string {
   return output.replace(/,\s*([}\]])/g, "$1");
 }
 
-function parseRoutingConfig(content: string): unknown {
+export function parseRoutingConfig(content: string): unknown {
   if (Buffer.byteLength(content, "utf8") > PROJECTED_CONFIG_LIMIT) {
     throw new Error("OpenCode resolved configuration exceeds the private routing limit.");
   }
@@ -542,7 +575,7 @@ function parseRoutingConfig(content: string): unknown {
   }
 }
 
-function routingConfigCandidates(environment: NodeJS.ProcessEnv): ReadonlyArray<string> {
+export function routingConfigCandidates(environment: NodeJS.ProcessEnv): ReadonlyArray<string> {
   const candidates: string[] = [];
   const explicit = environment.OPENCODE_CONFIG;
   if (explicit !== undefined && isAbsolute(explicit)) candidates.push(explicit);
@@ -634,6 +667,8 @@ export function createPrivateOpenCodeProfile(
   inheritedEnvironment: NodeJS.ProcessEnv,
   temporaryDirectory: () => string = tmpdir,
   betaPermissions?: ReadonlyArray<PermissionV2Rule>,
+  ownSkills = false,
+  ownToolServers?: Readonly<Record<string, Readonly<Record<string, unknown>>>>,
 ): PrivateOpenCodeProfile {
   const root = temporaryDirectory();
   const directories: string[] = [];
@@ -674,7 +709,7 @@ export function createPrivateOpenCodeProfile(
     Object.assign(environment, {
       OPENCODE_CONFIG: configPath,
       OPENCODE_CONFIG_DIR: configDirectory,
-      ...OPENCODE_GUARDS,
+      ...(ownSkills ? openCodeGuardsWithOwnSkills() : OPENCODE_GUARDS),
       TMPDIR: tempHome,
       XDG_CACHE_HOME: cacheHome,
       XDG_CONFIG_HOME: configHome,
@@ -694,8 +729,14 @@ export function createPrivateOpenCodeProfile(
     // executable extensions and compatibility tools stay denied.
     const ownedConfig: Record<string, unknown> = {
       ...projected,
-      permission: { skill: { "*": "deny" }, "*_*": "deny" },
+      permission: {
+        ...(ownSkills ? {} : { skill: { "*": "deny" } }),
+        ...(ownToolServers === undefined ? { "*_*": "deny" } : {}),
+      },
     };
+    if (ownToolServers !== undefined && Object.keys(ownToolServers).length > 0) {
+      ownedConfig.mcp = ownToolServers;
+    }
     // OpenCode 2 appends configured `permissions` after every agent's
     // built-in rules, and its default agent allows `*`. Without these rules an
     // approval-gated edit or shell command would run without asking.
@@ -1264,6 +1305,8 @@ function acquireOpenCodeServer(
           options.inheritedEnvironment ?? process.env,
           tmpdir,
           runtime === "beta" ? (input.betaPermissions ?? BETA_DENY_ALL) : undefined,
+          input.ownSkills === true,
+          input.ownToolServers,
         );
       } catch {
         resume(

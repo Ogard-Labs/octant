@@ -30,6 +30,11 @@ import {
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { buildBubblewrapLaunch, DEFAULT_BWRAP_PATH } from "./linuxConfinement";
+import {
+  secretGuardEntries,
+  secretGuardPersonRules,
+  secretGuardSeatbeltRules,
+} from "./secretGuard";
 import type { OsNetworkEgress } from "./threadEgressPolicy";
 
 export class ProcessConfinementError extends Error {
@@ -122,6 +127,13 @@ export interface SeatbeltProfileInput {
    */
   readonly isolatedRoots?: ReadonlyArray<string>;
   readonly privateHomeAllowPaths?: ReadonlyArray<string>;
+  /**
+   * The launching runtime's own account paths, whose sign-in the secret guard
+   * leaves readable. The read and write roots other than the bound root and
+   * the temporary directory count as own too: a launch is granted its own
+   * account home by name.
+   */
+  readonly ownAccountPaths?: ReadonlyArray<string>;
   readonly extraRules?: ReadonlyArray<string>;
   readonly homeDirectory?: string;
   readonly usersDirectory?: string;
@@ -166,6 +178,8 @@ export interface ProcessConfinementPrepareInput {
   /** See {@link SeatbeltProfileInput.isolatedRoots}. */
   readonly isolatedRoots?: ReadonlyArray<string>;
   readonly privateHomeAllowPaths?: ReadonlyArray<string>;
+  /** See {@link SeatbeltProfileInput.ownAccountPaths}. */
+  readonly ownAccountPaths?: ReadonlyArray<string>;
   readonly extraRules?: ReadonlyArray<string>;
   /**
    * Whether this launch is an interactive shell on a pseudo-terminal, and where
@@ -685,6 +699,10 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
           ...(input.usersDirectory === undefined ? {} : { usersDirectory: input.usersDirectory }),
         });
 
+  const guardEntries = secretGuardEntries({
+    platform: "darwin",
+    homeDirectory: input.homeDirectory,
+  });
   const lines = [
     "(version 1)",
     "(deny default)",
@@ -840,10 +858,49 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     ...writeGrantsBeneathBoundRoot(input, boundRoots, additionalWriteRoots, writeBoundRoot).map(
       (path) => seatbeltAllowRule("file-write*", path),
     ),
+    // The secret guard follows every grant above, so a protected file inside
+    // a granted root (a home folder opened as a Project) stays denied. Caller
+    // rules come after it: the Plan launch's own Keychain sign-in read is one.
+    // The paths the person added come after those too, so nothing reopens them.
+    ...secretGuardSeatbeltRules({
+      entries: guardEntries,
+      ownAccountPaths: ownAccountRoots(input, readRoots, additionalWriteRoots),
+      ownWriteRoots: additionalWriteRoots,
+      readableRoots: [
+        input.boundRoot,
+        input.temporaryDirectory,
+        ...readRoots,
+        ...additionalWriteRoots,
+      ],
+      profile: "deny-default",
+    }),
     '(allow file-write-data (literal "/dev/null"))',
     ...(input.extraRules ?? []),
+    ...secretGuardPersonRules(guardEntries),
   ];
   return lines.join("\n");
+}
+
+/**
+ * The paths whose sign-in the secret guard leaves to this launch: what the
+ * caller named, and every root granted by name except the bound root and the
+ * temporary directory, which a person or the host chose for other reasons.
+ */
+export function ownAccountRoots(
+  input: Pick<SeatbeltProfileInput, "boundRoot" | "temporaryDirectory" | "ownAccountPaths">,
+  readRoots: ReadonlyArray<string>,
+  additionalWriteRoots: ReadonlyArray<string>,
+): ReadonlyArray<string> {
+  const shared = new Set([
+    ...resolvedRootForms(input.boundRoot),
+    ...resolvedRootForms(input.temporaryDirectory),
+  ]);
+  return uniqueAbsolutePaths([
+    ...(input.ownAccountPaths ?? []),
+    ...[...readRoots, ...additionalWriteRoots].filter(
+      (path) => !resolvedRootForms(path).some((form) => shared.has(form)),
+    ),
+  ]);
 }
 
 export function wrapCommandInSandboxExec(
@@ -968,6 +1025,7 @@ function prepareSeatbeltLaunch(
       : { additionalDenyWritePaths: input.additionalDenyWritePaths }),
     ...(input.isolatedRoots === undefined ? {} : { isolatedRoots: input.isolatedRoots }),
     privateHomeAllowPaths,
+    ...(input.ownAccountPaths === undefined ? {} : { ownAccountPaths: input.ownAccountPaths }),
     ...(input.extraRules === undefined && input.terminal === undefined
       ? {}
       : {

@@ -243,13 +243,19 @@ function defaultAcpTerminalConfinement(): CodeAcpTerminalConfinement {
         executable: input.executable,
         args: input.args,
         boundRoot: input.boundRoot,
+        ...(input.extraBoundRoots === undefined ? {} : { extraBoundRoots: input.extraBoundRoots }),
         temporaryDirectory: input.temporaryDirectory,
         networkEgress: "allow",
         allowProcessExec: true,
         allowProcessFork: true,
         allowFileReadStar: true,
         writeBoundRoot: true,
-        readRoots: [input.boundRoot, input.temporaryDirectory, dirname(input.executable)],
+        readRoots: [
+          input.boundRoot,
+          ...(input.extraBoundRoots ?? []),
+          input.temporaryDirectory,
+          dirname(input.executable),
+        ],
       }),
   };
 }
@@ -916,9 +922,16 @@ export function createCodeOperationRuntime(
     }>
   >();
   const testDiscovery = options.repositoryTestDiscovery ?? new RepositoryTestDiscoveryService();
+  const extraFoldersOf = (projectId: string | undefined): ReadonlyArray<string> =>
+    projectId === undefined
+      ? []
+      : (options.readProjectExtraFolders?.(projectId as CodeThread["projectId"]) ?? []);
   const repositoryTests = {
-    discover: (input: { readonly checkoutId: string; readonly rootPath: string }) =>
-      testDiscovery.discover(input),
+    discover: (input: {
+      readonly checkoutId: string;
+      readonly rootPath: string;
+      readonly projectId?: string;
+    }) => testDiscovery.discover(input),
     run: async (input: Parameters<CodeOperationServiceOptions["repositoryTests"]["run"]>[0]) => {
       if (activeTests.has(input.runId)) throw new Error("Repository test is already running.");
       const controller = new AbortController();
@@ -933,7 +946,11 @@ export function createCodeOperationRuntime(
         done,
       });
       try {
-        return await testRunner.run({ ...input, signal: controller.signal });
+        return await testRunner.run({
+          ...input,
+          extraFolders: extraFoldersOf(input.projectId),
+          signal: controller.signal,
+        });
       } finally {
         activeTests.delete(input.runId);
         markDone();
@@ -3310,6 +3327,43 @@ class RuntimeTurnController implements CodeOperationTurnPort {
    * approval for exactly that command, bound to the thread's delivery target,
    * which the operation service validates before `gh` runs.
    */
+  /**
+   * One command the agent wants to type into its thread terminal, asked of the
+   * person in the thread with the command shown. When the terminal must start
+   * first, an approval mints the host's one-use approval for exactly that
+   * start, which the operation gate checks as it checks any approved effect.
+   */
+  async #askTerminalApproval(
+    active: ActiveTurn,
+    input: { readonly text: string; readonly start?: CodeOperationCommand },
+    signal?: AbortSignal,
+  ): Promise<"approved" | "denied" | "cancelled" | "expired" | "unavailable"> {
+    const shown = `Run this in the thread's terminal?\n${input.text}`;
+    const summary = boundProviderSummary(shown);
+    // The person must read the whole command they allow.
+    if (summary === undefined || summary !== shown.trim()) return "unavailable";
+    const outcome = await this.#askToolApproval(active, summary, undefined, signal);
+    if (outcome !== "approved" || input.start === undefined) return outcome;
+    const store = this.#approvalStore;
+    if (store === undefined) return "unavailable";
+    const thread = this.#options.persistence.readCodeThread(active.thread.id);
+    const checkout = this.#options.persistence.readCodeCheckout(active.thread.checkoutId);
+    if (thread === undefined || checkout === undefined) return "unavailable";
+    const context = await approvalContext(this.#options, input.start, thread, checkout);
+    if (context === undefined) return "unavailable";
+    try {
+      const receipt = store.issue({
+        windowId: active.windowId,
+        effect: { kind: "operation", command: input.start },
+        contextDigest: approvalContextDigest(context),
+      });
+      return receipt === undefined ? "unavailable" : "approved";
+    } catch {
+      // Host time recovery refuses to mint approvals; the start stays refused.
+      return "unavailable";
+    }
+  }
+
   async #askPullRequestApproval(
     active: ActiveTurn,
     command: PullRequestToolCommand,
@@ -3716,6 +3770,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           pullRequestApproval: {
             request: (command, signal) => this.#askPullRequestApproval(active, command, signal),
           },
+          terminalApproval: {
+            request: (input, signal) => this.#askTerminalApproval(active, input, signal),
+          },
           browserApproval: {
             isApproved: (contextId) => {
               const key = this.#browserApprovalKey(active, contextId);
@@ -3801,6 +3858,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             this.#effectiveThread(active.windowId, active.thread.id)?.executionPolicy ??
             active.thread.executionPolicy,
           checkoutRoot: active.checkoutRoot,
+          ...(active.extraFolders.length === 0 ? {} : { extraFolders: active.extraFolders }),
           uuid: this.#options.uuid,
           pathPort: this.#options.acpPathPort ?? liveCodeTestSourcePort,
           terminalConfinement:

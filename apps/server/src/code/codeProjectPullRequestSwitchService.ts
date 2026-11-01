@@ -172,10 +172,16 @@ export class CodeProjectPullRequestSwitchService {
   async setMergeWhenReady(
     windowId: WindowId,
     command: CodeProjectPullRequestMergeWhenReadyCommand,
-    initiator: "user" | "agent",
+    caller: "local-window" | "remote-device",
     signal: AbortSignal,
   ): Promise<CodeProjectPullRequestSwitchOutcome> {
-    if (initiator !== "user") return { status: "refused", reason: "not-authorized" };
+    // A paired phone or web client may turn the forge's auto-merge on, but only
+    // with the person's confirmation of the head they saw; the forge itself
+    // still waits for the required checks and reviews. Turning it off needs
+    // no confirmation. Auto-fix stays with the local window.
+    if (caller === "remote-device" && command.kind === "enable" && command.confirmed !== true) {
+      return { status: "refused", reason: "not-authorized" };
+    }
     const refused = await this.#authorize(windowId, command.target);
     if (refused !== undefined) return refused;
     const request = forgeRequest(command.target);
@@ -206,7 +212,12 @@ export class CodeProjectPullRequestSwitchService {
     if (result.status !== "enabled") return switchFailure(result);
     this.#recordMergeWhenReady(
       command.target,
-      { kind: "enabled", method, headSha: command.headSha },
+      {
+        kind: "enabled",
+        method,
+        headSha: command.headSha,
+        ...(caller === "remote-device" ? { caller } : {}),
+      },
       "local-user",
     );
     return { status: "applied", view: this.#view(this.#fold(command.target)) };

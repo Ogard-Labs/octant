@@ -149,7 +149,11 @@ web search or page fetch the provider runs with its own built-in tool, such as
 Codex's web search or OpenCode's web fetch, and a tool the model's provider
 runs on its own servers. The thread is marked as soon as the call starts, even
 if it later fails or you deny it, because by then the provider may already
-have the page. An agent that reports a web search the same way as a search of
+have the page. Where Octant can see what such a call returned, Octant Shield's Watcher reads
+it for text aimed at the agent, hidden or encoded text, and requests to send
+secrets out; a finding is tagged on the tool row, in Chat and Work as well as
+Code, and never shown to the Judge as text. Some providers do not show Octant
+the page, so their calls are marked but not read. An agent that reports a web search the same way as a search of
 your files cannot always be told apart, so that search may not mark the
 thread. If the provider's own reviewer is answering approvals in a Code
 thread, the turn stops at that point and says why, so you answer the next
@@ -183,7 +187,8 @@ that hosts the thread, not from a paired phone or browser.
   selected. A per-message posture may only narrow the thread's grant; the
   server clamps composer intent. Full access is what it says: the provider
   runtime runs without Octant's deny-default sandbox, so keep it for folders
-  and providers you trust. No posture grants an agent merge authority; only you merge, from a pull
+  and providers you trust. The [protected files](#protected-files) are guarded
+  by Octant's own tools and redaction only, and a shell command can read them. No posture grants an agent merge authority; only you merge, from a pull
   request's review on the desktop after confirming.
 - App-managed filesystem and shell tools cross an Octant-owned sandbox
   boundary; path checks alone are insufficient. Most provider runtimes cross it
@@ -212,6 +217,66 @@ that hosts the thread, not from a paired phone or browser.
   them, by picking it yourself, through macOS's own Keychain prompt. The agent
   asks you before it uses a signed-in site; a routine, a subagent, a terminal
   CLI, and a paired device cannot open one.
+
+### Protected files
+
+Some files are secrets whatever mode a thread is in. Below Full access (Ask
+first, Accept edits, Auto, and Plan), no agent, and no command an agent runs,
+can read or change them. At Full access they are guarded by Octant's own file
+tools and redaction only, and a shell command can read them. Full access is
+full access:
+
+- SSH private keys in `~/.ssh` (`id_*`, `*.pem`, `*.key`, and any file with a
+  `.pub` companion). `~/.ssh/config`, `known_hosts`, and public keys stay
+  readable.
+- Cloud command-line credentials (`~/.aws/credentials` and its sign-in caches,
+  and the credential and token files under `~/.config/gcloud` and `~/.azure`),
+  `~/.kube/config`, `~/.docker/config.json`, `~/.npmrc`, `~/.pypirc`, and the
+  other package registry token files.
+- `~/.git-credentials`, `~/.netrc`, and the forge command-line sign-in file
+  `~/.config/gh/hosts.yml`.
+- Keychain files other than your login keychain, and the local vault folders
+  of password managers.
+- Browser cookie and saved-login stores.
+- Octant's own secrets, and every provider's stored sign-in except the one the
+  running provider uses itself.
+
+The work those files serve goes through a channel instead, so ordinary work
+keeps working:
+
+- **SSH** uses your SSH agent (`SSH_AUTH_SOCK`), a password manager's SSH
+  agent included. Git over SSH works the same way.
+- **Git over HTTPS** signs in through the system credential helper, which
+  reads the keychain through the keychain service, not the file.
+- **API keys and tokens** go through Octant's credential broker. Link the key
+  in Octant, and the runtime receives it in its environment. For a cluster,
+  point `KUBECONFIG` at a file you keep outside the protected list.
+
+When an agent asks for a protected file, the refusal says which group refused
+it and which channel to use. You see that message in the tool row.
+
+Change the list in **Settings › Permissions › Protected files**. Add a file or
+folder of your own, absolute or starting with `~/`. Removing a built-in group
+asks you to confirm first, and Octant records the change. **Protect again**
+undoes it.
+
+Octant also redacts known key formats, and every key the credential broker
+handed out, from what agents say and what their tools print, from thread
+exports, and from the service log, at every level, Full access included.
+Octant's own file tools refuse a protected file at every level too.
+
+What to know:
+
+- At Full access nothing is sandboxed, so programs that start a sandbox of
+  their own, such as `swift package` and headless Chrome, run without extra
+  flags.
+- On Linux a protected file that does not exist yet when the agent starts is
+  not covered until the next start.
+- Claude Code's own commands below Full access run in Claude Code's sandbox,
+  which keeps them to the Project folder. If the Project folder contains your
+  home folder, Octant refuses Claude's file tools on a protected file, and a
+  search whose folder holds one; its commands are held only by your approval
+  or its reviewer.
 
 ### What the Claude runtime does on its own
 

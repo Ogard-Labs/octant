@@ -26,6 +26,7 @@ import type { ProjectSummary, ProjectId } from "@octant/contracts/projects";
 import type { BrowserToolApproval } from "@octant/contracts/browser-automation-rpc";
 import { WORK_PERMISSION_MODES, workAccessOfMode, workModeOf } from "./workPermissionModes";
 import { PermissionModePicker } from "../code/PermissionModePicker";
+import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import { browserApprovalDetail, browserApprovalSummary } from "../browser/browserProfileCopy";
 import {
   prependEarlierTurns,
@@ -2456,6 +2457,13 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           // became.
           trailing: (
             <>
+              {thread === undefined ? null : (
+                <ThreadNativeSetupControl
+                  disabled={accessChanging || creating || completionLocked}
+                  providerInstanceId={thread.providerInstanceId}
+                  threadId={String(thread.id)}
+                />
+              )}
               {thread === undefined ? null : (
                 <PermissionModePicker
                   autoSupported={autoSupported}

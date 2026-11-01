@@ -15,6 +15,11 @@ import {
   decodeCodeAttachmentId,
   decodeHostAnswer,
   type CodeAttachmentId,
+  CodeProjectPullRequestDetailView,
+  CodeProjectPullRequestMergeOutcome,
+  CodeProjectPullRequestSwitchOutcome,
+  CodeProjectPullRequestSwitchesView,
+  type CodeProjectPullRequestMergeMethod,
 } from "@octant/contracts";
 import { MobileInboxFailure, type MobileRemoteTransport } from "./mobileInboxClient";
 
@@ -97,6 +102,146 @@ export async function observeMobilePullRequest(input: {
     throw new MobileInboxFailure("unavailable", "Pull request observation returned no review.");
   }
   return result;
+}
+
+/** The pull request a phone merges, named the way the review names it. */
+export interface MobilePullRequestTarget {
+  readonly projectId: string;
+  /** `owner/name`, as the review reports the base repository. */
+  readonly baseRepository: string;
+  readonly number: number;
+}
+
+/** What the phone shows before it offers to merge. */
+export interface MobilePullRequestMergeState {
+  /** The head the phone will name when the person confirms. */
+  readonly headSha: string;
+  /** Open, fresh, and mergeable: the same bar the desktop review sets. */
+  readonly mergeable: boolean;
+  readonly mergeWhenReady: CodeProjectPullRequestSwitchesView["mergeWhenReady"] | undefined;
+}
+
+function projectTarget(target: MobilePullRequestTarget) {
+  const [owner, name, ...rest] = target.baseRepository.split("/");
+  if (owner === undefined || name === undefined || rest.length > 0) {
+    throw new MobileInboxFailure("unavailable", "The pull request's repository is unreadable.");
+  }
+  return {
+    projectId: target.projectId,
+    repositoryOwner: owner,
+    repositoryName: name,
+    number: target.number,
+  };
+}
+
+async function postProject(
+  transport: MobileRemoteTransport,
+  path: string,
+  body: unknown,
+): Promise<Response> {
+  return transport.authenticatedFetch({
+    method: "POST",
+    path: `/api/code/project-pull-requests/${path}`,
+    body: JSON.stringify(body),
+    contentType: "application/json",
+  });
+}
+
+/**
+ * Re-reads the pull request from GitHub for its current head, so the head the
+ * person confirms is one the host just saw, and reads the Merge when ready
+ * switch beside it.
+ */
+export async function loadMobilePullRequestMergeState(
+  transport: MobileRemoteTransport,
+  target: MobilePullRequestTarget,
+): Promise<MobilePullRequestMergeState> {
+  const identity = projectTarget(target);
+  const view = await decodeJson(
+    await postProject(transport, "detail/refresh", identity),
+    decodeHostAnswer(CodeProjectPullRequestDetailView),
+    "The pull request could not be read over the remote session.",
+  );
+  if (view.detail.state !== "observed") {
+    throw new MobileInboxFailure("unavailable", "The pull request could not be read from GitHub.");
+  }
+  const detail = view.detail;
+  const switches = await decodeJson(
+    await postProject(transport, "switches", identity),
+    decodeHostAnswer(CodeProjectPullRequestSwitchesView),
+    "Merge when ready could not be read over the remote session.",
+  ).catch(() => undefined);
+  return {
+    headSha: detail.headSha,
+    mergeable:
+      detail.headSha !== "" &&
+      detail.pullRequestState === "open" &&
+      detail.mergeability === "mergeable" &&
+      view.freshness.status === "fresh" &&
+      !detail.ambiguous &&
+      detail.freshness === "fresh",
+    mergeWhenReady: switches?.mergeWhenReady,
+  };
+}
+
+/**
+ * Merges one pull request. Sending this is the person's confirmation of
+ * `headSha` and of the checks the repository requires; the host refuses unless
+ * the head is still that one and the required checks pass.
+ */
+export async function mergeMobilePullRequest(
+  transport: MobileRemoteTransport,
+  input: MobilePullRequestTarget & {
+    readonly method: CodeProjectPullRequestMergeMethod;
+    readonly headSha: string;
+  },
+): Promise<CodeProjectPullRequestMergeOutcome> {
+  return decodeJson(
+    await postProject(transport, "merge", {
+      ...projectTarget(input),
+      method: input.method,
+      headSha: input.headSha,
+      confirmed: true,
+    }),
+    decodeHostAnswer(CodeProjectPullRequestMergeOutcome),
+    "The merge could not be sent over the remote session.",
+  );
+}
+
+/**
+ * Turns the forge's auto-merge on for the head the person confirmed, or off.
+ * GitHub then merges once the required checks and reviews pass.
+ */
+export async function setMobileMergeWhenReady(
+  transport: MobileRemoteTransport,
+  input: MobilePullRequestTarget &
+    (
+      | {
+          readonly enabled: true;
+          readonly method: CodeProjectPullRequestMergeMethod;
+          readonly headSha: string;
+        }
+      | { readonly enabled: false }
+    ),
+): Promise<CodeProjectPullRequestSwitchOutcome> {
+  const target = projectTarget(input);
+  return decodeJson(
+    await postProject(
+      transport,
+      "merge-when-ready",
+      input.enabled
+        ? {
+            kind: "enable",
+            target,
+            headSha: input.headSha,
+            method: input.method,
+            confirmed: true,
+          }
+        : { kind: "disable", target },
+    ),
+    decodeHostAnswer(CodeProjectPullRequestSwitchOutcome),
+    "Merge when ready could not be changed over the remote session.",
+  );
 }
 
 export interface MobileCodeConversationTurn {

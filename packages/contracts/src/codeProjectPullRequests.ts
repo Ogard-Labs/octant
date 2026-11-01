@@ -422,6 +422,52 @@ export const CodeProjectPullRequestActionOutcome = Schema.Union(
 );
 export type CodeProjectPullRequestActionOutcome = typeof CodeProjectPullRequestActionOutcome.Type;
 
+export const MAX_CODE_PROJECT_PULL_REQUEST_REPOSITORY_LABELS = 100;
+export const MAX_CODE_PROJECT_PULL_REQUEST_REVIEW_THREADS = 50;
+
+/** The one pull request whose labels and review threads the person's controls read. */
+export const CodeProjectPullRequestActionContextQuery = Schema.Struct({
+  ...CodeProjectPullRequestActionTarget,
+}).annotations(strict);
+export type CodeProjectPullRequestActionContextQuery =
+  typeof CodeProjectPullRequestActionContextQuery.Type;
+
+/**
+ * What the person's controls need to name: the labels on the pull request, the
+ * labels the repository already has (the host never creates one), and the
+ * review threads a reply can go to. Read-only and never journaled; the thread
+ * excerpt is the first comment's start, shown so the person knows which thread
+ * a reply answers.
+ */
+export const CodeProjectPullRequestActionContext = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("read"),
+    labels: Schema.Array(CodeProjectPullRequestLabel).pipe(Schema.maxItems(50)),
+    repositoryLabels: Schema.Array(CodeProjectPullRequestLabel).pipe(
+      Schema.maxItems(MAX_CODE_PROJECT_PULL_REQUEST_REPOSITORY_LABELS),
+    ),
+    reviewThreads: Schema.Array(
+      Schema.Struct({
+        id: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_=-]{1,128}$/)),
+        resolved: Schema.Boolean,
+        outdated: Schema.Boolean,
+        path: boundedText(1_024),
+        author: boundedText(255),
+        excerpt: boundedText(400),
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(MAX_CODE_PROJECT_PULL_REQUEST_REVIEW_THREADS)),
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    reason: Schema.Literal("not-authorized"),
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("unavailable"),
+    reason: CodeProjectPullRequestMergeUnavailable,
+  }).annotations(strict),
+);
+export type CodeProjectPullRequestActionContext = typeof CodeProjectPullRequestActionContext.Type;
+
 export const CODE_PROJECT_PULL_REQUEST_ACTION_RECORDED =
   "code.project-pull-request-action-recorded@1";
 
@@ -681,6 +727,12 @@ export const decodeCodeProjectPullRequestStackMergeOutcome = Schema.decodeUnknow
 );
 export const decodeCodeProjectPullRequestActionCommand = Schema.decodeUnknownSync(
   CodeProjectPullRequestActionCommand,
+);
+export const decodeCodeProjectPullRequestActionContextQuery = Schema.decodeUnknownSync(
+  CodeProjectPullRequestActionContextQuery,
+);
+export const decodeCodeProjectPullRequestActionContext = Schema.decodeUnknownSync(
+  CodeProjectPullRequestActionContext,
 );
 export const decodeCodeProjectPullRequestActionOutcome = Schema.decodeUnknownSync(
   CodeProjectPullRequestActionOutcome,

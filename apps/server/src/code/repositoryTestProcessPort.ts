@@ -115,6 +115,11 @@ interface RepositoryTestProcessPortOptions {
 export interface HarnessShellScriptInput {
   readonly script: string;
   readonly cwd: string;
+  /**
+   * The Project's extra folders: the command reads and writes each as it does
+   * `cwd`, and the script directory must lie outside them too.
+   */
+  readonly extraRoots?: ReadonlyArray<string>;
   readonly environment: Readonly<Record<string, string>>;
   readonly timeoutMs: number;
   /**
@@ -328,6 +333,7 @@ export class RepositoryTestProcessPort {
       validateLaunchInput({ ...input, argv: [HARNESS_SHELL, input.script] }, this.#maxOutputBytes);
       const script = await resolveHarnessScript(scriptDirectory, input.script, [
         input.cwd,
+        ...(input.extraRoots ?? []),
         this.#temporaryDirectory,
         ...this.#additionalWritePaths,
       ]);
@@ -336,7 +342,10 @@ export class RepositoryTestProcessPort {
         cwd: input.cwd,
         environment: input.environment,
         timeoutMs: input.timeoutMs,
-        additionalReadRoots: [dirname(script)],
+        additionalReadRoots: [dirname(script), ...(input.extraRoots ?? [])],
+        ...(input.extraRoots === undefined || input.extraRoots.length === 0
+          ? {}
+          : { additionalWriteRoots: input.extraRoots }),
       };
       validateLaunchInput(launchInput, this.#maxOutputBytes);
     } catch {

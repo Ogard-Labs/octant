@@ -178,7 +178,8 @@ describe("Code language agent tools", () => {
 
   it("refuses a path out of the checkout, a stale thread, and a profile that leaves the read out, before reading", async () => {
     const outside = tools();
-    for (const path of ["/etc/passwd", "../secret.ts", "a/../../b.ts"]) {
+    // An absolute path is a valid name here: the service places it in an extra folder or refuses it.
+    for (const path of ["//etc/passwd", "../secret.ts", "a/../../b.ts"]) {
       await expect(outside.call(CODE_DIAGNOSTICS_TOOL_NAME, { path })).resolves.toMatchObject({
         result: { error: "invalid-tool-input" },
         isError: true,

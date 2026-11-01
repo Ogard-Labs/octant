@@ -1,6 +1,12 @@
-import type { ProviderChildActivityEvent, TurnStopReason } from "@octant/contracts";
+import type {
+  ProviderChildActivityEvent,
+  ShieldWatcherLabel,
+  TurnStopReason,
+} from "@octant/contracts";
 import {
   observeTurnMetrics,
+  markThreadToolStepOutsideContent,
+  recordThreadShieldReview,
   recordThreadToolStep,
   startTurnMetrics,
   workThreadAccessOf,
@@ -249,6 +255,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
           message: RUNTIME_OUTSIDE_CONTENT_REFUSAL,
         });
       }
+      let toolSteps: ThreadToolSteps | undefined;
       const connection = yield* input.driver.acquire({
         instanceId: input.command.authority.providerInstanceId,
         projectRoot: input.projectRoot,
@@ -258,6 +265,13 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
           projectId: input.command.authority.projectId,
           threadId: input.command.threadId,
           sessionId: input.providerSessionId,
+          signal: input.signal,
+          // Octant Shield's answer to an approval shows on the transcript
+          // beside the turn's tool rows.
+          onApprovalReviewed: (review) => {
+            toolSteps = recordThreadShieldReview(toolSteps, review);
+            input.onToolSteps?.(toolSteps);
+          },
         },
       });
       yield* Effect.addFinalizer(() =>
@@ -311,7 +325,6 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       // New tasks a full plan turned away, kept until the restatement that
       // follows them can drop the tasks they replace.
       const turnedAwayTasks = new Map<string, ThreadTaskProgress>();
-      let toolSteps: ThreadToolSteps | undefined;
       let terminal: ProviderRuntimeEvent | undefined;
       const pendingRequestHolds = new Map<string, Deferred.Deferred<void>>();
       const pendingRequestCleanups = new Map<string, () => void>();
@@ -341,9 +354,37 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
                 // Marked before the budget is looked at: what the runtime
                 // read reached its model either way.
+                const markToolRow = (
+                  toolCallId: string,
+                  toolName: string,
+                  labels: ReadonlyArray<ShieldWatcherLabel>,
+                ) => {
+                  const next = markThreadToolStepOutsideContent(toolSteps, {
+                    toolCallId,
+                    toolName,
+                    mark: { labels },
+                  });
+                  if (next === undefined || next === toolSteps) return;
+                  toolSteps = next;
+                  input.onToolSteps?.(next);
+                };
+                if (event.kind === "outside-content-result") {
+                  const watched = outsideContentMarks.watch(String(input.command.threadId), event);
+                  if (watched.status === "refused") {
+                    return yield* Effect.fail<ProviderFailure>({
+                      category: "provider-failed",
+                      message: RUNTIME_OUTSIDE_CONTENT_REFUSAL,
+                    });
+                  }
+                  markToolRow(event.toolCallId, event.toolName, watched.labels);
+                  return;
+                }
                 if (event.kind === "outside-content-read") {
                   const marked = outsideContentMarks.mark(String(input.command.threadId), event);
-                  if (marked.status === "marked") return;
+                  if (marked.status === "marked") {
+                    markToolRow(event.toolCallId, event.toolName, []);
+                    return;
+                  }
                   // The scope's finalizer interrupts the session, as for any
                   // turn that ends before its terminal event.
                   return yield* Effect.fail<ProviderFailure>({
@@ -443,6 +484,9 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                     }),
                   );
                   if (executionSignal.aborted) return;
+                  if (execution.isError !== true && execution.outsideContent !== undefined) {
+                    markToolRow(event.requestId, event.toolName, execution.outsideContent.labels);
+                  }
                   yield* connection
                     .answerTool({
                       sessionId: input.providerSessionId,

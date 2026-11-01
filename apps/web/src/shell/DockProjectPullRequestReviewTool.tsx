@@ -1,4 +1,8 @@
 import type {
+  CodeProjectPullRequestActionCommand,
+  CodeProjectPullRequestActionContext,
+  CodeProjectPullRequestActionContextQuery,
+  CodeProjectPullRequestActionOutcome,
   CodeProjectPullRequestDetailObserved,
   CodeProjectPullRequestDetailQuery,
   CodeProjectPullRequestDetailRefreshCommand,
@@ -12,7 +16,8 @@ import type {
   CodeProjectPullRequestSwitchTarget,
   CodeProjectPullRequestSwitchesView,
 } from "@octant/contracts";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { ProjectPullRequestPersonAction } from "../code/ProjectPullRequestActions";
 import { ProjectPullRequestReviewPane } from "../code/ProjectPullRequestReviewPane";
 import { ShellState } from "./ShellState";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -31,6 +36,12 @@ export interface DockProjectPullRequestReviewToolProps {
     method: CodeProjectPullRequestMergeMethod,
     headSha: string,
   ) => Promise<CodeProjectPullRequestMergeOutcome>;
+  readonly loadActionContext?: (
+    query: CodeProjectPullRequestActionContextQuery,
+  ) => Promise<CodeProjectPullRequestActionContext>;
+  readonly act?: (
+    command: CodeProjectPullRequestActionCommand,
+  ) => Promise<CodeProjectPullRequestActionOutcome>;
   readonly loadSwitches?: (
     target: CodeProjectPullRequestSwitchTarget,
   ) => Promise<CodeProjectPullRequestSwitchesView>;
@@ -73,6 +84,22 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
     repositoryName: props.query.repositoryName,
     number: props.query.number,
   };
+
+  // Stable across renders: the dock binds a new loader function on every
+  // render and the switches poll re-renders this tool every 20 seconds, so the
+  // loader is read through a ref and only the target changes its identity. A
+  // new identity would re-read the labels and review threads from GitHub.
+  const loadActionContextRef = useRef(props.loadActionContext);
+  useEffect(() => {
+    loadActionContextRef.current = props.loadActionContext;
+  });
+  const { projectId, repositoryOwner, repositoryName, number } = props.query;
+  const readActionContext = useCallback(() => {
+    const load = loadActionContextRef.current;
+    return load === undefined
+      ? Promise.resolve({ status: "unavailable", reason: "unavailable" } as const)
+      : load({ projectId, repositoryOwner, repositoryName, number });
+  }, [projectId, repositoryOwner, repositoryName, number]);
 
   useEffect(() => {
     const load = loadSwitchesRef.current;
@@ -262,10 +289,21 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
                 return applySwitch(() =>
                   set(
                     enabled
-                      ? { kind: "enable", target, headSha, method }
+                      ? { kind: "enable", target, headSha, method, confirmed: true }
                       : { kind: "disable", target },
                   ),
                 );
+              },
+            })}
+        {...(props.loadActionContext === undefined || props.act === undefined
+          ? {}
+          : {
+              onLoadActionContext: readActionContext,
+              onAct: (action: ProjectPullRequestPersonAction) => {
+                const act = props.act;
+                return act === undefined
+                  ? Promise.resolve({ status: "unavailable", reason: "unavailable" } as const)
+                  : act({ ...action, ...target });
               },
             })}
         {...(props.setAutoFix === undefined

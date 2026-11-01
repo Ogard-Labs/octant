@@ -33,6 +33,8 @@ export interface StartQuickToolsServices {
   readonly projectTerminalClient: ProjectTerminalClient;
   readonly projectBrowserClient: ProjectBrowserClient;
   readonly hostBridge?: OctantHostBridge;
+  /** The Project's extra folders, so a terminal can start in one; main otherwise. */
+  readonly extraFolders?: (projectId: ProjectId) => ReadonlyArray<string>;
 }
 
 export const StartQuickToolsContext = createContext<StartQuickToolsServices | undefined>(undefined);
@@ -121,7 +123,7 @@ export function StartQuickTools(props: { readonly projectId: ProjectId }) {
   if (services === undefined) return null;
   const { projectTerminalClient } = services;
 
-  async function openTerminal(): Promise<void> {
+  async function openTerminal(folder?: string): Promise<void> {
     setStarting(true);
     setMessage(undefined);
     const terminalId = decodeCodeTerminalId(crypto.randomUUID());
@@ -132,6 +134,7 @@ export function StartQuickTools(props: { readonly projectId: ProjectId }) {
         terminalId,
         columns: 80,
         rows: 24,
+        ...(folder === undefined ? {} : { folder }),
       });
       if (started.kind === "project-terminal-refused") {
         setMessage(started.message);
@@ -176,6 +179,15 @@ export function StartQuickTools(props: { readonly projectId: ProjectId }) {
             label={starting ? "Starting terminal…" : "Terminal"}
             onSelect={() => void openTerminal()}
           />
+          {(services.extraFolders?.(props.projectId) ?? []).map((folder) => (
+            <QuickToolRow
+              disabled={starting}
+              icon={SquareTerminal}
+              key={folder}
+              label={`Terminal in ${folder.split("/").filter(Boolean).at(-1) ?? folder}`}
+              onSelect={() => void openTerminal(folder)}
+            />
+          ))}
           <QuickToolRow
             disabled={starting}
             icon={Globe}

@@ -126,7 +126,17 @@ export interface PreviewTargetResolver {
     readonly opaqueRef: string;
     readonly kind: PreviewTargetKind;
   }): Promise<
-    | { readonly ok: true; readonly relativePath: string; readonly displayName: string }
+    | {
+        readonly ok: true;
+        readonly relativePath: string;
+        readonly displayName: string;
+        /**
+         * The Project's extra folder `relativePath` is relative to. Absent
+         * means the Project's main folder. The resolver has already placed
+         * the path inside one of the Project's current extra folders.
+         */
+        readonly folder?: string;
+      }
     | { readonly ok: false; readonly code: "not-found" }
   >;
 }
@@ -202,7 +212,7 @@ export class PreviewService {
     if (!root.ok) return this.#unavailable(input.target);
 
     const manifest = producePreviewManifest({
-      projectRoot: root.canonicalRoot,
+      projectRoot: resolution.folder ?? root.canonicalRoot,
       hostId: this.#hostId,
       projectId: input.target.projectId,
       record: {
@@ -282,7 +292,10 @@ export class PreviewService {
     const root = await this.#projectRootResolver.resolve(input.target.projectId);
     if (!root.ok) return this.#unavailableChunks(input.target);
 
-    const confined = resolveConfinedPath(root.canonicalRoot, resolution.relativePath);
+    const confined = resolveConfinedPath(
+      resolution.folder ?? root.canonicalRoot,
+      resolution.relativePath,
+    );
     if (!confined.ok) {
       if (confined.code === "containment-violation") {
         return this.#unauthorizedChunks(input.target.targetId);
@@ -355,7 +368,10 @@ export class PreviewService {
     const root = await this.#projectRootResolver.resolve(input.target.projectId);
     if (!root.ok) return this.#handoffUnavailable(input.target);
 
-    const confined = resolveConfinedPath(root.canonicalRoot, resolution.relativePath);
+    const confined = resolveConfinedPath(
+      resolution.folder ?? root.canonicalRoot,
+      resolution.relativePath,
+    );
     if (!confined.ok) {
       if (confined.code === "containment-violation") {
         return this.#handoffUnauthorized(input.target.targetId);
@@ -370,7 +386,7 @@ export class PreviewService {
     // slipped through, and a format that never advertised the affordance can
     // not be commanded into it.
     const manifest = producePreviewManifest({
-      projectRoot: root.canonicalRoot,
+      projectRoot: resolution.folder ?? root.canonicalRoot,
       hostId: this.#hostId,
       projectId: input.target.projectId,
       record: {

@@ -60,17 +60,19 @@ import {
 import { createCodeThreadLocalServerScopeResolver } from "../localServers/localServerScopeResolver";
 import { createRunningServiceScopeResolver } from "../localServers/runningServiceScopeResolver";
 import { LocalServerService } from "../localServers/localServerService";
-import { defaultShellSettings, enabledModes } from "@octant/domain";
+import { defaultShellSettings, enabledModes, projectExtraFolderRoots } from "@octant/domain";
 import { pathIsProjectConfined } from "./providers";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { WorkspaceWiring } from "./workspace";
-import type { CodeWiring } from "./code";
+import { stableCodeFileId, type CodeWiring } from "./code";
+import { withProjectExtraFolders } from "../code/codeProjectFolderRoot";
 import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { FoundationsWiring } from "./foundations";
 import type { IntegrationsWiring } from "./integrations";
 import type { ProvidersWiring } from "./providers";
+import { windowCanAccessWorkProject } from "../windowCodeProjectAccess";
 
 export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence" | "version"> &
   Pick<AuthorityWiring, "codeSessionAuthority" | "windowAuthorityStore"> &
@@ -111,9 +113,29 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     version,
     windowAuthorityStore,
   } = deps;
+  // A file in a Project's extra folder is named by absolute path and resolves
+  // to that folder; language services and debug sessions treat it as a plain
+  // folder with no checkout of its own.
+  const resolveRootWithExtraFolders = withProjectExtraFolders({
+    resolve: (scopeId, thread, checkout, relativePath) =>
+      roots.resolve(scopeId, thread, checkout, relativePath),
+    extraFolders: (thread) => {
+      const project = persistence.readProject(thread.projectId);
+      return project?.type === "code" ? projectExtraFolderRoots(project) : [];
+    },
+    probePath: codeWorkingDirectoryProbePath,
+    fileId: stableCodeFileId,
+    statIdentity: async (path) => {
+      const metadata = await lstat(path, { bigint: true });
+      if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+        throw new Error("Project folder is unavailable.");
+      }
+      return { device: metadata.dev.toString(10), inode: metadata.ino.toString(10) };
+    },
+  });
   return Effect.gen(function* () {
-    // A person's own shell at a Code Project's root, with no thread. It
-    // shares the Code runtime's terminals, so one receipt store, reconcile,
+    // A person's own shell at a Work or Code Project's root, with no thread.
+    // It shares the Code runtime's terminals, so one receipt store, reconcile,
     // and shutdown cover it; the journal records its start and end.
     const sharedTerminals = codeOperationRuntime?.terminals;
     const projectTerminals =
@@ -122,11 +144,24 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
         : new ProjectTerminalService({
             terminals: sharedTerminals,
             readProject: persistence.readProject,
-            canAccessProject: canAccessCodeProject,
+            canAccessProject: (scopeId, projectId) => {
+              const project = persistence.readProject(projectId);
+              if (project?.type !== "work") return canAccessCodeProject(scopeId, projectId);
+              // A Work window reaches the Work Project its own persisted
+              // workspace binds, while it is live, as a Code window does.
+              return (
+                project.lifecycle === "active" &&
+                windowAuthorityStore.listWindowIds().some((id) => String(id) === String(scopeId)) &&
+                windowCanAccessWorkProject({
+                  workspace: persistence.readWindowWorkspace(scopeId)?.workspace,
+                  projectId,
+                })
+              );
+            },
             resolveRoot: async (project) => {
               try {
                 const binding = await projectRootPort.validate(
-                  "code",
+                  project.type,
                   project.binding.canonicalRoot,
                 );
                 if (binding.canonicalRoot !== project.binding.canonicalRoot) return undefined;
@@ -235,8 +270,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
         },
         canAccessProject: canAccessCodeProject,
         effectiveThread: (scopeId, thread) => codeSessionAuthority.effectiveThread(scopeId, thread),
-        resolveRoot: (scopeId, thread, checkout, relativePath) =>
-          roots.resolve(scopeId, thread, checkout, relativePath),
+        resolveRoot: resolveRootWithExtraFolders,
       },
       approvals: languageServerApprovals,
       threadTainted: (threadId) => toolEgressRules.threadTainted(String(threadId)),
@@ -319,8 +353,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
         readCheckout: persistence.readCodeCheckout,
         canAccessProject: canAccessCodeProject,
         effectiveThread: (scopeId, thread) => codeSessionAuthority.effectiveThread(scopeId, thread),
-        resolveRoot: (scopeId, thread, checkout, relativePath) =>
-          roots.resolve(scopeId, thread, checkout, relativePath),
+        resolveRoot: resolveRootWithExtraFolders,
       },
       approvals: debugConfigurationApprovals,
       adapters: installedDebugAdapterComponents({

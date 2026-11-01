@@ -195,6 +195,31 @@ describe("RepositoryTestDiscoveryService", () => {
     ]);
   });
 
+  it("offers an extra folder's tests by its absolute path, apart from the checkout's own", async () => {
+    const nodes = {
+      "/repo": { kind: "dir" as const },
+      "/repo/package.json": packageJson({ scripts: { test: "vitest run" } }),
+      "/notes": { kind: "dir" as const },
+      "/notes/package.json": packageJson({ scripts: { test: "node check.js" } }),
+    };
+    const definitions = await new RepositoryTestDiscoveryService({
+      sourcePort: fakePort(nodes),
+      extraFolders: (projectId) => (projectId === "project-1" ? ["/notes", "/missing"] : []),
+    }).discover({ checkoutId, rootPath, projectId: "project-1" });
+
+    expect(definitions.map((definition) => [definition.name, definition.cwd])).toEqual([
+      ["test", "."],
+      ["notes: test", "/notes"],
+    ]);
+    expect(new Set(definitions.map((definition) => definition.id)).size).toBe(2);
+    // A Project with no such folder offers only the checkout's tests.
+    const alone = await new RepositoryTestDiscoveryService({
+      sourcePort: fakePort(nodes),
+      extraFolders: () => [],
+    }).discover({ checkoutId, rootPath, projectId: "project-2" });
+    expect(alone.map((definition) => definition.name)).toEqual(["test"]);
+  });
+
   it("keeps every definition id stable across a re-list and distinct per checkout", async () => {
     const nodes = {
       "/repo": { kind: "dir" as const },

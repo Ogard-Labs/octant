@@ -451,6 +451,10 @@ export interface WorkspaceViewProps {
     brandKit: CanvasDesignBrand,
   ) => Promise<boolean>;
   readonly onWorkStatusFileChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
+  readonly onWorkDeveloperToolsChange?: (
+    projectId: ProjectId,
+    enabled: boolean,
+  ) => Promise<boolean>;
   readonly onActionsChange?: (
     projectId: ProjectId,
     actions: ReadonlyArray<ProjectAction>,
@@ -2272,6 +2276,9 @@ function renderNonCodeTab(
         {...(props.onWorkStatusFileChange === undefined
           ? {}
           : { onWorkStatusFileChange: props.onWorkStatusFileChange })}
+        {...(props.onWorkDeveloperToolsChange === undefined
+          ? {}
+          : { onWorkDeveloperToolsChange: props.onWorkDeveloperToolsChange })}
         {...(props.onDesktopRecipeChange === undefined
           ? {}
           : { onDesktopRecipeChange: props.onDesktopRecipeChange })}

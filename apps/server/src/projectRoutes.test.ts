@@ -343,6 +343,42 @@ describe("Project routes", () => {
     );
   });
 
+  it("refuses a paired device setting a Work Project's Developer tools or actions while a local window keeps both", async () => {
+    const executeProject = vi.fn(() => ({ kind: "work-project-developer-tools-changed" }));
+    const route = routeFixture({ executeProject });
+    const headers = {
+      "content-type": "application/json",
+      "x-octant-window-capability": capability,
+    };
+    const commands = [
+      { kind: "change-work-project-developer-tools", projectId, expectedVersion: 1, enabled: true },
+      { kind: "change-work-project-actions", projectId, expectedVersion: 1, actions: [] },
+    ];
+    for (const command of commands) {
+      const remote = new Request("http://127.0.0.1/api/projects/commands", {
+        method: "POST",
+        headers,
+        body: JSON.stringify(command),
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: { kind: "remote-device" } as never,
+        scopeId: windowId,
+      });
+      expect((await route(remote))?.status).toBe(403);
+    }
+    expect(executeProject).not.toHaveBeenCalled();
+
+    for (const command of commands) {
+      const local = new Request("http://127.0.0.1/api/projects/commands", {
+        method: "POST",
+        headers,
+        body: JSON.stringify(command),
+      });
+      expect((await route(local))?.status).toBe(200);
+    }
+    expect(executeProject).toHaveBeenCalledTimes(2);
+  });
+
   it("rejects missing, forged, and expired capabilities", async () => {
     const { route, now } = routeFixtureWithClock();
     for (const token of [undefined, "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"]) {

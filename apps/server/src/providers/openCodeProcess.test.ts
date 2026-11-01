@@ -386,6 +386,76 @@ describe("probeOpenCodeBinary", () => {
     }
   });
 
+  it("keeps OpenCode's own skill discovery only for a launch whose person allowed it, and every other guard", () => {
+    const root = fixtureRoot();
+    const skillSwitches = [
+      "OPENCODE_DISABLE_CLAUDE_CODE",
+      "OPENCODE_DISABLE_CLAUDE_CODE_SKILLS",
+      "OPENCODE_DISABLE_EXTERNAL_SKILLS",
+    ];
+    const locked = createPrivateOpenCodeProfile({ content: "{}" }, { HOME: root }, () => root);
+    const own = createPrivateOpenCodeProfile(
+      { content: "{}" },
+      { HOME: root },
+      () => root,
+      undefined,
+      true,
+    );
+    try {
+      for (const name of skillSwitches) {
+        expect(locked.environment[name], name).toBe("1");
+        expect(own.environment, name).not.toHaveProperty(name);
+      }
+      for (const name of [
+        "OPENCODE_DISABLE_AUTOUPDATE",
+        "OPENCODE_DISABLE_CLAUDE_CODE_PROMPT",
+        "OPENCODE_DISABLE_DEFAULT_PLUGINS",
+        "OPENCODE_DISABLE_PROJECT_CONFIG",
+        "OPENCODE_DISABLE_MODELS_FETCH",
+      ]) {
+        expect(own.environment[name], name).toBe("1");
+      }
+      const config = (profile: typeof own) =>
+        JSON.parse(readFileSync(profile.environment.OPENCODE_CONFIG ?? "", "utf8")) as {
+          readonly permission: Record<string, unknown>;
+        };
+      expect(config(locked).permission).toEqual({ skill: { "*": "deny" }, "*_*": "deny" });
+      // Every MCP tool but Octant's own bridge stays denied either way.
+      expect(config(own).permission).toEqual({ "*_*": "deny" });
+    } finally {
+      locked.cleanup();
+      own.cleanup();
+    }
+  });
+
+  it("writes the person's own MCP servers into the private configuration and stops denying every namespaced tool", () => {
+    const root = fixtureRoot();
+    const servers = { docs: { type: "local", command: ["docs-server"] } };
+    const loaded = createPrivateOpenCodeProfile(
+      { content: "{}" },
+      { HOME: root },
+      () => root,
+      undefined,
+      false,
+      servers,
+    );
+    const locked = createPrivateOpenCodeProfile({ content: "{}" }, { HOME: root }, () => root);
+    try {
+      const config = (profile: typeof loaded) =>
+        JSON.parse(readFileSync(profile.environment.OPENCODE_CONFIG ?? "", "utf8")) as {
+          readonly permission: Record<string, unknown>;
+          readonly mcp?: unknown;
+        };
+      expect(config(loaded).mcp).toEqual(servers);
+      expect(config(loaded).permission).toEqual({ skill: { "*": "deny" } });
+      expect(config(locked)).not.toHaveProperty("mcp");
+      expect(config(locked).permission).toEqual({ skill: { "*": "deny" }, "*_*": "deny" });
+    } finally {
+      loaded.cleanup();
+      locked.cleanup();
+    }
+  });
+
   it("makes OpenCode's default provider data root explicit for confinement", () => {
     const root = fixtureRoot();
     const profile = createPrivateOpenCodeProfile({ content: "{}" }, { HOME: root }, () => root);
@@ -825,6 +895,35 @@ describe("OpenCodeProcessPort", () => {
     expect(
       rules.some((rule) => rule.includes('(allow process-exec (literal "/usr/bin/false"))')),
     ).toBe(false);
+  });
+
+  it("starts Full access with no wrapper around the runtime", async () => {
+    const fixture = probeWrapper("v2-ready");
+    const prepared: Array<ReadonlyArray<string>> = [];
+    const confinement: ProcessConfinementPort = {
+      // The version probe is confined as at every level; the runtime launch
+      // is not wrapped at all.
+      prepare: (input) => {
+        prepared.push(input.args);
+        return { command: input.executable, args: input.args };
+      },
+    };
+    await Effect.runPromise(
+      Effect.scoped(
+        makeOpenCodeProcessLive({
+          confinement,
+          platform: "darwin",
+          runtimeConfigResolver: async () => undefined,
+          startupTimeoutMs: 2_000,
+        }).start({
+          binaryPath: fixture.binaryPath,
+          cwd: fixture.root,
+          mode: "code",
+          executionPolicy: "full-access",
+        }),
+      ),
+    );
+    expect(prepared.some((args) => args.includes("serve"))).toBe(false);
   });
 
   it("starts the server on its own egress proxy below Full access and keeps loopback off the proxy", async () => {

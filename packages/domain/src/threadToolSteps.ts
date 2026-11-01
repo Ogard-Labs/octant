@@ -2,6 +2,8 @@ import {
   MAX_THREAD_TOOL_STEP_SUMMARY_BYTES,
   MAX_THREAD_TOOL_STEPS_PER_TURN,
   type ProviderRuntimeEvent,
+  type ShieldDecision,
+  type ToolOutsideContentMark,
   type ThreadToolStep,
   type ThreadToolStepList,
 } from "@octant/contracts";
@@ -84,6 +86,9 @@ export function recordThreadToolStep(
         toolName: previous?.toolName ?? "Tool",
         state: "running",
         ...(summary === undefined ? {} : { summary }),
+        ...(previous?.outsideContent === undefined
+          ? {}
+          : { outsideContent: previous.outsideContent }),
       };
       break;
     }
@@ -98,9 +103,94 @@ export function recordThreadToolStep(
         state: event.kind === "tool-success" ? "completed" : "failed",
         ...(kept === undefined ? {} : { summary: kept }),
         ...(published === undefined ? {} : { published }),
+        ...(previous?.outsideContent === undefined
+          ? {}
+          : { outsideContent: previous.outsideContent }),
       };
       break;
     }
+  }
+  const nextSteps = steps.slice();
+  if (index === -1) nextSteps.push(next);
+  else nextSteps[index] = next;
+  return { steps: nextSteps, truncated: current?.truncated === true };
+}
+
+/**
+ * Puts the Watcher's mark on one tool call's step, keeping the strongest
+ * reading: labels already found stay when a later result adds none. A call
+ * with no step yet gets a completed one, so a tool Octant ran for the turn
+ * (it announces no start) still has a row to carry the tag. Returns the same
+ * value when the mark changes nothing.
+ */
+export function markThreadToolStepOutsideContent(
+  current: ThreadToolSteps | undefined,
+  call: {
+    readonly toolCallId: string;
+    readonly toolName: string;
+    readonly mark: ToolOutsideContentMark;
+  },
+): ThreadToolSteps | undefined {
+  const steps = current?.steps ?? [];
+  const toolCallId = boundedIdentifier(call.toolCallId);
+  const index = steps.findIndex((step) => step.toolCallId === toolCallId);
+  const previous = index === -1 ? undefined : steps[index];
+  if (previous === undefined && steps.length >= MAX_THREAD_TOOL_STEPS_PER_TURN) {
+    return current?.truncated === true ? current : { steps, truncated: true };
+  }
+  const labels = [...new Set([...(previous?.outsideContent?.labels ?? []), ...call.mark.labels])];
+  const sameLabels =
+    previous?.outsideContent !== undefined &&
+    labels.length === previous.outsideContent.labels.length;
+  if (sameLabels) return current;
+  const outsideContent: ToolOutsideContentMark = {
+    labels,
+    ...(call.mark.recordedOnly === true ? { recordedOnly: true } : {}),
+  };
+  const next: ThreadToolStep =
+    previous === undefined
+      ? {
+          toolCallId,
+          toolName: boundedIdentifier(call.toolName),
+          state: "completed",
+          outsideContent,
+        }
+      : { ...previous, outsideContent };
+  const nextSteps = steps.slice();
+  if (index === -1) nextSteps.push(next);
+  else nextSteps[index] = next;
+  return { steps: nextSteps, truncated: current?.truncated === true };
+}
+
+/**
+ * Adds Octant Shield's decision on one approval to a turn's tool steps, as a
+ * completed step of its own keyed by the approval's request id. A repeated
+ * review of the same request replaces its step. Past the step limit the
+ * decision is dropped and the list is marked truncated; the approval journal
+ * still holds it.
+ */
+export function recordThreadShieldReview(
+  current: ThreadToolSteps | undefined,
+  review: {
+    readonly requestId: string;
+    readonly toolName: string;
+    readonly summary: string;
+    readonly decision: ShieldDecision;
+  },
+): ThreadToolSteps {
+  const steps = current?.steps ?? [];
+  const toolCallId = boundedIdentifier(`shield:${review.requestId}`);
+  const summary = boundedSummary(review.summary);
+  const next: ThreadToolStep = {
+    toolCallId,
+    toolName: boundedIdentifier(review.toolName) || "Approval",
+    state: "completed",
+    ...(summary === undefined ? {} : { summary }),
+    shield: review.decision,
+  };
+  const index = steps.findIndex((step) => step.toolCallId === toolCallId);
+  if (index === -1 && steps.length >= MAX_THREAD_TOOL_STEPS_PER_TURN) {
+    return current?.truncated === true ? current : { steps, truncated: true };
   }
   const nextSteps = steps.slice();
   if (index === -1) nextSteps.push(next);

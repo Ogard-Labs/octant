@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
 import {
+  decodeCodeRepositoryTestDefinition,
   decodeCodeRepositoryTestDefinitionFile,
   type CodeRepositoryTestDefinition,
   type CodeRepositoryTestDefinitionSource,
   type CodeTestDefinitionId,
   type CodeTestPackageManager,
 } from "@octant/contracts";
+import { basename } from "node:path";
 import { classifyPathContainment } from "@octant/domain";
 import {
   liveCodeTestSourcePort,
@@ -49,10 +51,14 @@ export interface RepositoryTestDiscoveryRequest {
   readonly checkoutId: string;
   /** Canonical host path of the checkout this thread is bound to. */
   readonly rootPath: string;
+  /** The Project, whose extra folders offer tests of their own. */
+  readonly projectId?: string;
 }
 
 export interface RepositoryTestDiscoveryServiceOptions {
   readonly sourcePort?: CodeTestSourcePort;
+  /** A Project's extra folders, which are discovered like the checkout root. */
+  readonly extraFolders?: (projectId: string) => ReadonlyArray<string>;
 }
 
 /**
@@ -71,9 +77,11 @@ export interface RepositoryTestDiscoveryServiceOptions {
 export class RepositoryTestDiscoveryService {
   readonly #source: CodeTestSourcePort;
   readonly #definitions = new TestDefinitionService();
+  readonly #extraFolders: (projectId: string) => ReadonlyArray<string>;
 
   constructor(options: RepositoryTestDiscoveryServiceOptions = {}) {
     this.#source = options.sourcePort ?? liveCodeTestSourcePort;
+    this.#extraFolders = options.extraFolders ?? (() => []);
   }
 
   async discover(
@@ -91,6 +99,37 @@ export class RepositoryTestDiscoveryService {
         await this.#readJson(canonicalRoot, OCTANT_TESTS_PATH),
       ),
     ];
+    // An extra folder is a plain folder: its tests are named by its absolute
+    // path, run in it, and keep ids of their own so two folders' `test`
+    // scripts are two choices.
+    if (request.projectId !== undefined) {
+      for (const folder of this.#extraFolders(request.projectId)) {
+        const canonicalFolder = await this.#canonicalRoot(folder);
+        if (canonicalFolder === undefined) continue;
+        const scopeId = `${request.checkoutId}\0${canonicalFolder}`;
+        const inFolder = [
+          ...this.#fromPackageScripts(
+            scopeId,
+            await this.#readJson(canonicalFolder, PACKAGE_JSON_PATH),
+          ),
+          ...this.#fromOctantFile(
+            scopeId,
+            await this.#readJson(canonicalFolder, OCTANT_TESTS_PATH),
+          ),
+        ];
+        const label = basename(canonicalFolder);
+        for (const definition of inFolder) {
+          discovered.push(
+            decodeCodeRepositoryTestDefinition({
+              ...definition,
+              name: `${label}: ${definition.name}`.slice(0, 255),
+              cwd:
+                definition.cwd === "." ? canonicalFolder : `${canonicalFolder}/${definition.cwd}`,
+            }),
+          );
+        }
+      }
+    }
     return discovered.slice(0, MAX_DISCOVERED_TEST_DEFINITIONS);
   }
 

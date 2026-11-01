@@ -2133,12 +2133,25 @@ which governs Work and Code alike. The levels, top to bottom, are Ask first,
 Accept edits, Auto, and Full access; Full access is the lowest, and there is
 no separate switch below it. The first time a machine or a Project picks Full
 access, a one-time warning asks to confirm, in the warning role: "Agents can
-change any file and run any command without asking, with no sandbox, so they
-can read your whole home folder, including SSH and cloud keys." It offers
-Cancel (focused) and Use Full access, and is not shown again for that scope.
-A Code tool row whose result was outside content carries an "Outside content"
-tag, followed by what Octant Shield's Watcher found in it in the warning role,
-and the thread's board card a small mark; at Full access the tag stays quiet.
+change any file and run any command without asking, with no sandbox. Protected
+files, such as SSH and cloud keys, are guarded by Octant's own tools and
+redaction only, and a shell command can read them." It
+offers Cancel (focused) and Use Full access, and is not shown again for that
+scope. **Protected files** opens Settings › Permissions, above Remembered
+websites: one row per built-in group (SSH private keys, cloud credentials,
+and so on) whose description lists the paths it covers on this host and the
+channel that replaces them, with a secondary **Remove** button; a removed group
+reads "(not protected)" and offers **Protect again**. Remove opens
+`OctantConfirmDialog` in the destructive role ("Stop protecting …?", Cancel
+focused, **Remove protection**), because every agent can then read those
+files; the host journals the confirmed removal. Paths the person added follow
+as rows with Remove (no confirmation), then one "Protect another path" row with
+a text field and an **Add** button; a refused path is said in the section's
+feedback line. A paired device sees the section as set on the host machine.
+A Code, Chat, or Work tool row whose result was outside content carries an
+"Outside content" tag, followed by what Octant Shield's Watcher found in it in
+the warning role, and a Code thread's board card a small mark; at Full access
+the tag stays quiet.
 Neither prompts. The section also shows, each
 as an account default a Project
 may override: **Auto reviewer** (Provider's own / Octant Shield), **Safe

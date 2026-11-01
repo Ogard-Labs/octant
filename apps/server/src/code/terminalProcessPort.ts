@@ -101,6 +101,11 @@ export interface TerminalLaunchInput {
    * grant puts on `PATH`, and the runtime it starts with.
    */
   readonly additionalReadRoots?: ReadonlyArray<string>;
+  /**
+   * The Project's other folders. The shell reads and writes each as it does
+   * `cwd`, so a person can move between a Project's folders in one terminal.
+   */
+  readonly extraFolders?: ReadonlyArray<string>;
 }
 
 interface TerminalProcessDependencies {
@@ -375,6 +380,9 @@ export class TerminalProcessPort {
         // person installed were missing from a shell that looked like theirs.
         args: ["-l"],
         boundRoot: input.cwd,
+        ...(input.extraFolders === undefined || input.extraFolders.length === 0
+          ? {}
+          : { extraBoundRoots: input.extraFolders }),
         temporaryDirectory: this.#dependencies.temporaryDirectory,
         additionalWriteRoots: [shellState],
         networkEgress: this.#dependencies.networkEgress,
@@ -398,6 +406,7 @@ export class TerminalProcessPort {
         // path (see seatbeltProfile.ts).
         readRoots: [
           input.cwd,
+          ...(input.extraFolders ?? []),
           this.#dependencies.temporaryDirectory,
           shellState,
           shellDirectory,

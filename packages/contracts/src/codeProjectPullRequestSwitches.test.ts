@@ -31,6 +31,25 @@ describe("pull-request switch contracts", () => {
     ).toThrow();
   });
 
+  it("carries a paired device's confirmation of the seen head, and only the literal true", () => {
+    expect(
+      decodeCodeProjectPullRequestMergeWhenReadyCommand({
+        kind: "enable",
+        target,
+        headSha: "a1",
+        confirmed: true,
+      }),
+    ).toMatchObject({ confirmed: true });
+    expect(() =>
+      decodeCodeProjectPullRequestMergeWhenReadyCommand({
+        kind: "enable",
+        target,
+        headSha: "a1",
+        confirmed: false,
+      }),
+    ).toThrow();
+  });
+
   it("names the thread an Auto-fix switch wakes", () => {
     expect(
       decodeCodeProjectPullRequestAutoFixCommand({ kind: "enable", target, threadId }),
