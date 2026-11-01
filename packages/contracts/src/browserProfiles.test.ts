@@ -128,6 +128,11 @@ describe("Browser profiles contract", () => {
       sourceProfile: "Default",
     };
     expect(decodeBrowserProfilesCommand(command)).toEqual(command);
+    expect(decodeBrowserProfilesCommand({ ...command, site: "github.com" })).toEqual({
+      ...command,
+      site: "github.com",
+    });
+    expect(() => decodeBrowserProfilesCommand({ ...command, site: "" })).toThrow();
     expect(decodeBrowserProfilesCommand({ kind: "import-sources" })).toEqual({
       kind: "import-sources",
     });

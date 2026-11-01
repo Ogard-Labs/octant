@@ -8,7 +8,7 @@ import {
   renameSync,
   rmSync,
 } from "node:fs";
-import { join } from "node:path";
+import { join, relative, sep } from "node:path";
 import {
   AggregateId,
   AggregateVersion,
@@ -27,6 +27,7 @@ import {
   decodeBrowserExtensionsResult,
   type BrowserExtensionId,
   type BrowserExtensionRefusalReason,
+  type ExtensionImportBrowserId,
   type BrowserExtensionsCommand,
   type BrowserExtensionsResult,
   type BrowserExtensionSummary,
@@ -46,6 +47,10 @@ import {
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
 import type { BrowserRuntimePort } from "./browserRuntimePort";
+import {
+  listInstalledExtensionSources,
+  publicExtensionSources,
+} from "./extensionImport/extensionImportSources";
 
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
 const decodeAggregateVersion = Schema.decodeUnknownSync(AggregateVersion);
@@ -77,6 +82,8 @@ export interface BrowserExtensionServiceOptions {
     }) => string | undefined;
   };
   readonly runtime: BrowserRuntimePort;
+  /** The person's home folder, where other browsers keep their extensions; absent where none is offered. */
+  readonly importHome?: string;
   readonly readProject: (projectId: ProjectId) => Project | undefined;
   readonly uuid: () => string;
   readonly clock: () => string;
@@ -153,6 +160,7 @@ export class BrowserExtensionService {
   ): Promise<BrowserExtensionsResult> {
     // A paired device may see what is installed and where it runs; changing any of
     // it is the person's, at a window of this computer.
+    // What another browser has installed is the person's business too.
     if (caller !== "local-window" && command.kind !== "list") {
       return refused("extension-not-local", "Browser extensions are managed only on this Mac.");
     }
@@ -164,6 +172,16 @@ export class BrowserExtensionService {
         });
       case "install":
         return this.#install(windowId, command.receiptId);
+      case "import-sources":
+        return decodeBrowserExtensionsResult({
+          kind: "browser-extension-import-sources",
+          sources:
+            this.#options.importHome === undefined
+              ? []
+              : publicExtensionSources(listInstalledExtensionSources(this.#options.importHome)),
+        });
+      case "import":
+        return this.#import(command.browser, command.sourceProfile, command.sourceExtensionId);
       case "enable":
         return this.#enable(command.extensionId, command.profile, command.contentHash);
       case "disable":
@@ -197,6 +215,44 @@ export class BrowserExtensionService {
     } catch {
       return refused("invalid", "The folder's manifest.json is not valid JSON.");
     }
+    return this.#installFolder(folder, manifest, undefined);
+  }
+
+  /**
+   * Copies an extension out of another browser's profile on the person's pick.
+   * The pick must be one the listing offers, so a name from a window never
+   * becomes a path; the extension then follows the same path as a picked folder
+   * and starts off everywhere.
+   */
+  async #import(
+    browser: ExtensionImportBrowserId,
+    sourceProfile: string,
+    sourceExtensionId: string,
+  ): Promise<BrowserExtensionsResult> {
+    if ((await this.#options.runtime.nativeAvailable?.()) !== true) {
+      return refused("extension-unsupported", "Extensions need the Octant app on this Mac.");
+    }
+    const candidate =
+      this.#options.importHome === undefined
+        ? undefined
+        : listInstalledExtensionSources(this.#options.importHome)
+            .find((source) => source.browser === browser)
+            ?.profiles.find((profile) => profile.id === sourceProfile)
+            ?.extensions.find((extension) => extension.id === sourceExtensionId);
+    if (candidate === undefined) {
+      return refused("not-found", "That extension is not in that browser any more.");
+    }
+    if (candidate.unsupportedReason !== undefined) {
+      return refused("extension-unsupported", candidate.unsupportedReason);
+    }
+    return this.#installFolder(candidate.folder, candidate.manifest, browser);
+  }
+
+  async #installFolder(
+    folder: string,
+    manifest: unknown,
+    importedFrom: ExtensionImportBrowserId | undefined,
+  ): Promise<BrowserExtensionsResult> {
     const decision = readExtensionManifest(manifest);
     if (decision.kind === "refused") return refused(decision.reason, decision.message);
     const facts = decision.facts;
@@ -205,7 +261,12 @@ export class BrowserExtensionService {
     let contentHash: string;
     try {
       mkdirSync(this.#directory(), { recursive: true, mode: 0o700 });
-      contentHash = copyFolder(folder, staging);
+      contentHash = copyFolder(
+        folder,
+        staging,
+        // A store copy carries the browser's own integrity files; they mean nothing here.
+        importedFrom === undefined ? NO_SKIPPED_NAMES : BROWSER_PRIVATE_NAMES,
+      );
     } catch (error) {
       rmSync(staging, { recursive: true, force: true });
       return refused(
@@ -239,6 +300,7 @@ export class BrowserExtensionService {
       hostPatterns: facts.access.hostPatterns,
       hasPopup: pageExists(target, facts.popupPage),
       hasOptionsPage: pageExists(target, facts.optionsPage),
+      ...(importedFrom === undefined ? {} : { importedFrom }),
     };
     const updated = previous !== undefined;
     this.#append(
@@ -425,6 +487,14 @@ function aggregateUuid(extensionId: BrowserExtensionId): string {
 
 class FolderRefusal extends Error {}
 
+const NO_SKIPPED_NAMES: ReadonlySet<string> = new Set();
+const BROWSER_PRIVATE_NAMES: ReadonlySet<string> = new Set(["_metadata"]);
+
+/** The first path segment of `path` under `source`, or "" for `source` itself. */
+function relativeTopLevel(source: string, path: string): string {
+  return relative(source, path).split(sep)[0] ?? "";
+}
+
 /**
  * Copies an extension folder and hashes what it copied.
  *
@@ -433,11 +503,16 @@ class FolderRefusal extends Error {}
  * hash covers every path and byte, so two copies hash alike exactly when they are
  * the same extension.
  */
-function copyFolder(source: string, destination: string): string {
+function copyFolder(
+  source: string,
+  destination: string,
+  skippedTopLevel: ReadonlySet<string>,
+): string {
   const files: string[] = [];
   let bytes = 0;
   const walk = (relative: string): void => {
     for (const entry of readdirSync(join(source, relative)).sort()) {
+      if (relative === "" && skippedTopLevel.has(entry)) continue;
       const path = relative === "" ? entry : `${relative}/${entry}`;
       const info = lstatSync(join(source, path));
       if (info.isSymbolicLink())
@@ -462,7 +537,12 @@ function copyFolder(source: string, destination: string): string {
       .update(readFileSync(join(source, path)))
       .update("\0");
   }
-  cpSync(source, destination, { recursive: true, dereference: false, errorOnExist: false });
+  cpSync(source, destination, {
+    recursive: true,
+    dereference: false,
+    errorOnExist: false,
+    filter: (path) => !skippedTopLevel.has(relativeTopLevel(source, path)),
+  });
   return hash.digest("hex");
 }
 

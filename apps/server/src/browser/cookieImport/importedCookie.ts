@@ -79,3 +79,54 @@ export function importedCookieFrom(raw: RawCookie, nowSeconds: number): Imported
     sameSite: raw.sameSite,
   };
 }
+
+/**
+ * The host a person means by "just this site": a bare host or a pasted address,
+ * lower-cased, or undefined when it names no web host.
+ */
+export function normalizeImportSite(input: string): string | undefined {
+  const text = input.trim();
+  if (text === "") return undefined;
+  let host: string;
+  try {
+    host = new URL(text.includes("://") ? text : `https://${text}`).hostname.toLowerCase();
+  } catch {
+    return undefined;
+  }
+  if (host.endsWith(".")) host = host.slice(0, -1);
+  return HOSTNAME_PATTERN.test(host) && host.length <= 253 ? host : undefined;
+}
+
+/**
+ * Whether a cookie stored under `rawHost` is one this site would send: the
+ * site's own cookies, and domain cookies of its parent domains. A host-only
+ * cookie of a parent is not sent to a subdomain, and a bare top-level domain
+ * is never a parent, so neither is imported.
+ */
+export function cookieHostMatchesSite(rawHost: string, site: string): boolean {
+  const hostOnly = !rawHost.startsWith(".");
+  const host = (hostOnly ? rawHost : rawHost.slice(1)).toLowerCase();
+  if (host === site) return true;
+  return !hostOnly && host.includes(".") && site.endsWith(`.${host}`);
+}
+
+/**
+ * The `host_key` values a site's cookies can be stored under: the site, and each
+ * parent with at least two labels, in host-only and domain form. Used to select
+ * rows in SQL, so a large profile's row cap never hides the site's own cookies.
+ */
+export function siteCookieHosts(site: string): ReadonlyArray<string> {
+  const labels = site.split(".");
+  const hosts: string[] = [];
+  for (let start = 0; start < labels.length; start += 1) {
+    const host = labels.slice(start).join(".");
+    if (start > 0 && !host.includes(".")) break;
+    hosts.push(host, `.${host}`);
+  }
+  return hosts;
+}
+
+/** The hosts as an SQL list. They are already held to hostname characters; quotes are doubled regardless. */
+export function sqlHostList(hosts: ReadonlyArray<string>): string {
+  return hosts.map((host) => `'${host.replaceAll("'", "''")}'`).join(", ");
+}

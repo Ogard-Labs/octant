@@ -1544,7 +1544,7 @@ A Project browser is the person's browser, never an agent's. A page is Private u
 - A Project context is isolated and ephemeral, registered under an owner id derived from the Project, so no thread surface can attach and no thread approval carries into it.
 - Only the person at a local window may open, read or close it; a paired device is refused.
 - Profile pages open only in the desktop app's native Browser, and an agent acts on an origin there only after a site approval naming the profile.
-- Browser extensions install only from an unpacked folder at a local window, start disabled, are enabled per profile, and never load into a Private page.
+- Browser extensions install only at a local window, from an unpacked folder or from a copy of an extension the person picks in another Chromium-family browser on this Mac (never loaded in place; Manifest V2 and native-messaging extensions are listed as unsupported), start disabled, are enabled per profile, and never load into a Private page.
 - Octant never opens or imports another browser's profile.
 
 Status: Built. Since: —. Detail: [Architecture: Security and authority, Project browsing contexts](../architecture.md#security-and-authority) and [Browser profiles and extensions](../architecture.md#security-and-authority).
@@ -2253,6 +2253,7 @@ Status: Built. Since: —. Detail: [Search queries on a tainted thread](search-q
 Browser pages can keep sign-ins in named profiles, and a person may import cookies from another browser into a profile.
 
 - Octant never opens another browser's profile in place; the person's explicit pick of a browser and one of its profiles is the only way its cookies reach a Project or Personal profile.
+- The person may import every cookie in the chosen browser profile or only one site's and its parent domains'; the journal records only that the import was limited to a site.
 - A Chromium-family browser's cookie key comes through the macOS Keychain prompt; a refusal imports nothing. Cookies are never logged, journaled, returned to a window, or sent off the Mac, and the journal records the source, the profile, and counts.
 
 Status: Built. Since: 2026-10-31. Detail: [Browser profiles and extensions: Cookie import](browser-profiles.md#cookie-import).
