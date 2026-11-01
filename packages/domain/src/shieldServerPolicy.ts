@@ -277,6 +277,259 @@ function guessHost(text: string): string | undefined {
 }
 
 // ---------------------------------------------------------------------------
+// Reading an scp or rsync command.
+
+export type FileCopyInvocation =
+  | {
+      readonly kind: "copy";
+      readonly program: "scp" | "rsync";
+      /** Every operand on a server, as `[user@]host:path`. */
+      readonly remotes: ReadonlyArray<{
+        readonly host: string;
+        readonly user: string | undefined;
+        readonly path: string;
+      }>;
+      /** Every operand on this computer. */
+      readonly locals: ReadonlyArray<string>;
+      /** `upload` when the destination is on a server, else `download`. */
+      readonly direction: "download" | "upload";
+      /** Every option only tunes the copy; none runs a program, tunnels, or reaches a daemon. */
+      readonly optionsPlain: boolean;
+      /** An option names a key file. */
+      readonly keyPath: boolean;
+      /** The copy deletes files: `--delete` and its kin, or `--remove-source-files`. */
+      readonly destructive: boolean;
+      /** An rsync option no rule names, which the model judges. */
+      readonly unknownOption: boolean;
+    }
+  | { readonly kind: "unreadable" }
+  | { readonly kind: "not-copy" };
+
+/** scp options with no value that change nothing but the copy's chatter or attributes. */
+const SCP_PLAIN_FLAGS = new Set(["4", "6", "B", "C", "O", "p", "q", "r", "s", "T", "v"]);
+const SCP_VALUE_FLAGS = new Set(["c", "D", "F", "i", "J", "l", "o", "P", "S", "X"]);
+/** rsync short options that only shape the copy. `-e` and `-f` take a value and are read apart. */
+const RSYNC_PLAIN_FLAGS = new Set("avzrlptgoDhPnucHqixSIWmOJ");
+const RSYNC_PLAIN_LONG = new Set([
+  "archive",
+  "verbose",
+  "compress",
+  "recursive",
+  "links",
+  "perms",
+  "times",
+  "group",
+  "owner",
+  "devices",
+  "specials",
+  "human-readable",
+  "progress",
+  "partial",
+  "dry-run",
+  "update",
+  "checksum",
+  "hard-links",
+  "quiet",
+  "itemize-changes",
+  "one-file-system",
+  "sparse",
+  "stats",
+  "ignore-times",
+  "whole-file",
+  "prune-empty-dirs",
+  "omit-dir-times",
+  "omit-link-times",
+  "exclude",
+  "include",
+  "exclude-from",
+  "include-from",
+  "filter",
+  "bwlimit",
+  "timeout",
+  "contimeout",
+  "size-only",
+  "existing",
+  "ignore-existing",
+  "mkpath",
+]);
+/** Text a server's shell would expand or act on in a remote path. */
+const REMOTE_SHELL_TEXT = /[$`;|&<>(){}\\'"!\n\r]/;
+/** rsync long options that take a value, as `--name=value` or as the next word. */
+const RSYNC_VALUE_LONG = new Set([
+  "exclude",
+  "include",
+  "exclude-from",
+  "include-from",
+  "filter",
+  "bwlimit",
+  "timeout",
+  "contimeout",
+]);
+/** rsync options that run a program here or on the server, or reach something but the server's shell. */
+const RSYNC_PROGRAM_LONG = new Set(["rsh", "rsync-path", "daemon", "port", "address", "sockopts"]);
+
+/** `[user@]host:path`, the remote operand both programs read; a slash before the colon makes it local. */
+function remoteOperand(
+  word: string,
+): { readonly host: string; readonly user: string | undefined; readonly path: string } | undefined {
+  const colon = word.indexOf(":");
+  if (colon <= 0) return undefined;
+  const target = word.slice(0, colon);
+  if (target.includes("/")) return undefined;
+  const at = target.lastIndexOf("@");
+  const host = at === -1 ? target : target.slice(at + 1);
+  return { host, user: at === -1 ? undefined : target.slice(0, at), path: word.slice(colon + 1) };
+}
+
+/**
+ * Reads `scp …` or `rsync …` exactly as the local shell would pass it on, as
+ * `parseSshInvocation` reads ssh. Only a copy with at least one operand on a
+ * server is one; a local copy is `not-copy`.
+ */
+export function parseFileCopyInvocation(command: string): FileCopyInvocation {
+  const trimmed = command.trim();
+  const first = withoutQuotes(trimmed.split(/\s+/, 1)[0] ?? "");
+  const program = /^(?:\/(?:usr\/)?(?:local\/)?bin\/)?(scp|rsync)$/.exec(first)?.[1];
+  if (program !== "scp" && program !== "rsync") return { kind: "not-copy" };
+  const words = localWords(trimmed);
+  if (words === undefined) return { kind: "unreadable" };
+  let optionsPlain = true;
+  let keyPath = false;
+  let destructive = false;
+  let unknownOption = false;
+  const operands: string[] = [];
+  for (let index = 1; index < words.length; index += 1) {
+    const word = words[index] ?? "";
+    if (word === "--") {
+      operands.push(...words.slice(index + 1));
+      break;
+    }
+    if (!word.startsWith("-") || word.length < 2) {
+      operands.push(word);
+      continue;
+    }
+    if (program === "rsync" && word.startsWith("--")) {
+      const [name = "", value] = word.slice(2).split("=", 2);
+      if (name.startsWith("delete") || name === "remove-source-files") destructive = true;
+      else if (RSYNC_PROGRAM_LONG.has(name)) optionsPlain = false;
+      else if (!RSYNC_PLAIN_LONG.has(name)) unknownOption = true;
+      if (value !== undefined && KEY_FILE.test(value)) keyPath = true;
+      // A value given as the next word is not an operand.
+      if (value === undefined && (RSYNC_VALUE_LONG.has(name) || RSYNC_PROGRAM_LONG.has(name))) {
+        index += 1;
+      }
+      continue;
+    }
+    const flags = word.slice(1);
+    for (let at = 0; at < flags.length; at += 1) {
+      const flag = flags.charAt(at);
+      if (program === "rsync") {
+        if (RSYNC_PLAIN_FLAGS.has(flag)) continue;
+        if (flag === "e" || flag === "f") {
+          // `-e` names the program rsync runs to reach the server.
+          if (flag === "e") optionsPlain = false;
+          if (at === flags.length - 1) index += 1;
+          break;
+        }
+        unknownOption = true;
+        continue;
+      }
+      if (SCP_PLAIN_FLAGS.has(flag)) continue;
+      if (!SCP_VALUE_FLAGS.has(flag)) {
+        // `-3` copies through here, `-A` forwards the agent, `-R` copies between servers.
+        optionsPlain = false;
+        continue;
+      }
+      const attached = flags.slice(at + 1);
+      const value = attached.length > 0 ? attached : words[index + 1];
+      if (attached.length === 0) index += 1;
+      if (value === undefined) return { kind: "unreadable" };
+      if (flag === "i") {
+        keyPath = true;
+        optionsPlain = false;
+      } else if (flag === "o") {
+        const [key = "", setting = ""] = value.split(/[=\s]/, 2);
+        if (KEY_FILE.test(setting) || /^identityfile$/i.test(key)) keyPath = true;
+        if (!PLAIN_CONFIG_KEYS.has(key.toLowerCase())) optionsPlain = false;
+      } else if (flag !== "P" && flag !== "l") {
+        optionsPlain = false;
+      }
+      break;
+    }
+  }
+  const remotes: Array<{ host: string; user: string | undefined; path: string }> = [];
+  const locals: string[] = [];
+  for (const operand of operands) {
+    // A daemon (`host::module`, `rsync://`) or a URL is not the server's shell.
+    if (/^(?:rsync|scp|sftp):\/\//i.test(operand) || /^[^/]*::/.test(operand)) {
+      optionsPlain = false;
+      const host = /^(?:[a-z]+:\/\/)?(?:[^@/]*@)?([^:/]+)/i.exec(operand)?.[1];
+      if (host !== undefined) remotes.push({ host, user: undefined, path: "" });
+      continue;
+    }
+    const remote = remoteOperand(operand);
+    if (remote === undefined) locals.push(operand);
+    else remotes.push(remote);
+  }
+  if (remotes.length === 0) return { kind: "not-copy" };
+  if (operands.length < 2) return { kind: "unreadable" };
+  if (remotes.some((remote) => remote.host.length === 0 || remote.host.startsWith("-"))) {
+    return { kind: "unreadable" };
+  }
+  // The last operand is the destination; its shape says which way files go.
+  const destination = operands[operands.length - 1] ?? "";
+  const toServer =
+    remoteOperand(destination) !== undefined ||
+    /^(?:rsync|scp|sftp):\/\//i.test(destination) ||
+    /^[^/]*::/.test(destination);
+  return {
+    kind: "copy",
+    program,
+    remotes,
+    locals,
+    direction: toServer ? "upload" : "download",
+    optionsPlain,
+    keyPath,
+    destructive,
+    unknownOption,
+  };
+}
+
+/**
+ * The hosts a command reaches when it is one plain `ssh`, `scp`, or `rsync`
+ * call: what the host opens a confined path to. A command that does more
+ * reaches none, since a word check could not tell where it goes.
+ */
+export function remoteHostsNamedBy(command: string): ReadonlyArray<string> {
+  const ssh = parseSshInvocation(command);
+  if (ssh.kind === "ssh") return [ssh.host];
+  if (ssh.kind === "unreadable") return [];
+  const copy = parseFileCopyInvocation(command);
+  if (copy.kind !== "copy") return [];
+  return [...new Set(copy.remotes.map((remote) => remote.host))];
+}
+
+/** The tier of a copy's server side: a download reads, an upload is a configuration change. */
+export function fileCopyTier(
+  copy: Extract<FileCopyInvocation, { kind: "copy" }>,
+): ShieldRemoteCommandTier {
+  if (copy.destructive) return "lockout";
+  if (
+    copy.direction === "upload" &&
+    copy.remotes.some((remote) => LOCKOUT_PATHS.test(remote.path))
+  ) {
+    return "lockout";
+  }
+  // Legacy scp (`-O`) and rsync hand a remote path to the server's shell,
+  // so a path it would expand or run (`$(…)`, a separator, a redirection) is
+  // a command, not a file name; a glob only matches files.
+  if (copy.unknownOption || copy.remotes.some((remote) => REMOTE_SHELL_TEXT.test(remote.path))) {
+    return "unknown";
+  }
+  return copy.direction === "download" ? "read" : "admin";
+}
+
+// ---------------------------------------------------------------------------
 // Placing a remote command.
 
 interface RemoteSegment {

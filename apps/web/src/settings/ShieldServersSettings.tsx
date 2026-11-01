@@ -1,4 +1,5 @@
 import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
+import type { AggregateId } from "@octant/contracts/events";
 import type {
   ShieldServer,
   ShieldServerFields,
@@ -6,7 +7,7 @@ import type {
   ShieldServersCommand,
   ShieldServersView,
 } from "@octant/contracts/shield-servers";
-import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -18,6 +19,8 @@ export interface ShieldServersSettingsProps {
   /** Absent off this computer: the registry is host authority. */
   readonly client: Pick<ShieldServersClient, "read" | "command"> | undefined;
   readonly focusedSetting?: string | undefined;
+  /** Project names by id, for the picker; the host's own ids. */
+  readonly projectNames: ReadonlyMap<string, string>;
 }
 
 export const SHIELD_SERVERS_INTRO =
@@ -26,6 +29,9 @@ export const SHIELD_SSH_AGENT_MISSING_NOTE =
   "No SSH agent is running for Octant, so SSH commands cannot sign in.";
 export const SHIELD_SERVERS_ALWAYS_ASK_NOTE =
   "Lock-out and destructive actions (firewall changes, removing users or keys, disk changes, deleting data, reboots) always ask you.";
+
+export const SHIELD_PROJECT_SERVERS_NOTE =
+  "A Project's own list replaces the account list for that Project's threads.";
 
 const PROFILE_LABELS: Readonly<Record<ShieldServerProfile, string>> = {
   "read-only": "Read-only",
@@ -54,8 +60,20 @@ function deployLines(text: string): ReadonlyArray<string> {
     .filter((line) => line !== "");
 }
 
+function fieldsOf(server: ShieldServer): ShieldServerFields {
+  return {
+    alias: server.alias,
+    user: server.user,
+    profile: server.profile,
+    deployCommands: server.deployCommands,
+    ...(server.runbookPath === undefined ? {} : { runbookPath: server.runbookPath }),
+  };
+}
+
 interface ServerFormProps {
   readonly editing: ShieldServer | undefined;
+  /** Names the form when two lists can be on screen: the Project's name. */
+  readonly forProject?: string | undefined;
   readonly busy: boolean;
   readonly problem: string | undefined;
   readonly onSubmit: (fields: ShieldServerFields) => void;
@@ -85,7 +103,15 @@ function ServerForm(props: ServerFormProps) {
 
   return (
     <form
-      aria-label={editing === undefined ? "Add a server" : `Change ${editing.alias}`}
+      aria-label={
+        editing === undefined
+          ? props.forProject === undefined
+            ? "Add a server"
+            : `Add a server to ${props.forProject}`
+          : props.forProject === undefined
+            ? `Change ${editing.alias}`
+            : `Change ${editing.alias} for ${props.forProject}`
+      }
       className="shield-servers__form"
       noValidate
       onSubmit={submit}
@@ -183,22 +209,153 @@ function ServerForm(props: ServerFormProps) {
   );
 }
 
+interface ServerEditorProps {
+  readonly servers: ReadonlyArray<ShieldServer>;
+  readonly busy: boolean;
+  readonly problem: string | undefined;
+  /** The Project whose list this is; absent for the account list. */
+  readonly forProject?: string | undefined;
+  readonly onClearProblem: () => void;
+  readonly onAdd: (fields: ShieldServerFields) => Promise<boolean>;
+  readonly onChange: (server: ShieldServer, fields: ShieldServerFields) => Promise<boolean>;
+  readonly onRemove: (server: ShieldServer) => Promise<boolean>;
+}
+
 /**
- * Settings › Servers: the servers a person registers with Octant Shield, each
- * with the profile that bounds what a thread may do there without asking.
- * Only a local window edits the registry; a refusal from the host is shown
- * beside the form exactly as it arrived.
+ * One list of servers with the add, change and remove controls over it. The
+ * account list and a Project's own list share it; each edit is handed to the
+ * owner, which decides what whole command to send.
  */
-export function ShieldServersSettings(props: ShieldServersSettingsProps) {
-  const { client } = props;
-  const root = useRef<HTMLDivElement>(null);
-  const [view, setView] = useState<ShieldServersView | undefined>(undefined);
-  const [loadFailed, setLoadFailed] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<string | undefined>(undefined);
+function ServerEditor(props: ServerEditorProps) {
+  const { servers, forProject } = props;
   const [editingId, setEditingId] = useState<string | undefined>(undefined);
   /** Bumped after a successful add so the form remounts empty. */
   const [formKey, setFormKey] = useState(0);
+  const editing = servers.find((server) => String(server.serverId) === editingId);
+  const suffix = forProject === undefined ? "" : ` for ${forProject}`;
+
+  return (
+    <>
+      {servers.length === 0 ? (
+        <p className="shield-servers__empty">No servers registered.</p>
+      ) : (
+        <ul
+          aria-label={forProject === undefined ? "Registered servers" : `${forProject} servers`}
+          className="shield-servers__list"
+        >
+          {servers.map((server) => (
+            <li className="shield-servers__server" key={String(server.serverId)}>
+              <span className="shield-servers__name">{server.alias}</span>
+              <span className="shield-servers__login">
+                {server.user}@{server.alias}
+              </span>
+              <span className="shield-servers__profile">{PROFILE_LABELS[server.profile]}</span>
+              {server.runbookPath === undefined ? null : (
+                <span className="shield-servers__runbook">{server.runbookPath}</span>
+              )}
+              {server.deployCommands.length === 0 ? null : (
+                <span className="shield-servers__deploys">
+                  {server.deployCommands.length === 1
+                    ? "1 deploy command"
+                    : `${server.deployCommands.length} deploy commands`}
+                </span>
+              )}
+              <span className="shield-servers__row-actions">
+                <OctantButton
+                  aria-label={`Change ${server.alias}${suffix}`}
+                  disabled={props.busy}
+                  onClick={() => {
+                    props.onClearProblem();
+                    setEditingId(String(server.serverId));
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  Change
+                </OctantButton>
+                <OctantButton
+                  aria-label={`Remove ${server.alias}${suffix}`}
+                  disabled={props.busy}
+                  onClick={() => {
+                    void props.onRemove(server).then((removed) => {
+                      if (removed && editingId === String(server.serverId)) {
+                        setEditingId(undefined);
+                      }
+                    });
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Remove
+                </OctantButton>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <h3 className="shield-servers__heading">
+        {editing === undefined ? "Add a server" : "Change a server"}
+      </h3>
+      <p className="shield-servers__note">
+        {editing === undefined
+          ? "Use a host alias from your SSH config."
+          : `Changing ${editing.alias}.`}
+      </p>
+      <div data-setting-id={forProject === undefined ? "shield-servers-add" : undefined}>
+        <ServerForm
+          busy={props.busy}
+          editing={editing}
+          forProject={forProject}
+          key={editing === undefined ? `add:${String(formKey)}` : String(editing.serverId)}
+          onCancel={() => {
+            props.onClearProblem();
+            setEditingId(undefined);
+          }}
+          onSubmit={(fields) => {
+            const saved =
+              editing === undefined ? props.onAdd(fields) : props.onChange(editing, fields);
+            void saved.then((ok) => {
+              if (!ok) return;
+              setEditingId(undefined);
+              setFormKey((key) => key + 1);
+            });
+          }}
+          problem={props.problem}
+        />
+      </div>
+    </>
+  );
+}
+
+type Problem = { readonly scope: "account" | "project"; readonly message: string };
+
+/**
+ * Settings › Servers: the servers a person registers with Octant Shield, each
+ * with the profile that bounds what a thread may do there without asking, and
+ * a Project that keeps a list of its own in their place. Only a local window
+ * edits the registry; a refusal from the host is shown beside the form
+ * exactly as it arrived.
+ */
+export function ShieldServersSettings(props: ShieldServersSettingsProps) {
+  const { client } = props;
+  const pickerId = useId();
+  const root = useRef<HTMLDivElement>(null);
+  const requestNumber = useRef(0);
+  /**
+   * The Project the picker names now. An answer read or saved for another
+   * selection is dropped when it arrives, so a slow answer about Project A
+   * never lands on Project B.
+   */
+  const selected = useRef("");
+  const [projectId, setProjectId] = useState("");
+  const [view, setView] = useState<ShieldServersView | undefined>(undefined);
+  /** The selection `view` was read for; Project controls show only when it is the picker's. */
+  const [loadedFor, setLoadedFor] = useState<string | undefined>(undefined);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<Problem | undefined>(undefined);
 
   const focused = props.focusedSetting?.startsWith("shield-servers") === true;
   useEffect(() => {
@@ -207,38 +364,87 @@ export function ShieldServersSettings(props: ShieldServersSettingsProps) {
     root.current.scrollIntoView?.({ block: "center" });
   }, [focused]);
 
-  const load = useCallback(async () => {
-    if (client === undefined) return;
-    try {
-      setView(await client.read());
-      setLoadFailed(false);
-    } catch {
-      setLoadFailed(true);
-    }
-  }, [client]);
+  const load = useCallback(
+    async (chosen: string) => {
+      if (client === undefined) return;
+      const mine = ++requestNumber.current;
+      try {
+        const next = await client.read(chosen === "" ? undefined : chosen);
+        if (mine !== requestNumber.current || chosen !== selected.current) return;
+        setView(next);
+        setLoadedFor(chosen);
+        setLoadFailed(false);
+      } catch {
+        if (mine === requestNumber.current) setLoadFailed(true);
+      }
+    },
+    [client],
+  );
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void load(projectId);
+  }, [load, projectId]);
 
-  async function send(command: ShieldServersCommand): Promise<boolean> {
+  const projectOptions = useMemo(
+    () => [
+      { id: "", label: "No Project chosen" },
+      ...[...props.projectNames.entries()]
+        .map(([id, name]) => ({ id, label: name }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    ],
+    [props.projectNames],
+  );
+  const projectName = props.projectNames.get(projectId) ?? "this Project";
+
+  async function send(command: ShieldServersCommand, scope: "account" | "project") {
     if (client === undefined) return false;
+    const sentFor = projectId;
     setProblem(undefined);
     setBusy(true);
     try {
       const result = await client.command(command);
-      if (result.kind === "shield-servers-updated") {
-        setView(result.view);
-        return true;
+      if (result.kind !== "shield-servers-updated") {
+        if (sentFor === selected.current) setProblem({ scope, message: result.message });
+        return false;
       }
-      setProblem(result.message);
-      return false;
+      // The answer to an account command describes no Project, and the answer
+      // to a Project command is about the Project it was sent for, which the
+      // person may have left while it was saved. Either way only what it
+      // describes is taken.
+      if (scope === "account") {
+        const { servers, sshAgent } = result.view;
+        setView((current) =>
+          current === undefined ? result.view : { ...current, servers, sshAgent },
+        );
+      } else if (sentFor === selected.current) {
+        setView(result.view);
+      }
+      return true;
     } catch {
-      setProblem("Servers could not be saved.");
+      if (sentFor === selected.current) {
+        setProblem({ scope, message: "Servers could not be saved." });
+      }
       return false;
     } finally {
       setBusy(false);
     }
+  }
+
+  /** The picker only offers the host's own Project ids. */
+  const chosenProject = () => projectId as AggregateId;
+  /** Whether what is shown for the Project is the picker's Project, read for it. */
+  const showsChosenProject =
+    projectId !== "" &&
+    loadedFor === projectId &&
+    view?.project !== undefined &&
+    String(view.project.projectId) === projectId;
+
+  function chooseProject(next: string) {
+    if (next === selected.current) return;
+    selected.current = next;
+    setProblem(undefined);
+    setLoadedFor(undefined);
+    setProjectId(next);
   }
 
   if (client === undefined) {
@@ -256,7 +462,17 @@ export function ShieldServersSettings(props: ShieldServersSettingsProps) {
     );
   }
 
-  const editing = view.servers.find((server) => String(server.serverId) === editingId);
+  const projectView = showsChosenProject ? view.project : undefined;
+  const readingProject = projectId !== "" && loadedFor !== projectId;
+  const override = projectView?.override ?? null;
+  const problemFor = (scope: "account" | "project") =>
+    problem?.scope === scope ? problem.message : undefined;
+
+  // A Project's list is only ever saved whole, and only to the Project it was read for.
+  const saveProject = (servers: ReadonlyArray<ShieldServerFields>) =>
+    showsChosenProject
+      ? send({ kind: "set-project-servers", projectId: chosenProject(), servers }, "project")
+      : Promise.resolve(false);
 
   return (
     <div
@@ -278,96 +494,104 @@ export function ShieldServersSettings(props: ShieldServersSettingsProps) {
           ))}
         </ul>
         <p className="shield-servers__note">{SHIELD_SERVERS_ALWAYS_ASK_NOTE}</p>
-        {view.servers.length === 0 ? (
-          <p className="shield-servers__empty">No servers registered.</p>
-        ) : (
-          <ul aria-label="Registered servers" className="shield-servers__list">
-            {view.servers.map((server) => (
-              <li className="shield-servers__server" key={String(server.serverId)}>
-                <span className="shield-servers__name">{server.alias}</span>
-                <span className="shield-servers__login">
-                  {server.user}@{server.alias}
-                </span>
-                <span className="shield-servers__profile">{PROFILE_LABELS[server.profile]}</span>
-                {server.runbookPath === undefined ? null : (
-                  <span className="shield-servers__runbook">{server.runbookPath}</span>
-                )}
-                {server.deployCommands.length === 0 ? null : (
-                  <span className="shield-servers__deploys">
-                    {server.deployCommands.length === 1
-                      ? "1 deploy command"
-                      : `${server.deployCommands.length} deploy commands`}
-                  </span>
-                )}
-                <span className="shield-servers__row-actions">
-                  <OctantButton
-                    aria-label={`Change ${server.alias}`}
-                    disabled={busy}
-                    onClick={() => {
-                      setProblem(undefined);
-                      setEditingId(String(server.serverId));
-                    }}
-                    size="sm"
-                    type="button"
-                    variant="secondary"
-                  >
-                    Change
-                  </OctantButton>
-                  <OctantButton
-                    aria-label={`Remove ${server.alias}`}
-                    disabled={busy}
-                    onClick={() => {
-                      void send({ kind: "remove-server", serverId: server.serverId }).then(
-                        (removed) => {
-                          if (removed && editingId === String(server.serverId)) {
-                            setEditingId(undefined);
-                          }
-                        },
-                      );
-                    }}
-                    size="sm"
-                    type="button"
-                    variant="ghost"
-                  >
-                    Remove
-                  </OctantButton>
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
+        <ServerEditor
+          busy={busy}
+          onAdd={(fields) => send({ kind: "register-server", server: fields }, "account")}
+          onChange={(server, fields) =>
+            send({ kind: "change-server", serverId: server.serverId, server: fields }, "account")
+          }
+          onClearProblem={() => setProblem(undefined)}
+          onRemove={(server) =>
+            send({ kind: "remove-server", serverId: server.serverId }, "account")
+          }
+          problem={problemFor("account")}
+          servers={view.servers}
+        />
       </SettingsPanel>
-      <SettingsPanel
-        description={
-          editing === undefined
-            ? "Use a host alias from your SSH config."
-            : `Changing ${editing.alias}.`
-        }
-        title={editing === undefined ? "Add a server" : "Change a server"}
-      >
-        <div data-setting-id="shield-servers-add">
-          <ServerForm
-            busy={busy}
-            editing={editing}
-            key={editing === undefined ? `add:${String(formKey)}` : String(editing.serverId)}
-            onCancel={() => {
-              setProblem(undefined);
-              setEditingId(undefined);
-            }}
-            onSubmit={(fields) => {
-              const command: ShieldServersCommand =
-                editing === undefined
-                  ? { kind: "register-server", server: fields }
-                  : { kind: "change-server", serverId: editing.serverId, server: fields };
-              void send(command).then((saved) => {
-                if (!saved) return;
-                setEditingId(undefined);
-                setFormKey((key) => key + 1);
-              });
-            }}
-            problem={problem}
+      <SettingsPanel description={SHIELD_PROJECT_SERVERS_NOTE} title="Project">
+        <div className="host-settings__field">
+          <label htmlFor={pickerId}>Project</label>
+          <OctantSelectField
+            id={pickerId}
+            aria-label="Project"
+            onValueChange={chooseProject}
+            options={projectOptions}
+            value={projectId}
           />
         </div>
+        {readingProject ? (
+          <SettingsState kind="loading">Reading this Project's servers…</SettingsState>
+        ) : null}
+        {projectView === undefined ? null : (
+          <>
+            <div
+              aria-label={`Servers for ${projectName}`}
+              className="shield-servers__choice"
+              role="group"
+            >
+              <OctantButton
+                aria-pressed={override === null}
+                disabled={busy}
+                onClick={() => {
+                  if (override === null) return;
+                  void send(
+                    { kind: "clear-project-override", projectId: chosenProject() },
+                    "project",
+                  );
+                }}
+                size="sm"
+                type="button"
+                variant={override === null ? "secondary" : "ghost"}
+              >
+                Use the account's servers
+              </OctantButton>
+              <OctantButton
+                aria-pressed={override !== null}
+                disabled={busy}
+                onClick={() => {
+                  if (override !== null) return;
+                  // The own list starts as a copy of the account list.
+                  void saveProject(view.servers.map(fieldsOf));
+                }}
+                size="sm"
+                type="button"
+                variant={override !== null ? "secondary" : "ghost"}
+              >
+                Use servers for this Project only
+              </OctantButton>
+            </div>
+            {override === null ? (
+              <p className="shield-servers__note">
+                {projectName} uses the account's servers. Choose its own list to change them for
+                this Project only.
+              </p>
+            ) : (
+              <>
+                <p className="shield-servers__note">{projectName} has its own servers.</p>
+                <ServerEditor
+                  busy={busy}
+                  forProject={projectName}
+                  onAdd={(fields) => saveProject([...override.map(fieldsOf), fields])}
+                  onChange={(server, fields) =>
+                    saveProject(
+                      override.map((entry) =>
+                        entry.serverId === server.serverId ? fields : fieldsOf(entry),
+                      ),
+                    )
+                  }
+                  onClearProblem={() => setProblem(undefined)}
+                  onRemove={(server) =>
+                    saveProject(
+                      override.filter((entry) => entry.serverId !== server.serverId).map(fieldsOf),
+                    )
+                  }
+                  problem={problemFor("project")}
+                  servers={override}
+                />
+              </>
+            )}
+          </>
+        )}
       </SettingsPanel>
     </div>
   );

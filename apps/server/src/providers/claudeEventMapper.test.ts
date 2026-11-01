@@ -431,6 +431,28 @@ describe("mapClaudeMessage", () => {
     },
   );
 
+  it("names a started shell command only when it reaches a server", () => {
+    const start = (command: string) =>
+      mapped(context(), {
+        kind: "stream-event",
+        sessionId: claudeSessionId,
+        event: {
+          kind: "content-start",
+          index: 0,
+          content: {
+            kind: "tool-use",
+            toolUseId: "sdk-tool-1",
+            toolName: "Bash",
+            input: { command },
+          },
+        },
+      });
+    expect(start("ssh web1 uptime")).toMatchObject([
+      { kind: "event", event: { kind: "tool-start", argument: "ssh web1 uptime" } },
+    ]);
+    expect(JSON.stringify(start("cat notes.txt"))).not.toContain("notes.txt");
+  });
+
   it("maps tool start, bounded progress, and sanitized success/failure results", () => {
     const ctx = context();
     const started = mapped(ctx, {

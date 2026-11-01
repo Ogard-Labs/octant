@@ -7,6 +7,7 @@ import type { AutomationEditorCatalog } from "./automationCenterModel";
 import {
   AUTOMATION_UI_TEST_IDS,
   AUTOMATION_UI_TEST_NOW,
+  automationChatDraftFixture,
   automationCodeDraftFixture,
   automationWorkDraftFixture,
   automationDefinitionFixture,
@@ -14,6 +15,7 @@ import {
 
 const workDraft = automationWorkDraftFixture();
 const codeDraft = automationCodeDraftFixture();
+const chatDraft = automationChatDraftFixture();
 
 function catalog(overrides: Partial<AutomationEditorCatalog> = {}): AutomationEditorCatalog {
   return {
@@ -33,14 +35,23 @@ function catalog(overrides: Partial<AutomationEditorCatalog> = {}): AutomationEd
         projectVersion: codeDraft.projectVersion,
         binding: codeDraft.binding,
       },
+      {
+        projectId: chatDraft.projectId,
+        name: "Briefings",
+        mode: "chat",
+        projectVersion: chatDraft.projectVersion,
+        binding: chatDraft.binding,
+      },
     ],
     executionProfiles: [
       { label: "Work default", receipt: workDraft.executionProfile },
       { label: "Code default", receipt: codeDraft.executionProfile },
+      { label: "Chat default", receipt: chatDraft.executionProfile },
     ],
     authorityProfiles: [
       { label: "Ask for approvals Work", receipt: workDraft.authorityProfile },
       { label: "Ask for approvals Code", receipt: codeDraft.authorityProfile },
+      { label: "Ask for approvals Chat", receipt: chatDraft.authorityProfile },
     ],
     actorId: AUTOMATION_UI_TEST_IDS.actor,
     ...overrides,
@@ -131,10 +142,7 @@ describe("AutomationDefinitionEditor creation", () => {
     expect(draft.projectLevel).toBeUndefined();
   });
 
-  it("records the person's opt-in to run at the Project's mode, Full access included", async () => {
-    const props = editorProps();
-    render(<AutomationDefinitionEditor {...props} />);
-
+  async function fillWorkRoutine(): Promise<void> {
     await userEvent.type(screen.getByLabelText("Name"), "Weekly summary");
     await userEvent.type(screen.getByLabelText("Task for each run"), "Summarize open work.");
     await chooseLabeledOption("Project", "Docs Project");
@@ -143,18 +151,75 @@ describe("AutomationDefinitionEditor creation", () => {
     await chooseLabeledOption("Schedule", "Run once");
     fireEvent.change(screen.getByLabelText("Run at"), { target: { value: "2026-09-01T09:00" } });
     await userEvent.type(screen.getByLabelText("Delivery"), "A weekly summary exists.");
-    const optIn = screen.getByLabelText("Run at this Project's mode");
-    expect(optIn).toHaveAccessibleDescription(/Full access included/);
-    await userEvent.click(optIn);
     await userEvent.click(
       screen.getByLabelText("I confirm this delivery target for every scheduled run"),
     );
-    await userEvent.click(screen.getByRole("button", { name: "Save automation" }));
+  }
 
+  async function savedDraft(props: ReturnType<typeof editorProps>) {
+    await userEvent.click(screen.getByRole("button", { name: "Save automation" }));
     await waitFor(() => expect(props.onSubmit).toHaveBeenCalledOnce());
-    const draft = (props.onSubmit as ReturnType<typeof vi.fn>).mock
+    return (props.onSubmit as ReturnType<typeof vi.fn>).mock
       .calls[0]![0] as AutomationDefinitionDraft;
+  }
+
+  it("records the person's choice to run at the Project's mode, Full access included", async () => {
+    const props = editorProps();
+    render(<AutomationDefinitionEditor {...props} />);
+    await fillWorkRoutine();
+
+    expect(screen.getByText(/Full access means no sandbox and no prompts/)).toBeVisible();
+    await chooseLabeledOption("Mode for each run", "The Project's mode");
+
+    const draft = await savedDraft(props);
     expect(draft.projectLevel).toBe("opted-in");
+    expect(draft.runLevel).toBeUndefined();
+  });
+
+  it("records a level picked on the routine itself, apart from the Project's", async () => {
+    const props = editorProps();
+    render(<AutomationDefinitionEditor {...props} />);
+    await fillWorkRoutine();
+
+    await chooseLabeledOption("Mode for each run", "Accept edits");
+
+    const draft = await savedDraft(props);
+    expect(draft.runLevel).toBe("auto-accept-edits");
+    expect(draft.projectLevel).toBeUndefined();
+  });
+
+  it("builds a Chat routine with Chat's authority and no level to pick", async () => {
+    const props = editorProps();
+    render(<AutomationDefinitionEditor {...props} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Chat" }));
+    expect(screen.queryByLabelText("Mode for each run")).toBeNull();
+    expect(screen.getByText(/no files, commands, or Git/)).toBeVisible();
+    await userEvent.type(screen.getByLabelText("Name"), "Morning briefing");
+    await userEvent.type(screen.getByLabelText("Task for each run"), "Brief me on the day.");
+    await chooseLabeledOption("Project", "Briefings");
+    await chooseLabeledOption("Execution profile", "Chat default");
+    // Work's and Code's authority grant a folder, so only Chat's is offered.
+    await userEvent.click(screen.getByLabelText("Authority profile"));
+    expect(screen.queryByRole("option", { name: "Ask for approvals Work" })).toBeNull();
+    await userEvent.click(await screen.findByRole("option", { name: "Ask for approvals Chat" }));
+    await chooseLabeledOption("Schedule", "Run once");
+    fireEvent.change(screen.getByLabelText("Run at"), { target: { value: "2026-09-01T09:00" } });
+    await userEvent.type(screen.getByLabelText("Delivery"), "A short briefing is in the thread.");
+    await userEvent.click(
+      screen.getByLabelText("I confirm this delivery target for every scheduled run"),
+    );
+
+    const draft = await savedDraft(props);
+    expect(draft.mode).toBe("chat");
+    expect(draft.binding.kind).toBe("chat");
+    expect(draft.authorityProfile.effective).toMatchObject({
+      filesystem: false,
+      shell: false,
+      git: false,
+    });
+    expect(draft.projectLevel).toBeUndefined();
+    expect(draft.runLevel).toBeUndefined();
   });
 
   it("offers merging its pull requests only to a Code routine, and records the choice", async () => {

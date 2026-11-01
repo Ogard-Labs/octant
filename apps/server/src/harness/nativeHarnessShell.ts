@@ -36,7 +36,21 @@ export interface NativeHarnessShellOptions {
    * read denial keeps the key files themselves out of reach.
    */
   readonly sshAgentSocket?: () => string | undefined;
+  /**
+   * Opens a command's way to the registered servers it names, in its own
+   * script folder, for a command on `proxied` network. Undefined when the
+   * command names none; the access closes when the command ends.
+   */
+  readonly serverAccess?: (
+    command: string,
+    scriptFolder: string,
+  ) => Promise<HarnessServerAccess | undefined>;
 }
+
+/** A command's open way to its servers, closed when the command ends. */
+export type HarnessServerAccess = NonNullable<HarnessShellScriptInput["serverAccess"]> & {
+  readonly close: () => Promise<void>;
+};
 
 export interface NativeHarnessShellEgress {
   /** Whose rules apply: the thread, its Project, and the parent for a child. */
@@ -105,6 +119,11 @@ async function runScript(
 ): Promise<NativeHarnessShellRun> {
   const directory = await mkdtemp(join(options.scriptDirectory, "octant-harness-"));
   const script = join(directory, "command.sh");
+  // Opened in the command's own script folder, which it reads and cannot write.
+  const servers: HarnessServerAccess | undefined =
+    egressProxy === undefined
+      ? undefined
+      : await options.serverAccess?.(input.command, directory).catch(() => undefined);
   try {
     await writeFile(script, `${input.command}\n`, { mode: 0o600 });
     const result = await options.process.executeShellScript(
@@ -115,27 +134,41 @@ async function runScript(
         environment: commandEnvironment(options.sshAgentSocket?.()),
         timeoutMs: input.timeoutMs,
         ...(egressProxy === undefined ? {} : { egressProxy }),
+        ...(servers === undefined
+          ? {}
+          : {
+              serverAccess: {
+                binDirectory: servers.binDirectory,
+                relayPorts: servers.relayPorts,
+                agentSocket: servers.agentSocket,
+              },
+            }),
       },
       input.signal,
     );
-    const output = decodeOutput(result);
-    switch (result.termination) {
-      case "exited":
-        return {
-          status: "ran",
-          ...(result.exitCode === null ? {} : { exitCode: result.exitCode }),
-          output,
-          truncated: false,
-        };
-      case "timed-out":
-        return { status: "timed-out", output, truncated: false };
-      case "cancelled":
-        return { status: "cancelled", output, truncated: false };
-      case "unavailable":
-        return { status: "unavailable", output: "", truncated: false };
-    }
+    return shellRunOf(result);
   } finally {
+    if (servers !== undefined) await servers.close();
     await rm(directory, { recursive: true, force: true });
+  }
+}
+
+function shellRunOf(result: RepositoryTestProcessResult): NativeHarnessShellRun {
+  const output = decodeOutput(result);
+  switch (result.termination) {
+    case "exited":
+      return {
+        status: "ran",
+        ...(result.exitCode === null ? {} : { exitCode: result.exitCode }),
+        output,
+        truncated: false,
+      };
+    case "timed-out":
+      return { status: "timed-out", output, truncated: false };
+    case "cancelled":
+      return { status: "cancelled", output, truncated: false };
+    case "unavailable":
+      return { status: "unavailable", output: "", truncated: false };
   }
 }
 

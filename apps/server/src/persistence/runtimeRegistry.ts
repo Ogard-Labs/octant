@@ -221,6 +221,8 @@ import {
   SHIELD_REMOTE_COMMAND_EVENT_NAMES,
   SHIELD_SERVERS_EVENT_NAMES,
   ShieldRemoteCommandRanPayload,
+  ShieldProjectServersClearedPayload,
+  ShieldProjectServersSetPayload,
   ShieldServerRemovedPayload,
   ShieldServerSetPayload,
 } from "@octant/contracts/shield-servers";
@@ -535,6 +537,12 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(CODE_DEBUG_EVENT_NAMES.egressLaunchSummarized, 1, ThreadEgressLaunchSummarizedPayload)
     .register(SHIELD_SERVERS_EVENT_NAMES.serverSet, 1, ShieldServerSetPayload)
     .register(SHIELD_SERVERS_EVENT_NAMES.serverRemoved, 1, ShieldServerRemovedPayload)
+    .register(SHIELD_SERVERS_EVENT_NAMES.projectServersSet, 1, ShieldProjectServersSetPayload)
+    .register(
+      SHIELD_SERVERS_EVENT_NAMES.projectOverrideCleared,
+      1,
+      ShieldProjectServersClearedPayload,
+    )
     .register(SHIELD_REMOTE_COMMAND_EVENT_NAMES.ran, 1, ShieldRemoteCommandRanPayload)
     .register(SHIELD_TAG_EVENT_NAMES.recorded, 1, ShieldTagRecordedPayload)
     .register(SAFE_NETWORKS_EVENT_NAMES.limitsSet, 1, SafeNetworksLimitsSetPayload)

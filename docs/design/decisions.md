@@ -250,8 +250,9 @@ The person registers their own servers with an action profile, and SSH to a regi
 - Keys stay out of the agent: the SSH session gets the person's SSH agent or the credential broker, and Shield refuses reads of key paths.
 - SSH to an unregistered host goes to the person; destructive or lock-out actions go to the person at every level below Full access.
 - Every remote command and its exit status is journaled with the host, remote output passes through the Watcher, and a per-server runbook is context, never authority.
-- Built: the server registry in Settings › Access › Servers, the Judge's SSH rules by profile, every Octant Harness `ssh` command journaled with host and exit status, the person's SSH agent socket handed to harness shells, and runbooks given to harness turns as notes that grant nothing. SSH connects at Full access only; no Octant transport or stored key is added.
-- Not built yet: a confined command reaching a registered server, the credential broker for SSH, exit status and runbook context for provider runtimes' own commands, remote output through the Watcher, `scp` and `rsync` rules, and a Project override of the registry.
+- Built: the server registry in Settings › Access › Servers with a Project's own list replacing the account list for its threads; the Judge's rules by profile for `ssh`, `scp`, and `rsync` (a download reads, an upload is Admin, a deleting sync is a lock-out action); every remote command journaled with its host, and its exit status where the runtime reports it (the Octant Harness and Codex); remote output through the Watcher (harness and Codex); runbooks given to every runtime's Work and Code turns as notes that grant nothing; at Guarded the first connection to each host in a thread asks, naming the host, and no remembered approval covers it.
+- Built on macOS: below Full access a harness command that is one plain `ssh`, `scp`, or `rsync` call reaches only the registered servers it names, through per-command loopback relays and an agent socket the host owns that only lists keys and signs; the key files stay unreadable and the secret guard's list is unchanged. Octant stores no key and carries no SSH protocol of its own.
+- Not built yet: confined server access on Linux, the credential broker for SSH, and the command record for runtimes that do not name their commands.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Octant Shield](../architecture.md#octant-shield) and [Modes](../architecture.md#modes-chat-work-and-code).
 
@@ -271,7 +272,8 @@ The key providers run inside Octant as they run on their own, with their native 
 - A thread may turn a key provider's own setup on or off for itself (Account default, On, Off), only from a window on the host and journaled; Off beats Full access, and On never grants a Project's code, which still needs the Project's trust (built for all four key providers).
 - Claude Code loads its own subagents (each shown as a child run, every call through the parent's gate), web search and fetch (asking below Full access, marking the thread), home skills, settings and hooks, and a trusted Project's settings, hooks, skills, MCP servers and plugins; its account's MCP servers start only with a trusted Project's.
 - Codex keeps its Project skills and, in Chat, the person's tool servers and plugins; its own subagents run only at Full access, because their approvals never reach Octant, each shown as a child run, with their web searches marking the thread.
-- OpenCode loads its own skills, the MCP servers in the person's own configuration, and the permission rules they wrote (over the level, under Plan's denials and the outside-directory refusal; a catch-all rule is ignored), follows each session its `task` tool delegates to as a child run with its requests answered through the parent, and answers a remembered 2.x approval `always`, saying the grant lives in OpenCode's own store; Reviewed through Octant Shield is not built yet.
+- OpenCode loads its own skills, the MCP servers in the person's own configuration, and the permission rules they wrote (over the level, under Plan's denials and the outside-directory refusal; a catch-all rule is ignored), follows each session its `task` tool delegates to as a child run with its requests answered through the parent, and answers a remembered 2.x approval `always`, saying the grant lives in OpenCode's own store; Octant Shield answers its approvals at Auto like every other runtime's.
+- OpenCode reports file changes and compacts its own session on request only from the 2.x release whose server was read for them (2.2.0); an older 2.x release reports no file changes and compaction `unavailable`, 1.x reports compaction `unavailable` and reports no file changes (not built yet), and a change no edit grant names still fails the turn. A compaction request is held open until the run that carried it ends, so the closing idle is never read as a completed turn. Rationale: the narrower choice trusts only a release that was read, since routes and events differ between 2.x releases and the claim adds no authority.
 - Mistral Vibe loads its own skills and Project context, the account's MCP servers, connectors and hooks, and a trusted Project's `.vibe` tools, MCP servers, hooks, plugins and agents under its own folder trust; it stays on the ACP bridge, because its `vibe-app-server` is an unversioned surface that ships with its own client; reading usage, compaction, review and questions from `vibe-acp`'s own extensions is not built yet.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Providers](../architecture.md#providers) and [Provider runtimes: Key providers](provider-runtimes.md#key-providers).
@@ -757,7 +759,7 @@ A routine is a host-owned, Project-bound definition that starts an ordinary Work
 - A routine runs as the host, so it works with no window open; automation-origin execution cannot create, edit, run, pause or archive a routine.
 - An agent can only propose a routine; a person confirms, and the host builds the definition from the thread's live facts with an approval-gated profile.
 - The scheduler is an in-process timer; nothing wakes the computer or runs in a cloud, and a self-hosted wake service is designed but not built.
-- Chat routines are allowed (not built yet).
+- A Chat routine keeps Chat's authority: it binds an active Chat Project, grants no folder, shell, Git or subagents, has no level and no follow-up target, and each run sends one turn into a new Chat thread. No agent proposes one.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
@@ -766,9 +768,10 @@ Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](.
 A routine runs at the guardrail level the person picks when creating it, Full access included, and never at a lower level than its creator chose.
 
 - A Code routine may merge the pull requests it opens when the person allowed that at creation; an agent proposing a routine never picks either for the person.
+- Built: a person at a local window may pick a level on the routine itself (Ask first, Accept edits, Auto or Full access). It is the highest a run may use: a run takes the lower of the pick and its Project's level, so a pick lowers a run and never raises it above what the person allowed. A paired device and a routine an agent proposed cannot set it, and a Chat routine has none.
 - Built: a person at a local window may opt a routine into its Project's level, journaled on the definition and copied into each run; each run then takes the level the Project's new threads start at, Full access included. Without it a routine asks first, and a Full access profile stays ineligible.
 - A Work routine captures the shell and Git like a Code routine; one saved without them does not run until a person saves it again.
-- Not built yet: the merge permission, and a level picked on the routine itself rather than taken from its Project.
+- Not built yet: the merge permission.
 
 Status: Partly built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 

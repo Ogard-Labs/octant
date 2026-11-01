@@ -82,7 +82,8 @@ export interface HostShieldDependencies {
     readonly usage: TurnUsage | undefined;
   }) => void;
   /** The servers the person registered, judged by their profiles. */
-  readonly servers?: () => ReadonlyArray<ShieldServerRule>;
+  /** The servers a thread reaches: its Project's own list, else the account list. */
+  readonly servers?: (threadId: string) => ReadonlyArray<ShieldServerRule>;
   /**
    * The secret guard's list in force, the person's changes included, so the
    * Judge asks about a file the person added as it asks about a built-in one.
