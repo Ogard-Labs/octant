@@ -2322,7 +2322,9 @@ describe("Code tool families", () => {
     // description was shortened to pay for most of them. Its include
     // argument, which lets an action return a snapshot, text, or picture in
     // the same answer, added about 85 bytes; its usage is in help.
-    expect(JSON.stringify(families).length).toBeLessThanOrEqual(4_790);
+    // Hover, select, drag, upload, and the four tab operations added their
+    // names and five short arguments (about 305 bytes); their usage is in help.
+    expect(JSON.stringify(families).length).toBeLessThanOrEqual(5_100);
   });
 
   it.each(["octant_browser", "octant_terminal", "octant_apple", "octant_android"])(

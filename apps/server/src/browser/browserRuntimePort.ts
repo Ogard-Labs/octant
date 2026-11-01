@@ -23,6 +23,13 @@ export interface BrowserRuntimeObservation {
   readonly snapshotRefs?: ReadonlyArray<BrowserPageSnapshotRef>;
   readonly screenshotDataUrl?: string;
   readonly viewport?: { readonly width: number; readonly height: number };
+  /** Only a tab action fills this: the context's tabs as they now stand. */
+  readonly tabs?: ReadonlyArray<{
+    readonly tabId: string;
+    readonly url?: string;
+    readonly title?: string;
+    readonly active: boolean;
+  }>;
   /** Only the observe-diagnostics action fills these; see the contract. */
   readonly consoleErrors?: ReadonlyArray<{
     readonly text: string;
@@ -144,7 +151,18 @@ export interface BrowserProfileStorePort {
  */
 export type BrowserRuntimeAction = Pick<BrowserActionRequest, "kind"> &
   Partial<
-    Pick<BrowserActionRequest, "target" | "value" | "point" | "deltaX" | "deltaY" | "include">
+    Pick<
+      BrowserActionRequest,
+      | "target"
+      | "value"
+      | "point"
+      | "deltaX"
+      | "deltaY"
+      | "include"
+      | "destination"
+      | "files"
+      | "tabId"
+    >
   > & {
     /**
      * Set when `target` came from a snapshot ref: the page must still be at the
@@ -153,6 +171,12 @@ export type BrowserRuntimeAction = Pick<BrowserActionRequest, "kind"> &
      * `BrowserTargetStaleError` before touching it.
      */
     readonly expected?: { readonly role: string; readonly name: string; readonly url: string };
+    /** The same check for a `drag`'s drop target when it came from a ref. */
+    readonly destinationExpected?: {
+      readonly role: string;
+      readonly name: string;
+      readonly url: string;
+    };
   };
 
 export interface BrowserRuntimePort {

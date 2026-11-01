@@ -141,12 +141,18 @@ const hostPolicy: BrowserContextPolicy = {
   sessionTimeoutMs: 600_000,
 };
 const MAX_RETAINED_BROWSER_EVIDENCE = 32;
+/** How many uploads' copies one context keeps for forms not yet sent. */
+const MAX_STAGED_UPLOADS = 8;
 /** The actions that name one element, and so may name it by a snapshot ref. */
 const REF_ACTIONS: ReadonlySet<BrowserActionRequest["kind"]> = new Set([
   "click",
   "type",
   "wait",
   "extract-text",
+  "hover",
+  "select",
+  "drag",
+  "upload",
 ]);
 const staleRefFailure: BrowserAutomationFailure = {
   category: "stale",
@@ -168,6 +174,8 @@ export class BrowserAutomationService {
   readonly #now: () => number;
   readonly #schedule: (delayMs: number, callback: () => void) => () => void;
   readonly #contexts = new Map<BrowserContextId, OwnedContext>();
+  /** Each context's staged upload copies, deleted when the context closes. */
+  readonly #stagedUploads = new Map<BrowserContextId, Array<() => Promise<void>>>();
   readonly #removeProcessExitListener: (() => void) | undefined;
 
   constructor(options: BrowserAutomationServiceOptions) {
@@ -201,6 +209,7 @@ export class BrowserAutomationService {
         }
         owned.evidence.splice(0);
         owned.record = stoppedRecord(owned.record, this.#clock(), "error", "failed");
+        this.#releaseUploads(contextId);
       }
     });
   }
@@ -372,8 +381,23 @@ export class BrowserAutomationService {
      * names the agent tool or the person's pane; an unnamed caller keeps none.
      */
     readonly capturedBy?: BrowserCaptureTaker;
+    /**
+     * For an upload: the absolute paths of the files the request names, as the
+     * agent tool resolved them inside the thread's workspace after the person
+     * approved. Nothing else supplies a path to a runtime.
+     */
+    readonly uploadFiles?: ReadonlyArray<string>;
+    /**
+     * Deletes the copies `uploadFiles` names. The service owns it from here:
+     * a page reads an attached file when its form is sent, often in a later
+     * action, so the copies stay until the context closes.
+     */
+    readonly releaseUpload?: () => Promise<void>;
   }): Promise<BrowserAutomationSnapshot> {
     const owned = this.#contexts.get(input.request.contextId);
+    if (owned === undefined || owned.windowId !== input.windowId) {
+      if (input.releaseUpload !== undefined) void input.releaseUpload().catch(() => undefined);
+    }
     if (owned === undefined) {
       throw new Error("Browser context is stale or unknown.");
     }
@@ -384,7 +408,37 @@ export class BrowserAutomationService {
         "failed",
       );
     }
-    return this.#queueAction(owned, () => this.#actOwned(owned, input));
+    try {
+      return await this.#queueAction(owned, () => this.#actOwned(owned, input));
+    } finally {
+      if (input.releaseUpload !== undefined) this.#keepUpload(owned, input.releaseUpload);
+    }
+  }
+
+  /**
+   * Hold an upload's copies for as long as its context lives, so a later
+   * action can still send the form they were attached to. A context that is
+   * already closing releases them at once; past the bound, the oldest go.
+   */
+  #keepUpload(owned: OwnedContext, release: () => Promise<void>): void {
+    const contextId = owned.record.contextId;
+    if (owned.record.state !== "active" || !this.#contexts.has(contextId)) {
+      void release().catch(() => undefined);
+      return;
+    }
+    const kept = this.#stagedUploads.get(contextId) ?? [];
+    kept.push(release);
+    while (kept.length > MAX_STAGED_UPLOADS)
+      void kept
+        .shift()?.()
+        .catch(() => undefined);
+    this.#stagedUploads.set(contextId, kept);
+  }
+
+  #releaseUploads(contextId: BrowserContextId): void {
+    const kept = this.#stagedUploads.get(contextId);
+    this.#stagedUploads.delete(contextId);
+    for (const release of kept ?? []) void release().catch(() => undefined);
   }
 
   async #actOwned(
@@ -393,6 +447,7 @@ export class BrowserAutomationService {
       readonly windowId: WindowId;
       readonly request: BrowserActionRequest;
       readonly capturedBy?: BrowserCaptureTaker;
+      readonly uploadFiles?: ReadonlyArray<string>;
     },
   ): Promise<BrowserAutomationSnapshot> {
     if (owned.abort.signal.aborted || owned.record.state !== "active") {
@@ -447,6 +502,16 @@ export class BrowserAutomationService {
     }
     const resolved = this.#resolveRef(owned, input.request);
     if (resolved.kind === "refused") return this.#failure(owned, resolved.failure, "failed");
+    // An upload reads files off this computer, so only the agent tool, which
+    // resolved them inside the thread's workspace and asked the person, can
+    // hand them over. A route's request names no file a runtime would read.
+    if (input.request.kind === "upload" && input.uploadFiles === undefined) {
+      return this.#failure(
+        owned,
+        { category: "policy-denied", message: "An upload needs the agent's approved files." },
+        "failed",
+      );
+    }
     const decision = evaluateBrowserAction(resolved.request, owned.record, granted);
     if (decision.kind === "denied") {
       return this.#failure(
@@ -484,11 +549,20 @@ export class BrowserAutomationService {
       }
     }
     try {
+      const { files: _named, ...action } = resolved.request;
       const observed = await this.#runtime.act(
         owned.record.contextId,
-        resolved.expected === undefined
-          ? resolved.request
-          : { ...resolved.request, expected: resolved.expected },
+        {
+          ...action,
+          ...(resolved.expected === undefined ? {} : { expected: resolved.expected }),
+          ...(resolved.destinationExpected === undefined
+            ? {}
+            : { destinationExpected: resolved.destinationExpected }),
+          // Only the files the agent tool resolved and the person approved.
+          ...(input.request.kind === "upload" && input.uploadFiles !== undefined
+            ? { files: input.uploadFiles }
+            : {}),
+        },
         owned.abort.signal,
       );
       if (owned.abort.signal.aborted || owned.record.state !== "active") {
@@ -530,6 +604,7 @@ export class BrowserAutomationService {
           ? {}
           : { screenshotDataUrl: observed.screenshotDataUrl }),
         ...(observed.viewport === undefined ? {} : { viewport: observed.viewport }),
+        ...(observed.tabs === undefined ? {} : { tabs: observed.tabs }),
         // Only the observe-diagnostics action collects these, and it reports
         // them as absent rather than empty when the runtime did not supply
         // them: an empty array would claim the page logged nothing, which is a
@@ -577,7 +652,9 @@ export class BrowserAutomationService {
         };
       } else if (
         owned.refs !== undefined &&
-        (input.request.kind === "navigate" || observed.url !== owned.refs.url)
+        (input.request.kind === "navigate" ||
+          input.request.kind.startsWith("tab-") ||
+          observed.url !== owned.refs.url)
       ) {
         owned.refs = undefined;
       }
@@ -628,10 +705,17 @@ export class BrowserAutomationService {
         readonly kind: "resolved";
         readonly request: BrowserActionRequest;
         readonly expected?: NonNullable<BrowserRuntimeAction["expected"]>;
+        readonly destinationExpected?: NonNullable<BrowserRuntimeAction["expected"]>;
       }
     | { readonly kind: "refused"; readonly failure: BrowserAutomationFailure } {
-    if (request.ref === undefined) return { kind: "resolved", request };
-    if (request.target !== undefined || request.point !== undefined) {
+    if (request.ref === undefined && request.destinationRef === undefined) {
+      return { kind: "resolved", request };
+    }
+    if (
+      (request.ref !== undefined &&
+        (request.target !== undefined || request.point !== undefined)) ||
+      (request.destinationRef !== undefined && request.destination !== undefined)
+    ) {
       return {
         kind: "refused",
         failure: {
@@ -640,19 +724,39 @@ export class BrowserAutomationService {
         },
       };
     }
-    if (!REF_ACTIONS.has(request.kind)) {
+    if (
+      (request.ref !== undefined && !REF_ACTIONS.has(request.kind)) ||
+      (request.destinationRef !== undefined && request.kind !== "drag")
+    ) {
       return {
         kind: "refused",
         failure: { category: "invalid", message: `A ${request.kind} action takes no ref.` },
       };
     }
-    const entry = owned.refs?.byRef.get(request.ref);
-    if (entry === undefined) return { kind: "refused", failure: staleRefFailure };
-    const { ref: _ref, ...rest } = request;
+    const url = owned.refs?.url ?? "about:blank";
+    const entry = request.ref === undefined ? undefined : owned.refs?.byRef.get(request.ref);
+    const drop =
+      request.destinationRef === undefined
+        ? undefined
+        : owned.refs?.byRef.get(request.destinationRef);
+    if (
+      (request.ref !== undefined && entry === undefined) ||
+      (request.destinationRef !== undefined && drop === undefined)
+    ) {
+      return { kind: "refused", failure: staleRefFailure };
+    }
+    const { ref: _ref, destinationRef: _destinationRef, ...rest } = request;
     return {
       kind: "resolved",
-      request: { ...rest, target: entry.selector },
-      expected: { role: entry.role, name: entry.name, url: owned.refs?.url ?? "about:blank" },
+      request: {
+        ...rest,
+        ...(entry === undefined ? {} : { target: entry.selector }),
+        ...(drop === undefined ? {} : { destination: drop.selector }),
+      },
+      ...(entry === undefined ? {} : { expected: { role: entry.role, name: entry.name, url } }),
+      ...(drop === undefined
+        ? {}
+        : { destinationExpected: { role: drop.role, name: drop.name, url } }),
     };
   }
 
@@ -1016,6 +1120,7 @@ export class BrowserAutomationService {
 
   async close(): Promise<void> {
     this.#removeProcessExitListener?.();
+    for (const contextId of this.#stagedUploads.keys()) this.#releaseUploads(contextId);
     for (const owned of this.#contexts.values()) {
       owned.abort.abort();
       owned.cancelExpiry?.();
@@ -1207,6 +1312,7 @@ export class BrowserAutomationService {
   }
 
   async #safeClose(contextId: BrowserContextId): Promise<void> {
+    this.#releaseUploads(contextId);
     try {
       await this.#runtime.closeContext(contextId);
     } catch {

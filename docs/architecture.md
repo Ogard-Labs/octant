@@ -9876,8 +9876,9 @@ access` agree); a thread's own change is journaled as
   host identity key), with a pasted certificate's TLS key or, for a self-made
   certificate, only that it is self-made, and re-enabled when the server
   starts; a server shutdown keeps it and only a local disable forgets it.
-  A paired client may click, scroll, and press keys in the host's agent
-  browser, but may not navigate it, type into it, or close a tab. Those clicks
+  A paired client may click, hover, scroll, and press keys in the host's agent
+  browser, and list its tabs, but may not navigate it, type into it, choose a
+  list option, drag, upload, or open, switch, or close a tab. Those clicks
   and keys can still follow a link or submit a form within the context's
   approved origins; the host's navigation guards refuse any page outside them,
   so a paired client cannot take the host browser to a new origin.
