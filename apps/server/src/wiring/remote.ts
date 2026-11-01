@@ -75,6 +75,7 @@ import { createProviderCredentialCopyBroker } from "../hub/ownerCredentialBroker
 import { createReadingPostureHost } from "../hub/ownerPostureHost";
 import { createPeerCredentialRouteHandler } from "../hub/peerCredentialRoutes";
 import { OwnerUnlockService } from "../hub/ownerUnlock";
+import { PairedMergeUnlockService } from "../hub/pairedMergeUnlock";
 import { createHubMembershipJournal } from "../hub/hubMembershipJournal";
 import { FailoverService } from "../hub/failoverService";
 import { HubService, type HubPairingPort } from "../hub/hubService";
@@ -171,6 +172,7 @@ export type RemoteDependencies = Pick<
     | "debugConfigurationApprovals"
     | "debugService"
     | "languageServerApprovals"
+    | "pairedMergeUnlockSlot"
     | "remoteServerGrants"
   > &
   Pick<
@@ -218,6 +220,7 @@ export function wireRemote(deps: RemoteDependencies) {
     automationScheduler,
     browserCaptureStore,
     hubPushHandoffSlot,
+    pairedMergeUnlockSlot,
     nativeHarnessSessions,
     remoteDelegationHolder,
     canvasPublicShareService,
@@ -701,11 +704,26 @@ export function wireRemote(deps: RemoteDependencies) {
   const checkCertificate = () => void tailscaleCertificate.renewIfDue().catch(() => undefined);
   setInterval(checkCertificate, CERTIFICATE_CHECK_MS).unref();
   setTimeout(checkCertificate, STARTUP_CERTIFICATE_CHECK_MS).unref();
+  // One unlock service answers both the owner route's challenges and a paired
+  // client's merge, so a challenge issued there is the one the merge consumes.
+  const ownerUnlock = new OwnerUnlockService({
+    now: Date.now,
+    hostMemberId: () => hubService.hubMemberId(),
+  });
+  const pairedMergeUnlock = new PairedMergeUnlockService({
+    state: hubStateStore,
+    hub: hubService,
+    spoke: spokeLinkService,
+    unlock: ownerUnlock,
+    record: recordHubMembership,
+  });
+  pairedMergeUnlockSlot.bind(pairedMergeUnlock);
   const hubAdministrationRoutes = createHubAdministrationRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
     windowAuthorityStore,
     hub: hubService,
     spoke: spokeLinkService,
+    pairedMergeUnlock,
     failover: failoverService,
     wake: wakeService,
     spokeWake: spokeWakeService,
@@ -877,7 +895,7 @@ export function wireRemote(deps: RemoteDependencies) {
   const hubOwnerRoutes = createHubOwnerRouteHandler({
     hub: hubService,
     spoke: spokeLinkService,
-    unlock: new OwnerUnlockService({ now: Date.now, hostMemberId: () => hubService.hubMemberId() }),
+    unlock: ownerUnlock,
     postures: createReadingPostureHost({
       readCodeThread: (threadId) => persistence.readCodeThread(threadId),
       readProject: (projectId) => persistence.readProject(projectId),

@@ -1204,6 +1204,10 @@ export class SpokeLinkService {
       ...(current.pendingDeviceRevocations === undefined
         ? {}
         : { pendingDeviceRevocations: current.pendingDeviceRevocations }),
+      // A host-wide switch only its window sets; leaving a hub never turns it off.
+      ...(current.ownerUnlockBeforePairedMerge === undefined
+        ? {}
+        : { ownerUnlockBeforePairedMerge: current.ownerUnlockBeforePairedMerge }),
     });
     this.#revokeGuestDevices(
       current.link?.guestDevices ?? link.guestDevices ?? [],

@@ -718,9 +718,9 @@ A person merges one open pull request from its review in a local window. A Code 
 - An agent merges on the person's request only after the person approves that one merge in the thread, at every guardrail level; no routine, plugin or hub or peer host reaches it.
 - Merge when ready from a paired phone or web client needs the same confirmation of the reviewed head, and the phone panel offers Merge and Merge when ready after re-reading the pull request from GitHub.
 - An agent merges without asking for each act when a Code Project's Agents may merge switch, or a Code routine's Merge the pull requests it opens choice, allows it. Each is its own stored choice, set only from a window on this host; the host reads the choice again at the merge, enforces the reviewed head and the required checks as for any merge, and refuses when the choice has been switched off. A routine's choice reaches only the thread one of its runs created, while the routine is enabled.
-- A fresh owner-device unlock before a paired client's merge is allowed (not built yet): an owner device signs hub-owner requests while a paired client is a different principal, and no window-free path to the Code service exists.
+- Built: a host switch, Owner unlock before a phone or browser merges, off by default and set only from a window on that host, makes a paired client's merge, stack merge and Merge when ready (turning on) need a fresh unlock on one of the host's owner devices. The owner route issues the challenge for the merge route's own method, path and body hash to an owner on the host's own list; the host checks the proof against that list, refuses a missing or failed proof with a plain reason before anything merges, and journals the owner. The phone signs with its biometric-gated key and the browser with its passkey for the page's own host.
 
-Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
+Status: Built. Since: 2026-10-31. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
 ### Merge when ready and Auto-fix
 

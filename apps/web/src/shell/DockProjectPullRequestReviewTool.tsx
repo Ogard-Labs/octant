@@ -1,3 +1,4 @@
+import type { OwnerUnlockNotGiven } from "@octant/client-runtime";
 import type {
   CodeProjectPullRequestActionCommand,
   CodeProjectPullRequestActionContext,
@@ -35,7 +36,7 @@ export interface DockProjectPullRequestReviewToolProps {
   readonly onMerge?: (
     method: CodeProjectPullRequestMergeMethod,
     headSha: string,
-  ) => Promise<CodeProjectPullRequestMergeOutcome>;
+  ) => Promise<CodeProjectPullRequestMergeOutcome | OwnerUnlockNotGiven>;
   readonly loadActionContext?: (
     query: CodeProjectPullRequestActionContextQuery,
   ) => Promise<CodeProjectPullRequestActionContext>;
@@ -47,7 +48,7 @@ export interface DockProjectPullRequestReviewToolProps {
   ) => Promise<CodeProjectPullRequestSwitchesView>;
   readonly setMergeWhenReady?: (
     command: CodeProjectPullRequestMergeWhenReadyCommand,
-  ) => Promise<CodeProjectPullRequestSwitchOutcome>;
+  ) => Promise<CodeProjectPullRequestSwitchOutcome | OwnerUnlockNotGiven>;
   readonly setAutoFix?: (
     command: CodeProjectPullRequestAutoFixCommand,
   ) => Promise<CodeProjectPullRequestSwitchOutcome>;
@@ -132,8 +133,8 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
   ]);
 
   async function applySwitch(
-    run: () => Promise<CodeProjectPullRequestSwitchOutcome>,
-  ): Promise<CodeProjectPullRequestSwitchOutcome> {
+    run: () => Promise<CodeProjectPullRequestSwitchOutcome | OwnerUnlockNotGiven>,
+  ): Promise<CodeProjectPullRequestSwitchOutcome | OwnerUnlockNotGiven> {
     try {
       const outcome = await run();
       if (outcome.status === "applied") setSwitches(outcome.view);

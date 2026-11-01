@@ -177,6 +177,17 @@ ahead only if that head is still current and the required checks have passed;
 **Merge when ready** hands the merge to GitHub once they do. Labels, comments,
 replies, approving, requesting changes, close, and reopen stay on the desktop.
 
+A computer can also ask for an owner unlock before a phone or browser merges.
+Turn on **Owner unlock before a phone or browser merges** under **Settings →
+Remote access → Owner devices** in that computer's own window. It is off by
+default. With it on, a merge, a stack merge, or turning **Merge when ready** on
+from a phone or browser asks you to unlock on that device first, with Face ID, a
+fingerprint, your passcode, or a passkey. This works only on a phone or browser
+that is an owner of that computer (see
+[Owner devices](../advanced/hub-and-spokes.md#owner-devices)). A merge from the
+computer's own window never asks. If the unlock is missing, cancelled, or does
+not check out, nothing merges and the screen says why.
+
 In `octant agent`, Stop reports an interruption only when the host confirms it.
 If the turn finishes before Stop arrives, it reports that nothing is running;
 if the host refuses, the terminal shows the reason.

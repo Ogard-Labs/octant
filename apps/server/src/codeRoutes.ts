@@ -20,6 +20,7 @@ import {
   GlobalSequence,
   MAX_CODE_OPERATION_EVIDENCE_BYTES,
   MAX_CODE_OPERATION_TEXT_BYTES,
+  OWNER_UNLOCK_HEADER,
   MAX_CODE_EVIDENCE_BATCH_ITEMS,
   MAX_CODE_ATTACHMENT_BYTES,
   MAX_CODE_CONVERSATION_PAGE_SIZE,
@@ -182,6 +183,7 @@ import type { CodeService } from "./code/codeService";
 import type { FileIdentity } from "./code/fileOperationPort";
 import type { ProjectTerminalService } from "./code/projectTerminalService";
 import { MAX_EDITABLE_CODE_FILE_BYTES } from "./code/codeFileService";
+import type { PairedMergeUnlockPort } from "./hub/pairedMergeUnlock";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -550,6 +552,11 @@ export interface CodeRouteService {
 
 export interface CodeRouteDependencies {
   readonly service: CodeRouteService;
+  /**
+   * The owner unlock a paired client's merge may need. Absent, or with its
+   * switch off, a paired client's merge keeps its confirmation and checks gate.
+   */
+  readonly pairedMergeUnlock?: () => PairedMergeUnlockPort | undefined;
   /** Terminals a Code Project owns without a thread; absent on a host without them. */
   readonly projectTerminals?: Pick<ProjectTerminalService, "execute">;
   /**
@@ -631,6 +638,22 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
         origin,
       );
     }
+
+    // A host may ask a paired phone or web client's merge for a fresh unlock
+    // on an owner device first. A local window's click needs none, and the
+    // check runs before the service is reached, so a refused merge changes
+    // nothing.
+    const ownerUnlockRefusal = (body: Uint8Array) => {
+      if (callerKind !== "remote-device") return undefined;
+      const unlock = dependencies.pairedMergeUnlock?.();
+      if (unlock === undefined || !unlock.required()) return undefined;
+      const checked = unlock.verify({
+        path: url.pathname,
+        body: fatalUtf8.decode(body),
+        proof: request.headers.get(OWNER_UNLOCK_HEADER),
+      });
+      return checked.status === "unlocked" ? undefined : checked;
+    };
 
     try {
       switch (route.kind) {
@@ -1472,6 +1495,14 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           } catch {
             throw new CodeRouteRejected("Code project pull-request merge is invalid.", 400);
           }
+          const unlockRefused = ownerUnlockRefusal(body);
+          if (unlockRefused !== undefined) {
+            return jsonResponse(
+              decodeCodeProjectPullRequestMergeOutcome(unlockRefused),
+              200,
+              origin,
+            );
+          }
           // A paired phone or web client may merge, but only with the person's
           // explicit confirmation of the head they reviewed: the service
           // refuses an unconfirmed remote merge and one whose required checks
@@ -1499,13 +1530,22 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               origin,
             );
           }
-          const value = parseJson(await readBoundedBytes(request, jsonLimit));
+          const body = await readBoundedBytes(request, jsonLimit);
+          const value = parseJson(body);
           refuseRendererAuthoredIdentity(value);
           let command: CodeProjectPullRequestStackMergeCommand;
           try {
             command = decodeCodeProjectPullRequestStackMergeCommand(value);
           } catch {
             throw new CodeRouteRejected("Code project pull-request stack merge is invalid.", 400);
+          }
+          const unlockRefused = ownerUnlockRefusal(body);
+          if (unlockRefused !== undefined) {
+            return jsonResponse(
+              decodeCodeProjectPullRequestStackMergeOutcome(unlockRefused),
+              200,
+              origin,
+            );
           }
           return jsonResponse(
             decodeCodeProjectPullRequestStackMergeOutcome(
@@ -1657,7 +1697,8 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               origin,
             );
           }
-          const value = parseJson(await readBoundedBytes(request, jsonLimit));
+          const body = await readBoundedBytes(request, jsonLimit);
+          const value = parseJson(body);
           refuseRendererAuthoredIdentity(value);
           if (route.kind === "project-pull-requests-merge-when-ready") {
             if (dependencies.service.setProjectPullRequestMergeWhenReady === undefined) {
@@ -1672,6 +1713,16 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               command = decodeCodeProjectPullRequestMergeWhenReadyCommand(value);
             } catch {
               throw new CodeRouteRejected("Merge when ready command is invalid.", 400);
+            }
+            // Turning Merge when ready on hands the merge to the forge, so it
+            // asks what a merge asks; turning it off merges nothing.
+            const unlockRefused = command.kind === "enable" ? ownerUnlockRefusal(body) : undefined;
+            if (unlockRefused !== undefined) {
+              return jsonResponse(
+                decodeCodeProjectPullRequestSwitchOutcome(unlockRefused),
+                200,
+                origin,
+              );
             }
             return jsonResponse(
               decodeCodeProjectPullRequestSwitchOutcome(

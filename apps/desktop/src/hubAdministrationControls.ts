@@ -34,6 +34,7 @@ import {
   decodeOwnerAlertRequest,
   decodeOwnerMemberRequest,
   decodeOwnerRemovalRequest,
+  decodePairedMergeUnlockRequest,
 } from "@octant/contracts";
 import { Schema } from "effect";
 
@@ -107,6 +108,11 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     method: "POST",
     path: "/api/desktop/hub/confirm-new-members",
     decodeBody: decodeConfirmNewMembersRequest,
+  },
+  "paired-merge-unlock": {
+    method: "POST",
+    path: "/api/desktop/hub/paired-merge-unlock",
+    decodeBody: decodePairedMergeUnlockRequest,
   },
   "confirm-member": {
     method: "POST",
