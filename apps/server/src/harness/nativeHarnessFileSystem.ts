@@ -5,16 +5,16 @@ import type { NativeHarnessToolResultBounds } from "@octant/contracts";
 import { secretGuardRefusal } from "../process/secretGuard";
 
 /** Directories a search never descends into unless the pattern names them. */
-const SKIPPED_DIRECTORY_NAMES = new Set([".git", "node_modules"]);
+export const SKIPPED_DIRECTORY_NAMES = new Set([".git", "node_modules"]);
 const MAX_READ_RESULT_BYTES = 64 * 1024;
-const MAX_GREP_RESULT_BYTES = 64 * 1024;
-const MAX_GREP_SCANNED_FILE_BYTES = 4 * 1024 * 1024;
-const MAX_GREP_PATTERN_LENGTH = 512;
+export const MAX_GREP_RESULT_BYTES = 64 * 1024;
+export const MAX_GREP_SCANNED_FILE_BYTES = 4 * 1024 * 1024;
+export const MAX_GREP_PATTERN_LENGTH = 512;
 /** A scan the model asked for never holds the event loop longer than this. */
 const MAX_GREP_SCAN_MS = 5_000;
-const MAX_GLOB_RESULTS = 1_000;
-const MAX_WALKED_ENTRIES = 50_000;
-const MAX_GREP_LINE_LENGTH = 512;
+export const MAX_GLOB_RESULTS = 1_000;
+export const MAX_WALKED_ENTRIES = 50_000;
+export const MAX_GREP_LINE_LENGTH = 512;
 
 export type NativeHarnessFileRefusal =
   | "path-escapes-root"
@@ -218,35 +218,7 @@ export class NativeHarnessFileSystem {
     if (info.size > this.#maxFileBytes) return { kind: "refused", reason: "file-too-large" };
     const content = await readFile(resolved, "utf8");
     this.#readMarks.set(resolved, info.mtime.toISOString());
-    const allLines = content.split("\n");
-    const startLine = Math.min(input.offset ?? 0, allLines.length);
-    const limit = input.limit ?? 2_000;
-    const lines: string[] = [];
-    let returnedBytes = 0;
-    let cursor = startLine;
-    while (cursor < allLines.length && lines.length < limit) {
-      const line = allLines[cursor] ?? "";
-      const bytes = Buffer.byteLength(line, "utf8") + 1;
-      if (returnedBytes + bytes > MAX_READ_RESULT_BYTES && lines.length > 0) break;
-      lines.push(line);
-      returnedBytes += bytes;
-      cursor += 1;
-    }
-    const omittedBytes = allLines
-      .slice(cursor)
-      .reduce((total, line) => total + Buffer.byteLength(line, "utf8") + 1, 0);
-    const truncated = cursor < allLines.length;
-    return {
-      kind: "file",
-      path: display,
-      startLine,
-      lines,
-      totalLines: allLines.length,
-      ...(truncated ? { nextLine: cursor } : {}),
-      bounds: truncated
-        ? { truncated, returnedBytes, omittedBytes, nextOffset: cursor }
-        : { truncated, returnedBytes },
-    };
+    return readSlice(display, content, input);
   }
 
   async write(input: {
@@ -299,35 +271,17 @@ export class NativeHarnessFileSystem {
       return { kind: "refused", reason: "file-changed-since-read" };
     }
     const content = await readFile(resolved, "utf8");
-    const exact = countOccurrences(content, input.oldText);
-    let edited: { readonly text: string; readonly count: number } | undefined;
-    let fuzzy = false;
-    if (exact > 0) {
-      if (exact > 1 && input.replaceAll !== true) {
-        return { kind: "refused", reason: "old-text-ambiguous" };
-      }
-      edited = replaceOccurrences(content, input.oldText, input.newText, input.replaceAll === true);
-    } else {
-      // One whitespace-normalized retry: a model that reproduces indentation
-      // slightly wrong still names an unambiguous span, and the file's own
-      // bytes outside that span are left exactly as they were.
-      const spans = fuzzySpans(content, input.oldText);
-      if (spans.length === 0) return { kind: "refused", reason: "old-text-not-found" };
-      if (spans.length > 1 && input.replaceAll !== true) {
-        return { kind: "refused", reason: "old-text-ambiguous" };
-      }
-      fuzzy = true;
-      const chosen = input.replaceAll === true ? spans : spans.slice(0, 1);
-      let text = content;
-      for (const span of [...chosen].reverse()) {
-        text = text.slice(0, span.start) + input.newText + text.slice(span.end);
-      }
-      edited = { text, count: chosen.length };
-    }
+    const edited = editedText(content, input);
+    if (edited.kind === "refused") return edited;
     await writeFile(resolved, edited.text, "utf8");
     const after = await stat(resolved);
     this.#readMarks.set(resolved, after.mtime.toISOString());
-    return { kind: "edited", path: this.#display(resolved), replacements: edited.count, fuzzy };
+    return {
+      kind: "edited",
+      path: this.#display(resolved),
+      replacements: edited.count,
+      fuzzy: edited.fuzzy,
+    };
   }
 
   async glob(input: {
@@ -542,6 +496,87 @@ export class NativeHarnessFileSystem {
   }
 }
 
+/** The lines of a file a read returns, from `offset`, at most `limit` and the result's byte bound. */
+export function readSlice(
+  path: string,
+  content: string,
+  input: { readonly offset?: number | undefined; readonly limit?: number | undefined },
+): Extract<NativeHarnessReadResult, { readonly kind: "file" }> {
+  const allLines = content.split("\n");
+  const startLine = Math.min(input.offset ?? 0, allLines.length);
+  const limit = input.limit ?? 2_000;
+  const lines: string[] = [];
+  let returnedBytes = 0;
+  let cursor = startLine;
+  while (cursor < allLines.length && lines.length < limit) {
+    const line = allLines[cursor] ?? "";
+    const bytes = Buffer.byteLength(line, "utf8") + 1;
+    if (returnedBytes + bytes > MAX_READ_RESULT_BYTES && lines.length > 0) break;
+    lines.push(line);
+    returnedBytes += bytes;
+    cursor += 1;
+  }
+  const omittedBytes = allLines
+    .slice(cursor)
+    .reduce((total, line) => total + Buffer.byteLength(line, "utf8") + 1, 0);
+  const truncated = cursor < allLines.length;
+  return {
+    kind: "file",
+    path,
+    startLine,
+    lines,
+    totalLines: allLines.length,
+    ...(truncated ? { nextLine: cursor } : {}),
+    bounds: truncated
+      ? { truncated, returnedBytes, omittedBytes, nextOffset: cursor }
+      : { truncated, returnedBytes },
+  };
+}
+
+/**
+ * A file's text after an edit, or why the edit names no single span. Shared
+ * by every place the harness's files live, so an edit reads the same on this
+ * host and on a server.
+ */
+export function editedText(
+  content: string,
+  input: {
+    readonly oldText: string;
+    readonly newText: string;
+    readonly replaceAll?: boolean | undefined;
+  },
+):
+  | { readonly kind: "edited"; readonly text: string; readonly count: number; readonly fuzzy: boolean }
+  | NativeHarnessFileRefused {
+  const exact = countOccurrences(content, input.oldText);
+  if (exact > 0) {
+    if (exact > 1 && input.replaceAll !== true) {
+      return { kind: "refused", reason: "old-text-ambiguous" };
+    }
+    const replaced = replaceOccurrences(
+      content,
+      input.oldText,
+      input.newText,
+      input.replaceAll === true,
+    );
+    return { kind: "edited", ...replaced, fuzzy: false };
+  }
+  // One whitespace-normalized retry: a model that reproduces indentation
+  // slightly wrong still names an unambiguous span, and the file's own
+  // bytes outside that span are left exactly as they were.
+  const spans = fuzzySpans(content, input.oldText);
+  if (spans.length === 0) return { kind: "refused", reason: "old-text-not-found" };
+  if (spans.length > 1 && input.replaceAll !== true) {
+    return { kind: "refused", reason: "old-text-ambiguous" };
+  }
+  const chosen = input.replaceAll === true ? spans : spans.slice(0, 1);
+  let text = content;
+  for (const span of [...chosen].reverse()) {
+    text = text.slice(0, span.start) + input.newText + text.slice(span.end);
+  }
+  return { kind: "edited", text, count: chosen.length, fuzzy: true };
+}
+
 function countOccurrences(haystack: string, needle: string): number {
   if (needle.length === 0) return 0;
   let count = 0;
@@ -609,11 +644,11 @@ function fuzzySpans(
   return spans;
 }
 
-function firstSegment(pattern: string): string {
+export function firstSegment(pattern: string): string {
   return pattern.split("/")[0] ?? "";
 }
 
-function globToRegExp(pattern: string): RegExp {
+export function globToRegExp(pattern: string): RegExp {
   let source = "^";
   for (let index = 0; index < pattern.length; index += 1) {
     const character = pattern[index]!;
