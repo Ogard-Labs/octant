@@ -2499,6 +2499,84 @@ describe("CodeOperationService", () => {
     expect(localStage).not.toHaveBeenCalled();
   });
 
+  it("runs a server Project's tests on its server, never this host's, and refuses them at Plan", async () => {
+    const definition = {
+      id: "abcdabcd-abcd-4bcd-8bcd-abcdabcdabcd",
+      name: "test",
+      source: { kind: "octant-file" as const, path: ".octant/tests.json", selectedId: "unit" },
+      argv: ["make", "test"],
+      cwd: ".",
+      environmentRefs: [],
+      timeoutMs: 60_000,
+      artifactPaths: [],
+    };
+    const serverRun = vi.fn(async (input: { readonly checkoutRevision: string }) => ({
+      id: testRunId,
+      definition,
+      threadId: ids.thread,
+      checkoutId: ids.checkout,
+      checkoutRevision: input.checkoutRevision,
+      executionPolicy: "full-access",
+      startedAt: "2026-08-15T08:00:00.000Z",
+      completedAt: "2026-08-15T08:01:00.000Z",
+      exitCode: 0,
+      termination: "exited",
+      stdout: { text: "ok", byteLength: 2, truncated: false },
+      stderr: { text: "", byteLength: 0, truncated: false },
+      artifacts: [],
+      verdict: "passed",
+      concerns: [],
+    }));
+    const localRun = vi.fn();
+    const evidence = {
+      put: vi.fn(() =>
+        decodeCodeEvidenceReference({
+          contentId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          digest: "c".repeat(64),
+          byteLength: 3,
+        }),
+      ),
+      read: vi.fn(),
+    };
+    const command = {
+      kind: "run-repository-test",
+      operationId: decodeCodeOperationId("4f4f4f4f-4f4f-44f4-84f4-4f4f4f4f4f4f"),
+      threadId: ids.thread,
+      checkoutId: ids.checkout,
+      testRunId,
+      definition,
+    } as never;
+    const fixture = (executionPolicy: "full-access" | "plan") =>
+      providerTurnFixture({
+        remoteRoot: true,
+        holdsServerThread: () => true,
+        repositoryTests: { discover: vi.fn(), run: localRun, cancel: vi.fn() } as never,
+        serverRepositoryTests: () =>
+          ({
+            head: async () => "e".repeat(40),
+            discover: async () => [definition],
+            run: serverRun,
+            cancel: vi.fn(),
+          }) as never,
+        evidence: evidence as never,
+        thread: decodeCodeThread({ ...thread(), executionPolicy }),
+      });
+    expect(await fixture("full-access").service.execute(ids.window, command)).toMatchObject({
+      kind: "repository-test-state",
+      state: "completed",
+      verdict: "passed",
+    });
+    expect(serverRun).toHaveBeenCalledWith(
+      expect.objectContaining({ checkoutRevision: "e".repeat(40) }),
+    );
+    expect(await fixture("plan").service.execute(ids.window, command)).toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "unauthorized" },
+    });
+    expect(serverRun).toHaveBeenCalledOnce();
+    expect(localRun).not.toHaveBeenCalled();
+  });
+
   it("opens a server thread's pull request by name after checking its remote with Git on the server", async () => {
     const githubRemote = [
       {
@@ -3060,6 +3138,9 @@ function providerTurnFixture(
       | "takeProductFeedbackForTurn"
       | "holdsServerThread"
       | "serverGit"
+      | "serverRepositoryTests"
+      | "repositoryTests"
+      | "evidence"
       | "pullRequests"
     >
   > & {

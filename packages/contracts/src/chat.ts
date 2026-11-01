@@ -13,6 +13,7 @@ import {
   ContextHandoffMessages,
   ContextHandoffOmissions,
   ProviderSwitchConversationHandoff,
+  RewindConversationHandoff,
 } from "./contextHandoff";
 import { AggregateVersion, GlobalSequence, UtcTimestamp } from "./events";
 import { ThreadRestFields } from "./threadRest";
@@ -51,6 +52,8 @@ export const ChatThreadId = brandedUuid("ChatThreadId");
 export type ChatThreadId = typeof ChatThreadId.Type;
 export const ChatTurnId = brandedUuid("ChatTurnId");
 export type ChatTurnId = typeof ChatTurnId.Type;
+export const ChatRewindId = brandedUuid("ChatRewindId");
+export type ChatRewindId = typeof ChatRewindId.Type;
 export const ChatSubmissionId = brandedUuid("ChatSubmissionId");
 export type ChatSubmissionId = typeof ChatSubmissionId.Type;
 export const ChatAttemptId = brandedUuid("ChatAttemptId");
@@ -283,6 +286,7 @@ export type ChatBranchConversationHandoff = typeof ChatBranchConversationHandoff
 export const ChatAttemptHandoff = Schema.Union(
   ProviderSwitchConversationHandoff,
   ChatBranchConversationHandoff,
+  RewindConversationHandoff,
 );
 export type ChatAttemptHandoff = typeof ChatAttemptHandoff.Type;
 
@@ -368,6 +372,12 @@ export const ChatAttempt = Schema.Struct({
   );
 export type ChatAttempt = typeof ChatAttempt.Type;
 
+export const ChatTurnRewound = Schema.Struct({
+  rewindId: ChatRewindId,
+  rewoundAt: UtcTimestamp,
+}).annotations(strict);
+export type ChatTurnRewound = typeof ChatTurnRewound.Type;
+
 export const ChatTurn = Schema.Struct({
   id: ChatTurnId,
   threadId: ChatThreadId,
@@ -379,14 +389,23 @@ export const ChatTurn = Schema.Struct({
   extensionSelections: Schema.optional(Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32))),
   attempts: Schema.Array(ChatAttempt),
   /**
-   * Set when this turn re-runs the thread from an edited earlier message. The
-   * journal is append-only, so an edit never rewrites the turn it revises: it
-   * appends a new turn that names the revised turn here. The superseded turn
-   * and everything that followed it stay journaled and recoverable; they are
-   * simply no longer part of the active conversation, which `activeChatTurns`
-   * in `@octant/domain` derives from this field.
+   * Set on a turn that re-ran the thread from an edited earlier message, which
+   * Chat no longer offers. Journals written while it did still hold such
+   * turns, and they replay and display as they always did: the edit appended a
+   * new turn that names the revised turn here, and the superseded turn and
+   * everything that followed it stay journaled, but are no longer part of the
+   * active conversation, which `activeChatTurns` in `@octant/domain` derives
+   * from this field.
    */
   supersedes: Schema.optional(ChatTurnId),
+  /**
+   * Set when the person rewound the thread to before this turn. The rewind's
+   * journaled `thread-rewound` event is the record; this is its projection onto
+   * the turn, so every reader of the turn list leaves the turn out of the
+   * active conversation exactly as it does a superseded one. The turn and its
+   * attempts stay journaled.
+   */
+  rewound: Schema.optional(ChatTurnRewound),
   /**
    * Set only on a turn the host itself started to carry a finished subagent
    * run's result into this thread. The marker is what makes the delivery
@@ -644,21 +663,18 @@ export const SendChatTurnCommand = Schema.Struct({
 }).annotations(strict);
 
 /**
- * Revise an earlier user message and re-run the thread from that point.
- *
- * This never rewrites or deletes a journaled event. The server appends a new
- * turn carrying `prompt` and naming `turnId` in its `supersedes` field; the
- * revised turn and everything that followed it remain in the journal and stay
- * fully recoverable. `expectedVersion` is required, so an edit computed against
- * a stale view is refused rather than applied. Provider, model, and Project
- * scope always come from the server's copy of the thread, never from this
- * command, so an edit can neither widen authority nor silently re-route.
+ * Rewind the thread in place to just before one of its turns, so that turn and
+ * every later one leave the active conversation. Chat has no files, so only
+ * the conversation goes back; the removed turns stay journaled. The person's
+ * message is returned to the composer by the client, which already holds it.
+ * `expectedVersion` is required, so a rewind computed against a stale view is
+ * refused rather than applied.
  */
-export const EditChatTurnCommand = Schema.Struct({
-  kind: Schema.Literal("edit-chat-turn"),
+export const RewindChatThreadCommand = Schema.Struct({
+  kind: Schema.Literal("rewind-chat-thread"),
   ...ChatThreadCommandFields,
+  /** The first turn the rewind removes; every later turn goes with it. */
   turnId: ChatTurnId,
-  prompt: PromptText,
 }).annotations(strict);
 
 /**
@@ -901,7 +917,7 @@ export const ChatCommand = Schema.Union(
   ChangeChatResearchCommand,
   ChangeChatInstructionsCommand,
   SendChatTurnCommand,
-  EditChatTurnCommand,
+  RewindChatThreadCommand,
   BranchChatThreadCommand,
   RetryChatTurnCommand,
   ResumeChatTurnCommand,
@@ -1174,6 +1190,25 @@ export const ChatTurnCreated = Schema.Struct({
 }).annotations(strict);
 export type ChatTurnCreated = typeof ChatTurnCreated.Type;
 
+/** The most turns one rewind names; a longer tail is refused rather than half removed. */
+export const MAX_CHAT_REWOUND_TURNS = 10_000;
+
+/**
+ * The journaled removal: the turns a rewind took out of the active
+ * conversation, oldest first, with the thread's settled version. The removed
+ * turns stay in the journal; this record is what keeps them out of the thread
+ * and away from the model.
+ */
+export const ChatThreadRewound = Schema.Struct({
+  kind: Schema.Literal("thread-rewound"),
+  thread: ChatThread,
+  rewindId: ChatRewindId,
+  fromTurnId: ChatTurnId,
+  removedTurnIds: Schema.NonEmptyArray(ChatTurnId).pipe(Schema.maxItems(MAX_CHAT_REWOUND_TURNS)),
+  rewoundAt: UtcTimestamp,
+}).annotations(strict);
+export type ChatThreadRewound = typeof ChatThreadRewound.Type;
+
 export const ChatAttemptUpdated = Schema.Struct({
   kind: Schema.Literal("attempt-updated"),
   attempt: ChatAttempt,
@@ -1245,6 +1280,7 @@ export const ChatPublicEvent = Schema.Union(
   ChatSettingsUpdated,
   ChatThreadCreated,
   ChatThreadUpdated,
+  ChatThreadRewound,
   ChatTurnCreated,
   ChatAttemptUpdated,
   ChatAttemptResponseAppended,
@@ -1299,6 +1335,7 @@ export const CHAT_EVENT_NAMES = [
   "chat.settings-updated@1",
   "chat.thread-created@1",
   "chat.thread-updated@1",
+  "chat.thread-rewound@1",
   "chat.turn-created@1",
   "chat.attempt-updated@1",
   "chat.attempt-response-appended@1",
@@ -1314,6 +1351,7 @@ export const CHAT_EVENT_NAMES = [
 export const decodeChatThreadId = Schema.decodeUnknownSync(ChatThreadId);
 export const decodeChatSubmissionId = Schema.decodeUnknownSync(ChatSubmissionId);
 export const decodeChatTurnId = Schema.decodeUnknownSync(ChatTurnId);
+export const decodeChatRewindId = Schema.decodeUnknownSync(ChatRewindId);
 export const decodeChatAttemptId = Schema.decodeUnknownSync(ChatAttemptId);
 export const decodeChatContentId = Schema.decodeUnknownSync(ChatContentId);
 export const decodeChatAttachmentId = Schema.decodeUnknownSync(ChatAttachmentId);
@@ -1357,6 +1395,7 @@ export const decodeChatSettingsUpdated = Schema.decodeUnknownSync(ChatSettingsUp
 export const decodeChatThreadCreated = Schema.decodeUnknownSync(ChatThreadCreated);
 export const decodeChatThreadUpdated = Schema.decodeUnknownSync(ChatThreadUpdated);
 export const decodeChatTurnCreated = Schema.decodeUnknownSync(ChatTurnCreated);
+export const decodeChatThreadRewound = Schema.decodeUnknownSync(ChatThreadRewound);
 export const decodeChatAttemptUpdated = Schema.decodeUnknownSync(ChatAttemptUpdated);
 export const decodeChatAttemptResponseAppended = Schema.decodeUnknownSync(
   ChatAttemptResponseAppended,

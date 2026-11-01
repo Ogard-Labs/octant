@@ -47,13 +47,19 @@ export interface DockToolCapabilities {
    * Absent for every other thread.
    */
   readonly serverCheckout?: boolean;
+  /**
+   * The thread is a Work thread in a Project on one of the person's servers.
+   * Absent for every other thread.
+   */
+  readonly serverWork?: boolean;
 }
 
 /**
- * The tools a thread in a server Project keeps. Every other tool reads or acts
- * on a folder, a browser, a device, or a desktop of this host, which the host
- * refuses for such a thread, so the dock does not offer them. Review stays:
- * its changes and history are read by Git on the server.
+ * The tools a thread in a server Project keeps: Files and Tests read and run
+ * on its server, and Review's changes and history are read by Git there.
+ * Every other tool reads or acts on a folder, a browser, a device, or a
+ * desktop of this host, which the host refuses for such a thread, so the dock
+ * does not offer them.
  */
 const SERVER_CHECKOUT_TOOLS: ReadonlySet<RightUtilityDockSurfaceId> = new Set([
   "side-chat",
@@ -62,7 +68,22 @@ const SERVER_CHECKOUT_TOOLS: ReadonlySet<RightUtilityDockSurfaceId> = new Set([
   "plan",
   "agents",
   "terminal",
+  "files",
+  "tests",
   "review",
+]);
+
+/**
+ * The tools a Work thread in a server Project keeps. Work's Files, terminal,
+ * and other tools read a folder of this host, and none has a server form
+ * yet, so only the tools that act on nothing of this host stay.
+ */
+const SERVER_WORK_TOOLS: ReadonlySet<RightUtilityDockSurfaceId> = new Set([
+  "side-chat",
+  "document",
+  "canvas",
+  "plan",
+  "agents",
 ]);
 
 /**
@@ -74,6 +95,7 @@ export function isDockToolLaunchable(
   capabilities: DockToolCapabilities,
 ): boolean {
   if (capabilities.serverCheckout === true && !SERVER_CHECKOUT_TOOLS.has(surface)) return false;
+  if (capabilities.serverWork === true && !SERVER_WORK_TOOLS.has(surface)) return false;
   if (surface === "plan") return capabilities.hasPlanArtifact === true;
   if (surface === "delivery") return capabilities.hasDelivery === true;
   if (surface === "canvas") return capabilities.hasCanvasDocument === true;
@@ -94,6 +116,7 @@ export function isDockToolStillOpenable(
   capabilities: DockToolCapabilities,
 ): boolean {
   if (capabilities.serverCheckout === true && !SERVER_CHECKOUT_TOOLS.has(surface)) return false;
+  if (capabilities.serverWork === true && !SERVER_WORK_TOOLS.has(surface)) return false;
   if (surface === "plan") return capabilities.hasPlanArtifact !== false;
   if (surface === "delivery") return capabilities.hasDelivery !== false;
   if (surface === "canvas") return capabilities.hasCanvasDocument !== false;

@@ -12,7 +12,7 @@ import type {
 } from "@octant/contracts/chat";
 import type { ProviderUsageLimit } from "@octant/contracts/providers";
 import type { ThreadCheckpoint } from "@octant/contracts/thread-checkpoints";
-import { activeChatTurns } from "@octant/domain/chat-policy";
+import { activeChatTurns, chatTurnAnsweredAttempt } from "@octant/domain/chat-policy";
 import { withoutProviderCitationMarkers } from "@octant/domain/chat-message-parts";
 import type { PickerGroup } from "@octant/domain";
 import { threadHandoffDisclosure } from "../providers/conversationHandoff";
@@ -42,7 +42,6 @@ import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import { ChildResultCards } from "../agents/ChildResultCards";
-import { ChatTurnEditor } from "./ChatTurnEditor";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import {
   LoadEarlierMessages,
@@ -86,10 +85,19 @@ export interface ChatTranscriptProps {
   }) => void;
   /** Cancels the turn a question belongs to, without answering it. */
   readonly onDismissQuestion?: (turnId: ChatTurnId, attemptId: ChatAttemptId) => void;
-  /** Sends the revised message to the server, which decides whether to accept it. */
-  readonly onEditTurn?: (turnId: ChatTurnId, prompt: string) => void;
   /** Starts a second thread carrying the conversation through this turn. */
   readonly onBranchTurn?: (turnId: ChatTurnId) => void;
+  /**
+   * Asks to rewind the thread to just before this turn. `prompt` is the
+   * person's message from it, which returns to the composer; it is absent
+   * where the turn holds no message of theirs. `removedTurns` counts the turns
+   * the rewind takes out, this one included.
+   */
+  readonly onRewindTurn?: (input: {
+    readonly turnId: ChatTurnId;
+    readonly prompt: string | undefined;
+    readonly removedTurns: number;
+  }) => void;
   /**
    * Quotes a finished assistant excerpt into the same thread's composer as a
    * structured chip. Absent when the surface cannot accept quotes.
@@ -98,7 +106,7 @@ export interface ChatTranscriptProps {
     readonly turnId: ChatTurnId;
     readonly text: string;
   }) => void;
-  /** True while a turn is running, so revising and branching stay unavailable. */
+  /** True while a turn is running, so rewinding and forking stay unavailable. */
   readonly busy?: boolean;
   /**
    * The points this conversation is marked at, and the gestures that change
@@ -225,7 +233,6 @@ function AttemptFailureNotice(props: { readonly attempt: ChatAttempt }) {
 }
 
 export function ChatTranscript(props: ChatTranscriptProps) {
-  const [editingTurnId, setEditingTurnId] = useState<string | undefined>(undefined);
   const [checkpointDraft, setCheckpointDraft] = useState<
     { readonly turnId: string; readonly kind: "mark" | "restore" } | undefined
   >(undefined);
@@ -234,11 +241,15 @@ export function ChatTranscript(props: ChatTranscriptProps) {
   // newest turns; the newest turns keep receiving live updates meanwhile.
   const detached = windowState?.detached;
   const shown = detached?.view ?? props.view;
-  // Revising a message appends a new turn rather than rewriting history, so the
-  // transcript shows the conversation as it now stands and the superseded turns
-  // stay in the journal behind it.
+  // A revised or rewound message never leaves the journal, so the transcript
+  // shows the conversation as it now stands and the turns it left out stay
+  // behind it.
   const turns = useMemo(() => activeChatTurns(shown.turns), [shown.turns]);
-  // A windowed view holds active turns only, so the host counts the revised ones.
+  const turnIndexById = useMemo(
+    () => new Map(turns.map((turn, index) => [String(turn.id), index])),
+    [turns],
+  );
+  // A windowed view holds active turns only, so the host counts the left-out ones.
   const revisedTurnCount =
     windowState?.supersededTurnCount ?? props.view.turns.length - turns.length;
   const contentById = useMemo(
@@ -309,8 +320,8 @@ export function ChatTranscript(props: ChatTranscriptProps) {
       {revisedTurnCount === 0 ? null : (
         <p className="chat-transcript__provenance thread-column" role="status">
           {revisedTurnCount === 1
-            ? "1 earlier message was revised. This is the conversation as it now stands; the earlier version stays in this thread's history."
-            : `${revisedTurnCount} earlier messages were revised. This is the conversation as it now stands; the earlier versions stay in this thread's history.`}
+            ? "1 earlier message was revised or rewound. This is the conversation as it now stands; the earlier version stays in this thread's history."
+            : `${revisedTurnCount} earlier messages were revised or rewound. This is the conversation as it now stands; the earlier versions stay in this thread's history.`}
         </p>
       )}
       {earlierRow === undefined || props.transcriptWindow === undefined ? null : (
@@ -386,13 +397,12 @@ export function ChatTranscript(props: ChatTranscriptProps) {
       listClassName="chat-transcript__turns thread-column"
       listLabel="Chat transcript"
       listTag="ol"
-      {...(editingTurnId === undefined ? {} : { pinnedKeys: [editingTurnId] })}
       renderItem={(turn) => {
         const userContent = resolvedContent(contentById, turn.userMessageRef, "user");
         const attachments = turn.attachmentIds.map((id) => attachmentById.get(String(id)));
-        const editing = editingTurnId === String(turn.id);
         // The host wrote a delivered turn, not the person: it is a subagent's
-        // result and reads as one, and there is no message of theirs to revise.
+        // result and reads as one, and there is no message of theirs to return
+        // to the composer.
         const delivery = turn.delivery !== undefined ? userContent : undefined;
         const checkpoints = props.checkpoints;
         const marked = checkpoints?.byTurnId.get(String(turn.id));
@@ -425,76 +435,98 @@ export function ChatTranscript(props: ChatTranscriptProps) {
             .join("");
           return joined.length === 0 ? [] : [withoutProviderCitationMarkers(joined)];
         });
-        const canBranch = props.onBranchTurn !== undefined;
-        const actions = editing
-          ? []
-          : chatTurnActions({
-              busy: props.busy === true,
-              canEdit:
-                userContent !== undefined &&
-                delivery === undefined &&
-                props.onEditTurn !== undefined,
-              canBranch,
-              canCopyMarkdown: assistantBodies.some((body) => body.trim().length > 0),
-              checkpointsAvailable: checkpoints !== undefined,
-              checkpointBusy: checkpoints?.busy === true,
-              marked: marked !== undefined,
+        // From a person's message a fork runs through the turn before it and a
+        // rewind removes this turn; from a reply, a fork runs through this
+        // turn and a rewind removes the turns after it.
+        const turnIndex = turnIndexById.get(String(turn.id)) ?? -1;
+        const previousTurn = turnIndex > 0 ? turns[turnIndex - 1] : undefined;
+        const nextTurn = turnIndex >= 0 ? turns[turnIndex + 1] : undefined;
+        const nextPrompt =
+          nextTurn === undefined || nextTurn.delivery !== undefined
+            ? undefined
+            : resolvedContent(contentById, nextTurn.userMessageRef, "user")?.body;
+        const answered = chatTurnAnsweredAttempt(turn) !== undefined;
+        const forkFromMessage = props.onBranchTurn !== undefined ? previousTurn : undefined;
+        const forkFromReply = props.onBranchTurn !== undefined && answered ? turn : undefined;
+        // A detached range holds only the turns around a jump, so it cannot say how
+        // many a rewind would take out; the newest messages can.
+        const canRewind =
+          props.onRewindTurn !== undefined && turnIndex >= 0 && detached === undefined;
+        const copyMarkdown = assistantBodies.some((body) => body.trim().length > 0);
+        const messageActions = chatTurnActions({
+          role: "user",
+          busy: props.busy === true,
+          canFork: forkFromMessage !== undefined,
+          canRewind,
+          canCopyMarkdown: copyMarkdown,
+          checkpointsAvailable: checkpoints !== undefined,
+          checkpointBusy: checkpoints?.busy === true,
+          marked: marked !== undefined,
+        });
+        const replyActions = chatTurnActions({
+          role: "assistant",
+          busy: props.busy === true,
+          canFork: forkFromReply !== undefined,
+          canRewind:
+            props.onRewindTurn !== undefined && nextTurn !== undefined && detached === undefined,
+          canCopyMarkdown: false,
+          checkpointsAvailable: false,
+          checkpointBusy: false,
+          marked: false,
+        });
+        const onAction = (value: string) => {
+          if (value === "fork-message") {
+            if (forkFromMessage !== undefined) props.onBranchTurn?.(forkFromMessage.id);
+          } else if (value === "fork-reply") props.onBranchTurn?.(turn.id);
+          else if (value === "rewind-message") {
+            props.onRewindTurn?.({
+              turnId: turn.id,
+              prompt: delivery === undefined ? userContent?.body : undefined,
+              removedTurns: turns.length - turnIndex,
             });
+          } else if (value === "rewind-reply") {
+            if (nextTurn !== undefined)
+              props.onRewindTurn?.({
+                turnId: nextTurn.id,
+                prompt: nextPrompt,
+                removedTurns: turns.length - turnIndex - 1,
+              });
+          } else if (value === "checkpoint-mark") {
+            setCheckpointDraft({ turnId: String(turn.id), kind: "mark" });
+          } else if (value === "checkpoint-restore") {
+            setCheckpointDraft({ turnId: String(turn.id), kind: "restore" });
+          } else if (value === "checkpoint-forget") {
+            if (marked !== undefined) checkpoints?.onForget(marked);
+          } else if (value === "copy-markdown") {
+            void copyText(assistantBodies.join("\n\n").trim());
+          } else if (value === "copy-references") {
+            void copyText(
+              chatTurnReferenceText({
+                userBody: userContent?.body,
+                attachments: attachments.map(
+                  (attachment) => attachment?.displayName ?? "Attachment is unavailable.",
+                ),
+                assistantBodies,
+                citations: turnCitations.map((citation) => {
+                  const sourceUrl = safeCitationUrl(citation.sourceUrl);
+                  return sourceUrl === undefined
+                    ? citation.sourceTitle
+                    : `${citation.sourceTitle} · ${sourceUrl}`;
+                }),
+              }),
+            );
+          }
+        };
 
         return (
           <div className="chat-transcript__turn">
-            <TurnActionMenu
-              actions={actions}
-              onAction={(value) => {
-                if (value === "edit") setEditingTurnId(String(turn.id));
-                else if (value === "branch") props.onBranchTurn?.(turn.id);
-                else if (value === "checkpoint-mark") {
-                  setCheckpointDraft({ turnId: String(turn.id), kind: "mark" });
-                } else if (value === "checkpoint-restore") {
-                  setCheckpointDraft({ turnId: String(turn.id), kind: "restore" });
-                } else if (value === "checkpoint-forget") {
-                  if (marked !== undefined) checkpoints?.onForget(marked);
-                } else if (value === "copy-markdown") {
-                  void copyText(assistantBodies.join("\n\n").trim());
-                } else if (value === "copy-references") {
-                  void copyText(
-                    chatTurnReferenceText({
-                      userBody: userContent?.body,
-                      attachments: attachments.map(
-                        (attachment) => attachment?.displayName ?? "Attachment is unavailable.",
-                      ),
-                      assistantBodies,
-                      citations: turnCitations.map((citation) => {
-                        const sourceUrl = safeCitationUrl(citation.sourceUrl);
-                        return sourceUrl === undefined
-                          ? citation.sourceTitle
-                          : `${citation.sourceTitle} · ${sourceUrl}`;
-                      }),
-                    }),
-                  );
-                }
-              }}
-            >
+            <TurnActionMenu actions={messageActions} onAction={onAction}>
               <article
                 aria-label={delivery === undefined ? "Your message" : "Subagent results"}
                 className={delivery === undefined ? "turn-user" : "turn-child-result"}
               >
                 {delivery !== undefined ? (
                   <ChildResultCards providerGroups={props.providerGroups} text={delivery.body} />
-                ) : editing && userContent !== undefined && props.onEditTurn !== undefined ? (
-                  <>
-                    <ChatTurnEditor
-                      busy={props.busy === true}
-                      initialPrompt={userContent.body}
-                      onCancel={() => setEditingTurnId(undefined)}
-                      onSubmit={(turnId, prompt) => {
-                        setEditingTurnId(undefined);
-                        props.onEditTurn?.(turnId, prompt);
-                      }}
-                      turnId={turn.id}
-                    />
-                    {attachmentList}
-                  </>
                 ) : (
                   <>
                     <div className="bubble">
@@ -507,7 +539,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                     <TurnTime at={turn.createdAt} copyValue={userContent?.body} />
                   </>
                 )}
-                {editing || checkpoints === undefined ? null : (
+                {checkpoints === undefined ? null : (
                   <ThreadCheckpointControls
                     busy={props.busy === true || checkpoints.busy}
                     {...(marked === undefined ? {} : { checkpoint: marked })}
@@ -527,13 +559,15 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                   />
                 )}
               </article>
+            </TurnActionMenu>
+            <TurnActionMenu actions={replyActions} label="Reply actions" onAction={onAction}>
               {routeDecision === undefined ? null : <RouteReceipt decision={routeDecision} />}
               {turn.attempts.map((attempt, index) => (
                 <AttemptBlock
                   attempt={attempt}
                   contentById={contentById}
                   key={attempt.id}
-                  onFork={canBranch ? () => props.onBranchTurn?.(turn.id) : undefined}
+                  onFork={forkFromReply === undefined ? undefined : () => onAction("fork-reply")}
                   forkDisabled={props.busy === true}
                   onAnswerQuestion={props.onAnswerQuestion}
                   onDismissQuestion={props.onDismissQuestion}
@@ -620,14 +654,18 @@ function ChatDetachedRangeEnd(props: {
 
 /**
  * Per-message secondary actions. Each is a proposal: the renderer never
- * decides that an edit, branch, or checkpoint is allowed, it asks the
+ * decides that a fork, rewind, or checkpoint is allowed, it asks the
  * server, which re-checks the thread's version, lifecycle, and Project
  * scope before anything happens.
+ *
+ * A person's message and the reply to it each offer Fork from here and Rewind
+ * to here, but they mean different points: see the caller.
  */
 function chatTurnActions(input: {
+  readonly role: "user" | "assistant";
   readonly busy: boolean;
-  readonly canEdit: boolean;
-  readonly canBranch: boolean;
+  readonly canFork: boolean;
+  readonly canRewind: boolean;
   readonly canCopyMarkdown: boolean;
   readonly checkpointsAvailable: boolean;
   readonly checkpointBusy: boolean;
@@ -635,20 +673,23 @@ function chatTurnActions(input: {
 }): ReadonlyArray<TurnAction> {
   const checkpointDisabled = input.busy || input.checkpointBusy;
   const actions: TurnAction[] = [];
-  if (input.canEdit) {
+  if (input.canFork) {
     actions.push({
-      label: "Edit",
-      value: "edit",
+      label: "Fork from here",
+      value: input.role === "user" ? "fork-message" : "fork-reply",
       ...(input.busy ? { disabled: true } : {}),
     });
   }
-  if (input.canBranch) {
+  if (input.canRewind) {
     actions.push({
-      label: "Branch from here",
-      value: "branch",
+      label: "Rewind to here…",
+      value: input.role === "user" ? "rewind-message" : "rewind-reply",
       ...(input.busy ? { disabled: true } : {}),
     });
   }
+  // The reply's menu holds only the points the conversation can be taken
+  // back or forked from; copying and checkpoints stay with the message's.
+  if (input.role === "assistant") return actions;
   if (input.canCopyMarkdown) {
     actions.push({ label: "Copy as Markdown", value: "copy-markdown" });
   }

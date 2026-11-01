@@ -1020,6 +1020,7 @@ describe("chat contracts", () => {
       "chat.settings-updated@1",
       "chat.thread-created@1",
       "chat.thread-updated@1",
+      "chat.thread-rewound@1",
       "chat.turn-created@1",
       "chat.attempt-updated@1",
       "chat.attempt-response-appended@1",
@@ -1190,16 +1191,34 @@ describe("chat contracts", () => {
       expect(() => decodeChatThread({ ...threadFixture, branchedFrom })).toThrow();
     });
 
-    it("requires an expected version on both new commands and refuses extra authority fields", () => {
-      const edit = {
-        kind: "edit-chat-turn",
+    it("carries a rewind marker on a turn and refuses the retired edit command", () => {
+      const rewound = {
+        rewindId: "00000000-0000-4000-8000-0000000000b1",
+        rewoundAt: now,
+      } as const;
+      expect(decodeChatTurn({ ...turnFixture, rewound }).rewound).toEqual(rewound);
+      expect(decodeChatTurn(turnFixture).rewound).toBeUndefined();
+      expect(() =>
+        decodeChatCommand({
+          kind: "edit-chat-turn",
+          threadId: ids.thread,
+          expectedVersion: 3,
+          turnId: ids.turn,
+          prompt: "Revised",
+        }),
+      ).toThrow();
+    });
+
+    it("requires an expected version on rewind and branch and refuses extra authority fields", () => {
+      const rewind = {
+        kind: "rewind-chat-thread",
         threadId: ids.thread,
         expectedVersion: 3,
         turnId: ids.turn,
-        prompt: "Revised",
       } as const;
-      expect(decodeChatCommand(edit)).toEqual(edit);
-      expect(() => decodeChatCommand({ ...edit, expectedVersion: undefined })).toThrow();
+      expect(decodeChatCommand(rewind)).toEqual(rewind);
+      expect(() => decodeChatCommand({ ...rewind, expectedVersion: undefined })).toThrow();
+      expect(() => decodeChatCommand({ ...rewind, providerInstanceId: "x" })).toThrow();
 
       const branch = {
         kind: "branch-chat-thread",

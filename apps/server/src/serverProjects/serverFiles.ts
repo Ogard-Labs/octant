@@ -61,7 +61,7 @@ const CREDENTIAL_CASE =
  * credential location, before printing anything: a link with an innocent
  * name never carries a key's bytes to this host.
  */
-const RESOLVE_INSIDE = `exec 2>/dev/null
+export const RESOLVE_INSIDE = `exec 2>/dev/null
 r=$(realpath -- "$1") || { printf 'm'; exit 0; }
 case "$r" in "$2"|"$2"/*) ;; *) printf 'x'; exit 0;; esac
 case "$r" in ${CREDENTIAL_CASE}) printf 'k'; exit 0;; esac

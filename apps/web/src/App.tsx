@@ -2589,28 +2589,30 @@ function LaunchedShell(
   // A thread in a server Project keeps only the dock tools that act on nothing
   // of this host; the host refuses the rest for it.
   const dockServerCheckout =
-    (activeMode === "code" &&
-      activeCodeThreadId !== undefined &&
-      serverCodeProjectFor(
-        serverCodeProjects.projects,
-        codeController.activeView !== undefined &&
-          String(codeController.activeView.thread.id) === String(activeCodeThreadId)
-          ? codeController.activeView.thread.projectId
-          : codeController.bootstrap?.threads.find(
-              (thread) => String(thread.id) === String(activeCodeThreadId),
-            )?.projectId,
-      ) !== undefined) ||
-    (activeMode === "work" &&
-      activeWorkThreadId !== undefined &&
-      serverCodeProjectFor(
-        serverCodeProjects.workProjects,
-        workNavigation.bootstrap?.threads.find(
-          (thread) => String(thread.id) === String(activeWorkThreadId),
-        )?.projectId,
-      ) !== undefined);
+    activeMode === "code" &&
+    activeCodeThreadId !== undefined &&
+    serverCodeProjectFor(
+      serverCodeProjects.projects,
+      codeController.activeView !== undefined &&
+        String(codeController.activeView.thread.id) === String(activeCodeThreadId)
+        ? codeController.activeView.thread.projectId
+        : codeController.bootstrap?.threads.find(
+            (thread) => String(thread.id) === String(activeCodeThreadId),
+          )?.projectId,
+    ) !== undefined;
+  const dockServerWork =
+    activeMode === "work" &&
+    activeWorkThreadId !== undefined &&
+    serverCodeProjectFor(
+      serverCodeProjects.workProjects,
+      workNavigation.bootstrap?.threads.find(
+        (thread) => String(thread.id) === String(activeWorkThreadId),
+      )?.projectId,
+    ) !== undefined;
   const dockToolCapabilities = useMemo<DockToolCapabilities>(
     () => ({
       ...(dockServerCheckout ? { serverCheckout: true } : {}),
+      ...(dockServerWork ? { serverWork: true } : {}),
       addAgentInvoked: dockAddAgentInvoked,
       hasAppleSimulator: dockHasAppleSimulator,
       hasCanvasDocument: writtenCanvasKind === "canvas" ? true : dockHasCanvasDocument,
@@ -2630,6 +2632,7 @@ function LaunchedShell(
       dockHasPlanArtifact,
       dockHasWrittenDocument,
       dockServerCheckout,
+      dockServerWork,
       writtenCanvasKind,
     ],
   );

@@ -15,6 +15,7 @@ import {
   decodeChatNavigationThread,
   decodeChatThreadCreated,
   decodeChatThreadId,
+  decodeChatThreadRewound,
   decodeChatThreadUpdated,
   decodeChatThreadView,
   decodeChatThreadWindow,
@@ -86,6 +87,7 @@ const chatEventNames = new Set([
   "chat.settings-updated@1",
   "chat.thread-created@1",
   "chat.thread-updated@1",
+  "chat.thread-rewound@1",
   "chat.turn-created@1",
   "chat.attempt-updated@1",
   "chat.attempt-response-appended@1",
@@ -132,6 +134,9 @@ export class ChatProjection implements Projection {
         return;
       case "chat.thread-updated@1":
         this.#applyThreadUpdated(connection, event);
+        return;
+      case "chat.thread-rewound@1":
+        this.#applyThreadRewound(connection, event);
         return;
       case "chat.turn-created@1":
         this.#applyTurnCreated(connection, event);
@@ -207,6 +212,51 @@ export class ChatProjection implements Projection {
       thread.updatedAt,
       event.globalSequence,
     );
+  }
+
+  /**
+   * A rewind removes turns from the active conversation. Their rows stay; each
+   * is marked so every reader of the turn list leaves it out, and its text
+   * leaves the transcript search, which finds only what the thread shows.
+   * Replay marks the same rows again, and a turn already marked is not
+   * rewritten, so the first rewind stays the record.
+   */
+  #applyThreadRewound(connection: SqliteConnection, event: EventEnvelope): void {
+    assertEnvelope(event.aggregateType === "chat-thread");
+    const rewound = decodeProjection(() => decodeChatThreadRewound(event.payload));
+    assertEnvelope(
+      String(rewound.thread.id) === String(event.aggregateId) &&
+        rewound.thread.version === event.aggregateVersion,
+    );
+    this.#upsertThread(connection, rewound.thread, event.aggregateVersion, event.globalSequence);
+    upsertSearch(connection).run(
+      rewound.thread.id,
+      CHAT_PROJECTION_SCHEMA_VERSION,
+      normalizeSearchText(rewound.thread.title),
+      rewound.thread.updatedAt,
+      event.globalSequence,
+    );
+    const marker = { rewindId: rewound.rewindId, rewoundAt: rewound.rewoundAt };
+    for (const turnId of rewound.removedTurnIds) {
+      const row = connection
+        .prepare("SELECT turn_json FROM chat_turn_projection WHERE turn_id = ? AND thread_id = ?")
+        .get(turnId, rewound.thread.id) as { readonly turn_json: string } | undefined;
+      assertEnvelope(row !== undefined);
+      const turn = decodeChatTurn(JSON.parse(row.turn_json));
+      if (turn.rewound !== undefined) continue;
+      const marked = { ...turn, rewound: marker };
+      upsertTurn(connection).run(
+        marked.id,
+        marked.threadId,
+        marked.sequence,
+        CHAT_PROJECTION_SCHEMA_VERSION,
+        JSON.stringify(marked),
+        event.aggregateVersion,
+        marked.createdAt,
+        event.globalSequence,
+      );
+    }
+    dropInactiveTranscriptSearch(connection, String(rewound.thread.id));
   }
 
   #applyTurnCreated(connection: SqliteConnection, event: EventEnvelope): void {
@@ -326,7 +376,7 @@ export class ChatProjection implements Projection {
       event.globalSequence,
     );
     // A late attempt for a turn an edit already replaced must not bring its text back.
-    if (!isTurnReplacedByEdit(connection, updatedTurn)) {
+    if (updatedTurn.rewound === undefined && !isTurnReplacedByEdit(connection, updatedTurn)) {
       indexTranscriptSearchForAttempt(connection, updatedTurn, attempt, indexedContentIds, {
         lastSequence: event.globalSequence,
         updatedAt: attempt.updatedAt,
@@ -1365,6 +1415,7 @@ function escapeLikePattern(value: string): string {
  * The thread's active turn ids, oldest first: what a reader of the thread sees.
  * An edit supersedes the revised turn and every turn after it, so a turn's
  * activity cannot be read from its own row; it takes the fold over the thread.
+ * A rewound turn is marked on its own row but takes part in the same fold.
  */
 function readTurnIds(
   connection: SqliteConnection,
@@ -1372,7 +1423,8 @@ function readTurnIds(
 ): { readonly journaled: ReadonlyArray<string>; readonly active: ReadonlyArray<string> } {
   const order = connection
     .prepare(`
-      SELECT turn_id, json_extract(turn_json, '$.supersedes') AS supersedes
+      SELECT turn_id, json_extract(turn_json, '$.supersedes') AS supersedes,
+        json_type(turn_json, '$.rewound') IS NOT NULL AS rewound
       FROM chat_turn_projection
       WHERE thread_id = ?
       ORDER BY sequence ASC
@@ -1380,11 +1432,13 @@ function readTurnIds(
     .all(threadId) as ReadonlyArray<{
     readonly turn_id: string;
     readonly supersedes: string | null;
+    readonly rewound: number;
   }>;
   const active = activeChatTurns(
     order.map((row) => ({
       id: row.turn_id,
       ...(row.supersedes === null ? {} : { supersedes: row.supersedes }),
+      ...(row.rewound === 0 ? {} : { rewound: true }),
     })),
   ).map((turn) => turn.id);
   return { journaled: order.map((row) => row.turn_id), active };

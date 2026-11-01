@@ -20,6 +20,7 @@ import {
   supportsAttachmentFile,
 } from "./composerAttachmentCapability";
 import { pastedImageName } from "./composerImagePaste";
+import { RewindDialog, composerAfterRewind } from "../transcript/RewindDialog";
 import { COMPOSER_STAGED_DROPPED_NOTE } from "../composer/composerThreadDraftStore";
 import { useThreadMentions } from "./useThreadMentions";
 import { useComposerThreadDropRegistration } from "./composerThreadDrop";
@@ -236,6 +237,18 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   // One branch dispatch at a time: a second click while the server is still
   // creating the first branch would mint a second thread, not retry the first.
   const [branchPending, setBranchPending] = useState(false);
+  // The rewind the person is being asked about. Chat has no files, so the
+  // dialog only ever offers the conversation; the removed message returns to
+  // the composer once the host has journaled the rewind.
+  const [rewind, setRewind] = useState<{
+    readonly turnId: ChatTurnId;
+    readonly prompt: string | undefined;
+    readonly removedTurns: number;
+    /** The conversation's last turn when the question was asked. */
+    readonly tailTurnId: string | undefined;
+    readonly busy: boolean;
+    readonly message?: string;
+  }>();
   const pendingCanvasSelections = props.pendingCanvasSelections ?? localCanvasSelections;
   const [attachmentStatus, setAttachmentStatus] = useState<AttachmentStatus>({ kind: "idle" });
   // A send refused before the host saw it explains itself beside the composer,
@@ -617,7 +630,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   function baseFromResult(
     result: Awaited<ReturnType<typeof props.controller.execute>>,
   ): ModelOptionBase | undefined {
-    return result?.kind === "thread-updated"
+    return result?.kind === "thread-updated" || result?.kind === "thread-rewound"
       ? {
           threadId: String(result.thread.id),
           version: result.thread.version,
@@ -649,6 +662,54 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
 
   function queuedVersion(previous: ModelOptionBase | undefined): ChatThread["version"] {
     return queuedBase(previous).version;
+  }
+
+  /**
+   * Rewind the thread in place to just before the chosen turn. Behind the same
+   * queue as a model or option change: a rewind sent on the rendered version
+   * while one of those is settling is refused as stale. The host journals the
+   * removal; the person's message returns to the composer, which is how a sent
+   * message is changed in Chat, and a draft already there stays below it.
+   */
+  async function runRewind() {
+    const open = rewind;
+    if (open === undefined) return;
+    // The dialog named the turns it would remove. A turn that arrived since
+    // (from another window) is not among them, so ask again rather than take
+    // it out unseen.
+    if (String(activeChatTurns(view?.turns ?? []).at(-1)?.id) !== open.tailTurnId) {
+      setRewind({
+        ...open,
+        message: "The conversation changed while this was open. Close it and try again.",
+      });
+      return;
+    }
+    setRewind({ ...open, busy: true });
+    const result = await enqueueThreadCommand(async (previous) => {
+      const outcome = await props.controller.execute({
+        kind: "rewind-chat-thread",
+        threadId: thread.id,
+        expectedVersion: queuedVersion(previous),
+        turnId: open.turnId,
+      });
+      return { value: outcome, base: baseFromResult(outcome) };
+    }).catch(() => undefined);
+    if (!mountedRef.current) return;
+    if (result?.kind !== "thread-rewound") {
+      setRewind({
+        ...open,
+        busy: false,
+        message: "The rewind did not go through. Nothing changed.",
+      });
+      return;
+    }
+    setRewind(undefined);
+    if (open.prompt !== undefined) {
+      props.controller.setPendingDraft(
+        composerAfterRewind(open.prompt, props.controller.pendingDraft),
+        open.prompt.length,
+      );
+    }
   }
 
   function changeModelOption(optionId: string, value: string | undefined) {
@@ -1158,21 +1219,15 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                 }
               })();
             }}
-            onEditTurn={(turnId, prompt) => {
-              // Behind the same queue as a model or option change: an edit sent on
-              // the rendered version while one of those is settling is refused as
-              // stale, and the person's revision is lost with no second chance.
-              void enqueueThreadCommand(async (previous) => {
-                const result = await props.controller.execute({
-                  kind: "edit-chat-turn",
-                  threadId: view.thread.id,
-                  expectedVersion: queuedVersion(previous),
-                  turnId,
-                  prompt,
-                });
-                return { value: undefined, base: baseFromResult(result) };
-              }).catch(() => undefined);
-            }}
+            onRewindTurn={({ turnId, prompt, removedTurns }) =>
+              setRewind({
+                turnId,
+                prompt,
+                removedTurns,
+                tailTurnId: String(activeChatTurns(view.turns).at(-1)?.id),
+                busy: false,
+              })
+            }
             onRetryAttempt={(turnId, attemptId) => {
               void enqueueThreadCommand(async (previous) => {
                 const result = await props.controller.execute({
@@ -1295,6 +1350,20 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             summary={browserApprovalSummary(pendingBrowserApproval)}
           />
         )}
+        <RewindDialog
+          busy={rewind?.busy === true}
+          files={{
+            kind: "unavailable",
+            reason: "Chat has no files, so only the conversation can be rewound.",
+          }}
+          {...(rewind?.message === undefined ? {} : { message: rewind.message })}
+          onClose={() => {
+            if (rewind?.busy !== true) setRewind(undefined);
+          }}
+          onRewind={() => void runRewind()}
+          open={rewind !== undefined}
+          removedTurns={rewind?.removedTurns}
+        />
         <ChatComposer
           key={String(thread.id)}
           attachment={attachmentCapability}

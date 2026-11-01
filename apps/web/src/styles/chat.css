@@ -277,39 +277,6 @@
   gap: 20px;
 }
 
-/* Editing in place takes the bubble's column back to full width. */
-.chat-transcript__editor {
-  display: grid;
-  width: 100%;
-  gap: var(--oct-space-2);
-  justify-self: stretch;
-}
-
-.chat-transcript__editor textarea {
-  width: 100%;
-  min-height: 72px;
-  padding: var(--oct-space-2) var(--oct-space-3);
-  color: var(--oct-fg);
-  background: var(--oct-surface);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
-  font: inherit;
-  resize: vertical;
-}
-
-.chat-transcript__editor-note {
-  margin: 0;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-  line-height: 1.4;
-}
-
-.chat-transcript__editor-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--oct-space-2);
-}
-
 .chat-workspace__export {
   display: flex;
   flex-wrap: wrap;

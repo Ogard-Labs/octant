@@ -53,6 +53,18 @@ export function branchHandoffRecord(selection: Available): ChatBranchConversatio
  */
 export function restartHandoffRecord(
   selection: Available,
+  reason: "rewind",
+): RewindConversationHandoff;
+export function restartHandoffRecord(
+  selection: Available,
+  reason: "fork",
+): WorkForkConversationHandoff;
+export function restartHandoffRecord(
+  selection: Available,
+  reason: "rewind" | "fork",
+): RewindConversationHandoff | WorkForkConversationHandoff;
+export function restartHandoffRecord(
+  selection: Available,
   reason: "rewind" | "fork",
 ): RewindConversationHandoff | WorkForkConversationHandoff {
   return {
