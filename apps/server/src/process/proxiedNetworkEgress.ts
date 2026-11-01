@@ -136,6 +136,9 @@ function loopbackServer(port) {
     };
     client.on("error", end);
     upstream.on("error", end);
+    // Until the proxy answers, either side closing ends both.
+    client.on("close", end);
+    upstream.on("close", end);
     const target = "127.0.0.1:" + port;
     upstream.write("CONNECT " + target + " HTTP/1.1\\r\\nHost: " + target + "\\r\\n" + proxyAuthorization() + "\\r\\n");
     let head = Buffer.alloc(0);
