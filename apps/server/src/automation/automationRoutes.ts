@@ -405,7 +405,8 @@ async function handleCommand(
       decodeAutomationCommandResult({
         kind: "automation-command-failed",
         reason: "unauthorized",
-        message: "Letting a routine merge its pull requests is chosen in the Octant window on this host.",
+        message:
+          "Letting a routine merge its pull requests is chosen in the Octant window on this host.",
       }),
       200,
       origin,

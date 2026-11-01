@@ -3754,7 +3754,10 @@ export class CodeOperationService {
     }
     if (command.authorization.kind === "standing") {
       const thread = this.#options.authority.readThread(command.threadId);
-      if (thread === undefined || !this.#standingMergeBacked(command.authorization.allowedBy, thread)) {
+      if (
+        thread === undefined ||
+        !this.#standingMergeBacked(command.authorization.allowedBy, thread)
+      ) {
         return this.#failed(
           command.operationId,
           "unauthorized",

@@ -155,9 +155,9 @@ export class CodeProjectPullRequestActionService {
         ...(command.kind === "labels"
           ? { labels: { add: command.add, remove: command.remove } }
           : {}),
-        ...((command.kind === "comment" ||
-          command.kind === "reply" ||
-          command.kind === "request-changes") ||
+        ...(command.kind === "comment" ||
+        command.kind === "reply" ||
+        command.kind === "request-changes" ||
         (command.kind === "approve" && command.body !== undefined)
           ? { bodyBytes: Buffer.byteLength(command.body ?? "") }
           : {}),
@@ -315,7 +315,10 @@ export class CodeProjectPullRequestActionService {
    */
   async #review(
     identity: GhPullRequestIdentityRequest,
-    command: Extract<CodeProjectPullRequestActionCommand, { readonly kind: "approve" | "request-changes" }>,
+    command: Extract<
+      CodeProjectPullRequestActionCommand,
+      { readonly kind: "approve" | "request-changes" }
+    >,
     signal: AbortSignal,
   ): Promise<GhPullRequestActionResult> {
     const summary = await this.#forge.summary(identity, signal);

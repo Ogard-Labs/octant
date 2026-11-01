@@ -438,10 +438,10 @@ function actionRefusalCopy(
               ? "the pull request has a newer commit than the one you read; refresh and review again"
               : outcome.reason === "own-pull-request"
                 ? "GitHub does not let you review your own pull request"
-              : outcome.reason === "label-not-found"
-              ? "the repository does not have that label"
-              : outcome.reason === "invalid"
-                ? "GitHub did not accept that text or thread"
-                : "GitHub rejected it";
+                : outcome.reason === "label-not-found"
+                  ? "the repository does not have that label"
+                  : outcome.reason === "invalid"
+                    ? "GitHub did not accept that text or thread"
+                    : "GitHub rejected it";
   return `That did not go through: ${reason}.`;
 }

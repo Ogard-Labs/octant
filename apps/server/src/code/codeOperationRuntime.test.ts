@@ -5156,9 +5156,9 @@ describe("CodeOperationRuntime", () => {
       // The setting was switched off, or the claim names a choice that is not
       // stored: the command's word is not enough.
       const off = actionFixture({ approved: false, standing: [] });
-      expect(
-        await off.fixture.runtime.execute(windowId, { ...base, ...scope(201) }),
-      ).toMatchObject({ kind: "operation-failed", failure: { category: "unauthorized" } });
+      expect(await off.fixture.runtime.execute(windowId, { ...base, ...scope(201) })).toMatchObject(
+        { kind: "operation-failed", failure: { category: "unauthorized" } },
+      );
       const wrongSource = actionFixture({ approved: false, standing: ["routine"] });
       expect(
         await wrongSource.fixture.runtime.execute(windowId, { ...base, ...scope(202) }),

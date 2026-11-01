@@ -268,7 +268,11 @@ describe("Project creation and lifecycle", () => {
       ProjectPolicyRejected,
     );
     expect(() =>
-      changeCodeProjectAgentMerge(makeProject(ids.work, "0/1", { type: "work" }), "enabled", updatedAt),
+      changeCodeProjectAgentMerge(
+        makeProject(ids.work, "0/1", { type: "work" }),
+        "enabled",
+        updatedAt,
+      ),
     ).toThrow(ProjectPolicyRejected);
   });
 

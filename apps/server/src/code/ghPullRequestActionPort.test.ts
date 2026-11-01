@@ -224,7 +224,10 @@ describe("pull-request action port", () => {
 
   it("records a review on the named head through the review API, with the note on stdin", async () => {
     const head = "c".repeat(40);
-    const { port, run } = fixture([{ exitCode: 0, stdout: "{}" }, { exitCode: 0, stdout: "{}" }]);
+    const { port, run } = fixture([
+      { exitCode: 0, stdout: "{}" },
+      { exitCode: 0, stdout: "{}" },
+    ]);
     await expect(
       port.review({ ...identity, event: "approve", headSha: head }, signal),
     ).resolves.toEqual({ status: "done" });
@@ -270,7 +273,11 @@ describe("pull-request action port", () => {
   it("names the forge's refusal of your own pull request and of a moved head", async () => {
     const { port } = fixture([
       { exitCode: 1, stdout: "", stderr: "Can not approve your own pull request (HTTP 422)" },
-      { exitCode: 1, stdout: "", stderr: "Unprocessable Entity: commit_id is not part of the pull request" },
+      {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Unprocessable Entity: commit_id is not part of the pull request",
+      },
     ]);
     const request = { ...identity, event: "approve", headSha: "c".repeat(40) } as const;
     await expect(port.review(request, signal)).resolves.toEqual({

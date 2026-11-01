@@ -347,7 +347,14 @@ export class GhPullRequestActionPort {
       return { status: "refused", reason: "invalid" };
     }
     return this.#act(
-      ["api", "--method", "POST", `repos/${repository}/pulls/${request.number}/reviews`, "--input", "-"],
+      [
+        "api",
+        "--method",
+        "POST",
+        `repos/${repository}/pulls/${request.number}/reviews`,
+        "--input",
+        "-",
+      ],
       JSON.stringify({
         event: request.event === "approve" ? "APPROVE" : "REQUEST_CHANGES",
         commit_id: request.headSha,
