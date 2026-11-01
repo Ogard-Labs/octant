@@ -1381,6 +1381,9 @@ export class WorkTurnService {
         return this.#rewindResult(command, retried.removedRequestIds);
       throw this.#mapFailure(error);
     }
+    // Other panes and clients on this thread hold the removed turns until
+    // they read the transcript again.
+    this.#liveUpdates.invalidate(command.threadId);
     return this.#rewindResult(command, removed);
   }
 

@@ -185,6 +185,24 @@ export class WorkTurnLiveStore {
     );
   }
 
+  /**
+   * The thread's journaled transcript changed under every open view (a
+   * rewind removed turns), so each subscriber reads it again. The frame takes
+   * a sequence of its own, so a view that reconnects from before it replays it.
+   */
+  invalidate(threadId: WorkThreadId): void {
+    if (this.#closed) return;
+    const state = this.#state(threadId);
+    this.#publish(
+      threadId,
+      decodeWorkTurnStreamFrame({
+        kind: "snapshot-required",
+        sequence: state.nextSequence,
+        threadId,
+      }),
+    );
+  }
+
   async *subscribe(input: {
     readonly threadId: WorkThreadId;
     readonly afterSequence: number;

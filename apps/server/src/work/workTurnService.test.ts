@@ -3433,6 +3433,25 @@ describe("WorkTurnService", () => {
       ).toMatchObject({ reason: "rewind", messages: 2 });
     });
 
+    it("tells every open view of the thread to read the transcript again", async () => {
+      const { fixture } = await twoTurns(true);
+      const { liveCursor } = await fixture.service.transcript(ids.window, ids.thread);
+      const controller = new AbortController();
+      const stream = fixture.service.subscribe(
+        ids.window,
+        ids.thread,
+        liveCursor,
+        controller.signal,
+      );
+      const next = stream.next();
+
+      await fixture.service.rewindThread(ids.window, rewindFrom(secondRequest));
+      await expect(next).resolves.toMatchObject({
+        value: { kind: "snapshot-required", threadId: ids.thread },
+      });
+      controller.abort();
+    });
+
     it("rebuilds from the kept turns alone on a provider that keeps no session", async () => {
       const { fixture, run } = await twoTurns(false);
       await fixture.service.rewindThread(ids.window, rewindFrom(secondRequest));
