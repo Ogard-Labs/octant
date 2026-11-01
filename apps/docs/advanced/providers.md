@@ -203,7 +203,9 @@ What each one loads today:
 
 At Auto in Code, Mistral Vibe now reviews its own approvals with its
 auto-approve mode, as Claude Code and Codex do with theirs, until the thread
-reads something from the web.
+reads something from the web. The other agents on the ACP bridge have no
+reviewer of their own, so their capabilities list says **Own reviewer: None**
+and Auto uses Octant Shield for them.
 
 Only a window on the computer running Octant can change any of these switches; a
 paired phone or browser cannot. Plan mode stays read-only, so it never runs
@@ -1113,6 +1115,11 @@ every mode and fail closed when a capability is unsupported. When a
 connection check refuses, Settings names an Octant-authored reason and the
 next action instead of a generic incompatibility sentence. Detected versions
 stay visible when the probe read them. Raw provider output never appears here.
+
+**Session rollback** says whether a provider can cut its own session back when
+you rewind a Work or Code thread. The Octant Harness can. The other providers
+say **None**: after a rewind, your next message starts a fresh session with
+the messages you kept handed over as text.
 
 A Codex CLI configured for Amazon Bedrock works in Octant only with a Bedrock
 API key: one you signed that Codex account in to Bedrock with, or, for the

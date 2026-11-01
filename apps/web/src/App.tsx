@@ -57,6 +57,7 @@ import {
   readPairingFragment,
   type AgentProfileClient,
   type AutomationClient,
+  type OwnerUnlockNotGiven,
 } from "@octant/client-runtime";
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
 import { createLaunchedShellClients } from "./app/createLaunchedShellClients";
@@ -4493,7 +4494,7 @@ function LaunchedShell(
   function mergeProjectPullRequest(
     method: CodeProjectPullRequestMergeMethod,
     headSha: string,
-  ): Promise<CodeProjectPullRequestMergeOutcome> {
+  ): Promise<CodeProjectPullRequestMergeOutcome | OwnerUnlockNotGiven> {
     const selected = selectedProjectPullRequest;
     const merge = codeClient.mergeProjectPullRequest;
     if (selected === undefined || merge === undefined || headSha === "") {
@@ -6937,6 +6938,7 @@ function LaunchedShell(
                 : { threadErrorMessage: projectThreadsAccess.errorMessage })}
               threadExportClient={threadExportClient}
               threadHandOffClient={threadHandOffClient}
+              personMemoryClient={launchedClients.personMemoryClient}
               threadStatus={projectThreadsAccess.status}
               workStatus={workNavigation.status}
               workspace={controller.workspace}

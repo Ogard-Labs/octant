@@ -85,6 +85,9 @@ const initialCapabilities: ProviderCapabilities = {
   // Work continue their journaled session too, but the host plans and compacts
   // their history and rebuilds a fresh session from it after a compaction.
   sessionCompaction: { chat: "unsupported", work: "unsupported", code: "supported" },
+  // A rewound Code thread continues a copy of its own transcript cut back at
+  // the last kept turn, so the removed turns never reach the model.
+  sessionRollback: "supported",
   ...unsupportedChatCapabilities,
 };
 

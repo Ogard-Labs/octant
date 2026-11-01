@@ -225,10 +225,12 @@ import {
   bindServerCodeTurn,
   serverCodeCheckoutRoot,
   serverProjectOf,
+  serverThreadOf,
 } from "../serverProjects/serverProjectThreads";
 import type { GitService } from "../code/gitService";
 import { createServerGitService } from "../serverProjects/serverGit";
 import { serverTerminalLogin } from "../serverProjects/serverTerminal";
+import { serverPullRequestRepository } from "../serverProjects/serverWorktrees";
 
 export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<HarnessStateWiring, "serverConnection" | "serverProjectStore"> &
@@ -244,6 +246,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "machineChangeFeed"
     | "onWindowRevoked"
     | "simulatorInputGrants"
+    | "personMemoryAccess"
   > &
   Pick<
     AgentRunsWiring,
@@ -408,6 +411,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     threadMentionService,
     threadOutsideContentMarks,
     workRequestRuntime,
+    personMemoryAccess,
   } = deps;
   return Effect.gen(function* () {
     // A host started with its own runtime uses it; otherwise it is built below.
@@ -422,6 +426,15 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     ): void => {
       codeToolContributors.push(contributor);
     };
+    contributeCodeTools(({ windowId, thread }) =>
+      personMemoryAccess.toolsFor({
+        mode: "code",
+        threadId: String(thread.id),
+        projectId: String(thread.projectId),
+        createdAt: thread.createdAt,
+        windowId,
+      }),
+    );
     const {
       androidToolchainRoutes,
       appleToolchainRoutes,
@@ -538,6 +551,14 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       );
       codeOperationRuntime = createCodeOperationRuntime({
         shield: hostShield,
+        personMemoryBlock: ({ thread, windowId }) =>
+          personMemoryAccess.blockFor({
+            mode: "code",
+            threadId: String(thread.id),
+            projectId: String(thread.projectId),
+            createdAt: thread.createdAt,
+            windowId,
+          }),
         chosenAutoReviewer: (thread) => {
           const project = persistence.readProject(thread.projectId);
           return chosenAutoReviewer({
@@ -655,11 +676,11 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         nativeHarnessTools: (input) => nativeHarnessComposition.forCode(input),
         holdsServerThread: (thread) => serverProjectOf(serverProjectStore, thread) !== undefined,
         serverTerminalLogin: (thread) => {
-          const project = serverProjectOf(serverProjectStore, thread);
-          if (project === undefined) return undefined;
-          const address = serverProjectStore.addressOf(String(project.id));
+          const place = serverThreadOf(serverProjectStore, thread);
+          if (place === undefined) return undefined;
+          const address = serverProjectStore.addressOf(String(place.project.id));
           return address.kind === "address"
-            ? serverTerminalLogin(serverConnection, address.server, project.folder)
+            ? serverTerminalLogin(serverConnection, address.server, place.folder)
             : undefined;
         },
         serverGit: (thread) => {
@@ -727,6 +748,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         supportsModelSwitch: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities
             .modelSwitch === "supported",
+        supportsSessionRollback: (thread) =>
+          providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities
+            .sessionRollback === "supported",
         compactionRunning: (threadId) =>
           contextHarness.compactionRunning(
             decodeContextSubjectRef({ aggregateType: "code-thread", aggregateId: threadId }),
@@ -747,9 +771,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               globalSequence,
             ),
         },
-        providerSwitchContext: ({ thread, excludeOperationId, inheritedFrom }) =>
+        providerSwitchContext: ({ thread, excludeOperationId, inheritedFrom, purpose }) =>
           selectCodeConversation(thread.id, {
-            purpose: "provider-switch",
+            purpose: purpose ?? "provider-switch",
             excludeOperationId: String(excludeOperationId),
             ...(inheritedFrom === undefined
               ? {}
@@ -1009,8 +1033,12 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
                   ? instance.driverKind
                   : undefined;
               },
+              // The copied session holds every turn that ran on it, rewound
+              // ones too, so turns are placed in it by the order they ran.
               sourceTurns: (threadId) =>
-                codeThreadTurns((page) => codeBoardEventStore.conversation(page), threadId),
+                codeThreadTurns((page) => codeBoardEventStore.conversation(page), threadId, {
+                  includeRewound: true,
+                }),
               sourceConversations: (threadId) =>
                 codeBoardEventStore.providerConversationsOfTurns(threadId),
             },
@@ -1144,11 +1172,15 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         resolvePullRequestTarget: async (threadId) => {
           const thread = persistence.readCodeThread(threadId);
           if (thread === undefined) return undefined;
-          const owner = thread.deliveryTarget.proposedBaseRepository.split("/")[0];
+          const baseRepository = await serverPullRequestRepository(
+            { store: serverProjectStore, connection: serverConnection },
+            thread,
+          );
+          const owner = baseRepository.split("/")[0];
           if (owner === undefined || owner.length === 0) return undefined;
           return {
             authorization: "confirmed-delivery-target",
-            baseRepository: thread.deliveryTarget.proposedBaseRepository,
+            baseRepository,
             baseBranch: thread.deliveryTarget.proposedBaseBranch,
             head: `${owner}:${thread.deliveryTarget.branchIntent}`,
           };

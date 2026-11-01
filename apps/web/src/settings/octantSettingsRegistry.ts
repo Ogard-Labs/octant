@@ -587,12 +587,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "auto reviewer octant shield provider review approvals approve automatic judge",
         },
         {
-          id: settingId("code-shield-model"),
-          label: "Shield model",
-          scope: "app",
-          keywords: "octant shield model reviewer judge local endpoint approvals",
-        },
-        {
           id: settingId("code-editor-executable"),
           label: "External editor",
           scope: "app",
@@ -619,6 +613,20 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       keywords:
         "providers models agent runtimes provider type opencode codex kimi code acp cli login claude agent sdk subscription gemini qwen cline mistral vibe grok glm fx goose copilot devin kilo pi binary path permissions permission persistence runtime capabilities connection detected installed scan opencode update managed cli version provider catalog drivers bundled installed trusted available enabled authenticated signed in ready set up setup guided add runtime endpoint find look on this host install modes chat work code agent loop harness capabilities",
       settings: [
+        {
+          id: settingId("automatic-model-judge"),
+          label: "Octant Shield's Judge",
+          scope: "host",
+          keywords:
+            "automatic model calls octant shield judge reviewer approvals account api key provider smallest model local endpoint background",
+        },
+        {
+          id: settingId("automatic-model-memory"),
+          label: "Memory distilling",
+          scope: "host",
+          keywords:
+            "automatic model calls memory distilling writes memory account api key provider smallest model background",
+        },
         {
           id: settingId("opencode-managed-update"),
           label: "OpenCode update",
@@ -1059,6 +1067,57 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
+      id: "memory",
+      label: "Memory",
+      scope: "host",
+      keywords:
+        "memory remember person preferences past threads other projects forget learn privacy no trace distill",
+      settings: [
+        {
+          id: settingId("person-memory"),
+          label: "Remember across threads",
+          scope: "host",
+          keywords: "memory remember across threads projects on off automatic",
+        },
+        {
+          id: settingId("past-thread-search"),
+          label: "Search past threads",
+          scope: "host",
+          keywords: "search past threads earlier other projects what did we do tool",
+        },
+        {
+          id: settingId("person-memory-exclude"),
+          label: "Keep a Project out",
+          scope: "host",
+          keywords: "keep project out of memory exclude private",
+        },
+        {
+          id: settingId("person-memory-excluded-project"),
+          label: "Projects kept out of memory",
+          scope: "host",
+          keywords: "projects kept out excluded remember again",
+        },
+        {
+          id: settingId("person-memory-untraced"),
+          label: "Threads that leave no trace",
+          scope: "host",
+          keywords: "threads leave no trace private allow memory",
+        },
+        {
+          id: settingId("person-memory-entry"),
+          label: "What Octant remembers",
+          scope: "host",
+          keywords: "entries remembered edit delete source thread",
+        },
+        {
+          id: settingId("person-memory-forget"),
+          label: "Forget everything",
+          scope: "host",
+          keywords: "forget erase delete all memory entries",
+        },
+      ],
+    },
+    {
       id: "secret-stores",
       label: "Secret stores",
       scope: "host",
@@ -1077,6 +1136,25 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Check an item",
           scope: "host",
           keywords: "check item reference op vault found locked missing test",
+        },
+        {
+          id: settingId("secret-store-aws-cli"),
+          label: "AWS command line",
+          scope: "host",
+          keywords:
+            "aws cli command line access key id secret access key session token sts short-lived cloud credentials shell",
+        },
+        {
+          id: settingId("secret-store-aws-cli-key-id"),
+          label: "AWS access key ID item",
+          scope: "host",
+          keywords: "aws access key id item reference op vault",
+        },
+        {
+          id: settingId("secret-store-aws-cli-secret"),
+          label: "AWS secret access key item",
+          scope: "host",
+          keywords: "aws secret access key item reference op vault",
         },
       ],
     },
@@ -1238,6 +1316,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "hub join spoke code comparison grant leave roster introduce owners sign-in sign in request accept decline provider account",
+        },
+        {
+          id: settingId("hub-paired-merge-unlock"),
+          label: "Owner unlock before a phone or browser merges",
+          scope: "host",
+          keywords:
+            "hub owner unlock merge pull request phone browser paired client passkey fresh unlock off by default",
         },
         {
           id: settingId("hub-confirm-new-members"),

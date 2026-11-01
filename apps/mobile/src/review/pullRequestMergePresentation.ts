@@ -1,3 +1,4 @@
+import { ownerMergeUnlockCopy, type OwnerUnlockNotGiven } from "@octant/client-runtime";
 import type {
   CodeProjectPullRequestMergeOutcome,
   CodeProjectPullRequestSwitchOutcome,
@@ -15,8 +16,13 @@ export function mergeConfirmationCopy(
     : `Merge #${number} when ready? GitHub merges the head you just reviewed (${head}) with squash once its required checks and reviews pass. A new push turns it off.`;
 }
 
-export function mergeOutcomeCopy(outcome: CodeProjectPullRequestMergeOutcome): string {
+export function mergeOutcomeCopy(
+  outcome: CodeProjectPullRequestMergeOutcome | OwnerUnlockNotGiven,
+): string {
   if (outcome.status === "merged") return `Merged #${outcome.number}.`;
+  if (outcome.status === "owner-unlock-required" || outcome.status === "owner-unlock-not-given") {
+    return ownerMergeUnlockCopy(outcome);
+  }
   if (outcome.status === "unavailable") {
     return outcome.reason === "unauthenticated"
       ? "Merge unavailable: GitHub sign-in is missing on the host."
@@ -38,7 +44,12 @@ export function mergeOutcomeCopy(outcome: CodeProjectPullRequestMergeOutcome): s
   return `Merge refused: ${reason[outcome.reason]}.`;
 }
 
-export function mergeWhenReadyOutcomeCopy(outcome: CodeProjectPullRequestSwitchOutcome): string {
+export function mergeWhenReadyOutcomeCopy(
+  outcome: CodeProjectPullRequestSwitchOutcome | OwnerUnlockNotGiven,
+): string {
+  if (outcome.status === "owner-unlock-required" || outcome.status === "owner-unlock-not-given") {
+    return ownerMergeUnlockCopy(outcome);
+  }
   if (outcome.status === "applied") {
     return outcome.view.mergeWhenReady.status === "on"
       ? "Merge when ready is on. GitHub merges once the required checks and reviews pass."

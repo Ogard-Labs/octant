@@ -750,7 +750,8 @@ describe("DraftThreadWorkspace", () => {
     );
     expect(screen.getByRole("button", { name: "Project: Service" })).toBeVisible();
     expect(screen.getByText("devbox:/home/build/service")).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Workspace" })).toBeNull();
+    // A server thread starts in its folder unless the person picks a worktree there.
+    expect(screen.getByRole("button", { name: "Workspace" })).toHaveTextContent("Current checkout");
     expect(
       screen.queryByText("The selected Project is unavailable. Choose another Project."),
     ).toBeNull();

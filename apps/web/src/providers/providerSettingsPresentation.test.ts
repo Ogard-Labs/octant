@@ -6,7 +6,9 @@ import {
   providerProcessFailureSummary,
   providerRefusalGuidance,
   providerRowReadinessLabel,
+  ownReviewerLabel,
   reviewVerdictsLabel,
+  sessionRollbackLabel,
 } from "./providerSettingsPresentation";
 
 describe("provider Settings presentation", () => {
@@ -358,5 +360,36 @@ describe("reviewVerdictsLabel", () => {
 
   it("says nothing for a runtime with no reviewer of its own", () => {
     expect(reviewVerdictsLabel(report("unsupported"))).toBeUndefined();
+  });
+});
+
+describe("sessionRollbackLabel", () => {
+  it("says honestly when a provider cannot cut its own session back, including when it never said", () => {
+    expect(sessionRollbackLabel({ sessionRollback: "supported" } as never)).toContain(
+      "continues its own session",
+    );
+    expect(sessionRollbackLabel({ sessionRollback: "unsupported" } as never)).toContain(
+      "starts a fresh session with the kept turns as text",
+    );
+    expect(sessionRollbackLabel({} as never)).toMatch(/^None\./);
+  });
+});
+
+describe("ownReviewerLabel", () => {
+  const report = (harnessAutoReview: string) => ({ harnessAutoReview }) as never;
+
+  it("says an agent on the ACP bridge has no reviewer of its own", () => {
+    expect(ownReviewerLabel("gemini", report("unsupported"))).toBe(
+      "None. Octant Shield reviews at Auto.",
+    );
+  });
+
+  it("says nothing for an agent that has a reviewer, and for a runtime that is not an ACP agent", () => {
+    expect(ownReviewerLabel("mistral-vibe", report("supported"))).toBeUndefined();
+    expect(ownReviewerLabel("claude", report("unsupported"))).toBeUndefined();
+  });
+
+  it("does not call a reviewer missing when the connection check could not say", () => {
+    expect(ownReviewerLabel("mistral-vibe", report("unavailable"))).toBeUndefined();
   });
 });

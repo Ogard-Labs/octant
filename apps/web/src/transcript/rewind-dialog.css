@@ -1,0 +1,62 @@
+/* The one question before a rewind: what leaves the conversation, which files
+   go back, and the two answers. One column at every width, so the path list
+   wraps rather than pushing the dialog past a phone's edge. */
+.rewind-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-3);
+  width: min(32rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+}
+
+.rewind-dialog__title {
+  margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-lg);
+  font-weight: var(--oct-weight-display);
+}
+
+.rewind-dialog__detail,
+.rewind-dialog__message,
+.rewind-dialog__rollback,
+.rewind-dialog__section .oct-section-label,
+.rewind-dialog__section .oct-row-detail,
+.rewind-dialog__section .oct-meta {
+  margin: 0;
+}
+
+.rewind-dialog__scope {
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+.rewind-dialog__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-1);
+  padding-top: var(--oct-space-3);
+  border-top: 1px solid var(--oct-border);
+}
+
+.rewind-dialog__paths {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 10rem;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  color: var(--oct-fg);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  overflow-wrap: anywhere;
+}
+
+.rewind-dialog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--oct-space-2);
+}

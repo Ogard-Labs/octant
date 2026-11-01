@@ -549,6 +549,12 @@ from their phone or laptop what they could do sitting at any of them. An
   changing that host's hub and peer grants; and copying sign-ins
   ([Shared sign-ins](#shared-sign-ins)). Each use is journaled on the host
   with the device and `owner-unlock`.
+- **Before a paired client's merge.** A host may also ask a paired phone or
+  web client's merge for an owner unlock, under a switch its window sets, off
+  by default. The owner device answers a challenge this host's owner route
+  issued for the merge route's own path and body, and the merge carries the
+  proof. The rule and its rationale are in
+  [Architecture: pull-request merge](../architecture.md#modes-chat-work-and-code).
 - **What it never allows.** An unlock answers one person's direct action in a
   client. An agent, a routine, the hub principal, a standby, and a peer
   never carry one, and no tool can ask a device for it. An agent still cannot

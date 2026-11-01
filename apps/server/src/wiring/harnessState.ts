@@ -129,7 +129,11 @@ export function wireHarnessState(deps: HarnessStateDependencies) {
   // Code Projects on a registered server. Windows, Code, and the harness all
   // read them, so they are built here; the registry they name is Octant
   // Shield's, which the harness wiring hands over once it is built.
-  const serverRegistry: { servers?: () => ReadonlyArray<ShieldServer> } = {};
+  const serverRegistry: {
+    servers?: () => ReadonlyArray<ShieldServer>;
+    /** A Project's servers: its own list, else the account list. */
+    serversFor?: (projectId: string | undefined) => ReadonlyArray<ShieldServer>;
+  } = {};
   const serverConnection = new ServerConnection({
     agentSocket: () => personSshAgentSocket(process.env.SSH_AUTH_SOCK),
   });

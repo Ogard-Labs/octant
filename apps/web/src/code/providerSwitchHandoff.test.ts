@@ -14,7 +14,10 @@ const none = {
   sourceTruncatedMessages: 0,
 };
 
-type SwitchHandoff = Extract<CodeConversationTurnHandoff, { readonly reason: "provider-switch" }>;
+type SwitchHandoff = Extract<
+  CodeConversationTurnHandoff,
+  { readonly previousProviderInstanceId: unknown }
+>;
 
 const label = () => "Local — One";
 
@@ -31,6 +34,22 @@ function handoff(overrides: Partial<SwitchHandoff> = {}): SwitchHandoff {
 }
 
 describe("provider switch handoff disclosure", () => {
+  it("says a fresh session after a rewind carried only the kept turns", () => {
+    const text = conversationHandoffDisclosure(handoff({ reason: "rewind" }), label);
+    expect(text).toContain("After the rewind, a fresh session started with 2 recent messages");
+    expect(text).toContain("The removed turns");
+    expect(
+      conversationHandoffDisclosure(
+        {
+          reason: "rewind-native-session",
+          previousSessionId: "80000000-0000-4000-8000-0000000000a2" as never,
+          throughOperationId: "80000000-0000-4000-8000-0000000000a3" as never,
+        },
+        label,
+      ),
+    ).toContain("continued its own session cut back to the last kept reply");
+  });
+
   it("names how much was cut and which messages were already cut short when recorded", () => {
     const text = conversationHandoffDisclosure(
       handoff({

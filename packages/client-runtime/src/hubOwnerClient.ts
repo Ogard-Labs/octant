@@ -195,7 +195,21 @@ export interface OwnerAdministrationClient {
   /** Applies a provisioning proposal this spoke holds, through the same path its window uses. */
   readonly applyProposal: (offerId: string, projectId?: string) => Promise<OwnerActionResult>;
   readonly dismissProposal: (offerId: string) => Promise<OwnerActionResult>;
+  /**
+   * The unlock a paired client's merge carries on this host: a challenge for
+   * the merge route's own path and this exact body, signed after the person
+   * proves presence. Nothing is sent but the challenge; the caller sends the
+   * merge with the proof over its own paired session.
+   */
+  readonly unlockMerge: (path: string, body: string) => Promise<OwnerUnlockProofResult>;
 }
+
+/** An unlock signed for one action that another request will carry, or why there is none. */
+export type OwnerUnlockProofResult =
+  | { readonly status: "signed"; readonly proof: string }
+  | { readonly status: "refused"; readonly kind: string }
+  | { readonly status: "not-unlocked"; readonly reason: "cancelled" | "unavailable" }
+  | { readonly status: "unreachable" };
 
 /** What a signer answers for one text: a raw signature, or a passkey's assertion. */
 type Signed = { readonly signature: string } | OwnerUnlockAssertion;
@@ -315,12 +329,12 @@ export function createOwnerClient(
     }
   };
 
-  /** Asks for a challenge for this one action, has the unlocked key sign it, and sends the action. */
-  const act = async (
+  /** Asks for a challenge for this one action and has the unlocked key sign it. */
+  const prove = async (
     path: string,
     body: string,
     signer: ActionSigner,
-  ): Promise<OwnerActionResult> => {
+  ): Promise<OwnerUnlockProofResult> => {
     const bodyHash = hex(await sha256(body));
     const asked = await send({
       method: "POST",
@@ -354,12 +368,18 @@ export function createOwnerClient(
       challengeId: challenge.challengeId,
       ...signed.value,
     };
-    const answered = await send({
-      method: "POST",
-      path,
-      body,
-      proof: base64UrlEncode(encoder.encode(JSON.stringify(proof))),
-    });
+    return { status: "signed", proof: base64UrlEncode(encoder.encode(JSON.stringify(proof))) };
+  };
+
+  /** Asks for a challenge for this one action, has the unlocked key sign it, and sends the action. */
+  const act = async (
+    path: string,
+    body: string,
+    signer: ActionSigner,
+  ): Promise<OwnerActionResult> => {
+    const proved = await prove(path, body, signer);
+    if (proved.status !== "signed") return proved;
+    const answered = await send({ method: "POST", path, body, proof: proved.proof });
     if (answered === undefined) return { status: "unreachable" };
     if (!answered.ok || stringField(answered.json, "status") === "refused") {
       return refusal(answered);
@@ -455,6 +475,15 @@ export function createOwnerClient(
       ),
     dismissProposal: (offerId) =>
       administration(OWNER_ROUTES.provisionDismiss, JSON.stringify({ offerId })),
+    unlockMerge: async (path, body) => {
+      const opened = await openSigner();
+      if (opened.status !== "signed") return { status: "not-unlocked", reason: opened.status };
+      try {
+        return await prove(path, body, opened.value);
+      } finally {
+        opened.value.close();
+      }
+    },
     confirmNewMember: (member) =>
       unlocked(async (signer) => {
         // The confirmation is its own signature by the unlock key, over the
@@ -591,6 +620,7 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
   "not-a-spoke": "This computer has not joined a hub.",
   "hub-revoked": "The hub removed this computer.",
   "too-many-challenges": "This computer is busy with other unlocks. Try again in a moment.",
+  "device-revoked": "This computer revoked this device.",
   stale: "This phone's clock is too far from the computer's. Check the time.",
   replayed: "That request was already seen. Try again.",
   "signature-invalid": "The computer did not accept this device's signature.",

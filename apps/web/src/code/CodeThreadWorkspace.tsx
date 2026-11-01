@@ -112,6 +112,12 @@ import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { SelectionThreadScope } from "../transcript/SelectionThread";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { LoadEarlierMessages } from "../transcript/LoadEarlierMessages";
+import {
+  composerAfterRewind,
+  RewindDialog,
+  type RewindFilesPreview,
+  type RewindScope,
+} from "../transcript/RewindDialog";
 import { ImportedTerminalHistory } from "../terminalSessions/ImportedTerminalHistory";
 import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
 import { turnMenuTrigger, useFocusAfterTurnMenuCloses } from "../transcript/turnPanelFocus";
@@ -428,6 +434,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const setRestoreUndo = props.controller.noteRestoreUndo;
   const [forking, setForking] = useState(false);
   const [forkMessage, setForkMessage] = useState<string>();
+  // The rewind the person opened: the first turn it removes, that turn's own
+  // message (which returns to the composer), and what the host previewed.
+  const [rewind, setRewind] = useState<{
+    readonly fromOperationId: NonNullable<CodeConversationMessage["operationId"]>;
+    readonly prompt: string;
+    readonly removedTurns?: number;
+    readonly files: RewindFilesPreview;
+    readonly rollback?: "native" | "handoff";
+    readonly busy: boolean;
+    readonly message?: string;
+  }>();
   const [merging, setMerging] = useState(false);
   const [mergeMessage, setMergeMessage] = useState<string>();
   // A send refused before the host saw it explains itself beside the composer,
@@ -1084,6 +1101,135 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     }
   }
 
+  /**
+   * Open the rewind question for the turn that starts at `from`, and ask the
+   * host what it would change. Nothing changes until the person answers.
+   */
+  async function openRewind(from: CodeConversationMessage) {
+    const client = props.operationClient;
+    const nextUuid = props.nextUuid;
+    const fromOperationId = from.operationId;
+    if (client === undefined || nextUuid === undefined || fromOperationId === undefined) return;
+    if (view === undefined) return;
+    setRewind({ fromOperationId, prompt: from.text, files: { kind: "loading" }, busy: false });
+    try {
+      const preview = await client.executeOperation({
+        kind: "preview-code-rewind",
+        operationId: nextUuid() as never,
+        threadId: view.thread.id,
+        checkoutId: view.checkout.id,
+        fromOperationId,
+      });
+      setRewind((current) => {
+        if (current === undefined || current.fromOperationId !== fromOperationId) return current;
+        if (preview.kind !== "rewind-preview")
+          return {
+            ...current,
+            files: { kind: "unavailable", reason: "The files could not be compared." },
+            message:
+              preview.kind === "operation-failed"
+                ? preview.failure.message
+                : "This thread could not be rewound here.",
+          };
+        return {
+          ...current,
+          removedTurns: preview.removedTurns,
+          rollback: preview.rollback,
+          files:
+            preview.files.kind === "changes"
+              ? {
+                  kind: "changes",
+                  paths: preview.files.changes.files.map((file) => String(file.path)),
+                  total: preview.files.changes.total,
+                }
+              : preview.files.kind === "unchanged"
+                ? { kind: "unchanged" }
+                : { kind: "unavailable", reason: REWIND_FILES_UNAVAILABLE[preview.files.reason] },
+        };
+      });
+    } catch {
+      setRewind((current) =>
+        current === undefined
+          ? current
+          : {
+              ...current,
+              files: { kind: "unavailable", reason: "The files could not be compared." },
+              message: "The rewind could not be previewed. Try again.",
+            },
+      );
+    }
+  }
+
+  /**
+   * Rewind this thread in place. The host puts files back first and removes
+   * the turns only once that worked; the person's message from the first
+   * removed turn returns to the composer, which is how a sent message is
+   * edited here.
+   */
+  async function runRewind(scope: RewindScope) {
+    const client = props.operationClient;
+    const nextUuid = props.nextUuid;
+    const open = rewind;
+    if (client === undefined || nextUuid === undefined || open === undefined) return;
+    if (view === undefined) return;
+    setRewind({ ...open, busy: true });
+    const command = {
+      kind: "rewind-code-thread",
+      operationId: nextUuid() as never,
+      threadId: view.thread.id,
+      checkoutId: view.checkout.id,
+      fromOperationId: open.fromOperationId,
+      scope,
+      filesOperationId: nextUuid() as never,
+      gitOperationId: nextUuid() as never,
+    } as const;
+    try {
+      if (
+        scope !== "conversation" &&
+        decidesCodeEffectsByApproval(thread.executionPolicy) &&
+        (await props.requestApproval?.(command)) === undefined
+      ) {
+        setRewind({ ...open, busy: false, message: "Nothing was rewound." });
+        return;
+      }
+      const result = await client.executeOperation(command);
+      if (result.kind !== "thread-rewound") {
+        setRewind({
+          ...open,
+          busy: false,
+          message:
+            result.kind === "operation-failed"
+              ? result.failure.message
+              : "The rewind did not report a result. Refresh before assuming it did nothing.",
+        });
+        props.controller.refreshConversation();
+        return;
+      }
+      setRewind(undefined);
+      if (result.undo !== undefined) setRestoreUndo(result.undo);
+      setRestoreMessage(
+        result.scope === "files"
+          ? "Files were put back to before that message."
+          : result.files === "restored"
+            ? "Rewound the conversation and put the files back."
+            : "Rewound the conversation. Your message is back in the composer.",
+      );
+      if (result.scope !== "files") {
+        const next = composerAfterRewind(open.prompt, draft);
+        draftRevisionRef.current += 1;
+        setDraft(next);
+        props.controller.setPendingDraft?.(next, open.prompt.length);
+      }
+      props.controller.refreshConversation();
+    } catch {
+      setRewind({
+        ...open,
+        busy: false,
+        message: "The rewind did not report back. Refresh before assuming it did nothing.",
+      });
+    }
+  }
+
   async function changeMode(next: PermissionMode) {
     props.controller.setAccessNotice(undefined);
     setAccessChanging(true);
@@ -1385,6 +1531,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 })}
             renderItem={(message, index) => {
               const previousAssistant = previousAssistantMessage(messages, index);
+              // Rewinding from a person's message removes its turn; from a
+              // reply, the turns after it. Inherited turns are the source's.
+              const rewindFrom =
+                message.sourceThreadId !== undefined || message.operationId === undefined
+                  ? undefined
+                  : message.role === "user"
+                    ? message
+                    : nextOwnUserMessage(messages, index);
+              const forkPoint = message.role === "assistant" ? message : previousAssistant;
               const handoff =
                 message.role === "assistant" && previousAssistant !== undefined
                   ? providerIdentityChange(previousAssistant, message)
@@ -1474,12 +1629,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   >
                     <TurnActionMenu
                       actions={codeTurnActions({
+                        // A person's message forks through the reply before it.
                         canFork:
                           !serverCheckout &&
-                          message.role === "assistant" &&
-                          message.operationId !== undefined &&
-                          message.status === "completed" &&
-                          props.onOpenCodeThread !== undefined,
+                          props.onOpenCodeThread !== undefined &&
+                          forkPoint?.operationId !== undefined &&
+                          forkPoint.status === "completed",
+                        canRewind:
+                          rewindFrom !== undefined &&
+                          !busy &&
+                          props.operationClient !== undefined &&
+                          props.nextUuid !== undefined,
                         // A fork's own finished replies; inherited ones are the source's.
                         canMergeBack:
                           !serverCheckout &&
@@ -1512,7 +1672,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         restoring,
                       })}
                       onAction={(value) => {
-                        if (value === "fork") void forkFrom(message);
+                        if (value === "fork" && forkPoint !== undefined) void forkFrom(forkPoint);
+                        else if (value === "rewind" && rewindFrom !== undefined)
+                          void openRewind(rewindFrom);
                         else if (value === "merge-back") void mergeBackThrough(message);
                         else if (value === "checkpoint-mark") {
                           setCheckpointDraft({ messageId: message.id, kind: "mark" });
@@ -1706,6 +1868,18 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           />
         </SelectionThreadScope>
       )}
+      <RewindDialog
+        busy={rewind?.busy === true}
+        files={rewind?.files ?? { kind: "loading" }}
+        {...(rewind?.message === undefined ? {} : { message: rewind.message })}
+        onClose={() => {
+          if (rewind?.busy !== true) setRewind(undefined);
+        }}
+        onRewind={(scope) => void runRewind(scope)}
+        open={rewind !== undefined}
+        removedTurns={rewind?.removedTurns}
+        {...(rewind?.rollback === undefined ? {} : { rollback: rewind.rollback })}
+      />
 
       {props.canvasClient === undefined || view === undefined ? null : (
         <div className="thread-column">
@@ -1833,7 +2007,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         {...(threadDropKey === undefined ? {} : { threadDropKey })}
         context={
           <CodeCheckoutBar
-            {...(props.onCreatePullRequest === undefined || serverCheckout
+            {...(props.onCreatePullRequest === undefined
               ? {}
               : { onCreatePullRequest: props.onCreatePullRequest })}
             {...(serverProject === undefined ? {} : { serverLocation: serverProject.location })}
@@ -2294,6 +2468,7 @@ function RestoreFilesConfirm(props: {
 
 function codeTurnActions(input: {
   readonly canFork: boolean;
+  readonly canRewind: boolean;
   readonly canMergeBack: boolean;
   readonly merging: boolean;
   readonly canCopyMarkdown: boolean;
@@ -2311,6 +2486,9 @@ function codeTurnActions(input: {
       value: "fork",
       ...(input.forking ? { disabled: true } : {}),
     });
+  }
+  if (input.canRewind) {
+    actions.push({ label: "Rewind to here…", value: "rewind" });
   }
   if (input.canMergeBack) {
     actions.push({
@@ -2352,6 +2530,35 @@ function codeTurnActions(input: {
   actions.push({ label: "Copy message", value: "copy-references" });
   return actions;
 }
+
+/** The thread's own next message from the person after `index`, if any. */
+function nextOwnUserMessage(
+  messages: ReadonlyArray<CodeController["conversation"][number]>,
+  index: number,
+) {
+  for (let candidateIndex = index + 1; candidateIndex < messages.length; candidateIndex += 1) {
+    const candidate = messages[candidateIndex];
+    if (
+      candidate?.role === "user" &&
+      candidate.sourceThreadId === undefined &&
+      candidate.operationId !== undefined
+    )
+      return candidate;
+  }
+  return undefined;
+}
+
+/** Why a rewind's files cannot come back, as the dialog says it. */
+const REWIND_FILES_UNAVAILABLE: Readonly<
+  Record<"server-project" | "plan" | "unrecorded" | "unreadable", string>
+> = {
+  "server-project":
+    "A thread in a Project on a server takes no checkpoints, so only the conversation can be rewound. Git on the server is the way back for files.",
+  plan: "This thread is in Plan, which changes no files, so only the conversation can be rewound.",
+  unrecorded:
+    "A turn after this point changed files without a recorded checkpoint, so only the conversation can be rewound.",
+  unreadable: "The checkout could not be read, so only the conversation can be rewound.",
+};
 
 function previousAssistantMessage(
   messages: ReadonlyArray<CodeController["conversation"][number]>,

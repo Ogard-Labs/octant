@@ -2869,6 +2869,44 @@ describe("CodeService managed thread creation", () => {
     expect(appended).toEqual(["code.checkout-observed@1", "code.thread-created@1"]);
   });
 
+  it("binds a worktree made on a server as a remote-root checkout this host never resolves", async () => {
+    const port = mockCreationPort({
+      prepare: async () => ({
+        status: "prepared" as const,
+        preparation: { ...preparation(), checkoutKind: "remote-root" as const },
+      }),
+    });
+    const fixture = serviceFixture({ threads: [], managedThreadCreation: port as never });
+
+    const result = await fixture.service.execute(ids.window, managedCommand);
+
+    if (result?.kind !== "managed-thread-created")
+      throw new Error("expected managed-thread-created");
+    expect(result.checkout).toMatchObject({
+      id: managedCheckoutId,
+      kind: "remote-root",
+      head: { kind: "none" },
+    });
+    expect(result.thread.deliveryTarget.branchIntent).toBe("feature/managed");
+  });
+
+  it("makes no worktree on a server for a Plan thread", async () => {
+    const port = mockCreationPort({
+      prepare: async () => ({
+        status: "prepared" as const,
+        preparation: { ...preparation(), checkoutKind: "remote-root" as const },
+      }),
+    });
+    const fixture = serviceFixture({ threads: [], managedThreadCreation: port as never });
+
+    await expect(
+      fixture.service.execute(ids.window, { ...managedCommand, executionPolicy: "plan" }),
+    ).rejects.toMatchObject({
+      failure: { message: expect.stringContaining("Plan changes nothing") },
+    });
+    expect(port.commit).not.toHaveBeenCalled();
+  });
+
   it("fails closed when the Project is outside the authenticated window without preparing or committing", async () => {
     const port = mockCreationPort();
     const fixture = serviceFixture({ threads: [], managedThreadCreation: port as never });
@@ -4105,6 +4143,53 @@ describe("CodeService.watchFiles", () => {
         checkoutId: checkout.id,
       }),
     ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(watch).not.toHaveBeenCalled();
+  });
+
+  it("watches an extra folder from its own root when the authority places the request there", async () => {
+    const watch = vi.fn(() => (async function* (): AsyncGenerator<never> {})());
+    const fixture = serviceFixture({ watcher: { watch } });
+    fixture.roots.resolve.mockResolvedValue({
+      fileId: ids.file,
+      rootPath: "/private/extra",
+      rootIdentity: { device: "7", inode: "9" },
+      folderRoot: true,
+    } as never);
+
+    await fixture.service.watchFiles(ids.window, {
+      threadId: ids.thread,
+      checkoutId: checkout.id,
+      folder: "/private/extra" as never,
+    });
+
+    expect(fixture.roots.resolve).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      "/private/extra",
+    );
+    expect(watch).toHaveBeenCalledWith(expect.objectContaining({ rootPath: "/private/extra" }));
+  });
+
+  it("refuses to watch a path the authority does not place at the root of an extra folder", async () => {
+    const watch = vi.fn();
+    const fixture = serviceFixture({ watcher: { watch } });
+    // A path inside an extra folder, or one the authority resolved into the
+    // checkout, is not a folder to watch.
+    fixture.roots.resolve.mockResolvedValue({
+      fileId: ids.file,
+      rootPath: "/private/extra",
+      rootIdentity: { device: "7", inode: "9" },
+      relativePath: "src",
+    } as never);
+
+    await expect(
+      fixture.service.watchFiles(ids.window, {
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+        folder: "/private/extra/src" as never,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
     expect(watch).not.toHaveBeenCalled();
   });
 

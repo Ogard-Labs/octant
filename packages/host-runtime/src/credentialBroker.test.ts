@@ -717,6 +717,54 @@ describe("startCredentialBroker", () => {
     }
   });
 
+  it("gives out an SSH key's public line and signs only its logins, never the key", async () => {
+    const serverId = randomUUID();
+    const sshKeys = memoryStore();
+    const broker = await startCredentialBroker(
+      memoryStore(),
+      undefined,
+      undefined,
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      undefined,
+      sshKeys,
+    );
+    try {
+      const call = async (path: string, body: Record<string, string>) =>
+        broker.fetchForTest(
+          brokerRequest(broker.url, broker.token, path, { body: JSON.stringify(body) }),
+        );
+      expect((await call("/v1/ssh-keys/public", { serverId })).status).toBe(404);
+      const ensured = (await (await call("/v1/ssh-keys/ensure", { serverId })).json()) as {
+        readonly publicKey: string;
+      };
+      expect(ensured.publicKey).toMatch(/^ssh-ed25519 /);
+      expect(await (await call("/v1/ssh-keys/public", { serverId })).json()).toEqual(ensured);
+      // No route of any namespace reads the stored key back.
+      expect((await call("/v1/ssh-keys/resolve", { serverId })).status).toBe(404);
+      expect((await call("/v1/credentials/resolve", { providerInstanceId: serverId })).status).toBe(
+        404,
+      );
+      const answer = await call("/v1/ssh-keys/sign", {
+        serverId,
+        data: Buffer.from("not a login").toString("base64"),
+      });
+      expect(answer.status).toBe(403);
+      expect(JSON.stringify(await answer.json())).not.toContain("PRIVATE KEY");
+      expect((await call("/v1/ssh-keys/sign", { serverId })).status).toBe(400);
+      expect(await (await call("/v1/ssh-keys/delete", { serverId })).json()).toEqual({
+        deleted: true,
+      });
+      expect(await sshKeys.has(serverId)).toBe(false);
+    } finally {
+      await broker.close();
+    }
+  });
+
   it("replaces and deletes a sync bucket's key pair", async () => {
     const credentialRef = randomUUID();
     const broker = await startCredentialBroker(

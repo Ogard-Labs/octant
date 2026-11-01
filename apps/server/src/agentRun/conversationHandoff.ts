@@ -1,5 +1,7 @@
 import type {
   ChatBranchConversationHandoff,
+  RewindConversationHandoff,
+  WorkForkConversationHandoff,
   ProviderInstanceId,
   ProviderModelId,
   ProviderSwitchConversationHandoff,
@@ -36,6 +38,25 @@ export function providerSwitchHandoffRecord(
 export function branchHandoffRecord(selection: Available): ChatBranchConversationHandoff {
   return {
     reason: "branch",
+    messages: selection.blocks.length - 1,
+    omissions: selection.omissions,
+    externalContentIngested: selection.source.externalContentIngested,
+    nativeSessionTransferred: false,
+    hiddenReasoningTransferred: false,
+  };
+}
+
+/**
+ * The record a Work turn journals when it starts a new session for a reason
+ * other than a provider change: the thread was rewound and its provider cannot
+ * cut its own session back, or a fork runs its first own turn.
+ */
+export function restartHandoffRecord(
+  selection: Available,
+  reason: "rewind" | "fork",
+): RewindConversationHandoff | WorkForkConversationHandoff {
+  return {
+    reason,
     messages: selection.blocks.length - 1,
     omissions: selection.omissions,
     externalContentIngested: selection.source.externalContentIngested,

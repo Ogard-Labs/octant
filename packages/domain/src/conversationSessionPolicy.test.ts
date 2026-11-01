@@ -6,6 +6,23 @@ const host = { providerInstanceId: "local", owner: "host" } as const;
 const harness = { providerInstanceId: "endpoint", owner: "host-resumable" } as const;
 
 describe("decideConversationSession", () => {
+  it("never resumes the session a rewound thread's removed turns ran on", () => {
+    const rewound = { providerInstanceId: "claude", continuable: true, rewound: true };
+    expect(
+      decideConversationSession({ recipient: runtime, previous: rewound, handoff: "allowed" }),
+    ).toEqual({ kind: "new-session-with-handoff", reason: "rewind" });
+    expect(
+      decideConversationSession({
+        recipient: harness,
+        previous: { ...rewound, providerInstanceId: "endpoint" },
+        handoff: "allowed",
+      }),
+    ).toEqual({ kind: "host-rebuild" });
+    expect(
+      decideConversationSession({ recipient: host, previous: rewound, handoff: "allowed" }),
+    ).toEqual({ kind: "host-rebuild" });
+  });
+
   it("rebuilds the history on the host for a provider that keeps none, whatever ran before", () => {
     for (const previous of [
       undefined,

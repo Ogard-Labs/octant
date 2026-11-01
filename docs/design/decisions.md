@@ -2232,7 +2232,7 @@ The agent's Browser tool reads a page as an outline with element refs and acts b
 - No password saving, no agent-written script in the page, and downloads stay blocked.
 - Diagnostics report console errors, failed requests, and 4xx and 5xx responses (address, method, status; never a body or header), console warnings on request, each numbered, read after a `since` cursor without clearing.
 
-Status: Built. Since: 2026-11-01. Detail: [Browser for agents: Page snapshot](browser-agent-tool.md#page-snapshot), [Results](browser-agent-tool.md#results), [Actions](browser-agent-tool.md#actions), [Steps](browser-agent-tool.md#steps), [Waiting, dialogs, and viewport](browser-agent-tool.md#waiting-dialogs-and-viewport), and [Asking the person to sign in](browser-agent-tool.md#asking-the-person-to-sign-in), and [Diagnostics](browser-agent-tool.md#diagnostics).
+Status: Built. Since: 2026-11-01. Detail: [Browser for agents: Page snapshot](browser-agent-tool.md#page-snapshot), [Results](browser-agent-tool.md#results), [Actions](browser-agent-tool.md#actions), [Steps](browser-agent-tool.md#steps), [Waiting, dialogs, and viewport](browser-agent-tool.md#waiting-dialogs-and-viewport), [Asking the person to sign in](browser-agent-tool.md#asking-the-person-to-sign-in), and [Diagnostics](browser-agent-tool.md#diagnostics).
 
 ### Browser profiles and extensions
 

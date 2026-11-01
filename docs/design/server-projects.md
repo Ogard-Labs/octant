@@ -1,7 +1,7 @@
 # Server Projects
 
-This topic specification owns Code Projects bound to a folder on one of the
-person's registered servers, reached over SSH. Architecture owns the boundary
+This topic specification owns Code and Work Projects bound to a folder on one
+of the person's registered servers, reached over SSH. Architecture owns the boundary
 ([Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code),
 [Octant Shield: servers over SSH](../architecture.md#octant-shield), and the
 [Current Release Boundary](../architecture.md#current-release-boundary)).
@@ -10,8 +10,12 @@ person's registered servers, reached over SSH. Architecture owns the boundary
 the SSH connection, and the folder check at binding (`/api/server-projects`);
 Code threads there on the Octant Harness, with file tools, commands, and Git
 on the server at every level; thread terminals there; the Git tab, whose Git
-runs on the server; and the Code sidebar, composer, and thread view that open
-them. Not built yet: the items under [Not built yet](#not-built-yet).
+runs on the server; a thread's own worktree on the server and its pull
+request ([Worktrees and pull requests](#worktrees-and-pull-requests)); and
+the Code sidebar, composer, and thread view that open them. On the host: Work
+Projects there, whose Work threads run on the Octant Harness with file tools
+and commands on the server ([Work Projects](#work-projects)). Not built yet:
+the items under [Not built yet](#not-built-yet).
 
 ## Outcome
 
@@ -51,6 +55,12 @@ hands are on the server.
   well over a hundred places; a separate catalog keeps every one of them
   unable to reach a server Project, instead of auditing each for a path that
   is not local.
+- A binding names its mode: Code (the default, and the only mode a binding
+  journaled before Work Projects names) or Work (`mode: "work"` on the bound
+  Project). A Code Project's record carries no mode at all, so it is exactly
+  what an older build journaled and reads. A Work Project's record names its
+  mode, so an older build cannot decode it and binds nothing for it rather
+  than reading it as a Code Project. A Project's mode never changes.
 - A server Project whose server was removed from the registry stays in the
   catalog and refuses every connection (`server-not-registered`) until the
   person removes the Project or registers the server again.
@@ -70,11 +80,27 @@ hands are on the server.
   `StrictHostKeyChecking=yes` (an unknown or changed host key refuses; the
   person accepts a new server's key by running `ssh` to it once themselves),
   `ForwardAgent=no`, `ForwardX11=no`, `ClearAllForwardings=yes`,
-  `PermitLocalCommand=no`, `ControlMaster=no`, a ten-second connect timeout,
-  and keepalives that end a silent connection after about thirty seconds.
-  _Rationale:_ a shared control socket would be one more place a session
-  could be borrowed from; one connection per call costs a login each time and
-  keeps nothing open between calls.
+  `PermitLocalCommand=no`, a ten-second connect timeout, and keepalives that
+  end a silent connection after about thirty seconds.
+- **One shared connection per server.** Calls to one server and user (file
+  tools, commands, folder checks, and Git) share one connection through an
+  OpenSSH control socket, which stays open for sixty seconds after its last
+  call. The socket lives in a folder under `/tmp` that only this host's user
+  can open (`0700`), named by a digest of the server and user. Every Seatbelt
+  profile Octant builds ends by denying a socket there and the folder's files,
+  so a confined launch can neither open the socket nor move or link it out,
+  network or not, and a
+  Linux capsule has a `/tmp` of its own; a confined command's SSH config keeps
+  `ControlMaster no`. A dropped shared connection fails the calls on it, and
+  the next call logs in again. An interactive terminal keeps a connection of
+  its own (`ControlMaster=no`). _Rationale:_ one login per call made every Git
+  command a fresh login. The socket runs commands with no Shield decision, so
+  a confined launch must not reach it; denying the folder's reads is not
+  enough (measured on macOS 27, a launch with network reached a socket in a
+  read-denied folder, and one that could write `/tmp` renamed the socket out
+  and connected), so the profiles deny the socket and its folder. An unconfined
+  process already runs as the person and can reach their SSH agent, so the
+  socket gives it nothing new.
 - Each call runs a short `sh` script through the login shell, its arguments
   single-quoted, so the login shell must read POSIX single quotes (`sh`,
   `bash`, `zsh`, `dash`, and `fish` do; `csh` and `tcsh` are not supported).
@@ -93,7 +119,9 @@ hands are on the server.
   Project, server, and folder under labels of their own, so it can never name a
   retired checkout, and every host-side Git, file, test, checkpoint, and
   worktree path keeps refusing it as it refuses every `remote-root` checkout.
-  The Git tab reaches it only through Git on the server ([Panels](#panels)).
+  The Git tab reaches it only through Git on the server ([Panels](#panels)),
+  and a thread's own worktree is made there
+  ([Worktrees and pull requests](#worktrees-and-pull-requests)).
 - **Octant Harness only.** A thread there runs on the Octant Harness, whose
   inference stays on this host and whose hands are on the server. Every other
   runtime is refused before it launches, naming why: its own tools act on this
@@ -135,8 +163,40 @@ hands are on the server.
 - **Windows.** A window binds a server Project with no folder of this host
   (`boundRoot: null`), so Files, Browser, and every root-backed surface fail
   closed, and a server thread opens only its own view.
-- **Checkpoints.** A turn on a server takes no checkpoint, so rewind and
-  restore are not offered there; Git on the server is the way back.
+- **Checkpoints.** A turn on a server takes no checkpoint, so restoring
+  files is not offered there and Rewind to here rewinds the conversation
+  only, saying why; Git on the server is the way back for files.
+
+### Work Projects
+
+- **A Work Project on a server** is bound as a Code one is (same command,
+  same folder check, local window only, same catalog) with `mode: "work"`.
+  Its threads are Work threads; no Code thread, checkout, Git service, or
+  terminal resolves it, and a Code Project there holds no Work thread.
+- **Threads.** A Work thread there is an ordinary Work thread on this host's
+  journal, created against a binding revision derived from the Project alone
+  under a label of its own (`octant.server-work-project-binding.v1`), which
+  the catalog shows as the Project's `workBindingRevisionId`. It starts in the
+  Project's folder at the account's default Work access (a server Project
+  has no access override of its own) and stays there: moving it to another
+  Project or folder is refused. It takes no GitHub or Linear issue and no
+  terminal session at creation. _Rationale:_ the issue readers and the session
+  reader read this host's accounts and folders on the thread's behalf; the
+  narrower choice keeps the thread's sources on the server it works on.
+- **Turns.** A turn runs on the Octant Harness only, with the same file tools
+  and shell on the server as a Code thread there ([Threads](#threads)): the
+  same access levels and approvals, every command asking again below Full
+  access, every command journaled as `shield-remote-commands.ran@1`, and no
+  delegation. No tool of this host is offered: no Browser, Computer, side
+  task, routine, Canvas, or extension, and a turn that selects an extension
+  is refused. Nothing watches the folder for written files, and the Project's
+  status file and extra folders are not read, since each is a folder of this
+  host. A turn that cannot bind (a removed server, a runtime other than the
+  Octant Harness) is refused before it starts, and a call that cannot reach
+  the server runs nothing anywhere.
+- **Windows.** A window binds a server Work Project, and its threads, with no
+  folder of this host (`boundRoot: null`), so Work Files, Browser, and every
+  root-backed Work surface fail closed for it.
 
 ### Panels
 
@@ -160,8 +220,8 @@ hands are on the server.
   keep Plan read-only there.
 - **Fail closed.** A Git command that cannot reach the server runs nothing and
   the tab says Git is unavailable; a server removed from the registry refuses
-  the next command. One login per command makes the tab slower than a local
-  one; that is the connection rule's known cost.
+  the next command. Its commands share the server's one connection, so only
+  the first after a quiet minute pays for a login.
 - **One queue per Project.** Git changes on one server Project run one after
   another, as they do on one local checkout. A change the tab stops waiting
   for may still finish on the server; the next look at the tab shows it.
@@ -170,16 +230,73 @@ hands are on the server.
   thread. _Rationale:_ the draft's model session is opened with the checkout
   as its folder, which would name a server path as a folder of this host.
 
+### Worktrees and pull requests
+
+- **A thread's own worktree is on the server.** The composer's **Workspace**
+  menu offers **Managed worktree** for a server Project, and its branch list
+  is read with Git on the server (`git for-each-ref`). Creating the thread
+  runs `git worktree add` on the server, on a new branch (the thread's
+  delivery branch) from the chosen source, at
+  `<parent of the folder>/.octant-worktrees/<repository id>/<thread id>`: beside
+  the folder, where a local managed worktree sits beside its repository, at
+  a path derived from the Project and the thread alone. Start from origin
+  fetches only that branch there. Nothing is created, read, or fetched on
+  this host.
+- A worktree is made only when the Project's folder is its repository's top
+  folder, only on a branch that does not exist yet, and only where nothing
+  exists at its path; otherwise nothing is made. A fork is not offered, since
+  its files live in this host's checkpoints. A server that cannot be reached
+  makes nothing anywhere.
+- **Its identity.** The thread's checkout is a `remote-root` like the
+  Project's, with an id that is a digest of the Project and the thread under
+  a label of its own, journaled as `code.checkout-observed@1` before the
+  thread. The thread's file tools, commands, terminals, and Git act in the
+  worktree's folder; the folder is derived again from the Project and thread
+  on each use, never read back from a record, and a thread holding another
+  thread's worktree checkout is not that thread.
+- **Plan makes none.** A Plan thread is not started in a new worktree on a
+  server, since the worktree is a Git change there and Octant has no
+  confinement on the server to hold Plan read-only. It starts in Current
+  checkout instead.
+- **Removing it is the person's.** If binding the new thread fails, the
+  worktree and branch this creation just made are removed again. Otherwise
+  Octant never removes a worktree on a server: a thread purge on this host
+  leaves it, and the person removes it there (`git worktree remove`).
+  _Rationale:_ a purge runs without a connection to the server and cannot
+  confirm what it would delete there, so it deletes nothing.
+- **A remembered habit stays local.** A Project's remembered workspace choice
+  is this host's; a server thread starts in Current checkout unless the
+  person picks a worktree in the composer.
+- **Pull requests.** A server thread creates, updates, comments on, observes,
+  and merges its pull request as a local thread does, through this host's
+  `gh`, by repository and branch name alone: the branch is pushed from the
+  server first (**Git** › push), and no server path is handed to a process of
+  this host. The check that the checkout has a GitHub remote reads the remote
+  with Git on the server. The checkout bar offers **Create pull request**.
+  The same approvals, levels, and merge rules as a local thread apply.
+- **Its repository.** When the thread's delivery target names the
+  composer's `local/…` placeholder (a composer reads no remote of a server),
+  the pull request's repository is the GitHub repository of the delivery
+  remote on the server, read when the pull request is made. A repository the
+  person named stays. A server that cannot be reached leaves the
+  placeholder, and no pull request is opened. _Rationale:_ the remote the
+  thread pushes to is the repository its branch is on; reading it at that
+  moment needs no new record of a server's remotes on this host.
+
 ## Not built yet
 
-- Work Projects on a server, and extra folders in a server Project.
-- The file browser, tests, managed worktrees, and pull request delivery for a
-  server Project, and the dock's Review tool there; the Git tab is built.
+- The Work sidebar, composer, and thread view for a Work Project on a server,
+  and the choice of mode when binding one in Settings; the host side is built.
+- Extra folders in a server Project.
+- The file browser and tests for a server Project, and the dock's Review
+  tool there; the Git tab, managed worktrees, and pull requests are built.
 - The Project terminal (the thread-less one) for a server Project; thread
   terminals are built.
 - A Project-level guardrail level or reviewer for a server Project; the
   thread and account levels apply.
 - Real servers are untested: the connection, folder check, file tools,
-  commands, terminals and the Git tab were exercised against a throwaway local `sshd` only. Linux
+  commands, terminals, the Git tab and worktrees were exercised against a
+  throwaway local `sshd` only, and pull requests against a stand-in for
+  `gh`, never GitHub. Linux
   hosts are likewise untested; the connection uses only `ssh` options both
   platforms share.

@@ -186,7 +186,7 @@ export function wireFoundations(deps: FoundationsDependencies) {
       // A provider switch's handoff is read by the model it switches to, so
       // its bound comes from that model's context window when the probe
       // reported it. Other purposes keep the fixed bound.
-      ...(selection.purpose === "provider-switch"
+      ...(selection.purpose === "provider-switch" || selection.purpose === "rewind"
         ? (() => {
             const thread = persistence.readCodeThread(threadId);
             if (thread === undefined) return {};

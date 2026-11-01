@@ -16,6 +16,10 @@ import {
   mergeOutcomeCopy,
   mergeWhenReadyOutcomeCopy,
 } from "./pullRequestMergePresentation";
+import { createExpoPhoneUnlockKey } from "../hosts/expoOwnerUnlockPorts";
+import { phoneOwnerMergeUnlock } from "../hosts/ownerFlow";
+import { mobilePinnedListenerTransport } from "../runtime/mobilePinnedListenerTransport";
+import { useMobileSession } from "../session/MobileSessionContext";
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
 import { mobileSpacing, mobileTypography } from "../theme/tokens";
 import { useTheme } from "../../design-system";
@@ -27,6 +31,20 @@ export interface PullRequestReviewPanelProps {
 
 export function PullRequestReviewPanel(props: PullRequestReviewPanelProps) {
   const { colors } = useTheme();
+  const { deviceKeyStore, guestHubStore } = useMobileSession();
+  // A host may ask a paired phone's merge for an owner unlock first; this phone
+  // gives it only if it is an owner of that host, asking the person once.
+  const ownerUnlock = useMemo(() => {
+    const unlockKey = createExpoPhoneUnlockKey();
+    return unlockKey === undefined
+      ? undefined
+      : phoneOwnerMergeUnlock({
+          guestHubStore,
+          deviceKeyStore,
+          transport: mobilePinnedListenerTransport,
+          unlockKey,
+        });
+  }, [deviceKeyStore, guestHubStore]);
   const [review, setReview] = useState<CodePullRequestReview | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
@@ -103,20 +121,19 @@ export function PullRequestReviewPanel(props: PullRequestReviewPanelProps) {
     setMergeStep({ kind: "sending" });
     try {
       if (mode === "merge") {
-        const outcome = await mergeMobilePullRequest(props.transport, {
-          ...mergeTarget,
-          method: "squash",
-          headSha: state.headSha,
-        });
+        const outcome = await mergeMobilePullRequest(
+          props.transport,
+          { ...mergeTarget, method: "squash", headSha: state.headSha },
+          ownerUnlock,
+        );
         setMergeNotice(mergeOutcomeCopy(outcome));
         if (outcome.status === "merged") void refresh();
       } else {
-        const outcome = await setMobileMergeWhenReady(props.transport, {
-          ...mergeTarget,
-          enabled: true,
-          method: "squash",
-          headSha: state.headSha,
-        });
+        const outcome = await setMobileMergeWhenReady(
+          props.transport,
+          { ...mergeTarget, enabled: true, method: "squash", headSha: state.headSha },
+          ownerUnlock,
+        );
         setMergeNotice(mergeWhenReadyOutcomeCopy(outcome));
       }
     } catch {

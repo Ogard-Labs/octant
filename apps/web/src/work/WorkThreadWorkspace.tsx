@@ -8,6 +8,7 @@ import {
   decodeWorkMutationRequestId,
   decodeWorkTurnId,
   decodeWorkTurnRequestId,
+  decodeWorkThreadId,
   type ProviderModelOptionValues,
   type ThreadDocumentDelivery,
   type UsageResumeThreadState,
@@ -137,6 +138,8 @@ import {
 } from "../transcript/LoadEarlierMessages";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { TurnActivityRows } from "../transcript/TurnActivityRows";
+import { TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
+import { RewindDialog, composerAfterRewind } from "../transcript/RewindDialog";
 import { toolStepsActivity } from "../transcript/turnActivity";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
 import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
@@ -184,6 +187,8 @@ type WorkTranscriptRow =
       readonly delivered?: true;
       /** The turn header, when this is the turn's first reply and so opens with it. */
       readonly head?: WorkTurnState;
+      /** The turn this entry belongs to, which a turn action names. */
+      readonly turn: WorkTurnState;
     }
   | { readonly kind: "request"; readonly key: string; readonly request: WorkRequest }
   | {
@@ -449,7 +454,18 @@ export interface WorkThreadWorkspaceProps {
     cards: ReadonlyArray<CanvasThreadReferenceCard>,
   ) => void;
   readonly onThreadUpdated?: (thread: WorkThread) => void;
+  /** Opens a thread this one made, such as a fork; absent, Fork from here is not offered. */
+  readonly onOpenWorkThread?: (thread: WorkThread) => void;
   readonly draftStore?: ComposerThreadDraftStore;
+}
+
+/**
+ * Name a fork after the thread it came from, without stacking one suffix on
+ * another when a fork is itself forked.
+ */
+function workForkTitle(sourceTitle: string): string {
+  const base = sourceTitle.replace(/ \(fork(?: \d+)?\)$/, "").trim();
+  return `${base.length === 0 ? "Task" : base} (fork)`;
 }
 
 function artifactNameFromPrompt(prompt: string): string {
@@ -859,6 +875,133 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   const latestStatus = turns.at(-1)?.status;
   const turnRunning =
     latestStatus === "accepted" || latestStatus === "running" || latestStatus === "waiting";
+  // A rewind or fork acts on settled turns only, so either waits while any
+  // turn of the thread is still going.
+  const anyTurnActive = turns.some(
+    (turn) => turn.status === "accepted" || turn.status === "running" || turn.status === "waiting",
+  );
+  const [rewind, setRewind] = useState<{
+    readonly fromRequestId: WorkTurnRequestId;
+    readonly prompt: string;
+    readonly removedTurns: number;
+    readonly busy: boolean;
+    readonly message?: string;
+  }>();
+  const [forking, setForking] = useState(false);
+  const [turnActionMessage, setTurnActionMessage] = useState<string>();
+
+  /**
+   * Rewind this thread in place to just before `from`. Work takes no file
+   * checkpoints, so only the conversation goes back. The host journals the
+   * removal; the removed message returns to the composer, which is how a sent
+   * message is edited here, and the transcript is read again from the host.
+   */
+  async function runRewind() {
+    const turnClient = props.turnClient;
+    const open = rewind;
+    if (turnClient?.rewindThread === undefined || open === undefined) return;
+    setRewind({ ...open, busy: true });
+    try {
+      const result = await turnClient.rewindThread({
+        kind: "rewind-work-thread",
+        rewindId: decodeWorkTurnRequestId(globalThis.crypto.randomUUID()),
+        threadId: props.threadId,
+        fromRequestId: open.fromRequestId,
+      });
+      setRewind(undefined);
+      composerDraft.setDraft(
+        composerAfterRewind(result.prompt, composerDraft.text),
+        result.prompt.length,
+      );
+      setTurnActionMessage("Rewound the conversation. Your message is back in the composer.");
+      const newest = await readNewestWorkTurns(
+        turnClient,
+        props.threadId,
+        new AbortController().signal,
+      );
+      setLoaded({
+        threadKey: String(props.threadId),
+        turns: newest.turns,
+        hasEarlier: newest.hasEarlier,
+        offerEarlier: newest.hasEarlier,
+      });
+    } catch (error) {
+      setRewind({
+        ...open,
+        busy: false,
+        message:
+          error instanceof Error && error.message.length > 0
+            ? error.message
+            : "The rewind did not go through. Nothing changed.",
+      });
+    }
+  }
+
+  /**
+   * Start a second thread carrying this one's conversation through `through`.
+   * Nothing here changes; the host picks the turns, provider and model, and
+   * the fork starts at Ask first.
+   */
+  async function forkThrough(through: WorkTurnState) {
+    const open = props.onOpenWorkThread;
+    if (open === undefined || thread === undefined) return;
+    setTurnActionMessage(undefined);
+    setForking(true);
+    try {
+      const result = await props.threadClient.execute({
+        kind: "fork-work-thread",
+        threadId: decodeWorkThreadId(globalThis.crypto.randomUUID()),
+        sourceThreadId: props.threadId,
+        throughRequestId: through.requestId,
+        title: workForkTitle(thread.title),
+      });
+      if ("kind" in result && result.kind === "thread-created") open(result.thread);
+      else
+        setTurnActionMessage(
+          `${"message" in result ? result.message : "The thread could not be forked."} This thread is unchanged.`,
+        );
+    } catch {
+      setTurnActionMessage("The thread could not be forked. This thread is unchanged.");
+    } finally {
+      setForking(false);
+    }
+  }
+
+  /** Fork from here and Rewind to here, for one message of one turn. */
+  function turnActionsFor(role: "user" | "assistant", turn: WorkTurnState) {
+    const index = turns.findIndex((candidate) => candidate.requestId === turn.requestId);
+    // From a person's message the fork runs through the reply before it and
+    // the rewind removes this turn; from a reply, the fork runs through it and
+    // the rewind removes the turns after it.
+    const forkPoint = role === "assistant" ? turn : turns[index - 1];
+    const rewindFrom = role === "user" ? turn : turns[index + 1];
+    const actions: TurnAction[] = [];
+    if (anyTurnActive) return { actions, forkPoint: undefined, rewindFrom: undefined };
+    if (forkPoint !== undefined && props.onOpenWorkThread !== undefined && thread !== undefined)
+      actions.push({
+        label: forking ? "Forking…" : "Fork from here",
+        value: "fork",
+        ...(forking ? { disabled: true } : {}),
+      });
+    if (rewindFrom !== undefined && props.turnClient?.rewindThread !== undefined)
+      actions.push({ label: "Rewind to here…", value: "rewind" });
+    return { actions, forkPoint, rewindFrom };
+  }
+
+  function onTurnAction(value: string, role: "user" | "assistant", turn: WorkTurnState) {
+    const { forkPoint, rewindFrom } = turnActionsFor(role, turn);
+    if (value === "fork" && forkPoint !== undefined) void forkThrough(forkPoint);
+    else if (value === "rewind" && rewindFrom !== undefined) {
+      const index = turns.findIndex((candidate) => candidate.requestId === rewindFrom.requestId);
+      setTurnActionMessage(undefined);
+      setRewind({
+        fromRequestId: rewindFrom.requestId,
+        prompt: rewindFrom.prompt,
+        removedTurns: turns.length - index,
+        busy: false,
+      });
+    }
+  }
   const queueFollowUp =
     turnRunning ||
     (messageQueue.snapshot?.items.length ?? 0) > 0 ||
@@ -1087,6 +1230,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           kind: "message",
           key: `${String(turn.requestId)}-${entry.role}-${String(index)}`,
           entry,
+          turn,
           streaming:
             turn.status === "running" || turn.status === "accepted" || turn.status === "waiting",
           ...(entry.role === "user" ? { at: turn.acceptedAt } : {}),
@@ -1961,12 +2105,17 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                 }
                 return (
                   <article aria-label="Your message" className="turn-user">
-                    <div className="bubble">
-                      <TrackerReferenceText asParagraph text={row.entry.text} />
-                    </div>
-                    {row.at === undefined ? null : (
-                      <TurnTime at={row.at} copyValue={row.entry.text} />
-                    )}
+                    <TurnActionMenu
+                      actions={turnActionsFor("user", row.turn).actions}
+                      onAction={(value) => onTurnAction(value, "user", row.turn)}
+                    >
+                      <div className="bubble">
+                        <TrackerReferenceText asParagraph text={row.entry.text} />
+                      </div>
+                      {row.at === undefined ? null : (
+                        <TurnTime at={row.at} copyValue={row.entry.text} />
+                      )}
+                    </TurnActionMenu>
                   </article>
                 );
               }
@@ -1974,41 +2123,46 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
               // lists, and code blocks render the same way here.
               return (
                 <article aria-label="Assistant message" className="turn-agent">
-                  {row.head === undefined ? null : (
-                    <>
-                      <WorkTurnHeader
-                        copyValue={row.entry.text}
-                        onRestorePrompt={composerDraft.setDraft}
-                        onCancelResume={cancelUsageResume}
-                        onScheduleResume={scheduleUsageResume}
-                        providerGroups={props.providerGroups ?? []}
-                        resumable={
-                          String(row.head.turnId) === String(turns.at(-1)?.turnId) &&
-                          row.head.status === "waiting"
-                        }
-                        {...(thread?.snooze === undefined
-                          ? { onSnoozeAtReset: snoozeAtUsageReset }
-                          : {})}
-                        turn={row.head}
-                        {...(thread?.usageResume === undefined ||
-                        String(thread.usageResume.record.turnId) !== String(row.head.turnId)
-                          ? {}
-                          : { usageResume: thread.usageResume })}
-                      />
-                      <HarnessRetryStatus
-                        events={workRetryEvents(retries, String(row.head.requestId))}
-                      />
-                      <WorkToolGroup
-                        turn={row.head}
-                        {...(props.canvasClient === undefined
-                          ? {}
-                          : { canvasClient: props.canvasClient })}
-                      />
-                    </>
-                  )}
-                  {row.entry.text === "" ? null : (
-                    <AssistantMessageBody body={row.entry.text} streaming={row.streaming} />
-                  )}
+                  <TurnActionMenu
+                    actions={turnActionsFor("assistant", row.turn).actions}
+                    onAction={(value) => onTurnAction(value, "assistant", row.turn)}
+                  >
+                    {row.head === undefined ? null : (
+                      <>
+                        <WorkTurnHeader
+                          copyValue={row.entry.text}
+                          onRestorePrompt={composerDraft.setDraft}
+                          onCancelResume={cancelUsageResume}
+                          onScheduleResume={scheduleUsageResume}
+                          providerGroups={props.providerGroups ?? []}
+                          resumable={
+                            String(row.head.turnId) === String(turns.at(-1)?.turnId) &&
+                            row.head.status === "waiting"
+                          }
+                          {...(thread?.snooze === undefined
+                            ? { onSnoozeAtReset: snoozeAtUsageReset }
+                            : {})}
+                          turn={row.head}
+                          {...(thread?.usageResume === undefined ||
+                          String(thread.usageResume.record.turnId) !== String(row.head.turnId)
+                            ? {}
+                            : { usageResume: thread.usageResume })}
+                        />
+                        <HarnessRetryStatus
+                          events={workRetryEvents(retries, String(row.head.requestId))}
+                        />
+                        <WorkToolGroup
+                          turn={row.head}
+                          {...(props.canvasClient === undefined
+                            ? {}
+                            : { canvasClient: props.canvasClient })}
+                        />
+                      </>
+                    )}
+                    {row.entry.text === "" ? null : (
+                      <AssistantMessageBody body={row.entry.text} streaming={row.streaming} />
+                    )}
+                  </TurnActionMenu>
                 </article>
               );
             }
@@ -2182,6 +2336,21 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           }
         />
       </SelectionThreadScope>
+      <RewindDialog
+        busy={rewind?.busy === true}
+        files={{
+          kind: "unavailable",
+          reason:
+            "Work takes no file checkpoints, so only the conversation can be rewound. Files stay as they are.",
+        }}
+        {...(rewind?.message === undefined ? {} : { message: rewind.message })}
+        onClose={() => {
+          if (rewind?.busy !== true) setRewind(undefined);
+        }}
+        onRewind={() => void runRewind()}
+        open={rewind !== undefined}
+        removedTurns={rewind?.removedTurns}
+      />
 
       {props.canvasClient === undefined ? null : (
         <div className="thread-column">
@@ -2314,6 +2483,11 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
             />
             <TrackerReferenceComposerHints draft={prompt} />
             <WorkImageAttachmentChips images={images} />
+            {turnActionMessage === undefined ? null : (
+              <p className="work-thread-workspace__hint" role="status">
+                {turnActionMessage}
+              </p>
+            )}
             {composerDraft.stagedDropped === true ? (
               <p className="work-thread-workspace__hint" role="status">
                 {COMPOSER_STAGED_DROPPED_NOTE}

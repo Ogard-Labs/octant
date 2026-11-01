@@ -16,7 +16,7 @@ export const capabilityLabels: ReadonlyArray<
   readonly [
     Exclude<
       keyof ProviderObservedState["capabilities"],
-      "sessionCompaction" | "nativeArtifacts" | "nativeSetup" | "reviewVerdicts"
+      "sessionCompaction" | "nativeArtifacts" | "nativeSetup" | "reviewVerdicts" | "sessionRollback"
     >,
     string,
   ]
@@ -52,6 +52,34 @@ export function reviewVerdictsLabel(
   if (deny) return "Denials only";
   if (allow) return "Approvals only";
   return "Not reported";
+}
+
+/**
+ * Whether the runtime can cut its own session back when a thread is rewound,
+ * said for every provider: one that cannot is not hidden, because the person
+ * should know a rewind then starts a fresh session from the kept turns as text.
+ */
+export function sessionRollbackLabel(capabilities: ProviderObservedState["capabilities"]): string {
+  return capabilities.sessionRollback === "supported"
+    ? "Supported. A rewound thread continues its own session from the kept turns."
+    : "None. A rewound thread starts a fresh session with the kept turns as text.";
+}
+
+/**
+ * Whether an agent on the ACP bridge has a reviewer of its own, said only for
+ * the agent that has none: the person should read that Auto then falls to
+ * Octant Shield, not wonder why the row is missing. Agents with one are
+ * described by their reviewer verdicts instead.
+ */
+export function ownReviewerLabel(
+  driverKind: string,
+  capabilities: ProviderObservedState["capabilities"],
+): string | undefined {
+  if (!isAcpAgentKind(driverKind)) return undefined;
+  // Only a reviewer the agent reported absent is "none": a failed connection
+  // check reads unavailable for every capability and says nothing about this one.
+  if (capabilities.harnessAutoReview !== "unsupported") return undefined;
+  return "None. Octant Shield reviews at Auto.";
 }
 
 export const probeTimestampFormatter = new Intl.DateTimeFormat(undefined, {

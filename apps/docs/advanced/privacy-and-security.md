@@ -61,6 +61,15 @@ action; export and purge are separate confirmed operations on the same
 Data & storage page. What you have allowed (remembered websites, remembered
 tool approvals, public links) is on Settings → Permissions.
 
+Person memory (Settings → Memory) is kept in the same journal on this host.
+Octant writes it from your own messages after you put a thread away, using one
+small model request per thread on that thread's provider, and every new thread
+starts with it. It is on by default. You can turn it off, keep a Project or a
+thread out, and edit, delete, or forget every entry; deleting erases the
+entries from the journal. It never leaves the host except inside a provider
+request for a thread that uses it, and a thread on one provider can receive
+what was learned on another. See [Memory across Projects](/guide/memory#memory-across-projects).
+
 An unsent composer draft is ordinary local client storage on the machine
 where it was typed. It never enters the journal, diagnostics, or a provider
 request until you send it. Deleting or purging the thread removes that
@@ -75,7 +84,7 @@ named as omissions rather than inlined. A paired device may export only a
 thread it can already read.
 
 **Export my data** is the host-wide cut: a local-owner-only read of every
-projectable thread across Chat, Work, and Code, plus Projects, memory,
+projectable thread across Chat, Work, and Code, plus Projects, Project memory, your person memory (each note and the threads it came from),
 Canvases, settings, usage rows, and retention state including purge
 tombstones, streamed as line-delimited JSON. A remote or paired device
 principal is refused before any export data is read, and the same secret and
@@ -152,8 +161,10 @@ if it later fails or you deny it, because by then the provider may already
 have the page. Where Octant can see what such a call returned, Octant Shield's Watcher reads
 it for text aimed at the agent, hidden or encoded text, and requests to send
 secrets out; a finding is tagged on the tool row, in Chat and Work as well as
-Code, and never shown to the Judge as text. Some providers do not show Octant
-the page, so their calls are marked but not read. An agent that reports a web search the same way as a search of
+Code, and never shown to the Judge as text. Octant reads what an ACP agent,
+an OpenCode web tool, and a standalone Codex search returned. A web search
+that Codex's model provider runs on its own servers does not show Octant the
+page, so it is marked but not read. An agent that reports a web search the same way as a search of
 your files cannot always be told apart, so that search may not mark the
 thread. If the provider's own reviewer is answering approvals in a Code
 thread, the turn stops at that point and says why, so you answer the next
@@ -251,6 +262,9 @@ keeps working:
 - **API keys and tokens** go through Octant's credential broker. Link the key
   in Octant, and the runtime receives it in its environment. For a cluster,
   point `KUBECONFIG` at a file you keep outside the protected list.
+- **The AWS command line** in Octant's own shell gets a session that lasts one
+  hour once you point its key pair at items in a linked password manager
+  ([Use API keys from a secret store](../guide/secret-stores.md)).
 
 When an agent asks for a protected file, the refusal says which group refused
 it and which channel to use. You see that message in the tool row.
@@ -258,6 +272,10 @@ it and which channel to use. You see that message in the tool row.
 Octant Shield watches for this too. Any call of Octant's own tools that names
 a protected file, refused or not, gets an "Outside content" tag on its tool
 row saying it reached for a protected secret file, and the thread is marked.
+A command in Octant's own shell that prints a variable whose name says it
+holds a secret, such as `echo $GITHUB_TOKEN` or an `env` listing that shows
+one, gets the same tag, saying it printed a secret-holding environment
+variable.
 When Shield answers approvals at **Auto**, it sends a command that touches a file on your list to you,
 the files you added included, and refuses one that also sends something off
 the computer. At **Full access** Shield decides nothing, so instead it records
@@ -419,7 +437,12 @@ to each server in a thread asks you and names the server, even if you allowed
 commands for the session. Every remote command is recorded with its host and,
 where the agent's runtime reports it, its exit status.
 
-Octant never reads your key files: `ssh` signs in through your SSH agent. You
+Octant never reads your key files: `ssh` signs in through your SSH agent.
+Or, for a server, choose **Sign in with: A key Octant keeps**. Octant then
+makes a key for that server alone and keeps it in your system's keychain.
+Press **Show key** and add the line it shows to `~/.ssh/authorized_keys` for
+that user on the server. Octant signs that server's logins with it and never
+hands the key to an agent or a command. You
 can point each server at a notes file (a runbook); agents read it as
 reference, and nothing written there changes what Shield allows. A Project can
 use its own list of servers instead of the account's: pick the Project under
@@ -428,13 +451,20 @@ use its own list of servers instead of the account's: pick the Project under
 Below Full access, on a Mac or on Linux, an Octant Harness command still
 runs in its sandbox. When it is a single `ssh`, `scp`, or `rsync` call to servers you
 registered, Octant opens a path to those servers for that command only. Your
-SSH agent signs in for it, and the command can neither read your keys nor
+SSH agent signs in for it, or, for a server that uses a key Octant keeps,
+Octant's key store does, and the command can neither read your keys nor
 change what your agent holds. The server must already be in your
 `known_hosts`, so connect once from your own terminal first. A server you
 reach through a jump host gets no path.
 
-What this does not cover yet: commands that Claude Code, Codex, or another
-agent runs with its own shell keep the reach that agent's sandbox gives it. Octant records them when
+Commands that Claude Code, Codex, or another agent runs with its own shell
+get a similar path for the whole session: a small SSH setup that names only
+your registered servers, and a sign-in that works only after the server has
+proved, with its host key, that it is one of them. They use the agent's own
+network, so with **Network limits** on they cannot reach a server. The
+agent's own sandbox still applies: inside Claude Code's or Codex's sandbox,
+`ssh` stays blocked, as it does in their own apps, until you approve running
+the command outside it. Octant records them when
 the agent says what it ran, and Codex also reports the exit status.
 
 ## Remote transport

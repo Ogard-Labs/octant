@@ -21,6 +21,12 @@ import {
   type WorkStatusDatedItem,
 } from "@octant/contracts";
 import { Effect } from "effect";
+import { SERVER_RUNTIME_NOT_HARNESS } from "../serverProjects/serverProjectThreads";
+import {
+  bindServerWorkTurn,
+  serverWorkBindingRevisionId,
+  serverWorkProjectOf,
+} from "../serverProjects/serverWorkThreads";
 import { ThreadMessageQueueService } from "../messageQueue/threadMessageQueueService";
 import { createThreadMessageQueuePort } from "../messageQueue/threadMessageQueuePorts";
 import { createThreadMessageQueueAttachments } from "../messageQueue/threadMessageQueueAttachments";
@@ -103,6 +109,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "onWindowRevoked"
     | "routineProposalService"
     | "windowAuthorityStore"
+    | "personMemoryAccess"
   > &
   Pick<
     AgentRunsWiring,
@@ -114,7 +121,13 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "spendCeiling"
     | "threadAwaitsHarnessApproval"
   > &
-  Pick<HarnessStateWiring, "threadAwaitsHarnessQuestion" | "nativeHarnessSessions"> &
+  Pick<
+    HarnessStateWiring,
+    | "threadAwaitsHarnessQuestion"
+    | "nativeHarnessSessions"
+    | "serverConnection"
+    | "serverProjectStore"
+  > &
   Pick<WorkRequestStateWiring, "runningWorkTurns" | "workRequestRuntime" | "workRequestService"> &
   Pick<
     IntegrationsWiring,
@@ -166,6 +179,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "nativeHarnessComposition"
     | "nativeHarnessHooks"
     | "onHarnessPausedByPerson"
+    | "shieldServerStore"
     | "sideTaskFirstMessage"
   > &
   Pick<ChatWiring, "chatService" | "guardChatAttachmentPurge" | "threadMentionService"> &
@@ -215,6 +229,9 @@ export function wireWork(deps: WorkDependencies) {
     managedWorktreeReceipts,
     terminalSessionImports,
     nativeHarnessComposition,
+    serverConnection,
+    serverProjectStore,
+    shieldServerStore,
     nativeHarnessHooks,
     nativeHarnessSessions,
     onHarnessPausedByPerson,
@@ -251,6 +268,7 @@ export function wireWork(deps: WorkDependencies) {
     workRequestService,
     workThreadProjection,
     workTurnProjection,
+    personMemoryAccess,
   } = deps;
   return Effect.gen(function* () {
     const workTurnUsageStore = new WorkTurnUsageStore();
@@ -302,6 +320,9 @@ export function wireWork(deps: WorkDependencies) {
       projects: projectService,
       projection: workThreadProjection,
       turnProjection: workTurnProjection,
+      isMarked: (threadId) =>
+        readThreadExternalContentTaint(persistence.connection, String(threadId))
+          .externalContentIngested,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
       workingDirectories: { resolve: resolveThreadWorkingDirectory },
@@ -319,6 +340,13 @@ export function wireWork(deps: WorkDependencies) {
       issueContext: githubIssueContextService,
       linearIssueContext: linearIssueContextService,
       terminalSessions: terminalSessionImports,
+      serverProjects: {
+        bindingRevisionId: (projectId) => {
+          const project = serverProjectStore.workProject(String(projectId));
+          return project === undefined ? undefined : serverWorkBindingRevisionId(project);
+        },
+        holdsThread: (thread) => serverWorkProjectOf(serverProjectStore, thread) !== undefined,
+      },
     });
     // Hosts composed after Work (delegation to another spoke) learn that a
     // person stopped a thread's turn through this, not through the service.
@@ -328,6 +356,14 @@ export function wireWork(deps: WorkDependencies) {
     };
     const workTurnService = new WorkTurnService({
       liveTurns,
+      personMemoryBlock: ({ thread, windowId }) =>
+        personMemoryAccess.blockFor({
+          mode: "work",
+          threadId: String(thread.id),
+          projectId: String(thread.projectId),
+          createdAt: thread.createdAt,
+          windowId,
+        }),
       onTurnCancelled: (threadId) => {
         for (const listener of turnCancelledListeners) listener(threadId);
       },
@@ -348,6 +384,23 @@ export function wireWork(deps: WorkDependencies) {
           persistence
             .readProviderCatalog?.(providerInstanceId)
             ?.models.find((model) => String(model.id) === String(modelId)),
+      },
+      // A server Work thread's turn has only the harness's tools there; with
+      // no harness composed, it cannot run at all.
+      serverProjects: {
+        holds: (thread) => serverWorkProjectOf(serverProjectStore, thread) !== undefined,
+        bind: (thread) =>
+          nativeHarnessComposition === undefined
+            ? { status: "refused", message: SERVER_RUNTIME_NOT_HARNESS }
+            : bindServerWorkTurn(
+                {
+                  store: serverProjectStore,
+                  connection: serverConnection,
+                  composition: nativeHarnessComposition,
+                  record: (record) => shieldServerStore.recordServerCommand(record),
+                },
+                { thread },
+              ),
       },
       resolveAppManagedTools: (input) => {
         const observed = providerRuntimeRegistry.observedState(input.thread.providerInstanceId);
@@ -439,7 +492,17 @@ export function wireWork(deps: WorkDependencies) {
           executionPolicy: "approval-gated",
         });
         const computer = computerToolsFor(computerOwner);
+        const pastThreads = !browserSupported
+          ? undefined
+          : personMemoryAccess.toolsFor({
+              mode: "work",
+              threadId: String(input.thread.id),
+              projectId: String(input.thread.projectId),
+              createdAt: input.thread.createdAt,
+              windowId: input.windowId,
+            });
         if (
+          pastThreads === undefined &&
           native === undefined &&
           browser === undefined &&
           sideTaskTools === undefined &&
@@ -457,6 +520,7 @@ export function wireWork(deps: WorkDependencies) {
           routineTools,
           agentsTools,
           canvasTools,
+          pastThreads,
         );
       },
       nativeHarness: nativeHarnessHooks,
@@ -480,10 +544,10 @@ export function wireWork(deps: WorkDependencies) {
       supportsModelSwitch: (providerInstanceId) =>
         providerRuntimeRegistry.observedState(providerInstanceId)?.capabilities.modelSwitch ===
         "supported",
-      selectConversationHandoff: (thread) =>
+      selectConversationHandoff: (thread, purpose) =>
         admittedParentWorkContext({
           threadId: thread.id,
-          purpose: "provider-switch",
+          purpose,
           externalContentIngested: readThreadExternalContentTaint(
             persistence.connection,
             String(thread.id),

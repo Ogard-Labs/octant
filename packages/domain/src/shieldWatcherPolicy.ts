@@ -29,6 +29,7 @@ export const SHIELD_WATCHER_LABEL_WORDS: Readonly<Record<ShieldWatcherLabel, str
   "exfiltration-request": "a request to send secrets out",
   "fake-authority": "a false claim of authority",
   "secret-path-read": "a read of a protected secret file",
+  "secret-env-print": "a printed secret-holding environment variable",
 };
 
 /** The Watcher label a journaled source label names, if it names one. */
@@ -152,6 +153,192 @@ export function callReadsProtectedSecret(
 ): boolean {
   if (protectedSecretPath === undefined) return false;
   return pathsOf(args).some((path) => protectedSecretPath(path));
+}
+
+/**
+ * Whether a shell call printed an environment variable whose name says it
+ * holds a secret: its `command` hands one to a printer (`echo $GITHUB_TOKEN`,
+ * `printenv NPM_TOKEN`), or its output lists one with a value (`env`,
+ * `export -p`). Only a call with a `command` is read; a file tool's result is
+ * the file, which the secret guard's list covers.
+ *
+ * The name decides, not the value, so a token in an unusual format is still
+ * seen. A variable handed to another program (`curl -H "... $TOKEN"`) is a
+ * use, not a print, and is the Judge's to weigh.
+ */
+export function callPrintsSecretEnvironment(args: unknown, output: string): boolean {
+  if (typeof args !== "object" || args === null) return false;
+  const command = (args as Readonly<Record<string, unknown>>)["command"];
+  if (typeof command !== "string") return false;
+  return commandPrintsSecretVariable(command) || outputListsSecretVariable(output);
+}
+
+/**
+ * A name that holds a secret: one of its underscore-separated words is a
+ * secret noun. A name ending in a word that says where the secret lives
+ * (`_FILE`, `_PATH`, `_SOCK`) or which one it is (`_ID`) holds no secret
+ * itself, so `SSH_AUTH_SOCK` and `AWS_ACCESS_KEY_ID` print nothing worth a flag.
+ */
+export function isSecretHoldingVariable(name: string): boolean {
+  const words = name.toUpperCase().split("_");
+  const last = words.at(-1);
+  if (last === undefined || NOT_A_SECRET_SUFFIX.has(last)) return false;
+  return words.some(
+    (word, index) =>
+      SECRET_NAME_WORDS.has(word) ||
+      // A test runner's `PASS=12` and an `AUTH=on` switch say nothing secret;
+      // `DB_PASS` and `GITHUB_AUTH` do.
+      (index > 0 && QUALIFIED_SECRET_NAME_WORDS.has(word)) ||
+      (index > 0 && SECRET_NAME_PAIRS.has(`${words[index - 1]}_${word}`)),
+  );
+}
+
+const SECRET_NAME_WORDS: ReadonlySet<string> = new Set([
+  "SECRET",
+  "TOKEN",
+  "PASSWORD",
+  "PASSWD",
+  "PASSPHRASE",
+  "APIKEY",
+  "CREDENTIAL",
+  "CREDENTIALS",
+]);
+const QUALIFIED_SECRET_NAME_WORDS: ReadonlySet<string> = new Set(["PASS", "AUTH"]);
+const SECRET_NAME_PAIRS: ReadonlySet<string> = new Set([
+  "API_KEY",
+  "ACCESS_KEY",
+  "PRIVATE_KEY",
+  "SESSION_KEY",
+  "SIGNING_KEY",
+]);
+const NOT_A_SECRET_SUFFIX: ReadonlySet<string> = new Set([
+  "ID",
+  "FILE",
+  "PATH",
+  "DIR",
+  "SOCK",
+  "SOCKET",
+  "URL",
+  "HOST",
+  "USER",
+  "USERNAME",
+  "REGION",
+  "METHOD",
+  "TYPE",
+  "MODE",
+  "ENDPOINT",
+  "LENGTH",
+  "ENABLED",
+  "DISABLED",
+]);
+
+/** Programs that print their arguments. */
+const PRINTERS: ReadonlySet<string> = new Set(["echo", "printf", "print"]);
+/** Words that run the program after them, or open a compound command around it. */
+const COMMAND_PREFIXES: ReadonlySet<string> = new Set([
+  "sudo",
+  "command",
+  "builtin",
+  "exec",
+  "time",
+  "nohup",
+  "if",
+  "then",
+  "elif",
+  "else",
+  "while",
+  "until",
+  "do",
+  "!",
+  "{",
+]);
+/** `sh -c '…'` and its kin: the quoted body is a command line of its own. */
+const SHELL_BODY =
+  /(?:^|[\s;&|(])(?:sh|bash|zsh|dash)[ \t]+(?:-[A-Za-z]+[ \t]+){0,4}-[A-Za-z]*c[ \t]+(?:'([^']*)'|"([^"]*)")/g;
+const MAX_SHELL_DEPTH = 2;
+const MAX_COMMAND_LENGTH = 64 * 1024;
+const MAX_SIMPLE_COMMANDS = 256;
+const VARIABLE_REFERENCE = /\$\{?([A-Za-z_][A-Za-z0-9_]*)/g;
+const VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/** `NAME=value` as `env`, `printenv`, `export -p`, and `declare -x` list it. */
+const LISTED_VARIABLE =
+  /^[ \t]*(?:export[ \t]+|declare[ \t]+-[a-zA-Z]+[ \t]+|typeset[ \t]+-[a-zA-Z]+[ \t]+)?([A-Za-z_][A-Za-z0-9_]{0,255})=(.*)$/gm;
+
+function commandPrintsSecretVariable(command: string, depth = 0): boolean {
+  const bounded = command.slice(0, MAX_COMMAND_LENGTH);
+  if (depth < MAX_SHELL_DEPTH) {
+    for (const match of bounded.matchAll(SHELL_BODY)) {
+      if (commandPrintsSecretVariable(match[1] ?? match[2] ?? "", depth + 1)) return true;
+    }
+  }
+  const expanding = withoutLiteralDollars(bounded);
+  const simpleCommands = expanding.split(/[;&|\n()]+|`/).slice(0, MAX_SIMPLE_COMMANDS);
+  return simpleCommands.some((simple) => {
+    const words = simple
+      .trim()
+      .split(/[ \t]+/)
+      .filter((word) => word.length > 0);
+    let start = 0;
+    while (start < words.length) {
+      const word = words[start] ?? "";
+      if (!COMMAND_PREFIXES.has(word) && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) break;
+      start += 1;
+    }
+    const program = (words[start] ?? "").replace(/["']/g, "").split("/").at(-1) ?? "";
+    const rest = words.slice(start + 1);
+    if (PRINTERS.has(program)) {
+      return rest.some((word) =>
+        [...word.matchAll(VARIABLE_REFERENCE)].some((match) =>
+          isSecretHoldingVariable(match[1] ?? ""),
+        ),
+      );
+    }
+    if (program === "printenv") {
+      return rest.some((word) => {
+        const name = word.replace(/["']/g, "");
+        return VARIABLE_NAME.test(name) && isSecretHoldingVariable(name);
+      });
+    }
+    return false;
+  });
+}
+
+/**
+ * The command with every `$` that expands nothing neutralised: inside single
+ * quotes (`echo '$TOKEN'` prints the name) and after a backslash outside them
+ * (`echo \$TOKEN`, also inside double quotes). The words themselves stay, so
+ * `printenv 'NPM_TOKEN'` still names its variable. A single quote inside double
+ * quotes is an ordinary character, so `echo "a='$TOKEN'"` still expands.
+ */
+function withoutLiteralDollars(command: string): string {
+  let result = "";
+  let quote: "'" | '"' | undefined;
+  for (let index = 0; index < command.length; index += 1) {
+    const character = command[index] ?? "";
+    if (quote === "'") {
+      if (character === "'") quote = undefined;
+      result += character === "$" ? "_" : character;
+      continue;
+    }
+    if (character === "\\") {
+      const next = command[index + 1] ?? "";
+      result += next === "$" ? "\\_" : character + next;
+      index += 1;
+      continue;
+    }
+    if (character === '"') quote = quote === '"' ? undefined : '"';
+    else if (character === "'" && quote === undefined) quote = "'";
+    result += character;
+  }
+  return result;
+}
+
+function outputListsSecretVariable(output: string): boolean {
+  for (const match of boundedText(output).matchAll(LISTED_VARIABLE)) {
+    const value = (match[2] ?? "").replace(/^["']|["']$/g, "").trim();
+    if (value.length > 0 && isSecretHoldingVariable(match[1] ?? "")) return true;
+  }
+  return false;
 }
 
 const PATH_FIELDS = ["path", "paths", "file", "files", "filePath", "file_path", "filename"];

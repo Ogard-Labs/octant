@@ -11,6 +11,7 @@ import {
 } from "./codeOperations";
 import { UtcTimestamp } from "./events";
 import { GithubRepositoryName, GithubRepositoryOwner } from "./githubCatalogue";
+import { HubMemberId } from "./hubAndSpokes";
 import { ProjectId } from "./projects";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -219,6 +220,49 @@ const CodeProjectPullRequestMergeUnavailable = Schema.Literal(
 export type CodeProjectPullRequestMergeUnavailable =
   typeof CodeProjectPullRequestMergeUnavailable.Type;
 
+/** The merge routes a host can ask an owner unlock for, before a paired client's merge. */
+export const CODE_OWNER_UNLOCKED_MERGE_PATHS = [
+  "/api/code/project-pull-requests/merge",
+  "/api/code/project-pull-requests/merge-stack",
+  "/api/code/project-pull-requests/merge-when-ready",
+] as const;
+
+/**
+ * Why a host that asks for an owner unlock before a paired client's merge
+ * refused this one. `missing`: no unlock came with it. `no-owner-list`: the
+ * host is in no hub, or its hub grant leaves owners out, so it has no owner who
+ * could give one. The rest repeat the host's check of the owner and the unlock.
+ */
+export const CodeOwnerMergeUnlockReason = Schema.Literal(
+  "missing",
+  "invalid",
+  "no-owner-list",
+  "not-an-owner",
+  "owners-not-honored",
+  "device-revoked",
+  "hub-principal",
+  "no-such-challenge",
+  "expired",
+  "wrong-owner",
+  "action-mismatch",
+  "signature-invalid",
+  "user-verification-missing",
+);
+export type CodeOwnerMergeUnlockReason = typeof CodeOwnerMergeUnlockReason.Type;
+
+/**
+ * Nothing merged: the host asks a paired client's merge for a fresh unlock on
+ * one of its owner devices first. `hostMemberId` names this host on the hub, so
+ * the owner device asks this host for the challenge; it is absent when the host
+ * has no owner list.
+ */
+export const CodeOwnerMergeUnlockRefusal = Schema.Struct({
+  status: Schema.Literal("owner-unlock-required"),
+  reason: CodeOwnerMergeUnlockReason,
+  hostMemberId: Schema.optional(HubMemberId),
+}).annotations(strict);
+export type CodeOwnerMergeUnlockRefusal = typeof CodeOwnerMergeUnlockRefusal.Type;
+
 export const CodeProjectPullRequestMergeOutcome = Schema.Union(
   Schema.Struct({
     status: Schema.Literal("merged"),
@@ -234,6 +278,7 @@ export const CodeProjectPullRequestMergeOutcome = Schema.Union(
     status: Schema.Literal("unavailable"),
     reason: CodeProjectPullRequestMergeUnavailable,
   }).annotations(strict),
+  CodeOwnerMergeUnlockRefusal,
 );
 export type CodeProjectPullRequestMergeOutcome = typeof CodeProjectPullRequestMergeOutcome.Type;
 
@@ -340,6 +385,7 @@ export const CodeProjectPullRequestStackMergeOutcome = Schema.Union(
       }).annotations(strict),
     ),
   }).annotations(strict),
+  CodeOwnerMergeUnlockRefusal,
 );
 export type CodeProjectPullRequestStackMergeOutcome =
   typeof CodeProjectPullRequestStackMergeOutcome.Type;

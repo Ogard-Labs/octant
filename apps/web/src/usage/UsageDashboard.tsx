@@ -79,6 +79,7 @@ const CATEGORY_OPTIONS: ReadonlyArray<{
   { value: "octant-policy", label: "Octant policy" },
   { value: "user-instructions", label: "User instructions" },
   { value: "project-instructions", label: "Project instructions" },
+  { value: "person-memory", label: "Person memory" },
   { value: "project-memory", label: "Project memory" },
   { value: "conversation", label: "Conversation" },
   { value: "current-request", label: "Current request" },

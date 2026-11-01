@@ -1171,6 +1171,171 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByText("Files restored to this point.")).toBeVisible();
   });
 
+  it("rewinds to a message after showing what changes, and returns that message to the composer", async () => {
+    const user = userEvent.setup();
+    const executeOperation = vi.fn(async (command: { readonly kind: string }) =>
+      command.kind === "preview-code-rewind"
+        ? {
+            kind: "rewind-preview" as const,
+            operationId: "30000000-0000-4000-8000-000000000001",
+            fromOperationId: "20000000-0000-4000-8000-000000000002",
+            removedTurns: 1,
+            files: {
+              kind: "changes" as const,
+              changes: {
+                files: [{ path: "src/parser.ts", insertions: 3, deletions: 1 }],
+                total: 1,
+                truncated: false,
+              },
+            },
+            rollback: "handoff" as const,
+          }
+        : {
+            kind: "thread-rewound" as const,
+            operationId: "30000000-0000-4000-8000-000000000001",
+            fromOperationId: "20000000-0000-4000-8000-000000000002",
+            scope: "both" as const,
+            removedTurns: 1,
+            files: "restored" as const,
+            undo: checkpoint,
+          },
+    );
+    const refreshConversation = vi.fn(() => true);
+    const noteRestoreUndo = vi.fn();
+    const requestApproval = vi.fn(async () => "40000000-0000-4000-8000-000000000001" as never);
+    const operationId = "20000000-0000-4000-8000-000000000002";
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: "turn-1:user",
+              role: "user" as const,
+              text: "rewrite the parser",
+              operationId,
+              checkpoint,
+            },
+            {
+              id: "turn-1:assistant",
+              role: "assistant" as const,
+              text: "done",
+              operationId,
+              status: "completed" as const,
+            },
+          ],
+          refreshConversation,
+          noteRestoreUndo,
+        } as never)}
+        nextUuid={() => "30000000-0000-4000-8000-000000000001"}
+        operationClient={{ executeOperation } as never}
+        requestApproval={requestApproval}
+        threadId={threadId}
+      />,
+    );
+
+    await chooseTurnAction(user, "Rewind to here…", "rewrite the parser");
+    const dialog = await screen.findByRole("dialog", { name: "Rewind to here" });
+    expect(await within(dialog).findByText("src/parser.ts")).toBeVisible();
+    expect(within(dialog).getByText(/starts a fresh session with the kept turns/)).toBeVisible();
+    // Nothing is rewound by opening the question.
+    expect(executeOperation).toHaveBeenCalledTimes(1);
+
+    await user.click(within(dialog).getByRole("button", { name: "Rewind and restore files" }));
+    await waitFor(() =>
+      expect(executeOperation).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          kind: "rewind-code-thread",
+          scope: "both",
+          fromOperationId: operationId,
+        }),
+      ),
+    );
+    // Putting files back goes through the thread's approval path.
+    expect(requestApproval).toHaveBeenCalledOnce();
+    expect(refreshConversation).toHaveBeenCalled();
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: /message/i })).toHaveValue("rewrite the parser"),
+    );
+    // The way back from the file restore is kept where Undo restore reads it.
+    expect(noteRestoreUndo).toHaveBeenCalledWith(checkpoint);
+  });
+
+  it("rewinds only the conversation without asking for an approval", async () => {
+    const user = userEvent.setup();
+    const executeOperation = vi.fn(async (command: { readonly kind: string }) =>
+      command.kind === "preview-code-rewind"
+        ? {
+            kind: "rewind-preview" as const,
+            operationId: "30000000-0000-4000-8000-000000000001",
+            fromOperationId: "20000000-0000-4000-8000-000000000002",
+            removedTurns: 2,
+            files: { kind: "unavailable" as const, reason: "server-project" as const },
+            rollback: "native" as const,
+          }
+        : {
+            kind: "thread-rewound" as const,
+            operationId: "30000000-0000-4000-8000-000000000001",
+            fromOperationId: "20000000-0000-4000-8000-000000000002",
+            scope: "conversation" as const,
+            removedTurns: 2,
+            files: "not-requested" as const,
+          },
+    );
+    const requestApproval = vi.fn();
+    const operationId = "20000000-0000-4000-8000-000000000002";
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: "turn-1:user",
+              role: "user" as const,
+              text: "first",
+              operationId: "20000000-0000-4000-8000-000000000001",
+            },
+            {
+              id: "turn-1:assistant",
+              role: "assistant" as const,
+              text: "first reply",
+              operationId: "20000000-0000-4000-8000-000000000001",
+              status: "completed" as const,
+            },
+            { id: "turn-2:user", role: "user" as const, text: "second", operationId },
+            {
+              id: "turn-2:assistant",
+              role: "assistant" as const,
+              text: "second reply",
+              operationId,
+              status: "completed" as const,
+            },
+          ],
+          refreshConversation: vi.fn(() => true),
+        } as never)}
+        nextUuid={() => "30000000-0000-4000-8000-000000000001"}
+        operationClient={{ executeOperation } as never}
+        requestApproval={requestApproval}
+        threadId={threadId}
+      />,
+    );
+
+    // From a reply, the rewind starts at the message after it.
+    await chooseTurnAction(user, "Rewind to here…", "first reply");
+    const dialog = await screen.findByRole("dialog", { name: "Rewind to here" });
+    expect(await within(dialog).findByText(/takes no checkpoints/)).toBeVisible();
+    expect(within(dialog).queryByRole("button", { name: "Files only" })).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Rewind" }));
+    await waitFor(() =>
+      expect(executeOperation).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          kind: "rewind-code-thread",
+          scope: "conversation",
+          fromOperationId: operationId,
+        }),
+      ),
+    );
+    expect(requestApproval).not.toHaveBeenCalled();
+  });
+
   it("puts focus on keeping the files when the restore question opens, and hands it back to the turn's menu", async () => {
     const user = userEvent.setup();
     const executeOperation = vi.fn();

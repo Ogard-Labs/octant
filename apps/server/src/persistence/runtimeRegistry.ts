@@ -71,6 +71,7 @@ import {
   WorkSettingsUpdated,
   WorkTurnAccepted,
   WorkTurnUpdated,
+  WorkThreadRewound,
   WorkPromotionFrame,
   WorkResearchFrame,
   WorkRequestFrame,
@@ -358,6 +359,7 @@ import { registerCanvasTagEvents } from "../canvas/canvasTagService";
 import { registerCanvasShareEvents } from "../canvas/canvasShareEventStore";
 import { registerCanvasExportEvents } from "../canvas/canvasExportEventStore";
 import { registerCanvasPublicShareEvents } from "../canvas/canvasPublicShareService";
+import { registerPersonMemoryEvents } from "../personMemory/personMemoryStore";
 import { registerProtectedFilesEvents } from "../protectedFilesService";
 import { registerCanvasExportFolderEvents } from "../canvas/canvasExportFolderEventStore";
 import { registerCanvasOutsideContentEvents } from "../canvas/canvasOutsideContentMark";
@@ -610,6 +612,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("work.settings-updated@1", 1, WorkSettingsUpdated)
     .register("work.turn-accepted@1", 1, WorkTurnAccepted)
     .register("work.turn-updated@1", 1, WorkTurnUpdated)
+    .register("work.thread-rewound@1", 1, WorkThreadRewound)
     .register("work.artifact-mutation-recorded@1", 1, WorkArtifactMutationFrame)
     .register("work.promotion-recorded@1", 1, WorkPromotionFrame)
     .register("work.research-recorded@1", 1, WorkResearchFrame)
@@ -687,6 +690,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerCanvasExportEvents(events);
   registerCanvasPublicShareEvents(events);
   registerProtectedFilesEvents(events);
+  registerPersonMemoryEvents(events);
   registerCanvasExportFolderEvents(events);
   registerCanvasOutsideContentEvents(events);
   registerCanvasCommentEvents(events);

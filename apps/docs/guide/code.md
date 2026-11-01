@@ -99,10 +99,12 @@ in the composer changes it in one click, for new and existing threads alike:
   turn shows "Approved by the provider's review" or "Denied by the provider's
   review" beside the call. Codex reports both; Claude Code reports only its
   refusals, so a call it approved shows no line; Mistral Vibe reports none.
-  Settings › Providers & Models lists which verdicts each one reports. Settings › Code ›
-  Access › Shield model picks the
+  Settings › Providers & Models lists which verdicts each one reports. Settings › Providers & Models ›
+  Automatic model calls picks the
   model Shield asks (by default each thread's own provider with its smallest
-  model, or any configured endpoint, a local one included). Shield allows
+  model, or any configured account, an API-key or local one included). What
+  Shield reviews goes to that provider. If the account you chose is off or at its
+  limit, Shield asks you about the action and never uses another account. Shield allows
   reads and edits in the folder, your Project's test and build commands, and
   Git commands that only read without asking a model; it refuses or hands you
   harmful-looking calls; its model sees only your messages and the pending
@@ -163,7 +165,8 @@ fork, once its own turns are all shown, Load earlier continues with the thread
 it was forked from, starting at the reply you forked from. The usage and
 context figures always cover the whole thread, and a restore's **Undo restore**
 stays offered however far back the restore was. Find in page searches the turns
-loaded so far. Export always covers the whole thread.
+loaded so far. Export always covers the whole thread, except messages a
+rewind removed.
 
 The phone app opens a Code thread on its newest 20 turns and says so when
 earlier ones exist; it has no Load earlier, so read those on the desktop.
@@ -176,6 +179,17 @@ shows the short head it read, and waits for your **Confirm**. A merge goes
 ahead only if that head is still current and the required checks have passed;
 **Merge when ready** hands the merge to GitHub once they do. Labels, comments,
 replies, approving, requesting changes, close, and reopen stay on the desktop.
+
+A computer can also ask for an owner unlock before a phone or browser merges.
+Turn on **Owner unlock before a phone or browser merges** under **Settings →
+Remote access → Owner devices** in that computer's own window. It is off by
+default. With it on, a merge, a stack merge, or turning **Merge when ready** on
+from a phone or browser asks you to unlock on that device first, with Face ID, a
+fingerprint, your passcode, or a passkey. This works only on a phone or browser
+that is an owner of that computer (see
+[Owner devices](../advanced/hub-and-spokes.md#owner-devices)). A merge from the
+computer's own window never asks. If the unlock is missing, cancelled, or does
+not check out, nothing merges and the screen says why.
 
 In `octant agent`, Stop reports an interruption only when the host confirms it.
 If the turn finishes before Stop arrives, it reports that nothing is running;
@@ -278,6 +292,40 @@ refusal. A restore is also refused while another restore of the same folder is
 still running. A thread on its own worktree is not held up by other threads.
 
 A checkpoint marker stays on the turn only when that point is marked.
+
+Fork from here is on your messages too: there it forks through the reply
+before that message. Your first message has no Fork from here, because
+nothing comes before it; start a new thread instead.
+
+## Rewind to here
+
+You cannot edit a message you already sent in a Code thread. **Rewind to
+here…** in a message's More actions menu takes the thread back instead, in
+the same thread. On your message it removes that message and everything
+after it; on a reply it removes everything after the reply.
+
+The dialog shows how many messages leave and which files differ from the
+point you go back to, and lets you choose **Conversation and files**,
+**Conversation only**, or **Files only**. Nothing changes until you press
+**Rewind** (or **Rewind and restore files**). Putting files back still goes
+through the thread's approval path, and **Undo restore** stays offered
+afterwards. Your message comes back to the composer so you can change it and
+send it again.
+
+The removed messages no longer reach the model. The Octant Harness continues
+its own session cut back to the last reply you kept. Other providers cannot
+cut their sessions back, which their capability report says (**Session
+rollback: None**), so your next message starts a fresh session with the kept
+messages handed over as text; that reply says so. The removed messages stay in
+Octant's record but leave the transcript and export, and the thread's usage
+figure counts only the messages it keeps; the Usage dashboard still counts
+everything that ran.
+
+Octant refuses a rewind while a turn of the thread runs. It refuses to put
+files back while another thread has a turn writing in the same checkout, and
+when a turn after that point wrote files without a recorded checkpoint; the
+conversation can still be rewound on its own. A thread in a Project on a
+server, or in Plan, rewinds the conversation only and says why.
 
 ## Attaching images
 

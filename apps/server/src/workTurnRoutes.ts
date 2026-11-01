@@ -10,6 +10,7 @@ import {
   decodeWorkThreadTranscriptWindowRequest,
   decodeWorkTurnStreamFrame,
   decodeWorkTurnCancelResult,
+  decodeWorkThreadRewindResult,
   decodeWorkTurnLookupResult,
   decodeWorkTurnRequestId,
   type WorkAttachmentId,
@@ -20,6 +21,7 @@ import {
   type WorkThreadTranscriptWindow,
   type WorkThreadTranscriptWindowRequest,
   type WorkTurnCancelResult,
+  type WorkThreadRewindResult,
   type WorkTurnFailure,
   type WorkTurnLookupResult,
   type WorkTurnStreamFrame,
@@ -44,6 +46,7 @@ export interface WorkTurnRouteService {
     requestId: string,
   ) => Promise<WorkTurnLookupResult>;
   readonly cancelFirstTurn: (windowId: WindowId, command: unknown) => Promise<WorkTurnCancelResult>;
+  readonly rewindThread: (windowId: WindowId, command: unknown) => Promise<WorkThreadRewindResult>;
   readonly transcript: (
     windowId: WindowId,
     threadId: WorkThreadId,
@@ -157,6 +160,7 @@ export function createWorkTurnRouteHandler(dependencies: WorkTurnRouteDependenci
     const isAttachment = url.pathname === "/api/work/attachments";
     const isStart = url.pathname === "/api/work/turns" && request.method === "POST";
     const isCancel = url.pathname === "/api/work/turns/cancel" && request.method === "POST";
+    const isRewind = url.pathname === "/api/work/turns/rewind" && request.method === "POST";
     const lookupMatch = url.pathname.match(/^\/api\/work\/turns\/([^/]+)$/);
     const isLookup = lookupMatch !== null && request.method === "GET";
     const transcriptMatch = url.pathname.match(/^\/api\/work\/turns\/transcript\/([^/]+)$/);
@@ -169,6 +173,7 @@ export function createWorkTurnRouteHandler(dependencies: WorkTurnRouteDependenci
       !isAttachment &&
       !isStart &&
       !isCancel &&
+      !isRewind &&
       !isLookup &&
       !isTranscript &&
       !isWindow &&
@@ -286,6 +291,15 @@ export function createWorkTurnRouteHandler(dependencies: WorkTurnRouteDependenci
       const value = parseJson(body);
       if (isRecord(value) && Object.prototype.hasOwnProperty.call(value, "windowId")) {
         throw new WorkTurnRouteRejected("Work turn requests cannot supply window identity.", 400);
+      }
+      if (isRewind) {
+        return jsonResponse(
+          decodeWorkThreadRewindResult(
+            await dependencies.service.rewindThread(authenticatedWindowId, value),
+          ),
+          200,
+          origin,
+        );
       }
       if (isCancel) {
         return jsonResponse(

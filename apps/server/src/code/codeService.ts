@@ -227,6 +227,15 @@ const MANAGED_CREATION_REFUSAL_MESSAGES: Record<string, string> = {
   "repository-mismatch": "The bound repository is unavailable or stale.",
   "invalid-intent": "Managed Code worktree creation is invalid.",
   "invalid-grant": "Managed Code worktree creation is invalid.",
+  "server-unreachable":
+    "The server could not be reached, so no worktree was made there. Nothing ran on this computer.",
+  "server-not-registered":
+    "This Project's server is no longer registered in Settings › Access › Servers, so nothing can run there.",
+  "not-repository-top":
+    "A worktree on a server needs the Project's folder to be its repository's top folder.",
+  "worktree-unavailable": "Git on the server could not make the worktree, so nothing was created.",
+  "plan-on-server":
+    "Plan changes nothing on a server, so it cannot start a thread in a new worktree there. Choose another level or Current checkout.",
 };
 
 function stripProposedOutcome(
@@ -470,6 +479,11 @@ export interface ManagedCodeThreadCreationInput {
    * no command carries it.
    */
   readonly sourceFiles?: CodeForkFiles;
+  /**
+   * The new thread's level, so a creation that would change a server refuses
+   * a Plan thread before anything runs there.
+   */
+  readonly executionPolicy?: ProviderExecutionPolicy;
 }
 
 /** The files a fork starts from, as Git trees the source's checkpoints already hold. */
@@ -516,6 +530,11 @@ export interface ManagedCodeThreadPreparation {
   readonly sourceBranch: string;
   readonly remoteName?: string;
   readonly fetchedAt?: string;
+  /**
+   * Set for a worktree made on a server Project's server: the thread's
+   * checkout is then a `remote-root`, which every host-side path refuses.
+   */
+  readonly checkoutKind?: "remote-root";
 }
 
 export type ManagedCodeThreadPrepareOutcome =
@@ -805,6 +824,11 @@ export interface CodeSearchFilesInput {
 export interface CodeWatchFilesInput {
   readonly threadId: CodeThreadId;
   readonly checkoutId: CodeCheckoutId;
+  /**
+   * One of the Project's extra folders, by absolute path, to watch instead of
+   * the checkout. The root authority places it or the watch is refused.
+   */
+  readonly folder?: CodeRelativePath | undefined;
   readonly signal?: AbortSignal | undefined;
 }
 
@@ -1305,6 +1329,7 @@ export class CodeService {
             ? {}
             : { sourceRevision: command.sourceRevision }),
           ...(sourceFiles === undefined ? {} : { sourceFiles }),
+          executionPolicy: managedAuthority.executionPolicy,
         };
         const creationSignal = signal ?? new AbortController().signal;
         // Prepare resolves the exact source without mutating the user's checkout.
@@ -1313,6 +1338,14 @@ export class CodeService {
           throw this.#managedCreationFailure(prepared);
         }
         const preparation = prepared.preparation;
+        // Octant has no confinement on a server to hold Plan read-only, so a
+        // worktree there, which is a Git change, is not made for a Plan thread.
+        if (
+          preparation.checkoutKind === "remote-root" &&
+          managedAuthority.executionPolicy === "plan"
+        ) {
+          throw this.#managedCreationFailure({ status: "refused", reason: "plan-on-server" });
+        }
         const checkoutHead = decodeCodeCheckoutHead({
           kind: "branch",
           name: preparation.branchIntent,
@@ -1375,15 +1408,26 @@ export class CodeService {
           );
           throw this.#failure("interrupted", "Managed Code worktree creation was cancelled.");
         }
-        const checkout = decodeCodeCheckoutIdentity({
-          id: preparation.checkoutId,
-          repositoryId: preparation.repositoryId,
-          kind: "managed-worktree",
-          availability: "available",
-          head: checkoutHead,
-          ownershipReceiptId: committed.receiptId,
-          observedAt: decodeTimestamp(this.#clock()),
-        });
+        const checkout = decodeCodeCheckoutIdentity(
+          preparation.checkoutKind === "remote-root"
+            ? {
+                id: preparation.checkoutId,
+                repositoryId: preparation.repositoryId,
+                kind: "remote-root",
+                availability: "available",
+                head: { kind: "none" },
+                observedAt: decodeTimestamp(this.#clock()),
+              }
+            : {
+                id: preparation.checkoutId,
+                repositoryId: preparation.repositoryId,
+                kind: "managed-worktree",
+                availability: "available",
+                head: checkoutHead,
+                ownershipReceiptId: committed.receiptId,
+                observedAt: decodeTimestamp(this.#clock()),
+              },
+        );
         const provenance = decodeCodeWorktreeSourceProvenance({
           receiptId: committed.receiptId,
           mode: preparation.mode,
@@ -2659,9 +2703,11 @@ export class CodeService {
       authenticatedWindowId,
       authorized.effectiveThread,
       authorized.checkout,
-      CODE_LISTING_ROOT_PROBE_PATH,
+      input.folder ?? CODE_LISTING_ROOT_PROBE_PATH,
     );
-    if (root === undefined) {
+    // A named folder is watched only as a whole: a path inside one, or one the
+    // authority placed in the checkout, is not a folder the Project lists.
+    if (root === undefined || (input.folder !== undefined && root.folderRoot !== true)) {
       throw this.#failure("unavailable", "Code file authority is unavailable.");
     }
     const revocation = new AbortController();

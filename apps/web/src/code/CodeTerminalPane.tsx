@@ -55,6 +55,12 @@ export interface CodeTerminalPaneProps {
     readonly columns: number;
     readonly createTerminalId: () => CodeTerminalId;
     readonly credentialRefs: readonly string[];
+    /**
+     * The Project's extra folders, by absolute path. Each is offered as a
+     * place to restart this terminal; the host accepts only a folder the
+     * Project still lists.
+     */
+    readonly folders?: ReadonlyArray<string>;
     readonly rows: number;
   };
   readonly result: TerminalResult;
@@ -433,6 +439,43 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
     }
   };
 
+  const restartInFolder = async (folder: string) => {
+    const restart = props.restart;
+    if (restart === undefined || props.executionPolicy === "plan") return;
+    setFailure(undefined);
+    setNotice(undefined);
+    try {
+      // A running shell cannot change its starting folder, so the pick comes
+      // with a fresh shell; the person chose the folder to get it.
+      if (result.state === "running") {
+        const stopped = await props.client.executeOperation({
+          kind: "stop-terminal",
+          operationId: props.createOperationId(),
+          terminalId: result.terminalId,
+          ...props.scope,
+        });
+        if (stopped.kind === "operation-failed") {
+          setFailure(stopped.failure.message);
+          return;
+        }
+      }
+      const next = await props.client.executeOperation({
+        kind: "start-terminal",
+        operationId: props.createOperationId(),
+        terminalId: restart.createTerminalId(),
+        columns: restart.columns,
+        rows: restart.rows,
+        credentialRefs: restart.credentialRefs,
+        folder,
+        ...props.scope,
+      });
+      if (next.kind === "terminal-state") setResult(next);
+      else if (next.kind === "operation-failed") setFailure(next.failure.message);
+    } catch {
+      setFailure("Octant could not restart the terminal in that folder. Reconnect and retry.");
+    }
+  };
+
   const switchBrowserOn = async () => {
     const restart = props.restart;
     if (restart === undefined || props.executionPolicy === "plan") return;
@@ -541,6 +584,12 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
         : props.restart === undefined
           ? []
           : [{ value: "restart", label: "Restart terminal" }]),
+    ...(props.executionPolicy === "plan"
+      ? []
+      : (props.restart?.folders ?? []).map((folder) => ({
+          value: `folder:${folder}`,
+          label: `Restart in ${folder.slice(folder.lastIndexOf("/") + 1)}`,
+        }))),
   ];
   const selectAction = (value: string) => {
     if (value === "add-selection") addSelectionToChat();
@@ -549,6 +598,7 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
     else if (value === "browser-on") setConfirmingBrowser(true);
     else if (value === "browser-off") void switchBrowserOff();
     else if (value === "stop" || value === "restart") void control(value);
+    else if (value.startsWith("folder:")) void restartInFolder(value.slice("folder:".length));
   };
 
   const pane = (
