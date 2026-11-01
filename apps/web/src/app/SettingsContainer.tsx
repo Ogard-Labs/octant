@@ -32,7 +32,7 @@ export interface SettingsContainerProps {
   readonly chatController: ChatController;
   readonly browserAutomationClient?: Pick<
     BrowserAutomationClient,
-    "manageExtensions" | "manageProfiles"
+    "manageExtensions" | "manageFlows" | "manageProfiles"
   >;
   readonly clients: ReturnType<typeof createLaunchedShellClients>;
   readonly codeController: CodeController;

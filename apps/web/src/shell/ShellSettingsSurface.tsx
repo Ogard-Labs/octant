@@ -78,7 +78,7 @@ export interface ShellSettingsSurfaceProps {
   readonly hostControlClient: HostControlClient;
   readonly browserAutomationClient?: Pick<
     BrowserAutomationClient,
-    "manageExtensions" | "manageProfiles"
+    "manageExtensions" | "manageFlows" | "manageProfiles"
   >;
   readonly protectedFilesClient?: ProtectedFilesClient;
   readonly personMemoryClient?: PersonMemoryClient;

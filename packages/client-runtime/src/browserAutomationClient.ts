@@ -42,6 +42,11 @@ import {
   decodeBrowserProfilesCommand,
   type BrowserProfilesCommand,
 } from "@octant/contracts/browser-profiles";
+import {
+  BrowserFlowsResult,
+  decodeBrowserFlowsCommand,
+  type BrowserFlowsCommand,
+} from "@octant/contracts/browser-flows";
 import { decodeHostAnswer } from "@octant/contracts";
 
 export interface BrowserAutomationClientOptions {
@@ -103,6 +108,8 @@ export interface BrowserAutomationClient {
     command: BrowserProfilesCommand,
     signal?: AbortSignal,
   ): Promise<BrowserProfilesResult>;
+  /** List or delete the Projects' saved Browser flows; the agent saves and runs them. */
+  manageFlows?(command: BrowserFlowsCommand, signal?: AbortSignal): Promise<BrowserFlowsResult>;
 }
 
 export type BrowserAutomationClientFailureCategory =
@@ -226,6 +233,14 @@ export function createBrowserAutomationClient(
         "/api/browser/profiles",
         decodeBrowserProfilesCommand(command),
         decodeHostAnswer(BrowserProfilesResult),
+        signal,
+      ),
+    manageFlows: (command, signal) =>
+      post(
+        options,
+        "/api/browser/flows",
+        decodeBrowserFlowsCommand(command),
+        decodeHostAnswer(BrowserFlowsResult),
         signal,
       ),
     listApprovals: (signal) =>

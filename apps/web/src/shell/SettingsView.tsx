@@ -58,6 +58,7 @@ import { SettingsNavigation, type SettingsNavigationItem } from "./SettingsNavig
 import { useSettingsSaved, type SettingsWriteResult } from "./useSettingsSaved";
 import { SidebarDestinationSettings } from "./SidebarDestinationSettings";
 import { PluginSettingsSection } from "./PluginSettingsSection";
+import { BrowserFlowsSection } from "../browser/BrowserFlowsSection";
 import { BrowserProfilesSection } from "../browser/BrowserProfilesSection";
 import { BrowserExtensionsSection } from "../browser/BrowserExtensionsSection";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
@@ -224,7 +225,7 @@ export interface SettingsViewProps {
   /** Settings › Data & privacy › Browser profiles; absent where the host keeps none. */
   readonly browserAutomationClient?: Pick<
     BrowserAutomationClient,
-    "manageExtensions" | "manageProfiles"
+    "manageExtensions" | "manageFlows" | "manageProfiles"
   >;
   /** Settings › Permissions › Protected files; absent where the host publishes no list. */
   readonly protectedFilesClient?: ProtectedFilesClient;
@@ -1400,6 +1401,12 @@ function ActiveSectionContent({
           )}
           {props.browserAutomationClient === undefined ? null : (
             <BrowserProfilesSection
+              client={props.browserAutomationClient}
+              {...(focusedSetting === undefined ? {} : { focusedSetting })}
+            />
+          )}
+          {props.browserAutomationClient === undefined ? null : (
+            <BrowserFlowsSection
               client={props.browserAutomationClient}
               {...(focusedSetting === undefined ? {} : { focusedSetting })}
             />
