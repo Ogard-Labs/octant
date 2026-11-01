@@ -10,9 +10,10 @@ approval covers
 and [Browser captures](browser-captures.md) owns which screenshots a thread
 keeps.
 
-Status: the page snapshot, element refs, short results, and the actions below
-(hover, select, drag, key chords, upload, tabs) are built. Batched steps, richer waits, dialogs and viewport size, the sign-in
-handoff, and fuller diagnostics are allowed; not built yet.
+Status: the page snapshot, element refs, short results, the actions below
+(hover, select, drag, key chords, upload, tabs), and batched steps are built.
+Richer waits, dialogs and viewport size, the sign-in handoff, and fuller
+diagnostics are allowed; not built yet.
 
 ## One tool for every provider
 
@@ -169,8 +170,23 @@ only after the person approves it.
 
 ## Steps
 
-Allowed; not built yet. Up to 10 operations in one call, stopping at the first
-failure, with each step admitted by the server on its own.
+- `steps` runs up to 10 operations in one call. Each step is written exactly as
+  the operation would be alone, and runs through the same path a single call
+  takes, so the server admits each step on its own: the thread's authority, the
+  model binding, the origin approval, Plan mode, the stale check, and the
+  credential check.
+- The first step that fails ends the batch. The answer names it (its number,
+  its operation, and its own refusal or failure) and lists the steps that ran
+  before it with what each changed; no later step runs. A batch that succeeds
+  answers as its last step does, with a line per step.
+- A batch cannot hold another batch, an upload, `stop`, or a `navigate` with a
+  profile: each of those needs a call, and for an upload or a signed-in page a
+  question to the person, of its own. A malformed step refuses the whole batch
+  before any step runs.
+- A batch is a list of fixed operations, never a script: nothing an agent
+  writes runs in the page.
+- The field a `type` or `select` changes is not page text, so such a step
+  reports that the field holds the new value when nothing else changed.
 
 ## Waiting, dialogs, and viewport
 

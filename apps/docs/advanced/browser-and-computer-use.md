@@ -216,6 +216,10 @@ it asks for them, which keeps each step small. Octant takes no picture of the
 page the agent did not ask for; the activity preview still shows the page,
 because it takes its own.
 
+The agent can send up to 10 of these steps in one call, such as filling three
+fields and pressing Save. Octant checks each step on its own, exactly as if it
+came alone, and stops at the first one that fails.
+
 The tool's built-in guidance tells the agent to navigate, take a snapshot, act
 by reference, and inspect the result to verify success. The always-visible description stays short; the agent asks the tool's
 `help` operation for the full usage when it needs it, as it can for Computer
