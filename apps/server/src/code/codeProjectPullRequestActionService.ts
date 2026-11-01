@@ -311,7 +311,8 @@ export class CodeProjectPullRequestActionService {
   /**
    * A review is for the head the person read. The host reads the pull request
    * first and refuses a review for a head that moved or a pull request that is
-   * no longer open; the forge repeats the head check when it records the review.
+   * no longer open. The forge records the review against that commit, so a push
+   * between this read and the post leaves the review on the commit the person saw.
    */
   async #review(
     identity: GhPullRequestIdentityRequest,

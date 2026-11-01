@@ -1976,7 +1976,8 @@ approval or a request for changes names the head the person read
 (`headSha`): the host reads the pull request first and refuses `stale` when
 the head moved and `not-open` or `merged` when it is not open, and the review
 is recorded through GitHub's review API against that commit, so a push
-between the read and the review is refused there too. A request for changes
+in the short gap between the read and the post leaves the review on the
+commit the person saw rather than on the new one. A request for changes
 needs a note; an approval may carry one. GitHub refuses a review of the
 person's own pull request, which Octant reports as `own-pull-request`. Only
 the local window reviews: no agent, routine, or paired device does. Every attempt that reaches
