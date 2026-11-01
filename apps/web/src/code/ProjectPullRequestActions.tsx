@@ -435,7 +435,7 @@ function actionRefusalCopy(
           : outcome.reason === "merged"
             ? "the pull request is already merged"
             : outcome.reason === "stale"
-              ? "the pull request has a newer commit than the one you read; refresh and review again"
+              ? "the pull request has a newer commit than the one you read (a review already sent stays on the older commit); refresh and check it"
               : outcome.reason === "own-pull-request"
                 ? "GitHub does not let you review your own pull request"
                 : outcome.reason === "label-not-found"

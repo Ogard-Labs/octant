@@ -311,8 +311,8 @@ export class CodeProjectPullRequestActionService {
   /**
    * A review is for the head the person read. The host reads the pull request
    * first and refuses a review for a head that moved or a pull request that is
-   * no longer open. The forge records the review against that commit, so a push
-   * between this read and the post leaves the review on the commit the person saw.
+   * no longer open, then reads it again after the post, because the forge accepts a
+   * review for an older commit instead of refusing it.
    */
   async #review(
     identity: GhPullRequestIdentityRequest,
@@ -327,7 +327,7 @@ export class CodeProjectPullRequestActionService {
     if (summary.state === "merged") return { status: "refused", reason: "merged" };
     if (summary.state !== "open") return { status: "refused", reason: "not-open" };
     if (summary.headSha !== command.headSha) return { status: "refused", reason: "stale" };
-    return this.#forge.review(
+    const posted = await this.#forge.review(
       {
         ...identity,
         event: command.kind === "approve" ? "approve" : "request-changes",
@@ -336,6 +336,15 @@ export class CodeProjectPullRequestActionService {
       },
       signal,
     );
+    if (posted.status !== "done") return posted;
+    // GitHub files a review under the commit it names and does not refuse a
+    // head that has since moved, so the host looks again. A review that landed
+    // on an older commit is answered `stale` rather than `done`: the person
+    // must not read it as approval of code they never saw.
+    const after = await this.#forge.summary(identity, signal);
+    return after.status === "read" && after.headSha !== command.headSha
+      ? { status: "refused", reason: "stale" }
+      : posted;
   }
 
   #send(

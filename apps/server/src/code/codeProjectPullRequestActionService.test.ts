@@ -226,6 +226,40 @@ describe("project pull-request actions", () => {
       }
     });
 
+    it("answers stale when the head moves between the read and the post", async () => {
+      let reads = 0;
+      const { service, forge, store } = fixture({
+        forge: {
+          summary: async () => {
+            reads += 1;
+            return {
+              status: "read",
+              state: "open",
+              headBranch: "feature/x",
+              baseBranch: "main",
+              headSha: reads === 1 ? head : "b".repeat(40),
+            };
+          },
+        },
+      });
+      try {
+        expect(
+          await service.act(
+            windowId,
+            { kind: "approve", ...target, headSha: head },
+            signal(),
+            "local-window",
+          ),
+        ).toEqual({ status: "refused", reason: "stale" });
+        expect(forge.review).toHaveBeenCalledTimes(1);
+        expect(store.recorded()[0]?.payload).toMatchObject({
+          result: { status: "refused", reason: "stale" },
+        });
+      } finally {
+        store.close();
+      }
+    });
+
     it("refuses a review for a head that moved, a closed pull request, and a paired device", async () => {
       const moved = fixture({ summaries: open });
       const closed = fixture({
