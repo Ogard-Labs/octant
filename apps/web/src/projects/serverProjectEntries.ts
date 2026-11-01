@@ -72,13 +72,17 @@ export function useServerCodeProjectsSource(
         const aliases = new Map(
           (registry?.servers ?? []).map((server) => [String(server.serverId), server.alias]),
         );
-        const next = view.projects.map((project): ServerCodeProject => {
+        // A Work Project on a server holds Work threads, never Code ones.
+        const next = view.projects.flatMap((project): ReadonlyArray<ServerCodeProject> => {
+          if (project.mode === "work") return [];
           const alias = aliases.get(String(project.serverId));
-          return {
-            projectId: project.id,
-            name: project.name,
-            location: alias === undefined ? project.folder : `${alias}:${project.folder}`,
-          };
+          return [
+            {
+              projectId: project.id,
+              name: project.name,
+              location: alias === undefined ? project.folder : `${alias}:${project.folder}`,
+            },
+          ];
         });
         // An unchanged answer keeps its identity, so a poll that found nothing
         // new re-renders nothing that reads it.

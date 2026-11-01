@@ -1,3 +1,4 @@
+import { serverWorkProjectOf } from "../serverProjects/serverWorkThreads";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -148,8 +149,10 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
       persistence,
       readWorkThread: (threadId) => workThreadProjection.read(threadId),
       serverCodeProjects: {
-        has: (projectId) => serverProjectStore.project(String(projectId)) !== undefined,
+        has: (projectId) => serverProjectStore.codeProject(String(projectId)) !== undefined,
         holdsThread: (thread) => serverProjectOf(serverProjectStore, thread) !== undefined,
+        hasWork: (projectId) => serverProjectStore.workProject(String(projectId)) !== undefined,
+        holdsWorkThread: (thread) => serverWorkProjectOf(serverProjectStore, thread) !== undefined,
       },
       uuid: randomUUID,
       clock: () => new Date().toISOString(),

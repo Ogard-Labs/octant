@@ -94,7 +94,7 @@ const REFUSALS: Readonly<Record<number, string>> = {
 const OBJECT_ID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 
 export interface ServerWorktreeOptions {
-  readonly store: Pick<ServerProjectStore, "project" | "addressOf">;
+  readonly store: Pick<ServerProjectStore, "codeProject" | "addressOf">;
   readonly connection: Pick<ServerConnection, "run">;
 }
 
@@ -113,7 +113,7 @@ export function withServerWorktreeCreation(
     { readonly projectId: string; readonly folder: string; readonly branch: string }
   >();
   const placeOf = (input: ManagedCodeThreadCreationInput) => {
-    const project = options.store.project(String(input.projectId));
+    const project = options.store.codeProject(String(input.projectId));
     if (project === undefined) return undefined;
     const address = options.store.addressOf(String(project.id));
     return { project, server: address.kind === "address" ? address.server : undefined };
@@ -198,7 +198,7 @@ export function withServerWorktreeCreation(
     cleanup: async (input, signal) => {
       const made = created.get(input.receiptId);
       if (made === undefined) return local.cleanup(input, signal);
-      const project = options.store.project(made.projectId);
+      const project = options.store.codeProject(made.projectId);
       const address = options.store.addressOf(made.projectId);
       if (project === undefined || address.kind !== "address") return { status: "waiting" };
       const removed = await run(address.server, REMOVE_WORKTREE_SCRIPT, [
@@ -224,7 +224,7 @@ export async function listServerWorktreeRefs(
   projectId: string,
   signal: AbortSignal,
 ): Promise<ReadonlyArray<CodeWorktreeRef> | undefined> {
-  const project = options.store.project(projectId);
+  const project = options.store.codeProject(projectId);
   if (project === undefined) return undefined;
   const address = options.store.addressOf(projectId);
   if (address.kind !== "address") return [];

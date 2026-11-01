@@ -39,7 +39,7 @@ function projectAt(folder: string): ServerProject {
 describe("a server thread's own worktree", () => {
   it("is found only under the checkout the Project and thread derive", () => {
     const project = projectAt("/srv/site");
-    const store = { project: (id: string) => (id === projectId ? project : undefined) };
+    const store = { codeProject: (id: string) => (id === projectId ? project : undefined) };
     const derived = serverCodeCheckout(project);
     const worktree = serverWorktreeCheckout(project, threadId, project.boundAt);
     const thread = {
@@ -94,7 +94,7 @@ describe.skipIf(!canRunThrowawaySshd)("a worktree on a server", () => {
 
   const options = (alias = () => sshd.alias) => ({
     store: {
-      project: (id: string) => (id === projectId ? project : undefined),
+      codeProject: (id: string) => (id === projectId ? project : undefined),
       addressOf: () => ({
         kind: "address" as const,
         server: { alias: alias(), user: sshd.user },
