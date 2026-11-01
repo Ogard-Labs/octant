@@ -599,7 +599,9 @@ level, before creating a new file in `downloads/` of the thread's workspace;
 programs and installers and a symbolic link are refused, and a paired device,
 a terminal grant, and Plan cannot save
 ([Browser for agents: Download](design/browser-agent-tool.md#download)). A
-person's own download in the Browser pane stays blocked.
+person's own download in the Browser pane stays blocked. An upload asks every
+time, at every access level, naming each file and the site, and the answer is
+never remembered.
 
 Tool definitions carry the agent's usage guidance alongside their argument
 schemas. App-owned tools are capability families: one tool per object —
@@ -1246,7 +1248,10 @@ except where a bullet says otherwise.
   whether a provider's terms allow background calls on a subscription sign-in
   is not settled, and the seam is where an answer would land. If the chosen
   account is off, not ready or at its limit, the thread waits for a later pass;
-  it is never distilled on another account.
+  it is never distilled on another account. Limits: at most 5 new entries per
+  ended thread, 200 entries kept (past that the oldest never-edited entry is
+  dropped), 20 sources per entry, 512 Projects kept out, and the distiller sees
+  at most the newest 12,000 characters of the person's messages.
 - **Where it goes.** Every new Chat, Work, and Code thread, on every provider,
   gets one `person-memory` context block through Octant's own context
   assembly, placed after Octant's instructions and before Project memory and
@@ -1269,7 +1274,7 @@ except where a bullet says otherwise.
 - **Controls (Settings › Memory).** One switch for all of it, on by default:
   off stops writing, the block, and the tool, and keeps what is stored until
   the person forgets it. A second switch for searching past threads. Per
-  Project, Keep out of memory: that Project's threads are not distilled,
+  Project, Keep a Project out: that Project's threads are not distilled,
   entries and digests whose every source is in it are not shown to other
   threads or found by search, and its own threads get no block and no tool.
   Per thread, Leave no trace (from the thread's menu, listed in Settings
@@ -1367,11 +1372,17 @@ at binding (Settings › Access › Servers); Code threads there, which run only
 on the Octant Harness, with file tools, commands, and Git on the server under
 the same levels, approvals, and journal as a local Project; thread
 terminals that are logins on the server; the Git tab, whose Git runs on
-the server; and a thread's own worktree, made with Git on the server, and its
+the server; the dock's Review tool; the Files panel, file editor, and Tests
+panel, which read, write, and run on the server; the Project terminal; one
+shared SSH connection per server; and a thread's own worktree, made with Git on the server, and its
 pull request, opened by repository and branch name. A Work Project may be
 bound there too, in the same catalog: its Work threads run on the Octant
 Harness with file tools and commands on the server under the same rules, opened from the
-Work sidebar and composer. Octant has no sandbox on the server,
+Work sidebar and composer. Not built: Work Files, research sources, the status
+file and due dates, and the Project terminal for a Work Project on a server;
+extra folders; saved Project actions; a Project-level guardrail level or
+reviewer. It is tested only against a throwaway local `sshd`, never a real
+server. Octant has no sandbox on the server,
 so below Full access a remembered approval does not cover a command there. An agent in a local Project still
 reaches a remote machine with `ssh` through its shell (above), and Octant on
 another computer is a hub-and-spoke member
@@ -5123,7 +5134,8 @@ server checks it before any side effect:
     recovery) refuses `thread-paused` in every mode, through the same harness
     admission every Chat, Work and Code turn asks before it starts.
 - The Code runtime's compaction session opens nothing for a `remote-root`
-  checkout, a folder on another machine that no build runs threads in any more.
+  checkout, a folder on a registered server; compaction of a server thread's
+  conversation is not built.
 - The summarizer is always the thread's own provider instance and model. The
   command carries no summarizer choice, and the domain's
   `cross-vendor-opt-in-required` refusal stays the guard on the host path.
@@ -8577,7 +8589,7 @@ mechanisms are:
   person's name still asks at every level.
   Built in Code for Mistral Vibe's auto-approve mode, the one ACP profile that
   declares its own reviewer. Every other ACP agent reports
-  `harnessAutoReview` `unsupported`, and Settings › Providers › Capabilities
+  `harnessAutoReview` `unsupported`, and Settings › Providers & Models › Capabilities
   says "Own reviewer: None. Octant Shield reviews at Auto." A profile gains a
   reviewer by declaring `ownReviewer` and the mode that answers its prompts;
   none is declared without that mode being confirmed on the agent.
@@ -8703,10 +8715,9 @@ mechanisms are:
   sandboxed no-prompt level and the separate switch into it). OpenCode, Pi
   and the Octant harness launch outside Octant's OS sandbox with the network
   open, and Octant answers every approval allow; an ACP agent also launches
-  unconfined, keeping only the static denials of host credential files and
-  unapproved MCP, skill and hook folders, because credentials reach providers
-  only through the credential broker and discovery never enables an
-  extension. No call asks at Full access in Code, irreversible actions and
+  unconfined with no sandbox denials, because Full access means what it means
+  in the provider's own app; Octant's own file tools still refuse protected
+  paths. No call asks at Full access in Code, irreversible actions and
   publish-to-target included (`resolveToolCall`): the agent pushes, merges or
   publishes because the person asked in the thread, and the journal records
   the call. Outside content is recorded only: the thread keeps its taint for
@@ -11979,7 +11990,7 @@ LSP / extension host / debugger companion are release-scope choices the
 maintainer schedules, not safety rules; none of them protects an invariant by
 itself. Remote SSH development environments are in scope (maintainer
 decision, 2026-10-31, replacing the 2026-10-29 out-of-scope rule): a Code
-Project bound to a folder on a registered server is built for Code
+or Work Project bound to a folder on a registered server is built
 ([Server Projects](design/server-projects.md)). An agent in a local Project
 reaches another machine with `ssh` through its shell with the person's own
 SSH agent and configuration ([Modes](#modes-chat-work-and-code)), and Octant

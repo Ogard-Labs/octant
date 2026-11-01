@@ -307,7 +307,7 @@ turned on a switch, and then only after they answer for that file.
   its operation, and its own refusal or failure) and lists the steps that ran
   before it with what each changed; no later step runs. A batch that succeeds
   answers as its last step does, with a line per step.
-- A batch cannot hold another batch, an upload, a `download-save`, `stop`, a flow
+- A batch cannot hold another batch, an upload, a `sign-in`, a `download-save`, `stop`, a flow
   operation, or a `navigate` with a profile: each of those needs a call, and for
   an upload, a download, or a signed-in page a question to the person, of its own. A malformed step refuses the whole batch
   before any step runs.

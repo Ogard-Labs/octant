@@ -571,7 +571,7 @@ One quiet line under it, at the detail step in muted ink, says
 "Pick a project, or just start typing". The start screen names no time of day
 and counts nothing: what is running and what waits for review live in the
 sidebar. Once a Code start screen has a Project chosen, its quick tools are
-the Project's own Terminal and Browser as plain rows in the right dock's body,
+the Project's own Terminal and Browser (a server Project's Terminal only) as plain rows in the right dock's body,
 above one muted line, "Other tools open once the task starts". They live only
 in the dock: a column beside the start screen squeezed the composer off centre
 and contradicted the dock, so with the dock closed the start screen stands

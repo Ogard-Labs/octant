@@ -1069,8 +1069,9 @@ activity and the previous session did not transfer. A Chat branch from a
 conversation held by such a provider works the same way: its first message
 starts a new session with the carried messages as text. If the conversation
 cannot be read for the handoff, the message is refused with the reason and
-nothing is sent. Retrying, resuming or editing a message never starts a handed
-over session; switching back, or sending a new message, does.
+nothing is sent. Retrying or resuming never starts a handed
+over session; switching back, sending a new message, or sending after a
+rewind does.
 
 A fork that switches provider also hands over the conversation it was forked
 from, up to the reply it was forked at, ahead of its own messages, within the

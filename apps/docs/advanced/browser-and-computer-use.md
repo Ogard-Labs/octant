@@ -106,7 +106,7 @@ work in the Octant app on this Mac, in a Project or Personal profile, and never
 in a Private page. They are off until you turn them on, and an extension can
 read and change the pages it runs on, including what the agent reads there.
 
-- **Install** from **Settings → Data & privacy → Browser extensions → Install
+- **Install** from **Settings → Data & storage → Browser extensions → Install
   extension…**, then choose an unpacked Manifest V3 extension folder. Octant
   copies the folder, so later edits to it change nothing; choose the folder again
   to update. There is no web store, and extensions that need native messaging

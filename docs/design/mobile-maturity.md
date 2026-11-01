@@ -882,8 +882,9 @@ the phone's limit with its real notifications ([M7](#maintainer-decisions)).
   ([architecture](../architecture.md#security-and-authority)).
 - Internal iOS TestFlight is authorized and its credential boundary stands
   ([runbook](../mobile-testflight.md)).
-- Phone approvals require the biometric or device-credential gate; remote merge
-  is refused (threat model trust boundary 3).
+- Phone approvals require the biometric or device-credential gate; a phone's
+  pull-request merge needs the reviewed-head confirmation and passing required
+  checks, and an owner unlock when the host's switch is on.
 - Voice uses the host's OpenAI-compatible Voice endpoint and persists no audio
   ([Providers](../architecture.md#providers)).
 - A hosted relay stays out unless reachability evidence opens it

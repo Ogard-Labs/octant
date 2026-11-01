@@ -27,8 +27,8 @@
 2. The phone is a remote principal; revoke removes only that device registration.
 3. High-risk mutations (approve, including Allow this session, and revoke) require
    biometric or device-credential confirmation on the phone in addition to host checks.
-   Pull-request merge is not a remote mutation: the host refuses it from every paired
-   device.
+   A paired device's pull-request merge needs the reviewed-head confirmation and
+   passing required checks, and an owner unlock when the host's switch is on.
 4. Lock-screen and recents/screenshot surfaces must never show secrets, absolute
    paths, or full prompts — hosts build redacted payloads via domain policy.
 5. Stale or unhealthy hosts present honest read-only state; the phone must not

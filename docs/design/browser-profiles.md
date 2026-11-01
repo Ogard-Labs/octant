@@ -87,7 +87,7 @@ and service workers in. There are three kinds:
 - On macOS, Chromium encrypts a persistent profile's cookies with a key it keeps
   in the login keychain. Octant adds no second encryption layer.
 - Profiles are declared in the host data map (the desktop app tells the host the
-  folder it keeps them in) and listed in Settings › Data & privacy under
+  folder it keeps them in) and listed in Settings › Data & storage under
   "Browser profiles", each with its size. The size is the space the profile's
   folder occupies; the host never reads a cookie to produce it. The Personal
   profile is always listed; a Project profile is listed once it has a store, by
@@ -133,7 +133,7 @@ opened for it; the host's session ceiling and tab limit apply.
 A person can bring the sign-ins they already have in another browser on this Mac
 into one Project or Personal profile, so they do not sign in again.
 
-- **Only on the person's pick.** Settings › Data & privacy › Browser profiles has
+- **Only on the person's pick.** Settings › Data & storage › Browser profiles has
   "Import cookies…" on each stored profile. The dialog lists the browsers
   installed on this Mac and each one's profiles by the names that browser shows;
   nothing is opened to produce the list. The person chooses a browser and one of
@@ -215,7 +215,7 @@ thread made.
   (`rememberedBrowserProfileSites`), journaled like today's remembered origins:
   it grows only through the approval answer, and a settings write may forget a
   pair but never add one. The pairs are listed in
-  Settings › Data & privacy › Remembered websites with the profile beside the
+  Settings › Permissions › Remembered websites with the profile beside the
   site. A remembered Private origin never covers a profile page, and a pair
   remembered for one Project's profile never covers another Project's profile or
   the Personal profile.
@@ -292,7 +292,7 @@ page they are allowed on, including what the agent reads.
 
 ### Importing from another browser
 
-Settings › Data & privacy › Browser extensions has "Import from another
+Settings › Data & storage › Browser extensions has "Import from another
 browser…" beside "Install extension…", in a local window only.
 
 - **Which browsers.** Chromium-family browsers (Chrome, Chromium, Brave, Edge,
@@ -402,7 +402,7 @@ work without it, and takes no extension-support package:
   button carries a count badge, and the site approval card says so ("2
   extensions are on in this profile and can read what the agent reads"),
   because they can read and change what the agent sees.
-- Settings has a Browser extensions list under Data & privacy, beside Browser
+- Settings has a Browser extensions list under Data & storage, beside Browser
   profiles: each extension with its version, where it is enabled, Enable per
   profile, and Remove.
 

@@ -557,7 +557,7 @@ table.
   a bounded read of that thread's own conversation with your credentials
   redacted. It reads the conversation the running turn uses: when Octant had
   to start a Chat or Work thread's conversation afresh (after a compaction, a
-  retry, edit, or regenerated reply, or a change of model or provider), the
+  retry, rewind, or regenerated reply, or a change of model or provider), the
   earlier one is not read
   back, and the new one already began from the thread's history. Every mode
   summarizes earlier turns of a continued conversation before it cuts them;

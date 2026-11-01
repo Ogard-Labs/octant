@@ -92,7 +92,7 @@ Choose one to start a thread there.
   the thread's access level. A save is refused when the file changed on the
   server after you opened it.
 - **Not available there yet:** connectors and plugins, Browser and Computer,
-  subagents, forks, checkpoints and rewind, and searching across the folder.
+  subagents, forks, checkpoints and restoring files, and searching across the folder.
   Ask the agent to do it on the server, or use a terminal.
 
 ## Work Projects on a server
@@ -108,8 +108,8 @@ servers**. Choose it to start a Work thread there.
   extensions, image generation, or file mentions, and starts without an issue
   or a terminal session. It stays in the Project's folder: it cannot be moved
   to another Project or folder.
-- **Not available there yet:** the Work Files panel, research sources, and the
-  Project's status file and due dates.
+- **Not available there yet:** the Work Files panel, research sources, the
+  Project's status file and due dates, and the Project terminal.
 
 ## Testing
 

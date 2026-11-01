@@ -110,7 +110,9 @@ shows the Project terminal and Project actions. Code Projects have no such row, 
 opaque card step even under Glass, and the header's text takes the start
 screen's page-colour glow: set straight on the ground, the overview's rows
 read through the ground's letters (October 2026).
-Work's sidebar lists Chat and Work Projects only. When it has none and Code
+Work's sidebar lists Chat and Work Projects only, with Work Projects bound to a
+folder on a registered server beside them under **On your servers**
+([Server Projects](server-projects.md)). When it has none and Code
 has at least one, the empty Projects line says the Projects are in Code and
 offers Switch to Code; a host with no Projects in any mode keeps "No Projects
 yet."
@@ -486,7 +488,8 @@ or a valid launchable tool. A new Code task's pane, before its thread exists, ke
 the dock: its title band shows the common tools disabled ("Available once the task
 starts") and its body says so, so the band does not vanish and return around the
 first message. Once that start screen has a Project, the dock's body holds the
-Project's quick tools (Terminal and Browser); they never stand as a column
+Project's quick tools (Terminal and Browser; a server Project's are its
+Terminal only); they never stand as a column
 beside the start screen ([DESIGN.md](../../DESIGN.md#welcome-and-composer)). An available empty dock opens on a stack of fact cards (Environment with
 the local window's Remote access switch, Local servers, Context, Changes,
 Outputs, Background tasks, Running now; see [DESIGN.md](../../DESIGN.md#shell-and-layout));
@@ -609,7 +612,7 @@ strip.** When threads of the Project have live agent pages, the Project browser
 dock shows a tab strip under its title: "Your page" for the person's own page,
 then one tab per thread's page in front. A tab names the page (its title, else
 its host) and the thread that owns it by thread title, with an "Agent active"
-mark while that thread's agent drives the page and for a few seconds after its
+mark while that thread's agent drives the page and for 15 seconds after its
 last action. Choosing a tab shows that thread's own picture of the page, the one
 its floating preview shows, with no address bar and nothing to click, and an
 Open thread control that opens the owning thread; choosing "Your page" returns
