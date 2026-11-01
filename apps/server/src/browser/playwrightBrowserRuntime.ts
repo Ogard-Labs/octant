@@ -1106,8 +1106,15 @@ async function waitForConditions(
   while (true) {
     throwIfAborted(signal);
     try {
-      const checked = await page.evaluate(readBrowserPage, { mode: "check", conditions });
-      if (checked.mode === "check") met = checked.met;
+      // One check never outlives the wait: a page stuck in its own script
+      // would otherwise hold the loop past its deadline.
+      const checked = await Promise.race([
+        page.evaluate(readBrowserPage, { mode: "check", conditions }),
+        new Promise<undefined>((resolve) =>
+          setTimeout(() => resolve(undefined), Math.max(0, deadline - Date.now())),
+        ),
+      ]);
+      if (checked?.mode === "check") met = checked.met;
     } catch {
       // A page between documents cannot be read; the next check will be.
     }

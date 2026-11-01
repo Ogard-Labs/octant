@@ -809,6 +809,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 owned.nextTabOrdinal += 1;
                 const opened = openTabView(contextId, owned, tabId);
                 showTab(owned, opened);
+                // The new tab's own load can raise a dialog too.
+                const releaseTabDialogs = await guardDialogs(opened.view, dialogs);
                 try {
                   await opened.view.webContents.loadURL(
                     request.target === undefined ? "about:blank" : normalizeUrl(request.target),
@@ -816,6 +818,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 } catch (error) {
                   if (owned.blockedNavigationUrl === undefined) throw error;
                   throw new BrowserNavigationBlockedError(owned.blockedNavigationUrl);
+                } finally {
+                  await releaseTabDialogs().catch(() => undefined);
                 }
                 refuseUnapprovedPage(owned, opened.view.webContents);
                 return agentTabs(owned);
@@ -920,7 +924,9 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           // with how the fixed policy answered it.
           return dialogs.length === 0 ? observed : { ...observed, dialogs: dialogs.slice(0, 8) };
         } finally {
-          await releaseDialogs();
+          // Released before the surface is handed back, whatever the action did;
+          // a page that went away with its tab has nothing left to detach.
+          await releaseDialogs().catch(() => undefined);
           owned.control = "idle";
           publish(contextId, owned);
         }
@@ -1850,9 +1856,9 @@ async function guardDialogs(
   reports: DialogReport[],
 ): Promise<() => Promise<void>> {
   const client = view.webContents.debugger;
-  if (view.webContents.getURL() === "" || client.isAttached() || client.on === undefined) {
-    return async () => undefined;
-  }
+  // A page that has not loaded yet is guarded too: its first load is when a
+  // dialog most often opens.
+  if (client.isAttached() || client.on === undefined) return async () => undefined;
   try {
     client.attach("1.3");
   } catch {
@@ -1876,7 +1882,12 @@ async function guardDialogs(
       .catch(() => undefined);
   };
   client.on("message", listener);
-  await client.sendCommand("Page.enable").catch(() => undefined);
+  // Bounded: a view with no document yet may answer late, and the guard must
+  // never hold the action it exists to keep moving.
+  await Promise.race([
+    client.sendCommand("Page.enable").catch(() => undefined),
+    new Promise((resolve) => setTimeout(resolve, 1_000)),
+  ]);
   return async () => {
     client.removeListener?.("message", listener);
     agentDebuggers.delete(client);
@@ -1900,8 +1911,15 @@ async function waitForConditions(
   while (true) {
     throwIfAborted(signal);
     try {
-      const checked = await readPage(view, { mode: "check", conditions });
-      if (checked.mode === "check") met = checked.met;
+      // One check never outlives the wait: a page stuck in its own script
+      // would otherwise hold the loop past its deadline.
+      const checked = await Promise.race([
+        readPage(view, { mode: "check", conditions }),
+        new Promise<undefined>((resolve) =>
+          setTimeout(() => resolve(undefined), Math.max(0, deadline - Date.now())),
+        ),
+      ]);
+      if (checked?.mode === "check") met = checked.met;
     } catch {
       // A page between documents cannot be read; the next check will be.
     }
@@ -1949,7 +1967,7 @@ async function withDebugger(
 }
 
 async function waitForPageSettled(view: BrowserSurfaceViewPort): Promise<void> {
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + BROWSER_SETTLE_CAP_MS;
   while (view.webContents.isLoading() && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 25));
   }

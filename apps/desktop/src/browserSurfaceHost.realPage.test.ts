@@ -41,6 +41,7 @@ const pages: Record<string, string> = {
     <div id="done" style="width:60px;height:30px;margin-top:40px" onpointerup="if (window.dragging) document.title = 'Dropped card'">Done</div>
     <form onsubmit="event.preventDefault(); document.title = 'Submitted'"><input id="keys" aria-label="Keys" onkeydown="if (event.ctrlKey) document.title = 'Chord ' + event.key"></form>
     <input id="file" type="file" onchange="document.title = 'Attached ' + this.files[0].name + ' ' + this.files[0].size">`,
+  "/greets": `<!doctype html><title>Greeting</title><script>alert("Welcome"); document.title = "Greeted";</script>`,
   "/slow": `<!doctype html><title>Slow</title>
     <button id="go" onclick="setTimeout(() => { const p = document.createElement('p'); p.textContent = 'Saved at last'; document.body.append(p); document.getElementById('go').disabled = true; }, 400)">Go</button>
     <button id="later" onclick="setTimeout(() => { document.title = 'Settled'; }, 150)">Later</button>
@@ -198,8 +199,8 @@ async function surface(path: string, views = 1) {
       sessionTimeoutMs: 300_000,
     },
   });
-  await host.act(contextId, { kind: "navigate", target: `${origin}${path}` });
-  return { host, contextId, page };
+  const opened = await host.act(contextId, { kind: "navigate", target: `${origin}${path}` });
+  return { host, contextId, page, opened };
 }
 
 function entry(
@@ -391,6 +392,16 @@ describe.skipIf(chrome === undefined)(
       expect(narrow.extractedText).toContain("Width 390");
       const restored = await host.act(contextId, { kind: "resize", include: ["text"] });
       expect(restored.extractedText).toContain("Width 1280");
+      await page.close();
+    });
+
+    it("answers a dialog the very first page raises as it loads, and one a new tab raises", async () => {
+      const { host, contextId, page, opened } = await surface("/greets", 3);
+      expect(opened.dialogs).toEqual([{ type: "alert", message: "Welcome", answer: "accepted" }]);
+      expect(opened.title).toBe("Greeted");
+      const tabs = await host.act(contextId, { kind: "tab-open", target: `${origin}/greets` });
+      expect(tabs.dialogs).toEqual([{ type: "alert", message: "Welcome", answer: "accepted" }]);
+      expect(tabs.tabs?.[1]).toMatchObject({ title: "Greeted", active: true });
       await page.close();
     });
   },
