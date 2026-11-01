@@ -285,6 +285,31 @@ describe("provider tooling service", () => {
     expect(broker?.deleted).toEqual([plan.planId]);
   });
 
+  it("deletes the held secret when the person cancels, and refuses to cancel another window's plan", async () => {
+    const { service, broker } = make();
+    const plan = await planned(service, CLAUDE_ID, {
+      kind: "mcp-add-url",
+      name: "hosted",
+      url: "https://example.com/mcp",
+      oauthClientId: "client-1",
+      oauthClientSecret: SECRET,
+    });
+    expect(broker?.held.size).toBe(1);
+    const other = await service.cancel(
+      { kind: "local-window", windowId: "other" as never },
+      plan.planId,
+    );
+    expect(other).toMatchObject({ status: "refused", reason: "unknown-plan" });
+    expect(broker?.held.size).toBe(1);
+    expect(await service.cancel(LOCAL, plan.planId)).toEqual({ status: "cancelled" });
+    expect(broker?.held.size).toBe(0);
+    const later = await service.apply(LOCAL, { planId: plan.planId, digest: plan.digest });
+    expect(later).toMatchObject({ status: "refused", reason: "unknown-plan" });
+    expect(
+      await service.cancel({ kind: "remote-device", windowId: "r" as never }, plan.planId),
+    ).toMatchObject({ reason: "not-a-local-window" });
+  });
+
   it("refuses a secret Codex would put on its command line, and refuses a secret when the host has no broker", async () => {
     const { service } = make();
     expect(

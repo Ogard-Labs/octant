@@ -181,6 +181,17 @@ export const ProviderToolingApplyRequest = Schema.Struct({
 }).annotations(strict);
 export type ProviderToolingApplyRequest = typeof ProviderToolingApplyRequest.Type;
 
+export const ProviderToolingCancelRequest = Schema.Struct({
+  planId: Schema.UUID,
+}).annotations(strict);
+export type ProviderToolingCancelRequest = typeof ProviderToolingCancelRequest.Type;
+
+export const ProviderToolingCancelResult = Schema.Union(
+  Schema.Struct({ status: Schema.Literal("cancelled") }).annotations(strict),
+  ProviderToolingRefusal,
+);
+export type ProviderToolingCancelResult = typeof ProviderToolingCancelResult.Type;
+
 export const ProviderToolingSucceeded = Schema.Struct({
   status: Schema.Literal("applied"),
   /** The provider's own output, capped and scrubbed of any secret. */
@@ -236,6 +247,9 @@ export const decodeProviderToolingPlanRequest = Schema.decodeUnknownSync(
 );
 export const decodeProviderToolingApplyRequest = Schema.decodeUnknownSync(
   ProviderToolingApplyRequest,
+);
+export const decodeProviderToolingCancelRequest = Schema.decodeUnknownSync(
+  ProviderToolingCancelRequest,
 );
 export const decodeProviderToolingRequest = Schema.decodeUnknownSync(ProviderToolingRequest);
 export const decodeProviderToolingAppliedRecord = Schema.decodeUnknownSync(

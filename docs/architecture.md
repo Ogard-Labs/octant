@@ -8164,12 +8164,18 @@ provider keys), no input, a 45 second limit for a list and 120 seconds for a
 change, and 64 KiB of output, scrubbed of the secret before it is returned or
 logged. **Secrets**: neither program takes a secret on its command line safely
 (`-e`, `--env`, `-H`, `--oauth-client-secret` are arguments other programs can
-read), so Octant passes none that way. The one exception is Claude Code's
+read), so Octant passes no secret that way. A plain environment setting or
+address is checked on a best-effort basis: a name that says secret, token,
+password, credential, key or authorization, a value or query parameter that
+looks like a key, or an address with a user name is refused, but a value that
+carries no such sign cannot be told from an ordinary one. The one exception is Claude Code's
 OAuth client secret, which its `--client-secret` option reads from the
 `MCP_CLIENT_SECRET` environment variable: the value is held in the credential
 broker's namespace for MCP servers under the plan id until the person runs the
 command, given to the child through that variable only, and removed after the
-run or when the plan expires. For Codex only the name of the variable it reads
+run, when the person cancels, or when the plan expires (a timer deletes it even
+if the window is gone; a host that stops in that window leaves the entry until
+the plan id is deleted, because the broker does not list its namespace). For Codex only the name of the variable it reads
 a bearer token from is accepted, never the token; a plain setting that looks
 like a key is refused. **Journal**: `provider.tooling-applied@1`, its own
 single-event aggregate, names the provider, the account, the command kind, the
@@ -8177,7 +8183,8 @@ name the person gave, whether it succeeded, and whether a secret was used;
 it carries no address, argument, value, or secret. **What stays forbidden**:
 hand-editing a provider's config files, running a command the person was not
 shown, doing this from a paired device, doing it from an agent, passing a
-secret on a command line, accepting a marketplace's own install command for
+secret on a command line, showing a command whose text can differ from what runs (control,
+format and line-separator characters are refused in every value), accepting a marketplace's own install command for
 the person (the program's `--yes` is never passed), and any command the
 installed version lacks (the section says so and offers nothing). A tool added
 this way lives in the provider's own folder, so it reaches an Octant thread only

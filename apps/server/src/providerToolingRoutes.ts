@@ -1,5 +1,6 @@
 import {
   decodeProviderToolingApplyRequest,
+  decodeProviderToolingCancelRequest,
   decodeProviderToolingListRequest,
   decodeProviderToolingPlanRequest,
 } from "@octant/contracts";
@@ -12,12 +13,13 @@ const PATHS = new Set([
   "/api/provider-tooling/list",
   "/api/provider-tooling/plan",
   "/api/provider-tooling/apply",
+  "/api/provider-tooling/cancel",
 ]);
 const MAXIMUM_BODY_BYTES = 64 * 1024;
 const HEADERS = "content-type, x-octant-window-capability";
 
 export interface ProviderToolingRouteDependencies {
-  readonly service: Pick<ProviderToolingService, "list" | "plan" | "apply">;
+  readonly service: Pick<ProviderToolingService, "list" | "plan" | "apply" | "cancel">;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
 }
@@ -82,7 +84,9 @@ export function createProviderToolingRouteHandler(deps: ProviderToolingRouteDepe
             )
           : url.pathname === "/api/provider-tooling/plan"
             ? await planOf(deps, caller, body)
-            : await deps.service.apply(caller, decodeProviderToolingApplyRequest(body));
+            : url.pathname === "/api/provider-tooling/cancel"
+              ? await deps.service.cancel(caller, decodeProviderToolingCancelRequest(body).planId)
+              : await deps.service.apply(caller, decodeProviderToolingApplyRequest(body));
       const unauthorized = result.status === "refused" && result.reason === "not-a-local-window";
       return json(result, unauthorized ? 401 : 200, origin);
     } catch {

@@ -35,7 +35,7 @@ export interface ProviderToolingAccount {
 }
 
 export interface ProviderToolingPanelProps {
-  readonly client: Pick<ProviderToolingClient, "list" | "plan" | "apply">;
+  readonly client: Pick<ProviderToolingClient, "list" | "plan" | "apply" | "cancel">;
   /** The Claude Code and Codex accounts on this host. */
   readonly accounts: ReadonlyArray<ProviderToolingAccount>;
   /** Whether this is the Octant window on the host; a paired device can only read this page. */
@@ -274,7 +274,11 @@ export function ProviderToolingPanel(props: ProviderToolingPanelProps) {
       >
         {step.kind === "confirm" || step.kind === "running" ? (
           <ConfirmCommand
-            onCancel={() => setStep({ kind: "idle" })}
+            onCancel={() => {
+              // Drops the plan on the host too, which deletes any secret held for it.
+              void props.client.cancel(step.plan.planId).catch(() => undefined);
+              setStep({ kind: "idle" });
+            }}
             onRun={() => void run(step.plan)}
             plan={step.plan}
             running={step.kind === "running"}

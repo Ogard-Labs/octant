@@ -416,8 +416,8 @@ Some rules to know:
   client secret for a hosted server; Octant keeps it in the credential store until you
   run the command and hands it over through the environment, and the command you
   review shows `<secret>`. For Codex you can name the environment variable it
-  reads a bearer token from, but not the token. A setting that looks like a key
-  is refused. For a hosted service that needs a key, use a Connector.
+  reads a bearer token from, but not the token. Octant refuses a setting or address that
+  looks like a key, as far as it can tell. For a hosted service that needs a key, use a Connector.
 - **Only from the Octant window on this computer.** A paired device cannot use
   this, and neither can an agent.
 - **Nothing is invented.** If your copy of Claude Code or Codex has no command for

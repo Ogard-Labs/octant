@@ -6,6 +6,7 @@ import type {
   ProviderToolingAppliedRecord,
   ProviderToolingApplyRequest,
   ProviderToolingApplyResult,
+  ProviderToolingCancelResult,
   ProviderToolingListResult,
   ProviderToolingPlanResult,
   ProviderToolingRefusal,
@@ -191,6 +192,15 @@ export class ProviderToolingService {
       hasSecret: command.secret !== undefined,
       used: false,
     });
+    if (command.secret !== undefined) {
+      // The broker keeps a secret across a restart, so a plan nobody confirms
+      // or cancels must not outlive its lifetime holding one.
+      const expiry = setTimeout(() => {
+        const waiting = this.#plans.get(planId);
+        if (waiting !== undefined && !waiting.used) void this.#discard(waiting);
+      }, PLAN_LIFETIME_MS + 1000);
+      expiry.unref();
+    }
     return {
       status: "planned",
       planId,
@@ -204,6 +214,26 @@ export class ProviderToolingService {
       usesSecret: command.secret !== undefined,
       runsAsItself: account.runsAsItself,
     };
+  }
+
+  /**
+   * Drops a change that was shown and not run. A secret held for it is deleted
+   * now, because the broker's store survives a restart and nothing else would
+   * remove it after the person walked away.
+   */
+  async cancel(
+    caller: ProviderToolingCaller,
+    planId: string,
+  ): Promise<ProviderToolingCancelResult> {
+    const denied = this.#requireLocalWindow(caller);
+    if (denied !== undefined) return denied;
+    const plan = this.#plans.get(planId);
+    if (plan === undefined || plan.windowId !== caller.windowId) {
+      return refusal("unknown-plan", "That change is no longer waiting.");
+    }
+    if (plan.used) return refusal("used-plan", "That change was already run.");
+    await this.#discard(plan);
+    return { status: "cancelled" };
   }
 
   async apply(
@@ -322,7 +352,8 @@ export class ProviderToolingService {
       try {
         await this.#options.secrets?.delete(plan.planId);
       } catch {
-        // A secret that cannot be removed now is removed when the broker next restarts.
+        // A secret that cannot be removed stays in the broker until its plan id is
+        // deleted; nothing lists the namespace, so a restart does not clear it.
       }
     }
   }

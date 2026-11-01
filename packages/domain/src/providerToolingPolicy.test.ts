@@ -243,4 +243,50 @@ describe("provider tooling commands", () => {
       "CLAUDE_CONFIG_DIR='/Users/me/My Account' MCP_CLIENT_SECRET=<secret> claude mcp add -- 'a b' 'it'\\''s'",
     );
   });
+
+  it("refuses text that could reorder or hide what the confirmation shows", () => {
+    for (const hidden of ["pkg\u202E", "a\u200Bb", "a\u0085b", "a\u2028b"]) {
+      const result = build("claude", {
+        kind: "mcp-add-stdio",
+        name: "files",
+        command: "npx",
+        args: ["-y", hidden],
+        env: [],
+      });
+      expect(result.status).toBe("refused");
+    }
+    expect(
+      build("claude", { kind: "mcp-add-url", name: "hosted", url: " https://x.example/mcp" })
+        .status,
+    ).toBe("refused");
+  });
+
+  it("refuses an environment setting named like a key and an address that carries one in its query", () => {
+    for (const name of ["DB_PASSWORD", "API_TOKEN", "SECRET", "CLIENT_SECRET", "MY_API_KEY"]) {
+      const result = build("claude", {
+        kind: "mcp-add-stdio",
+        name: "files",
+        command: "npx",
+        args: [],
+        env: [{ name, value: "x1" }],
+      });
+      expect(result.status).toBe("refused");
+    }
+    expect(
+      build("claude", {
+        kind: "mcp-add-url",
+        name: "hosted",
+        url: "https://x.example/mcp?api_key=abcdefgh1234",
+      }).status,
+    ).toBe("refused");
+    expect(
+      build("claude", {
+        kind: "mcp-add-stdio",
+        name: "files",
+        command: "npx",
+        args: [],
+        env: [{ name: "LOG_LEVEL", value: "debug" }],
+      }).status,
+    ).toBe("ok");
+  });
 });

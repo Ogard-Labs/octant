@@ -1,5 +1,6 @@
 import {
   ProviderToolingApplyResult,
+  ProviderToolingCancelResult,
   ProviderToolingListResult,
   ProviderToolingPlanResult,
   decodeHostAnswer,
@@ -38,6 +39,8 @@ export interface ProviderToolingClient {
     request: ProviderToolingRequest,
   ): Promise<ProviderToolingPlanResult>;
   apply(request: ProviderToolingApplyRequest): Promise<ProviderToolingApplyResult>;
+  /** Drops a change that was shown and not run, and deletes any secret held for it. */
+  cancel(planId: string): Promise<ProviderToolingCancelResult>;
 }
 
 export function createProviderToolingClient(
@@ -84,12 +87,14 @@ export function createProviderToolingClient(
   const decodeList = decodeHostAnswer(ProviderToolingListResult);
   const decodePlan = decodeHostAnswer(ProviderToolingPlanResult);
   const decodeApply = decodeHostAnswer(ProviderToolingApplyResult);
+  const decodeCancel = decodeHostAnswer(ProviderToolingCancelResult);
   return {
     list: (providerInstanceId) =>
       send("/api/provider-tooling/list", { providerInstanceId }, decodeList),
     plan: (providerInstanceId, request) =>
       send("/api/provider-tooling/plan", { providerInstanceId, request }, decodePlan),
     apply: (request) => send("/api/provider-tooling/apply", request, decodeApply),
+    cancel: (planId) => send("/api/provider-tooling/cancel", { planId }, decodeCancel),
   };
 }
 

@@ -87,16 +87,22 @@ function setup(
     async (_request: unknown) =>
       options.apply ?? ({ status: "applied", output: "Added files" } as const),
   );
+  const cancel = vi.fn(async () => ({ status: "cancelled" }));
   const onOpenRunAsItself = vi.fn();
   render(
     <ProviderToolingPanel
       accounts={options.accounts ?? [CLAUDE]}
-      client={{ list: list as never, plan: plan as never, apply: apply as never }}
+      client={{
+        list: list as never,
+        plan: plan as never,
+        apply: apply as never,
+        cancel: cancel as never,
+      }}
       localHost={options.localHost ?? true}
       onOpenRunAsItself={onOpenRunAsItself}
     />,
   );
-  return { list, plan, apply, onOpenRunAsItself, user: userEvent.setup() };
+  return { list, plan, apply, cancel, onOpenRunAsItself, user: userEvent.setup() };
 }
 
 describe("ProviderToolingPanel", () => {
@@ -185,7 +191,7 @@ describe("ProviderToolingPanel", () => {
   });
 
   it("plans a removal and runs nothing when the person cancels", async () => {
-    const { user, plan, apply } = setup({
+    const { user, plan, apply, cancel } = setup({
       list: listing([
         section("mcp-servers", { entries: [{ name: "files" }] }),
         section("plugins"),
@@ -198,6 +204,7 @@ describe("ProviderToolingPanel", () => {
     expect((await screen.findByLabelText("The command")).textContent).toContain("mcp remove");
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(apply).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledTimes(1);
     expect(screen.queryByLabelText("The command")).toBeNull();
   });
 

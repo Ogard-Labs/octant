@@ -80,13 +80,19 @@ function refuse(
   };
 }
 
+/**
+ * Control, format and line-separator characters: besides breaking a line they
+ * can reorder or hide what the confirmation shows (a right-to-left override, a
+ * zero-width character) while the unchanged bytes are what runs.
+ */
+const INVISIBLE_CHARACTER = /[\p{Cc}\p{Cf}\u2028\u2029]/u;
+
 function hasControlCharacter(value: string): boolean {
-  for (const character of value) {
-    const code = character.codePointAt(0) ?? 0;
-    if (code < 0x20 || code === 0x7f) return true;
-  }
-  return false;
+  return INVISIBLE_CHARACTER.test(value);
 }
+
+/** A name that carries a key, so its value belongs in the credential broker. */
+const SECRET_NAME = /(secret|token|passw|credential|api[-_]?key|private[-_]?key|authori[sz]ation)/i;
 
 /** Returns a message when the value cannot be one plain argument, else undefined. */
 function plainValueProblem(
@@ -121,6 +127,12 @@ function webAddressProblem(value: string, label: string): string | undefined {
   if (parsed.hostname === "") return `${label} has no host.`;
   if (parsed.username !== "" || parsed.password !== "") {
     return `${label} must not carry a user name or password.`;
+  }
+  if (value !== value.trim()) return `${label} has a space around it.`;
+  for (const name of parsed.searchParams.keys()) {
+    if (SECRET_NAME.test(name)) {
+      return `${label} carries ${name.slice(0, 40)} in its query, which looks like a key. Octant does not put keys on a command line.`;
+    }
   }
   return undefined;
 }
@@ -325,7 +337,11 @@ function addStdioServer(
     if (entry.value.length > 1024 || hasControlCharacter(entry.value)) {
       return refuse("invalid-value", `The value of ${entry.name} is not plain text.`, "env");
     }
-    if (looksSecret(entry.value) || looksSecret(`${entry.name}=${entry.value}`)) {
+    if (
+      SECRET_NAME.test(entry.name) ||
+      looksSecret(entry.value) ||
+      looksSecret(`${entry.name}=${entry.value}`)
+    ) {
       return refuse(
         "secret-unsupported",
         `${entry.name} looks like a key. ${product} takes environment values only on its command line, where other programs on this computer can read them, so Octant does not add a key this way.`,
