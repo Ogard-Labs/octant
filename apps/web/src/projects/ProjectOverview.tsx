@@ -527,7 +527,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 />
               </ProjectOverviewInspector>
             ) : null}
-            {props.project.type === "code" && props.onPermissionModeChange !== undefined ? (
+            {props.project.type !== "chat" && props.onPermissionModeChange !== undefined ? (
               <ProjectOverviewInspector
                 key={`${String(props.project.id)}-mode`}
                 label="Default mode"

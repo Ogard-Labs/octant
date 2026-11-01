@@ -142,12 +142,14 @@ One setting says how much a thread's tool calls are guarded, with four levels: A
 - Auto (Reviewed): a reviewer the person chooses, the provider's own or Octant Shield, answers prompts and escalates to the person what it will not allow.
 - Full access means no sandbox and no prompts, as in the providers' own apps, with protected files guarded by Octant's own tools and redaction only, so a shell command can read them; outside content is only recorded and marked, and every hard line still holds.
 - Any level can be set globally, per Project and per thread; the narrowest scope wins, and Full access shows a one-time warning the first time a machine or Project picks it.
-- Lowering is journaled with who, when, from which level and at which scope; the thread header shows the level in force and where it came from (not built yet).
+- Lowering is journaled with who, when, from which level and at which scope; the thread header shows the level in force and where it came from.
 - Plan is an overlay on any level and always read-only; subagents start at their parent's level and never exceed it; a routine runs at the level its creator picked.
 - A retired level recorded before these four existed replays as Full access.
 - Built in Code: Ask first, Accept edits, Auto with the key CLI providers' own reviewers, Plan, and Full access with no sandbox and no prompts for every runtime, with a first-run default, a Settings › Code › Access default, a Project override, and the one-time warning.
 - Built in Work: Auto, Ask first, Accept edits and Full access, set from Settings › Work and the composer, with the one-time warning; Work has no Plan.
-- Not built yet: a Work Project override, an ACP agent's own reviewer, and the thread header indicator.
+- Built in both: a Work Project and a Code Project can override the mode new threads start in; the first-run answer sets the default for new Work threads as well as Code; the thread header shows the level in force and the scope it came from; every level lowered at the global, Project or thread scope is journaled with who, when, from which level (absent when a Project override replaced the default it followed) and which scope.
+- Computer and Browser keep their ask at the first action in each app at every level, Full access included, by a separate maintainer decision.
+- Not built yet: an ACP agent's own reviewer.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Security and authority, Guardrail levels](../architecture.md#security-and-authority).
 
@@ -176,7 +178,7 @@ The first run asks once which mode new threads start in, with Auto pre-selected 
 - Where no reviewer can run for a thread, that thread falls back to Ask first and the picker says why.
 - The answer is the default for new Work and Code threads; Settings › Access changes it, a Project may override it, and the composer switches a thread's mode in one click.
 - Built for Code: the answer is stored as the Code default, Settings › Code › Access changes it, and a Code Project may override it; a Project that remembered Full access before Project modes existed starts its threads in Full access.
-- Work takes the same modes without Plan from Settings › Work, and its composer switches a thread's mode; the first-run answer does not yet set the Work default, and a Work Project has no override (not built yet).
+- Work takes the same modes without Plan; a new Work thread starts in its Project's mode, else the default the first-run answer or Settings › Work set, and its composer switches a thread's mode.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Security and authority, Guardrail levels](../architecture.md#security-and-authority).
 
@@ -575,7 +577,7 @@ Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](.
 Work never silently becomes Code. A promotion proposal is an offer, and only explicit user approval creates the linked Code thread.
 
 - A promotion moves focus and tooling, not authority; the new thread takes the level of its own Project, never one carried over from Work.
-- Moving work from Code to Work is the same kind of person's choice (not built yet).
+- A thread never moves from Code to Work (maintainer decision, 2026-11-01): Code can do everything Work can, so a person forks the thread or starts a new one.
 - A Work Project may opt into a `STATUS.md` in its folder, off by default and refused for the default-folder Project.
 - Octant never writes an agent brief into a user folder, and a Work turn does not read an existing one.
 
@@ -1441,10 +1443,9 @@ Publishing a Work or Code file to the provider's hosted service is a person-auth
 
 - The account must enable the choice from a window on this host, and each thread then chooses hosted artifacts instead of Canvas for itself; Canvas stays the default.
 - Only such a thread's session outside Plan launches with the tool and with usage telemetry on; every other guard stays on and a host opt-out keeps all of them.
-- Every publish asks, at every posture including Full access, and an approved publish passes the gate again before the runtime continues; an answer is never reused for a later publish.
+- Every publish asks below Full access, and an approved publish passes the gate again before the runtime continues; an answer is never reused for a later publish. At Full access nothing asks, publishing included; the path checks still refuse a file outside the Project.
 - The file must be inside the bound Project and outside the login keychain folder; the host keeps the page link, title and a bounded snapshot of what the person approved.
 - Plan never offers the tool, Chat never publishes, agent-run child sessions are never offered it, and paired devices cannot choose it.
-- Today Full access asks too; the rule that nothing asks there, publishing included, is not built yet.
 
 Status: Built. Since: 2026-10-27. Detail: [Architecture: Security and authority, Hosted artifact publishing](../architecture.md#security-and-authority).
 

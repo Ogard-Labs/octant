@@ -347,12 +347,29 @@ export const WorkProjectDeveloperTools = Schema.Struct({
 }).annotations(strict);
 export type WorkProjectDeveloperTools = typeof WorkProjectDeveloperTools.Type;
 
+/**
+ * The modes a Work Project can start new threads in. Work shares Code's
+ * levels and has no Plan overlay.
+ */
+export const WorkProjectPermissionMode = Schema.Literal(
+  "auto",
+  "ask-first",
+  "accept-edits",
+  "full-access",
+);
+export type WorkProjectPermissionMode = typeof WorkProjectPermissionMode.Type;
+
 export const WorkProject = Schema.Struct({
   ...ProjectFields,
   type: Schema.Literal("work"),
   ...BoundProjectFields,
   statusFile: Schema.optional(WorkProjectStatusFile),
   developerTools: Schema.optional(WorkProjectDeveloperTools),
+  /**
+   * The mode this Project's new Work threads start in, overriding Work's
+   * default in Settings. Absent follows Settings.
+   */
+  defaultPermissionMode: Schema.optional(WorkProjectPermissionMode),
   /** Named commands for the Project terminal. Absent means none were defined. */
   actions: Schema.optional(ProjectActions),
 }).annotations(strict);
@@ -412,6 +429,7 @@ const WorkProjectSummary = Schema.Struct({
   extraFolders: Schema.optional(ProjectExtraFolders),
   statusFile: Schema.optional(WorkProjectStatusFile),
   developerTools: Schema.optional(WorkProjectDeveloperTools),
+  defaultPermissionMode: Schema.optional(WorkProjectPermissionMode),
   actions: Schema.optional(ProjectActions),
 }).annotations(strict);
 
@@ -692,6 +710,12 @@ export const ProjectCommand = Schema.Union(
     enabled: Schema.Boolean,
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("change-work-project-permission-mode"),
+    ...ProjectCommandFields,
+    /** Absent returns the Project to Work's default in Settings. */
+    permissionMode: Schema.optional(WorkProjectPermissionMode),
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("change-work-project-actions"),
     ...ProjectCommandFields,
     /** The whole list; an empty list removes every action. */
@@ -788,6 +812,10 @@ export const ProjectCommandResult = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("work-project-developer-tools-changed"),
+    project: WorkProject,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("work-project-permission-mode-changed"),
     project: WorkProject,
   }).annotations(strict),
   Schema.Struct({
@@ -971,6 +999,11 @@ export const WorkProjectDeveloperToolsChanged = Schema.Struct({
   project: WorkProject,
 }).annotations(strict);
 export type WorkProjectDeveloperToolsChanged = typeof WorkProjectDeveloperToolsChanged.Type;
+/** The Project's own Work mode changed; the payload is the whole Project. */
+export const WorkProjectPermissionModeChanged = Schema.Struct({
+  project: WorkProject,
+}).annotations(strict);
+export type WorkProjectPermissionModeChanged = typeof WorkProjectPermissionModeChanged.Type;
 export const WorkProjectActionsChanged = Schema.Struct({ project: WorkProject }).annotations(
   strict,
 );
@@ -1015,6 +1048,7 @@ export const PROJECT_EVENT_NAMES = [
   "project.native-providers-changed@1",
   "project.work-status-file-changed@1",
   "project.work-developer-tools-changed@1",
+  "project.work-permission-mode-changed@1",
   "project.work-actions-changed@1",
   "project.brand-kit-changed@1",
   "project.code-desktop-recipe-changed@1",
@@ -1085,6 +1119,9 @@ export const decodeWorkProjectStatusFileChanged = Schema.decodeUnknownSync(
 );
 export const decodeWorkProjectDeveloperToolsChanged = Schema.decodeUnknownSync(
   WorkProjectDeveloperToolsChanged,
+);
+export const decodeWorkProjectPermissionModeChanged = Schema.decodeUnknownSync(
+  WorkProjectPermissionModeChanged,
 );
 export const decodeWorkProjectActionsChanged = Schema.decodeUnknownSync(WorkProjectActionsChanged);
 export const decodeProjectBrandKitChanged = Schema.decodeUnknownSync(ProjectBrandKitChanged);
