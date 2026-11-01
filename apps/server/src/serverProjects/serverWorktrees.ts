@@ -136,6 +136,9 @@ export function withServerWorktreeCreation(
       const place = placeOf(input);
       if (place === undefined) return local.prepare(input, signal);
       if (place.server === undefined) return { status: "refused", reason: "server-not-registered" };
+      // Even the source fetch writes refs on the server, so a Plan thread's
+      // creation is refused before anything runs there.
+      if (input.executionPolicy === "plan") return { status: "refused", reason: "plan-on-server" };
       const derived = serverCodeCheckout(place.project);
       if (String(derived.bindingRevisionId) !== String(input.bindingRevisionId)) {
         return { status: "refused", reason: "repository-mismatch" };

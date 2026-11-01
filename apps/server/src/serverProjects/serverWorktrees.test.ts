@@ -166,6 +166,21 @@ describe.skipIf(!canRunThrowawaySshd)("a worktree on a server", () => {
     expect(existsSync(serverWorktreeFolder(project, threadId))).toBe(false);
   }, 30_000);
 
+  it("runs nothing on the server for a Plan thread, not even the source fetch", async () => {
+    const run = vi.fn();
+    const creation = withServerWorktreeCreation(
+      { ...options(), connection: { run } as unknown as ServerConnection },
+      local,
+    );
+    expect(
+      await creation.prepare(
+        { ...input("octant/fix-3"), startFromOrigin: true, executionPolicy: "plan" },
+        signal,
+      ),
+    ).toEqual({ status: "refused", reason: "plan-on-server" });
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it("makes nothing anywhere when the server cannot be reached", async () => {
     const creation = withServerWorktreeCreation(
       options(() => sshd.closedAlias),

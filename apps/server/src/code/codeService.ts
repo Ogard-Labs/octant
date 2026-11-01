@@ -479,6 +479,11 @@ export interface ManagedCodeThreadCreationInput {
    * no command carries it.
    */
   readonly sourceFiles?: CodeForkFiles;
+  /**
+   * The new thread's level, so a creation that would change a server refuses
+   * a Plan thread before anything runs there.
+   */
+  readonly executionPolicy?: ProviderExecutionPolicy;
 }
 
 /** The files a fork starts from, as Git trees the source's checkpoints already hold. */
@@ -1324,6 +1329,7 @@ export class CodeService {
             ? {}
             : { sourceRevision: command.sourceRevision }),
           ...(sourceFiles === undefined ? {} : { sourceFiles }),
+          executionPolicy: managedAuthority.executionPolicy,
         };
         const creationSignal = signal ?? new AbortController().signal;
         // Prepare resolves the exact source without mutating the user's checkout.
