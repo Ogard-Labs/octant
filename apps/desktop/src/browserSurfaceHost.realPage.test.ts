@@ -192,131 +192,138 @@ function entry(
   };
 }
 
-describe.skipIf(chrome === undefined)("the desktop Browser on a real page", () => {
-  it("reads a snapshot with refs and names a password field without its value", async () => {
-    const { host, contextId, page } = await surface("/login");
-    const observed = await host.act(contextId, { kind: "snapshot" });
-    expect(observed.snapshot).toMatch(/- textbox "Password" \[ref=e\d+\] protected$/m);
-    expect(observed.snapshot).not.toContain("hunter2");
-    expect(observed.snapshot).not.toContain("ada@example.com");
-    expect(observed.screenshotDataUrl).toBeUndefined();
-    expect(entry(observed.snapshotRefs, "Continue").role).toBe("button");
-    await page.close();
-  });
+// A real browser on a shared CI runner can take longer than the 5 s default.
+describe.skipIf(chrome === undefined)(
+  "the desktop Browser on a real page",
+  { timeout: 30_000 },
+  () => {
+    it("reads a snapshot with refs and names a password field without its value", async () => {
+      const { host, contextId, page } = await surface("/login");
+      const observed = await host.act(contextId, { kind: "snapshot" });
+      expect(observed.snapshot).toMatch(/- textbox "Password" \[ref=e\d+\] protected$/m);
+      expect(observed.snapshot).not.toContain("hunter2");
+      expect(observed.snapshot).not.toContain("ada@example.com");
+      expect(observed.screenshotDataUrl).toBeUndefined();
+      expect(entry(observed.snapshotRefs, "Continue").role).toBe("button");
+      await page.close();
+    });
 
-  it("acts on a ref's element and refuses one the page no longer matches", async () => {
-    const { host, contextId, page } = await surface("/form");
-    const observed = await host.act(contextId, { kind: "snapshot" });
-    const save = entry(observed.snapshotRefs, "Save");
-    const name = entry(observed.snapshotRefs, "Name");
-    await host.act(contextId, {
-      kind: "type",
-      target: name.selector,
-      value: "Ada",
-      expected: { role: name.role, name: name.name, url: `${origin}/form` },
-    });
-    const clicked = await host.act(contextId, {
-      kind: "click",
-      target: save.selector,
-      expected: { role: save.role, name: save.name, url: `${origin}/form` },
-    });
-    expect(clicked.title).toBe("Saved Ada");
-    const rename = entry(observed.snapshotRefs, "Rename save");
-    await host.act(contextId, { kind: "click", target: rename.selector });
-    await expect(
-      host.act(contextId, {
+    it("acts on a ref's element and refuses one the page no longer matches", async () => {
+      const { host, contextId, page } = await surface("/form");
+      const observed = await host.act(contextId, { kind: "snapshot" });
+      const save = entry(observed.snapshotRefs, "Save");
+      const name = entry(observed.snapshotRefs, "Name");
+      await host.act(contextId, {
+        kind: "type",
+        target: name.selector,
+        value: "Ada",
+        expected: { role: name.role, name: name.name, url: `${origin}/form` },
+      });
+      const clicked = await host.act(contextId, {
         kind: "click",
         target: save.selector,
         expected: { role: save.role, name: save.name, url: `${origin}/form` },
-      }),
-    ).rejects.toThrow(/changed since the snapshot/);
-    await page.close();
-  });
-
-  it("takes no picture and returns no text after an action unless the call asks", async () => {
-    const { host, contextId, page } = await surface("/form");
-    const clicked = await host.act(contextId, { kind: "click", target: "#save" });
-    expect(clicked.screenshotDataUrl).toBeUndefined();
-    expect(clicked.extractedText).toBeUndefined();
-    expect(clicked.contentHash).toMatch(/^[0-9a-f]{64}$/);
-    const asked = await host.act(contextId, {
-      kind: "click",
-      target: "#save",
-      include: ["screenshot", "text", "snapshot"],
-    });
-    expect(asked.screenshotDataUrl).toMatch(/^data:image\/jpeg;base64,/);
-    expect(asked.extractedText).toContain("Save");
-    expect(asked.snapshot).toMatch(/- button "Save" \[ref=e\d+\]/);
-    const pictured = await host.act(contextId, { kind: "screenshot" });
-    expect(pictured.screenshotDataUrl).toMatch(/^data:image\/jpeg;base64,/);
-    expect(pictured.extractedText).toBeUndefined();
-    const preview = await host.peek(contextId);
-    expect(preview.screenshotDataUrl).toMatch(/^data:image\/jpeg;base64,/);
-    await page.close();
-  });
-
-  it("hovers, chooses an option, drags, presses chords and Enter, and uploads a file", async () => {
-    const { host, contextId, page } = await surface("/controls");
-    await host.act(contextId, { kind: "hover", target: "#menu" });
-    expect(await page.isVisible("#item")).toBe(true);
-    expect(
-      (await host.act(contextId, { kind: "select", target: "#size", value: "Large" })).title,
-    ).toBe("Size l");
-    await expect(
-      host.act(contextId, { kind: "select", target: "#size", value: "Huge" }),
-    ).rejects.toThrow(/no option/);
-    expect(
-      (await host.act(contextId, { kind: "drag", target: "#card", destination: "#done" })).title,
-    ).toBe("Dropped card");
-    await host.act(contextId, { kind: "click", target: "#keys" });
-    expect((await host.act(contextId, { kind: "press", value: "Control+B" })).title).toBe(
-      "Chord b",
-    );
-    expect((await host.act(contextId, { kind: "press", value: "Enter" })).title).toBe("Submitted");
-    const folder = await mkdtemp(join(tmpdir(), "octant-upload-"));
-    try {
-      await writeFile(join(folder, "notes.txt"), "hello");
-      const sent = await host.act(contextId, {
-        kind: "upload",
-        target: "#file",
-        files: [join(folder, "notes.txt")],
       });
-      expect(sent.title).toBe("Attached notes.txt 5");
-    } finally {
-      await rm(folder, { recursive: true, force: true });
-    }
-    await page.close();
-  });
-
-  it("opens, lists, switches, and closes the agent's tabs inside the allowed origin", async () => {
-    const { host, contextId, page } = await surface("/form", 3);
-    const opened = await host.act(contextId, { kind: "tab-open", target: `${origin}/login` });
-    expect(opened.tabs).toEqual([
-      { tabId: "t1", url: `${origin}/form`, title: "Form", active: false },
-      { tabId: "t2", url: `${origin}/login`, title: "Sign in", active: true },
-    ]);
-    expect((await host.act(contextId, { kind: "tab-select", tabId: "t1" })).title).toBe("Form");
-    const closed = await host.act(contextId, { kind: "tab-close", tabId: "t2" });
-    expect(closed.tabs).toEqual([
-      { tabId: "t1", url: `${origin}/form`, title: "Form", active: true },
-    ]);
-    await expect(host.act(contextId, { kind: "tab-close", tabId: "t1" })).rejects.toThrow(
-      /only tab/,
-    );
-    await expect(
-      host.act(contextId, { kind: "tab-open", target: "https://example.com/" }),
-    ).rejects.toThrow(/allowlist/);
-    await page.close();
-  });
-
-  it("drags so a page listening for HTML drag and drop sees the drop too", async () => {
-    const { host, contextId, page } = await surface("/html-drag");
-    const dragged = await host.act(contextId, {
-      kind: "drag",
-      target: "#card",
-      destination: "#done",
+      expect(clicked.title).toBe("Saved Ada");
+      const rename = entry(observed.snapshotRefs, "Rename save");
+      await host.act(contextId, { kind: "click", target: rename.selector });
+      await expect(
+        host.act(contextId, {
+          kind: "click",
+          target: save.selector,
+          expected: { role: save.role, name: save.name, url: `${origin}/form` },
+        }),
+      ).rejects.toThrow(/changed since the snapshot/);
+      await page.close();
     });
-    expect(dragged.title).toBe("Dropped card");
-    await page.close();
-  });
-});
+
+    it("takes no picture and returns no text after an action unless the call asks", async () => {
+      const { host, contextId, page } = await surface("/form");
+      const clicked = await host.act(contextId, { kind: "click", target: "#save" });
+      expect(clicked.screenshotDataUrl).toBeUndefined();
+      expect(clicked.extractedText).toBeUndefined();
+      expect(clicked.contentHash).toMatch(/^[0-9a-f]{64}$/);
+      const asked = await host.act(contextId, {
+        kind: "click",
+        target: "#save",
+        include: ["screenshot", "text", "snapshot"],
+      });
+      expect(asked.screenshotDataUrl).toMatch(/^data:image\/jpeg;base64,/);
+      expect(asked.extractedText).toContain("Save");
+      expect(asked.snapshot).toMatch(/- button "Save" \[ref=e\d+\]/);
+      const pictured = await host.act(contextId, { kind: "screenshot" });
+      expect(pictured.screenshotDataUrl).toMatch(/^data:image\/jpeg;base64,/);
+      expect(pictured.extractedText).toBeUndefined();
+      const preview = await host.peek(contextId);
+      expect(preview.screenshotDataUrl).toMatch(/^data:image\/jpeg;base64,/);
+      await page.close();
+    });
+
+    it("hovers, chooses an option, drags, presses chords and Enter, and uploads a file", async () => {
+      const { host, contextId, page } = await surface("/controls");
+      await host.act(contextId, { kind: "hover", target: "#menu" });
+      expect(await page.isVisible("#item")).toBe(true);
+      expect(
+        (await host.act(contextId, { kind: "select", target: "#size", value: "Large" })).title,
+      ).toBe("Size l");
+      await expect(
+        host.act(contextId, { kind: "select", target: "#size", value: "Huge" }),
+      ).rejects.toThrow(/no option/);
+      expect(
+        (await host.act(contextId, { kind: "drag", target: "#card", destination: "#done" })).title,
+      ).toBe("Dropped card");
+      await host.act(contextId, { kind: "click", target: "#keys" });
+      expect((await host.act(contextId, { kind: "press", value: "Control+B" })).title).toBe(
+        "Chord b",
+      );
+      expect((await host.act(contextId, { kind: "press", value: "Enter" })).title).toBe(
+        "Submitted",
+      );
+      const folder = await mkdtemp(join(tmpdir(), "octant-upload-"));
+      try {
+        await writeFile(join(folder, "notes.txt"), "hello");
+        const sent = await host.act(contextId, {
+          kind: "upload",
+          target: "#file",
+          files: [join(folder, "notes.txt")],
+        });
+        expect(sent.title).toBe("Attached notes.txt 5");
+      } finally {
+        await rm(folder, { recursive: true, force: true });
+      }
+      await page.close();
+    });
+
+    it("opens, lists, switches, and closes the agent's tabs inside the allowed origin", async () => {
+      const { host, contextId, page } = await surface("/form", 3);
+      const opened = await host.act(contextId, { kind: "tab-open", target: `${origin}/login` });
+      expect(opened.tabs).toEqual([
+        { tabId: "t1", url: `${origin}/form`, title: "Form", active: false },
+        { tabId: "t2", url: `${origin}/login`, title: "Sign in", active: true },
+      ]);
+      expect((await host.act(contextId, { kind: "tab-select", tabId: "t1" })).title).toBe("Form");
+      const closed = await host.act(contextId, { kind: "tab-close", tabId: "t2" });
+      expect(closed.tabs).toEqual([
+        { tabId: "t1", url: `${origin}/form`, title: "Form", active: true },
+      ]);
+      await expect(host.act(contextId, { kind: "tab-close", tabId: "t1" })).rejects.toThrow(
+        /only tab/,
+      );
+      await expect(
+        host.act(contextId, { kind: "tab-open", target: "https://example.com/" }),
+      ).rejects.toThrow(/allowlist/);
+      await page.close();
+    });
+
+    it("drags so a page listening for HTML drag and drop sees the drop too", async () => {
+      const { host, contextId, page } = await surface("/html-drag");
+      const dragged = await host.act(contextId, {
+        kind: "drag",
+        target: "#card",
+        destination: "#done",
+      });
+      expect(dragged.title).toBe("Dropped card");
+      await page.close();
+    });
+  },
+);
