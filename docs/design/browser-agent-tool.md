@@ -92,6 +92,9 @@ handoff, and fuller diagnostics are allowed; not built yet.
   the agent left. A person's own action from the Browser pane or a paired
   device still brings a picture back, because a headless page is seen only as
   one, and so does opening a page in the thread-less Project browser.
+- A preview's picture of the same page (same address and title) keeps the
+  observation revision, so an agent's next action that names the revision its
+  last action returned still runs while a preview is open.
 - Rationale: measured on a local page with 40 paragraphs and a two-field form
   (headless Chromium), the per-action observation the host built and kept fell
   from 31.7 to 40.4 KB (a picture and the page text on every action) to about
