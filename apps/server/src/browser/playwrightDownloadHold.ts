@@ -1,5 +1,5 @@
 import { open, readdir, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import {
   BROWSER_DOWNLOAD_SNIFF_BYTES,
   safeBrowserDownloadName,
@@ -24,7 +24,7 @@ interface HeldDownload {
   readonly path: string;
 }
 
-interface PendingDownload {
+interface PendingDownload extends WatchedDownload {
   readonly download: PlaywrightDownloadPort;
   cancelledFor: "too-large" | "unfinished" | undefined;
 }
@@ -44,17 +44,16 @@ const WATCH_INTERVAL_MS = 50;
  * file never finishes.
  */
 export class PlaywrightDownloadHold {
-  readonly #folder: string | undefined;
+  readonly #watch: DownloadFolderWatch;
   readonly #pending = new Map<PendingDownload, Promise<void>>();
   readonly #held: HeldDownload[] = [];
   #reports: BrowserDownloadReport[] = [];
   #holding = false;
   #nextOrdinal = 1;
-  #watch: ReturnType<typeof setInterval> | undefined;
 
-  /** `folder` is where the browser writes unfinished downloads; absent, only a finished file is measured. */
-  constructor(folder?: string) {
-    this.#folder = folder;
+  /** `watch` measures the browser's download folder; absent, only a finished file is measured. */
+  constructor(watch: DownloadFolderWatch = new DownloadFolderWatch()) {
+    this.#watch = watch;
   }
 
   /** Start holding the downloads the page starts, for the length of one agent action. */
@@ -67,13 +66,18 @@ export class PlaywrightDownloadHold {
       void download.cancel().catch(() => undefined);
       return;
     }
-    const entry: PendingDownload = { download, cancelledFor: undefined };
+    const entry: PendingDownload = {
+      download,
+      cancelledFor: undefined,
+      file: undefined,
+      cancelForSize: () => this.#cancel(entry, "too-large"),
+    };
     const task = this.#hold(entry).finally(() => {
       this.#pending.delete(entry);
-      if (this.#pending.size === 0) this.#stopWatching();
+      this.#watch.remove(entry);
     });
     this.#pending.set(entry, task);
-    this.#startWatching();
+    this.#watch.add(entry);
   }
 
   /**
@@ -81,6 +85,9 @@ export class PlaywrightDownloadHold {
    * and say what became of each. A download still running is cancelled.
    */
   async finish(): Promise<void> {
+    // No new download is accepted from here on, so the snapshot below is every
+    // download the wait has to cover.
+    this.#holding = false;
     if (this.#pending.size > 0) {
       let timer: ReturnType<typeof setTimeout> | undefined;
       const timeout = new Promise<"timeout">((resolve) => {
@@ -95,7 +102,6 @@ export class PlaywrightDownloadHold {
         await settled;
       }
     }
-    this.#holding = false;
   }
 
   /** What became of the downloads since the last answer; each is reported once. */
@@ -116,7 +122,6 @@ export class PlaywrightDownloadHold {
   /** Delete everything held and cancel what is running; the context is closing. */
   async dispose(): Promise<void> {
     this.#holding = false;
-    this.#stopWatching();
     for (const entry of this.#pending.keys()) this.#cancel(entry, "unfinished");
     // A cancelled download that never reports back must not hold a close open.
     await Promise.race([
@@ -142,6 +147,7 @@ export class PlaywrightDownloadHold {
       });
       return;
     }
+    this.#watch.finished(path);
     let sizeBytes: number;
     let head: Uint8Array;
     try {
@@ -179,51 +185,107 @@ export class PlaywrightDownloadHold {
     entry.cancelledFor ??= reason;
     void entry.download.cancel().catch(() => undefined);
   }
+}
 
-  /**
-   * The browser writes a download into its folder as it arrives. Watching the
-   * folder is how a file is stopped at the cap instead of after it has
-   * finished. The folder cannot say which download a file belongs to, so when
-   * any file is past the cap, every running download of this context is
-   * cancelled.
-   */
-  #startWatching(): void {
-    if (this.#watch !== undefined || this.#folder === undefined) return;
-    const folder = this.#folder;
-    let reading = false;
-    this.#watch = setInterval(() => {
-      if (reading) return;
-      reading = true;
-      void largestFile(folder)
-        .then((largest) => {
-          if (largest > MAX_BROWSER_DOWNLOAD_FILE_BYTES) {
-            for (const entry of this.#pending.keys()) this.#cancel(entry, "too-large");
-          }
-        })
-        .catch(() => undefined)
-        .finally(() => {
-          reading = false;
-        });
-    }, WATCH_INTERVAL_MS);
-    this.#watch.unref?.();
+/** One running download as the folder watch sees it. */
+interface WatchedDownload {
+  /** The folder entry this download writes, once the watch could tell it was this one's. */
+  file: string | undefined;
+  readonly cancelForSize: () => void;
+}
+
+/**
+ * Watches the browser's one download folder, shared by every headless context,
+ * so a file is stopped at the cap while it is still arriving.
+ *
+ * A file is measured only for the download it belongs to. The folder holds one
+ * unfinished file per running download and cannot name its owner, so a file is
+ * attributed only when exactly one running download has none yet and exactly
+ * one new file has appeared; with more than one candidate it waits for the
+ * next look. A file that is never attributed is still measured when its
+ * download finishes. One context's oversize file therefore never cancels
+ * another context's download.
+ */
+export class DownloadFolderWatch {
+  readonly #folder: string | undefined;
+  readonly #running = new Set<WatchedDownload>();
+  /** Finished files, which belong to nobody who is running. */
+  readonly #finished = new Set<string>();
+  #timer: ReturnType<typeof setInterval> | undefined;
+  #reading = false;
+
+  /** `folder` is where the browser writes downloads; absent, nothing is watched. */
+  constructor(folder?: string) {
+    this.#folder = folder;
   }
 
-  #stopWatching(): void {
-    if (this.#watch !== undefined) clearInterval(this.#watch);
-    this.#watch = undefined;
+  add(download: WatchedDownload): void {
+    this.#running.add(download);
+    if (this.#timer !== undefined || this.#folder === undefined) return;
+    this.#timer = setInterval(() => void this.#look(), WATCH_INTERVAL_MS);
+    this.#timer.unref?.();
+  }
+
+  remove(download: WatchedDownload): void {
+    this.#running.delete(download);
+    if (this.#running.size > 0 || this.#timer === undefined) return;
+    clearInterval(this.#timer);
+    this.#timer = undefined;
+  }
+
+  /** A download finished at this path; its file is no one's running download. */
+  finished(path: string): void {
+    this.#finished.add(stripPartial(basename(path)));
+  }
+
+  async #look(): Promise<void> {
+    const folder = this.#folder;
+    if (this.#reading || folder === undefined) return;
+    this.#reading = true;
+    try {
+      const sizes = new Map<string, { readonly entry: string; readonly size: number }>();
+      for (const entry of await readdir(folder)) {
+        const size = await stat(join(folder, entry)).then(
+          (stats) => stats.size,
+          () => 0,
+        );
+        sizes.set(stripPartial(entry), { entry, size });
+      }
+      const claimed = new Set<string>();
+      for (const download of this.#running) {
+        if (download.file !== undefined) claimed.add(download.file);
+      }
+      const unattributed = [...this.#running].filter((download) => download.file === undefined);
+      const fresh = [...sizes.keys()].filter(
+        (name) => !claimed.has(name) && !this.#finished.has(name),
+      );
+      const only = unattributed[0];
+      const file = fresh[0];
+      if (
+        unattributed.length === 1 &&
+        fresh.length === 1 &&
+        only !== undefined &&
+        file !== undefined
+      ) {
+        only.file = file;
+      }
+      for (const download of this.#running) {
+        if (download.file === undefined) continue;
+        const seen = sizes.get(download.file);
+        if (seen !== undefined && seen.size > MAX_BROWSER_DOWNLOAD_FILE_BYTES) {
+          download.cancelForSize();
+        }
+      }
+    } catch {
+      // The folder may be gone with its browser; nothing to measure.
+    } finally {
+      this.#reading = false;
+    }
   }
 }
 
-async function largestFile(folder: string): Promise<number> {
-  let largest = 0;
-  for (const name of await readdir(folder)) {
-    const size = await stat(join(folder, name)).then(
-      (stats) => stats.size,
-      () => 0,
-    );
-    if (size > largest) largest = size;
-  }
-  return largest;
+function stripPartial(entry: string): string {
+  return entry.endsWith(".crdownload") ? entry.slice(0, -".crdownload".length) : entry;
 }
 
 async function readHead(path: string): Promise<Uint8Array> {

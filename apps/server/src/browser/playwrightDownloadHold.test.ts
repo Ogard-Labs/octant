@@ -2,7 +2,11 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PlaywrightDownloadHold, type PlaywrightDownloadPort } from "./playwrightDownloadHold";
+import {
+  DownloadFolderWatch,
+  PlaywrightDownloadHold,
+  type PlaywrightDownloadPort,
+} from "./playwrightDownloadHold";
 
 const folders: string[] = [];
 afterEach(async () => {
@@ -95,10 +99,14 @@ describe("PlaywrightDownloadHold", () => {
     hold.onDownload(first);
     hold.onDownload(second);
     await hold.finish();
+    // Which file is d1 depends on which finished reading first.
     await hold.discard("d1");
-    expect(first.delete).toHaveBeenCalled();
+    expect(
+      vi.mocked(first.delete).mock.calls.length + vi.mocked(second.delete).mock.calls.length,
+    ).toBe(1);
     expect(hold.claim("d1")).toBeUndefined();
     await hold.dispose();
+    expect(first.delete).toHaveBeenCalled();
     expect(second.delete).toHaveBeenCalled();
   });
 
@@ -118,7 +126,7 @@ describe("PlaywrightDownloadHold", () => {
     const folder = await mkdtemp(join(tmpdir(), "hold-unit-watch-"));
     folders.push(folder);
     await writeFile(join(folder, "guid.crdownload"), new Uint8Array(25 * 1024 * 1024 + 1));
-    const hold = new PlaywrightDownloadHold(folder);
+    const hold = new PlaywrightDownloadHold(new DownloadFolderWatch(folder));
     hold.begin();
     const download = await fakeDownload("stream.bin", "", { never: true });
     hold.onDownload(download);
@@ -126,6 +134,48 @@ describe("PlaywrightDownloadHold", () => {
     expect(download.cancelled()).toBe(true);
     expect(hold.takeReports()).toEqual([
       { state: "refused", name: "stream.bin", reason: "too-large" },
+    ]);
+  });
+
+  it("stops accepting downloads once it starts waiting, so none slips past the bounded wait", async () => {
+    const hold = new PlaywrightDownloadHold();
+    hold.begin();
+    const running = await fakeDownload("running.bin", "", { never: true });
+    hold.onDownload(running);
+    const finishing = hold.finish();
+    // A download that starts while the action's downloads are being waited on.
+    const late = await fakeDownload("late.txt", "x");
+    hold.onDownload(late);
+    expect(late.cancel).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(running.cancelled()).toBe(false));
+    running.cancel();
+    await finishing;
+    expect(hold.takeReports().map((report) => report.name)).not.toContain("late.txt");
+    expect(hold.claim("d1")).toBeUndefined();
+  });
+
+  it("measures each context's own files, so one oversize file never cancels another context's download", async () => {
+    const folder = await mkdtemp(join(tmpdir(), "hold-unit-shared-"));
+    folders.push(folder);
+    const watch = new DownloadFolderWatch(folder);
+    const first = new PlaywrightDownloadHold(watch);
+    const second = new PlaywrightDownloadHold(watch);
+    first.begin();
+    const big = await fakeDownload("big.bin", "", { never: true });
+    first.onDownload(big);
+    await writeFile(join(folder, "aaaa.crdownload"), new Uint8Array(25 * 1024 * 1024 + 1));
+    await vi.waitFor(() => expect(big.cancelled()).toBe(true));
+    second.begin();
+    const small = await fakeDownload("small.txt", "hello");
+    second.onDownload(small);
+    await second.finish();
+    await first.finish();
+    expect(small.cancel).not.toHaveBeenCalled();
+    expect(second.takeReports()).toEqual([
+      { state: "held", downloadId: "d1", name: "small.txt", sizeBytes: 5, mediaType: "text/plain" },
+    ]);
+    expect(first.takeReports()).toEqual([
+      { state: "refused", name: "big.bin", reason: "too-large" },
     ]);
   });
 });

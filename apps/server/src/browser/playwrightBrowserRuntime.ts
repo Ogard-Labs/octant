@@ -33,7 +33,11 @@ import {
 import { MAX_PRODUCT_FEEDBACK_CROP_CHARACTERS } from "@octant/contracts/product-feedback";
 import { browserDownloadHoldRoot, prepareBrowserDownloadHoldRoot } from "@octant/host-runtime";
 import { chromium } from "playwright-core";
-import { PlaywrightDownloadHold, type PlaywrightDownloadPort } from "./playwrightDownloadHold";
+import {
+  DownloadFolderWatch,
+  PlaywrightDownloadHold,
+  type PlaywrightDownloadPort,
+} from "./playwrightDownloadHold";
 import {
   BrowserNavigationBlockedError,
   BrowserProfileUnavailableError,
@@ -256,6 +260,8 @@ export const DEFAULT_BROWSER_EXECUTABLE_CANDIDATES = [
 export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
   readonly #options: PlaywrightBrowserRuntimeOptions;
   readonly #contexts = new Map<BrowserContextId, OwnedRuntimeContext>();
+  /** Measures the browser's one download folder for every context; see the class. */
+  readonly #downloadWatch: DownloadFolderWatch;
   readonly #processExitListeners = new Set<() => void>();
   #browser: PlaywrightBrowserPort | undefined;
   #launching: Promise<PlaywrightBrowserPort> | undefined;
@@ -266,6 +272,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
 
   constructor(options: PlaywrightBrowserRuntimeOptions) {
     this.#options = options;
+    this.#downloadWatch = new DownloadFolderWatch(options.downloadFolder);
   }
 
   async available(): Promise<boolean> {
@@ -317,7 +324,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       dialogs: [],
       failedRequests: [],
       instrumentedPages: new WeakSet(),
-      downloads: new PlaywrightDownloadHold(this.#options.downloadFolder),
+      downloads: new PlaywrightDownloadHold(this.#downloadWatch),
     };
     try {
       // Every request, not only navigations: a subresource reaches the network

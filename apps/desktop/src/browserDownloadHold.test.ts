@@ -137,4 +137,20 @@ describe("DesktopDownloadHold", () => {
     await hold.dispose();
     for (const path of paths) expect(existsSync(path)).toBe(false);
   });
+
+  it("stops accepting downloads once it starts waiting, so none slips past the bounded wait", async () => {
+    const hold = new DesktopDownloadHold(await root());
+    hold.begin();
+    const running = new FakeItem("running.bin");
+    hold.accept({}, running);
+    const finishing = hold.finish();
+    const refused = vi.fn();
+    const late = new FakeItem("late.txt");
+    hold.accept({ preventDefault: refused }, late);
+    expect(refused).toHaveBeenCalledOnce();
+    expect(late.savePath).toBeUndefined();
+    await running.complete("x");
+    await finishing;
+    expect(hold.takeReports().map((report) => report.name)).toEqual(["running.bin"]);
+  });
 });

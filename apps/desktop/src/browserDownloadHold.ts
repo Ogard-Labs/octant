@@ -102,6 +102,9 @@ export class DesktopDownloadHold {
 
   /** Wait (a bounded time) for the downloads this action started, then stop holding. */
   async finish(): Promise<void> {
+    // No new download is accepted from here on, so the snapshot below is every
+    // download the wait has to cover.
+    this.#holding = false;
     if (this.#pending.size > 0) {
       let timer: ReturnType<typeof setTimeout> | undefined;
       const timeout = new Promise<"timeout">((resolve) => {
@@ -116,7 +119,6 @@ export class DesktopDownloadHold {
         await settled;
       }
     }
-    this.#holding = false;
   }
 
   takeReports(): ReadonlyArray<BrowserDownloadReport> {
