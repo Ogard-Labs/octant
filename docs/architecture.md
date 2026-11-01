@@ -91,8 +91,7 @@ The design rests on a small set of invariants that every package obeys:
   endpoint the person configured and only while the Settings › Sync switch is
   on. Remote access is host-to-device over the user's
   own network; traffic among a person's own hub and spokes there is not a
-  third-party call ([Hub and spokes](design/hub-and-spokes.md), designed and
-  not built). Four host-initiated
+  third-party call ([Hub and spokes](design/hub-and-spokes.md), built). Four host-initiated
   HTTPS calls exist in code: desktop update checks against a signed feed, managed
   device-tool update checks against the npm registry, server marketplace
   fetches when the person searches, inspects, previews, or installs from the
@@ -2345,8 +2344,9 @@ the thread it came from.
 - **Asleep or offline.** The scheduler is an in-process timer in the running
   host over journaled definitions. Nothing wakes the computer or runs in a
   cloud today. A self-hosted wake service on a person's hub, which only wakes
-  a spoke and never holds or runs its routines, is designed in
-  [Hub and spokes](design/hub-and-spokes.md#wake-service) and not built. On return it reconciles missed occurrences by the routine's policy:
+  a spoke and never holds or runs its routines, is built
+  ([Hub and spokes](design/hub-and-spokes.md#wake-service)); it has run only
+  between hosts on loopback with a fake socket. On return it reconciles missed occurrences by the routine's policy:
   `skip` records them as skipped; `run-once` records all but the newest as
   skipped and runs the newest once. No catch-up burst. More than the missed-run
   cap blocks the routine as `missed-run-cap-exceeded`. A routine with an active
@@ -8048,7 +8048,7 @@ mechanisms are:
   that secret and bound to its origin. Another OS user, an `ssh -L` forward,
   or a proxy that rewrites `Host` reaches the listener but gets no capability
   (the local client context under [Process topology](#process-topology) has
-  the flow). The hub-and-spoke design adds one more way, not built: an owner
+  the flow). The hub-and-spoke design adds one more way, built: an owner
   device the person marked holds window authority on a host that put it
   on its own owner list, for a request signed by a key its platform uses after
   the person proves presence, or for a short administration window after one
@@ -8232,7 +8232,9 @@ mechanisms are:
   runtime, and nothing asks there, a publish of a Project file to a
   provider's hosted service included. A review reply posted under the
   person's name still asks at every level.
-  Allowed; not built yet: an ACP agent's own reviewer.
+  Built in Code for Mistral Vibe's auto-approve mode, the one ACP profile that
+  declares its own reviewer; allowed, not built yet: an own reviewer for any
+  other ACP agent.
 
 - **Reviewed.** A reviewer answers the prompts that would otherwise go to
   the person: the provider's own, where it has one, or
@@ -9718,7 +9720,7 @@ access` agree); a thread's own change is journaled as
   delegating to another spoke, is such a remote principal on the receiving
   host, held to the hub or peer grant that host's person chose there; it can
   never approve, read credentials, or loosen confinement on it
-  ([Hub and spokes](design/hub-and-spokes.md), designed and not built). The listener, pairing tickets, pairing
+  ([Hub and spokes](design/hub-and-spokes.md), built). The listener, pairing tickets, pairing
   decisions, and device inventory are administered only over the host's
   loopback administration channel — the desktop bridge secret plus a
   registered window capability — which both Settings → Remote access and the
@@ -11015,7 +11017,8 @@ deterministic detectors and no model call. Built for every successful result
 of an app-managed tool and of a plugin MCP server, and of what an adapter sees
 a runtime's own web search or fetch return (an ACP agent's content items);
 allowed; not built yet: a runtime's own web result where it does not expose
-it (Codex, OpenCode), and remote command output. It labels injection-shaped content: instructions aimed at the
+it (Codex, OpenCode), and remote command output of a runtime other than Codex
+(an Octant Harness command's output is an app-managed tool result and is read). It labels injection-shaped content: instructions aimed at the
 agent, hidden or encoded text, requests to exfiltrate, and fake authority. It
 can only raise: it marks the thread tainted, puts a visible marker on that
 tool row, and tells the Judge "tainted". It never allows anything. It runs at
