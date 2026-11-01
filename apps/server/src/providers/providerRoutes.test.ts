@@ -168,6 +168,64 @@ describe("ProviderRoutes", () => {
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
+  it("lets a local window set a thread's native setup, refuses a paired device, and refuses a thread whose provider cannot", async () => {
+    const threadId = "80000000-0000-4000-8000-000000000050";
+    const choices = new Map<string, string>();
+    const set = vi.fn(
+      (request: { threadId: string; choice: string; providerInstanceId: string }) => {
+        if (request.providerInstanceId !== String(instanceId)) return "refused" as const;
+        choices.set(request.threadId, request.choice);
+        return "recorded" as const;
+      },
+    );
+    const route = routeFixture({}, undefined, false, {
+      get: (id: string) => choices.get(id) ?? "inherit",
+      set,
+    });
+    const post = (body: unknown, headers: Record<string, string> = {}) =>
+      new Request("http://127.0.0.1/api/providers/thread-native-setup", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify(body),
+      });
+    const setBody = { kind: "set", threadId, providerInstanceId: instanceId, choice: "off" };
+
+    const remote = post(setBody);
+    const pairedDeviceId = "80000000-0000-4000-8000-000000000051";
+    bindPrincipalRouteContext(remote, {
+      principal: {
+        kind: "remote-device",
+        hostId: "local",
+        deviceId: pairedDeviceId,
+        credentialGeneration: 1,
+        origin: "https://remote.example",
+        protocolVersion: 1,
+        capabilityDigest: "a".repeat(64),
+        sessionId: "80000000-0000-4000-8000-000000000052",
+      } as never,
+      scopeId: pairedDeviceId as never,
+    });
+    expect((await route(remote))?.status).toBe(401);
+    expect(set).not.toHaveBeenCalled();
+
+    const local = await route(post(setBody, { "x-octant-window-capability": capability }));
+    expect(local?.status).toBe(200);
+    expect(await local?.json()).toEqual({ threadId, choice: "off" });
+
+    const read = await route(
+      post({ kind: "get", threadId }, { "x-octant-window-capability": capability }),
+    );
+    expect(await read?.json()).toEqual({ threadId, choice: "off" });
+
+    const other = await route(
+      post(
+        { ...setBody, providerInstanceId: "80000000-0000-4000-8000-000000000053" },
+        { "x-octant-window-capability": capability },
+      ),
+    );
+    expect(other?.status).toBe(400);
+  });
+
   it("refuses a paired device turning on Claude artifacts before the service runs", async () => {
     const execute = vi.fn(() => ({ kind: "provider-updated", instance: provider() }));
     const route = routeFixture({ execute });
@@ -381,6 +439,7 @@ function routeFixture(
   overrides: Record<string, unknown>,
   maxRequestBodySize?: number,
   packagedProviderSmokeControl = false,
+  threadNativeSetup?: unknown,
 ) {
   const store = new WindowAuthorityStore();
   store.register({ windowId, capability, now: 0 });
@@ -398,6 +457,7 @@ function routeFixture(
     windowAuthorityStore: store,
     now: () => 1,
     packagedProviderSmokeControl,
+    ...(threadNativeSetup === undefined ? {} : { threadNativeSetup: threadNativeSetup as never }),
     ...(maxRequestBodySize === undefined ? {} : { maxRequestBodySize }),
   });
 }

@@ -37,8 +37,17 @@ export interface WorkFileListingRequest {
   readonly projectId: ProjectId;
   /** Canonical host path of the folder this thread's Project is bound to. */
   readonly rootPath: string;
-  /** Subdirectory to list, relative to the bound folder. Absent lists the root. */
+  /**
+   * Subdirectory to list, relative to the bound folder, or the absolute path of
+   * an extra folder (or a directory in one). Absent lists the root.
+   */
   readonly directory?: string | undefined;
+  /**
+   * The Project's extra folders. The root listing offers each as a directory
+   * named by its absolute path, and everything listed inside one is named the
+   * same way; a relative path is always the main folder's.
+   */
+  readonly extraFolders?: ReadonlyArray<string> | undefined;
   readonly signal?: AbortSignal | undefined;
 }
 
@@ -71,6 +80,10 @@ export interface WorkFileListingServiceOptions {
 }
 
 interface PendingDirectory {
+  /** The canonical folder this directory is confined to. */
+  readonly root: string;
+  /** The extra folder's path its entries are named under; absent for the main folder. */
+  readonly prefix: string | undefined;
   readonly absolute: string;
   readonly relative: string;
   readonly depth: number;
@@ -116,9 +129,25 @@ export class WorkFileListingService {
 
   async list(request: WorkFileListingRequest): Promise<WorkFileListingResult> {
     let relativeDirectory: string | undefined;
-    if (request.directory !== undefined && request.directory !== "" && request.directory !== ".") {
+    // The folder being listed and the prefix its entries carry: the main
+    // folder's entries are relative, an extra folder's are absolute.
+    let rootPath = request.rootPath;
+    let namePrefix: string | undefined;
+    let requested = request.directory;
+    if (requested?.startsWith("/") === true) {
+      const folder = (request.extraFolders ?? []).find(
+        (candidate) => requested === candidate || requested?.startsWith(`${candidate}/`) === true,
+      );
+      if (folder === undefined) {
+        return failed("invalid", "That folder is not inside this Project's folders.");
+      }
+      rootPath = folder;
+      namePrefix = folder;
+      requested = requested.slice(folder.length + 1);
+    }
+    if (requested !== undefined && requested !== "" && requested !== ".") {
       try {
-        relativeDirectory = canonicalizeWorkRelativePath(request.directory);
+        relativeDirectory = canonicalizeWorkRelativePath(requested);
       } catch (error) {
         if (error instanceof WorkConfinementRejected) {
           return failed("invalid", "That folder is not inside this Project's folder.");
@@ -127,7 +156,7 @@ export class WorkFileListingService {
       }
     }
 
-    const canonicalRoot = await this.#canonicalRoot(request.rootPath);
+    const canonicalRoot = await this.#canonicalRoot(rootPath);
     if (canonicalRoot === undefined) {
       return failed("unavailable", "This Project's folder could not be read.");
     }
@@ -143,10 +172,39 @@ export class WorkFileListingService {
 
     const artifacts = this.#artifactIndex(request.projectId);
     const writtenByTurns = new Set(this.#pathsWrittenByTurns?.(request.projectId) ?? []);
+    const named = (prefix: string | undefined, relative: string): string =>
+      prefix === undefined ? relative : `${prefix}/${relative}`;
     const entries: WorkFileListingEntry[] = [];
     const queue: PendingDirectory[] = [
-      { absolute: start.canonical, relative: relativeDirectory ?? "", depth: 0 },
+      {
+        root: canonicalRoot,
+        prefix: namePrefix,
+        absolute: start.canonical,
+        relative: relativeDirectory ?? "",
+        depth: 0,
+      },
     ];
+    // The whole-folder listing also walks each extra folder, which the panel
+    // shows named by absolute path. A folder that cannot be read is left out,
+    // as it is from a runtime's profile, rather than failing the main folder.
+    if (namePrefix === undefined && relativeDirectory === undefined) {
+      for (const folder of request.extraFolders ?? []) {
+        const extraRoot = await this.#canonicalRoot(folder);
+        const extraStart =
+          extraRoot === undefined
+            ? undefined
+            : await resolveContainedWorkPath(this.#filesystem, extraRoot, extraRoot);
+        if (extraRoot === undefined || extraStart === undefined) continue;
+        entries.push({ kind: "directory", path: folder });
+        queue.push({
+          root: extraRoot,
+          prefix: folder,
+          absolute: extraStart.canonical,
+          relative: "",
+          depth: 0,
+        });
+      }
+    }
     let truncated = false;
 
     while (queue.length > 0) {
@@ -161,7 +219,7 @@ export class WorkFileListingService {
 
       const identity = await resolveContainedWorkPath(
         this.#filesystem,
-        canonicalRoot,
+        current.root,
         current.absolute,
       );
       // A directory that cannot be re-resolved is dropped from the walk, so the
@@ -191,17 +249,15 @@ export class WorkFileListingService {
         if (isHiddenName(name)) continue;
         const childAbsolute = joinWorkPath(identity.canonical, name);
         const childRelative = current.relative === "" ? name : `${current.relative}/${name}`;
-        const child = await resolveContainedWorkPath(
-          this.#filesystem,
-          canonicalRoot,
-          childAbsolute,
-        );
+        const child = await resolveContainedWorkPath(this.#filesystem, current.root, childAbsolute);
         if (child === undefined) continue;
 
         if (child.stat.isDirectory) {
-          entries.push({ kind: "directory", path: childRelative });
+          entries.push({ kind: "directory", path: named(current.prefix, childRelative) });
           if (current.depth + 1 < this.#maxDepth) {
             queue.push({
+              root: current.root,
+              prefix: current.prefix,
               absolute: child.canonical,
               relative: childRelative,
               depth: current.depth + 1,
@@ -213,12 +269,13 @@ export class WorkFileListingService {
         }
         if (!child.stat.isFile) continue;
 
-        const artifact = artifacts.get(childRelative);
-        const authored = artifact !== undefined || writtenByTurns.has(childRelative);
-        const preview = this.#previewRefs?.mint(request.projectId, childRelative);
+        const childName = named(current.prefix, childRelative);
+        const artifact = artifacts.get(childName);
+        const authored = artifact !== undefined || writtenByTurns.has(childName);
+        const preview = this.#previewRefs?.mint(request.projectId, childName);
         entries.push({
           kind: "file",
-          path: childRelative,
+          path: childName,
           byteLength: child.stat.size,
           origin: authored ? "authored" : "untouched",
           ...(artifact === undefined ? {} : { artifact }),
@@ -231,7 +288,11 @@ export class WorkFileListingService {
       kind: "work-file-listing",
       threadId: request.threadId,
       projectId: request.projectId,
-      ...(relativeDirectory === undefined ? {} : { directory: relativeDirectory }),
+      ...(relativeDirectory === undefined
+        ? namePrefix === undefined
+          ? {}
+          : { directory: namePrefix }
+        : { directory: named(namePrefix, relativeDirectory) }),
       entries: orderWorkFirst(entries),
       ...(this.#previewRefs === undefined ? {} : { previewHostId: this.#previewRefs.hostId }),
       truncated,

@@ -111,6 +111,7 @@ async function runScript(
       {
         script,
         cwd: input.cwd,
+        ...(input.extraRoots === undefined ? {} : { extraRoots: input.extraRoots }),
         environment: commandEnvironment(options.sshAgentSocket?.()),
         timeoutMs: input.timeoutMs,
         ...(egressProxy === undefined ? {} : { egressProxy }),

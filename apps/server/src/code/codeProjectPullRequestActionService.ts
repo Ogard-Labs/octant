@@ -1,6 +1,8 @@
 import {
   CODE_PROJECT_PULL_REQUEST_ACTION_RECORDED,
   type CodeProjectPullRequestActionCommand,
+  type CodeProjectPullRequestActionContext,
+  type CodeProjectPullRequestActionContextQuery,
   type CodeProjectPullRequestActionOutcome,
   type CodeProjectPullRequestActionRecorded,
   type CodeProjectPullRequestDetailQuery,
@@ -14,6 +16,7 @@ import { decideStackMerge } from "@octant/domain/code-pull-request-action-policy
 import type { Journal } from "../persistence/journal";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import type {
+  GhPullRequestActionContextResult,
   GhPullRequestActionResult,
   GhPullRequestIdentityRequest,
   GhPullRequestSummaryResult,
@@ -60,6 +63,10 @@ export interface CodeProjectPullRequestActionForge {
     request: GhPullRequestIdentityRequest,
     signal: AbortSignal,
   ): Promise<GhPullRequestSummaryResult>;
+  readContext(
+    request: GhPullRequestIdentityRequest,
+    signal: AbortSignal,
+  ): Promise<GhPullRequestActionContextResult>;
 }
 
 export interface CodeProjectPullRequestActionAuthority {
@@ -170,6 +177,30 @@ export class CodeProjectPullRequestActionService {
     }
     record(outcome);
     return outcome;
+  }
+
+  /**
+   * What the person's controls name on one pull request. Read-only, so it is
+   * not journaled; like the actions it belongs to the desktop window.
+   */
+  async readContext(
+    windowId: WindowId,
+    query: CodeProjectPullRequestActionContextQuery,
+    signal: AbortSignal,
+    caller: CodeProjectPullRequestCaller,
+  ): Promise<CodeProjectPullRequestActionContext> {
+    if (caller !== "local-window") return { status: "refused", reason: "not-authorized" };
+    const authorized = await this.#authority.authorizePullRequest(windowId, query);
+    if (authorized.status === "not-authorized") {
+      return { status: "refused", reason: "not-authorized" };
+    }
+    if (authorized.status === "disconnected") {
+      return { status: "unavailable", reason: "disconnected" };
+    }
+    return this.#forge.readContext(
+      { owner: query.repositoryOwner, name: query.repositoryName, number: query.number },
+      signal,
+    );
   }
 
   async mergeStack(

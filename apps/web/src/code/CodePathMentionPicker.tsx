@@ -1,8 +1,17 @@
-import type { CodeFileListingClient } from "@octant/client-runtime";
-import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts";
+import {
+  createFileMentionClient,
+  type CodeFileListingClient,
+  type FileMentionClient,
+} from "@octant/client-runtime";
+import {
+  decodeFileMentionRequestId,
+  type CodeCheckoutId,
+  type CodeThreadId,
+} from "@octant/contracts";
 import { reconcileFileMentionPaths } from "@octant/domain";
 import { File, Folder } from "lucide-react";
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
   applyPathMention,
@@ -15,6 +24,8 @@ import { useCodeFileListingController } from "./useCodeFileListingController";
 
 export interface CodePathMentionsOptions {
   readonly client?: CodeFileListingClient;
+  /** Lists files in the Project's extra folders, which the checkout listing does not. */
+  readonly mentionClient?: FileMentionClient;
   readonly threadId?: CodeThreadId | undefined;
   readonly checkoutId?: CodeCheckoutId | undefined;
   readonly draft: string;
@@ -72,13 +83,69 @@ export function useCodePathMentions(options: CodePathMentionsOptions): CodePathM
       : { windowCapability: options.windowCapability }),
   });
 
+  const mentionClient = useMemo(() => {
+    if (options.mentionClient !== undefined) return options.mentionClient;
+    if (options.serverUrl === undefined || options.windowCapability === undefined) return undefined;
+    try {
+      return createFileMentionClient({
+        baseUrl: options.serverUrl,
+        fetch: globalThis.fetch,
+        windowCapability: options.windowCapability,
+      });
+    } catch {
+      return undefined;
+    }
+  }, [options.mentionClient, options.serverUrl, options.windowCapability]);
+  // Files in an extra folder come back named by absolute path; the checkout
+  // listing never carries one, so the two sources do not overlap.
+  const [extraFolderPaths, setExtraFolderPaths] = useState<ReadonlyArray<PathMentionCandidate>>([]);
+  const debouncedMention = useDebouncedValue(mention, 120);
+  const mentionThreadId = options.threadId;
+  const mentionCheckoutId = options.checkoutId;
+  useEffect(() => {
+    if (
+      mentionClient === undefined ||
+      mentionThreadId === undefined ||
+      mentionCheckoutId === undefined ||
+      debouncedMention === undefined
+    ) {
+      setExtraFolderPaths([]);
+      return;
+    }
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const hits = await mentionClient.complete(
+          decodeFileMentionRequestId(globalThis.crypto.randomUUID()),
+          { mode: "code", threadId: mentionThreadId, checkoutId: mentionCheckoutId },
+          debouncedMention.query,
+          controller.signal,
+        );
+        if (!controller.signal.aborted) {
+          setExtraFolderPaths(
+            hits
+              .filter((hit) => String(hit.path).startsWith("/"))
+              .map((hit) => ({ kind: hit.kind, path: String(hit.path) })),
+          );
+        }
+      } catch {
+        if (!controller.signal.aborted) setExtraFolderPaths([]);
+      }
+    })();
+    return () => controller.abort();
+  }, [mentionClient, mentionThreadId, mentionCheckoutId, debouncedMention]);
+
   const paths = useMemo(
-    (): ReadonlyArray<PathMentionCandidate> =>
-      listing.entries.map((entry) => ({
-        kind: entry.kind === "directory" ? "directory" : "file",
-        path: String(entry.path),
-      })),
-    [listing.entries],
+    (): ReadonlyArray<PathMentionCandidate> => [
+      ...listing.entries.map(
+        (entry): PathMentionCandidate => ({
+          kind: entry.kind === "directory" ? "directory" : "file",
+          path: String(entry.path),
+        }),
+      ),
+      ...extraFolderPaths,
+    ],
+    [listing.entries, extraFolderPaths],
   );
   const candidates = useMemo(
     () => (mention === undefined ? [] : rankPathMentionCandidates(paths, mention.query)),

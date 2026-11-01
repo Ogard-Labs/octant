@@ -38,7 +38,7 @@ import { GithubIssueContextRequest } from "./githubIssueContext";
 import { LinearIssueContextRequest } from "./linearIssueContext";
 import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
 import { ThreadTaskProgressList } from "./threadTasks";
-import { ThreadToolStepList } from "./threadToolSteps";
+import { ThreadToolStepList } from "./threadToolStepList";
 import { ThreadWindowBoundsFields } from "./threadWindow";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };

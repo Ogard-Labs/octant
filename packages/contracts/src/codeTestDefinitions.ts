@@ -12,17 +12,29 @@ export const MAX_REPOSITORY_TEST_ARTIFACT_BYTES = 64 * 1024 * 1024;
 const CodeTestDefinitionId = Schema.UUID.pipe(Schema.brand("CodeTestDefinitionId"));
 export type CodeTestDefinitionId = typeof CodeTestDefinitionId.Type;
 
-const CodeTestPath = Schema.String.pipe(
+function isCodeTestPath(value: string): boolean {
+  return (
+    value === "." ||
+    (value.length > 0 &&
+      !value.includes("\0") &&
+      !value.includes("\\") &&
+      !value.startsWith("/") &&
+      !value.endsWith("/") &&
+      value === value.normalize("NFC") &&
+      value.split("/").every((segment) => segment !== "" && segment !== "." && segment !== ".."))
+  );
+}
+const CodeTestPath = Schema.String.pipe(Schema.filter(isCodeTestPath));
+/**
+ * Where a run starts: relative to the checkout, or the absolute path of an
+ * extra folder of the Project, or a folder inside one. The host places an
+ * absolute path in one of the Project's extra folders before it runs anything.
+ */
+const CodeTestWorkingDirectory = Schema.String.pipe(
   Schema.filter(
     (value) =>
-      value === "." ||
-      (value.length > 0 &&
-        !value.includes("\0") &&
-        !value.includes("\\") &&
-        !value.startsWith("/") &&
-        !value.endsWith("/") &&
-        value === value.normalize("NFC") &&
-        value.split("/").every((segment) => segment !== "" && segment !== "." && segment !== "..")),
+      isCodeTestPath(value) ||
+      (value.startsWith("/") && value.length > 1 && isCodeTestPath(value.slice(1))),
   ),
 );
 const ArtifactPath = CodeTestPath.pipe(Schema.filter((value) => value !== "."));
@@ -64,7 +76,7 @@ export const CodeRepositoryTestDefinition = Schema.Struct({
   name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
   source: CodeRepositoryTestDefinitionSource,
   argv: Schema.NonEmptyArray(ArgvToken).pipe(Schema.filter((argv) => argv.length <= 64)),
-  cwd: CodeTestPath,
+  cwd: CodeTestWorkingDirectory,
   environmentRefs: Schema.Array(EnvironmentReference).pipe(
     Schema.filter((refs) => refs.length <= 64 && new Set(refs).size === refs.length),
   ),

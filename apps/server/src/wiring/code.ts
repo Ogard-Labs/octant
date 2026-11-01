@@ -25,6 +25,7 @@ import {
   type ProviderModel,
   type WindowId,
 } from "@octant/contracts";
+import { projectExtraFolderRoots } from "@octant/domain";
 import { Effect } from "effect";
 import { WorkAttachmentStore } from "../work/workAttachmentStore";
 import { resolveThreadWorkingDirectory } from "../threadWorkingDirectoryAuthority";
@@ -447,6 +448,7 @@ const unavailableActionForge = {
   setState: async () => ({ status: "unavailable", reason: "unavailable" }) as const,
   summary: async () => ({ status: "unavailable" }) as const,
   requiredChecks: async () => "unknown" as const,
+  readContext: async () => ({ status: "unavailable", reason: "unavailable" }) as const,
 };
 
 function createProjectPullRequestPorts(ghExecutable: string | undefined): {
@@ -494,6 +496,7 @@ function createProjectPullRequestPorts(ghExecutable: string | undefined): {
         setState: (request, signal) => actions.setState(request, signal),
         summary: (request, signal) => actions.summary(request, signal),
         requiredChecks: (request, signal) => actions.requiredChecks(request, signal),
+        readContext: (request, signal) => actions.readContext(request, signal),
       },
       ghAvailable: true,
     };
@@ -597,7 +600,12 @@ export function wireCode(deps: CodeDependencies) {
     const codeFileSearch = new CodeSearchService();
     // Discovery reads only the checkout's package.json and .octant/tests.json,
     // so it needs no file helper either. The same instance authorizes a run.
-    const codeTestDiscovery = new RepositoryTestDiscoveryService();
+    const codeTestDiscovery = new RepositoryTestDiscoveryService({
+      extraFolders: (projectId) => {
+        const project = persistence.readProject(projectId as ProjectId);
+        return project?.type === "code" ? projectExtraFolderRoots(project) : [];
+      },
+    });
     let codeFiles: Pick<CodeFileService, "open" | "save"> & Partial<Pick<CodeFileService, "list">> =
       {
         open: async () => ({

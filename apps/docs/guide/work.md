@@ -50,7 +50,7 @@ The sidebar **Thread board** is a server-derived view of Work threads as Ready, 
 
 To redesign an existing website, ask the agent to open the page in the Browser and take a screenshot. It can then build a Canvas design with the page as it is now beside a redesigned version. The before frame shows the screenshot the thread kept (a small picture, about 40 KB), and the agent draws the after frame itself; it never pulls the site's own images, styles, or fonts into a frame. Only screenshots this thread took are used. The Canvas preview shows them, but a share, a public link, and an export leave them out.
 
-Work and Code can do the same things. A Work thread gets the same shell, Git, command-line tools, `ssh` to your own machines, and provider tools as a Code thread, under the same mode: at **Ask first** and **Accept edits** you approve each command, at **Auto** the provider's own reviewer answers (a provider without one asks first), and at **Full access** nothing asks and nothing is sandboxed. Octant keeps no SSH keys; `ssh`, `scp`, and `rsync` run as ordinary commands with your own agent and settings, so at Ask first you approve them like any other command. Pick the mode from the shield button beside the model in the composer; the next turn runs at it. Work has no Plan mode. When Work work becomes software engineering with a delivery target, use a [promotion](/guide/promotions) to start a linked Code thread with explicit user approval.
+Work and Code can do the same things. A Work thread gets the same shell, Git, command-line tools, `ssh` to your own machines, and provider tools as a Code thread, under the same mode: at **Ask first** and **Accept edits** you approve each command, at **Auto** the provider's own reviewer answers, or Octant Shield when you chose it in Settings or the provider has none (Shield's decisions show in the turn's steps, and anything it will not allow comes to you), and at **Full access** nothing asks and nothing is sandboxed. Octant keeps no SSH keys; `ssh`, `scp`, and `rsync` run as ordinary commands with your own agent and settings, so at Ask first you approve them like any other command. Pick the mode from the shield button beside the model in the composer; the next turn runs at it. Work has no Plan mode. When Work work becomes software engineering with a delivery target, use a [promotion](/guide/promotions) to start a linked Code thread with explicit user approval.
 
 What differs is focus: Work shows documents, artifacts, local tasks, and its board, and keeps Git panels, pull requests, reviews, issue trackers, and worktrees out of sight until you turn on **Developer tools** in the Work Project's overview. A Work thread is still Done when you mark it Done.
 
@@ -239,6 +239,18 @@ is busy with a turn, marked Done, archived, moved to another Project, or now
 on another provider or model; if the computer was asleep, it runs when Octant
 is back, unless it is more than a day late, in which case it is recorded as
 missed. Automation Center keeps its history. Chat threads have no follow-ups.
+
+## Find in a thread
+
+Press **⌘/Ctrl+F** in an open thread to search its conversation. A bar at the top
+shows "n of m", highlights each match, and moves with **Enter** (next) and
+**Shift+Enter** (previous). **Escape** closes it. Inside the code editor or a
+terminal, ⌘/Ctrl+F stays with that tool.
+
+Select text in one of the agent's replies and choose **New thread from
+selection**, from the small button under the reply or the right-click menu. A
+new Work draft opens in the same Project with your selection quoted at the top.
+Nothing is sent until you send it.
 
 ## Next steps
 

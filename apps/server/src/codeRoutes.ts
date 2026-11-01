@@ -37,6 +37,8 @@ import {
   decodeCodeProjectPullRequestAutoFixCommand,
   decodeCodeProjectPullRequestActionCommand,
   decodeCodeProjectPullRequestActionOutcome,
+  decodeCodeProjectPullRequestActionContext,
+  decodeCodeProjectPullRequestActionContextQuery,
   decodeCodeProjectPullRequestMergeCommand,
   decodeCodeProjectPullRequestMergeOutcome,
   decodeCodeProjectPullRequestStackMergeCommand,
@@ -95,6 +97,8 @@ import {
   type CodeProjectPullRequestAutoFixCommand,
   type CodeProjectPullRequestActionCommand,
   type CodeProjectPullRequestActionOutcome,
+  type CodeProjectPullRequestActionContext,
+  type CodeProjectPullRequestActionContextQuery,
   type CodeProjectPullRequestMergeCommand,
   type CodeProjectPullRequestStackMergeCommand,
   type CodeProjectPullRequestStackMergeOutcome,
@@ -360,6 +364,13 @@ export interface CodeRouteService {
     signal: AbortSignal,
     caller: "local-window" | "remote-device",
   ) => Promise<CodeProjectPullRequestActionOutcome>;
+  /** The labels and review threads the person's pull-request controls name. */
+  readonly readProjectPullRequestActionContext?: (
+    authenticatedWindowId: WindowId,
+    query: CodeProjectPullRequestActionContextQuery,
+    signal: AbortSignal,
+    caller: "local-window" | "remote-device",
+  ) => Promise<CodeProjectPullRequestActionContext>;
   /** A pull request's Merge when ready and Auto-fix switches. */
   readonly queryProjectPullRequestSwitches?: (
     authenticatedWindowId: WindowId,
@@ -369,7 +380,7 @@ export interface CodeRouteService {
     authenticatedWindowId: WindowId,
     command: CodeProjectPullRequestMergeWhenReadyCommand,
     signal: AbortSignal,
-    initiator: "user" | "agent",
+    caller: "local-window" | "remote-device",
   ) => Promise<CodeProjectPullRequestSwitchOutcome>;
   readonly setProjectPullRequestAutoFix?: (
     authenticatedWindowId: WindowId,
@@ -1507,6 +1518,48 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             origin,
           );
         }
+        case "project-pull-requests-action-context": {
+          requireMethodAndEmptyQuery(request, url, "POST");
+          requireJsonContentType(request);
+          // Like the actions it serves, this is the desktop window's own read.
+          if (callerKind !== "local-window") {
+            return failureResponse(
+              {
+                category: "unauthorized",
+                message: "Pull-request actions require the local user.",
+              },
+              403,
+              origin,
+            );
+          }
+          if (dependencies.service.readProjectPullRequestActionContext === undefined) {
+            return failureResponse(
+              { category: "unavailable", message: "Pull-request actions are unavailable." },
+              503,
+              origin,
+            );
+          }
+          const value = parseJson(await readBoundedBytes(request, jsonLimit));
+          refuseRendererAuthoredIdentity(value);
+          let query: CodeProjectPullRequestActionContextQuery;
+          try {
+            query = decodeCodeProjectPullRequestActionContextQuery(value);
+          } catch {
+            throw new CodeRouteRejected("Code project pull-request context query is invalid.", 400);
+          }
+          return jsonResponse(
+            decodeCodeProjectPullRequestActionContext(
+              await dependencies.service.readProjectPullRequestActionContext(
+                authenticatedWindowId,
+                query,
+                request.signal,
+                callerKind,
+              ),
+            ),
+            200,
+            origin,
+          );
+        }
         case "project-pull-requests-actions": {
           requireMethodAndEmptyQuery(request, url, "POST");
           requireJsonContentType(request);
@@ -1585,8 +1638,14 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           requireMethodAndEmptyQuery(request, url, "POST");
           requireJsonContentType(request);
           // The click in a local window is the approval for both switches, as
-          // for a merge; a paired device is refused before anything decodes.
-          if (operationInitiator !== "user") {
+          // for a merge. A paired device may turn Merge when ready on, with its
+          // confirmation of the head (the service enforces it), but Auto-fix
+          // wakes a thread and stays with the local window; it is refused
+          // before anything decodes.
+          if (
+            operationInitiator !== "user" &&
+            route.kind !== "project-pull-requests-merge-when-ready"
+          ) {
             return failureResponse(
               {
                 category: "unauthorized",
@@ -1618,7 +1677,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
                   authenticatedWindowId,
                   command,
                   request.signal,
-                  operationInitiator,
+                  callerKind,
                 ),
               ),
               200,
@@ -2045,6 +2104,7 @@ type MatchedRoute =
         | "project-pull-requests-merge"
         | "project-pull-requests-merge-stack"
         | "project-pull-requests-actions"
+        | "project-pull-requests-action-context"
         | "project-pull-requests-switches"
         | "project-pull-requests-merge-when-ready"
         | "project-pull-requests-auto-fix"
@@ -2184,6 +2244,9 @@ function matchRoute(pathname: string): MatchedRoute | undefined {
   }
   if (pathname === "/api/code/project-pull-requests/merge-stack") {
     return { kind: "project-pull-requests-merge-stack" };
+  }
+  if (pathname === "/api/code/project-pull-requests/action-context") {
+    return { kind: "project-pull-requests-action-context" };
   }
   if (pathname === "/api/code/project-pull-requests/actions") {
     return { kind: "project-pull-requests-actions" };

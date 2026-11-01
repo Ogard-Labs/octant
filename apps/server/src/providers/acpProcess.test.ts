@@ -8,10 +8,15 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts";
+import type {
+  ProviderExecutionPolicy,
+  ProviderFailure,
+  ProviderNativeSetup,
+} from "@octant/contracts";
 import { Effect, Either } from "effect";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
@@ -1954,5 +1959,184 @@ describe("Kimi Code provider-owned profile", () => {
     const spawned = spawnRecord(target.root);
     expect(spawned?.cwd).toBe(root);
     expect(spawned?.args.at(-1)).toBe("acp");
+  });
+});
+
+describe("System Keychain read for fx", () => {
+  const systemKeychain = "/Library/Keychains/System.keychain";
+
+  async function fxProfileText(
+    profile: AcpProviderProfile,
+    executionPolicy: ProviderExecutionPolicy,
+  ) {
+    const target = fixture(profile);
+    const launch = await Effect.runPromise(
+      makeAcpConfinementLive({
+        platform: "darwin",
+        sandboxPath: target.sandboxPath,
+        temporaryDirectory: join(target.canonicalRoot, "tmp"),
+        hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+      }).prepare({
+        profile,
+        binaryPath: target.binaryPath,
+        root: target.canonicalRoot,
+        managedHome: join(target.canonicalRoot, "managed-home"),
+        mode: "code",
+        executionPolicy,
+        environment: { PATH: "/usr/bin" },
+      }),
+    );
+    return seatbeltProfile(launch);
+  }
+
+  it.each(["approval-gated", "auto-accept-edits"] as const)(
+    "lets fx at %s read the System Keychain file after every built-in denial, and write no Keychain",
+    async (executionPolicy) => {
+      const lines = (await fxProfileText(fx, executionPolicy)).trimEnd().split("\n");
+      const allow = `(allow file-read* (literal "${systemKeychain}"))`;
+      expect(lines.at(-1)).toBe(allow);
+      expect(lines).toContain('(deny file-read* (subpath "/Library/Keychains"))');
+      expect(
+        lines.filter((line) => line.includes("Keychains/") && line.startsWith("(allow")),
+      ).toEqual([allow]);
+      expect(
+        lines.some((line) => line.startsWith("(allow file-write") && line.includes("Keychains")),
+      ).toBe(false);
+    },
+  );
+
+  it.each(profiles.filter((profile) => profile.kind !== "fx"))(
+    "gives $displayName no System Keychain read",
+    async (profile) => {
+      if (profile.refuses?.("code", "approval-gated") !== undefined) return;
+      expect(await fxProfileText(profile, "approval-gated")).not.toContain("System.keychain");
+    },
+  );
+
+  it("lets a process under the fx profile read the System Keychain file and nothing else of the Keychains", async () => {
+    if (process.platform !== "darwin" || !existsSync(systemKeychain)) return;
+    const target = fixture(fx);
+    const launch = await Effect.runPromise(
+      makeAcpConfinementLive({
+        platform: "darwin",
+        sandboxPath: "/usr/bin/sandbox-exec",
+        temporaryDirectory: join(target.canonicalRoot, "tmp"),
+        hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+      }).prepare({
+        profile: fx,
+        binaryPath: target.binaryPath,
+        root: target.canonicalRoot,
+        managedHome: join(target.canonicalRoot, "managed-home"),
+        mode: "code",
+        executionPolicy: "approval-gated",
+        environment: { PATH: "/usr/bin" },
+      }),
+    );
+    const profile = seatbeltProfile(launch);
+    const run = (...command: ReadonlyArray<string>) =>
+      spawnSync("/usr/bin/sandbox-exec", ["-p", profile, "--", ...command], {
+        encoding: "utf8",
+      }).status;
+    expect(run("/usr/bin/head", "-c", "4", systemKeychain)).toBe(0);
+    expect(run("/bin/ls", "/Library/Keychains")).not.toBe(0);
+    expect(run("/usr/bin/head", "-c", "1", "/var/db/SystemKey")).not.toBe(0);
+    expect(run("/bin/ls", join(realpathSync(homedir()), "Library/Keychains"))).not.toBe(0);
+    expect(run("/bin/sh", "-c", `: >> ${systemKeychain}`)).not.toBe(0);
+  });
+});
+
+describe("Mistral Vibe running as itself", () => {
+  const everything = {
+    subagents: true,
+    webTools: true,
+    skills: true,
+    toolServers: true,
+    hooks: true,
+    projectCode: true,
+  } as const;
+  const kept = [
+    "VIBE_ENABLE_TELEMETRY",
+    "VIBE_ENABLE_UPDATE_CHECKS",
+    "VIBE_ENABLE_NOTIFICATIONS",
+    "VIBE_VOICE_MODE_ENABLED",
+    "VIBE_NARRATOR_ENABLED",
+    "VIBE_TEST_DISABLE_KEYRING",
+    "VIBE_ENABLED_AGENTS",
+    "VIBE_DEFAULT_AGENT",
+    "VIBE_AGENT_PATHS",
+    "VIBE_INSTALLED_AGENTS",
+  ];
+
+  it("keeps every guard for a session without the person's setup and releases only its own for one with it", () => {
+    const locked = sanitizeAcpEnvironment(vibe, {}, { managedHome: "/x" });
+    expect(locked).toMatchObject(vibe.process.guards);
+
+    const own = sanitizeAcpEnvironment(vibe, {}, { managedHome: "/x", nativeSetup: everything });
+    for (const name of [
+      "VIBE_INCLUDE_PROJECT_CONTEXT",
+      "VIBE_SKILL_PATHS",
+      "VIBE_DISABLED_SKILLS",
+      "VIBE_MCP_SERVERS",
+      "VIBE_ENABLE_CONNECTORS",
+      "VIBE_ENABLE_EXPERIMENTAL_HOOKS",
+      "VIBE_TOOL_PATHS",
+    ]) {
+      expect(own, name).not.toHaveProperty(name);
+    }
+    for (const name of kept) expect(own[name], name).toBe(vibe.process.guards[name]);
+
+    // Plan and Chat: skills only, so hooks, tool servers, and Project tools stay off.
+    const readOnly = sanitizeAcpEnvironment(
+      vibe,
+      {},
+      {
+        managedHome: "/x",
+        nativeSetup: { ...everything, toolServers: false, hooks: false, projectCode: false },
+      },
+    );
+    expect(readOnly).not.toHaveProperty("VIBE_SKILL_PATHS");
+    expect(readOnly.VIBE_MCP_SERVERS).toBe("[]");
+    expect(readOnly.VIBE_ENABLE_EXPERIMENTAL_HOOKS).toBe("false");
+    expect(readOnly.VIBE_TOOL_PATHS).toBe("[]");
+  });
+
+  it("reads a trusted Project's own .vibe entries again only for a session that loads its code", async () => {
+    const target = fixture(vibe);
+    const managedHome = join(target.canonicalRoot, "managed-home");
+    const confinement = makeAcpConfinementLive({
+      platform: "darwin",
+      sandboxPath: target.sandboxPath,
+      temporaryDirectory: join(target.canonicalRoot, "tmp"),
+      hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+    });
+    const launch = (nativeSetup?: ProviderNativeSetup) =>
+      Effect.runPromise(
+        confinement.prepare({
+          profile: vibe,
+          binaryPath: target.binaryPath,
+          root: target.canonicalRoot,
+          managedHome,
+          mode: "code",
+          executionPolicy: "approval-gated",
+          environment: { PATH: "/usr/bin" },
+          ...(nativeSetup === undefined ? {} : { nativeSetup }),
+        }),
+      );
+    const projectConfig = join(target.canonicalRoot, ".vibe/config.toml");
+    const denies = (args: ReadonlyArray<string>) =>
+      args.some((arg) => arg.includes(`(deny file-read* (subpath "${projectConfig}"))`));
+    expect(denies((await launch()).args)).toBe(true);
+    expect(denies((await launch({ ...everything, projectCode: false })).args)).toBe(true);
+    expect(denies((await launch(everything)).args)).toBe(false);
+  });
+
+  it("answers Reviewed's prompts with Vibe's own auto-approve mode in Code only", () => {
+    expect(vibe.ownReviewer).toBe(true);
+    expect(vibe.sessionMode("code", "approval-gated", true)).toBe("auto-approve");
+    expect(vibe.sessionMode("code", "approval-gated", false)).toBe("ask");
+    expect(vibe.sessionMode("work", "approval-gated", true)).toBe("ask");
+    expect(vibe.sessionMode("chat", "approval-gated", true)).toBe("ask");
+    expect(vibe.sessionMode("code", "plan", true)).toBe("plan");
+    expect(kimi.ownReviewer).toBeUndefined();
   });
 });

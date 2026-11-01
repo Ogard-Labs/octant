@@ -13,6 +13,7 @@ import type {
   ProjectId,
   WindowId,
 } from "@octant/contracts";
+import { decodeCodeProjectFilePath } from "@octant/contracts";
 import {
   MAX_CODE_LANGUAGE_DOCUMENT_TEXT_LENGTH,
   type CodeLanguageApprovalRequest,
@@ -34,7 +35,7 @@ import {
 import { readConfinedCodeFile } from "./codeConfinedFileRead";
 import { liveCodeTestSourcePort, type CodeTestSourcePort } from "./codeDirectoryPort";
 import { joinCodePath, resolveContainedPath } from "./codePathConfinement";
-import type { CodeFileRootResolution } from "./codeService";
+import { pathInResolvedRoot, type CodeFolderRootResolution } from "./codeProjectFolderRoot";
 import {
   LANGUAGE_SERVER_FRAME_CAP_BYTES,
   LanguageServerConnection,
@@ -168,7 +169,7 @@ export interface CodeLanguageAuthority {
     thread: CodeThread,
     checkout: CodeCheckoutIdentity,
     relativePath: CodeRelativePath,
-  ) => Promise<CodeFileRootResolution | undefined> | CodeFileRootResolution | undefined;
+  ) => Promise<CodeFolderRootResolution | undefined> | CodeFolderRootResolution | undefined;
 }
 
 export interface CodeLanguageCaller {
@@ -281,7 +282,10 @@ type StartOutcome = "ready" | "crashed" | "confinement-unavailable";
 
 interface OpenDocument {
   readonly uri: string;
+  /** The path as the request named it: absolute for a file in an extra folder. */
   readonly path: CodeRelativePath;
+  /** The path inside the server's root, which `path` is unless the file is in an extra folder. */
+  readonly local: CodeRelativePath;
   readonly languageId: string;
   text: string;
   version: number;
@@ -296,6 +300,8 @@ interface ServerRecord {
   readonly projectId: ProjectId;
   readonly component: CodeLanguageServerComponent;
   readonly rootPath: string;
+  /** Whether the root is an extra folder: it has no checkout to watch, and its own server. */
+  readonly extraFolder: boolean;
   /** A thread on the checkout, to label the file watch the server is fed from. */
   readonly watchThreadId: CodeThreadId;
   state: ServerState;
@@ -403,7 +409,11 @@ export class CodeLanguageService {
       this.#release(record, document, String(request.fileId));
       return { status: "synced", ...scope };
     }
-    const served = await this.#serve(caller, authorized, document.path, "existing");
+    // The change goes to the server that owns the document: an extra folder's
+    // document is served from its own folder, not from the checkout.
+    const contained = await this.#containedRoot(caller, authorized, document.path);
+    if (contained.status === "refused") return contained;
+    const served = await this.#serve(caller, authorized, document.path, "existing", contained.root);
     if (served.status !== "served") return served;
     if (!fitsFrame(request.text)) return { status: "too-large", ...scope };
     document.text = request.text;
@@ -432,13 +442,7 @@ export class CodeLanguageService {
     // been replaced by a link out of the checkout since it was opened.
     const contained = await this.#containedRoot(caller, authorized, document.path);
     if (contained.status === "refused") return contained;
-    const served = await this.#serve(
-      caller,
-      authorized,
-      document.path,
-      "existing",
-      contained.root.rootPath,
-    );
+    const served = await this.#serve(caller, authorized, document.path, "existing", contained.root);
     if (served.status !== "served") return served;
     const { record } = served;
     // A server replaced while this read waited holds none of the old documents.
@@ -483,7 +487,7 @@ export class CodeLanguageService {
     const saved = await readConfinedCodeFile({
       port: this.#files,
       canonicalRoot: root.rootPath,
-      relativePath: request.path,
+      relativePath: pathInResolvedRoot(root, request.path),
       maximumBytes: LANGUAGE_SERVER_FRAME_CAP_BYTES,
     });
     if (saved.status === "refused") {
@@ -495,10 +499,11 @@ export class CodeLanguageService {
     if (text.length > MAX_CODE_LANGUAGE_DOCUMENT_TEXT_LENGTH || !fitsFrame(text)) {
       return { status: "too-large" };
     }
-    const served = await this.#serve(caller, authorized, request.path, "existing", root.rootPath);
+    const local = pathInResolvedRoot(root, request.path);
+    const served = await this.#serve(caller, authorized, request.path, "existing", root);
     if (served.status !== "served") return served;
     const { record } = served;
-    const uri = pathToFileURL(join(record.rootPath, request.path)).href;
+    const uri = pathToFileURL(join(record.rootPath, local)).href;
     const holder = `${AGENT_HOLDER_PREFIX}${String(request.threadId)}`;
     const now = this.#now();
     record.lastActivity = now;
@@ -507,6 +512,7 @@ export class CodeLanguageService {
       document = {
         uri,
         path: request.path,
+        local,
         languageId: languageOf(request.path) ?? "plaintext",
         text,
         version: 1,
@@ -598,7 +604,17 @@ export class CodeLanguageService {
       roots: { checkoutRoot: record.rootPath, installRoot: record.component.installRoot },
       realpath: (path) => realpath(path),
     });
-    return { status: "definition", ...scope, targets };
+    // A server rooted in an extra folder places a target relative to that
+    // folder; the agent is told its absolute path, as it is told every extra
+    // folder file, so it cannot mistake the main checkout's file for it.
+    const named = record.extraFolder
+      ? targets.map((target) =>
+          target.kind === "checkout-location"
+            ? { ...target, path: decodeCodeProjectFilePath(`${record.rootPath}/${target.path}`) }
+            : target,
+        )
+      : targets;
+    return { status: "definition", ...scope, targets: named };
   }
 
   /**
@@ -730,10 +746,10 @@ export class CodeLanguageService {
     authorized: Extract<Authorized, { status: "authorized" }>,
     path: CodeRelativePath,
   ): Promise<
-    | { readonly status: "contained"; readonly root: CodeFileRootResolution }
+    | { readonly status: "contained"; readonly root: CodeFolderRootResolution }
     | { readonly status: "refused"; readonly reason: CodeLanguageRefusalReason }
   > {
-    let root: CodeFileRootResolution | undefined;
+    let root: CodeFolderRootResolution | undefined;
     try {
       root = await this.#authority.resolveRoot(
         caller.scopeId,
@@ -748,7 +764,7 @@ export class CodeLanguageService {
     const resolved = await resolveContainedPath(
       this.#files,
       root.rootPath,
-      joinCodePath(root.rootPath, path),
+      joinCodePath(root.rootPath, pathInResolvedRoot(root, path)),
     );
     if (resolved === undefined || !resolved.stat.isFile) {
       return { status: "refused", reason: "path-outside-checkout" };
@@ -770,11 +786,12 @@ export class CodeLanguageService {
       fileId: root.fileId,
     };
     // Opening is how a person retries a server that used up its crash budget.
-    const served = await this.#serve(caller, authorized, request.path, "open", root.rootPath);
+    const local = pathInResolvedRoot(root, request.path);
+    const served = await this.#serve(caller, authorized, request.path, "open", root);
     if (served.status !== "served") return served;
     if (!fitsFrame(request.text)) return { status: "too-large", ...scope };
     const { record } = served;
-    const uri = pathToFileURL(join(record.rootPath, request.path)).href;
+    const uri = pathToFileURL(join(record.rootPath, local)).href;
     const fileKey = String(root.fileId);
     const existing = record.documents.get(uri);
     const now = this.#now();
@@ -783,6 +800,7 @@ export class CodeLanguageService {
       const document: OpenDocument = {
         uri,
         path: request.path,
+        local,
         languageId: languageOf(request.path) ?? "plaintext",
         text: request.text,
         version: 1,
@@ -822,8 +840,10 @@ export class CodeLanguageService {
     authorized: Extract<Authorized, { status: "authorized" }>,
     path: CodeRelativePath,
     intent: "open" | "existing",
-    rootPath?: string,
+    resolved?: CodeFolderRootResolution,
   ): Promise<Served> {
+    const rootPath = resolved?.rootPath;
+    const extraFolder = resolved?.relativePath !== undefined;
     const chosen = this.#componentFor(path);
     if (chosen.status === "refused") return chosen;
     const { component } = chosen;
@@ -844,7 +864,7 @@ export class CodeLanguageService {
     });
     if (decision.status === "refused") return decision;
 
-    const key = serverKey(authorized.checkout.id, component);
+    const key = serverKey(authorized.checkout.id, component, extraFolder ? rootPath : undefined);
     let record = this.#servers.get(key);
     if (record !== undefined && rootPath !== undefined && record.rootPath !== rootPath) {
       // The checkout now resolves somewhere else; the old server reads the
@@ -860,6 +880,7 @@ export class CodeLanguageService {
         projectId: authorized.thread.projectId,
         component,
         rootPath,
+        extraFolder,
         watchThreadId: authorized.thread.id,
         state: "stopped",
         generation: 0,
@@ -1187,7 +1208,7 @@ export class CodeLanguageService {
 
   #watch(record: ServerRecord, connection: LanguageServerConnection, generation: number): void {
     const watcher = this.#watcher;
-    if (watcher === undefined) return;
+    if (watcher === undefined || record.extraFolder) return;
     const controller = new AbortController();
     record.watch = controller;
     void (async () => {
@@ -1230,10 +1251,15 @@ function languageOf(path: string): string | undefined {
   return LANGUAGE_BY_EXTENSION[extname(path).toLowerCase()];
 }
 
-function serverKey(checkoutId: CodeCheckoutId, component: CodeLanguageServerComponent): string {
+function serverKey(
+  checkoutId: CodeCheckoutId,
+  component: CodeLanguageServerComponent,
+  extraFolder?: string,
+): string {
   return createHash("sha256")
     .update("octant.language-server.v1\0")
     .update(String(checkoutId))
+    .update(extraFolder === undefined ? "" : `\0folder:${extraFolder}`)
     .update("\0")
     .update(component.componentKey)
     .update("\0")

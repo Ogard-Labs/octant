@@ -71,6 +71,29 @@ describe("CodeSearchDialog", () => {
     expect(onOpenFile).toHaveBeenCalledWith("src/main.ts");
   });
 
+  it("names the extra folder a match lies in and does not open it in the checkout's editor", async () => {
+    const user = userEvent.setup();
+    const onOpenFile = vi.fn();
+    const search = client(
+      searched([{ scope: "path", fileId, path: "plan/main.md", folder: "/Users/me/notes" }]),
+    );
+    render(
+      <CodeSearchDialog
+        checkoutId={checkoutId}
+        client={search}
+        onOpenFile={onOpenFile}
+        threadId={threadId}
+      />,
+    );
+
+    chord("p");
+    await user.type(await screen.findByRole("combobox"), "main");
+
+    expect(await screen.findByRole("option", { name: /notes\/plan\/main\.md/ })).toBeVisible();
+    await user.keyboard("{Enter}");
+    expect(onOpenFile).not.toHaveBeenCalled();
+  });
+
   it("searches file contents under the other chord and shows where the text was found", async () => {
     const user = userEvent.setup();
     const search = client(

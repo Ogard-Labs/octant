@@ -78,13 +78,13 @@ export class UsageProjection implements Projection {
 
     // A child run's usage is journaled beside the run, not on it, but it is
     // the run's spend: its subject is the run itself.
-    // A Shield review is the reviewed Code thread's spend.
+    // A Shield review is the reviewed Code or Work thread's spend.
     const subject = manifest?.subject ?? {
       aggregateType:
         event.aggregateType === AGENT_RUN_USAGE_AGGREGATE_TYPE
           ? "agent-run"
           : event.aggregateType === SHIELD_REVIEW_USAGE_AGGREGATE_TYPE
-            ? "code-thread"
+            ? shieldReviewedThreadType(connection, event.aggregateId)
             : event.aggregateType,
       aggregateId: event.aggregateId,
     };
@@ -773,6 +773,29 @@ function decodeUsageRow(row: UsageRecordProjectionRow): UsageRecord {
     attribution,
     observedAt: row.observed_at,
   });
+}
+
+/**
+ * A review is journaled under the thread id alone. A Work thread's id has a
+ * journal of its own, or a purge tombstone once that journal is erased.
+ */
+function shieldReviewedThreadType(
+  connection: SqliteConnection,
+  threadId: string,
+): "work-thread" | "code-thread" {
+  const isWork =
+    connection
+      .prepare(
+        `SELECT 1 AS present FROM event_journal
+         WHERE aggregate_type = 'work-thread' AND aggregate_id = ? LIMIT 1`,
+      )
+      .get(threadId) !== undefined ||
+    connection
+      .prepare(
+        `SELECT 1 AS present FROM thread_purge_tombstone WHERE mode = 'work' AND thread_id = ?`,
+      )
+      .get(threadId) !== undefined;
+  return isWork ? "work-thread" : "code-thread";
 }
 
 /**

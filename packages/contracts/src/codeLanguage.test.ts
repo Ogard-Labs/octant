@@ -71,7 +71,6 @@ describe("Code language read contracts", () => {
     expect(decoded.status).toBe("diagnostics");
 
     for (const refused of [
-      diagnostic({ path: "/home/person/project/src/main.ts" }),
       diagnostic({ path: "../outside.ts" }),
       diagnostic({ severity: "fatal" }),
       diagnostic({ message: "x".repeat(MAX_CODE_LANGUAGE_DIAGNOSTIC_MESSAGE_LENGTH + 1) }),
@@ -115,7 +114,6 @@ describe("Code language read contracts", () => {
       { kind: "outside-checkout", label: "bundled-library", path: "lib.dom.d.ts" },
       { kind: "outside-checkout", label: "elsewhere", range },
       { kind: "outside-checkout", label: "home-directory" },
-      { kind: "checkout-location", path: "/usr/lib/node/lib.d.ts", range },
     ]) {
       expect(() =>
         decodeCodeLanguageReadResult({ status: "definition", ...scope, targets: [target] }),
@@ -174,13 +172,6 @@ describe("Code language read contracts", () => {
         kind: "open",
         threadId: scope.threadId,
         checkoutId: scope.checkoutId,
-        path: "/etc/passwd",
-        text: "",
-      },
-      {
-        kind: "open",
-        threadId: scope.threadId,
-        checkoutId: scope.checkoutId,
         path: "../outside.ts",
         text: "",
       },
@@ -216,7 +207,6 @@ describe("Code language read contracts", () => {
     expect(decodeCodeLanguageApprovalRequest(request)).toEqual(request);
     for (const refused of [
       { ...request, scope: "host" },
-      { ...request, path: "/etc/passwd" },
       { ...request, path: "../outside.go" },
       { ...request, component: "any-server" },
       { ...request, windowId: scope.threadId },
@@ -260,5 +250,15 @@ describe("Code language read contracts", () => {
     expect(() =>
       decodeCodeLanguageServerApprovalGranted({ ...granted, scope: { kind: "host" } }),
     ).toThrow();
+  });
+
+  it("names a file in an extra folder by absolute path and still refuses traversal out of it", () => {
+    const base = { kind: "open", threadId: scope.threadId, checkoutId: scope.checkoutId, text: "" };
+    expect(
+      decodeCodeLanguageDocumentRequest({ ...base, path: "/Users/me/notes/main.ts" }),
+    ).toMatchObject({ path: "/Users/me/notes/main.ts" });
+    for (const path of ["/", "//etc/passwd", "/Users/me/../secret.ts", "/Users/me/notes/"]) {
+      expect(() => decodeCodeLanguageDocumentRequest({ ...base, path })).toThrow();
+    }
   });
 });

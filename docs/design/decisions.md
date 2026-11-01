@@ -204,7 +204,7 @@ At the Reviewed level a reviewer stands in for the person's click: the provider'
 - The person chooses the reviewer in Settings › Access with a Project override; the provider's own is the default where it exists (built for Code in Settings › Code › Access and on a Code Project's overview).
 - A verdict the provider reports is journaled with the provider as approver and shown like a person's approval (not built yet: today the journal records the thread setting, not per-call verdicts).
 - Taint withdraws the provider's own reviewer for irreversible, publish and new-egress classes.
-- Built for the two key CLI providers in Code; one ACP agent's auto-approve mode is not built yet.
+- Built in Code for the two key CLI providers and for Mistral Vibe's auto-approve mode.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Security and authority, Reviewed](../architecture.md#security-and-authority).
 
@@ -220,10 +220,10 @@ Octant Shield is Octant's own automatic approval reviewer for every runtime that
 - Shield uses the thread's own provider account and its smallest model by default, or another configured endpoint, sends no telemetry, counts against spend ceilings, and journals every decision.
 - A release with Shield requires measuring its false-allow rate on a fixture set of known-safe and known-unsafe calls.
 - Build order: the native harness, every runtime's approval path, the picker and Settings, the Watcher, safe networks, then the server registry and SSH.
-- Built: the Judge (rules, fast allow rules that read a command exactly as written, the model stage, fail-closed, brakes, per-call grants, taint limits, spend reservations with the review's usage recorded under the thread), answering the approvals of the Octant Harness, Claude Code, Codex, OpenCode, ACP agents and Pi on a Code thread in Auto where Shield is the reviewer, and their subagents', each decision journaled and shown on the transcript; Auto offered in the picker wherever a reviewer can run; Settings › Code › Access Auto reviewer and Shield model with a Code Project override of the reviewer; the fixture set with a test of the rule stages and a false-allow measurement script.
-- Built: the Watcher, deterministic detectors with no model, over every app-managed tool result and plugin MCP result before the model reads it; each label is journaled as an outside-content source that marks the thread, reaches the Judge as a kind, tags the Code tool row (quietly at Full access) and marks the Code board card.
+- Built: the Judge (rules, fast allow rules that read a command exactly as written, the model stage, fail-closed, brakes, per-call grants, taint limits, spend reservations with the review's usage recorded under the thread), answering the approvals of the Octant Harness, Claude Code, Codex, OpenCode, ACP agents and Pi on a Code thread or a Work thread in Auto where Shield is the reviewer, and their subagents', each decision journaled and shown on the transcript (on a Work thread, a review row among the turn's tool steps; the Octant Harness's Work decisions are journaled with its approvals, with no row yet); Auto offered in the picker wherever a reviewer can run; Settings › Code › Access Auto reviewer and Shield model with a Code Project override of the reviewer; the fixture set with a test of the rule stages and a false-allow measurement script.
+- Built: the Watcher, deterministic detectors with no model, over every app-managed tool result and plugin MCP result before the model reads it; each label is journaled as an outside-content source that marks the thread, reaches the Judge as a kind, tags the Code tool row (quietly at Full access) and marks the Code board card; where an adapter sees what a runtime's own web search or fetch returned (an ACP agent's content items), the Watcher reads that text too, and Chat and Work tool rows carry the same tag as Code's.
 - Built: the server registry in Settings › Access › Servers (alias, user, Read-only, Operate or Admin profile, described deploys, runbook path), journaled and replayed, local window only; the Judge's SSH rules (a plain ssh call to a registered server as its user passes within its profile, an unregistered host, a key path, a tunnelling option, a lock-out or destructive remote command, or a remote secret read goes to the person or is refused) checked on a real-world command set; every Octant Harness `ssh` command journaled with host and exit status at every level; the person's SSH agent socket handed to harness shells; runbooks given to harness turns as notes that grant nothing.
-- Not built yet: the shared levels in Work; a confined command reaching a registered server (ssh connects at Full access only), the credential broker for SSH, exit status and runbook context for provider runtimes' own commands, `scp` and `rsync` rules, and a Project override of the registry; the Watcher does not read a runtime's own web search or fetch, the secret guard's path list is not handed to it, and Chat and Work tool rows show no tag; the false-allow rate of a real model is unmeasured.
+- Not built yet: the shared levels in Work; Shield's decisions on the Octant Harness's Work approvals as transcript rows; a confined command reaching a registered server (ssh connects at Full access only), the credential broker for SSH, exit status and runbook context for provider runtimes' own commands, `scp` and `rsync` rules, and a Project override of the registry; the Watcher cannot read a runtime's own web result where the runtime does not expose it (Codex, OpenCode), and the secret guard's path list is not handed to it or to the Judge; the false-allow rate of a real model is unmeasured.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Octant Shield](../architecture.md#octant-shield).
 
@@ -266,11 +266,11 @@ The key providers run inside Octant as they run on their own, with their native 
 - Every other provider keeps the deny rules for Project code and skills until it is promoted the same way.
 - A person turns it on for a key provider account (Run as itself) or trusts a Work or Code Project for a key provider (Trusted providers), only from a window on the host; both are journaled and the host resolves them for every session it starts or resumes.
 - A Project's own settings, hooks, MCP servers and plugins load only in a Project the person trusted for that provider, at every level.
-- A per-thread switch is not built yet.
+- A thread may turn a key provider's own setup on or off for itself (Account default, On, Off), only from a window on the host and journaled; Off beats Full access, and On never grants a Project's code, which still needs the Project's trust (built for all four key providers).
 - Claude Code loads its own subagents (each shown as a child run, every call through the parent's gate), web search and fetch (asking below Full access, marking the thread), home skills, settings and hooks, and a trusted Project's settings, hooks, skills, MCP servers and plugins; its account's MCP servers start only with a trusted Project's.
 - Codex keeps its Project skills and, in Chat, the person's tool servers and plugins; its own subagents run only at Full access, because their approvals never reach Octant, each shown as a child run, with their web searches marking the thread.
-- OpenCode loads its own skills and answers a remembered 2.x approval `always`, saying the grant lives in OpenCode's own store; the person's own OpenCode config and permission rules, its delegation as child runs, and Reviewed through Octant Shield are not built yet.
-- Mistral Vibe's driver still switches these native features off (not built yet).
+- OpenCode loads its own skills, the MCP servers in the person's own configuration, and the permission rules they wrote (over the level, under Plan's denials and the outside-directory refusal; a catch-all rule is ignored), follows each session its `task` tool delegates to as a child run with its requests answered through the parent, and answers a remembered 2.x approval `always`, saying the grant lives in OpenCode's own store; Reviewed through Octant Shield is not built yet.
+- Mistral Vibe loads its own skills and Project context, the account's MCP servers, connectors and hooks, and a trusted Project's `.vibe` tools, MCP servers, hooks, plugins and agents under its own folder trust; it still runs through the ACP bridge (promotion not built yet).
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Providers](../architecture.md#providers) and [Provider runtimes: Key providers](provider-runtimes.md#key-providers).
 
@@ -508,7 +508,7 @@ Chat's missing file and shell authority is withheld by rule, not only in today's
 
 - Provider runtimes launch confined with exec and fork denied or with no execution environment, and a sandbox that only blocks writes is not enough because reads never escalate.
 - Octant-managed tools (research, Canvas) are unaffected because they run on the host.
-- A person's own tool servers stay off in Chat until the person lets the provider run as itself for the account (built for Codex); a per-thread switch is not built yet.
+- A person's own tool servers stay off in Chat until the person lets the provider run as itself for the account (built for Codex), or for one thread with its own-setup choice.
 - Provider-owned memory stays off in every mode, because a provider's global memory reaches across Projects.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
@@ -615,8 +615,11 @@ A Work or Code Project has one main folder plus extra folders the person adds; e
 - An extra folder is never the home folder or above it, a system or credential folder, the main folder, or inside or around the main folder or another extra folder; a Project has at most 16.
 - The OS profiles, the provider sandboxes and approval scopes, the Octant Harness file tools and Octant Shield's fast read and edit rules grant an extra folder exactly what they grant the main folder; Plan reads it without writing, and Full access stays unwrapped.
 - Each Work and Code turn names the extra folders to the agent.
-- Worktrees, checkouts, Git, terminals and Project actions stay in the main folder; an extra folder is a plain folder.
-- Not built yet: the `@file` picker, the Work Files and overview listings, Work artifact paths and Code search still address only the main folder.
+- Worktrees, checkouts and Git stay in the main folder; an extra folder is a plain folder. A Project terminal and a saved Project action start in the main folder by default and in any folder the Project lists when the person picks one; the host refuses any other path, and the terminal binds every listed folder like the main one.
+- Language services, debug sessions and repository tests cover an extra folder as a plain folder: a file there is named by absolute path, the host places it in one of the Project's current extra folders or refuses it, and a server, session or test run takes the folder as its own bound root.
+- A path relative to the main folder is always the main folder's; a file in an extra folder is named by its absolute path, which the host honours only inside one of the Project's current extra folders. The Work Files listing and a turn's record of changed files cover every folder, and the Work overview lists each extra folder's top level by its last component, with no host path.
+- The `@file` picker (Work and Code) lists and reads a file in an extra folder by its absolute path, only inside one of the Project's current extra folders; Code search covers the extra folders and marks each match with its folder; the harness shell and the ACP client file and terminal tools reach every Project folder.
+- Not built yet: Work artifacts the host creates still live in the main folder, and the Code editor and explorer do not open files of an extra folder.
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Projects with several folders](../architecture.md#projects-with-several-folders).
 
@@ -688,7 +691,7 @@ A Code thread may push its own branch and open, update and stack pull requests f
 - Plan mode and revoked forge access refuse every action; force-with-lease on the thread's own branch is the default, and a plain force-push or any push to the default branch needs the person's approval for that one act, which Full access does not stand in for.
 - Each action journals the actor, repository, number and head SHA, and Octant stores no forge token.
 - Built: push, amend with force-with-lease, plain force-push on approval, open (ready, draft, stacked), edit, labels of existing labels only, comments and review replies (approved for each post at every level), close and reopen, and an agent's merge on request.
-- Approving or requesting changes as a person, and a renderer surface for the person's own comment, reply, label, close and reopen controls, are allowed (not built yet).
+- The review pane carries the person's own label, comment, review-reply, close and reopen controls; the labels and review threads they name are read through a desktop-window-only query, and a label the repository lacks is never offered. Approving or requesting changes as a person is allowed (not built yet).
 - At Guarded and Reviewed a Code agent's shell can still reach forge credentials, and a change made that way is journaled only as a shell command (known gap).
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
@@ -701,7 +704,8 @@ A person merges one open pull request from its review in a local window. A Code 
 - Octant uses the host's forge command-line login and strips ambient tokens; every attempt journals the actor, repository, number, method, approved head SHA and result.
 - A paired phone or web client may merge one pull request or a whole stack, but only with `confirmed: true` for the head it reviewed; the server then requires the repository's required checks to pass and refuses when they fail, are pending or cannot be read. A stack merges bottom first, each child retargeted to the branch the stack lands on before it merges, and is refused whole unless it is one chain. A review reply is posted only after the thread is read back and found on the named pull request.
 - An agent merges on the person's request only after the person approves that one merge in the thread, at every guardrail level; no routine, plugin or hub or peer host reaches it.
-- Auto-merge from a paired device, an agent's merge on a Project setting or routine, and a fresh owner-device unlock are allowed (not built yet).
+- Merge when ready from a paired phone or web client needs the same confirmation of the reviewed head, and the phone panel offers Merge and Merge when ready after re-reading the pull request from GitHub.
+- An agent's merge on a Project setting or routine, and a fresh owner-device unlock, are allowed (not built yet).
 
 Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
@@ -709,7 +713,7 @@ Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Modes: Chat, Wor
 
 A Code thread's pull request review carries two switches the person turns on: Merge when ready, which turns on the forge's own auto-merge, and Auto-fix, which wakes one linked Code thread to fix failed required checks, unresolved review threads and base conflicts.
 
-- Only a local window turns either on; paired devices are refused, and no provider, agent tool, plugin or routine reaches these routes.
+- Only a local window turns Auto-fix on. A paired phone or web client may turn Merge when ready on with `confirmed: true` for the head it reviewed, and off without it; the forge still waits for the required checks and reviews. No provider, agent tool, plugin or routine reaches these routes.
 - Merge when ready uses the forge's auto-merge matched to the head the person saw, never a loop of Octant's own, and answers unsupported when the repository does not allow auto-merge.
 - Auto-fix wakes the thread with one turn through the routine follow-up path, under the thread's own level and approvals; it marks the thread as having read outside content first, and sends no turn if that mark is refused.
 - Auto-fix states Octant's rules to the agent first: never force-push, never rewrite pushed history, merge the base branch instead of rebasing.
@@ -955,7 +959,7 @@ The provider catalog lists only bundled driver manifests under a closed schema, 
 - First-run enablement of the two key CLI providers is decided once per scan from durable host state: only while first-run onboarding is pending and no instance was ever recorded. Later auto-registers stay disabled. _Here only._
 - Discovery may recover a single-token executable alias only by reading named shell startup files, byte-bounded, through the discovery filesystem port. The files are never sourced or executed. _Here only._
 - Outside drivers are installed held from a local folder, trusted at a digest, and run in a confined process on macOS only. A publisher key is pinned at first trust.
-- One agent runtime is withheld: the driver is not admitted, no instance or process is created, and stored instances and threads are kept (maintainer decision, 2026-10-29).
+- A bundled driver can be withheld: the driver is not admitted, no instance or process is created, and stored instances and threads are kept (maintainer decision, 2026-10-29). None is withheld; fx is offered again (maintainer decision, 2026-10-31).
 
 Status: Built. Since: 2026-10-26. Detail: [Architecture: Providers](../architecture.md#providers) and [Outside provider drivers](outside-provider-drivers.md).
 
@@ -1341,6 +1345,7 @@ Every launch that could affect the machine goes through one shared confinement p
 - A Plan launch's temporary directory is made for that launch alone, removed when it exits or is refused, and never the shared temp root; a temp root inside the checkout is refused. _Here only._
 - A terminal launch may read metadata, never data, on each exact ancestor of its own shell-state directory, so other threads' histories stay unreadable. _Here only._
 - A macOS launch whose egress is allow may reach the system trust daemon and system keychain roots so TLS clients verify certificates; user keychains and offline launches stay denied. _Here only._
+- An fx launch below Full access on macOS may read the one file `/Library/Keychains/System.keychain`, emitted after the Keychain and built-in secret-file denials so neither overrides it (a path the person protects still does); no write, no other keychain path, no other runtime, and `/var/db/SystemKey` stays denied (maintainer decision, 2026-10-31).
 
 Status: Built. Since: —. Detail: [Architecture: Security and authority, Sandbox](../architecture.md#security-and-authority).
 
@@ -1541,7 +1546,7 @@ Child runs receive equal-or-narrower authority than the parent, clamped server-s
 - Code children require a verified isolated worktree receipt, and a managed child's Canvas tools are bound to the workspace and Project the host resolved, never a path the model names.
 - A provider transport that cannot carry app-managed tools fails the start with a typed reason rather than dropping the tool.
 - A source turn may send at most three thread messages, and a target turn started by that tool is never offered the tool. _Here only._
-- Native subagents of the key providers are journaled and use the parent's approval path; a provider whose children would bypass it gets them only at Full access (built for Claude Code, and for Codex at Full access only; not built yet for the others, whose adapters keep native subagents off).
+- Native subagents of the key providers are journaled and use the parent's approval path; a provider whose children would bypass it gets them only at Full access (built for Claude Code, for Codex at Full access only, and for OpenCode, whose delegated sessions are followed as child runs; not built yet for the others, whose adapters keep native subagents off).
 
 Status: Partly built. Since: —. Detail: [Architecture: Security and authority, Subagents](../architecture.md#security-and-authority).
 

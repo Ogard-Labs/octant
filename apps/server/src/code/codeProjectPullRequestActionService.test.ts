@@ -74,6 +74,15 @@ function fixture(
     comment: vi.fn(options.forge?.comment ?? (async () => done)),
     replyToReviewThread: vi.fn(options.forge?.replyToReviewThread ?? (async () => done)),
     retarget: vi.fn(options.forge?.retarget ?? (async () => done)),
+    readContext: vi.fn(
+      options.forge?.readContext ??
+        (async () => ({
+          status: "read" as const,
+          labels: ["bug"],
+          repositoryLabels: ["bug", "p1"],
+          reviewThreads: [],
+        })),
+    ),
     setState: vi.fn(options.forge?.setState ?? (async () => done)),
     summary: vi.fn(
       options.forge?.summary ??
@@ -269,6 +278,41 @@ describe("project pull-request actions", () => {
     } finally {
       store.close();
     }
+  });
+});
+
+describe("pull-request action context", () => {
+  it("reads labels and review threads for the local window and journals nothing", async () => {
+    const f = fixture();
+    await expect(
+      f.service.readContext(windowId, target, signal(), "local-window"),
+    ).resolves.toEqual({
+      status: "read",
+      labels: ["bug"],
+      repositoryLabels: ["bug", "p1"],
+      reviewThreads: [],
+    });
+    expect(f.forge.readContext).toHaveBeenCalledWith(
+      { owner: "octant", name: "octant", number: 12 },
+      expect.any(AbortSignal),
+    );
+    expect(f.store.recorded()).toHaveLength(0);
+    f.store.close();
+  });
+
+  it("refuses a paired device and a Project outside the repository before reading the forge", async () => {
+    const remote = fixture();
+    await expect(
+      remote.service.readContext(windowId, target, signal(), "remote-device"),
+    ).resolves.toEqual({ status: "refused", reason: "not-authorized" });
+    const outside = fixture({ authorized: "not-authorized" });
+    await expect(
+      outside.service.readContext(windowId, target, signal(), "local-window"),
+    ).resolves.toEqual({ status: "refused", reason: "not-authorized" });
+    expect(remote.forge.readContext).not.toHaveBeenCalled();
+    expect(outside.forge.readContext).not.toHaveBeenCalled();
+    remote.store.close();
+    outside.store.close();
   });
 });
 

@@ -48,6 +48,32 @@ describe("WorkTurnFileObserver", () => {
     expect(harness.closed()).toBe(1);
   });
 
+  it("records a change in an extra folder by its absolute path and closes every watcher", () => {
+    const changes = new Map<string, (relativePath: string | undefined) => void>();
+    let closes = 0;
+    const port: WorkFileWatchPort = {
+      watch(root, change) {
+        changes.set(root, change);
+        return {
+          close: () => {
+            closes += 1;
+          },
+        };
+      },
+    };
+    const observation = new WorkTurnFileObserver({ watchPort: port }).observe("/work", ["/notes"]);
+
+    changes.get("/work")?.("summary.md");
+    changes.get("/notes")?.("ideas/plan.md");
+    changes.get("/notes")?.("../escape.md");
+
+    expect(observation.finish()).toEqual({
+      paths: ["/notes/ideas/plan.md", "summary.md"],
+      truncated: true,
+    });
+    expect(closes).toBe(2);
+  });
+
   it("records nothing when the folder did not change", () => {
     const harness = watchHarness();
     const observation = new WorkTurnFileObserver({ watchPort: harness.port }).observe("/work");

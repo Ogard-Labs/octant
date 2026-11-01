@@ -1,3 +1,4 @@
+import { readThreadNativeSetup } from "./threadNativeSetupProjection";
 import { homedir } from "node:os";
 import type {
   AgentProfile,
@@ -201,6 +202,8 @@ export interface PersistenceService {
   readonly readProjectMemory: (projectId: ProjectId) => ProjectMemoryView;
   readonly readProviderInstance: (instanceId: ProviderInstanceId) => ProviderInstance | undefined;
   readonly readProviderInstances: () => ReadonlyArray<ProviderInstance>;
+  /** A thread's own choice about its key provider's native setup; undefined when it inherits. */
+  readonly readThreadNativeSetup: (threadId: string) => "on" | "off" | undefined;
   readonly readRemovedProviderInstanceIds?: () => ReadonlyArray<string>;
   readonly readProviderDefaults: () => ProviderDefaults;
   readonly readProviderCatalog?: (
@@ -461,6 +464,7 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       readProjectMemory: (projectId) => readProjectMemory(connection, projectId),
       readProviderInstance: (instanceId) => readProviderInstance(connection, instanceId),
       readProviderInstances: () => readProviderInstances(connection),
+      readThreadNativeSetup: (threadId) => readThreadNativeSetup(connection, threadId),
       readRemovedProviderInstanceIds: () => readRemovedProviderInstanceIds(connection),
       readProviderDefaults: () => readProviderDefaults(connection),
       readProviderCatalog: (instanceId) => readProviderCatalog(connection, instanceId),

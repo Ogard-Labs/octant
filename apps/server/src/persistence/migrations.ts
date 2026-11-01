@@ -2412,6 +2412,18 @@ CREATE INDEX validation_evidence_authority_idx
     name: "create_host_memory_limits_projection",
     sql: HOST_MEMORY_LIMITS_PROJECTION_SQL,
   },
+  {
+    version: 92,
+    name: "create_thread_native_setup_projection",
+    sql: `
+      CREATE TABLE thread_native_setup_projection (
+        thread_id TEXT PRIMARY KEY CHECK(length(trim(thread_id)) > 0),
+        choice TEXT NOT NULL CHECK(choice IN ('on', 'off', 'inherit')),
+        aggregate_version INTEGER NOT NULL CHECK(aggregate_version > 0),
+        last_sequence INTEGER NOT NULL CHECK(last_sequence > 0)
+      ) STRICT;
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {

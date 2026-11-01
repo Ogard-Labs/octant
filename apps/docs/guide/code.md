@@ -154,6 +154,13 @@ earlier ones exist; it has no Load earlier, so read those on the desktop.
 `octant agent` shows a Code thread's newest 50 turns, and its footer then
 counts them as **newest 50 turns**.
 
+On the phone, a Code thread's pull-request panel has **Merge…** and **Merge when
+ready…** for an open pull request. Each re-reads the pull request from GitHub,
+shows the short head it read, and waits for your **Confirm**. A merge goes
+ahead only if that head is still current and the required checks have passed;
+**Merge when ready** hands the merge to GitHub once they do. Labels, comments,
+replies, close, and reopen stay on the desktop.
+
 In `octant agent`, Stop reports an interruption only when the host confirms it.
 If the turn finishes before Stop arrives, it reports that nothing is running;
 if the host refuses, the terminal shows the reason.
@@ -442,3 +449,15 @@ Octant sends only the new message and never silently starts a replacement sessio
 If the saved session cannot be resumed, the task reports that failure. Older tasks
 without a saved session reference need a new task; a host restart also requires
 an adapter that supports durable resume identity.
+
+## Find in a thread
+
+Press **⌘/Ctrl+F** in an open thread to search its conversation. A bar at the top
+shows "n of m", highlights each match, and moves with **Enter** (next) and
+**Shift+Enter** (previous). **Escape** closes it. Inside the code editor or a
+terminal, ⌘/Ctrl+F stays with that tool.
+
+Select text in one of the agent's replies and choose **New thread from
+selection**, from the small button under the reply or the right-click menu. A
+new Code draft opens in the same Project with your selection quoted at the top.
+Nothing is sent until you send it.

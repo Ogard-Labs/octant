@@ -53,9 +53,11 @@ Projects support the following operations:
 A Work or Code Project has one main folder and can have extra folders beside it, for example a notes folder next to a repository. Open the Project overview and select **Add folder…** on the folders card; on the desktop app this opens the folder picker. **Remove** next to a folder takes it out of the Project and leaves the folder itself untouched.
 
 - An extra folder gets the same access as the main folder at each thread's level: at Ask first, writes there ask as they do in the main folder; in Plan it is read-only; at Full access nothing is confined.
-- Commands, checkouts and Git start in the main folder. An extra folder is a plain folder: Octant manages no checkout or worktree in it.
+- Checkouts and Git stay in the main folder. An extra folder is a plain folder: Octant manages no checkout or worktree in it.
+- Language services, [Run and debug](/advanced/debugging) and the Tests tool cover an extra folder. A file there is named by its full path. The Tests tool lists each extra folder's `test` scripts and `.octant/tests.json` tests, named after the folder, and runs them in that folder.
+- A Project terminal and your saved actions start in the main folder. Once the Project has an extra folder, the action buttons in the window header show a **Run in** menu, and the Code start screen's quick tools list **Terminal in** each extra folder. The terminal can reach every folder of the Project.
 - Agents are told the extra folders' paths at the start of each turn. A folder added or removed applies from the next turn.
-- The `@file` picker and the Files and overview listings still show only the main folder.
+- The Files tool of a Work thread and the Overview's folder list include the extra folders. A file there shows its own name, with its folder's full path beside it, and opens like any other file. The `@file` picker in Work and Code offers files from the extra folders by their full path, and Code search lists matches there with the folder's name in front. The Code editor opens files of the main checkout only, so choose such a match from your own editor.
 - Octant refuses your home folder itself, any folder above it, system folders, and folders that hold keys or credentials (such as `~/.ssh` or `~/.aws`), as well as a folder inside or around the main folder or another extra folder. A Project can have up to 16 extra folders.
 
 Only you add or remove folders; an agent cannot. Each change is recorded with who made it and when.

@@ -17,11 +17,12 @@ export type FileMentionRequestId = typeof FileMentionRequestId.Type;
 export const MAX_FILE_MENTION_RELATIVE_PATH_BYTES = 4_096;
 
 /**
- * A confined POSIX relative path a file mention may name. Absolute paths,
- * parent traversal, backslashes, and the other Work/Code relative-path
- * refusals are rejected here so a mention can never even *name* a location
- * outside the bound root on the wire.
- *
+ * A confined POSIX path a file mention may name: relative to the main folder,
+ * or absolute inside one of the Project's extra folders. Parent traversal,
+ * backslashes, and the other Work/Code relative-path refusals are rejected
+ * here. The schema cannot tell an extra folder from any other absolute path,
+ * so the host checks an absolute path against the Project's extra folders
+ * before it reads anything.
  * Turn commands carry raw strings and re-run this classification in policy
  * before any read, so a renderer that bypasses the typeahead is still refused.
  */
@@ -31,14 +32,15 @@ export const FileMentionPath = Schema.String.pipe(
       value.length === 0 ||
       value.includes("\0") ||
       value.includes("\\") ||
-      value.startsWith("/") ||
+      value === "/" ||
+      value.startsWith("//") ||
       value.endsWith("/") ||
       value.normalize("NFC") !== value ||
       textEncoder.encode(value).byteLength > MAX_FILE_MENTION_RELATIVE_PATH_BYTES
     ) {
       return false;
     }
-    const components = value.split("/");
+    const components = (value.startsWith("/") ? value.slice(1) : value).split("/");
     return components.every(
       (component) => component !== "" && component !== "." && component !== "..",
     );

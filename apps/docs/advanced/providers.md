@@ -156,8 +156,14 @@ shows each subagent it can see and marks a thread that read the web.
   Project's own settings, hooks, MCP servers, and plugins, code that no
   Octant review step sees. A provider you do not trust there never loads a
   Project's code, even at Full access.
+- **For one thread:** the **Own setup** menu next to the composer's picker
+  offers **Account default**, **On**, and **Off**. **On** loads the
+  provider's own setup in that thread as the account switch would, but never
+  a Project's code, which still needs the Project's trust. **Off** loads none
+  of it in that thread, even at Full access. The choice applies from the
+  thread's next turn.
 - **Full access** turns a provider's own setup on by itself, as in the
-  provider's own app.
+  provider's own app, unless the thread says Off.
 
 What each one loads today:
 
@@ -175,11 +181,28 @@ What each one loads today:
 - **OpenCode:** its skills in `.claude/skills` and `.agents/skills` (below
   Full access only the Project's). If you remember approvals for the
   Project, approving one remembers it in OpenCode's own settings, as OpenCode
-  does; the approval says so, and you clear it in OpenCode. Your own
-  OpenCode configuration, MCP servers, and permission rules do not load in
-  Octant yet.
+  does; the approval says so, and you clear it in OpenCode. The MCP servers
+  in your own OpenCode configuration load too, and their tools follow the
+  thread's level; a password or token typed straight into a server's
+  settings is left out, so give the server an environment variable
+  (`{env:NAME}`) instead. The permission rules you wrote in OpenCode apply
+  over the thread's level: a command or edit you allowed runs without
+  asking, and without Reviewed's reviewer. Plan's denials and the refusal
+  of folders outside the Project always win, and a catch-all rule is
+  ignored, because only the thread's level can lift everything. When
+  OpenCode hands a task to a subagent, it shows in the thread as a
+  subagent run, and any approval it needs reaches you the same way as the
+  main session's.
+- **Mistral Vibe:** its skills, the Project's context files, the MCP
+  servers, connectors, and hooks in its own settings, and in a trusted
+  Project that Project's `.vibe` tools, MCP servers, hooks, plugins, and
+  agents, as long as Vibe itself trusts the folder too.
 
-Only a window on the computer running Octant can change either switch; a
+At Auto in Code, Mistral Vibe now reviews its own approvals with its
+auto-approve mode, as Claude Code and Codex do with theirs, until the thread
+reads something from the web.
+
+Only a window on the computer running Octant can change any of these switches; a
 paired phone or browser cannot. Plan mode stays read-only, so it never runs
 hooks, tool servers, or a Project's code. Chat never gets a folder or a
 shell, so it never runs hooks or a Project's code; your own tool servers do
@@ -206,7 +229,7 @@ it instead of imitating it.
 | Octant tools (Browser, Computer)  | Yes         | Yes                         | macOS, some releases | After a check | macOS, some agents    | Verified models                          | Verified models                          |
 | Change model inside a thread      | Yes         | Yes                         | No                   | No            | No                    | Yes                                      | Yes                                      |
 | Compact session                   | Yes         | Yes, Codex 0.162.1 or newer | No                   | No            | No                    | Octant does it; Code uses Octant Harness | Octant does it; Code uses Octant Harness |
-| Auto-review of approvals in Code  | Yes         | Yes                         | No                   | No            | No                    | No                                       | No                                       |
+| Auto-review of approvals in Code  | Yes         | Yes                         | No                   | No            | Mistral Vibe          | No                                       | No                                       |
 
 - **Replayed** means the provider keeps no session of its own, so Octant sends
   the thread's history again, fitted to the model's context window. Changing
@@ -380,14 +403,14 @@ shell are intentionally ignored; add a persistent alias declaration or use
 Local CLI and SDK providers include Codex CLI, Claude Agent SDK,
 OpenCode CLI, Kilo ACP, Pi RPC, Oh My Pi, Devin ACP, Mistral Vibe ACP,
 Ollama, Kimi Code ACP, Grok Build ACP, Goose ACP, GLM Agent, Gemini CLI ACP,
-GitHub Copilot ACP, Cline ACP, and Qwen Code ACP.
+GitHub Copilot ACP, Cline ACP, Qwen Code ACP, and fx.
 
-Octant does not offer fx for now. The current fx release cannot load
-certificates inside Octant's sandbox, so it cannot reach the Vercel AI Gateway.
-Octant does not find fx, add it, or start it. If you already added an fx
-provider, Settings keeps it and its threads and says why it is unavailable; it
-cannot start new turns. Octant will offer fx again once a fx release fixes
-this.
+fx loads its certificates from the macOS System Keychain file,
+`/Library/Keychains/System.keychain`, so Octant's sandbox lets fx read that one
+file and nothing else of the Keychains. Every Mac user can already read it, and
+the passwords inside are encrypted with a key only the system can read, which
+stays blocked. Your own keychains stay blocked too. fx works in Work and Code;
+it does not run in Chat or Plan.
 
 Codex commentary and subsequent answer messages retain paragraph boundaries
 in new responses, including when the provider sends a completed message

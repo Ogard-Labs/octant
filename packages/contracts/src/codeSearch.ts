@@ -42,16 +42,28 @@ export type CodeSearchScope = typeof CodeSearchScope.Type;
  * also states where in the file it was found and shows the line it was on,
  * clipped to the preview bound. Nothing here is a host absolute path.
  */
+/**
+ * The Project's extra folder a match lies in, as its absolute path; the match's
+ * `path` is relative to it. Absent means the checkout. The explorer and editor
+ * address the checkout only, so a match with a folder is shown but not opened.
+ */
+export const CodeSearchFolder = Schema.String.pipe(
+  Schema.filter((value) => value.startsWith("/") && value.length > 1 && !value.includes("\0")),
+);
+export type CodeSearchFolder = typeof CodeSearchFolder.Type;
+
 export const CodeSearchMatch = Schema.Union(
   Schema.Struct({
     scope: Schema.Literal("path"),
     fileId: CodeFileId,
     path: CodeRelativePath,
+    folder: Schema.optional(CodeSearchFolder),
   }).annotations(strict),
   Schema.Struct({
     scope: Schema.Literal("content"),
     fileId: CodeFileId,
     path: CodeRelativePath,
+    folder: Schema.optional(CodeSearchFolder),
     line: Schema.Int.pipe(Schema.positive()),
     column: Schema.Int.pipe(Schema.positive()),
     preview: Schema.String.pipe(Schema.maxLength(MAX_CODE_SEARCH_PREVIEW_LENGTH)),

@@ -5,6 +5,7 @@ import { WorkRequestRuntime } from "../work/workRequestRuntime";
 import { WorkRequestService } from "../work/workRequestService";
 import type { RunningWorkTurnAccess } from "../work/workTurnService";
 import type { WorkAccess } from "@octant/contracts";
+import type { ShieldReviewPort } from "../shield/octantShield";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import type { FoundationsWiring } from "./foundations";
 import type { ServerStart } from "./serverShape";
@@ -58,9 +59,13 @@ export function wireWorkRequestState(deps: WorkRequestStateDependencies) {
     actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
     clock: () => new Date().toISOString(),
   });
+  // Octant Shield is built with the harness, after this runtime; a Work
+  // thread's approval prompts go through it once it exists.
+  const workShieldHolder: { port?: ShieldReviewPort } = {};
   const workRequestRuntime = new WorkRequestRuntime({
     requests: workRequestService,
     uuid: randomUUID,
+    shield: () => workShieldHolder.port,
   });
   workRequestService.hydrate();
   workRequestService.interruptOnRestart();
@@ -68,7 +73,13 @@ export function wireWorkRequestState(deps: WorkRequestStateDependencies) {
   const runningWorkTurns: RunningWorkTurnAccess = new Map();
   const runningWorkTurnAccess = (threadId: string): WorkAccess | undefined =>
     runningWorkTurns.get(threadId)?.access;
-  return { runningWorkTurnAccess, runningWorkTurns, workRequestRuntime, workRequestService };
+  return {
+    runningWorkTurnAccess,
+    runningWorkTurns,
+    workRequestRuntime,
+    workRequestService,
+    workShieldHolder,
+  };
 }
 
 export type WorkRequestStateWiring = ReturnType<typeof wireWorkRequestState>;

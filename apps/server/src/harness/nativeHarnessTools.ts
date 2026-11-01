@@ -65,6 +65,14 @@ const DEFAULT_DELEGATE_WAIT_MS = 60_000;
 const STALE_AUTHORITY_MESSAGE =
   "This thread can no longer use tools: it was archived or deleted, its folder or Project changed, or its provider was turned off. Do not retry. Tell the person what you would have done, and that they can reopen the thread or start a new one.";
 
+function shellExtraRoots(filesystem: { readonly extraRoots?: ReadonlyArray<string> }): {
+  readonly extraRoots?: ReadonlyArray<string>;
+} {
+  return filesystem.extraRoots === undefined || filesystem.extraRoots.length === 0
+    ? {}
+    : { extraRoots: filesystem.extraRoots };
+}
+
 export interface NativeHarnessShellRun {
   readonly status: "ran" | "timed-out" | "cancelled" | "unavailable";
   readonly exitCode?: number;
@@ -76,6 +84,8 @@ export interface NativeHarnessShellPort {
   run(input: {
     readonly command: string;
     readonly cwd: string;
+    /** Extra Project folders the command may read and write like `cwd`; it still starts in `cwd`. */
+    readonly extraRoots?: ReadonlyArray<string>;
     readonly timeoutMs: number;
     /** The authorized call this command runs for; it names the launch's egress records. */
     readonly callId?: string;
@@ -553,6 +563,7 @@ async function execute(
       const run = await ports.shell!.run({
         command: input.command,
         cwd: ports.filesystem!.root,
+        ...shellExtraRoots(ports.filesystem ?? {}),
         timeoutMs: input.timeoutMs ?? DEFAULT_SHELL_TIMEOUT_MS,
         callId,
         ...(signal === undefined ? {} : { signal }),
@@ -752,6 +763,7 @@ async function checkGoalCriterion(
   const run = await shell.run({
     command: criterion.check,
     cwd: filesystem.root,
+    ...shellExtraRoots(filesystem),
     timeoutMs: GOAL_CHECK_TIMEOUT_MS,
     callId,
     ...(signal === undefined ? {} : { signal }),

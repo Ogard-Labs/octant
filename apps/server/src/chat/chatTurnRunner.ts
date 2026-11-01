@@ -26,6 +26,7 @@ import {
   type ProviderResumeCursor,
   type ProviderRuntimeEvent,
   type ProviderServiceLimits,
+  type ShieldWatcherLabel,
   type TurnStopReason,
   type TurnUsage,
   type ThreadTaskProgress,
@@ -35,6 +36,7 @@ import {
 } from "@octant/contracts";
 import {
   accumulateTurnUsage,
+  markThreadToolStepOutsideContent,
   observeTurnMetrics,
   recordThreadToolStep,
   startTurnMetrics,
@@ -477,6 +479,35 @@ export class ChatTurnRunner {
           },
           decodeChatFailure({ category: "failed", message: RUNTIME_OUTSIDE_CONTENT_REFUSAL }),
         );
+      // The row of a call whose result brought outside content carries the
+      // Watcher's tag, with what it found, on the attempt's own tool steps.
+      const markToolRow = (
+        toolCallId: string,
+        toolName: string,
+        labels: ReadonlyArray<ShieldWatcherLabel>,
+      ) =>
+        Effect.gen(function* () {
+          const before: ThreadToolSteps | undefined =
+            currentAttempt.toolSteps === undefined
+              ? undefined
+              : {
+                  steps: currentAttempt.toolSteps,
+                  truncated: currentAttempt.toolStepsTruncated === true,
+                };
+          const after = markThreadToolStepOutsideContent(before, {
+            toolCallId,
+            toolName,
+            mark: { labels },
+          });
+          if (after === undefined || after === before) return;
+          currentAttempt = {
+            ...currentAttempt,
+            toolSteps: after.steps,
+            ...(after.truncated ? { toolStepsTruncated: true } : {}),
+            updatedAt: updatedAt(),
+          };
+          yield* input.persistAttempt(currentAttempt);
+        });
       // An earlier attempt's read that could not be marked is still in the
       // session this attempt would resume.
       if (outsideContentMarks.settleOwed(String(input.thread.id)).status === "refused") {
@@ -1026,6 +1057,17 @@ export class ChatTurnRunner {
                   input.onHarnessRetryCleared?.();
                 }
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
+                if (event.kind === "outside-content-result") {
+                  const watched = outsideContentMarks.watch(String(input.thread.id), event);
+                  if (watched.status === "refused") {
+                    yield* connection
+                      .interrupt(input.attempt.providerSessionId)
+                      .pipe(Effect.catchAll(() => Effect.void));
+                    return yield* unmarked();
+                  }
+                  yield* markToolRow(event.toolCallId, event.toolName, watched.labels);
+                  return;
+                }
                 if (event.kind === "outside-content-read") {
                   // Marked before the budget or a cancel is looked at: what
                   // the runtime read reached its model either way.
@@ -1037,6 +1079,7 @@ export class ChatTurnRunner {
                       .pipe(Effect.catchAll(() => Effect.void));
                     return yield* unmarked();
                   }
+                  yield* markToolRow(event.toolCallId, event.toolName, []);
                   if (input.signal?.aborted !== true && handledEvents <= maxEvents) return;
                 }
                 if (handledEvents > maxEvents) {
@@ -1398,6 +1441,13 @@ export class ChatTurnRunner {
                     ),
                   );
                   if (executionSignal?.aborted || execution === undefined) return;
+                  if (execution.isError !== true && execution.outsideContent !== undefined) {
+                    yield* markToolRow(
+                      event.requestId,
+                      event.toolName,
+                      execution.outsideContent.labels,
+                    );
+                  }
                   yield* callProvider(
                     connection.answerTool({
                       sessionId: input.attempt.providerSessionId,

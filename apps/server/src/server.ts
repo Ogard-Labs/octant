@@ -381,11 +381,16 @@ export function startOctantServer(
       windowAuthorityStore,
       workThreadProjection,
     });
-    const { runningWorkTurnAccess, runningWorkTurns, workRequestRuntime, workRequestService } =
-      wireWorkRequestState({
-        persistence,
-        workThreadProjection,
-      });
+    const {
+      runningWorkTurnAccess,
+      runningWorkTurns,
+      workRequestRuntime,
+      workRequestService,
+      workShieldHolder,
+    } = wireWorkRequestState({
+      persistence,
+      workThreadProjection,
+    });
     const {
       agentPluginMcpSessionManager,
       chatAttachmentStore,
@@ -722,6 +727,7 @@ export function startOctantServer(
     // Octant Shield's decisions show on the Code transcript beside the tool
     // rows; the runtime that owns the transcript is built after Shield.
     hostShield.showDecisionsWith((input) => codeOperationRuntime?.recordShieldReview?.(input));
+    workShieldHolder.port = hostShield;
     const {
       codeCheckoutOpenRoutes,
       codeExternalEditorRoutes,

@@ -13,7 +13,13 @@ describe("file mention contracts", () => {
   it("decodes a confined relative path and rejects parent traversal", () => {
     expect(decodeFileMentionPath("src/index.ts")).toBe("src/index.ts");
     expect(() => decodeFileMentionPath("../secret")).toThrow();
-    expect(() => decodeFileMentionPath("/etc/passwd")).toThrow();
+    expect(() => decodeFileMentionPath("/../etc/passwd")).toThrow();
+    expect(() => decodeFileMentionPath("//etc/passwd")).toThrow();
+    expect(() => decodeFileMentionPath("/")).toThrow();
+  });
+
+  it("names a file inside an extra folder by its absolute path", () => {
+    expect(decodeFileMentionPath("/Users/me/Notes/ideas.md")).toBe("/Users/me/Notes/ideas.md");
   });
 
   it("decodes a Code complete command and a Work resolve command", () => {

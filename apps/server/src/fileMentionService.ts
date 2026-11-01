@@ -13,6 +13,7 @@ import {
 } from "@octant/contracts";
 import {
   boundFileMentionText,
+  classifyFileMentionExtraFolderPath,
   classifyFileMentionRelativePath,
   FILE_MENTION_OUT_OF_ROOT_CONTEXT,
   FILE_MENTION_UNREADABLE_CONTEXT,
@@ -31,6 +32,14 @@ export type FileMentionRootResolution =
       readonly kind: "ok";
       readonly rootPath: string;
       readonly rootIdentity: FileMentionRootIdentity;
+      /**
+       * The Project's extra folders that exist, each pinned like the main
+       * root. Their files are named by absolute path.
+       */
+      readonly extraRoots?: ReadonlyArray<{
+        readonly rootPath: string;
+        readonly rootIdentity: FileMentionRootIdentity;
+      }>;
     }
   | { readonly kind: "unauthorized" }
   | { readonly kind: "unavailable" }
@@ -196,14 +205,28 @@ export class FileMentionService {
     root: Extract<FileMentionRootResolution, { readonly kind: "ok" }>,
     query: string,
   ): Promise<FileMentionCommandResult> {
-    if (fileMentionQueryEscapesRoot(query)) {
+    // An extra folder's files are named by absolute path, so a query may
+    // start with one slash; the rest of it is checked as any query is.
+    if (fileMentionQueryEscapesRoot(query.startsWith("/") ? query.slice(1) : query)) {
       return decodeFileMentionCommandResult({
         kind: "file-mentions-completed",
         requestId,
         candidates: [],
       });
     }
-    const listed = await this.#listCached(root);
+    const listed = [...(await this.#listCached(root))];
+    for (const extra of root.extraRoots ?? []) {
+      const files = await this.#listCached(extra);
+      for (const file of files) {
+        // A folder whose own path the wire cannot carry (a backslash,
+        // decomposed Unicode, too long) loses its files, not everyone's.
+        try {
+          listed.push({ ...file, path: decodeFileMentionPath(`${extra.rootPath}/${file.path}`) });
+        } catch {
+          break;
+        }
+      }
+    }
     return decodeFileMentionCommandResult({
       kind: "file-mentions-completed",
       requestId,
@@ -211,9 +234,10 @@ export class FileMentionService {
     });
   }
 
-  async #listCached(
-    root: Extract<FileMentionRootResolution, { readonly kind: "ok" }>,
-  ): ReturnType<FileMentionIo["list"]> {
+  async #listCached(root: {
+    readonly rootPath: string;
+    readonly rootIdentity: FileMentionRootIdentity;
+  }): ReturnType<FileMentionIo["list"]> {
     const key = `${root.rootPath}\0${root.rootIdentity.device}\0${root.rootIdentity.inode}`;
     const now = Date.now();
     const cached = this.#listings.get(key);
@@ -239,20 +263,38 @@ export class FileMentionService {
       truncated: boolean;
     }> = [];
     const unavailable: UnavailableFileMention[] = [];
-    for (const relativePath of paths) {
+    const extraRoots = root.extraRoots ?? [];
+    for (const mentioned of paths) {
+      // An absolute path is read only from the extra folder it lies inside;
+      // anything else absolute stays out of root.
+      const inFolder = mentioned.startsWith("/")
+        ? classifyFileMentionExtraFolderPath(
+            mentioned,
+            extraRoots.map((extra) => extra.rootPath),
+          )
+        : undefined;
+      const extra =
+        inFolder?.kind === "in-folder"
+          ? extraRoots.find((candidate) => candidate.rootPath === inFolder.folder)
+          : undefined;
       const resolved = await resolveMentionedFile({
-        relativePath,
-        rootPath: root.rootPath,
+        relativePath: inFolder?.kind === "in-folder" ? inFolder.path : mentioned,
+        rootPath: (extra ?? root).rootPath,
         io: this.#io,
-        rootIdentity: root.rootIdentity,
+        rootIdentity: (extra ?? root).rootIdentity,
       });
       if (resolved.kind === "unavailable") {
-        unavailable.push({ path: resolved.path, reason: resolved.reason });
+        unavailable.push({
+          path: extra === undefined ? resolved.path : mentioned,
+          reason: resolved.reason,
+        });
         continue;
       }
       let path;
       try {
-        path = decodeFileMentionPath(resolved.path);
+        path = decodeFileMentionPath(
+          extra === undefined ? resolved.path : `${extra.rootPath}/${resolved.path}`,
+        );
       } catch {
         unavailable.push({ path: resolved.path, reason: "out-of-root" });
         continue;

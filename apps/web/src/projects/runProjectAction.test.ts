@@ -61,4 +61,18 @@ describe("running a Project action", () => {
     ]);
     expect(notices).toEqual([]);
   });
+
+  it("names the chosen extra folder to the host and leaves it out by default", async () => {
+    const withFolder = setup([ran]);
+    await runProjectAction(
+      { ...withFolder.dependencies, folder: "/Users/me/notes" },
+      projectId,
+      action,
+    );
+    expect(withFolder.sent).toEqual([expect.objectContaining({ folder: "/Users/me/notes" })]);
+
+    const byDefault = setup([ran]);
+    await runProjectAction(byDefault.dependencies, projectId, action);
+    expect(byDefault.sent[0]).not.toHaveProperty("folder");
+  });
 });

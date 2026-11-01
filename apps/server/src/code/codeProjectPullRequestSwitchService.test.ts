@@ -163,12 +163,12 @@ const MERGE_WHEN_READY = "code.project-pull-request-merge-when-ready-recorded@1"
 const AUTO_FIX = "code.project-pull-request-auto-fix-recorded@1";
 
 describe("Merge when ready", () => {
-  it("refuses a caller that is not the local user before reaching the forge", async () => {
+  it("refuses a paired device that did not confirm the head before reaching the forge", async () => {
     const f = fixture();
     const outcome = await f.service.setMergeWhenReady(
       windowId,
       { kind: "enable", target, headSha: "a1" },
-      "agent",
+      "remote-device",
       signal,
     );
     expect(outcome).toEqual({ status: "refused", reason: "not-authorized" });
@@ -177,12 +177,48 @@ describe("Merge when ready", () => {
     expect(f.recorded(MERGE_WHEN_READY)).toHaveLength(0);
   });
 
+  it("turns auto-merge on for a paired device that confirmed the head, and journals the device", async () => {
+    const f = fixture();
+    const outcome = await f.service.setMergeWhenReady(
+      windowId,
+      { kind: "enable", target, headSha: "a1", confirmed: true },
+      "remote-device",
+      signal,
+    );
+    expect(outcome.status).toBe("applied");
+    expect(f.forge.enableAutoMerge).toHaveBeenCalledWith(
+      expect.objectContaining({ number: 12, headSha: "a1" }),
+      signal,
+    );
+    const [event] = f.recorded(MERGE_WHEN_READY);
+    expect(event?.payload).toMatchObject({
+      change: { kind: "enabled", headSha: "a1", caller: "remote-device" },
+    });
+  });
+
+  it("lets a paired device turn auto-merge off without a confirmation", async () => {
+    const f = fixture();
+    await f.service.setMergeWhenReady(
+      windowId,
+      { kind: "enable", target, headSha: "a1" },
+      "local-window",
+      signal,
+    );
+    const outcome = await f.service.setMergeWhenReady(
+      windowId,
+      { kind: "disable", target },
+      "remote-device",
+      signal,
+    );
+    expect(outcome.status).toBe("applied");
+  });
+
   it("reports a repository without auto-merge as unsupported and never turns it on", async () => {
     const f = fixture({ allowAutoMerge: false });
     const outcome = await f.service.setMergeWhenReady(
       windowId,
       { kind: "enable", target, headSha: "a1" },
-      "user",
+      "local-window",
       signal,
     );
     expect(outcome).toEqual({ status: "unsupported", reason: "auto-merge-not-allowed" });
@@ -195,7 +231,7 @@ describe("Merge when ready", () => {
     const outcome = await f.service.setMergeWhenReady(
       windowId,
       { kind: "enable", target, headSha: "a1" },
-      "user",
+      "local-window",
       signal,
     );
     expect(outcome.status).toBe("applied");
@@ -215,7 +251,7 @@ describe("Merge when ready", () => {
     const outcome = await f.service.setMergeWhenReady(
       windowId,
       { kind: "enable", target, headSha: "a1", method: "rebase" },
-      "user",
+      "local-window",
       signal,
     );
     expect(outcome).toEqual({ status: "refused", reason: "method-not-allowed" });
@@ -227,7 +263,7 @@ describe("Merge when ready", () => {
     await f.service.setMergeWhenReady(
       windowId,
       { kind: "enable", target, headSha: "a1" },
-      "user",
+      "local-window",
       signal,
     );
     f.observe(observed({ waitingOn: ["checks"] }));
@@ -242,7 +278,7 @@ describe("Merge when ready", () => {
     await f.service.setMergeWhenReady(
       windowId,
       { kind: "enable", target, headSha: "a1" },
-      "user",
+      "local-window",
       signal,
     );
     f.observe(observed({ autoMergeEnabled: false }));
@@ -449,7 +485,7 @@ describe("Auto-fix", () => {
     await f.service.setMergeWhenReady(
       windowId,
       { kind: "enable", target, headSha: "a1" },
-      "user",
+      "local-window",
       signal,
     );
     await f.service.setAutoFix(windowId, { kind: "enable", target, threadId }, "user");

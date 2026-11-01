@@ -416,6 +416,13 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     ...(codeClient.queryProjectPullRequestSwitches === undefined
       ? {}
       : { loadSwitches: codeClient.queryProjectPullRequestSwitches.bind(codeClient) }),
+    ...(codeClient.readProjectPullRequestActionContext === undefined ||
+    codeClient.actOnProjectPullRequest === undefined
+      ? {}
+      : {
+          loadActionContext: codeClient.readProjectPullRequestActionContext.bind(codeClient),
+          act: codeClient.actOnProjectPullRequest.bind(codeClient),
+        }),
     ...(codeClient.setProjectPullRequestMergeWhenReady === undefined
       ? {}
       : { setMergeWhenReady: codeClient.setProjectPullRequestMergeWhenReady.bind(codeClient) }),

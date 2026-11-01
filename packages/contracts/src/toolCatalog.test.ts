@@ -141,16 +141,20 @@ describe("Code language read entries", () => {
     }
   });
 
-  it("takes a checkout-relative path and a one-based position, and nothing else", () => {
+  it("takes a checkout-relative or extra-folder path and a one-based position, and nothing else", () => {
     expect(diagnostics?.decodeArguments({ path: "src/a.ts" })).toEqual({ path: "src/a.ts" });
     expect(definition?.decodeArguments({ path: "src/a.ts", line: 2, column: 14 })).toEqual({
       path: "src/a.ts",
       line: 2,
       column: 14,
     });
-    for (const path of ["/etc/passwd", "../outside.ts", "src/../../a.ts", "src\\a.ts", ""]) {
+    for (const path of ["../outside.ts", "src/../../a.ts", "src\\a.ts", ""]) {
       expect(() => diagnostics?.decodeArguments({ path })).toThrow();
     }
+    // A file in an extra folder is named by absolute path; the host refuses any
+    // absolute path outside the Project's folders, so the schema only carries it.
+    expect(diagnostics?.decodeArguments({ path: "/notes/a.ts" })).toEqual({ path: "/notes/a.ts" });
+    expect(() => diagnostics?.decodeArguments({ path: "/notes/../a.ts" })).toThrow();
     expect(() => diagnostics?.decodeArguments({ path: "a.ts", fileId: "x" })).toThrow();
     expect(() => definition?.decodeArguments({ path: "a.ts", line: 0, column: 1 })).toThrow();
     expect(() => definition?.decodeArguments({ path: "a.ts", line: 1, column: 0 })).toThrow();

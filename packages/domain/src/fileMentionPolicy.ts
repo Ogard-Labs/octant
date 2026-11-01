@@ -43,6 +43,30 @@ export function classifyFileMentionRelativePath(raw: string): FileMentionPathCla
 }
 
 /**
+ * Which of a Project's extra folders an absolute mentioned path lies inside,
+ * and the path relative to it. A path is inside only at a component boundary,
+ * so `/work/notes-old/a.md` is not inside `/work/notes`; the match is on the
+ * path as written, and the host still confines the read against the folder's
+ * real directory. Parent traversal never matches.
+ */
+export function classifyFileMentionExtraFolderPath(
+  raw: string,
+  extraFolders: ReadonlyArray<string>,
+):
+  | { readonly kind: "in-folder"; readonly folder: string; readonly path: string }
+  | { readonly kind: "out-of-root" } {
+  if (!raw.startsWith("/")) return { kind: "out-of-root" };
+  for (const folder of extraFolders) {
+    let base = folder;
+    while (base.endsWith("/")) base = base.slice(0, -1);
+    if (!raw.startsWith(`${base}/`)) continue;
+    const relative = classifyFileMentionRelativePath(raw.slice(base.length + 1));
+    if (relative.kind === "in-root") return { kind: "in-folder", folder, path: relative.path };
+  }
+  return { kind: "out-of-root" };
+}
+
+/**
  * Find the `@…` token the caret sits in, if any.
  *
  * Typing `@` never resolves anything by itself: an unmatched `@text` stays
