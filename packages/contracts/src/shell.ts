@@ -487,6 +487,29 @@ export const StandaloneSkillActivationMap = Schema.Record({
 }).annotations(strict);
 export type StandaloneSkillActivationMap = typeof StandaloneSkillActivationMap.Type;
 
+/** The key providers whose own skill folder a person can turn on. */
+export const SKILL_FOLDER_PROVIDERS = ["claude", "codex"] as const;
+export const SkillFolderProvider = Schema.Literal(...SKILL_FOLDER_PROVIDERS);
+export type SkillFolderProvider = typeof SkillFolderProvider.Type;
+
+/** An absolute folder path with no relative segment, as a person typed or picked it. */
+export const SkillFolderPath = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(1024),
+  Schema.filter(
+    (path) =>
+      (path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path)) &&
+      !path.split(/[\\/]/).includes("..") &&
+      !path.includes("\0"),
+    { message: () => "A skill folder is an absolute path with no .. segment." },
+  ),
+);
+export const MAX_ADDED_SKILL_FOLDERS = 32;
+export const SkillFolderSettings = Schema.Struct({
+  providers: Schema.Array(SkillFolderProvider).pipe(Schema.maxItems(SKILL_FOLDER_PROVIDERS.length)),
+  folders: Schema.Array(SkillFolderPath).pipe(Schema.maxItems(MAX_ADDED_SKILL_FOLDERS)),
+});
+export type SkillFolderSettings = typeof SkillFolderSettings.Type;
+
 /** One site remembered for one stored Browser profile; see `rememberedBrowserProfileSites`. */
 export const RememberedBrowserProfileSite = Schema.Struct({
   origin: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
@@ -678,6 +701,16 @@ export const ShellSettings = Schema.Struct({
   // host was never asked, and saying so is the honest reading.
   userProfile: Schema.optionalWith(UserProfile, {
     default: () => ({ accent: DEFAULT_AVATAR_ACCENT, avatar: DEFAULT_USER_AVATAR }),
+  }),
+  /**
+   * Skill folders beyond the Project and user-global roots: a key provider's
+   * own folder the person turned on, and folders they added by path. Each is
+   * its own root under the same activation ladder, so nothing in one is
+   * trusted or active because the folder is listed. Octant never adds one on
+   * its own, and a store persisted before this shipped decodes to none.
+   */
+  skillFolders: Schema.optionalWith(SkillFolderSettings, {
+    default: () => ({ providers: [], folders: [] }),
   }),
   // Review, trust, and enablement state for discovered/bundled skills.
   // Persisted before this shipped decodes to empty, so skills remain unavailable

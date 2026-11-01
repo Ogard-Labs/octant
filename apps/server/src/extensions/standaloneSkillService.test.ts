@@ -209,6 +209,7 @@ describe("standalone skill marketplace service", () => {
   it("searches and previews without activation, then installs through the shared lifecycle", async () => {
     const resolved = resolvedPackage();
     const inspected: InspectedExtensionPackage[] = [];
+    const trustAsked: Array<boolean | undefined> = [];
     const service = new StandaloneSkillService({
       discovery: {
         snapshot: () => ({ skills: [], collisions: [] }),
@@ -220,8 +221,9 @@ describe("standalone skill marketplace service", () => {
       },
       lifecycle: {
         snapshot: () => baseSnapshot,
-        install: async (value) => {
+        install: async (value, options) => {
           inspected.push(value);
+          trustAsked.push(options?.trust);
           return baseSnapshot;
         },
         update: async (value) => {
@@ -258,6 +260,16 @@ describe("standalone skill marketplace service", () => {
       }),
     ).toMatchObject({ kind: "extension-state-updated" });
     expect(inspected).toHaveLength(1);
+    expect(trustAsked).toEqual([false]);
+    await service.execute({
+      kind: "install-skill",
+      extensionId: extensionId as never,
+      packageId: packageId as never,
+      version: "1.0.0" as never,
+      digest: resolved.manifest.digest,
+      trust: true,
+    });
+    expect(trustAsked).toEqual([false, true]);
     expect(
       service
         .snapshot(baseSnapshot)

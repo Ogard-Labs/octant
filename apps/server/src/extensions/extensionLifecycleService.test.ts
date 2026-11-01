@@ -355,6 +355,30 @@ describe("journaled extension lifecycle and startup reconciliation", () => {
     expect(context.makeService().snapshot()).toEqual(componentEnabled);
   });
 
+  it("installs and trusts in one step, journaled as both, and leaves enabling off", async () => {
+    const context = await setup();
+    const service = context.makeService();
+    const before = context.journal.headSequence();
+    const snapshot = await service.install(inspection(), { trust: true });
+    expect(snapshot.packages[0]).toMatchObject({
+      activation: { trusted: true, pluginDesired: false },
+      components: [{ effectiveState: { kind: "blocked", reason: "plugin-disabled" } }],
+    });
+    const journaled = JSON.stringify(
+      context.journal.replay({ afterSequence: before as never, limit: 100 } as never),
+    );
+    for (const kind of ["install-prepared", "install-committed", "source-trust-changed"]) {
+      expect(journaled).toContain(kind);
+    }
+    expect(journaled).not.toContain("plugin-desired-changed");
+  });
+
+  it("installs untrusted when trust is not asked for", async () => {
+    const context = await setup();
+    const snapshot = await context.makeService().install(inspection());
+    expect(snapshot.packages[0]).toMatchObject({ activation: { trusted: false } });
+  });
+
   it("installs a language server without trusting, enabling, or offering it outside Code", async () => {
     const context = await setup();
     const service = context.makeService();

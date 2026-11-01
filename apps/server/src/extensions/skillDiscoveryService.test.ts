@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createCodeProfileSkillResolver } from "../code/codeProfileSkillResolver";
 import { buildCatalogs } from "./extensionChatResolver";
 import { SkillDiscoveryService } from "./skillDiscoveryService";
+import { extraSkillRootsFromSettings } from "./skillFolderRoots";
 import { createThreadSkillDiscoveryRootProvider } from "./threadSkillDiscoveryRootProvider";
 
 const directories: string[] = [];
@@ -232,6 +233,111 @@ describe("bounded standalone skill discovery", () => {
     expect(names).not.toContain("home-claude");
     expect(names).toContain("nested-claude");
     expect(names).toContain("home-agents");
+  });
+});
+
+describe("skills from provider folders and folders the person added", () => {
+  async function setup() {
+    const home = await mkdtemp(join(tmpdir(), "octant-extra-skills-"));
+    directories.push(home);
+    const skill = async (folder: string, name: string) => {
+      await mkdir(join(folder, name), { recursive: true });
+      await writeFile(join(folder, name, "SKILL.md"), `# ${name}\n`);
+    };
+    await skill(join(home, ".claude", "skills"), "from-claude");
+    await skill(join(home, ".codex", "skills"), "from-codex");
+    await skill(join(home, "mine"), "from-mine");
+    await skill(join(home, ".agents", "skills"), "from-global");
+    await mkdir(join(home, "proj"), { recursive: true });
+    const discover = async (settings: Parameters<typeof extraSkillRootsFromSettings>[0]) => {
+      const userGlobalSkillsRoot = join(home, ".agents", "skills");
+      const service = new SkillDiscoveryService({
+        homeDirectory: home,
+        roots: {
+          resolve: async () => [
+            {
+              workingDirectory: join(home, "proj"),
+              projectRoot: join(home, "proj"),
+              projectRef: "p",
+              userGlobalSkillsRoot,
+              extraSkillRoots: extraSkillRootsFromSettings(settings, {
+                home,
+                userGlobalSkillsRoot,
+                env: {},
+              }),
+            },
+          ],
+        },
+      });
+      return (await service.reconcile()).skills;
+    };
+    return { home, discover };
+  }
+
+  it("reads none of them until the person turns one on", async () => {
+    const { discover } = await setup();
+    const names = (await discover({ providers: [], folders: [] })).map((s) => s.skill.name);
+    expect(names).toEqual(["from-global"]);
+  });
+
+  it("lists a turned-on provider folder and an added folder, each its own root, indexed and not trusted", async () => {
+    const { home, discover } = await setup();
+    const skills = await discover({
+      providers: ["claude", "codex"],
+      folders: [join(home, "mine")],
+    });
+    expect(skills.map((s) => s.skill.name).sort()).toEqual([
+      "from-claude",
+      "from-codex",
+      "from-global",
+      "from-mine",
+    ]);
+    for (const record of skills) {
+      expect(record).toMatchObject({ reviewed: false, desiredEnabled: false });
+      expect(record.effectiveState).toMatchObject({ kind: "blocked", reason: "review-required" });
+    }
+    const refs = skills.map((s) =>
+      String(s.source.kind === "agents-skills-directory" ? s.source.sourceRef : ""),
+    );
+    expect(refs.filter((ref) => ref.startsWith("provider:")).sort()).toEqual([
+      "provider:claude",
+      "provider:codex",
+    ]);
+    expect(refs.some((ref) => ref.startsWith("folder:") && !ref.includes(home))).toBe(true);
+  });
+
+  it("reads a same-named skill in two folders as two skills", async () => {
+    const { home, discover } = await setup();
+    await mkdir(join(home, "mine", "from-claude"), { recursive: true });
+    await writeFile(join(home, "mine", "from-claude", "SKILL.md"), "# other\n");
+    const skills = await discover({ providers: ["claude"], folders: [join(home, "mine")] });
+    expect(skills.filter((s) => s.skill.name === "from-claude")).toHaveLength(2);
+  });
+
+  it("ignores an added folder that is a link or does not exist", async () => {
+    const { home, discover } = await setup();
+    await symlink(join(home, "mine"), join(home, "linked"));
+    const names = (
+      await discover({
+        providers: [],
+        folders: [join(home, "linked"), join(home, "missing")],
+      })
+    ).map((s) => s.skill.name);
+    expect(names).toEqual(["from-global"]);
+  });
+
+  it("reads the user-global folder once when it is added again", async () => {
+    const { home, discover } = await setup();
+    const skills = await discover({ providers: [], folders: [join(home, ".agents", "skills")] });
+    expect(skills.filter((s) => s.skill.name === "from-global")).toHaveLength(1);
+  });
+
+  it("follows CODEX_HOME for Codex's folder", () => {
+    const roots = extraSkillRootsFromSettings(
+      { providers: ["codex"], folders: [] },
+      { home: "/h", userGlobalSkillsRoot: "/h/.agents/skills", env: { CODEX_HOME: "/c" } },
+    );
+    expect(roots).toEqual([{ sourceRef: "provider:codex", path: "/c/skills" }]);
   });
 });
 

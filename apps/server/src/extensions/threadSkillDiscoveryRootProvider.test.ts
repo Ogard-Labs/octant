@@ -46,6 +46,9 @@ describe("thread skill-discovery root provider", () => {
       ],
       resolveWorkingDirectory,
       userGlobalSkillsRoot: "/home/user/.agents/skills",
+      readExtraSkillRoots: () => [
+        { sourceRef: "provider:claude", path: "/home/user/.claude/skills" },
+      ],
     });
 
     await expect(provider.resolve()).resolves.toEqual([
@@ -54,6 +57,7 @@ describe("thread skill-discovery root provider", () => {
         projectRoot: "/repo",
         projectRef: String(projectId),
         userGlobalSkillsRoot: "/home/user/.agents/skills",
+        extraSkillRoots: [{ sourceRef: "provider:claude", path: "/home/user/.claude/skills" }],
         projectScope: { mode: "code", projectId },
         scope: { mode: "code", projectId, threadRef: String(codeThreadId) },
       },
@@ -62,6 +66,7 @@ describe("thread skill-discovery root provider", () => {
         projectRoot: "/repo",
         projectRef: String(projectId),
         userGlobalSkillsRoot: "/home/user/.agents/skills",
+        extraSkillRoots: [{ sourceRef: "provider:claude", path: "/home/user/.claude/skills" }],
         projectScope: { mode: "code", projectId },
       },
     ]);

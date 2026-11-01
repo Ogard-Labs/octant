@@ -26,13 +26,14 @@ import {
   defaultPermissionModeFor,
   listEligibleImageProfiles,
   permissionModeOf,
-  threadAccessOf,
 } from "@octant/domain";
 import { SpeechCapabilityProvider } from "./voice/SpeechCapabilityContext";
 import { buildAutomationEditorCatalog } from "./automation/automationEditorCatalog";
 import type { ComputerUseClient } from "@octant/client-runtime/computer-use-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import { useWorkSettings } from "./work/useWorkSettings";
+import { recordFirstRunMode } from "./onboarding/recordFirstRunMode";
+import { GuardrailDefaultsContext, guardrailDefaultsOf } from "./code/GuardrailLevelIndicator";
 import { useAppUpdateReadyNotice } from "./settings/useAppUpdateReadyNotice";
 import { useHostMemoryNotice } from "./host/useHostMemoryNotice";
 import type { WorkTurnClient } from "@octant/client-runtime/work-turn-client";
@@ -3462,6 +3463,17 @@ function LaunchedShell(
     project: activeCodeProject,
     settings: codeController.bootstrap?.settings ?? { defaultExecutionPolicy: "approval-gated" },
   });
+  const guardrailDefaults = useMemo(
+    () =>
+      guardrailDefaultsOf({
+        codeSettings: codeController.bootstrap?.settings ?? {
+          defaultExecutionPolicy: "approval-gated",
+        },
+        workSettings: workSettings.settings,
+        projects: projectController.allProjects,
+      }),
+    [codeController.bootstrap?.settings, workSettings.settings, projectController.allProjects],
+  );
   const agentProfiles = useAgentProfiles(agentProfileClient);
   // Editor catalog from Projects already loaded in App, approval-gated agent
   // profiles, and Code bootstrap / prepared checkout receipts when present.
@@ -7299,14 +7311,20 @@ function LaunchedShell(
                 chosen: codeController.bootstrap?.settings.autoReviewer,
                 shieldModel: codeController.bootstrap?.settings.shieldModel,
               })?.status === "reviewer",
-            onSetDefaultMode: async (mode) => {
+            onSetDefaultMode: (mode) => {
               const settings = codeController.bootstrap?.settings;
-              if (settings === undefined) return false;
-              const access = threadAccessOf(mode);
-              return codeController.updateSettings({
-                defaultExecutionPolicy: access.executionPolicy,
-                defaultPermissionPersistence: settings.defaultPermissionPersistence,
-                defaultAutoApprove: access.autoApprove,
+              if (settings === undefined) return Promise.resolve(false);
+              return recordFirstRunMode(mode, {
+                saveCode: (access) =>
+                  codeController.updateSettings({
+                    defaultExecutionPolicy: access.executionPolicy,
+                    defaultPermissionPersistence: settings.defaultPermissionPersistence,
+                    defaultAutoApprove: access.autoApprove,
+                  }),
+                saveWork:
+                  workSettings.status === "ready"
+                    ? (defaultAccess) => workSettings.update({ defaultAccess })
+                    : undefined,
               });
             },
             workEnabled: controller.settings?.workEnabled ?? true,
@@ -7391,83 +7409,87 @@ function LaunchedShell(
   );
 
   return (
-    <ImageJobChangeRevisionContext.Provider value={machineChanges.imageJobs}>
-      <ThreadActivityRevisionsContext.Provider value={threadActivityRevisions}>
-        <SpeechCapabilityProvider
-          client={speechClient}
-          instances={providerController.snapshot?.instances ?? NO_PROVIDER_INSTANCES}
-          settings={controller.settings?.voice ?? NO_VOICE_SETTINGS}
-        >
-          <OctantCommandProvider commands={octantCommands}>
-            {actionsProject === undefined ? null : (
-              <ProjectActionButtons
-                actions={activeProjectActions}
-                {...(actionsProject.type === "code"
-                  ? {
-                      mainFolder: actionsProject.binding.canonicalRoot,
-                      extraFolders: (actionsProject.extraFolders ?? []).map(
-                        (folder) => folder.canonicalRoot,
-                      ),
-                    }
-                  : {})}
-                onRun={(action, folder) => void runProjectAction(actionsProject.id, action, folder)}
-              />
-            )}
-            <NeedsYouProvider source={needsYouSource}>
-              {/* Held here rather than with any Code pane: a thread's controller has to
+    <GuardrailDefaultsContext.Provider value={guardrailDefaults}>
+      <ImageJobChangeRevisionContext.Provider value={machineChanges.imageJobs}>
+        <ThreadActivityRevisionsContext.Provider value={threadActivityRevisions}>
+          <SpeechCapabilityProvider
+            client={speechClient}
+            instances={providerController.snapshot?.instances ?? NO_PROVIDER_INSTANCES}
+            settings={controller.settings?.voice ?? NO_VOICE_SETTINGS}
+          >
+            <OctantCommandProvider commands={octantCommands}>
+              {actionsProject === undefined ? null : (
+                <ProjectActionButtons
+                  actions={activeProjectActions}
+                  {...(actionsProject.type === "code"
+                    ? {
+                        mainFolder: actionsProject.binding.canonicalRoot,
+                        extraFolders: (actionsProject.extraFolders ?? []).map(
+                          (folder) => folder.canonicalRoot,
+                        ),
+                      }
+                    : {})}
+                  onRun={(action, folder) =>
+                    void runProjectAction(actionsProject.id, action, folder)
+                  }
+                />
+              )}
+              <NeedsYouProvider source={needsYouSource}>
+                {/* Held here rather than with any Code pane: a thread's controller has to
         outlive the surfaces reading it, so closing a diff tab never tears down
         the turn that thread is running. */}
-              <CodeThreadControllerSlots
-                client={codeClient}
-                readCursorStore={codeReadCursorStore}
-                registry={codeThreadControllers}
-                threadIds={openCodeThreadIds}
-              />
-              <TrackerReferenceProvider ports={trackerReferencePorts}>
-                <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
-                  <SidebarThreadTabsContext.Provider value={sidebarThreadTabs}>
-                    <ProjectThreadsProvider value={projectThreadsAccess}>
-                      <NewTaskDraftsContext.Provider value={newTaskDrafts}>
-                        <StreamRepliesContext.Provider
-                          value={controller.settings?.streamReplies !== false}
-                        >
-                          {/* The floor for every rendered link: panes that can host a
+                <CodeThreadControllerSlots
+                  client={codeClient}
+                  readCursorStore={codeReadCursorStore}
+                  registry={codeThreadControllers}
+                  threadIds={openCodeThreadIds}
+                />
+                <TrackerReferenceProvider ports={trackerReferencePorts}>
+                  <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
+                    <SidebarThreadTabsContext.Provider value={sidebarThreadTabs}>
+                      <ProjectThreadsProvider value={projectThreadsAccess}>
+                        <NewTaskDraftsContext.Provider value={newTaskDrafts}>
+                          <StreamRepliesContext.Provider
+                            value={controller.settings?.streamReplies !== false}
+                          >
+                            {/* The floor for every rendered link: panes that can host a
                     Browser layer their in-app open over this, and surfaces that
                     never can — dock tools, dialogs, Chat — still get the
                     external open and copy rather than a dead anchor. */}
-                          <MarkdownLinkActionsContext.Provider value={rootLinkActions}>
-                            <WorkKindChoiceContext.Provider value={workKindChoice}>
-                              <ModelToolVerificationContext.Provider
-                                value={providerController.verifyModelTools}
-                              >
-                                <HostFederationStackContext.Provider value={federation}>
-                                  <PlanUsageProvider
-                                    barStyle={controller.settings?.usageBars ?? "smooth"}
-                                    client={launchedClients.providerUsageLimitsClient}
-                                  >
-                                    <HostPlatformContext.Provider value={hostPlatform}>
-                                      <ServerCodeProjectsContext.Provider
-                                        value={serverCodeProjects}
-                                      >
-                                        {shell}
-                                      </ServerCodeProjectsContext.Provider>
-                                    </HostPlatformContext.Provider>
-                                  </PlanUsageProvider>
-                                </HostFederationStackContext.Provider>
-                              </ModelToolVerificationContext.Provider>
-                            </WorkKindChoiceContext.Provider>
-                          </MarkdownLinkActionsContext.Provider>
-                        </StreamRepliesContext.Provider>
-                      </NewTaskDraftsContext.Provider>
-                    </ProjectThreadsProvider>
-                  </SidebarThreadTabsContext.Provider>
-                </SidebarThreadDragContext.Provider>
-              </TrackerReferenceProvider>
-            </NeedsYouProvider>
-          </OctantCommandProvider>
-        </SpeechCapabilityProvider>
-      </ThreadActivityRevisionsContext.Provider>
-    </ImageJobChangeRevisionContext.Provider>
+                            <MarkdownLinkActionsContext.Provider value={rootLinkActions}>
+                              <WorkKindChoiceContext.Provider value={workKindChoice}>
+                                <ModelToolVerificationContext.Provider
+                                  value={providerController.verifyModelTools}
+                                >
+                                  <HostFederationStackContext.Provider value={federation}>
+                                    <PlanUsageProvider
+                                      barStyle={controller.settings?.usageBars ?? "smooth"}
+                                      client={launchedClients.providerUsageLimitsClient}
+                                    >
+                                      <HostPlatformContext.Provider value={hostPlatform}>
+                                        <ServerCodeProjectsContext.Provider
+                                          value={serverCodeProjects}
+                                        >
+                                          {shell}
+                                        </ServerCodeProjectsContext.Provider>
+                                      </HostPlatformContext.Provider>
+                                    </PlanUsageProvider>
+                                  </HostFederationStackContext.Provider>
+                                </ModelToolVerificationContext.Provider>
+                              </WorkKindChoiceContext.Provider>
+                            </MarkdownLinkActionsContext.Provider>
+                          </StreamRepliesContext.Provider>
+                        </NewTaskDraftsContext.Provider>
+                      </ProjectThreadsProvider>
+                    </SidebarThreadTabsContext.Provider>
+                  </SidebarThreadDragContext.Provider>
+                </TrackerReferenceProvider>
+              </NeedsYouProvider>
+            </OctantCommandProvider>
+          </SpeechCapabilityProvider>
+        </ThreadActivityRevisionsContext.Provider>
+      </ImageJobChangeRevisionContext.Provider>
+    </GuardrailDefaultsContext.Provider>
   );
 }
 

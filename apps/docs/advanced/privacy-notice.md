@@ -212,7 +212,7 @@ A Claude artifact goes to your claude.ai account. Only once you turn on
 **Enable Claude artifacts** for a Claude account and choose artifacts for a
 thread does Claude Code publish a page from that thread's folder to
 claude.ai, where Anthropic stores it under that account; Claude asks before
-every publish, Full access included, and Plan and Chat never publish. While a
+every publish except at Full access, which asks nothing, and Plan and Chat never publish. While a
 thread uses Claude artifacts, Claude Code also sends its usage telemetry to
 Anthropic for that thread's turns; error reports and conversation uploads
 stay off, and other threads send none. Octant keeps the page's address and

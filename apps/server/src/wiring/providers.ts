@@ -157,6 +157,7 @@ import {
   type SkillDiscoveryRootProvider,
   SkillDiscoveryService,
 } from "../extensions/skillDiscoveryService";
+import { extraSkillRootsFromSettings } from "../extensions/skillFolderRoots";
 import { createThreadSkillDiscoveryRootProvider } from "../extensions/threadSkillDiscoveryRootProvider";
 import { StandaloneSkillService } from "../extensions/standaloneSkillService";
 import { ShellSettingsStandaloneSkillActivationStore } from "../extensions/standaloneSkillActivationStore";
@@ -644,7 +645,13 @@ export function wireProviders(deps: ProvidersDependencies) {
     recordExtensionRuntimeEvidence = (event) =>
       extensionLifecycleService.recordRuntimeEvidence(event);
     const userGlobalSkillsRoot = join(homedir(), ".agents", "skills");
+    const readExtraSkillRoots = () =>
+      extraSkillRootsFromSettings(
+        (persistence.readShellSettings()?.settings ?? defaultShellSettings()).skillFolders,
+        { home: homedir(), userGlobalSkillsRoot },
+      );
     const threadSkillRoots = createThreadSkillDiscoveryRootProvider({
+      readExtraSkillRoots,
       readProjects: () =>
         persistence.readProjects({ lifecycle: "active" }).flatMap((project) => {
           if (project.type === "chat") return [];
@@ -678,6 +685,7 @@ export function wireProviders(deps: ProvidersDependencies) {
                 projectRoot: process.cwd(),
                 projectRef: "server-working-directory",
                 userGlobalSkillsRoot,
+                extraSkillRoots: readExtraSkillRoots(),
               },
             ];
       },

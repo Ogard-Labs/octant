@@ -42,6 +42,9 @@ import {
   ProjectBrandKitChanged,
   WorkProjectDeveloperToolsChanged,
   WorkProjectActionsChanged,
+  WorkProjectPermissionModeChanged,
+  GUARDRAIL_LEVEL_LOWERED,
+  GuardrailLevelLowered,
   CodeProjectActionsChanged,
   ProjectExtraFolderAdded,
   ProjectExtraFolderRemoved,
@@ -422,6 +425,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     )
     .register("project.code-agent-merge-changed@1", 1, CodeProjectAgentMergeChanged)
     .register(CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED, 1, CodeProjectPullRequestMergeRecorded)
+    .register(GUARDRAIL_LEVEL_LOWERED, 1, GuardrailLevelLowered)
     .register(CODE_PROJECT_PULL_REQUEST_ACTION_RECORDED, 1, CodeProjectPullRequestActionRecorded)
     .register(
       CODE_PROJECT_PULL_REQUEST_MERGE_WHEN_READY_RECORDED,
@@ -433,6 +437,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("project.native-providers-changed@1", 1, ProjectNativeProvidersChanged)
     .register("project.work-status-file-changed@1", 1, WorkProjectStatusFileChanged)
     .register("project.work-developer-tools-changed@1", 1, WorkProjectDeveloperToolsChanged)
+    .register("project.work-permission-mode-changed@1", 1, WorkProjectPermissionModeChanged)
     .register("project.work-actions-changed@1", 1, WorkProjectActionsChanged)
     .register("project.brand-kit-changed@1", 1, ProjectBrandKitChanged)
     .register("project.code-actions-changed@1", 1, CodeProjectActionsChanged)

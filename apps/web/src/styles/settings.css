@@ -720,7 +720,8 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="synthesis"],
 .setrow[data-setting-id="custom-image-sources"],
 .setrow[data-setting-id="browser-hub-code"],
-.setrow[data-setting-id="browser-hub-claim"] {
+.setrow[data-setting-id="browser-hub-claim"],
+.setrow[data-setting-id="skill-folders-added"] {
   grid-template-columns: minmax(0, 1fr);
 }
 
@@ -737,7 +738,8 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="transcription"] > .setrow-control,
 .setrow[data-setting-id="synthesis"] > .setrow-control,
 .setrow[data-setting-id="browser-hub-code"] > .setrow-control,
-.setrow[data-setting-id="browser-hub-claim"] > .setrow-control {
+.setrow[data-setting-id="browser-hub-claim"] > .setrow-control,
+.setrow[data-setting-id="skill-folders-added"] > .setrow-control {
   grid-column: 1;
   grid-row: auto;
   justify-self: stretch;
@@ -3739,5 +3741,33 @@ html[data-octant-increased-contrast="true"]
 
 .protected-files__paths {
   display: block;
+  overflow-wrap: anywhere;
+}
+
+.skill-folder-settings__added {
+  display: grid;
+  gap: var(--oct-space-3);
+  min-width: 0;
+}
+
+.skill-folder-settings__list {
+  display: grid;
+  gap: var(--oct-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.skill-folder-settings__list li,
+.skill-folder-settings__form {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--oct-space-3);
+  min-width: 0;
+}
+
+.skill-folder-settings__list code {
+  min-width: 0;
   overflow-wrap: anywhere;
 }

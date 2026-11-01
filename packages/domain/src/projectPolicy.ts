@@ -18,6 +18,7 @@ import {
   type CodeAccessPersistence,
   type WorkProject,
   type WorkProjectDeveloperTools,
+  type WorkProjectPermissionMode,
   type WorkProjectStatusFile,
   type Project,
   type ProjectAction,
@@ -238,6 +239,33 @@ export function changeCodeProjectAccess(
   return {
     ...rest,
     codeAccessPersistence,
+    version: nextVersion(project),
+    updatedAt,
+  };
+}
+
+/**
+ * Set the mode a Work Project's new threads start in, or return it to Work's
+ * default in Settings. Work shares Code's levels and has no Plan overlay.
+ */
+export function changeWorkProjectPermissionMode(
+  project: Project,
+  permissionMode: WorkProjectPermissionMode | undefined,
+  updatedAt: UtcTimestamp,
+): WorkProject {
+  if (project.type !== "work") {
+    reject("binding-not-allowed", "Only Work Projects take a Work default mode");
+  }
+  if (project.lifecycle === "archived") {
+    reject("invalid-lifecycle", "Archived Projects are read-only");
+  }
+  if (project.defaultPermissionMode === permissionMode) {
+    reject("invalid-lifecycle", "This Project already starts threads in that mode");
+  }
+  const { defaultPermissionMode: _previousMode, ...rest } = project;
+  return {
+    ...rest,
+    ...(permissionMode === undefined ? {} : { defaultPermissionMode: permissionMode }),
     version: nextVersion(project),
     updatedAt,
   };

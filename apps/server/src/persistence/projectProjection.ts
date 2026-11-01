@@ -25,6 +25,7 @@ import {
   decodeProjectBrandKitChanged,
   decodeWorkProjectDeveloperToolsChanged,
   decodeWorkProjectActionsChanged,
+  decodeWorkProjectPermissionModeChanged,
   decodeCodeProjectActionsChanged,
   decodeProjectExtraFolderAdded,
   decodeProjectExtraFolderRemoved,
@@ -195,6 +196,8 @@ const projectDecoders = {
     decodeWorkProjectStatusFileChanged(payload).project,
   "project.work-developer-tools-changed@1": (payload: unknown) =>
     decodeWorkProjectDeveloperToolsChanged(payload).project,
+  "project.work-permission-mode-changed@1": (payload: unknown) =>
+    decodeWorkProjectPermissionModeChanged(payload).project,
   "project.work-actions-changed@1": (payload: unknown) =>
     decodeWorkProjectActionsChanged(payload).project,
   "project.brand-kit-changed@1": (payload: unknown) =>
