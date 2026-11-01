@@ -58,6 +58,12 @@ import {
   type NativeHarnessToolPorts,
 } from "./nativeHarnessTools";
 
+/** Where a Full access tag is journaled, and whose earlier reads count toward it. */
+interface SecretEgressTagScope {
+  readonly threadId: string;
+  readonly readerThreadIds: ReadonlyArray<string>;
+}
+
 export interface NativeHarnessCompositionOptions {
   readonly authority: NativeHarnessAuthority;
   /** Whether a provider instance is one the harness drives; others get no harness tools. */
@@ -115,7 +121,10 @@ export interface NativeHarnessCompositionOptions {
    * result is; the command itself is never stopped.
    */
   readonly tagSecretEgress?: (input: {
+    /** Where the tag is journaled: the thread the person reviews. */
     readonly threadId: string;
+    /** Whose earlier reads count: the thread, and a child run that ran the command. */
+    readonly readerThreadIds: ReadonlyArray<string>;
     readonly command: string;
     readonly workingDirectory: string;
   }) => "recorded" | "not-tagged" | "unavailable";
@@ -547,7 +556,7 @@ export function createNativeHarnessComposition(
    * falls back to open network.
    */
   const postureShell = (
-    threadId: string,
+    tagScope: SecretEgressTagScope,
     proxied: NativeHarnessShellPort,
     resolveEgress: () => ReturnType<typeof resolveDefaultThreadEgressPolicy>,
   ): NativeHarnessShellPort => ({
@@ -567,7 +576,7 @@ export function createNativeHarnessComposition(
       // command that runs outside the sandbox.
       const shell =
         network === "allow"
-          ? taggingSecretEgress(threadId, options.fullAccessShell ?? options.shell)
+          ? taggingSecretEgress(tagScope, options.fullAccessShell ?? options.shell)
           : options.offlineShell;
       return (shell ?? unavailableShell).run(input);
     },
@@ -578,7 +587,7 @@ export function createNativeHarnessComposition(
    * else judges a command there, so the tag is the record; it never stops one.
    */
   const taggingSecretEgress = (
-    threadId: string,
+    scope: SecretEgressTagScope,
     shell: NativeHarnessShellPort | undefined,
   ): NativeHarnessShellPort | undefined => {
     const tag = options.tagSecretEgress;
@@ -588,7 +597,12 @@ export function createNativeHarnessComposition(
         const run = await shell.run(input);
         let tagged: ReturnType<typeof tag>;
         try {
-          tagged = tag({ threadId, command: input.command, workingDirectory: input.cwd });
+          tagged = tag({
+            threadId: scope.threadId,
+            readerThreadIds: scope.readerThreadIds,
+            command: input.command,
+            workingDirectory: input.cwd,
+          });
         } catch {
           tagged = "unavailable";
         }
@@ -634,7 +648,7 @@ export function createNativeHarnessComposition(
     shell: NativeHarnessShellPort | undefined,
     resolveEgress: () => ReturnType<typeof resolveDefaultThreadEgressPolicy>,
   ): NativeHarnessShellPort | undefined => {
-    const tagged = taggingSecretEgress(threadId, shell);
+    const tagged = taggingSecretEgress({ threadId, readerThreadIds: [threadId] }, shell);
     if (shell === undefined || tagged === undefined || tagged === shell) return shell;
     return {
       run: (input) =>
@@ -659,8 +673,10 @@ export function createNativeHarnessComposition(
         ? taggingAtFullAccess(scope.threadId, options.shell, () =>
             codeEgress(scope.threadId, windowId),
           )
-        : postureShell(scope.threadId, options.proxiedShell(scope), () =>
-            codeEgress(scope.threadId, windowId),
+        : postureShell(
+            { threadId: scope.threadId, readerThreadIds: [scope.threadId] },
+            options.proxiedShell(scope),
+            () => codeEgress(scope.threadId, windowId),
           ),
     );
   const workEgress = (threadId: string) => {
@@ -676,8 +692,10 @@ export function createNativeHarnessComposition(
       scope.threadId,
       options.proxiedShell === undefined
         ? taggingAtFullAccess(scope.threadId, options.shell, () => workEgress(scope.threadId))
-        : postureShell(scope.threadId, options.proxiedShell(scope), () =>
-            workEgress(scope.threadId),
+        : postureShell(
+            { threadId: scope.threadId, readerThreadIds: [scope.threadId] },
+            options.proxiedShell(scope),
+            () => workEgress(scope.threadId),
           ),
     );
   const delegateFor = (scope: {
@@ -914,7 +932,8 @@ export function createNativeHarnessComposition(
             : projectId === undefined
               ? unavailableShell
               : postureShell(
-                  parentThreadId,
+                  // A child's own reads count beside its parent's.
+                  { threadId: parentThreadId, readerThreadIds: [parentThreadId, runId] },
                   options.proxiedShell({
                     threadId: runId,
                     projectId: String(projectId),

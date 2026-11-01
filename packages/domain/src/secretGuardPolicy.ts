@@ -593,7 +593,17 @@ const MAX_COMMAND_PATH_WORDS = 256;
  * "$DIR"/key`) is not seen; this is a flag for a person to read, never what
  * stands between a command and a file.
  */
-export function commandPathWords(command: string): ReadonlyArray<string> {
+export function commandPathWords(
+  command: string,
+  options: {
+    /**
+     * Also plain words that could name a file in the working directory
+     * (`token`), for a caller that resolves them there. A flag, an
+     * assignment, or a word with `:` is left out.
+     */
+    readonly bareNames?: boolean;
+  } = {},
+): ReadonlyArray<string> {
   const words: string[] = [];
   for (const raw of command.split(/[\s;&|<>()`]+/)) {
     if (words.length >= MAX_COMMAND_PATH_WORDS) break;
@@ -603,6 +613,9 @@ export function commandPathWords(command: string): ReadonlyArray<string> {
       .replace(/^@/, "");
     if (value.length === 0) continue;
     if (value.includes("/") || value.startsWith("~")) words.push(value);
+    else if (options.bareNames === true && /^[\w.][\w.@+-]*$/.test(value) && value === raw) {
+      words.push(value);
+    }
   }
   return words;
 }

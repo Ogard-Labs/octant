@@ -1056,6 +1056,7 @@ describe("native harness composition", () => {
       expect(harness.ran).toEqual([`full:${command}`]);
       expect(harness.tagged).toHaveBeenCalledWith({
         threadId: String(autoThread.id),
+        readerThreadIds: [String(autoThread.id)],
         command,
         workingDirectory: "/Users/dev/app",
       });

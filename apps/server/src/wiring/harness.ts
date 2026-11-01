@@ -616,13 +616,13 @@ export function wireHarness(deps: HarnessDependencies) {
   const nativeHarnessComposition = createNativeHarnessComposition({
     recordRemoteCommand: (input) => shieldServerStore.recordRemoteCommand(input),
     protectedSecretPath: (path) => isProtectedSecretPath(path),
-    tagSecretEgress: ({ threadId, command, workingDirectory }) =>
+    tagSecretEgress: ({ threadId, readerThreadIds, command, workingDirectory }) =>
       readsSecretsThenEgress({
         command,
         workingDirectory,
         protectedSecretPath: (path) => isProtectedSecretPath(path),
-        threadReadSecret: readShieldWatcherLabels(persistence.connection, threadId).includes(
-          "secret-path-read",
+        threadReadSecret: readerThreadIds.some((reader) =>
+          readShieldWatcherLabels(persistence.connection, reader).includes("secret-path-read"),
         ),
       })
         ? shieldServerStore.recordTag({ threadId, tag: "reads-secrets-then-egress", command })

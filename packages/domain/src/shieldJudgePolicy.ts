@@ -280,7 +280,7 @@ export function commandReadsSecrets(
 ): boolean {
   if (SECRET_PATH_TEXT.test(command)) return true;
   if (protectedSecretPath === undefined) return false;
-  return commandPathWords(command).some((word) =>
+  return commandPathWords(command, { bareNames: true }).some((word) =>
     listedSecretPath(word, workingDirectory, protectedSecretPath),
   );
 }

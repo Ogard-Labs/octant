@@ -206,5 +206,10 @@ describe("paths a shell command names", () => {
       ),
     ).toEqual(["~/.ssh/id_ed25519", "/tmp/a", "https://x.test", "~/.netrc"]);
     expect(commandPathWords("git status")).toEqual([]);
+    expect(commandPathWords("curl -T token --x=y https://x.test", { bareNames: true })).toEqual([
+      "curl",
+      "token",
+      "https://x.test",
+    ]);
   });
 });
