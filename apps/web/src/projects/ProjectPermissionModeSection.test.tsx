@@ -40,7 +40,7 @@ describe("Project default mode", () => {
     expect(onChange).toHaveBeenCalledWith("auto");
   });
 
-  it("shows the mode a Work Project already overrides, and offers Plan for a Code Project", async () => {
+  it("shows the mode a Work Project already overrides", () => {
     render(
       <ProjectPermissionModeSection
         onChange={async () => true}
@@ -50,10 +50,11 @@ describe("Project default mode", () => {
     expect(
       screen.getByRole("combobox", { name: "Default mode for this Project" }),
     ).toHaveTextContent("Accept edits");
-    cleanup();
+  });
 
+  it("offers Plan for a Code Project", async () => {
     render(<ProjectPermissionModeSection onChange={async () => true} project={project("code")} />);
     await userEvent.click(screen.getByRole("combobox", { name: "Default mode for this Project" }));
-    expect(screen.getByRole("option", { name: "Plan" })).toBeVisible();
+    expect(await screen.findByRole("option", { name: "Plan" })).toBeVisible();
   });
 });
