@@ -1120,7 +1120,7 @@ export class BrowserAutomationService {
 
   async close(): Promise<void> {
     this.#removeProcessExitListener?.();
-    for (const contextId of [...this.#stagedUploads.keys()]) this.#releaseUploads(contextId);
+    for (const contextId of this.#stagedUploads.keys()) this.#releaseUploads(contextId);
     for (const owned of this.#contexts.values()) {
       owned.abort.abort();
       owned.cancelExpiry?.();
