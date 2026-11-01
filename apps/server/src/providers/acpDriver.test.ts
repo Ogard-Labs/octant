@@ -1695,6 +1695,85 @@ describe("ACP provider driver profile quirks", () => {
     expect(fx.sessionMode("code", "approval-gated")).toBe("ask");
   });
 
+  it.each([
+    ["work", "approval-gated", "refused"],
+    ["code", "approval-gated", "refused"],
+    ["code", "auto-accept-edits", "refused"],
+    ["work", "full-access", "runs"],
+    ["code", "full-access", "runs"],
+    ["code", "plan", "runs"],
+    ["chat", "approval-gated", "runs"],
+  ] as const)(
+    "an agent whose shell runs without asking is %s %s: %s",
+    async (productMode, executionPolicy, outcome) => {
+      // No command reaches Octant to ask about, so Guarded and Reviewed cannot
+      // hold; only Full access runs, and Chat and Plan have no shell at all.
+      const silentShell: AcpProviderProfile = { ...kilo, shellWithoutRequest: true };
+      const { driver, starts } = fixture(silentShell);
+      const result = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* driver.acquire({
+              instanceId,
+              projectRoot,
+              mode: productMode,
+            });
+            const started = yield* Effect.either(
+              connection.start({ sessionId, modelId, executionPolicy }),
+            );
+            if (started._tag === "Right") yield* connection.stop(sessionId);
+            return started;
+          }),
+        ),
+      );
+      if (outcome === "refused") {
+        expect(result).toMatchObject({
+          _tag: "Left",
+          left: {
+            category: "unsupported",
+            message: expect.stringMatching(/cannot be asked per command.*Full access/),
+          },
+        });
+        expect(starts).toEqual([]);
+      } else {
+        expect(result._tag).toBe("Right");
+        expect(starts).toHaveLength(1);
+      }
+    },
+  );
+
+  it("keeps refusing an agent whose shell runs without asking when a Full access session resumes below it", async () => {
+    // The refusal names its reason on resume too, rather than reading as a
+    // stale cursor that invites a pointless retry.
+    const silentShell: AcpProviderProfile = { ...kilo, shellWithoutRequest: true };
+    const { driver } = fixture(silentShell);
+    const resumed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "work" });
+          const started = yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "full-access",
+          });
+          yield* connection.stop(sessionId);
+          if (started.resumeCursor === undefined) throw new Error("Missing resume cursor.");
+          return yield* Effect.flip(
+            connection.resume({
+              sessionId,
+              resumeCursor: started.resumeCursor,
+              executionPolicy: "approval-gated",
+            }),
+          );
+        }),
+      ),
+    );
+    expect(resumed).toMatchObject({
+      category: "unsupported",
+      message: expect.stringMatching(/Full access/),
+    });
+  });
+
   it("refuses an fx session that does not offer the mode the thread needs, before selecting it", async () => {
     // fx accepts an unknown mode id and keeps its previous mode, so a release
     // that renamed `ask` would otherwise run an approval-gated turn under
