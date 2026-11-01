@@ -163,6 +163,16 @@ export class ShieldServerStore {
     );
   }
 
+  /** A server in the account list or in any Project's own list, by its id. */
+  serverById(serverId: string): ShieldServer | undefined {
+    return (
+      this.#servers.get(serverId) ??
+      [...this.#projectServers.values()]
+        .flat()
+        .find((server) => String(server.serverId) === serverId)
+    );
+  }
+
   /** A Project's own list, or undefined while it follows the account list. */
   projectOverride(projectId: string): ReadonlyArray<ShieldServer> | undefined {
     return this.#projectServers.get(projectId);

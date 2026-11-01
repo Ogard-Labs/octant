@@ -913,6 +913,31 @@
   font-size: var(--oct-text-xs);
 }
 
+.shield-servers__key {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.shield-servers__key > .shield-servers__note {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.shield-servers__public-key {
+  min-width: 0;
+  flex: 1 1 240px;
+  padding: var(--oct-space-1) var(--oct-space-2);
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-sm);
+  color: var(--oct-fg);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  overflow-wrap: anywhere;
+}
+
 .shield-servers__row-actions {
   display: flex;
   gap: var(--oct-space-2);

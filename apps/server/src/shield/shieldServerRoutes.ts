@@ -15,6 +15,7 @@ import type {
   ShieldServerStore,
   ShieldServersChange,
 } from "./shieldServerStore";
+import type { ServerSshKeys } from "./sshKeyBrokerClient";
 
 const ROUTE = "/api/shield/servers";
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
@@ -32,7 +33,10 @@ export interface ShieldServerRouteDependencies {
     | "projectOverride"
     | "setProjectServers"
     | "clearProject"
+    | "serverById"
   >;
+  /** The keys Octant keeps for servers that sign in with one; absent without a credential broker. */
+  readonly sshKeys?: Pick<ServerSshKeys, "ensure">;
   readonly projectExists: (projectId: string) => boolean;
   /** Whether the person's SSH agent socket is there for SSH sessions to use. */
   readonly sshAgentAvailable: () => boolean;
@@ -121,6 +125,10 @@ export function createShieldServerRouteHandler(dependencies: ShieldServerRouteDe
     ) {
       return json(refused("project-not-found"), 404, origin);
     }
+    if (command.kind === "show-server-key") {
+      const shown = await showServerKey(dependencies, String(command.serverId), principal);
+      return json(shown, shown.kind === "shield-server-key" ? 200 : 409, origin);
+    }
     const change: ShieldServersChange =
       command.kind === "set-project-servers"
         ? dependencies.store.setProjectServers({
@@ -155,6 +163,24 @@ export function createShieldServerRouteHandler(dependencies: ShieldServerRouteDe
   };
 }
 
+/**
+ * A key is made only for a person at this computer, and only for a server
+ * they registered to sign in with one, so a paired device cannot mint keys.
+ */
+async function showServerKey(
+  dependencies: ShieldServerRouteDependencies,
+  serverId: string,
+  principal: ShieldServerPrincipal,
+): Promise<ShieldServersCommandResult> {
+  if (principal !== "local-window") return refused("needs-local-window");
+  const server = dependencies.store.serverById(serverId);
+  if (server === undefined) return refused("server-not-found");
+  if (server.signIn !== "octant-key") return refused("signs-in-with-agent");
+  const publicKey = await dependencies.sshKeys?.ensure(serverId);
+  if (publicKey === undefined) return refused("key-unavailable");
+  return { kind: "shield-server-key", serverId: server.serverId, publicKey };
+}
+
 function view(
   dependencies: ShieldServerRouteDependencies,
   projectId: string | undefined,
@@ -182,6 +208,8 @@ const MESSAGES: Readonly<Record<ShieldServersRefusalReason, string>> = {
   "server-not-found": "That server is not registered.",
   "too-many-servers": "No more servers can be registered.",
   "project-not-found": "That Project does not exist on this computer.",
+  "signs-in-with-agent": "That server signs in with your SSH agent, so it has no key here.",
+  "key-unavailable": "Octant could not reach its key store, so no key was made.",
   unavailable: "The change could not be recorded, so nothing changed.",
 };
 

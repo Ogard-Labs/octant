@@ -4,6 +4,7 @@ import type {
   ShieldServer,
   ShieldServerFields,
   ShieldServerProfile,
+  ShieldServerSignIn,
   ShieldServersCommand,
   ShieldServersView,
 } from "@octant/contracts/shield-servers";
@@ -24,7 +25,7 @@ export interface ShieldServersSettingsProps {
 }
 
 export const SHIELD_SERVERS_INTRO =
-  "Agents reach these servers with your own SSH agent. Octant never reads your key files.";
+  "Agents reach these servers with your own SSH agent, or with a key Octant makes and keeps for one server. Octant never reads your key files.";
 export const SHIELD_SSH_AGENT_MISSING_NOTE =
   "No SSH agent is running for Octant, so SSH commands cannot sign in.";
 export const SHIELD_SERVERS_ALWAYS_ASK_NOTE =
@@ -47,6 +48,17 @@ const PROFILE_EXPLANATIONS: Readonly<Record<ShieldServerProfile, string>> = {
 
 const PROFILE_ORDER: ReadonlyArray<ShieldServerProfile> = ["read-only", "operate", "admin"];
 
+const SIGN_IN_OPTIONS: ReadonlyArray<{ readonly id: ShieldServerSignIn; readonly label: string }> =
+  [
+    { id: "ssh-agent", label: "Your SSH agent" },
+    { id: "octant-key", label: "A key Octant keeps" },
+  ];
+
+/** What the row shows once the host answers "Show key". */
+type KeyShown =
+  | { readonly kind: "key"; readonly publicKey: string }
+  | { readonly kind: "problem"; readonly message: string };
+
 const PROFILE_OPTIONS = PROFILE_ORDER.map((id) => ({ id, label: PROFILE_LABELS[id] }));
 
 function profileAllowsDeploys(profile: ShieldServerProfile): boolean {
@@ -67,6 +79,7 @@ function fieldsOf(server: ShieldServer): ShieldServerFields {
     profile: server.profile,
     deployCommands: server.deployCommands,
     ...(server.runbookPath === undefined ? {} : { runbookPath: server.runbookPath }),
+    ...(server.signIn === undefined ? {} : { signIn: server.signIn }),
   };
 }
 
@@ -88,6 +101,7 @@ function ServerForm(props: ServerFormProps) {
   const [profile, setProfile] = useState<ShieldServerProfile>(editing?.profile ?? "read-only");
   const [deploys, setDeploys] = useState((editing?.deployCommands ?? []).join("\n"));
   const [runbook, setRunbook] = useState(editing?.runbookPath ?? "");
+  const [signIn, setSignIn] = useState<ShieldServerSignIn>(editing?.signIn ?? "ssh-agent");
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -98,6 +112,7 @@ function ServerForm(props: ServerFormProps) {
       profile,
       deployCommands: profileAllowsDeploys(profile) ? deployLines(deploys) : [],
       ...(runbookPath === "" ? {} : { runbookPath }),
+      ...(signIn === "octant-key" ? { signIn } : {}),
     });
   }
 
@@ -153,6 +168,19 @@ function ServerForm(props: ServerFormProps) {
           }}
           options={PROFILE_OPTIONS}
           value={profile}
+        />
+      </div>
+      <div className="host-settings__field">
+        <label htmlFor={`${fieldId}-sign-in`}>Sign in with</label>
+        <OctantSelectField
+          id={`${fieldId}-sign-in`}
+          aria-label="Sign in with"
+          onValueChange={(next) => {
+            const chosen = SIGN_IN_OPTIONS.find((option) => option.id === next);
+            if (chosen !== undefined) setSignIn(chosen.id);
+          }}
+          options={SIGN_IN_OPTIONS}
+          value={signIn}
         />
       </div>
       {profileAllowsDeploys(profile) ? (
@@ -219,6 +247,7 @@ interface ServerEditorProps {
   readonly onAdd: (fields: ShieldServerFields) => Promise<boolean>;
   readonly onChange: (server: ShieldServer, fields: ShieldServerFields) => Promise<boolean>;
   readonly onRemove: (server: ShieldServer) => Promise<boolean>;
+  readonly onShowKey: (server: ShieldServer) => Promise<KeyShown>;
 }
 
 /**
@@ -233,6 +262,8 @@ function ServerEditor(props: ServerEditorProps) {
   const [formKey, setFormKey] = useState(0);
   const editing = servers.find((server) => String(server.serverId) === editingId);
   const suffix = forProject === undefined ? "" : ` for ${forProject}`;
+  const [shownKeys, setShownKeys] = useState<ReadonlyMap<string, KeyShown>>(new Map());
+  const [copiedId, setCopiedId] = useState<string | undefined>(undefined);
 
   return (
     <>
@@ -260,7 +291,27 @@ function ServerEditor(props: ServerEditorProps) {
                     : `${server.deployCommands.length} deploy commands`}
                 </span>
               )}
+              {server.signIn === "octant-key" ? (
+                <span className="shield-servers__deploys">Key Octant keeps</span>
+              ) : null}
               <span className="shield-servers__row-actions">
+                {server.signIn === "octant-key" ? (
+                  <OctantButton
+                    aria-label={`Show the key for ${server.alias}${suffix}`}
+                    disabled={props.busy}
+                    onClick={() => {
+                      const id = String(server.serverId);
+                      void props.onShowKey(server).then((shown) => {
+                        setShownKeys((current) => new Map(current).set(id, shown));
+                      });
+                    }}
+                    size="sm"
+                    type="button"
+                    variant="secondary"
+                  >
+                    Show key
+                  </OctantButton>
+                ) : null}
                 <OctantButton
                   aria-label={`Change ${server.alias}${suffix}`}
                   disabled={props.busy}
@@ -291,6 +342,16 @@ function ServerEditor(props: ServerEditorProps) {
                   Remove
                 </OctantButton>
               </span>
+              <ServerKey
+                copied={copiedId === String(server.serverId)}
+                onCopied={() => setCopiedId(String(server.serverId))}
+                server={server}
+                shown={
+                  server.signIn === "octant-key"
+                    ? shownKeys.get(String(server.serverId))
+                    : undefined
+                }
+              />
             </li>
           ))}
         </ul>
@@ -326,6 +387,46 @@ function ServerEditor(props: ServerEditorProps) {
         />
       </div>
     </>
+  );
+}
+
+/**
+ * The public line of the key Octant keeps for a server, for the person to add
+ * to that server's `authorized_keys`. The private key never reaches this page.
+ */
+function ServerKey(props: {
+  readonly server: ShieldServer;
+  readonly shown: KeyShown | undefined;
+  readonly copied: boolean;
+  readonly onCopied: () => void;
+}) {
+  const { server, shown } = props;
+  if (shown === undefined) return null;
+  if (shown.kind === "problem") {
+    return (
+      <OctantAlert className="shield-servers__key" tone="danger">
+        {shown.message}
+      </OctantAlert>
+    );
+  }
+  return (
+    <div className="shield-servers__key">
+      <p className="shield-servers__note">
+        Add this line to <code>~/.ssh/authorized_keys</code> for {server.user} on {server.alias}.
+      </p>
+      <code className="shield-servers__public-key">{shown.publicKey}</code>
+      <OctantButton
+        aria-label={`Copy the key for ${server.alias}`}
+        onClick={() => {
+          void navigator.clipboard?.writeText(shown.publicKey).then(props.onCopied, () => {});
+        }}
+        size="sm"
+        type="button"
+        variant="ghost"
+      >
+        {props.copied ? "Copied" : "Copy"}
+      </OctantButton>
+    </div>
   );
 }
 
@@ -403,10 +504,11 @@ export function ShieldServersSettings(props: ShieldServersSettingsProps) {
     setBusy(true);
     try {
       const result = await client.command(command);
-      if (result.kind !== "shield-servers-updated") {
+      if (result.kind === "shield-servers-refused") {
         if (sentFor === selected.current) setProblem({ scope, message: result.message });
         return false;
       }
+      if (result.kind !== "shield-servers-updated") return false;
       // The answer to an account command describes no Project, and the answer
       // to a Project command is about the Project it was sent for, which the
       // person may have left while it was saved. Either way only what it
@@ -428,6 +530,18 @@ export function ShieldServersSettings(props: ShieldServersSettingsProps) {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function showKey(server: ShieldServer): Promise<KeyShown> {
+    if (client === undefined) return { kind: "problem", message: "Servers are unavailable." };
+    try {
+      const result = await client.command({ kind: "show-server-key", serverId: server.serverId });
+      if (result.kind === "shield-server-key") return { kind: "key", publicKey: result.publicKey };
+      if (result.kind === "shield-servers-refused") return { kind: "problem", message: result.message };
+    } catch {
+      // Shown below as the same plain problem.
+    }
+    return { kind: "problem", message: "The key could not be shown." };
   }
 
   /** The picker only offers the host's own Project ids. */
@@ -504,6 +618,7 @@ export function ShieldServersSettings(props: ShieldServersSettingsProps) {
           onRemove={(server) =>
             send({ kind: "remove-server", serverId: server.serverId }, "account")
           }
+          onShowKey={showKey}
           problem={problemFor("account")}
           servers={view.servers}
         />
@@ -585,6 +700,7 @@ export function ShieldServersSettings(props: ShieldServersSettingsProps) {
                       override.filter((entry) => entry.serverId !== server.serverId).map(fieldsOf),
                     )
                   }
+                  onShowKey={showKey}
                   problem={problemFor("project")}
                   servers={override}
                 />

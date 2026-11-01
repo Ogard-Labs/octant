@@ -478,6 +478,7 @@ export function startOctantServer(
       hostShield,
       threadWork,
     } = wireHarness({
+      options,
       safeNetworkStore,
       projectService,
       agentRunInteractions,

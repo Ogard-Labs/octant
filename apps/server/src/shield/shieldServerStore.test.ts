@@ -451,4 +451,74 @@ describe("Settings › Servers route", () => {
       view: { project: { projectId, override: null } },
     });
   });
+
+  it("shows the public key Octant keeps only for a server that signs in with one, to a window here", async () => {
+    const store = storeOn(openJournal(scratch()));
+    const windowId = decodeWindowId("00000000-0000-4000-8000-000000000470");
+    const capability = "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCA";
+    const windows = new WindowAuthorityStore();
+    windows.register({ windowId, capability, now: 0 });
+    const ensured: string[] = [];
+    let brokerAnswers = true;
+    const handler = createShieldServerRouteHandler({
+      windowAuthorityStore: windows,
+      store,
+      sshAgentAvailable: () => false,
+      projectExists: () => false,
+      sshKeys: {
+        ensure: async (serverId) => {
+          ensured.push(serverId);
+          return brokerAnswers ? "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample" : undefined;
+        },
+      },
+      now: () => 1,
+    });
+    const keyed = store.register({
+      server: { ...web, alias: "keyed", signIn: "octant-key" },
+      principal: "local-window",
+    });
+    const agent = store.register({ server: web, principal: "local-window" });
+    if (keyed.kind !== "changed" || agent.kind !== "changed") throw new Error("Not registered.");
+    const [keyedId, agentId] = ["keyed", "web1"].map((alias) =>
+      String(store.servers().find((server) => server.alias === alias)?.serverId),
+    );
+    const url = "http://127.0.0.1/api/shield/servers";
+    const show = (serverId: string | undefined) =>
+      handler(
+        new Request(url, {
+          method: "POST",
+          body: JSON.stringify({ kind: "show-server-key", serverId }),
+          headers: { "x-octant-window-capability": capability },
+        }),
+      );
+
+    const shown = await show(keyedId);
+    expect(shown?.status).toBe(200);
+    expect(await shown?.json()).toEqual({
+      kind: "shield-server-key",
+      serverId: keyedId,
+      publicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample",
+    });
+    expect(await (await show(agentId))?.json()).toMatchObject({ reason: "signs-in-with-agent" });
+    expect(await (await show("5e7e0000-0000-4000-8000-00000000dead"))?.json()).toMatchObject({
+      reason: "server-not-found",
+    });
+    brokerAnswers = false;
+    expect(await (await show(keyedId))?.json()).toMatchObject({ reason: "key-unavailable" });
+
+    const remote = new Request(url, {
+      method: "POST",
+      body: JSON.stringify({ kind: "show-server-key", serverId: keyedId }),
+    });
+    bindPrincipalRouteContext(remote, {
+      principal: {
+        kind: "remote-device",
+        deviceId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      } as never,
+      scopeId: windowId,
+    });
+    expect(await (await handler(remote))?.json()).toMatchObject({ reason: "needs-local-window" });
+    // Only the person's own window here made a key; the paired device asked nothing of the broker.
+    expect(ensured).toEqual([keyedId, keyedId]);
+  });
 });

@@ -107,7 +107,7 @@ describe("ShieldServersSettings", () => {
 
     await user.type(within(form).getByLabelText("Host alias"), "db-1");
     await user.type(within(form).getByLabelText("Login user"), "ops");
-    await chooseSelectFieldOption(user, within(form).getByRole("combobox"), "Operate");
+    await chooseSelectFieldOption(user, within(form).getByRole("combobox", { name: "Profile" }), "Operate");
     await user.type(
       within(form).getByLabelText("Deploy commands (one per line)"),
       "systemctl restart app{Enter}{Enter}  ./deploy.sh  ",
@@ -128,12 +128,77 @@ describe("ShieldServersSettings", () => {
     });
   });
 
+  it("registers a server that signs in with a key Octant keeps", async () => {
+    const { command, user } = setup({ initial: view({ servers: [] }) });
+    const form = await screen.findByRole("form", { name: "Add a server" });
+
+    await user.type(within(form).getByLabelText("Host alias"), "db-1");
+    await user.type(within(form).getByLabelText("Login user"), "ops");
+    await chooseSelectFieldOption(
+      user,
+      within(form).getByRole("combobox", { name: "Sign in with" }),
+      "A key Octant keeps",
+    );
+    await user.click(within(form).getByRole("button", { name: "Add server" }));
+
+    await waitFor(() => expect(command).toHaveBeenCalledOnce());
+    expect(command).toHaveBeenCalledWith({
+      kind: "register-server",
+      server: {
+        alias: "db-1",
+        user: "ops",
+        profile: "read-only",
+        deployCommands: [],
+        signIn: "octant-key",
+      },
+    });
+  });
+
+  it("shows the public line of a server's Octant key, to add on the server", async () => {
+    const keyed = { ...DB, signIn: "octant-key" } as ShieldServer;
+    const publicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample";
+    const { command, user } = setup({
+      initial: view({ servers: [WEB, keyed] }),
+      answer: (sent) =>
+        sent.kind === "show-server-key"
+          ? { kind: "shield-server-key", serverId: keyed.serverId, publicKey }
+          : { kind: "shield-servers-updated", view: view() },
+    });
+
+    const list = await screen.findByRole("list", { name: "Registered servers" });
+    // A server that signs in with the person's agent has no key to show.
+    expect(within(list).queryByRole("button", { name: "Show the key for web-1" })).toBeNull();
+    await user.click(within(list).getByRole("button", { name: "Show the key for db-1" }));
+
+    expect(await within(list).findByText(publicKey)).toBeVisible();
+    expect(within(list).getByText(/for ops on db-1/)).toBeVisible();
+    expect(command).toHaveBeenCalledWith({ kind: "show-server-key", serverId: keyed.serverId });
+  });
+
+  it("shows the host's refusal when the key cannot be shown", async () => {
+    const keyed = { ...DB, signIn: "octant-key" } as ShieldServer;
+    const { user } = setup({
+      initial: view({ servers: [keyed] }),
+      answer: () => ({
+        kind: "shield-servers-refused",
+        reason: "key-unavailable",
+        message: "Octant could not reach its key store, so no key was made.",
+      }),
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Show the key for db-1" }));
+
+    expect(
+      await screen.findByText("Octant could not reach its key store, so no key was made."),
+    ).toBeVisible();
+  });
+
   it("hides deploy commands for a read-only server", async () => {
     const { user } = setup({ initial: view({ servers: [] }) });
     const form = await screen.findByRole("form", { name: "Add a server" });
 
     expect(within(form).queryByLabelText("Deploy commands (one per line)")).toBeNull();
-    await chooseSelectFieldOption(user, within(form).getByRole("combobox"), "Admin");
+    await chooseSelectFieldOption(user, within(form).getByRole("combobox", { name: "Profile" }), "Admin");
     expect(within(form).getByLabelText("Deploy commands (one per line)")).toBeVisible();
   });
 
@@ -162,7 +227,7 @@ describe("ShieldServersSettings", () => {
 
     await user.click(await screen.findByRole("button", { name: "Change web-1" }));
     const form = screen.getByRole("form", { name: "Change web-1" });
-    const profile = within(form).getByRole("combobox");
+    const profile = within(form).getByRole("combobox", { name: "Profile" });
     await chooseSelectFieldOption(user, profile, "Admin");
     await user.click(within(form).getByRole("button", { name: "Save changes" }));
 
