@@ -546,6 +546,7 @@ export function startOctantServer(
       roots,
       workAttachments,
     } = yield* wireCode({
+      serverConnection,
       serverProjectStore,
       codeBoardEventStore,
       codeEvidence,
@@ -780,6 +781,8 @@ export function startOctantServer(
       remoteServerGrants,
     } = yield* wireCodeTooling({
       browserAuthority,
+      serverConnection,
+      serverProjectStore,
       canAccessCodeProject,
       codeFileWatch,
       codeOperationRuntime,

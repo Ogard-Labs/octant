@@ -595,6 +595,14 @@ export interface CodeServiceOptions {
    */
   readonly awaitsHarnessApproval?: (threadId: string) => boolean;
   readonly gitHistory?: Pick<GitHistoryPort, "read">;
+  /**
+   * The history of a thread in a server Project, read by Git on its server,
+   * with the folder there; undefined for any other thread or a server that
+   * left the registry.
+   */
+  readonly serverGitHistory?: (
+    thread: CodeThread,
+  ) => { readonly root: string; readonly reader: Pick<GitHistoryPort, "read"> } | undefined;
   readonly persistence: CodePersistencePort;
   readonly access: CodeWindowAccessPort;
   readonly checkouts: CodeCheckoutObservationPort;
@@ -855,6 +863,7 @@ export class CodeService {
   readonly #checkouts: CodeCheckoutObservationPort;
   readonly #roots: CodeFileRootAuthorityPort;
   readonly #gitHistory: CodeServiceOptions["gitHistory"];
+  readonly #serverGitHistory: CodeServiceOptions["serverGitHistory"];
   readonly #files: Pick<CodeFileService, "open" | "save"> & Partial<Pick<CodeFileService, "list">>;
   readonly #tests: CodeRepositoryTestDiscoveryPort | undefined;
   readonly #watcher: Pick<CodeFileWatchService, "watch"> | undefined;
@@ -912,6 +921,7 @@ export class CodeService {
     this.#checkouts = options.checkouts;
     this.#roots = options.roots;
     this.#gitHistory = options.gitHistory;
+    this.#serverGitHistory = options.serverGitHistory;
     this.#files = options.files;
     this.#tests = options.tests;
     this.#watcher = options.watcher;
@@ -2449,6 +2459,9 @@ export class CodeService {
       query.checkoutId,
       "Git history is unauthorized.",
     );
+    if (authorized.checkout.kind === "remote-root") {
+      return this.#readServerGitHistory(windowId, query, authorized, signal);
+    }
     const root = await this.#roots.resolve(
       windowId,
       authorized.effectiveThread,
@@ -2483,6 +2496,44 @@ export class CodeService {
       CODE_LISTING_ROOT_PROBE_PATH,
     );
     if (currentRoot?.rootPath !== root.rootPath)
+      return { status: "unavailable", message: "Checkout access changed. Refresh Git history." };
+    return result;
+  }
+
+  /**
+   * A server thread's history, read by Git on its server in the Project's
+   * folder. Nothing is read on this host; a thread outside a server Project,
+   * or one whose server left the registry, has none.
+   */
+  async #readServerGitHistory(
+    windowId: WindowId,
+    query: GitHistoryQuery,
+    authorized: { readonly effectiveThread: CodeThread },
+    signal: AbortSignal | undefined,
+  ): Promise<GitHistoryResult> {
+    const server = this.#serverGitHistory?.(authorized.effectiveThread);
+    if (server === undefined) {
+      return { status: "unavailable", message: "Git history is unavailable for this checkout." };
+    }
+    const target = authorized.effectiveThread.deliveryTarget;
+    const result = await server.reader.read(
+      server.root,
+      query,
+      signal,
+      query.kind === "local-commits"
+        ? [
+            `refs/remotes/${target.remoteName}/${target.proposedBaseBranch}`,
+            `refs/heads/${target.proposedBaseBranch}`,
+          ]
+        : [],
+    );
+    const current = await this.#authorizeCheckoutRead(
+      windowId,
+      query.threadId,
+      query.checkoutId,
+      "Git history is unauthorized.",
+    );
+    if (this.#serverGitHistory?.(current.effectiveThread)?.root !== server.root)
       return { status: "unavailable", message: "Checkout access changed. Refresh Git history." };
     return result;
   }

@@ -50,9 +50,15 @@ Choose one to start a thread there.
   allowed commands earlier in the thread. Full access asks nothing.
 - **Terminals.** A terminal in the thread is a login shell in the folder on
   the server. When the connection drops, the terminal ends.
+- **Project terminal.** When you start a new task in a server Project, the
+  dock's quick tools offer **Terminal**: a login shell in the folder on the
+  server, with no thread. There is no Browser beside it, and saved Project
+  actions are not available there yet.
 - **Git tab.** Choose **Git** on the thread's checkout bar to see the
   changes in the folder on the server, stage, commit, and push. Git runs on
   the server with the server's own Git setup. At Plan it changes nothing.
+- **Review.** The dock's Review tool shows the working tree, local commits,
+  and history of the folder on the server, read by Git there.
 - **Not available there yet:** connectors and plugins, Browser and Computer,
   subagents, forks, checkpoints and rewind, pull requests, and the Files and
   Tests panels. Ask the agent to do it on the server, or use a terminal.
