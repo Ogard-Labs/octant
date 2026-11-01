@@ -304,7 +304,7 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
       if (role !== "listbox" && role !== "combobox") return;
       childDepth = depth + 1;
     } else if (element.localName === "p" || element.localName === "li") {
-      const text = clip(element.textContent ?? "", 160);
+      const text = clip(element.textContent ?? "", 80);
       if (text !== "" && !element.querySelector("a[href], button, input, select, textarea")) {
         if (nodes.length >= request.maxNodes) {
           truncated = true;

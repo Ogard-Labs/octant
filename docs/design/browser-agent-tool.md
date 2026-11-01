@@ -29,7 +29,7 @@ handoff, and fuller diagnostics are allowed; not built yet.
 ## Page snapshot
 
 - `snapshot` returns a compact outline of the page: one line per heading, short
-  text block (a paragraph or list item), and control, indented by nesting. Each
+  text block (the first 80 characters of a paragraph or list item), and control, indented by nesting. Each
   element an agent can act on carries a ref (`[ref=e4]`), its role, its
   accessible name, its state (checked, disabled, expanded, selected, required),
   and its value.
