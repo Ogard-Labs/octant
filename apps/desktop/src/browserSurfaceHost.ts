@@ -1559,7 +1559,7 @@ function elementExpression(selector: string): string {
 interface TargetDocument {
   run(code: string): Promise<unknown>;
   readonly element: string;
-  readonly offset: { readonly x: number; readonly y: number };
+  readonly offset: SurfaceFrame["offset"];
   readonly frame?: { readonly frames: SurfaceFrames; readonly frame: SurfaceFrame };
 }
 
@@ -1571,7 +1571,11 @@ async function inTargetDocument<T>(
 ): Promise<T> {
   const { frames: hops, element } = splitBrowserFrameTarget(target);
   if (hops.length === 0) {
-    return use({ run: (code) => execute(view, code), element, offset: { x: 0, y: 0 } });
+    return use({
+      run: (code) => execute(view, code),
+      element,
+      offset: { x: 0, y: 0, scaleX: 1, scaleY: 1 },
+    });
   }
   return withFrames(view, policy, async (frames) => {
     let frame = await frames.top();
@@ -1658,7 +1662,10 @@ async function targetGeometry(
     return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
   })()`),
     );
-    return { x: point.x + target.offset.x, y: point.y + target.offset.y };
+    return {
+      x: target.offset.x + target.offset.scaleX * point.x,
+      y: target.offset.y + target.offset.scaleY * point.y,
+    };
   });
 }
 

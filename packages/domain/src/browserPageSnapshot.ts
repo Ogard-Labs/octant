@@ -244,7 +244,8 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
   // A selector may step into open shadow roots; a frame hop is the host's to
   // take before it asks this document.
   // Inside a shadow root nothing anchors a path the way `html` does in the
-  // document, so its first step matches only the root's own children.
+  // document, so its first step matches only the root's own children. A path
+  // that starts at an id needs no anchor: the id is unique in its root.
   const resolve = (selector: string): Element | null => {
     let root: Document | ShadowRoot = document as Document | ShadowRoot;
     const parts = selector.split(" >>shadow>> ");
@@ -252,7 +253,7 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
       const part = parts[index] ?? "";
       let found: Element | null = null;
       try {
-        if (root instanceof ShadowRoot) {
+        if (root instanceof ShadowRoot && !part.startsWith("#")) {
           const [first = "", ...rest] = part.split(" > ");
           const top: Element | undefined = Array.from(root.children).find((child: Element) =>
             child.matches(first),
@@ -531,7 +532,7 @@ export function resolveBrowserElement(selector: string): Element | null {
     let found: Element | null = null;
     try {
       // A shadow root's path starts at one of its own children; see the reader.
-      if (root instanceof ShadowRoot) {
+      if (root instanceof ShadowRoot && !part.startsWith("#")) {
         const [first = "", ...rest] = part.split(" > ");
         const top: Element | undefined = Array.from(root.children).find((child: Element) =>
           child.matches(first),
@@ -560,16 +561,25 @@ export function resolveBrowserElement(selector: string): Element | null {
  * document's viewport, after bringing the frame into view. A point inside the
  * frame plus this offset is the point in the page that holds it.
  */
-export function browserFrameContentOffset(
-  frame: Element | null,
-): { readonly x: number; readonly y: number } | null {
+export function browserFrameContentOffset(frame: Element | null): {
+  readonly x: number;
+  readonly y: number;
+  readonly scaleX: number;
+  readonly scaleY: number;
+} | null {
   if (!(frame instanceof HTMLIFrameElement || frame instanceof HTMLFrameElement)) return null;
   frame.scrollIntoView({ block: "nearest", inline: "nearest" });
   const box = frame.getBoundingClientRect();
   const style = window.getComputedStyle(frame);
+  // A scaled frame (a transform on it or an ancestor) draws its own pixels
+  // smaller or larger: the drawn box against the laid-out one gives the scale.
+  const scaleX = frame.offsetWidth > 0 ? box.width / frame.offsetWidth : 1;
+  const scaleY = frame.offsetHeight > 0 ? box.height / frame.offsetHeight : 1;
   return {
-    x: box.left + frame.clientLeft + Number.parseFloat(style.paddingLeft || "0"),
-    y: box.top + frame.clientTop + Number.parseFloat(style.paddingTop || "0"),
+    x: box.left + (frame.clientLeft + Number.parseFloat(style.paddingLeft || "0")) * scaleX,
+    y: box.top + (frame.clientTop + Number.parseFloat(style.paddingTop || "0")) * scaleY,
+    scaleX,
+    scaleY,
   };
 }
 

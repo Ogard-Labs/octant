@@ -111,7 +111,7 @@ beforeAll(async () => {
         <div id="closed"></div>
         <script>
           const open = document.getElementById("card").attachShadow({ mode: "open" });
-          open.innerHTML = '<p><button>One</button></p><button onclick="document.title = \\'Shadow saved\\'">Shadow save</button><p><slot name="note"></slot></p>';
+          open.innerHTML = '<p><button>One</button></p><button onclick="document.title = \\'Shadow saved\\'">Shadow save</button><div><button id="deep" onclick="document.title = \\'Deep saved\\'">Deep save</button></div><p><slot name="note"></slot></p>';
           document.getElementById("closed").attachShadow({ mode: "closed" }).innerHTML = "<button>Hidden away</button>";
         </script>`);
       return;
@@ -268,6 +268,8 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     expect(found.result.page?.title).toBe("Found Ada");
     const saved = await tool.call({ operation: "click", ref: refFor(outline, /"Shadow save"/) });
     expect(saved.result.page?.title).toBe("Shadow saved");
+    const deep = await tool.call({ operation: "click", ref: refFor(outline, /"Deep save"/) });
+    expect(deep.result.page?.title).toBe("Deep saved");
     const waited = await tool.call({
       operation: "wait",
       conditions: [{ ref: refFor(outline, /"Find"/), state: "visible" }],

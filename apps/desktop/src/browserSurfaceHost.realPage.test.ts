@@ -54,10 +54,10 @@ const pages: Record<string, string> = {
     <div id="done" style="width:60px;height:30px;margin-top:40px" ondragover="event.preventDefault()" ondrop="event.preventDefault(); document.title = 'Dropped ' + event.dataTransfer.getData('text')">Done</div>`,
   "/framed": `<!doctype html><title>Framed</title>
     <iframe title="Search" src="/inner"></iframe>
-    <iframe title="Elsewhere" src="{{other}}/remote"></iframe>
+    <iframe title="Elsewhere" src="{{other}}/remote" width="600" height="300" style="transform: scale(0.5); transform-origin: 0 0"></iframe>
     <shadow-card id="card"></shadow-card>
     <script>
-      document.getElementById("card").attachShadow({ mode: "open" }).innerHTML = '<p><button>One</button></p><button onclick="document.title = \\'Shadow saved\\'">Shadow save</button>';
+      document.getElementById("card").attachShadow({ mode: "open" }).innerHTML = '<p><button>One</button></p><button onclick="document.title = \\'Shadow saved\\'">Shadow save</button><div><button id="deep" onclick="document.title = \\'Deep saved\\'">Deep save</button></div>';
       addEventListener("message", (event) => { document.title = String(event.data); });
     </script>`,
   "/inner": `<!doctype html><title>Inner</title>
@@ -65,7 +65,7 @@ const pages: Record<string, string> = {
     <button onclick="top.document.title = 'Found ' + document.getElementById('q').value">Find</button>`,
   "/remote": `<!doctype html><title>Remote</title>
     <label for="r">Remote query</label><input id="r">
-    <button onclick="parent.postMessage('Remote ' + document.getElementById('r').value, '*')">Remote find</button>`,
+    <button style="margin-left: 300px" onclick="parent.postMessage('Remote ' + document.getElementById('r').value, '*')">Remote find</button>`,
   "/framed-login": `<!doctype html><title>Framed sign-in</title>
     <label for="mail">Email</label><input id="mail" value="ada@example.com">
     <iframe title="Sign-in" src="{{other}}/remote-login"></iframe>`,
@@ -313,6 +313,7 @@ describe.skipIf(chrome === undefined)(
       await act("click", "Remote find");
       await page.waitForFunction(() => document.title === "Remote Grace");
       expect((await act("click", "Shadow save")).title).toBe("Shadow saved");
+      expect((await act("click", "Deep save")).title).toBe("Deep saved");
       await page.close();
     });
 

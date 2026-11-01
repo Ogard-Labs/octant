@@ -31,8 +31,17 @@ export interface SurfaceFrame {
   readonly sessionId?: string;
   readonly contextId: number;
   readonly url: string;
-  /** Where the frame's content starts in the top page's viewport. */
-  readonly offset: { readonly x: number; readonly y: number };
+  /**
+   * Where the frame's content starts in the top page's viewport, and how much
+   * one of its pixels is drawn as there: a point inside the frame lands at
+   * `offset + scale * point`.
+   */
+  readonly offset: {
+    readonly x: number;
+    readonly y: number;
+    readonly scaleX: number;
+    readonly scaleY: number;
+  };
 }
 
 export type SurfaceFrameChild =
@@ -160,7 +169,7 @@ export function surfaceFrames(options: {
       return {
         contextId: await world(frame.id, undefined),
         url: typeof frame.url === "string" ? frame.url : "",
-        offset: { x: 0, y: 0 },
+        offset: { x: 0, y: 0, scaleX: 1, scaleY: 1 },
       };
     },
     /** The frame a frame element in `parent` holds, when the agent may enter it. */
@@ -207,8 +216,18 @@ export function surfaceFrames(options: {
       const offset = (await evaluate(
         parent,
         `(${browserFrameContentOffset.toString()})((${resolveBrowserElement.toString()})(${JSON.stringify(selector)}))`,
-      )) as { readonly x?: unknown; readonly y?: unknown } | null;
-      if (typeof offset?.x !== "number" || typeof offset.y !== "number") {
+      )) as {
+        readonly x?: unknown;
+        readonly y?: unknown;
+        readonly scaleX?: unknown;
+        readonly scaleY?: unknown;
+      } | null;
+      if (
+        typeof offset?.x !== "number" ||
+        typeof offset.y !== "number" ||
+        typeof offset.scaleX !== "number" ||
+        typeof offset.scaleY !== "number"
+      ) {
         return { status: "excluded" };
       }
       return {
@@ -217,7 +236,12 @@ export function surfaceFrames(options: {
           ...(sessionId === undefined ? {} : { sessionId }),
           contextId,
           url,
-          offset: { x: parent.offset.x + offset.x, y: parent.offset.y + offset.y },
+          offset: {
+            x: parent.offset.x + parent.offset.scaleX * offset.x,
+            y: parent.offset.y + parent.offset.scaleY * offset.y,
+            scaleX: parent.offset.scaleX * offset.scaleX,
+            scaleY: parent.offset.scaleY * offset.scaleY,
+          },
         },
       };
     },

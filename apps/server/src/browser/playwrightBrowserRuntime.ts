@@ -1267,11 +1267,14 @@ async function targetDocument(
 /**
  * A shadow hop becomes Playwright's own chain, whose CSS reaches into the
  * host's shadow root. `:scope >` keeps each part to the root's own children
- * first, as the page reader resolves it, rather than any descendant.
+ * first, as the page reader resolves it, rather than any descendant; a part
+ * that starts at an id, unique in its root, needs no anchor.
  */
 function playwrightSelector(selector: string): string {
   const [first = "", ...inside] = selector.split(BROWSER_SHADOW_HOP);
-  return [first, ...inside.map((part) => `:scope > ${part}`)].join(" >> ");
+  return [first, ...inside.map((part) => (part.startsWith("#") ? part : `:scope > ${part}`))].join(
+    " >> ",
+  );
 }
 
 function frameOrigin(url: string): { readonly origin?: string } {
