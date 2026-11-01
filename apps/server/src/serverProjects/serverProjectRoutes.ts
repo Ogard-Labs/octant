@@ -78,7 +78,9 @@ export function createServerProjectRouteHandler(dependencies: ServerProjectRoute
         now: now(),
         ...(body === undefined ? {} : { body }),
       });
-      principal = context.principal.kind === "remote-device" ? "remote-device" : "local-window";
+      // Only a principal that names a local window may change the catalog;
+      // any other kind is held to the paired device's refusal.
+      principal = context.principal.kind === "local-window" ? "local-window" : "remote-device";
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
         return failure("Server Project request is unauthorized.", 401, origin);

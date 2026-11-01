@@ -153,7 +153,11 @@ export class ServerConnection {
     const remoteCommand = [
       "sh",
       "-c",
-      quoteForServer(`printf '\\036'; ${input.script}`),
+      // The script runs in a subshell whose own 255 becomes 254, so 255 is
+      // only ever ssh reporting its own failure.
+      quoteForServer(
+        `printf '\\036'; (${input.script}\n); status=$?; [ "$status" -eq 255 ] && status=254; exit "$status"`,
+      ),
       "octant",
       ...(input.args ?? []).map(quoteForServer),
     ].join(" ");
@@ -222,12 +226,13 @@ export class ServerConnection {
           finish({ status: ended, output, truncated });
           return;
         }
-        // ssh exits 255 for its own failures. Its messages are the only thing
-        // on its standard error once the script sends its own elsewhere, so
-        // 255 with a message is a dropped or refused connection, and a call
-        // that never printed the sentinel never reached the server at all.
+        // ssh exits 255 for its own failures, and the wrapper keeps the
+        // script from exiting 255, so 255 is a refused or dropped connection
+        // even when ssh printed nothing (a server that ends the session is
+        // reported below the error log level). A call that never printed
+        // the sentinel never reached the server at all.
         const message = lastLine(errorText);
-        if (!reached || (code === 255 && message !== undefined)) {
+        if (!reached || code === 255) {
           finish({
             status: "unreachable",
             message: message ?? "The connection closed before the server answered.",

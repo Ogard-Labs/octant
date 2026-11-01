@@ -170,6 +170,17 @@ export class ServerProjectStore {
     if (call.exitCode !== 0) return refused("folder-not-found");
     const folder = decodeFolder(call.output.toString("utf8").replace(/\n$/, ""));
     if (folder._tag === "None") return refused("folder-not-found");
+    // The check above waited on the server, so the limit and the registry are
+    // read again: another bind may have filled the catalog, or the server may
+    // have been removed, in the meantime.
+    if (this.#projects.size >= MAX_SERVER_PROJECTS) return refused("too-many-projects");
+    if (
+      !this.#options
+        .servers()
+        .some((candidate) => String(candidate.serverId) === String(server.serverId))
+    ) {
+      return refused("server-not-registered");
+    }
     const project: ServerProject = {
       id: decodeProjectId(this.#options.uuid()),
       name: input.name.trim(),

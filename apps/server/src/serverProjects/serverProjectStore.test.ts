@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { decodeWindowId } from "@octant/contracts";
+import { MAX_SERVER_PROJECTS } from "@octant/contracts/server-projects";
 import type { ShieldServer } from "@octant/contracts/shield-servers";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
@@ -174,6 +175,45 @@ describe("server Project catalog", () => {
       }),
     ).toMatchObject({ kind: "refused", reason: "needs-local-window" });
     expect(server.calls).toEqual([]);
+  });
+
+  it("holds the catalog to its limit when binds overlap, and binds nothing for a server removed meanwhile", async () => {
+    const waiting: Array<() => void> = [];
+    let servers: ReadonlyArray<ShieldServer> = [web];
+    const store = storeOn(
+      openJournal(scratch()),
+      {
+        run: () =>
+          new Promise<ServerCall>((resolve) => waiting.push(() => resolve(resolvedTo("/srv/app")))),
+      },
+      () => servers,
+    );
+    const bind = (name: string) =>
+      store.bind({
+        name,
+        serverId: String(web.serverId),
+        folder: "/srv/app",
+        principal: "local-window",
+      });
+    for (let index = 0; index < MAX_SERVER_PROJECTS - 1; index += 1) {
+      const pending = bind(`App ${String(index)}`);
+      waiting.shift()?.();
+      await pending;
+    }
+    const first = bind("Last");
+    const second = bind("One too many");
+    for (const answer of waiting.splice(0)) answer();
+    expect((await Promise.all([first, second])).map((change) => change.kind)).toEqual([
+      "changed",
+      "refused",
+    ]);
+    expect(store.projects()).toHaveLength(MAX_SERVER_PROJECTS);
+
+    store.remove({ projectId: String(store.projects()[0]?.id), principal: "local-window" });
+    const late = bind("Late");
+    servers = [];
+    waiting.shift()?.();
+    expect(await late).toMatchObject({ kind: "refused", reason: "server-not-registered" });
   });
 
   it("keeps a Project whose server was removed from the registry, with no address", async () => {
