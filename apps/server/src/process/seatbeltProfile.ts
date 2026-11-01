@@ -196,6 +196,14 @@ export interface ProcessConfinementPrepareInput {
    * refuses it: there the host reaches a port the profile opens on loopback.
    */
   readonly inboundRelay?: Readonly<{ socketPath: string; port: number }>;
+  /**
+   * Linux `proxied` only: loopback ports inside the capsule the forwarder
+   * also listens on, each carried to the same port on the host's loopback
+   * through the launch's proxy as a `CONNECT 127.0.0.1:<port>`, so the
+   * proxy's decision and records cover it. A provider runtime's tool bridge
+   * uses it. macOS refuses it: there the profile opens the host port itself.
+   */
+  readonly loopbackRelayPorts?: ReadonlyArray<number>;
 }
 
 export interface ProcessConfinementPort {
@@ -980,6 +988,12 @@ function prepareSeatbeltLaunch(
     throw new ProcessConfinementError(
       "incompatible",
       "Seatbelt launches have no inbound relay; the host reaches an opened loopback port.",
+    );
+  }
+  if (input.loopbackRelayPorts !== undefined && input.loopbackRelayPorts.length > 0) {
+    throw new ProcessConfinementError(
+      "incompatible",
+      "Seatbelt launches have no loopback relay; the profile opens the host port itself.",
     );
   }
   const interpreterSearchPath =

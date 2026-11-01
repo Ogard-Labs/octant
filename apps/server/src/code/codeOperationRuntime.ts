@@ -2118,6 +2118,19 @@ export function threadWithActiveTurnPosture(
   return executionPolicy === thread.executionPolicy ? thread : { ...thread, executionPolicy };
 }
 
+/** The Code thread whose running turn holds this provider session, if any. */
+export function threadOfActiveSession(
+  activeTurns: ReadonlyMap<string, Pick<ActiveTurn, "thread" | "sessionId" | "requestedSessionId">>,
+  sessionId: string,
+): string | undefined {
+  for (const active of activeTurns.values()) {
+    if (active.sessionId === sessionId || active.requestedSessionId === sessionId) {
+      return String(active.thread.id);
+    }
+  }
+  return undefined;
+}
+
 interface ActiveTurn {
   /**
    * A provider-switch or fork handoff this turn selected and has not

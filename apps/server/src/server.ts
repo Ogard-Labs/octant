@@ -292,9 +292,11 @@ export function startOctantServer(
       providerRuntimeNetwork,
       safeNetworkRoutes,
     } = yield* wireIntegrations({
+      codeActiveTurns,
       externalContentIngestionStore,
       options,
       persistence,
+      shieldHolder,
       windowAuthorityStore,
       workThreadProjection,
     });

@@ -6783,9 +6783,17 @@ where it was or narrows it:
   since narrowed to a posture that clamps it to `proxied` runs its commands
   unasked, so on a tainted parent they reach no host. A tainted proposal shows on the card and cannot
   be granted there; the command confirmation is where it is granted.
-  [Octant Shield](#octant-shield), the reviewer that may answer a per-call
-  `network-access` prompt, is not built.
   Each fails closed.
+- _The reviewer path._ With Network limits on, a command's `no-rule` or
+  `expired` refusal on an untainted thread goes to
+  [Octant Shield](#octant-shield) while the command runs, before the
+  refusal is answered (`ToolEgressRules` `reviewNetwork`), when Shield is the
+  thread's reviewer at Auto. Shield judges a `network-access` call naming the
+  host and port; an allow becomes one `call` rule for that launch, journaled
+  as `thread.egress-rule-granted@1` with the reviewer as principal, and the
+  proxy decides again; the decision shows on the thread's transcript. The
+  proxy waits at most 20 seconds. Anything else stays refused and goes on to
+  learn mode as before.
 
 **Failure modes.** Each fails closed:
 
@@ -6884,12 +6892,12 @@ proofs that suite already holds:
 
 ### Provider runtime network
 
-**Status: built on macOS, behind the Network limits switch, off by default (maintainer request, 2026-10-31).** The decision is
+**Status: built on macOS and Linux, behind the Network limits switch, off by default (maintainer request, 2026-10-31; Linux, Claude's own process, and the composed reviewer 2026-11-01).** The decision is
 `decideProviderRuntimeEgress` in `packages/domain/src/safeNetworkPolicy.ts`,
 the places and records are in `packages/contracts/src/safeNetworks.ts`, and
 the host side is `apps/server/src/network/` (`providerRuntimeNetwork.ts`,
 `safeNetworkStore.ts`, `safeNetworkRoutes.ts`), composed in
-`wiring/runtimeNetwork.ts`. Linux keeps open network for runtimes (below).
+`wiring/runtimeNetwork.ts`. On Linux OpenCode keeps open network (below).
 
 **Network limits ship off.** No real provider turn has run through the proxy
 yet, and a runtime that ignores the proxy settings would lose all its
@@ -6912,20 +6920,26 @@ that for the runtime process too. Full access stays open network.
 
 **Where it applies.** Every wrapped runtime below Full access, Plan and Chat
 included: OpenCode, ACP agents, Pi, and the Codex app-server, each launch
-(and each probe) on a listener of its own. Claude's own process is unwrapped
-outside Plan, so at Ask first, Accept edits and Auto its command sandbox
-carries the network instead: the Agent SDK's `sandbox.network.httpProxyPort`
-points the sandbox's commands at the session's listener in place of the
-sandbox's own proxy. Octant sends that one network setting and refuses a
-sandbox with any other (`hasValidSandbox`). The SDK has no setting that
-carries proxy credentials, so that listener takes no launch token
-(`authentication: "none"`); only processes that can reach the port use it,
-and a confined launch's OS rules reach only its own port. Still open: Claude's
-own process (its in-process web fetch and, in Plan, the runtime itself, whose
-launch is composed synchronously inside the SDK's spawn hook) and SOCKS
-traffic from the Claude sandbox, which its own filter keeps. Each runtime's
-module reaches this through `acquireProviderRuntimeNetwork`, and
-`providerProcessConfinement.test.ts` refuses a wrapped module that does not.
+(and each probe) on a listener of its own. Claude's own process gets a
+listener of its own too (runtime `claude`), started with the session before
+the SDK's spawn hook runs, so the hook only reads it: every launch, its
+catalog and plan-usage probes included, carries the listener's proxy
+variables, and its inference and in-process web fetch go there. In Plan,
+where Octant wraps the process, its OS rules reach that listener and nothing
+else. Outside Plan the process is not wrapped (macOS refuses a sandbox inside
+the one Claude's commands run in), so the variables are what route it: a
+client in it that ignored them would keep open network there. At Ask first,
+Accept edits and Auto its command sandbox carries the commands' network as
+well: the Agent SDK's `sandbox.network.httpProxyPort` points the sandbox's
+commands at a second listener in place of the sandbox's own proxy. Octant
+sends that one network setting and refuses a sandbox with any other
+(`hasValidSandbox`). The SDK has no setting that carries proxy credentials,
+so that listener takes no launch token (`authentication: "none"`); only
+processes that can reach the port use it, and a confined launch's OS rules
+reach only its own port. Still open: SOCKS traffic from the Claude sandbox,
+which its own filter keeps. Each runtime's module reaches this through
+`acquireProviderRuntimeNetwork`, and `providerProcessConfinement.test.ts`
+refuses a wrapped module that does not.
 
 **Enforcement point.** The host proxy harness commands use
 (`nativeHarnessEgressProxy.ts`), with a provider-runtime decider in place of
@@ -6970,15 +6984,27 @@ innermost active Work or Code Project whose bound folder holds it), and a
 folder no Project holds gets the account default and no Project rules.
 
 **Unlisted hosts at Auto and Ask first.** At Auto, where the launch knows it
-runs at Auto (Claude's sandbox today), an unlisted host goes to the reviewer
-hook (`RuntimeNetworkReviewer`) before its refusal is answered; the proxy
-decides again once the reviewer answers or 20 seconds pass. An `allow` is
-journaled first (`runtime-network.reviewer-allowed@1`) and holds for that
-launch alone; it is never a place or a rule. No reviewer is composed yet, so
-at Auto as at Ask first the refusal stands and goes to the person: the
-host appears under Recently refused in Settings › Access › Safe networks,
-where one click trusts it for the Project or every Project, and the runtime's
-next attempt passes. The connection is refused at once rather than held.
+runs at Auto (Claude's own process and its sandbox today), an unlisted host
+goes to the reviewer hook (`RuntimeNetworkReviewer`) before its refusal is
+answered; the proxy decides again once the reviewer answers or 20 seconds
+pass. The reviewer composed there is [Octant Shield](#octant-shield)
+(`shield/shieldNetworkReview.ts`): the launch names its thread directly (a
+Work request's session) or by its provider session, which a running Code
+turn holds, and Shield judges a `network-access` call naming only the host,
+the port, and the runtime. Shield answers only on a thread whose reviewer it
+is, never on a tainted thread, and its decision shows on the thread's
+transcript. An `allow` is journaled first (`runtime-network.reviewer-allowed@1`)
+and holds for that launch alone; it is never a place or a rule. Every other
+answer, a launch whose thread no running turn holds (a probe, a child run),
+and Ask first leave the refusal standing for the person: the host appears
+under Recently refused in Settings › Access › Safe networks, where one click
+trusts it for the Project or every Project, and the runtime's next attempt
+passes. The connection is refused at once rather than held. _Rationale:_ the
+person chose who reviews at Auto; where they kept the provider's own
+reviewer, that reviewer never sees the proxy's question, so Shield does not
+answer it in their place and spend on a call nobody chose. OpenCode, ACP
+agents, Pi, and Codex do not tell their launch the thread's level, so their
+unlisted hosts go to the person at every level.
 
 **Audit journal.** On the launch's own `runtime-network` aggregate:
 `runtime-network.launch-started@1` (the launch's id, runtime, ACP profile,
@@ -6990,19 +7016,33 @@ whose start cannot be journaled never starts the runtime, which reports that
 its network guard could not start. Recently refused is rebuilt at startup
 from the launch starts and summaries.
 
-**Linux.** The capsule's private network namespace would also cut the host
-loopback that tool bridges and OpenCode's own server use, so Linux runtimes
-keep `allow` until the forwarder carries those connections too. The Safe
-networks page says so when its host does not route runtimes.
+**Linux.** A runtime's Bubblewrap capsule keeps its private network
+namespace, and its listener is a Unix socket in a fresh private folder under
+the data folder's `runtime-network`, which the capsule's forwarder relays its
+fixed loopback port to, as harness commands do. The namespace also hides the
+host's loopback, so the forwarder listens on each port the launch serves
+Octant's tools on (`loopbackRelayPorts`) and carries every connection there
+to the same host port through the proxy as a `CONNECT 127.0.0.1:<port>` with
+the launch's token, so the proxy decides and records it as any other request.
+A process Octant does not run in a capsule of its own (Claude's sandbox, and
+Claude's own process outside Plan) gets a loopback listener, as on macOS.
+OpenCode keeps open network on Linux: it is a server the host connects into,
+and the namespace would cut that connection. _Rationale:_ relaying the host's
+connections in needs a host-side listener for each launch beside the
+forwarder's inbound socket; until it exists, OpenCode keeps the network it
+had rather than failing every launch.
 
 **Not proven live.** No real runtime turn has run on its proxy: a runtime's
 own HTTP client honouring the proxy variables with credentials, Codex's
-streaming transport among them, and Claude's sandbox using the outside proxy
-port, are unverified against real providers. A client that ignores the
-variables fails closed. The real check is a Codex-shaped launch under
-Seatbelt in `providerRuntimeNetwork.hostile.test.ts`: `curl` reaches a trusted
-loopback server through the proxy, is refused an untrusted one with 403, and
-fails going around the proxy.
+streaming transport among them, Claude's own process and its sandbox using
+their listeners, and a Shield model answering a network review, are
+unverified against real providers. A client that ignores the variables fails
+closed where Octant wraps it. The real checks are in
+`providerRuntimeNetwork.hostile.test.ts`: a Codex-shaped launch under
+Seatbelt, where `curl` reaches a trusted loopback server through the proxy,
+is refused an untrusted one with 403, and fails going around the proxy; and
+the same under real Bubblewrap on Linux, where `curl` also reaches the
+launch's tool bridge through the loopback relay.
 
 ## Extensions and skills
 
@@ -10735,7 +10775,7 @@ Octant Shield is Octant's own automatic approval reviewer (maintainer
 decision, 2026-10-31). Its Judge is built for every runtime below, subagents
 included, with the picker and the Settings and Project choices (build order
 steps 1 to 3), its Watcher for the results Octant hands a model (step 4),
-safe networks for provider runtimes (step 5), and the server registry with
+safe networks for provider runtimes and harness commands (step 5), and the server registry with
 its SSH rules (step 6), with the gaps each part names below. It answers the
 approval prompts
 that would otherwise go to the person, for every runtime that routes
@@ -10812,7 +10852,8 @@ count beside its parent's.
 (account default, Project override): hosts, domains, address ranges, and
 private-network tags. Egress to a trusted place passes by rule; anything else
 goes to the Judge at Reviewed and to the person at Guarded. Each decision is
-journaled per host. Built for provider runtimes on macOS, behind the Network limits switch, which
+journaled per host. Built for provider runtimes on macOS and Linux and for
+Octant Harness commands, behind the Network limits switch, which
 ships off ([provider runtime network](#provider-runtime-network)): a `host` place
 matches that name, a `domain` the name and every name under it, a range is
 CIDR, and the tags are `this-mac` (loopback), `local-network` (the private
@@ -10823,10 +10864,20 @@ link-local address is refused. Each list is journaled whole, journal first, as
 fixed id, or the Project's), and `safe-networks.project-override-cleared@1`
 returns a Project to the default, and `safe-networks.limits-set@1` records the
 Network limits switch; startup replays them. Only a person at a
-local window changes them (`GET`/`POST /api/access/safe-networks`). The
-reviewer hook is in place and no reviewer is composed, so today every unlisted
-host goes to the person. Not built yet: safe networks for harness commands,
-which keep thread and Project rules, and taint suspending places.
+local window changes them (`GET`/`POST /api/access/safe-networks`). A harness
+command's proxy falls back to the places of its thread's Project after the
+thread's and Project's rules refuse, and a private answer passes for it only
+through a place, as for a runtime. Taint suspends places for a command as it
+suspends standing rules, so a marked thread's command reaches only the hosts
+a person confirmed for it; a runtime taints no thread, so its places stay.
+Bytes a command receives from a place taint its thread as any other
+command's do. With limits on, an unlisted host goes to Shield where Shield
+reviews the thread at Auto, for a runtime that says it runs at Auto (Claude's
+own process and its sandbox) and for every harness command, whose
+`network-access` prompt it answers per call; anything Shield does not allow
+goes to the person. _Rationale:_ places apply to commands only while limits
+are on, like everything else here, so turning the switch off returns every
+command to exactly its thread and Project rules.
 
 **Servers over SSH,** in Work and Code alike:
 

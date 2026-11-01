@@ -37,6 +37,7 @@ import {
 } from "./claudeAgentSdkDecoder";
 import { BoundedAsyncInput, makeClaudeCloseCoordinator } from "./claudeAgentSdkLifecycle";
 import type { ClaudeProcessPort, SpawnClaudeCodeProcess } from "./claudeProcess";
+import type { ProviderRuntimeProxiedNetwork } from "../network/providerRuntimeNetwork";
 
 export type ClaudePermissionMode = "default" | "bypassPermissions" | "plan" | "auto";
 
@@ -106,6 +107,11 @@ export interface ClaudeOpenQueryInput {
   /** The Project's extra folders, granted what `projectRoot` is granted. */
   readonly additionalDirectories?: ReadonlyArray<string>;
   readonly authEnvironment: Readonly<Record<string, string | undefined>>;
+  /**
+   * The runtime's own network, where the host routes Claude's process
+   * through its egress proxy: the launch's listener and proxy variables.
+   */
+  readonly network?: ProviderRuntimeProxiedNetwork;
   readonly model: string;
   /** Agent SDK `effort` for the session; absent means the SDK default. */
   readonly effort?: ClaudeEffortLevel;
@@ -925,6 +931,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               : { extraFolders: input.additionalDirectories }),
             executionPolicy: input.executionPolicy,
             runsCommands: input.tools.includes("Bash"),
+            ...(input.network === undefined ? {} : { network: input.network }),
           });
           // The runtime process this query's launch produced, kept so a stuck
           // turn can be killed without the graceful close that waits on it.
