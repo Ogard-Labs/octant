@@ -280,6 +280,15 @@ phone says when it can dictate again. Reading replies aloud stays on the
 computer. Without a transcription endpoint, or while the computer is
 unreachable, the phone shows no microphone.
 
+## Forking and rewinding from the phone
+
+Under each message of a Chat, Work, or Code thread the phone shows **Fork from
+here** and **Rewind to here**. The computer decides every effect and refuses
+what it would refuse at its own window. Putting a Code thread's files back needs
+your approval at the computer unless the thread has Full access, so on other
+threads the phone rewinds the conversation only and says why. See
+[Code: On the phone](/guide/code#on-the-phone).
+
 ## Screen privacy and keys on the phone
 
 **Computers › Privacy & security** in the phone app says what this phone

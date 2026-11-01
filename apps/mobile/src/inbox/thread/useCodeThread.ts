@@ -5,6 +5,7 @@ import {
   sendMobileCodeTurn,
   type MobileCodeConversation,
 } from "@octant/client-runtime";
+import type { CodeThread } from "@octant/contracts";
 import { runLoad, runMutation, sendThenReload } from "./runMutation";
 import type { RefreshOptions, ThreadHookInput } from "./threadTypes";
 import { useThreadAttachments } from "./useThreadAttachments";
@@ -15,6 +16,7 @@ export function useCodeThread(input: ThreadHookInput) {
   const threadId = target?.threadId;
   const enabled = target?.mode === "code";
   const [policy, setPolicy] = useState<string | undefined>();
+  const [codeThread, setCodeThread] = useState<CodeThread | undefined>();
   const [conversation, setConversation] = useState<MobileCodeConversation | undefined>();
   const [threadModel, setThreadModel] = useState<
     { readonly providerInstanceId: string; readonly modelId: string } | undefined
@@ -23,6 +25,7 @@ export function useCodeThread(input: ThreadHookInput) {
 
   useEffect(() => {
     setPolicy(undefined);
+    setCodeThread(undefined);
     setConversation(undefined);
     setThreadModel(undefined);
   }, [identity]);
@@ -45,6 +48,7 @@ export function useCodeThread(input: ThreadHookInput) {
           ]),
         onLoaded: ([thread, loaded]) => {
           setPolicy(thread.executionPolicy);
+          setCodeThread(thread);
           setThreadModel({
             providerInstanceId: String(thread.providerInstanceId),
             modelId: String(thread.modelId),
@@ -53,6 +57,7 @@ export function useCodeThread(input: ThreadHookInput) {
         },
         onFailed: () => {
           setPolicy(undefined);
+          setCodeThread(undefined);
           setConversation(undefined);
         },
       });
@@ -95,6 +100,7 @@ export function useCodeThread(input: ThreadHookInput) {
   const turns = conversation?.turns;
   return {
     policy,
+    thread: codeThread,
     conversation,
     turns,
     live: (turns ?? []).some((turn) => turn.status === "waiting"),

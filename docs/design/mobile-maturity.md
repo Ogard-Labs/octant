@@ -107,7 +107,54 @@ These rules hold for every phase and are not reopened by any slice:
 | Push on the phone | `enablePhoneNotifications.ts` trades the platform token for a gateway capability bound to the paired computer's key fingerprint at the gateway compiled into the build (`MOBILE_PUSH_GATEWAY_URL`) and registers only the capability with the computer, as [Phone rules](#phone-rules) describes; removing a computer or revoking this phone from it calls the port's `forgetHost`. The in-tree `octant-push` module (`apps/mobile/modules/octant-push`) is the native port (`mobileNotificationPort.native.ts`): the system's permission, the Apple or Firebase token, one X25519 notification key per computer, and the iPhone's notification service extension and the Android messaging service that open sealed content. `rotatePhoneNotifications` re-registers a changed token, and `PushNotificationsPanel.tsx` offers enablement only where the port reports `available`, as [Phone rules](#phone-rules) describes; `deepLinks.ts` parses `octant://hosts/{hostId}/threads/[{mode}/]{threadId}` |
 | Capture           | Chat, Work, and Code threads attach a camera photo, a library image, or a document-picker file (`apps/mobile/src/inbox/thread/pickAttachment.ts`, `useThreadAttachments.ts`) through each mode's own attachment route (`packages/client-runtime/src/mobileAttachmentClient.ts`), offered only for media the thread's model takes. The listener admits those routes for a paired device (`remoteRoutePolicy.ts`), and the host removes image metadata from every paired upload before a route sees it (`apps/server/src/attachments/imageMetadataRemoval.ts`, applied in `authenticatedProductRoutes.ts`). The camera and photo-library permission strings name both uses; the physical-device camera pass is a maintainer gate                                                                                                                                                                                                                                                                           |
 | Voice             | The listener forwards `/api/speech/status` and `/api/speech/transcriptions` to a paired device and never `/api/speech/synthesis`; `speechRoutes.ts` holds each device to its own budget and clip bound, as [Voice](#voice) describes. The phone composers draw a microphone only while the host reports transcription `ready` (`apps/mobile/src/voice/`), recording through `expo-audio`; `app.config.ts` names the one microphone use                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Fork and rewind   | Every message of a Chat, Work, or Code thread the phone opens offers Fork from here and Rewind to here (`apps/mobile/src/inbox/thread/useThreadTurnActions.ts`, `packages/client-runtime/src/mobileThreadRewind.ts`), through the host's own commands, as [Fork and rewind](#fork-and-rewind) describes. The phone shows the host's preview and asks once, returns the removed message to its composer, and offers nothing while a turn runs or the host is stale. A Code rewind offers files only under Full access; otherwise it rewinds the conversation only and says why.                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | Hardening ports   | On Android, screenshot privacy is the secure-window flag and key storage is reported (`deviceProtection.native.ts`). On iOS the same module covers the app in the app switcher and while the screen is captured, and reports whether a Secure Enclave protects the Keychain; secure storage keeps its items on that phone only (`hosts/expoSecureStorage.ts`), as [iOS capture and key storage rules](#ios-capture-and-key-storage-rules) describes. Device integrity is an unavailable stub (`deviceIntegrityPort.ts`) on both. Each unavailable port is disclosed in Settings                                                                                                                                                                                                                                                                                                                                                                                                                          |
+
+## Fork and rewind
+
+Decided 2026-11-01: the phone offers what the desktop and web clients offer on
+a sent message ([Architecture: modes](../architecture.md#modes-chat-work-and-code),
+"Rewind and fork instead of edit"). It adds no route and no authority.
+
+- **Where.** Fork from here and Rewind to here sit under every message of a
+  Chat, Work, or Code thread the phone can open. A reply forks through itself
+  and a person's message through the reply before it, so the first message
+  offers no fork. Rewind from a person's message removes that turn and every
+  later one; from a reply, the turns after it. A Code thread shows its newest
+  turns, so its first shown turn offers no fork.
+- **Same commands.** Chat sends `branch-chat-thread` and `rewind-chat-thread`
+  to `/api/chat/commands`; Work sends `fork-work-thread` to
+  `/api/work/threads/commands` and `rewind-work-thread` to
+  `/api/work/turns/rewind`; Code sends `fork-code-thread`,
+  `preview-code-rewind`, and `rewind-code-thread` to `/api/code/commands`. The
+  remote route classifier already forwards these prefixes to a paired device.
+- **What the host does with a paired device.** A Code operation from a paired
+  device is gated as an agent's. A fork and a conversation-only rewind are
+  allowed. The files part of a rewind is the in-place restore: under Ask first
+  and Auto-accept edits the host asks an approval, approvals are taken only at
+  a window on the computer, and `/api/desktop/*` is local-only, so a phone's
+  restore there could only wait; under Full access the host asks nothing and
+  allows it. The phone changes none of this.
+- **What the phone offers.** Files only for a Full access Code thread whose
+  preview reports files that can come back, with the same list of paths and
+  the same single confirmation. For every other Code thread, and for Chat and
+  Work (which keep no files), the sheet offers the conversation only and says
+  why in plain words. The host's own refusal, such as a stale version or a
+  writing turn in another thread on the checkout, is shown as it is.
+- **While a turn runs.** The actions are not drawn while a turn starts, runs,
+  or waits, and not while the host is stale or disconnected; the host refuses
+  the same cases. The phone queues nothing.
+- **The composer.** After a rewind of the conversation, the removed message
+  returns to the phone's composer above any draft already there.
+
+Rationale: a phone-side way to approve a file restore would be a new approval
+path for a destructive effect, and the phone cannot see the host's session
+grants. Offering files only where the thread's own posture asks nothing, and
+showing the host's refusal when it disagrees, keeps authority on the host.
+
+Not proven without a device: the touch layout on a real phone, and a Full
+access Code rewind with files against a live host. Both are live-test cases for
+the maintainer's device pass ([device acceptance pass](../mobile-testflight.md#device-acceptance-pass)).
 
 ## Phase B (Android): internal builds of the same client
 

@@ -327,6 +327,21 @@ when a turn after that point wrote files without a recorded checkpoint; the
 conversation can still be rewound on its own. A thread in a Project on a
 server, or in Plan, rewinds the conversation only and says why.
 
+### On the phone
+
+The phone app puts **Fork from here** and **Rewind to here** under every message
+of a Code thread. A fork opens the new thread, and a rewind asks once with the
+computer's own answer to what it would change, then returns your removed message
+to the phone's composer. The phone shows neither while a turn runs or the
+computer is out of reach.
+
+Putting files back is different. Under **Ask first** and **Auto-accept edits**,
+Octant asks for your approval, and it takes approvals only at the computer. A
+phone cannot give one, so there the phone rewinds the conversation only and says
+so in the sheet; restore the files at the computer. Under **Full access** the
+computer asks nothing, and the phone lists the files that would change and asks
+once before it puts them back.
+
 ## Attaching images
 
 Paste or drop a PNG, JPEG, WebP, or GIF into the thread composer to send it with your next message. Each image uploads to the host as you attach it, and the turn sends only the identifier the host answered with, so the provider receives bytes the host itself accepted.

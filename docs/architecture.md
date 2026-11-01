@@ -1694,6 +1694,29 @@ now also move back in place. Chat's differences are under **Chat** below.
 - **The composer.** The person's message from the first removed turn returns
   to the composer for editing, which is how a sent message is changed in Chat,
   Work and Code.
+- **On the phone.** The Android and iOS client offers Fork from here and
+  Rewind to here on every message of a Chat, Work or Code thread it can open,
+  through the same host routes and commands, and gains no authority from it.
+  A paired device is a remote principal and a Code operation from it is gated
+  as an agent's, so the host's own rules decide each part. A fork and a
+  conversation-only rewind are allowed. A rewind that puts files back is the
+  in-place restore, which the host asks an approval for under Ask first and
+  Auto-accept edits, and approvals are taken only at a window on the computer
+  (`/api/desktop/*` never reaches a phone); under Full access the host asks
+  nothing and allows it. The phone therefore offers files only for a Full
+  access Code thread whose preview says files can come back, shows the same
+  preview and the same single confirmation, and otherwise offers the
+  conversation only and says why in the sheet. Chat and Work have no files and
+  say so. Nothing is offered while a turn starts, runs or waits, or while the
+  host is stale; the host refuses the same cases itself. The removed message
+  returns to the phone's composer above any draft.
+
+  Rationale: the narrower choice keeps the existing boundary. Giving a phone
+  its own way to approve a file restore would be a new approval path for a
+  destructive effect, and the phone cannot know the host's session grants, so
+  it offers files only where the thread's own posture asks nothing and shows
+  the host's refusal as it is when the host disagrees.
+
 - **Chat.** Chat follows these rules with the differences below. It has no
   files and gains no filesystem or shell authority: the rewind dialog says so
   and offers the conversation only, with no preview read and no checkpoint

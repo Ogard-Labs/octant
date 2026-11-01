@@ -168,6 +168,12 @@ comes back to the composer to change and send again. Work keeps no copies of
 your files, so a rewind changes the conversation only; files stay as they
 are. Octant refuses a rewind while a turn of the thread runs.
 
+On the phone app, every message has **Fork from here** and **Rewind to here**
+under it, with the same meaning. A rewind asks once and says that only the
+conversation goes back, then your removed message returns to the phone's
+composer. The phone shows neither while a turn runs or the computer is out of
+reach.
+
 ## Export
 
 **Export…** downloads a portable JSON cut of this Work thread: the

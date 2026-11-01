@@ -26,6 +26,7 @@ import { AttachSourceSheet } from "../ui/AttachSourceSheet";
 import { FloatingComposer } from "../ui/FloatingComposer";
 import { IconButton } from "../ui/IconButton";
 import { ModelPickerSheet } from "../ui/ModelPickerSheet";
+import { RewindSheet } from "../ui/RewindSheet";
 import { modelOptionForThread } from "./thread/pendingAttachments";
 import { useVoiceDictation } from "../voice/useVoiceDictation";
 import { appendTranscript } from "../voice/voiceDictation";
@@ -34,6 +35,7 @@ import { ThreadTranscript } from "./thread/ThreadTranscript";
 import type { ThreadHookInput, ThreadTarget, ThreadUi } from "./thread/threadTypes";
 import { useChatThread } from "./thread/useChatThread";
 import { useCodeThread } from "./thread/useCodeThread";
+import { useThreadTurnActions } from "./thread/useThreadTurnActions";
 import { useWorkThread } from "./thread/useWorkThread";
 import {
   MOBILE_CHAT_IDLE_REFRESH_INITIAL_DELAY_MS,
@@ -47,6 +49,8 @@ const RECONNECTING_COPY = "Reconnecting to the host…";
 export interface ThreadScreenProps {
   readonly selected: MobileInboxRow | undefined;
   readonly onBack: () => void;
+  /** Opens the thread a fork made. */
+  readonly onOpenThread: (row: MobileInboxRow) => void;
 }
 
 export function ThreadScreen(props: ThreadScreenProps) {
@@ -154,6 +158,25 @@ export function ThreadScreen(props: ThreadScreenProps) {
     }, MOBILE_CHAT_IDLE_REFRESH_INITIAL_DELAY_MS);
     return () => clearInterval(timer);
   }, [codeTurnLive, mode, refresh, workTurnLive]);
+
+  const turnActions = useThreadTurnActions({
+    transport,
+    target:
+      identity === undefined || hostId === undefined || threadId === undefined || mode === undefined
+        ? undefined
+        : { identity, hostId, threadId, mode },
+    guard,
+    ui,
+    gate: staleGate,
+    prompt,
+    setPrompt,
+    turnLive: chat.activeAttempt !== undefined || workTurnLive || codeTurnLive,
+    refresh,
+    onOpenThread: props.onOpenThread,
+    chatThread: chat.view?.thread,
+    workThread: work.thread,
+    codeThread: code.thread,
+  });
 
   const selectedModel = useMemo(
     () => models.options.find((option) => option.id === chat.modelOptionId),
@@ -340,6 +363,11 @@ export function ThreadScreen(props: ThreadScreenProps) {
               <ActivityIndicator color={colors.accent} />
             ) : null}
             {error !== undefined ? <Text style={styles.error}>{error}</Text> : null}
+            {turnActions.notice !== undefined ? (
+              <Text style={styles.connectionStatus} testID="mobile-thread-notice">
+                {turnActions.notice}
+              </Text>
+            ) : null}
             {selected.mode === "code" &&
             (codePolicy === "approval-gated" || codePolicy === "auto-accept-edits") ? (
               <ApprovalDeferralSheet
@@ -357,6 +385,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
               allowProductMutations={staleGate.allowProductMutations}
               chat={chat}
               codeConversation={code.conversation}
+              turnActionsFor={turnActions.actionsFor}
               workTurns={work.turns}
             />
           </>
@@ -416,6 +445,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
           voice={voice}
         />
       )}
+      <RewindSheet {...turnActions.sheet} />
       <AttachSourceSheet
         onClose={() => setAttachOpen(false)}
         onSelect={attachFrom}
