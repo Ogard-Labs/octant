@@ -203,7 +203,9 @@ What each one loads today:
 
 At Auto in Code, Mistral Vibe now reviews its own approvals with its
 auto-approve mode, as Claude Code and Codex do with theirs, until the thread
-reads something from the web.
+reads something from the web. The other agents on the ACP bridge have no
+reviewer of their own, so their capabilities list says **Own reviewer: None**
+and Auto uses Octant Shield for them.
 
 Only a window on the computer running Octant can change any of these switches; a
 paired phone or browser cannot. Plan mode stays read-only, so it never runs

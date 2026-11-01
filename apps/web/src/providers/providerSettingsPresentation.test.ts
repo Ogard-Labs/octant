@@ -6,6 +6,7 @@ import {
   providerProcessFailureSummary,
   providerRefusalGuidance,
   providerRowReadinessLabel,
+  ownReviewerLabel,
   reviewVerdictsLabel,
 } from "./providerSettingsPresentation";
 
@@ -358,5 +359,20 @@ describe("reviewVerdictsLabel", () => {
 
   it("says nothing for a runtime with no reviewer of its own", () => {
     expect(reviewVerdictsLabel(report("unsupported"))).toBeUndefined();
+  });
+});
+
+describe("ownReviewerLabel", () => {
+  const report = (harnessAutoReview: string) => ({ harnessAutoReview }) as never;
+
+  it("says an agent on the ACP bridge has no reviewer of its own", () => {
+    expect(ownReviewerLabel("gemini", report("unsupported"))).toBe(
+      "None. Octant Shield reviews at Auto.",
+    );
+  });
+
+  it("says nothing for an agent that has a reviewer, and for a runtime that is not an ACP agent", () => {
+    expect(ownReviewerLabel("mistral-vibe", report("supported"))).toBeUndefined();
+    expect(ownReviewerLabel("claude", report("unsupported"))).toBeUndefined();
   });
 });

@@ -54,6 +54,21 @@ export function reviewVerdictsLabel(
   return "Not reported";
 }
 
+/**
+ * Whether an agent on the ACP bridge has a reviewer of its own, said only for
+ * the agent that has none: the person should read that Auto then falls to
+ * Octant Shield, not wonder why the row is missing. Agents with one are
+ * described by their reviewer verdicts instead.
+ */
+export function ownReviewerLabel(
+  driverKind: string,
+  capabilities: ProviderObservedState["capabilities"],
+): string | undefined {
+  if (!isAcpAgentKind(driverKind)) return undefined;
+  if (capabilities.harnessAutoReview === "supported") return undefined;
+  return "None. Octant Shield reviews at Auto.";
+}
+
 export const probeTimestampFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
   timeStyle: "short",
