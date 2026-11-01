@@ -226,6 +226,8 @@ import {
   serverCodeCheckoutRoot,
   serverProjectOf,
 } from "../serverProjects/serverProjectThreads";
+import type { GitService } from "../code/gitService";
+import { createServerGitService } from "../serverProjects/serverGit";
 import { serverTerminalLogin } from "../serverProjects/serverTerminal";
 
 export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence"> &
@@ -465,6 +467,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       // host's own profile is the identity a checkout without local config
       // falls back to. Read it per call: the profile is editable while the
       // server runs, and a restart is too high a price for a name.
+      const serverGitServices = new Map<string, GitService>();
       const gitMutationPort = new GitMutationPort(undefined, {
         commitIdentity: () => {
           const profile = persistence.readShellSettings()?.settings.userProfile;
@@ -677,6 +680,34 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           return address.kind === "address"
             ? serverTerminalLogin(serverConnection, address.server, project.folder)
             : undefined;
+        },
+        serverGit: (thread) => {
+          const project = serverProjectOf(serverProjectStore, thread);
+          if (project === undefined) return undefined;
+          const projectId = String(project.id);
+          if (serverProjectStore.addressOf(projectId).kind !== "address") return undefined;
+          // One service per Project, so its Git changes queue one after
+          // another as a local checkout's do.
+          let git = serverGitServices.get(projectId);
+          if (git === undefined) {
+            git = createServerGitService({
+              connection: serverConnection,
+              // Read each call, so a server removed mid-operation refuses the next command.
+              server: () => {
+                const address = serverProjectStore.addressOf(projectId);
+                return address.kind === "address" ? address.server : undefined;
+              },
+              commitIdentity: () => {
+                const profile = persistence.readShellSettings()?.settings.userProfile;
+                return {
+                  ...(profile?.displayName === undefined ? {} : { name: profile.displayName }),
+                  ...(profile?.email === undefined ? {} : { email: profile.email }),
+                };
+              },
+            });
+            serverGitServices.set(projectId, git);
+          }
+          return git;
         },
         serverCodeTurn: (input) =>
           serverProjectOf(serverProjectStore, input.thread) === undefined

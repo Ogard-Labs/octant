@@ -548,6 +548,8 @@ export interface CodeOperationRuntimeOptions {
   readonly holdsServerThread?: (thread: CodeThread) => boolean;
   /** The login a server thread's terminal opens on its server. */
   readonly serverTerminalLogin?: CodeOperationServiceOptions["serverTerminalLogin"];
+  /** Git on a server thread's server, for its Git panel. */
+  readonly serverGit?: (thread: CodeThread) => GitService | undefined;
   readonly serverCodeTurn?: (input: {
     readonly thread: CodeThread;
     readonly windowId: WindowId;
@@ -1095,6 +1097,14 @@ export function createCodeOperationRuntime(
     ...(options.serverTerminalLogin === undefined
       ? {}
       : { serverTerminalLogin: options.serverTerminalLogin }),
+    ...(options.serverGit === undefined
+      ? {}
+      : {
+          serverGit: (thread: CodeThread) => {
+            const serverGit = options.serverGit?.(thread);
+            return serverGit === undefined ? undefined : codeOperationGitPort(serverGit);
+          },
+        }),
     ...(options.isProviderModelAllowed === undefined
       ? {}
       : { isProviderModelAllowed: options.isProviderModelAllowed }),

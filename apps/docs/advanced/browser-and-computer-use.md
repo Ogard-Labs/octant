@@ -188,14 +188,21 @@ not offer Browser.
 
 Where supported, Octant registers `octant_browser` when the provider session
 starts. The agent does not need a separate browser skill, a debugging URL, or
-a shell-launched browser. The tool can navigate, read page text, click and fill
-CSS-selected elements, press a browser key, scroll horizontally or vertically,
-wait for an element, take a screenshot, and stop its session. Page observations
-include a revision that subsequent actions may use to refuse stale targets.
+a shell-launched browser. The tool can navigate, take a snapshot of the page,
+read page text, click and fill elements, press a browser key, scroll
+horizontally or vertically, wait for an element, take a screenshot, and stop
+its session.
 
-The tool's built-in guidance tells the agent to navigate, inspect the page,
-act using the observed target and revision, and inspect the result to verify
-success. The always-visible description stays short; the agent asks the tool's
+A snapshot is a short outline of the page: its headings, text, and controls,
+each control with a reference such as `e4` the agent passes back to click or
+type there. A password or one-time-code field appears as protected, and the
+outline never shows what is typed in it; on a sign-in page no field's value is
+shown. Octant keeps the references itself and refuses one that no longer
+matches the page, so the agent snapshots again instead of acting on the wrong
+element.
+
+The tool's built-in guidance tells the agent to navigate, take a snapshot, act
+by reference, and inspect the result to verify success. The always-visible description stays short; the agent asks the tool's
 `help` operation for the full usage when it needs it, as it can for Computer
 use and Code's terminal, Apple, and Android tools. The same definition reaches
 supported providers in Work and Code. Installing a browser skill or configuring a global MCP server is unnecessary.

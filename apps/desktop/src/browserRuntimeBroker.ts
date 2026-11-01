@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { BrowserContextPolicy, BrowserProfileClearScope } from "@octant/contracts";
 import {
+  BrowserActionKind,
   decodeImportedCookie,
   decodeStoredBrowserProfile,
   MAX_BROWSER_TABS_PER_CONTEXT,
@@ -11,6 +12,8 @@ import {
 import type { BrowserProfileStore } from "./browserProfileStore";
 import {
   BrowserNavigationBlockedError,
+  BrowserTargetStaleError,
+  type BrowserSurfaceAction,
   type ReturnTypeOfBrowserSurfaceHost,
 } from "./browserSurfaceHost";
 
@@ -221,6 +224,9 @@ async function handleBrokerRequest(
     if (error instanceof Error && error.message.includes("not a native Project window")) {
       return failure("owner-unavailable", 409);
     }
+    if (error instanceof BrowserTargetStaleError) {
+      return Response.json({ error: "target-stale" }, { status: 422 });
+    }
     if (error instanceof BrowserNavigationBlockedError) {
       return Response.json({ error: "navigation-blocked", url: error.url }, { status: 422 });
     }
@@ -332,43 +338,11 @@ function isOwner(value: unknown): value is { windowId: string; threadId: string 
   return isRecord(value) && typeof value.windowId === "string" && isUuid(value.threadId);
 }
 
-function isBrowserAction(value: unknown): value is {
-  kind:
-    | "navigate"
-    | "click"
-    | "type"
-    | "press"
-    | "scroll"
-    | "screenshot"
-    | "extract-text"
-    | "wait"
-    | "close-tab"
-    | "observe-diagnostics";
-  target?: string;
-  value?: string;
-  point?: { readonly x: number; readonly y: number };
-  deltaX?: number;
-  deltaY?: number;
-} {
+function isBrowserAction(value: unknown): value is BrowserSurfaceAction {
   if (!isRecord(value)) return false;
-  const allowedKeys = new Set(["kind", "target", "value", "point", "deltaX", "deltaY"]);
+  const allowedKeys = new Set(["kind", "target", "value", "point", "deltaX", "deltaY", "expected"]);
   if (Object.keys(value).some((key) => !allowedKeys.has(key))) return false;
-  if (
-    ![
-      "navigate",
-      "click",
-      "type",
-      "press",
-      "scroll",
-      "screenshot",
-      "extract-text",
-      "wait",
-      "close-tab",
-      "observe-diagnostics",
-    ].includes(String(value.kind))
-  ) {
-    return false;
-  }
+  if (!(BrowserActionKind.literals as ReadonlyArray<unknown>).includes(value.kind)) return false;
   return (
     (value.target === undefined ||
       (typeof value.target === "string" && value.target.length <= 4096)) &&
@@ -376,7 +350,21 @@ function isBrowserAction(value: unknown): value is {
       (typeof value.value === "string" && value.value.length <= 65_536)) &&
     (value.point === undefined || isViewportPoint(value.point)) &&
     (value.deltaX === undefined || isBoundedDelta(value.deltaX)) &&
-    (value.deltaY === undefined || isBoundedDelta(value.deltaY))
+    (value.deltaY === undefined || isBoundedDelta(value.deltaY)) &&
+    (value.expected === undefined || isExpectedElement(value.expected))
+  );
+}
+
+function isExpectedElement(value: unknown): value is { role: string; name: string; url: string } {
+  return (
+    isRecord(value) &&
+    Object.keys(value).every((key) => key === "role" || key === "name" || key === "url") &&
+    typeof value.url === "string" &&
+    value.url.length <= 4096 &&
+    typeof value.role === "string" &&
+    value.role.length <= 64 &&
+    typeof value.name === "string" &&
+    value.name.length <= 512
   );
 }
 
