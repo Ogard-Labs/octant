@@ -28,6 +28,7 @@ import {
   CodeProjectNewThreadWorkspaceChanged,
   CodeProjectPermissionModeChanged,
   CodeProjectAutoReviewerChanged,
+  CodeProjectAgentMergeChanged,
   CodeProjectPullRequestBackgroundRefreshChanged,
   CODE_PROJECT_PULL_REQUEST_ACTION_RECORDED,
   CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED,
@@ -409,6 +410,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       1,
       CodeProjectPullRequestBackgroundRefreshChanged,
     )
+    .register("project.code-agent-merge-changed@1", 1, CodeProjectAgentMergeChanged)
     .register(CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED, 1, CodeProjectPullRequestMergeRecorded)
     .register(CODE_PROJECT_PULL_REQUEST_ACTION_RECORDED, 1, CodeProjectPullRequestActionRecorded)
     .register(

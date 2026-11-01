@@ -157,6 +157,36 @@ describe("AutomationDefinitionEditor creation", () => {
     expect(draft.projectLevel).toBe("opted-in");
   });
 
+  it("offers merging its pull requests only to a Code routine, and records the choice", async () => {
+    const props = editorProps();
+    render(<AutomationDefinitionEditor {...props} />);
+
+    await userEvent.type(screen.getByLabelText("Name"), "Nightly fix");
+    await userEvent.type(screen.getByLabelText("Task for each run"), "Fix the flaky test.");
+    await chooseLabeledOption("Project", "Docs Project");
+    expect(screen.queryByLabelText("Merge the pull requests it opens")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Code" }));
+    await chooseLabeledOption("Project", "Repo Project");
+    await chooseLabeledOption("Execution profile", "Code default");
+    await chooseLabeledOption("Authority profile", "Ask for approvals Code");
+    await chooseLabeledOption("Schedule", "Run once");
+    fireEvent.change(screen.getByLabelText("Run at"), { target: { value: "2026-09-01T09:00" } });
+    await userEvent.type(screen.getByLabelText("Delivery"), "A fix is merged.");
+    const optIn = screen.getByLabelText("Merge the pull requests it opens");
+    expect(optIn).toHaveAccessibleDescription(/required checks passing/);
+    await userEvent.click(optIn);
+    await userEvent.click(
+      screen.getByLabelText("I confirm this delivery target for every scheduled run"),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Save automation" }));
+
+    await waitFor(() => expect(props.onSubmit).toHaveBeenCalledOnce());
+    const draft = (props.onSubmit as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as AutomationDefinitionDraft;
+    expect(draft.agentMerge).toBe("allowed");
+  });
+
   it("builds a weekly-local trigger with weekdays, wall time, and IANA timezone", async () => {
     const props = editorProps();
     render(<AutomationDefinitionEditor {...props} />);

@@ -62,6 +62,7 @@ export interface ReaderPagesContainerProps {
     | "setAutomationCenterOpen"
     | "setCodeBoardOpen"
     | "setCodePullRequestBackgroundRefresh"
+    | "setCodeAgentMerge"
     | "setCodePullRequestsOpen"
     | "setGithubIssuesOpen"
     | "setImageLibraryOpen"
@@ -481,6 +482,17 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
               projectId,
               enabled ? "enabled" : "disabled",
             ),
+        }}
+        agentMerge={{
+          enabledFor: (projectId) =>
+            projects.some(
+              (project) =>
+                String(project.id) === String(projectId) &&
+                project.type === "code" &&
+                project.agentMerge === "enabled",
+            ),
+          setEnabled: (projectId, enabled) =>
+            actions.setCodeAgentMerge(projectId, enabled ? "enabled" : "disabled"),
         }}
         {...(selectedProjectPullRequestKey === undefined ? {} : { selectedProjectPullRequestKey })}
         onCloseWorkBoard={() => actions.setWorkBoardOpen(false)}
