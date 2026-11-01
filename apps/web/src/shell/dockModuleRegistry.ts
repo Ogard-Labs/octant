@@ -110,6 +110,7 @@ export const dockModuleInputs = {
     "codeController",
     "codeProviderGroups",
     "hostBridge",
+    "projectExtraFolders",
     "providerController",
     "serverUrl",
     "subject",

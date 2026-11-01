@@ -2764,8 +2764,18 @@ Git start in the main folder. Built.
   path, the root authority places it in one of the Project's current extra
   folders after resolving the checkout, and the folder is then the file's
   root. The explorer lists each extra folder as its own tree beneath the
-  checkout's, labelled with the folder's last component. An extra folder has
-  no file watch, so its tree relists on Refresh, and a save there is
+  checkout's, labelled with the folder's last component. The host watches an
+  extra folder as it does the checkout: the explorer opens a watch for each
+  of the first two folders, naming it by the absolute path the Project lists, and the root
+  authority places that path as the root of a current extra folder or the
+  watch is refused (a path inside a folder, or one that resolves into the
+  checkout, is not a folder to watch). A notice names paths relative to that
+  folder and the folder's tree relists on it and on Refresh. Further folders relist on
+  Refresh only. _Rationale:_ each watch is a long-lived HTTP/1.1 stream and a
+  browser allows about six per origin, shared with the checkout's watch and the
+  window's other streams, so a Project with many folders could starve ordinary
+  requests; multiplexing the watches over one stream is left for a larger
+  change. A save there is
   journaled like any other save of the thread.
 - **Terminals and Project actions.** A Project terminal starts in the main
   folder unless the person picks an extra folder, and a saved action runs
@@ -2779,8 +2789,14 @@ Git start in the main folder. Built.
   Project folder that exists as a Project terminal does, and its start command
   may name an extra folder to start in, compared as the exact path the Project
   lists; the host refuses any other, and a folder missing on disk is left out
-  of the binding. The Terminal tab does not offer that pick yet: a thread
-  terminal started from it still opens in the thread's working directory.
+  of the binding. The Terminal tab's menu offers **Restart in** each extra
+  folder (a Project with none shows no pick, and Plan shows none). The pick
+  stops a running shell and starts a fresh one in that folder, because a
+  running shell cannot change where it started; the first terminal a tab opens
+  still starts in the thread's working directory.
+  _Rationale:_ restarting on the pick, rather than a separate start control,
+  keeps one terminal per tab and reuses the stop-then-start path the Browser
+  grant already takes.
 - **Work files.** A path relative to the main folder is always the main
   folder's; a file in an extra folder is named by its absolute path, and the
   host honours an absolute path only inside one of the Project's current
@@ -2812,9 +2828,6 @@ Git start in the main folder. Built.
   checkout and then each extra folder under the shared budgets, and a match
   there carries its folder; choosing it opens the file in the editor by the
   folder's path joined to the match's.
-- **Not yet.** The Terminal tab has no control to start a thread terminal in
-  an extra folder, and an extra folder has no live file watch in the
-  explorer.
 
 ## Agent task display
 

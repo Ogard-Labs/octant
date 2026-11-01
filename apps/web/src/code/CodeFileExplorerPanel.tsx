@@ -12,6 +12,14 @@ import { useCodeFileListingController } from "./useCodeFileListingController";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
+/**
+ * How many extra folders the explorer follows live. Each watch is a long-lived
+ * HTTP/1.1 stream, and a browser allows about six per origin, shared with the
+ * checkout's watch and every other stream the window holds; more would starve
+ * ordinary requests. Further folders relist on Refresh.
+ */
+export const MAX_LIVE_EXTRA_FOLDER_WATCHES = 2;
+
 export interface CodeFileExplorerPanelProps {
   readonly threadId?: CodeThreadId | undefined;
   readonly checkoutId?: CodeCheckoutId | undefined;
@@ -94,10 +102,11 @@ export function CodeFileExplorerPanel(props: CodeFileExplorerPanelProps) {
         truncated={controller.truncated}
         {...(props.selectedPath === undefined ? {} : { selectedPath: props.selectedPath })}
       />
-      {(props.extraFolders ?? []).map((folder) => (
+      {(props.extraFolders ?? []).map((folder, index) => (
         <ExtraFolderExplorer
           key={folder}
           folder={folder}
+          live={index < MAX_LIVE_EXTRA_FOLDER_WATCHES}
           onOpenFile={props.onOpenFile}
           {...(props.threadId === undefined ? {} : { threadId: props.threadId })}
           {...(props.checkoutId === undefined ? {} : { checkoutId: props.checkoutId })}
@@ -116,13 +125,15 @@ export function CodeFileExplorerPanel(props: CodeFileExplorerPanelProps) {
  * One extra folder of the Project, listed as its own tree. The host lists it
  * when asked for the folder by absolute path, and an entry opens by that
  * folder's path joined to the entry's, which is how the editor names a file
- * outside the checkout. The folder has no file watch, so it relists on Refresh.
+ * outside the checkout. A folder within the live limit is watched as the
+ * checkout is, so its tree relists when something in it changes; any folder
+ * relists on Refresh.
  */
 function ExtraFolderExplorer(
   props: Pick<
     CodeFileExplorerPanelProps,
     "threadId" | "checkoutId" | "client" | "serverUrl" | "windowCapability" | "onOpenFile"
-  > & { readonly folder: string },
+  > & { readonly folder: string; readonly live: boolean },
 ) {
   // A folder spelled in a way the file-path schema refuses (a decomposed
   // Unicode name, a backslash) is a valid folder on disk, so it is shown as
@@ -130,6 +141,8 @@ function ExtraFolderExplorer(
   const directory = projectFilePath(props.folder);
   const controller = useCodeFileListingController({
     enabled: directory !== undefined,
+    watch: props.live,
+    watchFolder: props.folder,
     ...(directory === undefined ? {} : { directory }),
     ...(props.client === undefined ? {} : { client: props.client }),
     ...(props.threadId === undefined ? {} : { threadId: props.threadId }),
