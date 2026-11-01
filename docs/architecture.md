@@ -9601,8 +9601,8 @@ access` agree); a thread's own change is journaled as
   approval and app-tool requests arrive on its own thread id and are
   answered through the session that owns it, under that session's level,
   mode, and Project confinement, within its turn; one heard when no turn of
-  the owner's is running is refused (an approval declined, a tool call
-  failed), never left waiting. Rationale, read from the codex-cli 0.164.0
+  the owner's is running, or still waiting when that turn ends, is refused
+  (an approval declined, a tool call failed), never left waiting. Rationale, read from the codex-cli 0.164.0
   source: a spawned agent copies its parent turn's approval policy,
   reviewer, working directory, permission profile, environments, and app
   tools, and the app-server attaches every new agent thread to each

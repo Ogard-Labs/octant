@@ -3709,6 +3709,60 @@ describe("Codex running as itself", () => {
     await acquired.close();
   });
 
+  it("refuses a subagent's requests still waiting when its parent's turn ends", async () => {
+    const { f, acquired } = await parentWithSubagent();
+    const asked = takeEvents(acquired.connection, 2);
+    f.emit(
+      commandApproval({ id: "child-waiting", threadId: "thread-child", turnId: "turn-child" }),
+    );
+    f.emit(
+      dynamicToolCall({ id: "child-waiting-tool", threadId: "thread-child", turnId: "turn-child" }),
+    );
+    await asked;
+    f.emit(
+      notification("turn/completed", {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "interrupted" },
+      }),
+    );
+    await vi.waitFor(() => {
+      expect(f.calls).toContainEqual({
+        method: "approval/respond",
+        input: { providerRequestId: "child-waiting", result: { decision: "decline" } },
+      });
+      expect(f.calls).toContainEqual({
+        method: "tool/respond",
+        input: {
+          providerRequestId: "child-waiting-tool",
+          result: expect.objectContaining({ success: false }),
+        },
+      });
+    });
+    await acquired.close();
+  });
+
+  it("leaves the parent's own pending requests to Codex when its turn ends", async () => {
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()), "code");
+    await startSession(acquired.connection);
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "approval", attachments: [], tools: [] }),
+    );
+    const asked = takeEvents(acquired.connection, 1);
+    f.emit(commandApproval({ id: "parent-waiting" }));
+    await asked;
+    const ended = takeEvents(acquired.connection, 1);
+    f.emit(
+      notification("turn/completed", {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "interrupted" },
+      }),
+    );
+    await ended;
+    expect(f.calls.some(({ method }) => method === "approval/respond")).toBe(false);
+    await acquired.close();
+  });
+
   it("refuses a subagent's request heard after its parent's turn ended, so the subagent never waits out of sight", async () => {
     const { f, acquired } = await parentWithSubagent();
     // Another thread mid-turn on the same connection keeps it listening.

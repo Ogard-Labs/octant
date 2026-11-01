@@ -447,6 +447,8 @@ interface SessionState {
       readonly providerRequestId: CodexRpcId;
       readonly controller: AbortController;
       readonly turnId: string;
+      /** Sent by one of Codex's own subagents, whose turn outlives this one. */
+      readonly fromSubagent?: true;
     }
   >;
   /** The compaction `compact` asked for, until the run that carries it ends. */
@@ -1406,16 +1408,51 @@ function makeConnection(
         Math.max(0, options.runtimeRegistry.activeSessionCount(options.instanceId) - 1),
       );
     };
+    /**
+     * Refuses a request one of Codex's own subagents is still waiting on once
+     * nobody can answer it. Its turn is its own, so the parent's ending does
+     * not settle it; unanswered, the subagent would wait out of sight.
+     */
+    const refuseSubagentRequest = (
+      providerRequestId: CodexRpcId,
+      refusal: { readonly kind: "tool" } | { readonly kind: "approval"; readonly result: unknown },
+    ) =>
+      Effect.runFork(
+        request(() =>
+          refusal.kind === "tool"
+            ? client.respondTool({
+                providerRequestId,
+                result: {
+                  success: false,
+                  contentItems: [
+                    { type: "inputText", text: "The parent turn has ended; nobody can answer." },
+                  ],
+                },
+              })
+            : client.respondApproval({ providerRequestId, result: refusal.result }),
+        ).pipe(Effect.ignore),
+      );
     const clearPendingApprovals = (state: SessionState) => {
-      for (const requestId of state.pendingApprovals.keys()) {
+      for (const [requestId, pending] of state.pendingApprovals) {
         if (pendingApprovalOwners.get(requestId) === state.sessionId) {
           pendingApprovalOwners.delete(requestId);
+          if (pending.threadId !== state.threadId) {
+            refuseSubagentRequest(pending.providerRequestId, {
+              kind: "approval",
+              result: declinedApprovalResult(pending),
+            });
+          }
         }
       }
       state.pendingApprovals.clear();
     };
     const clearPendingTools = (state: SessionState) => {
-      for (const pending of state.pendingTools.values()) pending.controller.abort();
+      for (const pending of state.pendingTools.values()) {
+        pending.controller.abort();
+        if (pending.fromSubagent === true) {
+          refuseSubagentRequest(pending.providerRequestId, { kind: "tool" });
+        }
+      }
       state.pendingTools.clear();
     };
     const unsubscribeWhenIdle = () => {
@@ -1536,6 +1573,7 @@ function makeConnection(
           controller: new AbortController(),
           // The parent's turn, which a subagent's call is answered within.
           turnId: state.activeTurnId ?? item.tool.turnId,
+          ...(item.tool.threadId === state.threadId ? {} : { fromSubagent: true as const }),
         });
         offer(item.tool.event);
         return "admitted";
@@ -1609,26 +1647,17 @@ function makeConnection(
       const owner = subagentOwner(message.params.threadId);
       if (owner === undefined) return;
       if (owner.terminal || owner.context === undefined) {
-        Effect.runFork(
-          request(() =>
-            message.method === "item/tool/call"
-              ? client.respondTool({
-                  providerRequestId: message.id,
-                  result: {
-                    success: false,
-                    contentItems: [
-                      { type: "inputText", text: "The parent turn has ended; nobody can answer." },
-                    ],
-                  },
-                })
-              : client.respondApproval({
-                  providerRequestId: message.id,
-                  result:
-                    message.method === "item/permissions/requestApproval"
-                      ? { permissions: {}, scope: "turn" }
-                      : { decision: "decline" },
-                }),
-          ).pipe(Effect.ignore),
+        refuseSubagentRequest(
+          message.id,
+          message.method === "item/tool/call"
+            ? { kind: "tool" }
+            : {
+                kind: "approval",
+                result:
+                  message.method === "item/permissions/requestApproval"
+                    ? { permissions: {}, scope: "turn" }
+                    : { decision: "decline" },
+              },
         );
         return;
       }
