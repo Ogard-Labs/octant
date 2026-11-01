@@ -1,4 +1,10 @@
 import { browserToolImage } from "../browser/browserToolImage";
+import {
+  browserToolAction,
+  browserToolResult,
+  parseBrowserToolInput,
+  type BrowserToolInput,
+} from "../browser/browserToolOperations";
 import { BROWSER_TOOL_DEFINITION, BROWSER_TOOL_HELP } from "../browser/browserToolDefinition";
 import type {
   BrowserActionRequest,
@@ -59,7 +65,6 @@ const MAX_TOOL_INPUT_BYTES = 16 * 1024;
 const MAX_PULL_REQUEST_TOOL_INPUT_BYTES = 128 * 1024;
 const MAX_TERMINAL_RESULT_BYTES = 32 * 1024;
 const MAX_TERMINAL_SCAN_BYTES = 64 * 1024;
-const MAX_BROWSER_TEXT_RESULT_BYTES = 24 * 1024;
 const TERMINAL_COMMAND_TIMEOUT_MS = 30_000;
 const TERMINAL_COMPLETION_POLL_MS = 50;
 
@@ -554,7 +559,11 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
         return plannerProposeTool(options, parseProposeThreadInput(inputJson));
       }
       if (name === CODE_BROWSER_TOOL_NAME && options.browser !== undefined) {
-        return browserTool(options, parseBrowserInput(inputJson), signal);
+        return browserTool(
+          options,
+          parseBrowserToolInput(inputJson, { allowProfile: false }),
+          signal,
+        );
       }
       // The device tools decide per operation: reads run under any posture,
       // effects ask the person under an approval-gated one. See
@@ -1079,7 +1088,7 @@ async function browserTool(
     const context = options.browser.inspectThread(options.windowId, threadId).context;
     if (context !== undefined) options.browserApproval?.forget(String(context.contextId));
     const released = await options.browser.releaseThread(options.windowId, threadId);
-    return browserResult(released);
+    return browserToolResult(released);
   }
   const postureFailure = browserAuthorityFailure(options);
   if (postureFailure !== undefined) return failure(postureFailure);
@@ -1090,15 +1099,13 @@ async function browserTool(
   }
   const origin =
     existing === undefined
-      ? input.operation === "navigate" && input.url !== undefined
+      ? input.operation === "navigate"
         ? allowedOrigin(input.url)
         : undefined
       : existing.policy.allowedOrigins.join(", ");
   if (origin === undefined)
     return failure(
-      input.operation === "navigate" && input.url !== undefined
-        ? "invalid-browser-url"
-        : "browser-navigation-required",
+      input.operation === "navigate" ? "invalid-browser-url" : "browser-navigation-required",
     );
   const requiresApproval = currentAuthorityFailure(options) !== undefined;
   const remembered =
@@ -1142,9 +1149,9 @@ async function browserTool(
     }
   }
   const context = snapshot.context;
-  if (context === undefined || context.state !== "active") return browserResult(snapshot);
+  if (context === undefined || context.state !== "active") return browserToolResult(snapshot);
   if (signal?.aborted) return failure("tool-interrupted");
-  const request = browserAction(input, context);
+  const request = browserToolAction(input, context);
   if (request === undefined) return failure("invalid-browser-input");
   const acted = await guardedBrowserEffect(options, threadId, signal, () =>
     options.browser!.act({ windowId: options.windowId, request, capturedBy: "agent" }),
@@ -1156,7 +1163,7 @@ async function browserTool(
   ) {
     return failure("browser-screenshot-unavailable");
   }
-  return browserResult(acted.snapshot, input.operation === "screenshot");
+  return browserToolResult(acted.snapshot, input.operation === "screenshot");
 }
 
 /**
@@ -1839,58 +1846,6 @@ async function guardedBrowserEffect(
   }
 }
 
-function browserAction(
-  input: BrowserToolInput,
-  context: NonNullable<BrowserAutomationSnapshot["context"]>,
-) {
-  const base = {
-    actionId: context.actionId,
-    contextId: context.contextId,
-    correlationId: context.correlationId,
-    authority: context.authority,
-    ...(input.expectedObservationRevision === undefined
-      ? {}
-      : { expectedObservationRevision: input.expectedObservationRevision }),
-  } as const;
-  switch (input.operation) {
-    case "navigate":
-      return input.url === undefined
-        ? undefined
-        : { ...base, kind: "navigate" as const, target: input.url };
-    case "read-page":
-      return {
-        ...base,
-        kind: "extract-text" as const,
-        ...(input.selector === undefined ? {} : { target: input.selector }),
-      };
-    case "click":
-      return input.selector === undefined
-        ? undefined
-        : { ...base, kind: "click" as const, target: input.selector };
-    case "type":
-      return input.selector === undefined || input.text === undefined
-        ? undefined
-        : { ...base, kind: "type" as const, target: input.selector, value: input.text };
-    case "press":
-      return { ...base, kind: "press" as const, value: input.key };
-    case "wait":
-      return input.selector === undefined
-        ? undefined
-        : { ...base, kind: "wait" as const, target: input.selector };
-    case "scroll":
-      return {
-        ...base,
-        kind: "scroll" as const,
-        ...(input.deltaX === undefined ? {} : { deltaX: input.deltaX }),
-        ...(input.deltaY === undefined ? {} : { deltaY: input.deltaY }),
-      };
-    case "screenshot":
-      return { ...base, kind: "screenshot" as const };
-    case "diagnostics":
-      return { ...base, kind: "observe-diagnostics" as const };
-  }
-}
-
 function actionRequest(
   options: CodeAppManagedToolsOptions,
   authority: ToolActionAuthority,
@@ -1949,66 +1904,6 @@ function terminalSnapshot(
       ...(command === undefined ? {} : command),
     },
     isError: false,
-  };
-}
-
-function browserResult(snapshot: BrowserAutomationSnapshot, includeScreenshot = false) {
-  const image = includeScreenshot
-    ? browserToolImage(snapshot.observation?.screenshotDataUrl)
-    : undefined;
-  return {
-    ...(image === undefined ? {} : { images: [image] }),
-    result: {
-      status: snapshot.status,
-      ...(snapshot.failure === undefined ? {} : { failure: snapshot.failure }),
-      ...(snapshot.observation === undefined
-        ? {}
-        : {
-            page: {
-              ...(snapshot.observation.revision === undefined
-                ? {}
-                : { observationRevision: snapshot.observation.revision }),
-              ...(snapshot.observation.url === undefined ? {} : { url: snapshot.observation.url }),
-              ...(snapshot.observation.title === undefined
-                ? {}
-                : { title: snapshot.observation.title }),
-              ...(snapshot.observation.extractedText === undefined
-                ? {}
-                : {
-                    text: boundedUtf8(
-                      snapshot.observation.extractedText,
-                      MAX_BROWSER_TEXT_RESULT_BYTES,
-                    ),
-                    ...(Buffer.byteLength(snapshot.observation.extractedText, "utf8") <=
-                    MAX_BROWSER_TEXT_RESULT_BYTES
-                      ? {}
-                      : { textTruncated: true }),
-                  }),
-              ...(snapshot.observation.revision === undefined
-                ? {}
-                : { revision: snapshot.observation.revision }),
-              ...(snapshot.observation.contentHash === undefined
-                ? {}
-                : { contentHash: snapshot.observation.contentHash }),
-              ...(snapshot.observation.consoleErrors === undefined
-                ? {}
-                : { consoleErrors: snapshot.observation.consoleErrors }),
-              ...(snapshot.observation.failedRequests === undefined
-                ? {}
-                : { failedRequests: snapshot.observation.failedRequests }),
-              ...(includeScreenshot && image === undefined
-                ? { screenshotOmitted: "invalid-or-too-large" as const }
-                : {}),
-              ...(snapshot.observation.capture?.status === "kept"
-                ? { captureId: snapshot.observation.capture.captureId }
-                : {}),
-              ...(snapshot.observation.capture?.status === "not-kept"
-                ? { captureNotKept: snapshot.observation.capture.reason }
-                : {}),
-            },
-          }),
-    },
-    isError: snapshot.failure !== undefined || snapshot.status === "failed",
   };
 }
 
@@ -2095,19 +1990,6 @@ function parseProposeThreadInput(value: string): ProposeThreadToolInput | undefi
     ...(typeof parsed.rationale === "string" ? { rationale: parsed.rationale } : {}),
   };
 }
-
-type BrowserToolInput = {
-  readonly expectedObservationRevision?: number;
-} & (
-  | { readonly operation: "navigate"; readonly url: string }
-  | { readonly operation: "read-page"; readonly selector?: string }
-  | { readonly operation: "screenshot" | "stop" }
-  | { readonly operation: "diagnostics" }
-  | { readonly operation: "scroll"; readonly deltaX?: number; readonly deltaY?: number }
-  | { readonly operation: "click" | "wait"; readonly selector: string }
-  | { readonly operation: "press"; readonly key: string }
-  | { readonly operation: "type"; readonly selector: string; readonly text: string }
-);
 
 function parsePullRequestInput(value: string): PullRequestToolInput | undefined {
   const parsed = parseObject(
@@ -2243,89 +2125,6 @@ function parseTerminalInput(value: string): TerminalToolInput | undefined {
     return undefined;
   }
   return { operation, ...(typeof parsed.command === "string" ? { command: parsed.command } : {}) };
-}
-
-function parseBrowserInput(value: string): BrowserToolInput | undefined {
-  const parsed = parseObject(
-    value,
-    new Set([
-      "operation",
-      "url",
-      "selector",
-      "text",
-      "key",
-      "deltaX",
-      "deltaY",
-      "expectedObservationRevision",
-    ]),
-  );
-  if (parsed === undefined) return undefined;
-  const revision = parsed.expectedObservationRevision;
-  if (
-    revision !== undefined &&
-    (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 0)
-  )
-    return undefined;
-  const common = typeof revision === "number" ? { expectedObservationRevision: revision } : {};
-  const only = (...keys: ReadonlyArray<string>) =>
-    Object.keys(parsed).every(
-      (key) => key === "operation" || key === "expectedObservationRevision" || keys.includes(key),
-    );
-  const text = (field: string, limit: number) =>
-    typeof parsed[field] === "string" && parsed[field].length > 0 && parsed[field].length <= limit;
-  switch (parsed.operation) {
-    case "navigate":
-      return only("url") && text("url", 4096) && typeof parsed.url === "string"
-        ? { ...common, operation: "navigate", url: parsed.url }
-        : undefined;
-    case "click":
-    case "wait":
-      return only("selector") && text("selector", 4096) && typeof parsed.selector === "string"
-        ? { ...common, operation: parsed.operation, selector: parsed.selector }
-        : undefined;
-    case "type":
-      return only("selector", "text") &&
-        text("selector", 4096) &&
-        text("text", 65536) &&
-        typeof parsed.selector === "string" &&
-        typeof parsed.text === "string"
-        ? { ...common, operation: "type", selector: parsed.selector, text: parsed.text }
-        : undefined;
-    case "press":
-      return only("key") && text("key", 64) && typeof parsed.key === "string"
-        ? { ...common, operation: "press", key: parsed.key }
-        : undefined;
-    case "scroll": {
-      if (!only("deltaX", "deltaY")) return undefined;
-      for (const delta of [parsed.deltaX, parsed.deltaY]) {
-        if (
-          delta !== undefined &&
-          (typeof delta !== "number" || !Number.isInteger(delta) || Math.abs(delta) > 2000)
-        )
-          return undefined;
-      }
-      return {
-        ...common,
-        operation: "scroll",
-        ...(typeof parsed.deltaX === "number" ? { deltaX: parsed.deltaX } : {}),
-        ...(typeof parsed.deltaY === "number" ? { deltaY: parsed.deltaY } : {}),
-      };
-    }
-    case "read-page":
-      if (!only("selector") || (parsed.selector !== undefined && !text("selector", 4096)))
-        return undefined;
-      return {
-        ...common,
-        operation: "read-page",
-        ...(typeof parsed.selector === "string" ? { selector: parsed.selector } : {}),
-      };
-    case "screenshot":
-    case "diagnostics":
-    case "stop":
-      return only() ? { ...common, operation: parsed.operation } : undefined;
-    default:
-      return undefined;
-  }
 }
 
 function parseAppleInput(value: string): AppleToolInput | undefined {
@@ -2587,19 +2386,6 @@ function currentThreadIdentityFailure(options: CodeAppManagedToolsOptions): stri
   return undefined;
 }
 
-function boundedUtf8(value: string, maxBytes: number): string {
-  if (Buffer.byteLength(value, "utf8") <= maxBytes) return value;
-  let low = 0;
-  let high = value.length;
-  while (low < high) {
-    const middle = Math.ceil((low + high) / 2);
-    if (Buffer.byteLength(value.slice(0, middle), "utf8") <= maxBytes) low = middle;
-    else high = middle - 1;
-  }
-  if (low > 0 && isHighSurrogate(value.charCodeAt(low - 1))) low -= 1;
-  return value.slice(0, low);
-}
-
 function boundedUtf8Tail(value: string, maxBytes: number): string {
   if (maxBytes <= 0) return "";
   if (Buffer.byteLength(value, "utf8") <= maxBytes) return value;
@@ -2639,10 +2425,6 @@ function terminalTranscriptTail(
     value: selected.join(""),
     truncated: snapshot.transcript.truncated || truncatedByBound || firstSelectedIndex > 0,
   };
-}
-
-function isHighSurrogate(code: number): boolean {
-  return code >= 0xd800 && code <= 0xdbff;
 }
 
 function isLowSurrogate(code: number): boolean {

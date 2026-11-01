@@ -1236,8 +1236,9 @@ refused, and a call that cannot reach the server fails with nothing run on
 this host instead. Built: the catalog, the connection, and the folder check
 at binding (Settings › Access › Servers); Code threads there, which run only
 on the Octant Harness, with file tools, commands, and Git on the server under
-the same levels, approvals, and journal as a local Project; and thread
-terminals that are logins on the server. Octant has no sandbox on the server,
+the same levels, approvals, and journal as a local Project; thread
+terminals that are logins on the server; and the Git tab, whose Git runs on
+the server. Octant has no sandbox on the server,
 so below Full access a remembered approval does not cover a command there. An agent in a local Project still
 reaches a remote machine with `ssh` through its shell (above), and Octant on
 another computer is a hub-and-spoke member
@@ -1958,6 +1959,16 @@ on **Merge when ready** and **Auto-fix** for a Code thread's pull request
   no way to give would only lock it out, and a window-free merge would widen
   the confirmation the merge routes need, so neither is built. Hub and peer
   hosts never merge on a person's behalf.
+  _What building it needs:_ a host-side switch, default off and set only from
+  a window on the host, so no paired client is locked out by default; a
+  challenge issued for the merge route's own method, path and body hash (the
+  owner challenge route today refuses any path that is not an owner action);
+  verification of the owner's unlock proof in the merge, stack and Merge when
+  ready routes against the host's own owner list, never the hub's roster; and
+  an unlock signer in each paired client that is also an owner device (the
+  phone's key and the browser's passkey). The narrower choice, taken until
+  then, is to leave the paired-client merge as it is, with its reviewed-head
+  confirmation and required-checks gate.
 - **Stack.** The command lists one to ten pull requests bottom first, each
   with the head the person reviewed. The server reads every one first and
   refuses the stack whole unless each is open and each base is the head

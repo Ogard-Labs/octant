@@ -18,6 +18,8 @@ export function CodeCheckoutBar(props: {
    * or diff of it, so the bar names where it runs instead.
    */
   readonly serverLocation?: string;
+  /** Opens the Git tab, whose Git runs on the server. */
+  readonly onOpenServerGit?: () => void;
 }) {
   const checkout = useCodeCheckout();
   if (props.serverLocation !== undefined) {
@@ -32,6 +34,19 @@ export function CodeCheckoutBar(props: {
             {props.serverLocation}
           </span>
         </span>
+        {props.onOpenServerGit === undefined ? null : (
+          <OctantButton
+            className="code-checkout-bar__action window-no-drag"
+            onClick={props.onOpenServerGit}
+            size="sm"
+            title="Git on the server"
+            type="button"
+            variant="ghost"
+          >
+            <GitBranch aria-hidden="true" size={14} strokeWidth={1.7} />
+            <span>Git</span>
+          </OctantButton>
+        )}
       </div>
     );
   }

@@ -9,6 +9,7 @@ import type { WindowId } from "@octant/contracts/shell";
 import { decodeStoredBrowserProfile } from "@octant/contracts/browser-profiles";
 import {
   BrowserNavigationBlockedError,
+  BrowserTargetStaleError,
   type BrowserProfileStorePort,
   type BrowserRuntimeObservation,
   type BrowserRuntimePort,
@@ -172,6 +173,7 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
           ...(request.point === undefined ? {} : { point: request.point }),
           ...(request.deltaX === undefined ? {} : { deltaX: request.deltaX }),
           ...(request.deltaY === undefined ? {} : { deltaY: request.deltaY }),
+          ...(request.expected === undefined ? {} : { expected: request.expected }),
         },
       },
       signal,
@@ -231,8 +233,11 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
     });
     if (response.status === 409) throw new DesktopBrowserOwnerUnavailable();
     if (response.status === 422) {
-      const blocked = await navigationBlockedUrl(response);
-      if (blocked !== undefined) throw new BrowserNavigationBlockedError(blocked);
+      const refused = await structuredRefusal(response);
+      if (refused?.error === "target-stale") throw new BrowserTargetStaleError();
+      if (refused?.error === "navigation-blocked" && refused.url !== undefined) {
+        throw new BrowserNavigationBlockedError(refused.url);
+      }
     }
     if (!response.ok) throw new Error("Octant desktop Browser broker rejected the request.");
     return (await response.json()) as T;
@@ -249,21 +254,17 @@ export function createDesktopBrowserRuntimeFromEnvironment(
   return new DesktopBrowserRuntime({ brokerUrl, token, ...extra });
 }
 
-async function navigationBlockedUrl(response: Response): Promise<string | undefined> {
+async function structuredRefusal(
+  response: Response,
+): Promise<{ readonly error: string; readonly url?: string } | undefined> {
   try {
     const payload: unknown = await response.json();
-    if (
-      typeof payload === "object" &&
-      payload !== null &&
-      "error" in payload &&
-      payload.error === "navigation-blocked" &&
-      "url" in payload &&
-      typeof payload.url === "string"
-    ) {
-      return payload.url;
-    }
+    if (typeof payload !== "object" || payload === null || !("error" in payload)) return undefined;
+    if (typeof payload.error !== "string") return undefined;
+    const url = "url" in payload && typeof payload.url === "string" ? payload.url : undefined;
+    return { error: payload.error, ...(url === undefined ? {} : { url }) };
   } catch {
-    // Not the structured refusal; fall through to the generic broker error.
+    // Not a structured refusal; fall through to the generic broker error.
   }
   return undefined;
 }

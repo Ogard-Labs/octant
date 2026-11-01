@@ -2,7 +2,15 @@ import { createHash } from "node:crypto";
 import {
   browserProfileKey,
   browserProfilePartition,
+  browserRefStillMatches,
+  formatBrowserPageSnapshot,
+  MAX_BROWSER_SNAPSHOT_NODES,
+  MAX_BROWSER_SNAPSHOT_REFS,
   originAllowed as sameSiteOriginAllowed,
+  readBrowserPage,
+  type BrowserPageReadRequest,
+  type BrowserPageReadResult,
+  type BrowserPageSnapshotRef,
 } from "@octant/domain";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
 import {
@@ -236,11 +244,32 @@ export class BrowserNavigationBlockedError extends Error {
   }
 }
 
+/**
+ * The element a snapshot ref named is gone or is no longer the element the
+ * snapshot described, so the action was refused before it touched the page.
+ */
+export class BrowserTargetStaleError extends Error {
+  constructor() {
+    super("The element behind that ref changed since the snapshot.");
+    this.name = "BrowserTargetStaleError";
+  }
+}
+
+/** What the server asks a page to do; it carries no authority of its own. */
+export type BrowserSurfaceAction = Pick<BrowserActionRequest, "kind"> &
+  Partial<Pick<BrowserActionRequest, "target" | "value" | "point" | "deltaX" | "deltaY">> & {
+    /** The role and name a snapshot ref recorded; the target must still match. */
+    readonly expected?: { readonly role: string; readonly name: string; readonly url: string };
+  };
+
 export interface BrowserSurfaceRuntimeObservation {
   readonly url?: string;
   readonly title?: string;
   readonly contentHash?: string;
   readonly extractedText?: string;
+  /** Only a snapshot read fills these: the outline, and what each ref names. */
+  readonly snapshot?: string;
+  readonly snapshotRefs?: ReadonlyArray<BrowserPageSnapshotRef>;
   readonly screenshotDataUrl?: string;
   readonly viewport?: { readonly width: number; readonly height: number };
   /** Only an observe-diagnostics read fills these; each read clears what it returns. */
@@ -570,8 +599,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     },
     act: async (
       contextId: BrowserContextId | string,
-      request: Pick<BrowserActionRequest, "kind"> &
-        Partial<Pick<BrowserActionRequest, "target" | "value" | "point" | "deltaX" | "deltaY">>,
+      request: BrowserSurfaceAction,
       signal?: AbortSignal,
     ): Promise<BrowserSurfaceRuntimeObservation> => {
       const owned = surface(contextId);
@@ -590,6 +618,18 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           // result is checked below, so a navigation that fails cannot leave
           // the agent extracting the page it did not manage to leave.
           if (request.kind !== "navigate") refuseUnapprovedPage(owned, contents);
+          if (request.expected !== undefined && request.target !== undefined) {
+            const found = await readPage(contentsView(owned), {
+              mode: "verify",
+              selector: request.target,
+            });
+            if (
+              found.mode !== "verify" ||
+              !browserRefStillMatches(request.expected, found.element, observedUrl(contents))
+            ) {
+              throw new BrowserTargetStaleError();
+            }
+          }
           switch (request.kind) {
             case "navigate": {
               if (
@@ -638,6 +678,33 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
               break;
             case "screenshot":
               break;
+            case "snapshot": {
+              // The outline is the whole answer: no picture and no page text,
+              // and a credential field in it is named, never valued.
+              const read = await readPage(contentsView(owned), {
+                mode: "snapshot",
+                maxRefs: MAX_BROWSER_SNAPSHOT_REFS,
+                maxNodes: MAX_BROWSER_SNAPSHOT_NODES,
+                protectCredentials: owned.policy.credentialFieldProtection,
+                // Every frame, which the in-page reader does not walk.
+                withholdValues: await hasSensitiveDocument(
+                  contentsView(owned),
+                  owned.policy.credentialFieldProtection,
+                ),
+              });
+              if (read.mode !== "snapshot") throw new Error("Browser snapshot is unavailable.");
+              refuseUnapprovedPage(owned, contents);
+              return {
+                ...(contents.getURL() === ""
+                  ? {}
+                  : { url: redactedObservationUrl(contents.getURL()).slice(0, 4_096) }),
+                ...(contents.getTitle() === ""
+                  ? {}
+                  : { title: contents.getTitle().slice(0, 1_024) }),
+                snapshot: formatBrowserPageSnapshot(read.snapshot),
+                snapshotRefs: read.snapshot.refs,
+              };
+            }
             case "observe-diagnostics":
               // Handed over and cleared before any renderer work: a page that
               // never committed has no document to evaluate, and that is when
@@ -1154,6 +1221,21 @@ function execute(
   );
 }
 
+/**
+ * Run the shared page reader in the isolated world. Its source is handed over
+ * whole, which is why it keeps no helpers outside its own body.
+ */
+async function readPage(
+  view: BrowserSurfaceViewPort,
+  request: BrowserPageReadRequest,
+): Promise<BrowserPageReadResult> {
+  const result = await execute(view, `(${readBrowserPage.toString()})(${JSON.stringify(request)})`);
+  if (typeof result !== "object" || result === null || !("mode" in result)) {
+    throw new Error("Browser page read returned nothing.");
+  }
+  return result as BrowserPageReadResult;
+}
+
 async function targetGeometry(
   view: BrowserSurfaceViewPort,
   selector: string | undefined,
@@ -1411,6 +1493,12 @@ function recordFailedRequest(
     ...(method === "" ? {} : { method }),
     failure: failure === "" ? "The request did not complete." : failure,
   });
+}
+
+/** The page's address as an observation reports it, so a snapshot's can be compared. */
+function observedUrl(contents: BrowserSurfaceViewPort["webContents"]): string {
+  const url = contents.getURL();
+  return url === "" ? "about:blank" : redactedObservationUrl(url).slice(0, 4_096);
 }
 
 function redactedObservationUrl(value: string): string {

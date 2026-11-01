@@ -166,11 +166,18 @@ export class GitObservationPort {
   readonly #maxDiffBytes: number;
   readonly #commandTimeoutMs: number;
   readonly #confinement: ReturnType<typeof createGitSeatbeltConfinement>;
+  readonly #onServer: boolean;
 
   constructor(
     options: {
       readonly maxDiffBytes?: number;
       readonly commandTimeoutMs?: number;
+      /**
+       * The checkout is a server Project's folder and `dependencies` reach the
+       * server: Git runs there as it is, with no launch prepared or path read
+       * on this host. Canonical: docs/design/server-projects.md § Panels.
+       */
+      readonly onServer?: boolean;
     } & GitSeatbeltPortOptions = {},
     dependencies: GitObservationDependencies = liveDependencies,
   ) {
@@ -178,6 +185,7 @@ export class GitObservationPort {
     this.#maxDiffBytes = options.maxDiffBytes ?? DEFAULT_MAX_GIT_DIFF_BYTES;
     this.#commandTimeoutMs = options.commandTimeoutMs ?? 5_000;
     this.#confinement = createGitSeatbeltConfinement(options);
+    this.#onServer = options.onServer === true;
   }
 
   /**
@@ -598,6 +606,10 @@ export class GitObservationPort {
     headOid: string,
     signal?: AbortSignal,
   ): Promise<"clean" | "conflicts" | "unknown"> {
+    // The quarantine below is a directory of this host, which a server's Git
+    // cannot read, and without it the merge tree would land in the server's
+    // object database.
+    if (this.#onServer) return "unknown";
     // `merge-tree --write-tree` is the one observation that writes: it puts the
     // merged tree in the object database, which for a linked worktree lives
     // outside the bound root. Asking the launch for that write would hand the
@@ -662,6 +674,14 @@ export class GitObservationPort {
       const checkoutRoot = args[0] === "-C" ? args[1] : undefined;
       if (checkoutRoot === undefined || !isAbsolute(checkoutRoot)) {
         return { exitCode: 1, stdout: "" };
+      }
+      if (this.#onServer) {
+        return await this.#dependencies.execFile(
+          "git",
+          args,
+          createGitCommandEnvironment(process.env),
+          controller.signal,
+        );
       }
       const launch = prepareGitSeatbeltLaunch({
         confinement: this.#confinement.confinement,

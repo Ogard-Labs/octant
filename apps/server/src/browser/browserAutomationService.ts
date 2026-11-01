@@ -32,6 +32,7 @@ import {
   evaluateBrowserProfileUse,
   storedBrowserProfile,
   type BrowserCaptureTaker,
+  type BrowserPageSnapshotRef,
   type BrowserProfileCaller,
 } from "@octant/domain";
 import type {
@@ -43,7 +44,9 @@ import type { KeepBrowserCaptureInput } from "./browserCaptureService";
 import {
   BrowserNavigationBlockedError,
   BrowserProfileUnavailableError,
+  BrowserTargetStaleError,
   type BrowserPointObservation,
+  type BrowserRuntimeAction,
   type BrowserRuntimePort,
 } from "./browserRuntimePort";
 
@@ -108,6 +111,15 @@ interface OwnedContext {
   status: BrowserWorkspaceStatus;
   observation: BrowserObservation | undefined;
   observationRevision: number;
+  /**
+   * What each ref of the latest snapshot names, and the page it was read on.
+   * Refs live here, on the server, so an action can name only an element the
+   * snapshot listed; a new snapshot replaces them and leaving the page drops
+   * them.
+   */
+  refs:
+    | { readonly url: string | undefined; readonly byRef: Map<string, BrowserPageSnapshotRef> }
+    | undefined;
   readonly evidence: ToolEvidence[];
   failure: BrowserAutomationFailure | undefined;
   creation?: Promise<void>;
@@ -121,6 +133,18 @@ const hostPolicy: BrowserContextPolicy = {
   sessionTimeoutMs: 600_000,
 };
 const MAX_RETAINED_BROWSER_EVIDENCE = 32;
+/** The actions that name one element, and so may name it by a snapshot ref. */
+const REF_ACTIONS: ReadonlySet<BrowserActionRequest["kind"]> = new Set([
+  "click",
+  "type",
+  "wait",
+  "extract-text",
+]);
+const staleRefFailure: BrowserAutomationFailure = {
+  category: "stale",
+  message:
+    "That ref is not on the page's latest snapshot, or the page changed since. Take a new snapshot and use its refs.",
+};
 
 export class BrowserAutomationService {
   readonly #runtime: BrowserRuntimePort;
@@ -253,6 +277,7 @@ export class BrowserAutomationService {
       status: "waiting",
       observation: undefined,
       observationRevision: 0,
+      refs: undefined,
       evidence: [],
       failure: undefined,
     };
@@ -410,7 +435,9 @@ export class BrowserAutomationService {
     ) {
       return snapshot(owned);
     }
-    const decision = evaluateBrowserAction(input.request, owned.record, granted);
+    const resolved = this.#resolveRef(owned, input.request);
+    if (resolved.kind === "refused") return this.#failure(owned, resolved.failure, "failed");
+    const decision = evaluateBrowserAction(resolved.request, owned.record, granted);
     if (decision.kind === "denied") {
       return this.#failure(
         owned,
@@ -425,7 +452,7 @@ export class BrowserAutomationService {
       try {
         const target = await this.#runtime.inspectTarget(
           owned.record.contextId,
-          input.request.target ?? ":focus",
+          resolved.request.target ?? ":focus",
           owned.abort.signal,
         );
         if (target.sensitive) {
@@ -449,7 +476,9 @@ export class BrowserAutomationService {
     try {
       const observed = await this.#runtime.act(
         owned.record.contextId,
-        input.request,
+        resolved.expected === undefined
+          ? resolved.request
+          : { ...resolved.request, expected: resolved.expected },
         owned.abort.signal,
       );
       if (owned.abort.signal.aborted || owned.record.state !== "active") {
@@ -476,6 +505,7 @@ export class BrowserAutomationService {
         ...(observed.title === undefined ? {} : { title: observed.title }),
         ...(observed.contentHash === undefined ? {} : { contentHash: observed.contentHash }),
         ...(observed.extractedText === undefined ? {} : { extractedText: observed.extractedText }),
+        ...(observed.snapshot === undefined ? {} : { snapshot: observed.snapshot }),
         ...(observed.screenshotDataUrl === undefined
           ? {}
           : { screenshotDataUrl: observed.screenshotDataUrl }),
@@ -519,6 +549,17 @@ export class BrowserAutomationService {
       // picture of that page is kept.
       const capture = await this.#keepCapture(owned, input, observed);
       owned.observation = capture === undefined ? observation : { ...observation, capture };
+      if (input.request.kind === "snapshot") {
+        owned.refs = {
+          url: observed.url,
+          byRef: new Map((observed.snapshotRefs ?? []).map((entry) => [entry.ref, entry])),
+        };
+      } else if (
+        owned.refs !== undefined &&
+        (input.request.kind === "navigate" || observed.url !== owned.refs.url)
+      ) {
+        owned.refs = undefined;
+      }
       owned.evidence.push(evidence);
       if (owned.evidence.length > MAX_RETAINED_BROWSER_EVIDENCE) {
         owned.evidence.splice(0, owned.evidence.length - MAX_RETAINED_BROWSER_EVIDENCE);
@@ -528,6 +569,9 @@ export class BrowserAutomationService {
       return snapshot(owned);
     } catch (error) {
       const interrupted = owned.abort.signal.aborted;
+      if (!interrupted && error instanceof BrowserTargetStaleError) {
+        return this.#failure(owned, staleRefFailure, "failed");
+      }
       if (!interrupted && error instanceof BrowserNavigationBlockedError) {
         return this.#failure(
           owned,
@@ -547,6 +591,48 @@ export class BrowserAutomationService {
         interrupted ? "interrupted" : "failed",
       );
     }
+  }
+
+  /**
+   * Turn a ref into the selector the snapshot recorded for it, with the role
+   * and name the runtime must still find there. A ref the latest snapshot did
+   * not list, or one from before the page changed, is refused here, before
+   * any runtime is asked.
+   */
+  #resolveRef(
+    owned: OwnedContext,
+    request: BrowserActionRequest,
+  ):
+    | {
+        readonly kind: "resolved";
+        readonly request: BrowserActionRequest;
+        readonly expected?: NonNullable<BrowserRuntimeAction["expected"]>;
+      }
+    | { readonly kind: "refused"; readonly failure: BrowserAutomationFailure } {
+    if (request.ref === undefined) return { kind: "resolved", request };
+    if (request.target !== undefined || request.point !== undefined) {
+      return {
+        kind: "refused",
+        failure: {
+          category: "invalid",
+          message: "Name the element with a ref or a selector, not both.",
+        },
+      };
+    }
+    if (!REF_ACTIONS.has(request.kind)) {
+      return {
+        kind: "refused",
+        failure: { category: "invalid", message: `A ${request.kind} action takes no ref.` },
+      };
+    }
+    const entry = owned.refs?.byRef.get(request.ref);
+    if (entry === undefined) return { kind: "refused", failure: staleRefFailure };
+    const { ref: _ref, ...rest } = request;
+    return {
+      kind: "resolved",
+      request: { ...rest, target: entry.selector },
+      expected: { role: entry.role, name: entry.name, url: owned.refs?.url ?? "about:blank" },
+    };
   }
 
   /**

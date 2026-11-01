@@ -242,6 +242,9 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         {...(props.onOpenSurface === undefined
           ? {}
           : { onCreatePullRequest: () => props.onOpenSurface?.("code-pr") })}
+        {...(props.onOpenSurface === undefined
+          ? {}
+          : { onOpenGit: () => props.onOpenSurface?.("code-git") })}
         {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
         {...(props.onOpenCanvas === undefined ? {} : { onOpenCanvas: props.onOpenCanvas })}
         {...(props.onCanvasReferencesObserved === undefined
@@ -273,13 +276,12 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
   }
 
   // A thread in a server Project keeps its files, Git, and tests on the
-  // server, which this host does not read yet, so the tab says so. Its
-  // terminal is a login on the server and opens as any terminal does.
-  if (
+  // server. Its terminal is a login there, and its Git tab runs Git there;
+  // the tabs this host does not offer for it yet say so.
+  const serverThread =
     view.checkout.kind === "remote-root" &&
-    props.tab.kind !== "code-terminal" &&
-    serverCodeProjectFor(serverCodeProjects, view.thread.projectId) !== undefined
-  ) {
+    serverCodeProjectFor(serverCodeProjects, view.thread.projectId) !== undefined;
+  if (serverThread && props.tab.kind !== "code-terminal" && props.tab.kind !== "code-git") {
     return (
       <ShellState
         eyebrow="On a server"
@@ -292,7 +294,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
 
   // A thread from a build that could run on a remote machine keeps that
   // checkout kind. This host reads none of it, so the tab says so.
-  if (view.checkout.kind === "remote-root") {
+  if (view.checkout.kind === "remote-root" && !serverThread) {
     return (
       <ShellState
         eyebrow="Remote folder"
@@ -334,7 +336,16 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         />
       );
     case "code-git":
-      return <GitWorkspaceSurface {...props} nextUuid={nextUuid} scope={scope} tab={props.tab} />;
+      return (
+        <GitWorkspaceSurface
+          {...props}
+          // Pull requests are not offered for a server Project yet.
+          offersPullRequest={!serverThread}
+          nextUuid={nextUuid}
+          scope={scope}
+          tab={props.tab}
+        />
+      );
     case "code-terminal":
       return (
         <TerminalWorkspaceSurface
@@ -1007,6 +1018,7 @@ function GitWorkspaceSurface(
       readonly threadId: NonNullable<CodeController["activeView"]>["thread"]["id"];
     };
     readonly tab: Extract<CodeTab, { readonly kind: "code-git" }>;
+    readonly offersPullRequest: boolean;
   },
 ) {
   const [observation, setObservation] = useState<GitObservation>();
@@ -1077,7 +1089,7 @@ function GitWorkspaceSurface(
       createOperationId={() => props.nextUuid() as never}
       executionPolicy={policy}
       observation={observation}
-      {...(props.onOpenSurface === undefined
+      {...(props.onOpenSurface === undefined || !props.offersPullRequest
         ? {}
         : { onReviewPullRequest: () => props.onOpenSurface!("code-pr") })}
       {...(props.approvals?.git === undefined ? {} : { requestApproval: props.approvals.git })}
