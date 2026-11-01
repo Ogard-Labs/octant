@@ -2321,8 +2321,8 @@ describe("Code tool families", () => {
     // snapshot operation and its ref argument added about 35 bytes after the
     // description was shortened to pay for most of them. Its include
     // argument, which lets an action return a snapshot, text, or picture in
-    // the same answer, added about 70 bytes; its usage is in help.
-    expect(JSON.stringify(families).length).toBeLessThanOrEqual(4_770);
+    // the same answer, added about 85 bytes; its usage is in help.
+    expect(JSON.stringify(families).length).toBeLessThanOrEqual(4_790);
   });
 
   it.each(["octant_browser", "octant_terminal", "octant_apple", "octant_android"])(

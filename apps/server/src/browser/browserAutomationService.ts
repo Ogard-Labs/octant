@@ -903,6 +903,13 @@ export class BrowserAutomationService {
           owned.record.contextId,
           signal ?? new AbortController().signal,
         );
+        // A fresh picture of the same page is not a new page: keeping the
+        // revision lets an agent's next action, which names the revision its
+        // last action returned, still run while a preview is open.
+        const samePage =
+          owned.observation !== undefined &&
+          observed.url === owned.observation.url &&
+          observed.title === owned.observation.title;
         owned.observation = {
           contextId: owned.record.contextId,
           actionId: owned.record.actionId,
@@ -915,7 +922,7 @@ export class BrowserAutomationService {
             ? {}
             : { screenshotDataUrl: observed.screenshotDataUrl }),
           ...(observed.viewport === undefined ? {} : { viewport: observed.viewport }),
-          revision: ++owned.observationRevision,
+          revision: samePage ? owned.observationRevision : ++owned.observationRevision,
           observedAt: this.#clock() as BrowserObservation["observedAt"],
           stale: false,
         };

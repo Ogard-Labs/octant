@@ -242,9 +242,18 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
   it("keeps the person's activity preview picture after an action that took none", async () => {
     const tool = agentTool();
     await tool.call({ operation: "navigate", url: `${origin}/form` });
-    await tool.call({ operation: "click", selector: "#save" });
+    const clicked = await tool.call({ operation: "click", selector: "#save" });
     const preview = await tool.service.peekThread(windowId, threadId);
     expect(preview.observation?.screenshotDataUrl).toMatch(/^data:image\/jpeg;base64,/);
+    // The preview's picture does not make the agent's next action stale.
+    const next = await tool.call({
+      operation: "click",
+      selector: "#save",
+      expectedObservationRevision: clicked.result.page?.observationRevision,
+    });
+    expect(next.result.page?.observationRevision).toBe(
+      Number(clicked.result.page?.observationRevision) + 1,
+    );
     await tool.stop();
   });
 });

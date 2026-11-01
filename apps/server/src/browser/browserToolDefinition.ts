@@ -35,7 +35,10 @@ export const BROWSER_TOOL_DEFINITION = {
           "For navigate when no page is open: keep the page in a signed-in profile instead of a private one. The person is asked first. Omit for a private page.",
       },
       ref: { type: "string", description: "Element ref from the latest snapshot." },
-      include: { type: "array", items: { enum: ["snapshot", "text", "screenshot"] } },
+      include: {
+        type: "array",
+        items: { type: "string", enum: ["snapshot", "text", "screenshot"] },
+      },
       selector: {
         type: "string",
         maxLength: 4096,
