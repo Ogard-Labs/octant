@@ -6,6 +6,7 @@ import {
   BROWSER_DIALOG_POLICY,
   BROWSER_SETTLE_CAP_MS,
   BROWSER_SETTLE_QUIET_MS,
+  browserFrameAdmitted,
   browserPageConditions,
   browserRefStillMatches,
   describeUnmetWait,
@@ -17,11 +18,23 @@ import {
   MAX_BROWSER_SNAPSHOT_REFS,
   originAllowed as sameSiteOriginAllowed,
   readBrowserPage,
+  readFramedBrowserSnapshot,
+  resolveBrowserElement,
+  splitBrowserFrameTarget,
   type BrowserPageReadRequest,
   type BrowserPageReadResult,
   type BrowserPageSnapshotRef,
 } from "@octant/domain";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
+import {
+  surfaceFrames,
+  watchSurfaceFrameTargets,
+  type SurfaceFrame,
+  type SurfaceFrameTargets,
+  type SurfaceFrames,
+  type SurfaceProtocolListener,
+  type SurfaceProtocolSend,
+} from "./browserSurfaceFrames";
 import {
   DEFAULT_BROWSER_WAIT_MS,
   MAX_BROWSER_DIAGNOSTIC_ENTRIES,
@@ -154,16 +167,18 @@ export interface BrowserSurfaceViewPort {
       attach(protocolVersion?: string): void;
       detach(): void;
       isAttached(): boolean;
-      sendCommand(method: string, commandParams?: Record<string, unknown>): Promise<unknown>;
-      /** Protocol events, such as a page's dialog opening; Electron's debugger emits them. */
-      on?(
-        event: "message",
-        listener: (event: unknown, method: string, params: unknown) => void,
-      ): void;
-      removeListener?(
-        event: "message",
-        listener: (event: unknown, method: string, params: unknown) => void,
-      ): void;
+      /** A session id sends to a frame on another site, attached as its own target. */
+      sendCommand(
+        method: string,
+        commandParams?: Record<string, unknown>,
+        sessionId?: string,
+      ): Promise<unknown>;
+      /**
+       * Protocol events, such as a page's dialog opening; Electron's debugger
+       * emits them, with the session of the frame target that sent one.
+       */
+      on?(event: "message", listener: SurfaceProtocolListener): void;
+      removeListener?(event: "message", listener: SurfaceProtocolListener): void;
     };
     /** Electron's device emulation, which sizes the page without moving the view. */
     enableDeviceEmulation?(parameters: {
@@ -711,15 +726,16 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     },
     inspectTarget: async (contextId: BrowserContextId | string, selector: string) => {
       const owned = surface(contextId);
-      const result = await execute(
-        contentsView(owned),
-        `(() => {
-        const element = document.querySelector(${JSON.stringify(selector)});
+      // A field the host cannot reach, in a frame or out of one, counts as
+      // sensitive: the check fails closed.
+      const result = await inTargetDocument(contentsView(owned), owned.policy, selector, (target) =>
+        target.run(`(() => {
+        const element = ${elementExpression(target.element)};
         if (!(element instanceof HTMLInputElement)) return false;
         const hint = [element.type, element.autocomplete, element.name, element.id].join(" ").toLowerCase();
         return element.type === "password" || /(?:password|passcode|one-time-code|otp|webauthn|cc-|credit|card|ssn|secret|token)/.test(hint);
-      })()`,
-      );
+      })()`),
+      ).catch(() => true);
       return { sensitive: result === true };
     },
     act: async (
@@ -751,9 +767,15 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
             if (request.kind !== "navigate" && !request.kind.startsWith("tab-")) {
               refuseUnapprovedPage(owned, contents);
             }
-            await refuseStaleTarget(contentsView(owned), request.target, request.expected);
             await refuseStaleTarget(
               contentsView(owned),
+              owned.policy,
+              request.target,
+              request.expected,
+            );
+            await refuseStaleTarget(
+              contentsView(owned),
+              owned.policy,
               request.destination,
               request.destinationExpected,
             );
@@ -774,11 +796,12 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 break;
               }
               case "click":
-                await clickTarget(contentsView(owned), request.target, request.point);
+                await clickTarget(contentsView(owned), owned.policy, request.target, request.point);
                 break;
               case "type":
                 await typeIntoTarget(
                   contentsView(owned),
+                  owned.policy,
                   request.target,
                   request.value,
                   owned.policy.credentialFieldProtection,
@@ -802,9 +825,14 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 break;
               case "wait":
                 if (request.waitFor === undefined) {
-                  await waitForSelector(contentsView(owned), request.target);
+                  await waitForSelector(contentsView(owned), owned.policy, request.target);
                 } else {
-                  await waitForConditions(contentsView(owned), request.waitFor, signal);
+                  await waitForConditions(
+                    contentsView(owned),
+                    owned.policy,
+                    request.waitFor,
+                    signal,
+                  );
                 }
                 break;
               case "resize": {
@@ -824,16 +852,26 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 break;
               }
               case "hover":
-                await hoverTarget(contentsView(owned), request.target);
+                await hoverTarget(contentsView(owned), owned.policy, request.target);
                 break;
               case "select":
-                await selectOption(contentsView(owned), request.target, request.value);
+                await selectOption(
+                  contentsView(owned),
+                  owned.policy,
+                  request.target,
+                  request.value,
+                );
                 break;
               case "drag":
-                await dragTarget(contentsView(owned), request.target, request.destination);
+                await dragTarget(
+                  contentsView(owned),
+                  owned.policy,
+                  request.target,
+                  request.destination,
+                );
                 break;
               case "upload":
-                await uploadFiles(contentsView(owned), request.target, request.files);
+                await uploadFiles(contentsView(owned), owned.policy, request.target, request.files);
                 break;
               case "tab-list":
                 return agentTabs(owned);
@@ -924,9 +962,14 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
             const text = typeof bodyText === "string" ? bodyText : "";
             const selectedText =
               wantsText && request.kind === "extract-text" && request.target !== undefined
-                ? await execute(
+                ? await inTargetDocument(
                     contentsView(owned),
-                    `document.querySelector(${JSON.stringify(request.target)})?.innerText?.slice(0, 65536) ?? ''`,
+                    owned.policy,
+                    request.target,
+                    (target) =>
+                      target.run(
+                        `${elementExpression(target.element)}?.innerText?.slice(0, 65536) ?? ''`,
+                      ),
                   )
                 : text;
             const measuredViewport = await execute(
@@ -1457,23 +1500,124 @@ async function snapshotOf(owned: OwnedSurface): Promise<{
   readonly snapshot: string;
   readonly snapshotRefs: ReadonlyArray<BrowserPageSnapshotRef>;
 }> {
-  const read = await readPage(contentsView(owned), {
-    mode: "snapshot",
-    maxRefs: MAX_BROWSER_SNAPSHOT_REFS,
-    maxNodes: MAX_BROWSER_SNAPSHOT_NODES,
+  const view = contentsView(owned);
+  const reading = {
+    mode: "snapshot" as const,
     protectCredentials: owned.policy.credentialFieldProtection,
-    // Every frame, which the in-page reader does not walk.
-    withholdValues: await hasSensitiveDocument(
-      contentsView(owned),
-      owned.policy.credentialFieldProtection,
-    ),
+    // A credential field in any frame withholds every value in every frame.
+    withholdValues: await hasSensitiveDocument(view, owned.policy.credentialFieldProtection),
+  };
+  const limits = { maxRefs: MAX_BROWSER_SNAPSHOT_REFS, maxNodes: MAX_BROWSER_SNAPSHOT_NODES };
+  const top = await readPage(view, { ...reading, ...limits });
+  if (top.mode !== "snapshot") throw new Error("Browser snapshot is unavailable.");
+  // Frames are read through the debugger protocol, so a page without any
+  // costs no attachment. A debugger someone else holds leaves them unread.
+  const framed = top.snapshot.nodes.some((node) => node.frame !== undefined)
+    ? await withFrames(view, owned.policy, (frames) =>
+        readFramedBrowserSnapshot<SurfaceFrame | undefined>(
+          undefined,
+          {
+            read: async (frame, budget) => {
+              if (frame === undefined) return top.snapshot;
+              const read = (await frames.evaluate(
+                frame,
+                `(${readBrowserPage.toString()})(${JSON.stringify({ ...reading, ...budget })})`,
+              )) as BrowserPageReadResult;
+              if (read.mode !== "snapshot") throw new Error("Browser snapshot is unavailable.");
+              return read.snapshot;
+            },
+            child: async (frame, selector) => frames.child(frame ?? (await frames.top()), selector),
+          },
+          limits,
+        ),
+      ).catch(() =>
+        readFramedBrowserSnapshot(
+          undefined,
+          {
+            read: async () => top.snapshot,
+            child: async () => ({ status: "excluded" }),
+          },
+          limits,
+        ),
+      )
+    : top.snapshot;
+  return { snapshot: formatBrowserPageSnapshot(framed), snapshotRefs: framed.refs };
+}
+
+/** How page code names the element a selector reaches, open shadow roots included. */
+function elementExpression(selector: string): string {
+  return `(${resolveBrowserElement.toString()})(${JSON.stringify(selector)})`;
+}
+
+/**
+ * Where a target sits: the document to run page code in, the selector inside
+ * it, and where that document starts in the top page's viewport. A target
+ * with no frame hop runs in the top document's isolated world, as before; one
+ * that steps into frames is followed hop by hop through the debugger
+ * protocol, and a frame the context may not enter refuses the action.
+ */
+interface TargetDocument {
+  run(code: string): Promise<unknown>;
+  readonly element: string;
+  readonly offset: { readonly x: number; readonly y: number };
+  readonly frame?: { readonly frames: SurfaceFrames; readonly frame: SurfaceFrame };
+}
+
+async function inTargetDocument<T>(
+  view: BrowserSurfaceViewPort,
+  policy: BrowserContextPolicy,
+  target: string,
+  use: (document: TargetDocument) => Promise<T>,
+): Promise<T> {
+  const { frames: hops, element } = splitBrowserFrameTarget(target);
+  if (hops.length === 0) {
+    return use({ run: (code) => execute(view, code), element, offset: { x: 0, y: 0 } });
+  }
+  return withFrames(view, policy, async (frames) => {
+    let frame = await frames.top();
+    for (const hop of hops) {
+      const child = await frames.child(frame, hop);
+      if (child.status === "excluded") {
+        throw new Error(
+          "That frame is gone, or its site is outside the sites approved for this page.",
+        );
+      }
+      frame = child.frame;
+    }
+    const reached = frame;
+    return use({
+      run: (code) => frames.evaluate(reached, code),
+      element,
+      offset: reached.offset,
+      frame: { frames, frame: reached },
+    });
   });
-  if (read.mode !== "snapshot") throw new Error("Browser snapshot is unavailable.");
-  return { snapshot: formatBrowserPageSnapshot(read.snapshot), snapshotRefs: read.snapshot.refs };
+}
+
+function withFrames<T>(
+  view: BrowserSurfaceViewPort,
+  policy: BrowserContextPolicy,
+  use: (frames: SurfaceFrames) => Promise<T>,
+): Promise<T> {
+  const client = view.webContents.debugger;
+  return withDebugger(view, (send) =>
+    use(
+      surfaceFrames({
+        send,
+        targets: frameTargetsOf(client),
+        admits: (url) =>
+          browserFrameAdmitted(url, {
+            allowedOrigins: policy.allowedOrigins,
+            signedIn: (policy.profile?.kind ?? "private") !== "private",
+          }),
+      }),
+    ),
+  );
 }
 
 async function targetGeometry(
   view: BrowserSurfaceViewPort,
+  policy: BrowserContextPolicy,
   selector: string | undefined,
   point: { readonly x: number; readonly y: number } | undefined,
   editable: boolean,
@@ -1496,10 +1640,12 @@ async function targetGeometry(
     return validPoint(result);
   }
   if (selector === undefined) throw new Error("Browser action requires a selector or point.");
-  const result = await execute(
-    view,
-    `(() => {
-    const element = document.querySelector(${JSON.stringify(selector)});
+  // The point is found in the target's own frame, credential check included,
+  // and moved by where that frame sits in the page.
+  return inTargetDocument(view, policy, selector, async (target) => {
+    const point = validPoint(
+      await target.run(`(() => {
+    const element = ${elementExpression(target.element)};
     if (!(element instanceof HTMLElement)) throw new Error("Browser target was not found.");
     if (${editable ? "true" : "false"} && !(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element.isContentEditable)) throw new Error("Browser target is not editable.");
     const hint = [element.getAttribute("type"), element.getAttribute("autocomplete"), element.getAttribute("name"), element.id, element.getAttribute("aria-label")].join(" ").toLowerCase();
@@ -1510,17 +1656,19 @@ async function targetGeometry(
     const rect = element.getBoundingClientRect();
     if (rect.width < 1 || rect.height < 1) throw new Error("Browser target is not visible.");
     return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-  })()`,
-  );
-  return validPoint(result);
+  })()`),
+    );
+    return { x: point.x + target.offset.x, y: point.y + target.offset.y };
+  });
 }
 
 async function clickTarget(
   view: BrowserSurfaceViewPort,
+  policy: BrowserContextPolicy,
   selector: string | undefined,
   point: { readonly x: number; readonly y: number } | undefined,
 ): Promise<void> {
-  const target = await targetGeometry(view, selector, point, false, false);
+  const target = await targetGeometry(view, policy, selector, point, false, false);
   await withDebugger(view, async (send) => {
     await dispatchTrustedClick(send, target);
   });
@@ -1529,12 +1677,13 @@ async function clickTarget(
 
 async function typeIntoTarget(
   view: BrowserSurfaceViewPort,
+  policy: BrowserContextPolicy,
   selector: string | undefined,
   value: string | undefined,
   protectCredentials: boolean,
 ): Promise<void> {
   if (value === undefined) throw new Error("Type requires a selector and value.");
-  const point = await targetGeometry(view, selector, undefined, true, protectCredentials);
+  const point = await targetGeometry(view, policy, selector, undefined, true, protectCredentials);
   await withDebugger(view, async (send) => {
     await dispatchTrustedClick(send, point);
     await send("Input.dispatchKeyEvent", { type: "keyDown", key: "a", modifiers: 4 });
@@ -1556,15 +1705,24 @@ async function pressFocusedTarget(
   // A key goes to whatever has focus, a field or the page itself; only a
   // focused credential field refuses it.
   if (protectCredentials) {
-    const sensitive = await execute(
-      view,
-      `(() => {
-      const element = document.activeElement;
+    // Focus can sit inside a shadow root, or in a frame: then every frame's
+    // focused element is checked, and a frame that cannot be read refuses.
+    const focusedProbe = `(() => {
+      let element = document.activeElement;
+      while (element instanceof HTMLElement && element.shadowRoot?.activeElement) element = element.shadowRoot.activeElement;
+      if (element instanceof HTMLIFrameElement || element instanceof HTMLFrameElement) return "frame";
       if (!(element instanceof HTMLElement) || element === document.body) return false;
       const hint = [element.getAttribute("type"), element.getAttribute("autocomplete"), element.getAttribute("name"), element.id, element.getAttribute("aria-label")].join(" ").toLowerCase();
-      return /(?:password|passcode|one-time-code|otp|webauthn|cc-|credit|card|ssn|secret|token|api.?key)/.test(hint);
-    })()`,
-    );
+      return element.getAttribute("type") === "password" || /(?:password|passcode|one-time-code|otp|webauthn|cc-|credit|card|ssn|secret|token|api.?key)/.test(hint);
+    })()`;
+    let sensitive = await execute(view, focusedProbe);
+    if (sensitive === "frame") {
+      sensitive = false;
+      for (const frame of view.webContents.mainFrame.framesInSubtree) {
+        const focused = await frame.executeJavaScript(focusedProbe).catch(() => true);
+        if (focused === true) sensitive = true;
+      }
+    }
     if (sensitive === true) {
       throw new Error("Octant will not type into a sensitive or credential field.");
     }
@@ -1663,8 +1821,12 @@ function keyEvent(chord: {
   };
 }
 
-async function hoverTarget(view: BrowserSurfaceViewPort, selector: string | undefined) {
-  const point = await targetGeometry(view, selector, undefined, false, false);
+async function hoverTarget(
+  view: BrowserSurfaceViewPort,
+  policy: BrowserContextPolicy,
+  selector: string | undefined,
+) {
+  const point = await targetGeometry(view, policy, selector, undefined, false, false);
   await withDebugger(view, async (send) => {
     await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y });
   });
@@ -1677,16 +1839,16 @@ async function hoverTarget(view: BrowserSurfaceViewPort, selector: string | unde
  */
 async function selectOption(
   view: BrowserSurfaceViewPort,
+  policy: BrowserContextPolicy,
   selector: string | undefined,
   choice: string | undefined,
 ) {
   if (selector === undefined || choice === undefined) {
     throw new Error("Select requires a list and an option.");
   }
-  const chosen = await execute(
-    view,
-    `(() => {
-    const element = document.querySelector(${JSON.stringify(selector)});
+  const chosen = await inTargetDocument(view, policy, selector, (target) =>
+    target.run(`(() => {
+    const element = ${elementExpression(target.element)};
     if (!(element instanceof HTMLSelectElement)) return "not-a-list";
     const choice = ${JSON.stringify(choice)};
     const option = Array.from(element.options).find((candidate) => candidate.value === choice || candidate.label === choice);
@@ -1695,7 +1857,7 @@ async function selectOption(
     element.dispatchEvent(new Event("input", { bubbles: true }));
     element.dispatchEvent(new Event("change", { bubbles: true }));
     return "chosen";
-  })()`,
+  })()`),
   );
   if (chosen === "not-a-list") throw new Error("Browser target is not a list.");
   if (chosen !== "chosen") throw new Error("The list has no option with that value or label.");
@@ -1708,11 +1870,12 @@ async function selectOption(
  */
 async function dragTarget(
   view: BrowserSurfaceViewPort,
+  policy: BrowserContextPolicy,
   source: string | undefined,
   destination: string | undefined,
 ) {
-  const from = await targetGeometry(view, source, undefined, false, false);
-  const to = await targetGeometry(view, destination, undefined, false, false);
+  const from = await targetGeometry(view, policy, source, undefined, false, false);
+  const to = await targetGeometry(view, policy, destination, undefined, false, false);
   await withDebugger(view, async (send) => {
     await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: from.x, y: from.y });
     await send("Input.dispatchMouseEvent", {
@@ -1744,33 +1907,40 @@ async function dragTarget(
   await waitForPageSettled(view);
 }
 
-/** Put files into one file field through Chromium's own file chooser path. */
+/**
+ * Put files into one file field through Chromium's own file chooser path. The
+ * field is found as the page object the protocol hands files to, in its own
+ * frame's session, so a field in a frame or a shadow root takes them too.
+ */
 async function uploadFiles(
   view: BrowserSurfaceViewPort,
+  policy: BrowserContextPolicy,
   selector: string | undefined,
   files: ReadonlyArray<string> | undefined,
 ) {
   if (selector === undefined || files === undefined || files.length === 0) {
     throw new Error("Upload requires a file field and files.");
   }
-  const isFileField = await execute(
-    view,
-    `document.querySelector(${JSON.stringify(selector)}) instanceof HTMLInputElement && document.querySelector(${JSON.stringify(selector)}).type === "file"`,
-  );
-  if (isFileField !== true) throw new Error("Browser target is not a file field.");
-  await withDebugger(view, async (send) => {
-    const document = (await send("DOM.getDocument", { depth: 0 })) as {
-      readonly root?: { readonly nodeId?: number };
-    };
-    const rootId = document.root?.nodeId;
-    if (rootId === undefined) throw new Error("Browser page has no document.");
-    const found = (await send("DOM.querySelector", { nodeId: rootId, selector })) as {
-      readonly nodeId?: number;
-    };
-    if (found.nodeId === undefined || found.nodeId === 0) {
-      throw new Error("Browser target was not found.");
+  const { frames: hops, element } = splitBrowserFrameTarget(selector);
+  await withFrames(view, policy, async (frames) => {
+    let frame = await frames.top();
+    for (const hop of hops) {
+      const child = await frames.child(frame, hop);
+      if (child.status === "excluded") throw new Error("Browser target was not found.");
+      frame = child.frame;
     }
-    await send("DOM.setFileInputFiles", { files: [...files], nodeId: found.nodeId });
+    const isFileField = await frames.evaluate(
+      frame,
+      `(() => { const element = ${elementExpression(element)}; return element instanceof HTMLInputElement && element.type === "file"; })()`,
+    );
+    if (isFileField !== true) throw new Error("Browser target is not a file field.");
+    const field = await frames.objectId(frame, elementExpression(element));
+    if (field === undefined) throw new Error("Browser target was not found.");
+    await view.webContents.debugger.sendCommand(
+      "DOM.setFileInputFiles",
+      { files: [...files], objectId: field },
+      frame.sessionId,
+    );
   });
 }
 
@@ -1809,11 +1979,20 @@ function agentTabs(owned: OwnedSurface): BrowserSurfaceRuntimeObservation {
 /** Refuse a ref whose page moved on or whose element is no longer the one named. */
 async function refuseStaleTarget(
   view: BrowserSurfaceViewPort,
+  policy: BrowserContextPolicy,
   selector: string | undefined,
   expected: BrowserSurfaceAction["expected"],
 ): Promise<void> {
   if (expected === undefined || selector === undefined) return;
-  const found = await readPage(view, { mode: "verify", selector });
+  // A ref whose frame is gone, or no longer one the agent may enter, is stale.
+  const found = await inTargetDocument(view, policy, selector, async (target) =>
+    target.frame === undefined
+      ? readPage(view, { mode: "verify", selector: target.element })
+      : ((await target.run(
+          `(${readBrowserPage.toString()})(${JSON.stringify({ mode: "verify", selector: target.element })})`,
+        )) as BrowserPageReadResult),
+  ).catch(() => undefined);
+  if (found === undefined) throw new BrowserTargetStaleError();
   if (
     found.mode !== "verify" ||
     !browserRefStillMatches(expected, found.element, observedUrl(view.webContents))
@@ -1886,6 +2065,28 @@ async function dispatchTrustedClick(
  */
 const agentDebuggers = new WeakSet<object>();
 
+/** The frame targets each of the agent's attachments has been told of. */
+const frameTargets = new WeakMap<object, SurfaceFrameTargets>();
+
+function frameTargetsOf(client: BrowserSurfaceViewPort["webContents"]["debugger"]) {
+  const known = frameTargets.get(client);
+  if (known !== undefined) return known;
+  const watched = watchSurfaceFrameTargets((listener) => {
+    client.on?.("message", listener);
+    return () => client.removeListener?.("message", listener);
+  });
+  frameTargets.set(client, watched);
+  return watched;
+}
+
+/** Detach the agent's attachment, forgetting the frame sessions that ended with it. */
+function detachAgentDebugger(client: BrowserSurfaceViewPort["webContents"]["debugger"]): void {
+  agentDebuggers.delete(client);
+  frameTargets.get(client)?.stop();
+  frameTargets.delete(client);
+  if (client.isAttached()) client.detach();
+}
+
 interface DialogReport {
   readonly type: "alert" | "confirm" | "prompt" | "beforeunload";
   readonly message: string;
@@ -1937,8 +2138,7 @@ async function guardDialogs(
   ]);
   return async () => {
     client.removeListener?.("message", listener);
-    agentDebuggers.delete(client);
-    if (client.isAttached()) client.detach();
+    detachAgentDebugger(client);
   };
 }
 
@@ -1948,6 +2148,7 @@ async function guardDialogs(
  */
 async function waitForConditions(
   view: BrowserSurfaceViewPort,
+  policy: BrowserContextPolicy,
   waitFor: NonNullable<BrowserSurfaceAction["waitFor"]>,
   signal: AbortSignal | undefined,
 ): Promise<void> {
@@ -1961,7 +2162,7 @@ async function waitForConditions(
       // One check never outlives the wait: a page stuck in its own script
       // would otherwise hold the loop past its deadline.
       const checked = await Promise.race([
-        readPage(view, { mode: "check", conditions }),
+        checkConditions(view, policy, conditions),
         new Promise<undefined>((resolve) =>
           setTimeout(() => resolve(undefined), Math.max(0, deadline - Date.now())),
         ),
@@ -1979,6 +2180,44 @@ async function waitForConditions(
 }
 
 /**
+ * Check wait conditions where each one lives: the page's in one read, and an
+ * element a ref found inside a frame in that frame. A frame that is gone holds
+ * no element, so its condition reads as an element that is not there.
+ */
+async function checkConditions(
+  view: BrowserSurfaceViewPort,
+  policy: BrowserContextPolicy,
+  conditions: ReturnType<typeof browserPageConditions>,
+): Promise<{ readonly mode: "check"; readonly met: ReadonlyArray<boolean> }> {
+  const inFrame = (condition: (typeof conditions)[number]) =>
+    condition.kind === "element" && splitBrowserFrameTarget(condition.target).frames.length > 0;
+  const pageRead = await readPage(view, {
+    mode: "check",
+    conditions: conditions.map((condition) =>
+      inFrame(condition) ? { ...condition, target: ":not(*)" } : condition,
+    ),
+  });
+  const met = pageRead.mode === "check" ? [...pageRead.met] : conditions.map(() => false);
+  for (const [index, condition] of conditions.entries()) {
+    if (condition.kind !== "element" || !inFrame(condition)) continue;
+    const read = await inTargetDocument(
+      view,
+      policy,
+      condition.target,
+      async (target) =>
+        (await target.run(
+          `(${readBrowserPage.toString()})(${JSON.stringify({
+            mode: "check",
+            conditions: [{ ...condition, target: target.element }],
+          })})`,
+        )) as BrowserPageReadResult,
+    ).catch(() => undefined);
+    if (read?.mode === "check") met[index] = read.met[0] === true;
+  }
+  return { mode: "check", met };
+}
+
+/**
  * Give the page a moment to finish what an action started: its load, then a
  * short window in which the document stops changing, bounded either way.
  */
@@ -1993,23 +2232,25 @@ async function settlePage(view: BrowserSurfaceViewPort): Promise<void> {
   ).catch(() => undefined);
 }
 
-async function withDebugger(
+async function withDebugger<T>(
   view: BrowserSurfaceViewPort,
-  action: (
-    send: (method: string, parameters?: Record<string, unknown>) => Promise<unknown>,
-  ) => Promise<void>,
-): Promise<void> {
+  action: (send: SurfaceProtocolSend) => Promise<T>,
+): Promise<T> {
   const client = view.webContents.debugger;
-  if (client.isAttached() && agentDebuggers.has(client)) {
-    await action((method, parameters) => client.sendCommand(method, parameters));
-    return;
-  }
+  const send: SurfaceProtocolSend = (method, parameters, sessionId) =>
+    sessionId === undefined
+      ? client.sendCommand(method, parameters)
+      : client.sendCommand(method, parameters, sessionId);
+  if (client.isAttached() && agentDebuggers.has(client)) return action(send);
   if (client.isAttached()) throw new Error("Browser automation control is already in use.");
   client.attach("1.3");
+  // Ours while it is attached, so a step inside the action that needs the
+  // debugger too reuses it instead of mistaking it for someone else's.
+  agentDebuggers.add(client);
   try {
-    await action((method, parameters) => client.sendCommand(method, parameters));
+    return await action(send);
   } finally {
-    if (client.isAttached()) client.detach();
+    detachAgentDebugger(client);
   }
 }
 
@@ -2181,15 +2422,16 @@ function redactedObservationUrl(value: string): string {
 
 async function waitForSelector(
   view: BrowserSurfaceViewPort,
+  policy: BrowserContextPolicy,
   selector: string | undefined,
 ): Promise<void> {
   if (selector === undefined) throw new Error("Wait requires a selector.");
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
-    if (
-      (await execute(view, `document.querySelector(${JSON.stringify(selector)}) !== null`)) === true
-    )
-      return;
+    const found = await inTargetDocument(view, policy, selector, (target) =>
+      target.run(`${elementExpression(target.element)} !== null`),
+    ).catch(() => false);
+    if (found === true) return;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new BrowserWaitTimedOutError(

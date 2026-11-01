@@ -10,7 +10,23 @@
  * The same function answers "is the element behind this ref still the one the
  * snapshot named?", so a ref is checked against the role and name it was given
  * rather than trusted because a selector still matches something.
+ *
+ * The reader walks one document and every open shadow root in it. A frame is
+ * another document, often in another process, so the reader only marks where
+ * one sits; the host reads each frame it may read with the same function and
+ * splices the outlines together (`readFramedBrowserSnapshot`).
  */
+
+/**
+ * How a ref's selector steps into a frame or an open shadow root. Neither is
+ * valid CSS, so a selector holding one can never be mistaken for a plain one.
+ */
+export const BROWSER_FRAME_HOP = " >>frame>> ";
+export const BROWSER_SHADOW_HOP = " >>shadow>> ";
+/** How deep frames nest before the outline stops reading them. */
+export const MAX_BROWSER_SNAPSHOT_FRAME_DEPTH = 4;
+/** How many frames one snapshot reads. */
+export const MAX_BROWSER_SNAPSHOT_FRAMES = 16;
 
 /** How many elements one snapshot may give a reference to. */
 export const MAX_BROWSER_SNAPSHOT_REFS = 400;
@@ -29,6 +45,8 @@ export interface BrowserPageSnapshotNode {
   readonly protected?: boolean;
   readonly states?: ReadonlyArray<string>;
   readonly level?: number;
+  /** On an `iframe` line: the selector of the frame element, for the host to read into. */
+  readonly frame?: string;
 }
 
 export interface BrowserPageSnapshotRef {
@@ -51,10 +69,12 @@ export type BrowserPageReadRequest =
       readonly maxNodes: number;
       readonly protectCredentials: boolean;
       /**
-       * The host already found a credential field somewhere on the page, in a
-       * frame or shadow root this reader does not walk. No field shows a value.
+       * The host already found a credential field somewhere on the page, in
+       * another frame. No field shows a value.
        */
       readonly withholdValues: boolean;
+      /** Refs already given out by the frames read before this one. */
+      readonly refOffset?: number;
     }
   | { readonly mode: "verify"; readonly selector: string }
   | { readonly mode: "check"; readonly conditions: ReadonlyArray<BrowserPageCondition> };
@@ -160,20 +180,37 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
   };
   // The text a person reads in a node, leaving out every field inside it: a
   // label that wraps a textarea would otherwise carry what was typed into it.
+  // A shadow host reads as its shadow root, and a slot as what it was given.
   const readableText = (node: Node): string => {
     if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
     if (!(node instanceof Element)) return "";
     if (node.localName === "select" || isEditable(node)) return "";
-    return Array.from(node.childNodes).map(readableText).join(" ");
+    const assigned = node instanceof HTMLSlotElement ? node.assignedNodes() : [];
+    const shown =
+      node.shadowRoot !== null
+        ? node.shadowRoot.childNodes
+        : assigned.length > 0
+          ? assigned
+          : node.childNodes;
+    return Array.from(shown).map(readableText).join(" ");
   };
-  const textOf = (id: string): string => {
-    const target = document.getElementById(id);
+  // Ids and labels are looked up in the element's own root, which for an
+  // element inside a shadow root is that root, not the document.
+  const rootOf = (element: Element): Document | ShadowRoot => {
+    const root = element.getRootNode();
+    return root instanceof ShadowRoot ? root : document;
+  };
+  const textOf = (root: Document | ShadowRoot, id: string): string => {
+    const target = root.getElementById(id);
     return target === null ? "" : readableText(target);
   };
   const nameOf = (element: Element): string => {
     const labelledBy = element.getAttribute("aria-labelledby");
     if (labelledBy !== null) {
-      const joined = labelledBy.split(/\s+/).map(textOf).join(" ");
+      const joined = labelledBy
+        .split(/\s+/)
+        .map((id) => textOf(rootOf(element), id))
+        .join(" ");
       if (joined.trim() !== "") return clip(joined, 120);
     }
     const label = element.getAttribute("aria-label");
@@ -182,7 +219,7 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
     if (tag === "input" || tag === "select" || tag === "textarea") {
       const id = element.getAttribute("id");
       if (id !== null && id !== "") {
-        for (const candidate of Array.from(document.querySelectorAll("label"))) {
+        for (const candidate of Array.from(rootOf(element).querySelectorAll("label"))) {
           if (candidate.htmlFor === id) return clip(readableText(candidate), 120);
         }
       }
@@ -204,6 +241,41 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
     return title === null ? "" : clip(title, 120);
   };
 
+  // A selector may step into open shadow roots; a frame hop is the host's to
+  // take before it asks this document.
+  // Inside a shadow root nothing anchors a path the way `html` does in the
+  // document, so its first step matches only the root's own children.
+  const resolve = (selector: string): Element | null => {
+    let root: Document | ShadowRoot = document as Document | ShadowRoot;
+    const parts = selector.split(" >>shadow>> ");
+    for (let index = 0; index < parts.length; index += 1) {
+      const part = parts[index] ?? "";
+      let found: Element | null = null;
+      try {
+        if (root instanceof ShadowRoot) {
+          const [first = "", ...rest] = part.split(" > ");
+          const top: Element | undefined = Array.from(root.children).find((child: Element) =>
+            child.matches(first),
+          );
+          found =
+            top === undefined
+              ? null
+              : rest.length === 0
+                ? top
+                : top.querySelector(`:scope > ${rest.join(" > ")}`);
+        } else {
+          found = root.querySelector(part);
+        }
+      } catch {
+        return null;
+      }
+      if (found === null || index === parts.length - 1) return found;
+      if (found.shadowRoot === null) return null;
+      root = found.shadowRoot;
+    }
+    return null;
+  };
+
   if (request.mode === "check") {
     const shown = (element: Element): boolean => {
       const style = window.getComputedStyle(element);
@@ -223,12 +295,7 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
           ? document.readyState === "complete"
           : document.readyState !== "loading";
       }
-      let element: Element | null = null;
-      try {
-        element = document.querySelector(condition.target);
-      } catch {
-        element = null;
-      }
+      const element = resolve(condition.target);
       if (condition.state === "attached") return element !== null;
       if (condition.state === "detached") return element === null;
       if (condition.state === "visible") return element !== null && shown(element);
@@ -243,12 +310,7 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
   }
 
   if (request.mode === "verify") {
-    let element: Element | null = null;
-    try {
-      element = document.querySelector(request.selector);
-    } catch {
-      element = null;
-    }
+    const element = resolve(request.selector);
     if (element === null) return { mode: "verify", element: null };
     return { mode: "verify", element: { role: roleOf(element) ?? "", name: nameOf(element) } };
   }
@@ -260,27 +322,39 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
     const style = window.getComputedStyle(element);
     return style.display === "none" || style.visibility === "hidden";
   };
-  const step = (node: Element): string => {
+  // Ids and positions count within the element's own root: a shadow root is
+  // its own scope, and the selector steps into it from its host.
+  // In the document an id counts as unique only if no open shadow root holds
+  // it too: the headless Browser's selectors pierce shadow roots.
+  const idCount = (root: Document | ShadowRoot, id: string): number =>
+    root instanceof ShadowRoot
+      ? root.querySelectorAll(`#${CSS.escape(id)}`).length
+      : roots.reduce((sum, each) => sum + each.querySelectorAll(`#${CSS.escape(id)}`).length, 0);
+  const step = (node: Element, root: Document | ShadowRoot): string => {
     const id = node.getAttribute("id");
-    if (id !== null && id !== "" && document.querySelectorAll(`#${CSS.escape(id)}`).length === 1) {
+    if (id !== null && id !== "" && idCount(root, id) === 1) {
       return `#${CSS.escape(id)}`;
     }
     const tag = node.tagName.toLowerCase();
-    const parent = node.parentElement;
+    const parent: ParentNode | null =
+      node.parentElement ?? (node.parentNode instanceof ShadowRoot ? node.parentNode : null);
     if (parent === null) return tag;
     const siblings = Array.from(parent.children).filter((child) => child.tagName === node.tagName);
     return siblings.length <= 1 ? tag : `${tag}:nth-of-type(${String(siblings.indexOf(node) + 1)})`;
   };
   const selectorOf = (element: Element): string => {
+    const root = element.getRootNode();
+    const scope = root instanceof ShadowRoot ? root : document;
     const path: string[] = [];
     let current: Element | null = element;
     while (current !== null) {
-      const piece = step(current);
+      const piece = step(current, scope);
       path.unshift(piece);
       if (piece.startsWith("#") || current.tagName.toLowerCase() === "html") break;
       current = current.parentElement;
     }
-    return path.join(" > ");
+    const own = path.join(" > ");
+    return root instanceof ShadowRoot ? `${selectorOf(root.host)} >>shadow>> ${own}` : own;
   };
   const valueOf = (element: Element): string | undefined => {
     if (element instanceof HTMLSelectElement) {
@@ -334,7 +408,18 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
       roots.some((root) => Array.from(root.querySelectorAll("*")).some(isCredential)));
   const nodes: BrowserPageSnapshotNode[] = [];
   const refs: BrowserPageSnapshotRef[] = [];
+  const refOffset = request.refOffset ?? 0;
   let truncated = false;
+  // The children a person sees: an open shadow root's instead of the host's
+  // own, and a slot's assigned elements in place of its fallback.
+  const shownChildren = (element: Element): ReadonlyArray<Element> => {
+    if (element.shadowRoot !== null) return Array.from(element.shadowRoot.children);
+    if (element instanceof HTMLSlotElement) {
+      const assigned = element.assignedElements();
+      if (assigned.length > 0) return assigned;
+    }
+    return Array.from(element.children);
+  };
   const visit = (element: Element, depth: number): void => {
     if (truncated) return;
     if (["script", "style", "noscript", "template", "svg", "head"].includes(element.localName)) {
@@ -359,7 +444,7 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
           truncated = true;
           return;
         }
-        ref = `e${String(refs.length + 1)}`;
+        ref = `e${String(refOffset + refs.length + 1)}`;
         refs.push({ ref, selector: selectorOf(element), role, name });
       }
       nodes.push({
@@ -385,15 +470,21 @@ export function readBrowserPage(request: BrowserPageReadRequest): BrowserPageRea
         nodes.push({ depth, role: "text", name: text });
         return;
       }
-    } else if (element.localName === "iframe") {
+    } else if (element.localName === "iframe" || element.localName === "frame") {
       if (nodes.length >= request.maxNodes) {
         truncated = true;
         return;
       }
-      nodes.push({ depth, role: "iframe", name: "not included" });
+      const title = clip(element.getAttribute("title") ?? "", 120);
+      nodes.push({
+        depth,
+        role: "iframe",
+        ...(title === "" ? {} : { name: title }),
+        frame: selectorOf(element),
+      });
       return;
     }
-    for (const child of Array.from(element.children)) visit(child, childDepth);
+    for (const child of shownChildren(element)) visit(child, childDepth);
   };
   if (document.body !== null) visit(document.body, 0);
   return { mode: "snapshot", snapshot: { nodes, refs, truncated } };
@@ -425,6 +516,172 @@ export function formatBrowserPageSnapshot(snapshot: BrowserPageSnapshot): string
   }
   if (snapshot.truncated) lines.push("- (outline truncated)");
   return lines.join("\n");
+}
+
+/**
+ * Runs inside the page: the element a selector names in this document,
+ * stepping into open shadow roots at each shadow hop. Self-contained, like the
+ * reader, so a host can hand its source to a page or frame.
+ */
+export function resolveBrowserElement(selector: string): Element | null {
+  let root: Document | ShadowRoot = document as Document | ShadowRoot;
+  const parts = selector.split(" >>shadow>> ");
+  for (let index = 0; index < parts.length; index += 1) {
+    const part = parts[index] ?? "";
+    let found: Element | null = null;
+    try {
+      // A shadow root's path starts at one of its own children; see the reader.
+      if (root instanceof ShadowRoot) {
+        const [first = "", ...rest] = part.split(" > ");
+        const top: Element | undefined = Array.from(root.children).find((child: Element) =>
+          child.matches(first),
+        );
+        found =
+          top === undefined
+            ? null
+            : rest.length === 0
+              ? top
+              : top.querySelector(`:scope > ${rest.join(" > ")}`);
+      } else {
+        found = root.querySelector(part);
+      }
+    } catch {
+      return null;
+    }
+    if (found === null || index === parts.length - 1) return found;
+    if (found.shadowRoot === null) return null;
+    root = found.shadowRoot;
+  }
+  return null;
+}
+
+/**
+ * Runs inside the page: where a frame element's content starts in this
+ * document's viewport, after bringing the frame into view. A point inside the
+ * frame plus this offset is the point in the page that holds it.
+ */
+export function browserFrameContentOffset(
+  frame: Element | null,
+): { readonly x: number; readonly y: number } | null {
+  if (!(frame instanceof HTMLIFrameElement || frame instanceof HTMLFrameElement)) return null;
+  frame.scrollIntoView({ block: "nearest", inline: "nearest" });
+  const box = frame.getBoundingClientRect();
+  const style = window.getComputedStyle(frame);
+  return {
+    x: box.left + frame.clientLeft + Number.parseFloat(style.paddingLeft || "0"),
+    y: box.top + frame.clientTop + Number.parseFloat(style.paddingTop || "0"),
+  };
+}
+
+/** A ref's selector split at its frame hops: the frames to enter, then the element in the last. */
+export function splitBrowserFrameTarget(target: string): {
+  readonly frames: ReadonlyArray<string>;
+  readonly element: string;
+} {
+  const parts = target.split(BROWSER_FRAME_HOP);
+  return { frames: parts.slice(0, -1), element: parts.at(-1) ?? target };
+}
+
+/**
+ * What the host can do with one frame of the page: read it with the shared
+ * reader, or find the frame a frame element holds. A frame the context may not
+ * read (its origin is outside the context's allowlist, or it cannot be reached)
+ * comes back excluded, with its origin when one is known.
+ */
+export interface BrowserSnapshotFrames<Frame> {
+  read(
+    frame: Frame,
+    limits: { readonly refOffset: number; readonly maxRefs: number; readonly maxNodes: number },
+  ): Promise<BrowserPageSnapshot>;
+  child(
+    frame: Frame,
+    selector: string,
+  ): Promise<
+    | { readonly status: "included"; readonly frame: Frame }
+    | { readonly status: "excluded"; readonly origin?: string }
+  >;
+}
+
+/**
+ * The page's outline with its frames read into it: each frame the context may
+ * read is listed under its `iframe` line, and its refs' selectors start with
+ * the frame hops that reach it. One budget of refs and lines covers the whole
+ * page, frames included.
+ */
+export async function readFramedBrowserSnapshot<Frame>(
+  top: Frame,
+  frames: BrowserSnapshotFrames<Frame>,
+  limits: { readonly maxRefs: number; readonly maxNodes: number },
+): Promise<BrowserPageSnapshot> {
+  const nodes: BrowserPageSnapshotNode[] = [];
+  const refs: BrowserPageSnapshotRef[] = [];
+  let truncated = false;
+  let framesRead = 0;
+  const walk = async (
+    frame: Frame,
+    prefix: string,
+    depthOffset: number,
+    level: number,
+  ): Promise<void> => {
+    const read = await frames.read(frame, {
+      refOffset: refs.length,
+      maxRefs: Math.max(0, limits.maxRefs - refs.length),
+      maxNodes: Math.max(0, limits.maxNodes - nodes.length),
+    });
+    if (read.truncated) truncated = true;
+    for (const ref of read.refs) refs.push({ ...ref, selector: `${prefix}${ref.selector}` });
+    for (const node of read.nodes) {
+      const { frame: frameSelector, ...line } = node;
+      const placed = { ...line, depth: line.depth + depthOffset };
+      if (frameSelector === undefined) {
+        nodes.push(placed);
+        continue;
+      }
+      if (level >= MAX_BROWSER_SNAPSHOT_FRAME_DEPTH || framesRead >= MAX_BROWSER_SNAPSHOT_FRAMES) {
+        nodes.push({ ...placed, states: ["not included"] });
+        truncated = true;
+        continue;
+      }
+      framesRead += 1;
+      type Child = Awaited<ReturnType<BrowserSnapshotFrames<Frame>["child"]>>;
+      const child: Child = await frames
+        .child(frame, frameSelector)
+        .catch((): Child => ({ status: "excluded" }));
+      if (child.status === "excluded") {
+        nodes.push({
+          ...placed,
+          ...(child.origin === undefined ? {} : { name: child.origin }),
+          states: ["not included"],
+        });
+        continue;
+      }
+      const placedAt = nodes.push(placed) - 1;
+      // A frame that navigates or goes away mid-read is left out on its own;
+      // the rest of the page still reads.
+      const before = { nodes: nodes.length, refs: refs.length };
+      try {
+        await walk(
+          child.frame,
+          `${prefix}${frameSelector}${BROWSER_FRAME_HOP}`,
+          placed.depth + 1,
+          level + 1,
+        );
+      } catch {
+        nodes.length = before.nodes;
+        refs.length = before.refs;
+        nodes[placedAt] = { ...placed, states: ["not included"] };
+      }
+    }
+  };
+  await walk(top, "", 0, 0);
+  // A frame read mid-page spends lines the frame's parent had already read.
+  if (nodes.length > limits.maxNodes) {
+    // A ref keeps its line: one the outline no longer shows is dropped too.
+    const kept = nodes.slice(0, limits.maxNodes);
+    const shown = new Set(kept.flatMap((node) => (node.ref === undefined ? [] : [node.ref])));
+    return { nodes: kept, refs: refs.filter((ref) => shown.has(ref.ref)), truncated: true };
+  }
+  return { nodes, refs, truncated };
 }
 
 /**

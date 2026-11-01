@@ -52,6 +52,25 @@ const pages: Record<string, string> = {
   "/html-drag": `<!doctype html><title>Drag</title>
     <div id="card" draggable="true" style="width:60px;height:30px" ondragstart="event.dataTransfer.setData('text', 'card')">Card</div>
     <div id="done" style="width:60px;height:30px;margin-top:40px" ondragover="event.preventDefault()" ondrop="event.preventDefault(); document.title = 'Dropped ' + event.dataTransfer.getData('text')">Done</div>`,
+  "/framed": `<!doctype html><title>Framed</title>
+    <iframe title="Search" src="/inner"></iframe>
+    <iframe title="Elsewhere" src="{{other}}/remote"></iframe>
+    <shadow-card id="card"></shadow-card>
+    <script>
+      document.getElementById("card").attachShadow({ mode: "open" }).innerHTML = '<p><button>One</button></p><button onclick="document.title = \\'Shadow saved\\'">Shadow save</button>';
+      addEventListener("message", (event) => { document.title = String(event.data); });
+    </script>`,
+  "/inner": `<!doctype html><title>Inner</title>
+    <label for="q">Query</label><input id="q">
+    <button onclick="top.document.title = 'Found ' + document.getElementById('q').value">Find</button>`,
+  "/remote": `<!doctype html><title>Remote</title>
+    <label for="r">Remote query</label><input id="r">
+    <button onclick="parent.postMessage('Remote ' + document.getElementById('r').value, '*')">Remote find</button>`,
+  "/framed-login": `<!doctype html><title>Framed sign-in</title>
+    <label for="mail">Email</label><input id="mail" value="ada@example.com">
+    <iframe title="Sign-in" src="{{other}}/remote-login"></iframe>`,
+  "/remote-login": `<!doctype html><title>Remote sign-in</title>
+    <label for="code">Password</label><input id="code" type="password" value="hunter2">`,
   "/form": `<!doctype html><title>Form</title>
     <label>Name <input id="name"></label>
     <button id="save" onclick="document.title = 'Saved ' + document.getElementById('name').value">Save</button>
@@ -64,13 +83,19 @@ let browser: Browser | undefined;
 
 beforeAll(async () => {
   server = createServer((request, response) => {
+    // A frame on the server's other name is on another site, in its own process.
+    const other = `http://localhost:${String((server.address() as AddressInfo).port)}`;
     const body = pages[new URL(request.url ?? "/", "http://localhost").pathname];
     response.writeHead(body === undefined ? 404 : 200, { "content-type": "text/html" });
-    response.end(body ?? "missing");
+    response.end(body?.replaceAll("{{other}}", other) ?? "missing");
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   origin = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`;
-  if (chrome !== undefined) browser = await chromium.launch({ executablePath: chrome });
+  // Electron keeps each site in its own process; Playwright turns that off
+  // unless asked, and a frame on another site would then share the page's.
+  if (chrome !== undefined) {
+    browser = await chromium.launch({ executablePath: chrome, args: ["--site-per-process"] });
+  }
 });
 
 afterAll(async () => {
@@ -85,7 +110,12 @@ async function pageView(): Promise<{ view: BrowserSurfaceViewPort; page: Page }>
   let title = "";
   let session: CDPSession | undefined;
   let attached = false;
-  const messageListeners = new Set<(event: unknown, method: string, params: unknown) => void>();
+  const messageListeners = new Set<
+    (event: unknown, method: string, params: unknown, sessionId?: string) => void
+  >();
+  // Frames on another site, each with its own protocol session, as Electron's
+  // debugger announces them once the host asks to attach to them.
+  const frameSessions = new Map<string, CDPSession>();
   const openSession = async (): Promise<CDPSession> => {
     if (session !== undefined) return session;
     const opened = await page.context().newCDPSession(page);
@@ -121,7 +151,30 @@ async function pageView(): Promise<{ view: BrowserSurfaceViewPort; page: Page }>
           session = undefined;
         },
         isAttached: () => attached,
-        sendCommand: async (method, parameters) => {
+        sendCommand: async (method, parameters, sessionId) => {
+          if (sessionId !== undefined) {
+            const child = frameSessions.get(sessionId);
+            if (child === undefined) throw new Error("No such frame session.");
+            return child.send(method as "Runtime.evaluate", parameters as never);
+          }
+          if (method === "Target.setAutoAttach") {
+            for (const frame of page.frames()) {
+              if (frame === page.mainFrame()) continue;
+              // Only a frame in its own process has a session of its own.
+              const child = await page
+                .context()
+                .newCDPSession(frame)
+                .catch(() => undefined);
+              if (child === undefined) continue;
+              const { targetInfo } = await child.send("Target.getTargetInfo");
+              const id = `frame-${String(frameSessions.size + 1)}`;
+              frameSessions.set(id, child);
+              for (const listener of messageListeners) {
+                listener({}, "Target.attachedToTarget", { sessionId: id, targetInfo }, undefined);
+              }
+            }
+            return {};
+          }
           const answer = await (
             await openSession()
           ).send(method as "Runtime.evaluate", parameters as never);
@@ -175,7 +228,7 @@ async function pageView(): Promise<{ view: BrowserSurfaceViewPort; page: Page }>
   return { view, page };
 }
 
-async function surface(path: string, views = 1) {
+async function surface(path: string, views = 1, profile?: { readonly kind: "personal" }) {
   const pool = await Promise.all(Array.from({ length: views }, () => pageView()));
   const page = pool[0]?.page;
   if (page === undefined) throw new Error("No page.");
@@ -198,6 +251,7 @@ async function surface(path: string, views = 1) {
       credentialFieldProtection: true,
       maxConcurrentTabs: 4,
       sessionTimeoutMs: 300_000,
+      ...(profile === undefined ? {} : { profile }),
     },
   });
   const opened = await host.act(contextId, { kind: "navigate", target: `${origin}${path}` });
@@ -231,6 +285,59 @@ describe.skipIf(chrome === undefined)(
       expect(observed.snapshot).not.toContain("ada@example.com");
       expect(observed.screenshotDataUrl).toBeUndefined();
       expect(entry(observed.snapshotRefs, "Continue").role).toBe("button");
+      await page.close();
+    });
+
+    it("reads and acts inside a frame on this site, a frame on another site, and an open shadow root", async () => {
+      const { host, contextId, page } = await surface("/framed");
+      await page.waitForFunction(() => document.querySelectorAll("iframe").length === 2);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const observed = await host.act(contextId, { kind: "snapshot" });
+      expect(observed.snapshot).toMatch(/^- iframe "Search"$/m);
+      expect(observed.snapshot).toMatch(/^ {2}- textbox "Query" \[ref=e\d+\]$/m);
+      expect(observed.snapshot).toMatch(/^- iframe "Elsewhere"$/m);
+      expect(observed.snapshot).toMatch(/^ {2}- button "Remote find" \[ref=e\d+\]$/m);
+      expect(observed.snapshot).toMatch(/- button "Shadow save" \[ref=e\d+\]/);
+      const act = (kind: "click" | "type", name: string, value?: string) => {
+        const found = entry(observed.snapshotRefs, name);
+        return host.act(contextId, {
+          kind,
+          target: found.selector,
+          ...(value === undefined ? {} : { value }),
+          expected: { role: found.role, name: found.name, url: `${origin}/framed` },
+        });
+      };
+      await act("type", "Query", "Ada");
+      expect((await act("click", "Find")).title).toBe("Found Ada");
+      await act("type", "Remote query", "Grace");
+      await act("click", "Remote find");
+      await page.waitForFunction(() => document.title === "Remote Grace");
+      expect((await act("click", "Shadow save")).title).toBe("Shadow saved");
+      await page.close();
+    });
+
+    it("protects a credential field in a frame on another site and withholds every value", async () => {
+      const { host, contextId, page } = await surface("/framed-login");
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const observed = await host.act(contextId, { kind: "snapshot" });
+      expect(observed.snapshot).toMatch(/^ {2}- textbox "Password" \[ref=e\d+\] protected$/m);
+      expect(observed.snapshot).not.toContain("hunter2");
+      expect(observed.snapshot).not.toContain("ada@example.com");
+      const password = entry(observed.snapshotRefs, "Password");
+      await expect(
+        host.act(contextId, { kind: "type", target: password.selector, value: "guess" }),
+      ).rejects.toThrow(/credential field/);
+      expect((await host.inspectTarget(contextId, password.selector)).sensitive).toBe(true);
+      await page.close();
+    });
+
+    it("leaves out a frame on another site from a signed-in page", async () => {
+      const { host, contextId, page } = await surface("/framed", 1, { kind: "personal" });
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const observed = await host.act(contextId, { kind: "snapshot" });
+      expect(observed.snapshot).toMatch(/^ {2}- textbox "Query" \[ref=e\d+\]$/m);
+      expect(observed.snapshot).toMatch(/^- iframe "http:\/\/localhost:\d+" not included$/m);
+      expect(observed.snapshot).not.toContain("Remote find");
       await page.close();
     });
 

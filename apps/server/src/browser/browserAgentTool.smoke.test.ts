@@ -67,6 +67,14 @@ const pages: Record<string, string> = {
   "/noisy": `<!doctype html><title>Noisy</title>
     <script>console.warn("careful"); console.error("boom"); fetch("/missing-data?token=s3cret");</script>`,
   "/other": `<!doctype html><title>Other</title><button>Save</button>`,
+  "/inner": `<!doctype html><title>Inner</title>
+    <label for="q">Query</label><input id="q">
+    <button onclick="top.document.title = 'Found ' + document.getElementById('q').value">Find</button>`,
+  "/inner-login": `<!doctype html><title>Inner sign-in</title>
+    <label for="code">Password</label><input id="code" type="password" value="hunter2">`,
+  "/framed-login": `<!doctype html><title>Framed sign-in</title>
+    <label for="mail">Email</label><input id="mail" value="ada@example.com">
+    <iframe title="Sign-in" src="/inner-login"></iframe>`,
 };
 
 const threadId = randomUUID() as BrowserThreadId;
@@ -90,6 +98,24 @@ beforeAll(async () => {
     const path = new URL(request.url ?? "/", "http://localhost").pathname;
     // A page on this origin that sends the browser to another one: the same
     // server under its other name is a different origin.
+    // A page with a frame on this origin, one on the server's other name, and
+    // an open and a closed shadow root.
+    if (path === "/framed") {
+      const port = (server.address() as AddressInfo).port;
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end(`<!doctype html><title>Framed</title>
+        <h1>Framed</h1>
+        <iframe title="Search" src="/inner"></iframe>
+        <iframe title="Elsewhere" src="http://localhost:${String(port)}/inner"></iframe>
+        <shadow-card id="card"><span slot="note">Slotted note</span></shadow-card>
+        <div id="closed"></div>
+        <script>
+          const open = document.getElementById("card").attachShadow({ mode: "open" });
+          open.innerHTML = '<p><button>One</button></p><button onclick="document.title = \\'Shadow saved\\'">Shadow save</button><p><slot name="note"></slot></p>';
+          document.getElementById("closed").attachShadow({ mode: "closed" }).innerHTML = "<button>Hidden away</button>";
+        </script>`);
+      return;
+    }
     if (path === "/leave") {
       const port = (server.address() as AddressInfo).port;
       response.writeHead(302, { location: `http://localhost:${String(port)}/other` });
@@ -209,6 +235,53 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
     expect(outline).toMatch(/- textbox "Email" \[ref=e\d+\]$/m);
     expect(outline).toMatch(/- textbox "Password" \[ref=e\d+\] protected$/m);
     expect(outline).toMatch(/- button "Continue" \[ref=e\d+\]/);
+    expect(outline).not.toContain("hunter2");
+    expect(outline).not.toContain("ada@example.com");
+    const typed = await tool.call({
+      operation: "type",
+      ref: refFor(outline, /"Password"/),
+      text: "guess",
+    });
+    expect(typed.result.failure?.category).toBe("credential-protected");
+    await tool.stop();
+  });
+
+  it("reads and acts inside a same-origin frame and an open shadow root, and leaves out a frame it may not load", async () => {
+    const tool = agentTool();
+    await tool.call({ operation: "navigate", url: `${origin}/framed` });
+    const outline = (await tool.call({ operation: "snapshot" })).result.page?.snapshot ?? "";
+    expect(outline).toMatch(/^- iframe "Search"$/m);
+    expect(outline).toMatch(/^ {2}- textbox "Query" \[ref=e\d+\]$/m);
+    expect(outline).toMatch(/^ {2}- button "Find" \[ref=e\d+\]$/m);
+    // The headless Browser loads nothing outside the page's own origin.
+    expect(outline).toMatch(/^- iframe .*not included$/m);
+    expect(outline).toMatch(/- button "Shadow save" \[ref=e\d+\]/);
+    expect(outline).toMatch(/- text "Slotted note"/);
+    expect(outline).not.toContain("Hidden away");
+    const typed = await tool.call({
+      operation: "type",
+      ref: refFor(outline, /"Query"/),
+      text: "Ada",
+    });
+    expect(typed.isError).toBe(false);
+    const found = await tool.call({ operation: "click", ref: refFor(outline, /"Find"/) });
+    expect(found.result.page?.title).toBe("Found Ada");
+    const saved = await tool.call({ operation: "click", ref: refFor(outline, /"Shadow save"/) });
+    expect(saved.result.page?.title).toBe("Shadow saved");
+    const waited = await tool.call({
+      operation: "wait",
+      conditions: [{ ref: refFor(outline, /"Find"/), state: "visible" }],
+    });
+    expect(waited.isError).toBe(false);
+    await tool.stop();
+  });
+
+  it("protects a credential field inside a frame and withholds every value on the page", async () => {
+    const tool = agentTool();
+    await tool.call({ operation: "navigate", url: `${origin}/framed-login` });
+    const outline = (await tool.call({ operation: "snapshot" })).result.page?.snapshot ?? "";
+    expect(outline).toMatch(/^ {2}- textbox "Password" \[ref=e\d+\] protected$/m);
+    expect(outline).toMatch(/^- textbox "Email" \[ref=e\d+\]$/m);
     expect(outline).not.toContain("hunter2");
     expect(outline).not.toContain("ada@example.com");
     const typed = await tool.call({
