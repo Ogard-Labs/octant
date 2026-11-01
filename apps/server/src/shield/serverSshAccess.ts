@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
-import { createServer, connect, type Server, type Socket } from "node:net";
+import { createServer, connect, type ListenOptions, type Server, type Socket } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ShieldServer } from "@octant/contracts/shield-servers";
@@ -284,10 +284,10 @@ async function readKnownHostLines(
   return lines;
 }
 
-async function listen(server: Server, ...args: ReadonlyArray<unknown>): Promise<void> {
+async function listen(server: Server, at: ListenOptions): Promise<void> {
   await new Promise<void>((resolvePromise, reject) => {
     server.once("error", reject);
-    server.listen(...(args as [string]), () => {
+    server.listen(at, () => {
       server.off("error", reject);
       resolvePromise();
     });
@@ -320,7 +320,7 @@ async function openRelay(
     client.pipe(upstream);
     upstream.pipe(client);
   });
-  await listen(server, 0, "127.0.0.1");
+  await listen(server, { port: 0, host: "127.0.0.1" });
   const address = server.address();
   if (address === null || typeof address === "string") {
     await closer(server, sockets)();
@@ -350,7 +350,7 @@ async function openAgentProxy(
   }
   const sockets = new Set<Socket>();
   const server = createServer((client) => relayAgent(client, upstreamPath, sockets));
-  await listen(server, socketPath);
+  await listen(server, { path: socketPath });
   closers.push(closer(server, sockets));
   return socketPath;
 }

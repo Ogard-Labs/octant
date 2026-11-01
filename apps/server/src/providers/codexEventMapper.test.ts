@@ -514,7 +514,8 @@ describe("mapCodexMessage", () => {
       ).flatMap((result) => (result.kind === "event" ? [result.event] : []));
     };
 
-    expect(completed("ssh web1 uptime", "failed", 3)).toEqual([
+    // Codex runs each command through a login shell.
+    expect(completed("/bin/zsh -lc 'ssh web1 uptime'", "failed", 3)).toEqual([
       expect.objectContaining({
         kind: "outside-content-result",
         source: "remote-command",

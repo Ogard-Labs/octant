@@ -352,6 +352,17 @@ const RSYNC_PLAIN_LONG = new Set([
   "ignore-existing",
   "mkpath",
 ]);
+/** rsync long options that take a value, as `--name=value` or as the next word. */
+const RSYNC_VALUE_LONG = new Set([
+  "exclude",
+  "include",
+  "exclude-from",
+  "include-from",
+  "filter",
+  "bwlimit",
+  "timeout",
+  "contimeout",
+]);
 /** rsync options that run a program here or on the server, or reach something but the server's shell. */
 const RSYNC_PROGRAM_LONG = new Set(["rsh", "rsync-path", "daemon", "port", "address", "sockopts"]);
 
@@ -401,6 +412,10 @@ export function parseFileCopyInvocation(command: string): FileCopyInvocation {
       else if (RSYNC_PROGRAM_LONG.has(name)) optionsPlain = false;
       else if (!RSYNC_PLAIN_LONG.has(name)) unknownOption = true;
       if (value !== undefined && KEY_FILE.test(value)) keyPath = true;
+      // A value given as the next word is not an operand.
+      if (value === undefined && (RSYNC_VALUE_LONG.has(name) || RSYNC_PROGRAM_LONG.has(name))) {
+        index += 1;
+      }
       continue;
     }
     const flags = word.slice(1);
@@ -459,13 +474,18 @@ export function parseFileCopyInvocation(command: string): FileCopyInvocation {
   if (remotes.some((remote) => remote.host.length === 0 || remote.host.startsWith("-"))) {
     return { kind: "unreadable" };
   }
+  // The last operand is the destination; its shape says which way files go.
   const destination = operands[operands.length - 1] ?? "";
+  const toServer =
+    remoteOperand(destination) !== undefined ||
+    /^(?:rsync|scp|sftp):\/\//i.test(destination) ||
+    /^[^/]*::/.test(destination);
   return {
     kind: "copy",
     program,
     remotes,
     locals,
-    direction: locals.includes(destination) ? "download" : "upload",
+    direction: toServer ? "upload" : "download",
     optionsPlain,
     keyPath,
     destructive,

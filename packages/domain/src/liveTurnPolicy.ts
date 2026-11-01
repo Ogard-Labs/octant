@@ -119,7 +119,7 @@ const ABSOLUTE_WINDOWS_PATH = /(?<![A-Za-z0-9_])[A-Za-z]:\\[^\s'"`;|&<>()]*/g;
 const SHELL_WRAPPER =
   /^\s*(?:\S*\/)?(?:ba|z|da|fi)?sh\s+-[a-z]*c\s+(?:'([\s\S]*)'|"([\s\S]*)")\s*$/;
 
-function unwrapShellInvocation(command: string): string {
+export function unwrapShellInvocation(command: string): string {
   const match = SHELL_WRAPPER.exec(command);
   if (match === null) return command;
   if (match[1] !== undefined) return match[1].replaceAll("'\\''", "'");

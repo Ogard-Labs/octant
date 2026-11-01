@@ -325,6 +325,22 @@ describe("reading an scp or rsync command", () => {
     expect(parseFileCopyInvocation("scp web1:/etc/hosts . && rm -rf x").kind).toBe("unreadable");
   });
 
+  it("reads an option's value given as the next word as no operand, wherever it stands", () => {
+    for (const command of [
+      "rsync -a ./src web1:/etc/app --exclude tmp",
+      "rsync -a --exclude tmp ./src web1:/etc/app",
+    ]) {
+      expect(parseFileCopyInvocation(command), command).toMatchObject({
+        direction: "upload",
+        locals: ["./src"],
+      });
+    }
+    expect(judge("rsync -a ./src web1:/etc/app --exclude tmp", [web])).toMatchObject({
+      verdict: "ask",
+      rule: "beyond-server-profile",
+    });
+  });
+
   it("marks a key file, a program it would run, and a deleting sync", () => {
     expect(parseFileCopyInvocation("scp -i ~/.ssh/id_ed25519 web1:/a .")).toMatchObject({
       keyPath: true,

@@ -7,7 +7,7 @@ import type {
   UtcTimestamp,
 } from "@octant/contracts";
 import { OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS } from "@octant/contracts";
-import { summarizeStepArgument } from "@octant/domain/live-turn-policy";
+import { summarizeStepArgument, unwrapShellInvocation } from "@octant/domain/live-turn-policy";
 import { remoteHostsNamedBy } from "@octant/domain/shield-server-policy";
 import { createHash } from "node:crypto";
 import { isAbsolute, relative, resolve, sep } from "node:path";
@@ -404,7 +404,7 @@ function mapToolCompletion(
   // reads a fetched page; it is never journaled or shown from here.
   const remoteOutput =
     command !== undefined &&
-    remoteHostsNamedBy(command.command).length > 0 &&
+    remoteHostsNamedBy(unwrapShellInvocation(command.command)).length > 0 &&
     typeof command.aggregatedOutput === "string" &&
     command.aggregatedOutput.trim() !== ""
       ? [
