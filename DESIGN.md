@@ -654,7 +654,7 @@ and is never pre-selected; Auto uses the provider's own reviewer or
 [Octant Shield](docs/architecture.md#octant-shield), so it is listed for every
 runtime, and where no reviewer can run the picker shows it unavailable with
 the reason; the pick becomes the default for every new Work and Code thread
-until changed in Settings › Access; this question is allowed, not built yet) — and ends in one primary action, Start a task,
+until changed in Settings › Access) — and ends in one primary action, Start a task,
 that opens the new-task composer in that Project. Every step is optional from
 the first one. Opening setup focuses the current step's heading so a long
 provider list does not scroll past its introduction; Tab then reaches the
@@ -2191,7 +2191,7 @@ Profile, Deploy commands (one per line, shown for Operate and Admin), and
 Runbook path. A refusal from the host shows inline in the alert role.
 A Work Project's **Developer tools** switch is presentation, not a
 permission, so it lives on that Project's overview, not here
-([Workspace](docs/design/workspace.md); allowed, not built yet). A Browser request from a
+([Workspace](docs/design/workspace.md)). A Browser request from a
 CLI in a Code thread's terminal names the origin and the thread and says a
 program in the terminal asked, not the thread's agent
 ([Terminal Browser grant](docs/design/terminal-browser-grant.md#the-window)).

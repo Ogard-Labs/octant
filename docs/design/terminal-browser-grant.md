@@ -30,8 +30,8 @@ it exactly that one tool family, as that thread, and nothing wider.
 - **Code threads only.** The thread must be an active Code thread this window can
   open under the rule Code already uses (`not-a-code-thread` covers an unknown id
   and a Work or Chat thread alike; `thread-not-active` an archived or completed
-  one; `window-cannot-open-thread` a window that does not hold the Project). Work
-  has no shell. The thread-less Project terminal has no way to ask: its command
+  one; `window-cannot-open-thread` a window that does not hold the Project). The
+  grant is built for Code terminals only; a Work thread is refused even though it has a shell. The thread-less Project terminal has no way to ask: its command
   schema refuses the field and its launch carries no credentials.
 - **Browser only.** The endpoint serves the Browser tool and its `help` operation,
   built by the same factory a managed turn uses, for this thread. It offers no

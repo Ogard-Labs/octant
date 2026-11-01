@@ -1042,9 +1042,10 @@ maintainer's hardware, or names the maintainer gate.
      add and remove) with the one the session opened against, so a window that
      removes a device and lists it again ends the session too.
    - **Postures are a Code Project's and a Code thread's.** A Project's posture is
-     whether it remembers Full access for its threads; today's Work asks first and has
-     none (Work at the shared guardrail level is allowed; not built yet,
-     [Modes](../architecture.md#modes-chat-work-and-code)). Reading one asks for an unlock or an open session, which is stricter
+     whether it remembers Full access for its threads. Work threads take the shared
+     guardrail levels ([Modes](../architecture.md#modes-chat-work-and-code)), but the
+     owner routes read and change only a Code posture; reading a Work thread's level
+     is not built. Reading one asks for an unlock or an open session, which is stricter
      than reading an alert. The route accepts a change, holds Full access to its
      own unlock, and journals it with the owner device, but the host as it runs
      today answers every change `unsupported`: the Code service's Full access
