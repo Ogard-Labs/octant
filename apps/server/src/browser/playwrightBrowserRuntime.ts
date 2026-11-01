@@ -3,12 +3,16 @@ import {
   awaitQuietPage,
   BROWSER_DIALOG_POLICY,
   BROWSER_SETTLE_CAP_MS,
+  BROWSER_SHADOW_HOP,
+  browserFrameAdmitted,
   BROWSER_SETTLE_QUIET_MS,
   browserPageConditions,
   browserRefStillMatches,
   describeUnmetWait,
   dialogType,
   formatBrowserPageSnapshot,
+  readFramedBrowserSnapshot,
+  splitBrowserFrameTarget,
   waitSatisfied,
   MAX_BROWSER_SNAPSHOT_NODES,
   MAX_BROWSER_SNAPSHOT_REFS,
@@ -141,6 +145,31 @@ export interface PlaywrightPagePort {
   viewportSize(): { readonly width: number; readonly height: number } | null;
   textContent(selector: string): Promise<string | null>;
   close(): Promise<void>;
+  /**
+   * The element a selector names, for stepping into the frame it holds.
+   * Optional: a test double need not model frames.
+   */
+  $?(selector: string): Promise<PlaywrightElementPort | null>;
+}
+
+/** One document of a page: the page's own, or a frame's. Playwright's frames answer the same calls. */
+export type PlaywrightDocumentPort = Pick<
+  PlaywrightPagePort,
+  | "click"
+  | "fill"
+  | "hover"
+  | "selectOption"
+  | "dragAndDrop"
+  | "setInputFiles"
+  | "evaluate"
+  | "locator"
+  | "textContent"
+  | "url"
+  | "$"
+>;
+
+export interface PlaywrightElementPort {
+  contentFrame(): Promise<PlaywrightDocumentPort | null>;
 }
 
 export interface PlaywrightFramePort {
@@ -397,7 +426,22 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     signal: AbortSignal,
   ): Promise<BrowserTargetInspection> {
     const page = await this.#page(contextId, signal);
-    const sensitive = await sensitiveTarget(page, selector);
+    // A field inside a frame is checked in that frame; one that cannot be
+    // reached is treated as sensitive, as an unreadable field always was.
+    const target =
+      selector === ":focus"
+        ? undefined
+        : await targetDocument(
+            page,
+            selector,
+            this.#contexts.get(contextId)?.allowedOrigins ?? [],
+          ).catch(() => null);
+    const sensitive =
+      target === null
+        ? true
+        : target === undefined
+          ? await sensitiveTarget(page, selector)
+          : await sensitiveTarget(target.document, target.selector);
     throwIfAborted(signal);
     return { sensitive };
   }
@@ -472,7 +516,8 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
 
   async peek(contextId: BrowserContextId, signal: AbortSignal): Promise<BrowserRuntimeObservation> {
     const page = await this.#page(contextId, signal);
-    return this.#observe(page, this.#contexts.get(contextId)?.protectCredentials ?? true, {
+    const owned = this.#contexts.get(contextId);
+    return this.#observe(page, owned?.protectCredentials ?? true, owned?.allowedOrigins ?? [], {
       text: false,
       screenshot: true,
       snapshot: false,
@@ -523,8 +568,13 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     const page = await this.#page(contextId, signal);
     const owned = this.#contexts.get(contextId);
     if (owned !== undefined) owned.blockedNavigationUrl = undefined;
-    await refuseStaleTarget(page, request.target, request.expected);
-    await refuseStaleTarget(page, request.destination, request.destinationExpected);
+    const allowedOrigins = owned?.allowedOrigins ?? [];
+    await refuseStaleTarget(page, request.target, request.expected, allowedOrigins);
+    await refuseStaleTarget(page, request.destination, request.destinationExpected, allowedOrigins);
+    // The document an element target sits in, a frame's when its ref stepped
+    // into one, and the selector inside it.
+    const at = (target: string | undefined, message: string) =>
+      targetDocument(page, required(target, message), allowedOrigins);
     switch (request.kind) {
       case "navigate":
         try {
@@ -536,20 +586,28 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
         break;
       case "click":
         if (request.point === undefined) {
-          await page.click(required(request.target, "Click actions require a selector or point."));
+          const target = await at(request.target, "Click actions require a selector or point.");
+          await target.document.click(target.selector);
         } else {
           const point = viewportPoint(page, request.point);
           await page.mouse.click(point.x, point.y);
         }
         break;
       case "type": {
-        const selector = request.target ?? ":focus";
-        if (await sensitiveTarget(page, selector)) {
+        const value = required(request.value, "Type actions require a value.");
+        if (request.target === undefined) {
+          if (await sensitiveTarget(page, ":focus")) {
+            throw new Error("Octant will not type into a sensitive or credential field.");
+          }
+          await page.keyboard.insertText(value);
+          break;
+        }
+        // The credential check runs in the field's own frame, whichever it is.
+        const target = await at(request.target, "Type actions require a selector.");
+        if (await sensitiveTarget(target.document, target.selector)) {
           throw new Error("Octant will not type into a sensitive or credential field.");
         }
-        const value = required(request.value, "Type actions require a value.");
-        if (request.target === undefined) await page.keyboard.insertText(value);
-        else await page.fill(request.target, value);
+        await target.document.fill(target.selector, value);
         break;
       }
       case "press":
@@ -573,11 +631,12 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
         return readDiagnostics(required(owned, "Browser context is unavailable."), request);
       case "wait":
         if (request.waitFor !== undefined) {
-          await waitForConditions(page, request.waitFor, signal);
+          await waitForConditions(page, request.waitFor, signal, allowedOrigins);
         } else {
           try {
-            await page
-              .locator(required(request.target, "Wait actions require a selector."))
+            const target = await at(request.target, "Wait actions require a selector.");
+            await target.document
+              .locator(target.selector)
               .waitFor({ timeout: DEFAULT_BROWSER_WAIT_MS });
           } catch {
             throw new BrowserWaitTimedOutError(
@@ -589,15 +648,20 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       case "resize":
         await page.setViewportSize(request.viewport ?? DEFAULT_VIEWPORT);
         break;
-      case "hover":
-        await page.hover(required(request.target, "Hover actions require an element."));
+      case "hover": {
+        const target = await at(request.target, "Hover actions require an element.");
+        await target.document.hover(target.selector);
         break;
+      }
       case "select": {
-        const selector = required(request.target, "Select actions require an element.");
+        const { document, selector } = await at(
+          request.target,
+          "Select actions require an element.",
+        );
         const choice = required(request.value, "Select actions require an option.");
         // Playwright waits for a missing option until its timeout; a page with
         // no such option is the agent's mistake to hear about now.
-        const exists = await page
+        const exists = await document
           .locator(selector)
           .evaluate((element) =>
             element instanceof HTMLSelectElement
@@ -607,21 +671,23 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
         if (!exists.some((pair) => pair.includes(choice))) {
           throw new Error("The list has no option with that value or label.");
         }
-        await page.selectOption(selector, choice);
+        await document.selectOption(selector, choice);
         break;
       }
-      case "drag":
-        await page.dragAndDrop(
-          required(request.target, "Drag actions require an element."),
-          required(request.destination, "Drag actions require where to drop."),
-        );
+      case "drag": {
+        const from = await at(request.target, "Drag actions require an element.");
+        const to = await at(request.destination, "Drag actions require where to drop.");
+        if (from.document !== to.document) {
+          throw new Error("A drag starts and ends in the same frame.");
+        }
+        await from.document.dragAndDrop(from.selector, to.selector);
         break;
-      case "upload":
-        await page.setInputFiles(
-          required(request.target, "Upload actions require a file field."),
-          request.files ?? [],
-        );
+      }
+      case "upload": {
+        const target = await at(request.target, "Upload actions require a file field.");
+        await target.document.setInputFiles(target.selector, request.files ?? []);
         break;
+      }
       case "tab-list":
         return this.#tabsObservation(required(owned, "Browser context is unavailable."));
       case "tab-open": {
@@ -685,12 +751,13 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     if (owned !== undefined) await leaveUnapprovedLanding(page, owned.allowedOrigins);
     throwIfAborted(signal);
     if (request.kind === "snapshot") {
-      return this.#snapshot(page, owned?.protectCredentials ?? true);
+      return this.#snapshot(page, owned?.protectCredentials ?? true, allowedOrigins);
     }
     const include = new Set(request.include ?? []);
     return this.#observe(
       page,
       owned?.protectCredentials ?? true,
+      allowedOrigins,
       {
         text: request.kind === "extract-text" || include.has("text"),
         screenshot: request.kind === "screenshot" || include.has("screenshot"),
@@ -980,23 +1047,42 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
   async #snapshot(
     page: PlaywrightPagePort,
     protectCredentials: boolean,
+    allowedOrigins: ReadonlyArray<string>,
   ): Promise<BrowserRuntimeObservation> {
-    const read = await page.evaluate(readBrowserPage, {
-      mode: "snapshot",
-      maxRefs: MAX_BROWSER_SNAPSHOT_REFS,
-      maxNodes: MAX_BROWSER_SNAPSHOT_NODES,
-      protectCredentials,
-      // Every frame and shadow root, which the in-page reader does not walk.
-      withholdValues: protectCredentials && (await sensitiveDocument(page)),
-    });
-    if (read.mode !== "snapshot") throw new Error("Browser snapshot is unavailable.");
+    // A credential field in any frame withholds every value in every frame.
+    const withholdValues = protectCredentials && (await sensitiveDocument(page));
+    const snapshot = await readFramedBrowserSnapshot<PlaywrightDocumentPort>(
+      page,
+      {
+        read: async (document, limits) => {
+          const read = await document.evaluate(readBrowserPage, {
+            mode: "snapshot",
+            ...limits,
+            protectCredentials,
+            withholdValues,
+          });
+          if (read.mode !== "snapshot") throw new Error("Browser snapshot is unavailable.");
+          return read.snapshot;
+        },
+        child: async (document, selector) => {
+          const owner = await document.$?.(playwrightSelector(selector));
+          const frame = await owner?.contentFrame();
+          if (frame === null || frame === undefined) return { status: "excluded" };
+          if (!browserFrameAdmitted(frame.url(), { allowedOrigins, signedIn: false })) {
+            return { status: "excluded", ...frameOrigin(frame.url()) };
+          }
+          return { status: "included", frame };
+        },
+      },
+      { maxRefs: MAX_BROWSER_SNAPSHOT_REFS, maxNodes: MAX_BROWSER_SNAPSHOT_NODES },
+    );
     const title = await page.title();
     const viewport = page.viewportSize();
     return {
       ...(page.url() === "about:blank" ? {} : { url: bounded(page.url(), 4096) }),
       ...(title.trim() === "" ? {} : { title: bounded(title, 1024) }),
-      snapshot: formatBrowserPageSnapshot(read.snapshot),
-      snapshotRefs: read.snapshot.refs,
+      snapshot: formatBrowserPageSnapshot(snapshot),
+      snapshotRefs: snapshot.refs,
       ...(viewport === null ? {} : { viewport }),
     };
   }
@@ -1010,10 +1096,13 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
   async #observe(
     page: PlaywrightPagePort,
     protectCredentials: boolean,
+    allowedOrigins: ReadonlyArray<string>,
     parts: { readonly text: boolean; readonly screenshot: boolean; readonly snapshot: boolean },
     selector?: string,
   ): Promise<BrowserRuntimeObservation> {
-    const outline = parts.snapshot ? await this.#snapshot(page, protectCredentials) : {};
+    const outline = parts.snapshot
+      ? await this.#snapshot(page, protectCredentials, allowedOrigins)
+      : {};
     if (protectCredentials && (await sensitiveDocument(page))) {
       const title = await page.title();
       const viewport = page.viewportSize();
@@ -1027,7 +1116,11 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     const [title, text, selected, screenshotDataUrl] = await Promise.all([
       page.title(),
       page.textContent("body"),
-      parts.text && selector !== undefined ? page.textContent(selector) : Promise.resolve(null),
+      parts.text && selector !== undefined
+        ? targetDocument(page, selector, allowedOrigins).then((target) =>
+            target.document.textContent(target.selector),
+          )
+        : Promise.resolve(null),
       parts.screenshot ? boundedScreenshotDataUrl(page) : Promise.resolve(undefined),
     ]);
     const boundedText = bounded(text ?? "", 65_536);
@@ -1046,8 +1139,11 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
   }
 }
 
-async function sensitiveTarget(page: PlaywrightPagePort, selector: string): Promise<boolean> {
-  const frames = selector === ":focus" ? page.frames() : [page];
+async function sensitiveTarget(
+  page: PlaywrightDocumentPort & Partial<Pick<PlaywrightPagePort, "frames">>,
+  selector: string,
+): Promise<boolean> {
+  const frames = selector === ":focus" && page.frames !== undefined ? page.frames() : [page];
   for (const frame of frames) {
     try {
       if (await frame.locator(selector).evaluate(isSensitiveElement)) return true;
@@ -1188,6 +1284,59 @@ const SETTLING_ACTIONS: ReadonlySet<BrowserRuntimeAction["kind"]> = new Set([
 ]);
 
 /**
+ * The document a target sits in and the selector Playwright resolves inside
+ * it. A ref that stepped into frames is followed hop by hop, and a frame is
+ * entered only when its origin is one the context's allowlist admits, so a
+ * frame outside the approval stays as unreadable as a page outside it.
+ */
+async function targetDocument(
+  page: PlaywrightPagePort,
+  target: string,
+  allowedOrigins: ReadonlyArray<string>,
+): Promise<{
+  readonly document: PlaywrightDocumentPort;
+  /** For Playwright: shadow hops become its own chained selectors, which pierce shadow roots. */
+  readonly selector: string;
+  /** For the page reader, which takes shadow hops itself. */
+  readonly element: string;
+}> {
+  const { frames, element } = splitBrowserFrameTarget(target);
+  let document: PlaywrightDocumentPort = page;
+  for (const frameSelector of frames) {
+    const owner = await document.$?.(playwrightSelector(frameSelector));
+    const frame = await owner?.contentFrame();
+    if (frame === null || frame === undefined) throw new Error("Browser target was not found.");
+    if (!browserFrameAdmitted(frame.url(), { allowedOrigins, signedIn: false })) {
+      throw new Error("That frame's site is outside the sites approved for this page.");
+    }
+    document = frame;
+  }
+  return { document, selector: playwrightSelector(element), element };
+}
+
+/**
+ * A shadow hop becomes Playwright's own chain, whose CSS reaches into the
+ * host's shadow root. `:scope >` keeps each part to the root's own children
+ * first, as the page reader resolves it, rather than any descendant; a part
+ * that starts at an id, unique in its root, needs no anchor.
+ */
+function playwrightSelector(selector: string): string {
+  const [first = "", ...inside] = selector.split(BROWSER_SHADOW_HOP);
+  return [first, ...inside.map((part) => (part.startsWith("#") ? part : `:scope > ${part}`))].join(
+    " >> ",
+  );
+}
+
+function frameOrigin(url: string): { readonly origin?: string } {
+  try {
+    const origin = new URL(url).origin;
+    return origin === "null" ? {} : { origin };
+  } catch {
+    return {};
+  }
+}
+
+/**
  * Let the page finish what the action started: its load, then a short window in
  * which the document stops changing. Bounded either way, so a page that never
  * settles costs the cap and the action still answers.
@@ -1207,6 +1356,7 @@ async function waitForConditions(
   page: PlaywrightPagePort,
   waitFor: NonNullable<BrowserRuntimeAction["waitFor"]>,
   signal: AbortSignal,
+  allowedOrigins: ReadonlyArray<string>,
 ): Promise<void> {
   const conditions = browserPageConditions(waitFor);
   const timeoutMs = Math.min(waitFor.timeoutMs ?? DEFAULT_BROWSER_WAIT_MS, MAX_BROWSER_WAIT_MS);
@@ -1218,7 +1368,7 @@ async function waitForConditions(
       // One check never outlives the wait: a page stuck in its own script
       // would otherwise hold the loop past its deadline.
       const checked = await Promise.race([
-        page.evaluate(readBrowserPage, { mode: "check", conditions }),
+        checkConditions(page, conditions, allowedOrigins),
         new Promise<undefined>((resolve) =>
           setTimeout(() => resolve(undefined), Math.max(0, deadline - Date.now())),
         ),
@@ -1233,6 +1383,40 @@ async function waitForConditions(
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 100));
   }
+}
+
+/**
+ * Check wait conditions where each one lives: the page's in one read, and an
+ * element a ref found inside a frame in that frame. A frame that is gone holds
+ * no element, so its condition reads as an element that is not there.
+ */
+async function checkConditions(
+  page: PlaywrightPagePort,
+  conditions: ReturnType<typeof browserPageConditions>,
+  allowedOrigins: ReadonlyArray<string>,
+): Promise<{ readonly mode: "check"; readonly met: ReadonlyArray<boolean> }> {
+  const inFrame = (condition: (typeof conditions)[number]) =>
+    condition.kind === "element" && splitBrowserFrameTarget(condition.target).frames.length > 0;
+  const pageRead = await page.evaluate(readBrowserPage, {
+    mode: "check",
+    conditions: conditions.map((condition) =>
+      inFrame(condition) ? { ...condition, target: ":not(*)" } : condition,
+    ),
+  });
+  const met = pageRead.mode === "check" ? [...pageRead.met] : conditions.map(() => false);
+  for (const [index, condition] of conditions.entries()) {
+    if (condition.kind !== "element" || !inFrame(condition)) continue;
+    const target = await targetDocument(page, condition.target, allowedOrigins).catch(
+      () => undefined,
+    );
+    if (target === undefined) continue;
+    const read = await target.document.evaluate(readBrowserPage, {
+      mode: "check",
+      conditions: [{ ...condition, target: target.element }],
+    });
+    if (read.mode === "check") met[index] = read.met[0] === true;
+  }
+  return { mode: "check", met };
 }
 
 /**
@@ -1257,9 +1441,15 @@ async function refuseStaleTarget(
   page: PlaywrightPagePort,
   selector: string | undefined,
   expected: BrowserRuntimeAction["expected"],
+  allowedOrigins: ReadonlyArray<string>,
 ): Promise<void> {
   if (expected === undefined || selector === undefined) return;
-  const found = await page.evaluate(readBrowserPage, { mode: "verify", selector });
+  const target = await targetDocument(page, selector, allowedOrigins).catch(() => undefined);
+  if (target === undefined) throw new BrowserTargetStaleError();
+  const found = await target.document.evaluate(readBrowserPage, {
+    mode: "verify",
+    selector: target.element,
+  });
   const pageUrl = page.url() === "about:blank" ? "about:blank" : bounded(page.url(), 4096);
   if (found.mode !== "verify" || !browserRefStillMatches(expected, found.element, pageUrl)) {
     throw new BrowserTargetStaleError();
