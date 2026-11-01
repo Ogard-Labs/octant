@@ -141,6 +141,8 @@ const hostPolicy: BrowserContextPolicy = {
   sessionTimeoutMs: 600_000,
 };
 const MAX_RETAINED_BROWSER_EVIDENCE = 32;
+/** How many uploads' copies one context keeps for forms not yet sent. */
+const MAX_STAGED_UPLOADS = 8;
 /** The actions that name one element, and so may name it by a snapshot ref. */
 const REF_ACTIONS: ReadonlySet<BrowserActionRequest["kind"]> = new Set([
   "click",
@@ -172,6 +174,8 @@ export class BrowserAutomationService {
   readonly #now: () => number;
   readonly #schedule: (delayMs: number, callback: () => void) => () => void;
   readonly #contexts = new Map<BrowserContextId, OwnedContext>();
+  /** Each context's staged upload copies, deleted when the context closes. */
+  readonly #stagedUploads = new Map<BrowserContextId, Array<() => Promise<void>>>();
   readonly #removeProcessExitListener: (() => void) | undefined;
 
   constructor(options: BrowserAutomationServiceOptions) {
@@ -205,6 +209,7 @@ export class BrowserAutomationService {
         }
         owned.evidence.splice(0);
         owned.record = stoppedRecord(owned.record, this.#clock(), "error", "failed");
+        this.#releaseUploads(contextId);
       }
     });
   }
@@ -382,8 +387,17 @@ export class BrowserAutomationService {
      * approved. Nothing else supplies a path to a runtime.
      */
     readonly uploadFiles?: ReadonlyArray<string>;
+    /**
+     * Deletes the copies `uploadFiles` names. The service owns it from here:
+     * a page reads an attached file when its form is sent, often in a later
+     * action, so the copies stay until the context closes.
+     */
+    readonly releaseUpload?: () => Promise<void>;
   }): Promise<BrowserAutomationSnapshot> {
     const owned = this.#contexts.get(input.request.contextId);
+    if (owned === undefined || owned.windowId !== input.windowId) {
+      if (input.releaseUpload !== undefined) void input.releaseUpload().catch(() => undefined);
+    }
     if (owned === undefined) {
       throw new Error("Browser context is stale or unknown.");
     }
@@ -394,7 +408,37 @@ export class BrowserAutomationService {
         "failed",
       );
     }
-    return this.#queueAction(owned, () => this.#actOwned(owned, input));
+    try {
+      return await this.#queueAction(owned, () => this.#actOwned(owned, input));
+    } finally {
+      if (input.releaseUpload !== undefined) this.#keepUpload(owned, input.releaseUpload);
+    }
+  }
+
+  /**
+   * Hold an upload's copies for as long as its context lives, so a later
+   * action can still send the form they were attached to. A context that is
+   * already closing releases them at once; past the bound, the oldest go.
+   */
+  #keepUpload(owned: OwnedContext, release: () => Promise<void>): void {
+    const contextId = owned.record.contextId;
+    if (owned.record.state !== "active" || !this.#contexts.has(contextId)) {
+      void release().catch(() => undefined);
+      return;
+    }
+    const kept = this.#stagedUploads.get(contextId) ?? [];
+    kept.push(release);
+    while (kept.length > MAX_STAGED_UPLOADS)
+      void kept
+        .shift()?.()
+        .catch(() => undefined);
+    this.#stagedUploads.set(contextId, kept);
+  }
+
+  #releaseUploads(contextId: BrowserContextId): void {
+    const kept = this.#stagedUploads.get(contextId);
+    this.#stagedUploads.delete(contextId);
+    for (const release of kept ?? []) void release().catch(() => undefined);
   }
 
   async #actOwned(
@@ -1076,6 +1120,7 @@ export class BrowserAutomationService {
 
   async close(): Promise<void> {
     this.#removeProcessExitListener?.();
+    for (const contextId of [...this.#stagedUploads.keys()]) this.#releaseUploads(contextId);
     for (const owned of this.#contexts.values()) {
       owned.abort.abort();
       owned.cancelExpiry?.();
@@ -1267,6 +1312,7 @@ export class BrowserAutomationService {
   }
 
   async #safeClose(contextId: BrowserContextId): Promise<void> {
+    this.#releaseUploads(contextId);
     try {
       await this.#runtime.closeContext(contextId);
     } catch {

@@ -682,6 +682,21 @@ describe("BrowserSurfaceHost", () => {
       { tabId: "t1", url: "https://example.com/", title: "Example", active: true },
       { tabId: "t2", active: false },
     ]);
+    await expect(host.act(contextId, { kind: "tab-select", tabId: "t2" })).rejects.toThrow(
+      /outside this context's allowed origins/,
+    );
+    // With the person's tab in front, the agent can still list and move.
+    await host.tabCommand(
+      contextId,
+      { windowId: "window-a", threadId },
+      { kind: "select", tabId: `${contextId}:2` },
+    );
+    expect((await host.act(contextId, { kind: "tab-list" })).tabs).toHaveLength(2);
+    expect(
+      (await host.act(contextId, { kind: "tab-select", tabId: "t1" })).tabs?.[0],
+    ).toMatchObject({
+      active: true,
+    });
   });
 
   it("opens a second page in the same session and shows one tab at a time", async () => {

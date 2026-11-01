@@ -480,6 +480,7 @@ export interface CodeAppManagedToolsOptions {
       readonly request: BrowserActionRequest;
       readonly capturedBy?: "agent";
       readonly uploadFiles?: ReadonlyArray<string>;
+      readonly releaseUpload?: () => Promise<void>;
     }) => Promise<BrowserAutomationSnapshot>;
     readonly releaseThread: (
       windowId: WindowId,
@@ -1184,24 +1185,24 @@ async function browserTool(
     uploadFiles = admitted.paths;
     releaseUpload = admitted.release;
   }
-  let acted: Awaited<ReturnType<typeof guardedBrowserEffect>>;
-  try {
-    if (releaseUpload !== undefined) {
-      const changed = browserAuthorityFailure(options);
-      if (changed !== undefined || signal?.aborted === true)
-        return failure(changed ?? "tool-interrupted");
+  if (releaseUpload !== undefined) {
+    const changed = browserAuthorityFailure(options);
+    if (changed !== undefined || signal?.aborted === true) {
+      await releaseUpload();
+      return failure(changed ?? "tool-interrupted");
     }
-    acted = await guardedBrowserEffect(options, threadId, signal, () =>
-      options.browser!.act({
-        windowId: options.windowId,
-        request,
-        capturedBy: "agent",
-        ...(uploadFiles === undefined ? {} : { uploadFiles }),
-      }),
-    );
-  } finally {
-    await releaseUpload?.();
   }
+  // The service keeps the copies until the page closes; see Work's tool.
+  const release = releaseUpload;
+  const acted = await guardedBrowserEffect(options, threadId, signal, () =>
+    options.browser!.act({
+      windowId: options.windowId,
+      request,
+      capturedBy: "agent",
+      ...(uploadFiles === undefined ? {} : { uploadFiles }),
+      ...(release === undefined ? {} : { releaseUpload: release }),
+    }),
+  );
   if (acted.kind === "failure") return failure(acted.reason);
   if (
     input.operation === "screenshot" &&
