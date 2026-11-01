@@ -156,6 +156,10 @@ Destinations that this host cannot back — Navigator without a model, a Work
 board that is not wired, GitHub pull requests without a working GitHub
 capability — stay absent rather than advertised. Agents is available on an existing thread even before the first child exists.
 
+The last step also says that Octant remembers what you work on across threads
+and Projects, and that **Settings › Memory** turns it off. See
+[Memory across Projects](/guide/memory#memory-across-projects).
+
 ## Provider and access settings
 
 GitHub and Linear have separate pages in Settings. Selecting either page shows

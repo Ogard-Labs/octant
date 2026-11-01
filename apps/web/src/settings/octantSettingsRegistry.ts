@@ -1059,6 +1059,63 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
+      id: "memory",
+      label: "Memory",
+      scope: "host",
+      keywords:
+        "memory remember person preferences past threads other projects forget learn privacy no trace distill",
+      settings: [
+        {
+          id: settingId("person-memory"),
+          label: "Remember across threads",
+          scope: "host",
+          keywords: "memory remember across threads projects on off automatic",
+        },
+        {
+          id: settingId("past-thread-search"),
+          label: "Search past threads",
+          scope: "host",
+          keywords: "search past threads earlier other projects what did we do tool",
+        },
+        {
+          id: settingId("person-memory-model"),
+          label: "Model that writes memory",
+          scope: "host",
+          keywords: "memory model smallest provider usage distill",
+        },
+        {
+          id: settingId("person-memory-exclude"),
+          label: "Keep a Project out",
+          scope: "host",
+          keywords: "keep project out of memory exclude private",
+        },
+        {
+          id: settingId("person-memory-excluded-project"),
+          label: "Projects kept out of memory",
+          scope: "host",
+          keywords: "projects kept out excluded remember again",
+        },
+        {
+          id: settingId("person-memory-untraced"),
+          label: "Threads that leave no trace",
+          scope: "host",
+          keywords: "threads leave no trace private allow memory",
+        },
+        {
+          id: settingId("person-memory-entry"),
+          label: "What Octant remembers",
+          scope: "host",
+          keywords: "entries remembered edit delete source thread",
+        },
+        {
+          id: settingId("person-memory-forget"),
+          label: "Forget everything",
+          scope: "host",
+          keywords: "forget erase delete all memory entries",
+        },
+      ],
+    },
+    {
       id: "secret-stores",
       label: "Secret stores",
       scope: "host",

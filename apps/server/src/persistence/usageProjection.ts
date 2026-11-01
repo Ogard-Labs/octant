@@ -1,6 +1,8 @@
 import {
   AGENT_RUN_TURN_REQUEST_SHAPE,
   AGENT_RUN_USAGE_AGGREGATE_TYPE,
+  PERSON_MEMORY_REQUEST_SHAPE,
+  PERSON_MEMORY_USAGE_AGGREGATE_TYPE,
   SHIELD_REVIEW_REQUEST_SHAPE,
   SHIELD_REVIEW_USAGE_AGGREGATE_TYPE,
   decodeCodeOperationEventFrame,
@@ -55,7 +57,8 @@ export class UsageProjection implements Projection {
       event.aggregateType !== "context-ledger" &&
       event.aggregateType !== "image-job" &&
       event.aggregateType !== AGENT_RUN_USAGE_AGGREGATE_TYPE &&
-      event.aggregateType !== SHIELD_REVIEW_USAGE_AGGREGATE_TYPE
+      event.aggregateType !== SHIELD_REVIEW_USAGE_AGGREGATE_TYPE &&
+      event.aggregateType !== PERSON_MEMORY_USAGE_AGGREGATE_TYPE
     )
       return;
     this.#applyUsageReconciled(connection, event);
@@ -78,14 +81,17 @@ export class UsageProjection implements Projection {
 
     // A child run's usage is journaled beside the run, not on it, but it is
     // the run's spend: its subject is the run itself.
-    // A Shield review is the reviewed Code or Work thread's spend.
+    // A Shield review is the reviewed Code or Work thread's spend, and a
+    // person-memory distillation is the distilled thread's.
     const subject = manifest?.subject ?? {
       aggregateType:
         event.aggregateType === AGENT_RUN_USAGE_AGGREGATE_TYPE
           ? "agent-run"
           : event.aggregateType === SHIELD_REVIEW_USAGE_AGGREGATE_TYPE
             ? shieldReviewedThreadType(connection, event.aggregateId)
-            : event.aggregateType,
+            : event.aggregateType === PERSON_MEMORY_USAGE_AGGREGATE_TYPE
+              ? distilledThreadType(connection, event.aggregateId)
+              : event.aggregateType,
       aggregateId: event.aggregateId,
     };
     // A reconciled request whose subject thread (or child run) was purged keeps
@@ -201,7 +207,8 @@ export class UsageProjection implements Projection {
         // A child run has no Octant planning estimate, so it has no variance
         // either; the request-detail table says so instead of showing zero.
         reconciliation.requestShape === AGENT_RUN_TURN_REQUEST_SHAPE ||
-          reconciliation.requestShape === SHIELD_REVIEW_REQUEST_SHAPE
+          reconciliation.requestShape === SHIELD_REVIEW_REQUEST_SHAPE ||
+          reconciliation.requestShape === PERSON_MEMORY_REQUEST_SHAPE
           ? 0
           : 1,
       );
@@ -796,6 +803,30 @@ function shieldReviewedThreadType(
       )
       .get(threadId) !== undefined;
   return isWork ? "work-thread" : "code-thread";
+}
+
+/** Which mode's thread a distillation was for, by the thread's own history or its tombstone. */
+function distilledThreadType(
+  connection: SqliteConnection,
+  threadId: string,
+): "chat-thread" | "work-thread" | "code-thread" {
+  for (const [mode, type] of [
+    ["chat", "chat-thread"],
+    ["work", "work-thread"],
+  ] as const) {
+    const present =
+      connection
+        .prepare(
+          `SELECT 1 AS present FROM event_journal
+           WHERE aggregate_type = ? AND aggregate_id = ? LIMIT 1`,
+        )
+        .get(type, threadId) !== undefined ||
+      connection
+        .prepare(`SELECT 1 AS present FROM thread_purge_tombstone WHERE mode = ? AND thread_id = ?`)
+        .get(mode, threadId) !== undefined;
+    if (present) return type;
+  }
+  return "code-thread";
 }
 
 /**

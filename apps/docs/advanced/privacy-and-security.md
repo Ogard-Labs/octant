@@ -61,6 +61,15 @@ action; export and purge are separate confirmed operations on the same
 Data & storage page. What you have allowed (remembered websites, remembered
 tool approvals, public links) is on Settings → Permissions.
 
+Person memory (Settings → Memory) is kept in the same journal on this host.
+Octant writes it from your own messages after you put a thread away, using one
+small model request per thread on that thread's provider, and every new thread
+starts with it. It is on by default. You can turn it off, keep a Project or a
+thread out, and edit, delete, or forget every entry; deleting erases the
+entries from the journal. It never leaves the host except inside a provider
+request for a thread that uses it, and a thread on one provider can receive
+what was learned on another. See [Memory across Projects](/guide/memory#memory-across-projects).
+
 An unsent composer draft is ordinary local client storage on the machine
 where it was typed. It never enters the journal, diagnostics, or a provider
 request until you send it. Deleting or purging the thread removes that
