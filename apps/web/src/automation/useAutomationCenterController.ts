@@ -19,7 +19,7 @@ import { useDebouncedValue } from "../lib/useDebouncedValue";
  * recovery, cancellation) and never invents projection facts.
  */
 
-export type AutomationCenterFilter = "all" | "work" | "code";
+export type AutomationCenterFilter = "all" | "chat" | "work" | "code";
 
 export type AutomationListState =
   | { readonly status: "loading" }

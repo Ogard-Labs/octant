@@ -2129,9 +2129,18 @@ rules below:
 **Routines (Automation Center).** A routine is a host-owned, Project-bound
 definition that starts an ordinary Work or Code thread with a fixed task prompt
 on a trigger: once, every N minutes (15 minutes to 30 days), or weekly at a
-local time in an IANA time zone. Chat routines are allowed, since a Chat
-thread has no file, shell, or Git authority for a routine to widen, but not
-built yet: today a routine targets a Work or Code Project. Each occurrence creates
+local time in an IANA time zone. A routine targets a Chat, Work, or Code
+Project. A **Chat routine** keeps Chat's authority, since a Chat thread has no
+file, shell, or Git authority for a routine to widen: its definition binds an
+active Chat Project (the receipt names the Project and its version, with no
+folder or binding revision), its authority snapshot grants no filesystem,
+shell, Git, or subagents, and the contract refuses a Chat definition that
+does. It has no level to pick and no follow-up (`same-thread`) target, and no
+thread's agent proposes one, because a Chat thread has no Environment to
+propose from. Each run creates a Chat thread in the Project through
+`create-chat-thread`, puts it on the routine's provider and model, and sends
+the task as one `send-chat-turn` under a submission identity derived from the
+occurrence, so a retry after a crash finds the turn it already sent. Each occurrence creates
 at most one new thread (target policy `new-thread`) and runs its first turn
 through the ordinary thread and turn services; a routine cannot do anything the
 thread it creates could not do. The one exception is a follow-up (target
@@ -2161,16 +2170,29 @@ the thread it came from.
   own, else Settings › Code › Access), and a Work run's turn is not narrowed
   below its thread's level, which a routine thread takes from Settings ›
   Work. Only a local window sets the opt-in: a paired device is refused at the
-  route, and a routine an agent proposes never has it. A Code
+  route, and a routine an agent proposes never has it. A person may instead
+  **pick a level on the routine itself** (`runLevel` on the definition, one of
+  Ask first, Accept edits, Auto, or Full access; at most one of this and the
+  Project opt-in, journaled and copied into each run's snapshot the same way).
+  It is the highest level a run may use, never a grant: a Code run's thread is
+  created at the lower of the pick and the level the Project's new threads
+  start at, and a Work run's turn takes the pick as its ceiling, so it is
+  clamped to the thread's own level (`clampWorkAccess`). A pick can therefore
+  lower a run below its Project's level and never raise it above what the
+  person allowed there. Only a local window sets it, a paired device is
+  refused at the route, a routine an agent proposes never has it, and a Chat
+  routine cannot carry it. _Rationale:_ the maintainer asked for a level "never
+  above what the person allowed"; the narrower reading, the Project's level
+  as the ceiling, keeps Full access a choice made where the Project's level is
+  set.
+  A Code
   routine may also be created with **Merge the pull requests it opens**
   (`agentMerge: "allowed"` on the definition, journaled with every revision and
   copied into each run's snapshot); only a local window sets it, a paired device
   is refused at the route, and a routine an agent proposes never has it. It
   lets the run's agent merge the pull request its own thread opened under the
   merge rules in [Git and pull requests](#modes-chat-work-and-code), with the
-  head and required checks enforced, while the live routine is enabled. Allowed;
-  not built yet: a level picked on the routine itself rather than taken from
-  its Project. A routine never runs at a level lower than the one
+  head and required checks enforced, while the live routine is enabled. A routine never runs at a level lower than the one
   its creator chose. Work runs bind the Project's confined root like an
   interactive Work thread. A Code first turn runs with
   the `agent` initiator, so approvals wait for a person.
@@ -11244,8 +11266,7 @@ request and editing its title, body, or draft state, a person's
 merge of one pull request from a local window, a person's approval or request
 for changes there, an agent's merge on a Project setting or routine, and the
 Merge when ready and Auto-fix switches the person turns on there are built;
-the rest, Chat routines,
-and the key providers' skill folders and extra skill folders added in Settings,
+the rest, and the key providers' skill folders and extra skill folders added in Settings,
 are allowed and not built yet. Linked external secret stores are built for the
 1Password CLI, under [linked secret stores](#linked-secret-stores): a pointer
 in the credential broker, the value fetched at use and never kept.

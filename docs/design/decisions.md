@@ -757,7 +757,7 @@ A routine is a host-owned, Project-bound definition that starts an ordinary Work
 - A routine runs as the host, so it works with no window open; automation-origin execution cannot create, edit, run, pause or archive a routine.
 - An agent can only propose a routine; a person confirms, and the host builds the definition from the thread's live facts with an approval-gated profile.
 - The scheduler is an in-process timer; nothing wakes the computer or runs in a cloud, and a self-hosted wake service is designed but not built.
-- Chat routines are allowed (not built yet).
+- A Chat routine keeps Chat's authority: it binds an active Chat Project, grants no folder, shell, Git or subagents, has no level and no follow-up target, and each run sends one turn into a new Chat thread. No agent proposes one.
 
 Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
@@ -766,9 +766,10 @@ Status: Built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](.
 A routine runs at the guardrail level the person picks when creating it, Full access included, and never at a lower level than its creator chose.
 
 - A Code routine may merge the pull requests it opens when the person allowed that at creation; an agent proposing a routine never picks either for the person.
+- Built: a person at a local window may pick a level on the routine itself (Ask first, Accept edits, Auto or Full access). It is the highest a run may use: a run takes the lower of the pick and its Project's level, so a pick lowers a run and never raises it above what the person allowed. A paired device and a routine an agent proposed cannot set it, and a Chat routine has none.
 - Built: a person at a local window may opt a routine into its Project's level, journaled on the definition and copied into each run; each run then takes the level the Project's new threads start at, Full access included. Without it a routine asks first, and a Full access profile stays ineligible.
 - A Work routine captures the shell and Git like a Code routine; one saved without them does not run until a person saves it again.
-- Not built yet: the merge permission, and a level picked on the routine itself rather than taken from its Project.
+- Not built yet: the merge permission.
 
 Status: Partly built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 

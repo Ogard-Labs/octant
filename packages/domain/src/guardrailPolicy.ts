@@ -204,6 +204,20 @@ export function workAccessOfPermissionMode(mode: PermissionMode): WorkAccess | u
   }
 }
 
+/** The Code mode picker choice a Work access stands for. */
+export function permissionModeOfWorkAccess(access: WorkAccess): PermissionMode {
+  switch (access) {
+    case "auto":
+      return "auto";
+    case "ask-first":
+      return "ask-first";
+    case "auto-accept-edits":
+      return "accept-edits";
+    case "full-access":
+      return "full-access";
+  }
+}
+
 /**
  * What a Work turn records about the level it ran at: shell and Git follow
  * the level as they do in Code, and a Full access turn runs with no OS
