@@ -1,6 +1,12 @@
 import type { ImportedCookie } from "@octant/contracts";
 import { openReadOnlySqlite } from "../../persistence/sqlitePort";
-import { importedCookieFrom, MAX_IMPORTED_COOKIES } from "./importedCookie";
+import {
+  cookieHostMatchesSite,
+  importedCookieFrom,
+  MAX_IMPORTED_COOKIES,
+  siteCookieHosts,
+  sqlHostList,
+} from "./importedCookie";
 
 export type FirefoxCookieRead =
   | {
@@ -20,6 +26,8 @@ const MILLISECONDS_THRESHOLD = 100_000_000_000;
 export function readFirefoxCookies(input: {
   readonly databasePath: string;
   readonly nowSeconds: number;
+  /** Only this site's cookies and its parent domains' are read. */
+  readonly site?: string;
 }): FirefoxCookieRead {
   let database;
   try {
@@ -28,12 +36,19 @@ export function readFirefoxCookies(input: {
     return { status: "unreadable" };
   }
   try {
+    const where =
+      input.site === undefined
+        ? ""
+        : ` WHERE host IN (${sqlHostList(siteCookieHosts(input.site))})`;
     const rows = database.all(
-      `SELECT host, name, value, path, expiry, isSecure, isHttpOnly, sameSite, originAttributes FROM moz_cookies LIMIT ${MAX_IMPORTED_COOKIES}`,
+      `SELECT host, name, value, path, expiry, isSecure, isHttpOnly, sameSite, originAttributes FROM moz_cookies${where} LIMIT ${MAX_IMPORTED_COOKIES}`,
     ) as ReadonlyArray<Record<string, unknown>>;
     const cookies: ImportedCookie[] = [];
     let skipped = 0;
     for (const row of rows) {
+      if (input.site !== undefined && !cookieHostMatchesSite(String(row.host), input.site)) {
+        continue;
+      }
       const expiry = Number(row.expiry);
       const imported = importedCookieFrom(
         {

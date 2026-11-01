@@ -186,6 +186,47 @@ describe("BrowserProfilesSection", () => {
       ).toBeInTheDocument();
     });
 
+    it("imports one website's cookies only when the person chooses that and names the site", async () => {
+      const user = userEvent.setup();
+      const manageProfiles = answering({
+        kind: "browser-cookies-imported",
+        profile: { kind: "personal" },
+        browser: "chrome",
+        sourceProfile: "Default",
+        imported: 4,
+        skipped: 0,
+        siteOnly: true,
+      });
+      render(<BrowserProfilesSection client={{ manageProfiles }} />);
+      await screen.findByText("Personal · 0 B");
+      await user.click(screen.getByRole("button", { name: "Import cookies into Personal" }));
+      await screen.findByText(/macOS will ask you to allow access/);
+
+      await user.click(screen.getByRole("combobox", { name: "What to import" }));
+      await user.click(await screen.findByRole("option", { name: "One website only" }));
+      expect(screen.getByRole("button", { name: "Import" })).toBeDisabled();
+      await user.type(
+        screen.getByRole("textbox", { name: "Website to import cookies for" }),
+        "github.com",
+      );
+      await user.click(screen.getByRole("button", { name: "Import" }));
+
+      await waitFor(() =>
+        expect(manageProfiles).toHaveBeenCalledWith({
+          kind: "import-cookies",
+          profile: { kind: "personal" },
+          browser: "chrome",
+          sourceProfile: "Default",
+          site: "github.com",
+        }),
+      );
+      expect(
+        await screen.findByText(
+          "Imported 4 cookies for that site from Google Chrome into Personal.",
+        ),
+      ).toBeInTheDocument();
+    });
+
     it("says plainly that nothing was imported when macOS access is refused", async () => {
       const user = userEvent.setup();
       const manageProfiles = answering({

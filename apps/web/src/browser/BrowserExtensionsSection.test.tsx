@@ -205,3 +205,101 @@ describe("BrowserExtensionsSection", () => {
     expect(screen.queryByRole("button", { name: /Install extension/ })).not.toBeInTheDocument();
   });
 });
+
+describe("importing an extension from another browser", () => {
+  const sources: BrowserExtensionsResult = {
+    kind: "browser-extension-import-sources",
+    sources: [
+      {
+        browser: "chrome",
+        label: "Google Chrome",
+        profiles: [
+          {
+            id: "Default",
+            label: "Person 1",
+            extensions: [
+              { id: "a".repeat(32), name: "Reader view", version: "1.0" },
+              {
+                id: "b".repeat(32),
+                name: "Legacy blocker",
+                version: "2.0",
+                unsupportedReason: "It uses the older Manifest V2 format, which Octant cannot run.",
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+  const pick = async () => ({ receiptId: "r", displayName: "x" });
+
+  function importing(imported?: BrowserExtensionsResult) {
+    const api = client({ extensions: [] }, (command) =>
+      command.kind === "import-sources"
+        ? sources
+        : command.kind === "import"
+          ? imported
+          : undefined,
+    );
+    render(<BrowserExtensionsSection client={api} pickExtensionFolder={pick} />);
+    return api;
+  }
+
+  it("says some extensions may not work, lists unsupported ones with the reason, and copies nothing until Import", async () => {
+    const user = userEvent.setup();
+    const api = importing();
+    await screen.findByText("No extensions installed.");
+
+    await user.click(screen.getByRole("button", { name: "Import from another browser…" }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/Some extensions may not work here/)).toBeInTheDocument();
+    expect(
+      await within(dialog).findByText(/Legacy blocker: It uses the older Manifest V2/),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByRole("combobox", { name: "Extension to import" })).toHaveTextContent(
+      "Reader view · 1.0",
+    );
+    expect(api.manageExtensions).not.toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "import" }),
+    );
+  });
+
+  it("imports the picked extension and says it is off until enabled", async () => {
+    const user = userEvent.setup();
+    const api = importing({
+      kind: "browser-extension-installed",
+      updated: false,
+      extension: extension({ name: "Reader view" }),
+    });
+    await screen.findByText("No extensions installed.");
+    await user.click(screen.getByRole("button", { name: "Import from another browser…" }));
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByText(/Legacy blocker/);
+
+    await user.click(within(dialog).getByRole("button", { name: "Import" }));
+
+    await waitFor(() =>
+      expect(api.manageExtensions).toHaveBeenCalledWith({
+        kind: "import",
+        browser: "chrome",
+        sourceProfile: "Default",
+        sourceExtensionId: "a".repeat(32),
+      }),
+    );
+    expect(
+      await screen.findByText(
+        "Imported Reader view from Google Chrome. It is off until you enable it in a profile.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("offers no import in a window that cannot install", async () => {
+    render(<BrowserExtensionsSection client={client({ extensions: [] })} />);
+    await screen.findByText("No extensions installed.");
+
+    expect(
+      screen.queryByRole("button", { name: "Import from another browser…" }),
+    ).not.toBeInTheDocument();
+  });
+});

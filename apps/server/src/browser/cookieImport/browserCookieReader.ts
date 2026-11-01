@@ -34,7 +34,12 @@ export interface BrowserCookieReader {
    * when its database actually holds encrypted values, and only through the
    * platform's own prompt; a refusal reads nothing.
    */
-  readonly read: (browser: CookieImportBrowserId, sourceProfile: string) => Promise<CookieRead>;
+  readonly read: (
+    browser: CookieImportBrowserId,
+    sourceProfile: string,
+    /** A normalized host: read only its cookies and its parent domains', not the whole profile. */
+    site?: string,
+  ) => Promise<CookieRead>;
 }
 
 export function createBrowserCookieReader(
@@ -42,7 +47,7 @@ export function createBrowserCookieReader(
 ): BrowserCookieReader {
   return {
     listSources: () => publicCookieSources(listInstalledCookieSources(options.home)),
-    async read(browserId, sourceProfile) {
+    async read(browserId, sourceProfile, site) {
       const definition = cookieImportBrowser(browserId);
       // The pick must be one the listing offers: a profile id never reaches a
       // path unless an installed browser named it.
@@ -68,10 +73,19 @@ export function createBrowserCookieReader(
         }
         const nowSeconds = Math.floor(options.now() / 1_000);
         if (definition.engine === "firefox") {
-          const read = readFirefoxCookies({ databasePath: copy, nowSeconds });
+          const read = readFirefoxCookies({
+            databasePath: copy,
+            nowSeconds,
+            ...(site === undefined ? {} : { site }),
+          });
           return read.status === "read" ? read : { status: "refused", reason: "source-unreadable" };
         }
-        const first = readChromiumCookies({ databasePath: copy, key: undefined, nowSeconds });
+        const first = readChromiumCookies({
+          databasePath: copy,
+          key: undefined,
+          nowSeconds,
+          ...(site === undefined ? {} : { site }),
+        });
         if (first.status === "read") return first;
         if (first.status === "unreadable" || definition.keychain === undefined) {
           return { status: "refused", reason: "source-unreadable" };
@@ -84,6 +98,7 @@ export function createBrowserCookieReader(
           databasePath: copy,
           key: deriveChromiumCookieKey(keychain.password),
           nowSeconds,
+          ...(site === undefined ? {} : { site }),
         });
         return second.status === "read"
           ? second

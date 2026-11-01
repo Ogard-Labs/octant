@@ -104,7 +104,7 @@ const manifest = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-function harness(options: { readonly native?: boolean } = {}) {
+function harness(options: { readonly native?: boolean; readonly home?: string } = {}) {
   const root = scratch();
   const live = journal(root);
   const syncs: Array<{
@@ -136,6 +136,7 @@ function harness(options: { readonly native?: boolean } = {}) {
         owner === String(windowId) ? folders.get(receiptId) : undefined,
     },
     runtime,
+    ...(options.home === undefined ? {} : { importHome: options.home }),
     readProject: (id) => (String(id) === String(projectId) ? project() : undefined),
     uuid: randomUUID,
     clock: () => now,
@@ -463,5 +464,158 @@ describe("Browser extension service", () => {
 
     expect(result).toMatchObject({ kind: "browser-extension-installed" });
     expect(service.list()).toHaveLength(1);
+  });
+});
+
+describe("Importing an extension from another browser", () => {
+  const CHROME_ID = "abcdefghijklmnopabcdefghijklmnop";
+  const V2_ID = "ponmlkjihgfedcbaponmlkjihgfedcba";
+  const NATIVE_ID = "aaaaaaaaaaaaaaaabbbbbbbbbbbbbbbb";
+
+  /** A Chrome profile on a fake Mac; the real one is never read. */
+  function fakeChrome(root: string): string {
+    const home = join(root, "fake-home");
+    const base = join(home, "Library", "Application Support", "Google", "Chrome");
+    mkdirSync(join(base, "Default", "Extensions"), { recursive: true });
+    writeFileSync(
+      join(base, "Local State"),
+      JSON.stringify({ profile: { info_cache: { Default: { name: "Person 1" } } } }),
+    );
+    const add = (id: string, version: string, files: Record<string, string>) => {
+      const folder = join(base, "Default", "Extensions", id, version);
+      for (const [name, content] of Object.entries(files)) {
+        mkdirSync(join(folder, name, ".."), { recursive: true });
+        writeFileSync(join(folder, name), content);
+      }
+    };
+    add(CHROME_ID, "1.0_0", {
+      "manifest.json": JSON.stringify(
+        manifest({ name: "__MSG_appName__", default_locale: "en", version: "1.0" }),
+      ),
+      "_locales/en/messages.json": JSON.stringify({ appName: { message: "Reader view" } }),
+      "_metadata/verified_contents.json": "{}",
+      "popup.html": "<p>hi</p>",
+    });
+    add(CHROME_ID, "0.9_0", {
+      "manifest.json": JSON.stringify(manifest({ name: "Old", version: "0.9" })),
+    });
+    add(V2_ID, "2.0_0", {
+      "manifest.json": JSON.stringify({ manifest_version: 2, name: "Legacy", version: "2.0" }),
+    });
+    add(NATIVE_ID, "3.0_0", {
+      "manifest.json": JSON.stringify(
+        manifest({ name: "Vault", permissions: ["nativeMessaging"] }),
+      ),
+    });
+    return home;
+  }
+
+  const importCommand = (id: string) =>
+    ({
+      kind: "import",
+      browser: "chrome",
+      sourceProfile: "Default",
+      sourceExtensionId: id,
+    }) as const;
+
+  it("lists the extensions in a browser profile, and says in plain words why one is unsupported", async () => {
+    const root = scratch();
+    const { service } = harness({ home: fakeChrome(root) });
+
+    const result = await service.execute(windowId, "local-window", { kind: "import-sources" });
+
+    expect(result).toMatchObject({ kind: "browser-extension-import-sources" });
+    if (result.kind !== "browser-extension-import-sources") return;
+    expect(result.sources.map((source) => source.browser)).toEqual(["chrome"]);
+    const extensions = result.sources[0]?.profiles[0]?.extensions ?? [];
+    expect(extensions.find((entry) => entry.id === CHROME_ID)).toEqual({
+      id: CHROME_ID,
+      name: "Reader view",
+      version: "1.0",
+    });
+    expect(extensions.find((entry) => entry.id === V2_ID)?.unsupportedReason).toContain(
+      "Manifest V2",
+    );
+    expect(extensions.find((entry) => entry.id === NATIVE_ID)?.unsupportedReason).toContain(
+      "native messaging",
+    );
+    // No folder on this Mac reaches a window.
+    expect(JSON.stringify(result)).not.toContain(root);
+  });
+
+  it("copies the picked extension in, installed but off, and journals where it came from", async () => {
+    const { root, service, live, syncs } = harness({ home: fakeChrome(scratch()) });
+
+    const result = await service.execute(windowId, "local-window", importCommand(CHROME_ID));
+
+    expect(result).toMatchObject({
+      kind: "browser-extension-installed",
+      updated: false,
+      extension: { name: "Reader view", version: "1.0", enabledIn: [], hasPopup: true },
+    });
+    const copy = join(root, "browser-extensions", String(extensionIdFromName("Reader view")));
+    expect(existsSync(join(copy, "popup.html"))).toBe(true);
+    // The browser's own integrity files stay behind, and its profile is never loaded in place.
+    expect(existsSync(join(copy, "_metadata"))).toBe(false);
+    expect(syncs).toEqual([]);
+    const events = live.replayAggregateType({
+      aggregateType: "browser-extension",
+      afterSequence: 0,
+      limit: 10,
+    });
+    expect(events.map((event) => event.eventName)).toEqual(["browser.extension-installed@1"]);
+    expect(events[0]?.payload).toMatchObject({ importedFrom: "chrome", name: "Reader view" });
+  });
+
+  it("refuses an unsupported extension with its reason and copies nothing", async () => {
+    const root = scratch();
+    const { service } = harness({ home: fakeChrome(root) });
+
+    for (const [id, words] of [
+      [V2_ID, "Manifest V2"],
+      [NATIVE_ID, "native messaging"],
+    ] as const) {
+      const result = await service.execute(windowId, "local-window", importCommand(id));
+      expect(result).toMatchObject({
+        kind: "browser-extension-refused",
+        reason: "extension-unsupported",
+      });
+      expect(JSON.stringify(result)).toContain(words);
+    }
+    expect(service.list()).toEqual([]);
+  });
+
+  it("refuses a pick the listing did not offer, so a name from a window never becomes a path", async () => {
+    const root = scratch();
+    const { service } = harness({ home: fakeChrome(root) });
+
+    const result = await service.execute(windowId, "local-window", {
+      ...importCommand(CHROME_ID),
+      sourceProfile: "../../Default",
+    });
+
+    expect(result).toMatchObject({ kind: "browser-extension-refused", reason: "not-found" });
+  });
+
+  it("is the person's alone: a paired device sees no browser extensions and imports none", async () => {
+    const root = scratch();
+    const { service } = harness({ home: fakeChrome(root) });
+
+    for (const command of [{ kind: "import-sources" } as const, importCommand(CHROME_ID)]) {
+      expect(await service.execute(windowId, "remote-device", command)).toMatchObject({
+        kind: "browser-extension-refused",
+        reason: "extension-not-local",
+      });
+    }
+    expect(service.list()).toEqual([]);
+  });
+
+  it("imports nothing without the desktop app", async () => {
+    const root = scratch();
+    const { service } = harness({ home: fakeChrome(root), native: false });
+
+    expect(await service.execute(windowId, "local-window", importCommand(CHROME_ID))).toMatchObject(
+      { kind: "browser-extension-refused", reason: "extension-unsupported" },
+    );
   });
 });

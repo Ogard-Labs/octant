@@ -7,6 +7,7 @@ import { openSqlite } from "../../persistence/sqlitePort";
 import { createBrowserCookieReader } from "./browserCookieReader";
 import { deriveChromiumCookieKey, decryptChromiumCookieValue } from "./chromiumCookies";
 import { listInstalledCookieSources } from "./cookieImportSources";
+import { normalizeImportSite } from "./importedCookie";
 import type { KeychainPasswordReader } from "./keychainPassword";
 
 const roots: string[] = [];
@@ -477,5 +478,122 @@ describe("Chromium cookie reading", () => {
 
     expect(before && existsSync(original)).toBe(true);
     expect(existsSync(`${original}-journal`)).toBe(false);
+  });
+});
+
+describe("importing one site's cookies", () => {
+  const cookies: ReadonlyArray<FixtureCookie> = [
+    { host: ".example.com", name: "parent", value: "p", expiresAtSeconds: future },
+    { host: "example.com", name: "parent-host-only", value: "q", expiresAtSeconds: future },
+    { host: "app.example.com", name: "own", value: "o", expiresAtSeconds: future },
+    { host: "other.example.com", name: "sibling", value: "s", expiresAtSeconds: future },
+    { host: ".app.example.com", name: "own-domain", value: "d", expiresAtSeconds: future },
+    { host: ".notexample.com", name: "lookalike", value: "l", expiresAtSeconds: future },
+    { host: ".other.test", name: "elsewhere", value: SENTINEL, expiresAtSeconds: future },
+  ];
+
+  it("reads the site's own cookies and its parent domains' and nothing else", async () => {
+    const root = home();
+    chromeProfile(root, cookies);
+
+    const result = await reader(root, keychain({ status: "ok", password: PASSWORD })).read(
+      "chrome",
+      "Default",
+      "app.example.com",
+    );
+
+    expect(result.status).toBe("read");
+    if (result.status !== "read") return;
+    expect(result.cookies.map((cookie) => cookie.name).sort()).toEqual([
+      "own",
+      "own-domain",
+      "parent",
+    ]);
+  });
+
+  it("finds the site's cookies even when other sites fill the profile's row cap", async () => {
+    const root = home();
+    const filler = Array.from({ length: 20_005 }, (_, index) => ({
+      host: ".filler.test",
+      name: `f${String(index)}`,
+      value: "x",
+      encrypt: false,
+      expiresAtSeconds: future,
+    }));
+    chromeProfile(root, [
+      ...filler,
+      { host: ".example.com", name: "late", value: "y", encrypt: false, expiresAtSeconds: future },
+    ]);
+
+    const result = await reader(root, keychain({ status: "refused" })).read(
+      "chrome",
+      "Default",
+      "example.com",
+    );
+
+    expect(result).toMatchObject({ status: "read", cookies: [{ name: "late" }] });
+  });
+
+  it("does not ask the Keychain when the site has no cookies in the profile", async () => {
+    const root = home();
+    chromeProfile(root, cookies);
+    const ask = keychain({ status: "refused" });
+
+    const result = await reader(root, ask).read("chrome", "Default", "nothing.invalid");
+
+    expect(result).toMatchObject({ status: "read", cookies: [], skipped: 0 });
+    expect(ask).not.toHaveBeenCalled();
+  });
+
+  it("counts left-behind cookies only among the site's own", async () => {
+    const root = home();
+    chromeProfile(root, [
+      { host: ".example.com", name: "old", value: "x", expiresAtSeconds: NOW_SECONDS - 10 },
+      { host: ".example.com", name: "live", value: "y", expiresAtSeconds: future },
+      { host: ".other.test", name: "old", value: "x", expiresAtSeconds: NOW_SECONDS - 10 },
+    ]);
+
+    const result = await reader(root, keychain({ status: "ok", password: PASSWORD })).read(
+      "chrome",
+      "Default",
+      "example.com",
+    );
+
+    expect(result).toMatchObject({ status: "read", skipped: 1 });
+  });
+
+  it("filters a Firefox profile the same way", async () => {
+    const root = home();
+    const base = join(root, "Library", "Application Support", "Firefox");
+    mkdirSync(join(base, "Profiles", "abcd.default"), { recursive: true });
+    writeFileSync(
+      join(base, "profiles.ini"),
+      "[Profile0]\nName=default\nIsRelative=1\nPath=Profiles/abcd.default\n",
+    );
+    const database = openSqlite(join(base, "Profiles", "abcd.default", "cookies.sqlite"));
+    database.exec(
+      "CREATE TABLE moz_cookies (host TEXT, name TEXT, value TEXT, path TEXT, expiry INTEGER, isSecure INTEGER, isHttpOnly INTEGER, sameSite INTEGER, originAttributes TEXT)",
+    );
+    const insert = database.prepare("INSERT INTO moz_cookies VALUES (?, ?, ?, ?, ?, 1, 0, 1, ?)");
+    insert.run(".example.org", "mine", "a", "/", future, "");
+    insert.run(".elsewhere.test", "theirs", "b", "/", future, "");
+    database.close();
+
+    const result = await reader(root, keychain({ status: "refused" })).read(
+      "firefox",
+      "Profiles/abcd.default",
+      "www.example.org",
+    );
+
+    expect(result).toMatchObject({ status: "read", cookies: [{ name: "mine" }] });
+  });
+
+  it("accepts a host or a pasted address and refuses what is not a web host", () => {
+    expect(normalizeImportSite(" GitHub.com ")).toBe("github.com");
+    expect(normalizeImportSite("https://app.Example.com/path?x=1")).toBe("app.example.com");
+    expect(normalizeImportSite("example.com.")).toBe("example.com");
+    expect(normalizeImportSite("")).toBeUndefined();
+    expect(normalizeImportSite("not a host")).toBeUndefined();
+    expect(normalizeImportSite("file:///etc/passwd")).toBeUndefined();
   });
 });

@@ -53,6 +53,46 @@ export const BrowserExtensionSummary = Schema.Struct({
 }).annotations(strict);
 export type BrowserExtensionSummary = typeof BrowserExtensionSummary.Type;
 
+/** The Chromium-family browsers whose installed extensions a person can copy in. */
+export const ExtensionImportBrowserId = Schema.Literal(
+  "chrome",
+  "chromium",
+  "brave",
+  "edge",
+  "vivaldi",
+  "arc",
+);
+export type ExtensionImportBrowserId = typeof ExtensionImportBrowserId.Type;
+
+/** The id a Chromium-family browser gives an extension: 32 letters a to p. */
+const SourceExtensionId = Schema.String.pipe(Schema.pattern(/^[a-p]{32}$/));
+const SourceProfileId = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128));
+
+/**
+ * One extension found in another browser's profile. When Octant cannot run it,
+ * `unsupportedReason` says why in plain words and the person cannot pick it.
+ */
+export const ExtensionImportCandidate = Schema.Struct({
+  id: SourceExtensionId,
+  name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  version: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(32)),
+  unsupportedReason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
+}).annotations(strict);
+export type ExtensionImportCandidate = typeof ExtensionImportCandidate.Type;
+
+export const ExtensionImportSource = Schema.Struct({
+  browser: ExtensionImportBrowserId,
+  label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+  profiles: Schema.Array(
+    Schema.Struct({
+      id: SourceProfileId,
+      label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+      extensions: Schema.Array(ExtensionImportCandidate).pipe(Schema.maxItems(256)),
+    }).annotations(strict),
+  ).pipe(Schema.maxItems(64)),
+}).annotations(strict);
+export type ExtensionImportSource = typeof ExtensionImportSource.Type;
+
 /**
  * A person's command about browser extensions. Only a local window sends one;
  * an agent, a plugin, a skill, and a structured reference cannot. Installing
@@ -63,6 +103,13 @@ export const BrowserExtensionsCommand = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("install"),
     receiptId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("import-sources") }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("import"),
+    browser: ExtensionImportBrowserId,
+    sourceProfile: SourceProfileId,
+    sourceExtensionId: SourceExtensionId,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("enable"),
@@ -106,6 +153,10 @@ export const BrowserExtensionsResult = Schema.Union(
     extensions: Schema.Array(BrowserExtensionSummary).pipe(Schema.maxItems(256)),
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("browser-extension-import-sources"),
+    sources: Schema.Array(ExtensionImportSource).pipe(Schema.maxItems(16)),
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("browser-extension-installed"),
     extension: BrowserExtensionSummary,
     /** True when the folder replaced an extension that was already installed. */
@@ -144,6 +195,8 @@ const InstalledFields = {
   hostPatterns: BrowserExtensionAccess.fields.hostPatterns,
   hasPopup: Schema.Boolean,
   hasOptionsPage: Schema.Boolean,
+  /** The browser the folder was copied from, when it was not picked from a folder. */
+  importedFrom: Schema.optional(ExtensionImportBrowserId),
 } as const;
 
 /** Journaled when a folder is installed: what it is and what it asks for. */

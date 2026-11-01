@@ -9621,9 +9621,12 @@ access` agree); a thread's own change is journaled as
   through its own Keychain prompt (a refusal imports nothing), verifies each
   decrypted value against its host, and hands the cookies to the desktop app's
   store without logging, journaling, or returning them; the journal records the
-  source, the profile, and counts. Purging a Project clears its profile with its
-  other data. Browser extensions install only from an unpacked Manifest V3
-  folder chosen with the native picker at a local window (the host copies it under
+  source, the profile, and counts. The import may be limited to one site and its
+  parent domains, which the journal records only as a flag. Purging a Project
+  clears its profile with its other data. Browser extensions install only from an
+  unpacked Manifest V3 folder chosen with the native picker, or from a copy of
+  an extension in another Chromium-family browser on this Mac that the person
+  picks in Settings, at a local window (the host copies it under
   `browser-extensions/<id>/` and journals the install), start disabled, are
   enabled per profile after the person reads what they can read and change, and
   never load into a Private page; an update that asks for more turns off
