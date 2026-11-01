@@ -253,6 +253,7 @@ import {
   checkoutNotPreparedMessage,
   codeUnavailableMessage,
   resolveDraftProject,
+  resolveWorkDraftProject,
   resolveWorkDraftChoice,
   UNRESOLVED_DRAFT_PROJECT_MESSAGE,
 } from "./shell/draftThreadResolution";
@@ -6422,12 +6423,9 @@ function LaunchedShell(
         // A Work Project on a server is not in the Project catalog. Its thread
         // is made against the binding the host derives for it, in its folder,
         // with no issue, terminal session, or extension of this host.
-        const serverWorkProject = serverCodeProjectFor(
-          serverCodeProjects.workProjects,
+        const resolution = resolveWorkDraftProject({
           draftProjectId,
-        );
-        const resolution = resolveDraftProject({
-          draftProjectId,
+          serverProjects: serverCodeProjects.workProjects,
           candidates: projectController.projects.filter(
             (
               candidate,
@@ -6442,15 +6440,15 @@ function LaunchedShell(
           setDraftError(UNRESOLVED_DRAFT_PROJECT_MESSAGE);
           return false;
         }
-        const localProject = resolution.project;
+        const serverWorkProject = resolution.kind === "server" ? resolution.project : undefined;
         const project =
-          serverWorkProject !== undefined
+          resolution.kind === "server"
             ? {
-                id: serverWorkProject.projectId,
-                bindingRevisionId: serverWorkProject.bindingRevisionId,
+                id: resolution.project.projectId,
+                bindingRevisionId: resolution.project.bindingRevisionId,
               }
-            : localProject?.type === "work"
-              ? localProject
+            : resolution.project?.type === "work"
+              ? resolution.project
               : undefined;
         if (project === undefined) {
           setDraftError("No active Work Project is available.");
