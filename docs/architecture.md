@@ -1135,13 +1135,14 @@ than the level names.
 
 SSH to the person's own machines goes through the thread's shell, in Work
 and Code alike: a thread runs `ssh`, `scp`, or `rsync` as ordinary commands.
-Octant stores no SSH key, writes no SSH config, and adds no SSH transport of
-its own; the commands use the person's own SSH agent and configuration. No
-mode bans them: in Work as in Code they are commands at the thread's level.
-At Guarded, the first connection to each host in a thread asks the person,
-naming the host, even where a remembered approval would cover the command
-otherwise (allowed; not built yet: today an `ssh` command asks at Guarded as
-every command does, without naming the host apart). Network egress for shell commands follows the level: at Guarded
+Octant stores no SSH key and carries no SSH protocol of its own; the
+commands use the person's own SSH agent and, at Full access, their own
+configuration. Below Full access a command reaches a registered server
+through relays and an agent socket the host opens for that one command
+([Octant Shield](#octant-shield), servers as built). No mode bans them: in
+Work as in Code they are commands at the thread's level. At Guarded, the
+first connection to each host in a thread asks the person, naming the host,
+even where a remembered approval would cover the command otherwise. Network egress for shell commands follows the level: at Guarded
 and Reviewed it follows the Project's egress rules, so a host those
 rules do not allow is refused; at Full access the network is open.
 
@@ -10773,14 +10774,19 @@ which keep thread and Project rules, and taint suspending places.
 - A per-server notes file (runbook) the person points to is given to the
   agent as context, never as authority.
 
-**Servers as built.** The registry is Settings › Access › Servers, one
-account list (no Project override yet): a server is its alias, user, profile,
+**Servers as built.** The registry is Settings › Access › Servers: an
+account list, and per Project an optional list of its own that replaces the
+account list for that Project's threads. A server is its alias, user, profile,
 the deploy commands the person described (Operate and Admin run them exactly
 as written), and an optional absolute runbook path. Each change is journaled
 whole, journal first, as `shield-servers.server-set@1` or
-`shield-servers.server-removed@1` on the `shield-servers` aggregate, and
-startup replays them; only a person at a local window changes them (`GET`/`POST
-/api/shield/servers`). An alias is unique without regard to case, as ssh
+`shield-servers.server-removed@1` on the `shield-servers` aggregate; a
+Project's list is journaled whole as `shield-servers.project-servers-set@1`
+under the Project's id, and `shield-servers.project-override-cleared@1`
+returns the Project to the account list. Startup replays them; only a person
+at a local window changes them (`GET`/`POST /api/shield/servers`, with
+`?projectId=` for a Project's list). The Judge, the confined path below, the
+record, and the notes all read the thread's Project's list. An alias is unique without regard to case, as ssh
 matches `Host` patterns, and a runbook inside a key or credential folder is
 refused. The rules are pure policy in `packages/domain/src/shieldServerPolicy.ts`,
 checked against the real-world command set in
@@ -10812,6 +10818,17 @@ applies them to every command that starts with `ssh`:
   any state change to SSH or network units, a power target, a recursive
   change on a system folder, removing an SSH or boot package, and `kill -1`
   are lock-out actions.
+- `scp` and `rsync` read the same way: every `[user@]host:path` operand
+  must name a registered server as its user, with options that only tune the
+  copy (`-e`, `--rsh`, `--rsync-path`, a daemon or URL operand, scp's `-3`,
+  `-A`, `-R`, `-S`, `-J`, `-F`, and non-plain `-o` go to the person; a key
+  file is refused). A download is a read; an upload is a configuration change
+  (Admin). A deleting sync (`--delete*`, `--remove-source-files`) or an
+  upload to a sign-in or boot path is a lock-out action; a secret path on the
+  server goes to the person, and a secret file on this computer is refused as
+  reading secrets then sending them out, as for any command. Every file on
+  this computer must lie inside the Project, else the person decides. An
+  rsync option the rules do not name goes to the model.
 
 Every `ssh` command an Octant Harness shell runs, at every level, is journaled
 under its thread as `shield-remote-commands.ran@1` with the host (left out
@@ -10822,18 +10839,61 @@ there. A command whose record cannot be journaled returns no output. Its
 output reaches the model as every harness command's does, through the
 Watcher. Each harness shell gets the person's SSH agent socket as
 `SSH_AUTH_SOCK` when the host process has one that is a live socket, and
-nothing that names a key. Work and Code turns on the Octant Harness carry the
-servers and their runbooks (the first 8 KB of each, read when the turn starts)
-as a notes block that says it grants nothing.
+nothing that names a key. Work and Code turns on every runtime carry the
+thread's servers and their runbooks (the first 8 KB of each, read when the
+turn starts) as a notes block that says it grants nothing; a provider
+runtime's turn gets the same block a harness turn does.
 
-Not built yet: a confined command reaching a server. Below Full access the
-harness sandbox keeps the private home (the SSH config with it) unreadable and
-opens only the egress proxy, so `ssh` connects at Full access only, where
-Shield records and does not judge. Also not built: the credential broker for
-SSH, exit status for commands a provider runtime runs itself (Shield's journaled
-decision is its record there), runbook context for provider runtimes, `scp`
-and `rsync` rules (they go to the model as before), naming a host apart at
-Guarded, and a Project override of the registry.
+**Confined commands.** Below Full access, on macOS, a harness command that
+is one plain `ssh`, `scp`, or `rsync` call to registered servers gets, for
+that command only, from the host (`apps/server/src/shield/serverSshAccess.ts`):
+
+- a loopback relay per server it names, which carries bytes to the address
+  the person's own `ssh -G <alias>` resolves and nowhere else; Seatbelt opens
+  only these ports beside the egress proxy, so the command reaches no other
+  host, and a server the person's config reaches through `ProxyJump` or
+  `ProxyCommand` gets no relay;
+- an agent socket the host owns, in a private folder, that passes the
+  person's SSH agent only the requests to list keys, sign a login, and bind a
+  session to a host key, and answers adding, removing, or locking a key with
+  a failure; the command's `SSH_AUTH_SOCK` names it;
+- an SSH config, a known-hosts file, and `ssh`, `scp`, and `rsync` wrappers
+  first on `PATH`, written into the command's own script folder, which it
+  reads and cannot write. Each server is its alias with the relay's port, the
+  registered user, the host keys the person's known-hosts files record for it
+  (read by `ssh-keygen -F` on the host), strict host key checking, and
+  forwarding, proxy commands, local commands, and connection sharing off;
+- the user-database lookup `ssh` makes for the person's own account.
+
+The secret guard's list is untouched: the key files stay unreadable, and the
+person's own config and known hosts are read only on the host. A command that
+does more than one plain call, or names no registered server, gets none of
+this and reaches no server. Rationale: Seatbelt cannot name a remote host, so
+per-server loopback relays are the narrowest network grant; an agent socket
+the host owns was chosen over the credential broker because the person's
+agent already holds the keys and never hands them out, and the filter keeps a
+command from changing what it holds. Not built: Linux, whose Bubblewrap
+capsule would need its forwarder to carry the relays; a provider runtime's
+own commands, which run in its own sandbox or the provider launch profile and
+keep today's reach.
+
+**Guarded.** The first connection to each host in a thread asks the person,
+naming the host ("First connection to web1 in this thread"), and is never
+covered by a remembered approval; once allowed, later commands to that host
+follow the level as any command does. The hosts are held in host memory, so a
+restart asks again. At Auto, Shield's rules decide first, as above.
+
+**Provider runtimes' own commands.** A runtime's shell commands that reach a
+server are recorded as `shield-remote-commands.ran@1` when the runtime names
+the command: Codex names every command and reports its exit status, and
+Claude Code names a command only when it is a plain `ssh`, `scp`, or `rsync`
+call, without an exit status. A Codex command's output from a server passes
+the Watcher as `remote-command` outside content. A runtime that names no
+command (OpenCode, ACP agents, Pi) keeps Shield's journaled decision as its
+record. A failure with no exit status is recorded as `unavailable`, since it
+may not have run.
+
+Not built yet: the credential broker for SSH.
 
 **Model and privacy.** By default Shield uses the thread's own provider
 account with that provider's smallest model, so no new party sees the work.

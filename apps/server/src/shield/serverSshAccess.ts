@@ -161,7 +161,7 @@ export async function openServerSshAccess(
 
 /** A path the config and the wrappers can carry inside quotes. */
 function quotable(path: string): boolean {
-  return !/["'\\$`\n\r\0]/.test(path);
+  return !/["'\\$`\n\r]/.test(path) && !path.includes("\u0000");
 }
 
 function configEntry(

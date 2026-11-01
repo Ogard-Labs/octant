@@ -249,9 +249,12 @@ The person registers their own servers with an action profile, and SSH to a regi
 - Keys stay out of the agent: the SSH session gets the person's SSH agent or the credential broker, and Shield refuses reads of key paths.
 - SSH to an unregistered host goes to the person; destructive or lock-out actions go to the person at every level below Full access.
 - Every remote command and its exit status is journaled with the host, remote output passes through the Watcher, and a per-server runbook is context, never authority.
-- Today an agent reaches the person's machines with `ssh` through its shell under the thread's level; no Octant transport or stored key is added.
+- An agent reaches the person's machines with `ssh`, `scp`, or `rsync` through its shell under the thread's level; Octant stores no key and carries no SSH protocol of its own. Below Full access a confined command reaches only the registered servers it names, through per-command loopback relays and an agent socket the host owns that only lists keys and signs.
+- `scp` and `rsync` are judged by the same profiles: a download reads, an upload is Admin, and a deleting sync is a lock-out action.
+- At Guarded the first connection to each host in a thread asks, naming the host, and is never covered by a remembered approval.
+- A Project may hold its own server list, which replaces the account list for its threads.
 
-Status: Designed, not built. Since: 2026-10-31. Detail: [Architecture: Octant Shield](../architecture.md#octant-shield) and [Modes](../architecture.md#modes-chat-work-and-code).
+Status: Built on macOS for the Octant Harness's commands; provider runtimes' own commands are recorded where the runtime names them (Codex with exit status). Linux confined access and the credential broker for SSH are not built. Since: 2026-10-31. Detail: [Architecture: Octant Shield](../architecture.md#octant-shield) and [Modes](../architecture.md#modes-chat-work-and-code).
 
 ## Key providers
 

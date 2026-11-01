@@ -309,7 +309,7 @@ export type FileCopyInvocation =
 const SCP_PLAIN_FLAGS = new Set(["4", "6", "B", "C", "O", "p", "q", "r", "s", "T", "v"]);
 const SCP_VALUE_FLAGS = new Set(["c", "D", "F", "i", "J", "l", "o", "P", "S", "X"]);
 /** rsync short options that only shape the copy. `-e` and `-f` take a value and are read apart. */
-const RSYNC_PLAIN_FLAGS = new Set([..."avzrlptgoDhPnucHqixSIWmOJ"]);
+const RSYNC_PLAIN_FLAGS = new Set("avzrlptgoDhPnucHqixSIWmOJ");
 const RSYNC_PLAIN_LONG = new Set([
   "archive",
   "verbose",
