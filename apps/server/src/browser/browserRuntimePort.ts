@@ -145,11 +145,12 @@ export interface BrowserProfileStorePort {
 export type BrowserRuntimeAction = Pick<BrowserActionRequest, "kind"> &
   Partial<Pick<BrowserActionRequest, "target" | "value" | "point" | "deltaX" | "deltaY">> & {
     /**
-     * Set when `target` came from a snapshot ref: the element there must still
-     * have this role and name, or the runtime refuses with
+     * Set when `target` came from a snapshot ref: the page must still be at the
+     * snapshot's address (as an observation reports it) and the element there
+     * must still have this role and name, or the runtime refuses with
      * `BrowserTargetStaleError` before touching it.
      */
-    readonly expected?: { readonly role: string; readonly name: string };
+    readonly expected?: { readonly role: string; readonly name: string; readonly url: string };
   };
 
 export interface BrowserRuntimePort {

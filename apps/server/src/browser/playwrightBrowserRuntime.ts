@@ -395,7 +395,11 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
         mode: "verify",
         selector: request.target,
       });
-      if (found.mode !== "verify" || !browserRefStillMatches(request.expected, found.element)) {
+      const pageUrl = page.url() === "about:blank" ? "about:blank" : bounded(page.url(), 4096);
+      if (
+        found.mode !== "verify" ||
+        !browserRefStillMatches(request.expected, found.element, pageUrl)
+      ) {
         throw new BrowserTargetStaleError();
       }
     }

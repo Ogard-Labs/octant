@@ -37,7 +37,8 @@ handoff, and fuller diagnostics are allowed; not built yet.
   host's credential test matches) reads `protected` and never carries a value.
   On a page that holds a credential field anywhere (a frame and a shadow root
   included), no field shows a value at all. An editable element is never named
-  by its own text, which is what was typed into it.
+  by its own text, which is what was typed into it, and a label's text leaves
+  out the fields inside it.
 - A snapshot carries no picture and no page text beyond the outline. It reads
   the top document: an iframe is listed as `iframe "not included"`, and shadow
   roots are not listed.
@@ -52,9 +53,10 @@ handoff, and fuller diagnostics are allowed; not built yet.
 - **A stale ref is refused.** A ref the latest snapshot did not list is refused as
   `stale` before any runtime is called. A new snapshot replaces every earlier
   ref, and a navigation, or any action that leaves the page the snapshot read,
-  drops them. Before acting, the runtime checks that the element behind the
-  ref still has the role and name the snapshot recorded; one that does not is
-  refused as `stale` and the action does not run.
+  drops them. Before acting, the runtime checks that the page is still at the
+  address the snapshot read and that the element behind the ref still has the
+  role and name the snapshot recorded; a page that moved on by itself, or an
+  element that changed, is refused as `stale` and the action does not run.
 - The same snapshot is built on the desktop Browser and the headless Browser:
   one page reader runs inside the page in both, so a ref means the same thing
   on either.
