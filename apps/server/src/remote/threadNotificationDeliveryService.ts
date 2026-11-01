@@ -79,7 +79,12 @@ const Id = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64));
 const ChatAttemptUpdated = Schema.Struct({
   attempt: Schema.Struct({ id: Id, threadId: Id, outcome: Schema.String }),
 });
-const WorkTurnUpdated = Schema.Struct({ threadId: Id, turnId: Id, status: Schema.String });
+const WorkTurnUpdated = Schema.Struct({
+  threadId: Id,
+  turnId: Id,
+  status: Schema.String,
+  carried: Schema.optional(Schema.Literal(true)),
+});
 const WorkRequestRecorded = Schema.Struct({
   kind: Schema.String,
   request: Schema.Struct({
@@ -142,7 +147,8 @@ function threadNotificationFactOf(event: CommittedFact): ThreadNotificationFact 
     }
     case "work.turn-updated@1": {
       const turn = read(WorkTurnUpdated, event.payload);
-      if (turn === undefined) return undefined;
+      // A fork's copy of a source turn finished nowhere; nobody is owed a push.
+      if (turn === undefined || turn.carried === true) return undefined;
       return fact(turn.threadId, lifecycleKind(turn.status), turn.turnId);
     }
     case "work.request-recorded@1": {

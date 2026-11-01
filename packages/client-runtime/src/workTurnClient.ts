@@ -1,6 +1,9 @@
 import {
   MAX_WORK_ATTACHMENT_BYTES,
   decodeCancelWorkTurnCommand,
+  decodeRewindWorkThreadCommand,
+  type RewindWorkThreadCommand,
+  WorkThreadRewindResult,
   decodeWorkAttachmentId,
   decodeWorkAttachmentMediaType,
   decodeWorkThreadId,
@@ -34,6 +37,11 @@ export interface WorkTurnClient {
   startFirstTurn(command: StartWorkThreadTurnCommand): Promise<WorkTurnLookupResult>;
   lookupFirstTurn(requestId: WorkTurnRequestId): Promise<WorkTurnLookupResult>;
   cancelFirstTurn(command: CancelWorkTurnCommand): Promise<WorkTurnCancelResult>;
+  /**
+   * Rewind the thread in place to just before one of its turns. Optional so a
+   * client built without it simply offers no rewind.
+   */
+  rewindThread?(command: RewindWorkThreadCommand): Promise<WorkThreadRewindResult>;
   transcript(threadId: WorkThreadId, signal?: AbortSignal): Promise<WorkThreadTranscript>;
   /**
    * One page of the thread: the newest turns, or those just before `before`.
@@ -124,6 +132,22 @@ export function createWorkTurnClient(options: WorkTurnClientOptions): WorkTurnCl
         validated,
         decodeHostAnswer(WorkTurnCancelResult),
         "Work turn cancel failed.",
+      );
+    },
+    async rewindThread(command) {
+      let validated: RewindWorkThreadCommand;
+      try {
+        validated = decodeRewindWorkThreadCommand(command);
+      } catch {
+        throw new WorkTurnClientFailure("Work rewind command is invalid.", 0);
+      }
+      return postJson(
+        fetch,
+        options,
+        "/api/work/turns/rewind",
+        validated,
+        decodeHostAnswer(WorkThreadRewindResult),
+        "Work rewind failed.",
       );
     },
     async transcript(threadId, signal) {

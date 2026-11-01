@@ -1,6 +1,15 @@
 import { CodeProjection, readCodeRuntimeWorkAggregateVersion } from "../persistence/codeProjection";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -294,6 +303,122 @@ describe("Code execution lifecycle", () => {
   });
 });
 
+describe("Rewinding a Code thread on a real checkout", () => {
+  it("previews, puts files back from the turn's own checkpoint, removes the turns, and leaves Undo restore", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-code-rewind-"));
+    directories.push(directory);
+    const requestedCheckoutRoot = join(directory, "checkout");
+    execFileSync("git", ["init", "--initial-branch=feature/lifecycle", requestedCheckoutRoot]);
+    const checkoutRoot = realpathSync(requestedCheckoutRoot);
+    execFileSync("git", ["-C", checkoutRoot, "config", "user.name", "Octant Test"]);
+    execFileSync("git", ["-C", checkoutRoot, "config", "user.email", "test@octant.local"]);
+    writeFileSync(join(checkoutRoot, "README.md"), "initial\n");
+    execFileSync("git", ["-C", checkoutRoot, "add", "README.md"]);
+    execFileSync("git", ["-C", checkoutRoot, "commit", "-m", "initial"]);
+    const headOid = execFileSync("git", ["-C", checkoutRoot, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim();
+    const journal = openJournal(join(directory, "events.sqlite3"));
+    const fixture = makeRuntime(journal, checkoutRoot, headOid);
+    // No provider runs here: each send journals its turn and the checkpoint
+    // the host captured first, then fails, which is all a rewind reads.
+    const send = (id: number, text: string) =>
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(id),
+        threadId,
+        checkoutId,
+        sessionId: `91000000-0000-4000-8000-${(id + 500).toString().padStart(12, "0")}`,
+        prompt: fixture.prompt(text),
+      });
+    const turnIds = async () =>
+      (await fixture.runtime.conversation(windowId, threadId, 0, 50)).turns.map((turn) =>
+        String(turn.operationId),
+      );
+    try {
+      await send(30, "First change.");
+      writeFileSync(join(checkoutRoot, "README.md"), "after the first turn\n");
+      await send(31, "Second change.");
+      writeFileSync(join(checkoutRoot, "README.md"), "after the second turn\n");
+      writeFileSync(join(checkoutRoot, "notes.md"), "a new file\n");
+      expect(await turnIds()).toEqual([String(operationId(30)), String(operationId(31))]);
+
+      const preview = await fixture.runtime.execute(windowId, {
+        kind: "preview-code-rewind",
+        operationId: operationId(32),
+        threadId,
+        checkoutId,
+        fromOperationId: operationId(31),
+      });
+      expect(preview).toMatchObject({
+        kind: "rewind-preview",
+        removedTurns: 1,
+        files: { kind: "changes", changes: { total: 2 } },
+      });
+      // Previewing changes nothing.
+      expect(readFileSync(join(checkoutRoot, "README.md"), "utf8")).toBe("after the second turn\n");
+
+      const rewound = await fixture.runtime.execute(windowId, {
+        kind: "rewind-code-thread",
+        operationId: operationId(33),
+        threadId,
+        checkoutId,
+        fromOperationId: operationId(31),
+        scope: "both",
+        filesOperationId: operationId(34),
+        gitOperationId: operationId(134),
+      });
+      expect(rewound).toMatchObject({
+        kind: "thread-rewound",
+        removedTurns: 1,
+        files: "restored",
+      });
+      expect(readFileSync(join(checkoutRoot, "README.md"), "utf8")).toBe("after the first turn\n");
+      expect(existsSync(join(checkoutRoot, "notes.md"))).toBe(false);
+      expect(await turnIds()).toEqual([String(operationId(30))]);
+      const page = await fixture.runtime.conversation(windowId, threadId, 0, 50);
+      expect(page.restoreUndo).toBeDefined();
+
+      // The way back is an ordinary restore of what the rewind replaced.
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "restore-git-checkpoint",
+          operationId: operationId(35),
+          threadId,
+          checkoutId,
+          gitOperationId: operationId(135),
+          checkpoint: page.restoreUndo!,
+        }),
+      ).toMatchObject({ kind: "git-mutation-state", state: "completed" });
+      expect(readFileSync(join(checkoutRoot, "README.md"), "utf8")).toBe("after the second turn\n");
+      expect(readFileSync(join(checkoutRoot, "notes.md"), "utf8")).toBe("a new file\n");
+
+      // A conversation-only rewind leaves the files exactly as they are.
+      expect(
+        await fixture.runtime.execute(windowId, {
+          kind: "rewind-code-thread",
+          operationId: operationId(36),
+          threadId,
+          checkoutId,
+          fromOperationId: operationId(30),
+          scope: "conversation",
+          filesOperationId: operationId(37),
+          gitOperationId: operationId(137),
+        }),
+      ).toMatchObject({ kind: "thread-rewound", removedTurns: 1, files: "not-requested" });
+      expect(await turnIds()).toEqual([]);
+      expect(readFileSync(join(checkoutRoot, "README.md"), "utf8")).toBe("after the second turn\n");
+
+      // A turn sent after a rewind is the thread's own again.
+      await send(38, "A new direction.");
+      expect(await turnIds()).toEqual([String(operationId(38))]);
+    } finally {
+      await fixture.runtime.close();
+      journal.connection.close();
+    }
+  });
+});
+
 function openJournal(path: string) {
   const connection = openSqlite(path);
   applyMigrations(connection, MIGRATIONS, () => now);
@@ -437,6 +562,7 @@ function makeRuntime(
             networkEgress: "allow",
           });
           return {
+            readTreeChanges: port.readTreeChanges.bind(port),
             observe: async (root: string, signal?: AbortSignal) => {
               const observation = await port.observe(root, signal);
               return observation.status === "ready"
@@ -461,7 +587,20 @@ function makeRuntime(
       };
     })(),
   });
-  return { runtime, ensurePullRequest };
+  return {
+    runtime,
+    ensurePullRequest,
+    prompt: (text: string) => {
+      const id = ++evidenceId;
+      const reference = decodeCodeEvidenceReference({
+        contentId: `91000000-0000-4000-8000-${id.toString().padStart(12, "0")}`,
+        digest: createHash("sha256").update(text).digest("hex"),
+        byteLength: Buffer.byteLength(text),
+      });
+      evidence.set(reference.contentId, text);
+      return reference;
+    },
+  };
 }
 
 function observeCommand(id: number) {

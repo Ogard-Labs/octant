@@ -69,6 +69,9 @@ const initialCapabilities: ProviderCapabilities = {
   // Tools follow a person's per-model Verify tools result, as on every other
   // direct endpoint: one model's tool call proves only that model.
   sessionCompaction: { chat: "unsupported", work: "unsupported", code: "supported" },
+  // A rewound Code thread continues a copy of its own transcript cut back at
+  // the last kept turn, so the removed turns never reach the model.
+  sessionRollback: "supported",
   ...unsupportedChatCapabilities,
 };
 

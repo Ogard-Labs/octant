@@ -460,6 +460,27 @@ describe("CodeOperationRuntime", () => {
       },
     });
 
+    const rewind = await fixture.runtime.prepareApproval(windowId, {
+      effect: {
+        kind: "operation",
+        command: {
+          kind: "rewind-code-thread",
+          threadId,
+          checkoutId,
+          operationId: operationId(9),
+          fromOperationId: operationId(10),
+          scope: "both",
+          filesOperationId: operationId(11),
+          gitOperationId: operationId(12) as never,
+        },
+      },
+    });
+
+    // A rewind that puts files back can be approved like the restore it runs.
+    expect(rewind?.message).toBe("Rewind this thread and put the files back?");
+    expect(rewind?.detail).toContain(
+      "Uncommitted work not saved in that checkpoint is overwritten",
+    );
     expect(discard?.message).toBe("Discard uncommitted changes?");
     expect(unstage?.message).toBe("Allow Code unstage operation?");
     expect(unstage?.detail).toContain("src/main.ts");
@@ -1477,6 +1498,68 @@ describe("CodeOperationRuntime", () => {
       );
       await vi.waitFor(() => expect(connection.answerTool).toHaveBeenCalledOnce());
       expect(execute).toHaveBeenCalledOnce();
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("rewinds a server Project's conversation only, saying why its files cannot come back", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      holdsServerThread: () => true,
+      serverCodeTurn: () => ({
+        status: "bound",
+        tools: { definitions: [], execute: vi.fn(async () => ({ result: {} })) },
+      }),
+    });
+    try {
+      fixture.bindCheckoutToRemoteFolder();
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1470),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(1));
+      await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+      await vi.waitFor(() => expect(connection.stop).toHaveBeenCalledOnce());
+      const rewind = (scope: "conversation" | "both", id: number) =>
+        fixture.runtime.execute(windowId, {
+          kind: "rewind-code-thread",
+          operationId: operationId(id),
+          threadId,
+          checkoutId,
+          fromOperationId: operationId(1470),
+          scope,
+          filesOperationId: operationId(id + 1),
+          gitOperationId: operationId(id + 2),
+        });
+
+      const preview = await fixture.runtime.execute(windowId, {
+        kind: "preview-code-rewind",
+        operationId: operationId(1471),
+        threadId,
+        checkoutId,
+        fromOperationId: operationId(1470),
+      });
+      expect(preview).toMatchObject({
+        kind: "rewind-preview",
+        files: { kind: "unavailable", reason: "server-project" },
+      });
+      expect(await rewind("both", 1472)).toMatchObject({
+        kind: "operation-failed",
+        failure: { message: expect.stringContaining("takes no checkpoints") },
+      });
+      expect(fixture.conversation().turns).toHaveLength(1);
+      expect(await rewind("conversation", 1476)).toMatchObject({
+        kind: "thread-rewound",
+        removedTurns: 1,
+      });
+      expect(fixture.conversation().turns).toHaveLength(0);
     } finally {
       fixture.close();
     }
@@ -5784,6 +5867,167 @@ describe("provider switch handoff", () => {
     },
   );
 
+  /** A second finished turn after `finishFirstTurn`, on the same provider. */
+  async function finishSecondTurn(
+    fixture: ReturnType<typeof runtimeFixture>,
+    drivers: ReturnType<typeof twoHarnesses>,
+    instanceId: CodeThread["providerInstanceId"],
+  ) {
+    await sendAfterSwitch(fixture);
+    const connection = drivers.connection(instanceId);
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(2));
+    await drivers.offer(
+      instanceId,
+      eventOn(instanceId, { kind: "text-delta", text: "Second reply." }),
+    );
+    await drivers.offer(instanceId, eventOn(instanceId, { kind: "completed" }));
+    await vi.waitFor(() => expect(connection.stop).toHaveBeenCalledTimes(2));
+  }
+
+  function rewindFrom(from: number, scope: "conversation" | "files" | "both" = "conversation") {
+    return {
+      kind: "rewind-code-thread" as const,
+      operationId: operationId(90),
+      threadId,
+      checkoutId,
+      fromOperationId: operationId(from),
+      scope,
+      filesOperationId: operationId(91),
+      gitOperationId: operationId(92),
+    };
+  }
+
+  async function sendAfterRewind(fixture: ReturnType<typeof runtimeFixture>) {
+    const prompt = storedEvidence(88, "Try it another way.");
+    fixture.evidenceValues.set(prompt.contentId, "Try it another way.");
+    return fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operationId(87),
+      threadId,
+      checkoutId,
+      sessionId: decodeProviderSessionId("90000000-0000-4000-8000-000000000089"),
+      prompt,
+    });
+  }
+
+  it("rewinds the conversation in place, returns the removed prompt, and hands only the kept turns to a fresh session", async () => {
+    const drivers = twoHarnesses();
+    const fixture = runtimeFixture({ resolveProviderDriver: drivers.resolveProviderDriver });
+    fixture.setThread(onProvider(providerInstance, "model-a"));
+    try {
+      await finishFirstTurn(fixture, drivers, providerInstance);
+      await finishSecondTurn(fixture, drivers, providerInstance);
+      const secondPrompt = fixture.conversation().turns[1]?.prompt;
+
+      const rewound = await fixture.runtime.execute(windowId, rewindFrom(85));
+      expect(rewound).toMatchObject({
+        kind: "thread-rewound",
+        removedTurns: 1,
+        files: "not-requested",
+        prompt: secondPrompt,
+      });
+      expect(fixture.conversation().turns.map((turn) => turn.operationId)).toEqual([
+        operationId(84),
+      ]);
+
+      await sendAfterRewind(fixture);
+      const connection = drivers.connection(providerInstance);
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(3));
+      // The provider has no rollback of its own: the session that still holds
+      // the removed turn is never resumed, and a new one starts from text.
+      expect(connection.resume).toHaveBeenCalledTimes(1);
+      expect(connection.start).toHaveBeenCalledTimes(2);
+      const context = vi.mocked(connection.send).mock.calls[2]![0].context ?? [];
+      const texts = context.map((block) => block.text).join("\n");
+      expect(texts).toContain("the person rewound the thread");
+      expect(texts).toContain("Implement this.");
+      expect(texts).toContain("First reply.");
+      expect(texts).not.toContain("Second reply.");
+      expect(texts).not.toContain("Carry on.");
+
+      const frames = await fixture.runtime.subscribe(windowId, threadId, operationId(87), 0, 50);
+      expect(
+        frames.find((frame) => frame.event.kind === "context-handoff-attached")?.event,
+      ).toMatchObject({ reason: "rewind", previousSessionId: sessionId, messages: 2 });
+      const page = fixture.conversation();
+      expect(page.turns.map((turn) => turn.operationId)).toEqual([
+        operationId(84),
+        operationId(87),
+      ]);
+      expect(page.turns[1]?.handoff).toMatchObject({ reason: "rewind" });
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
+  it("continues a harness session cut back at the last kept turn after a rewind", async () => {
+    const drivers = twoHarnesses();
+    const forkProviderSession = vi.fn(async () => ({
+      driverKind: "openai-compatible" as const,
+      value: "transcript-cut-back",
+    }));
+    const fixture = runtimeFixture({
+      resolveProviderDriver: drivers.resolveProviderDriver,
+      forkProviderSession,
+    });
+    fixture.setThread(onProvider(harnessInstance, "harness-model"));
+    try {
+      await finishFirstTurn(fixture, drivers, harnessInstance);
+      await finishSecondTurn(fixture, drivers, harnessInstance);
+      await fixture.runtime.execute(windowId, rewindFrom(85));
+
+      await sendAfterRewind(fixture);
+      await vi.waitFor(() => expect(drivers.harness.send).toHaveBeenCalledTimes(3));
+      expect(forkProviderSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          origin: { threadId, throughOperationId: operationId(84) },
+        }),
+      );
+      expect(drivers.harness.resume).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          resumeCursor: { driverKind: "openai-compatible", value: "transcript-cut-back" },
+        }),
+      );
+      // A copy of the session carries the kept turn itself, so no text goes.
+      const context = vi.mocked(drivers.harness.send).mock.calls[2]![0].context ?? [];
+      expect(context.map((block) => block.text).join("\n")).not.toContain("rewound the thread");
+      const frames = await fixture.runtime.subscribe(windowId, threadId, operationId(87), 0, 50);
+      expect(
+        frames.find((frame) => frame.event.kind === "context-handoff-attached")?.event,
+      ).toMatchObject({
+        reason: "rewind-native-session",
+        throughOperationId: operationId(84),
+        nativeSessionTransferred: true,
+      });
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
+  it("refuses to rewind while a turn of the thread runs, and keeps every turn", async () => {
+    const drivers = twoHarnesses();
+    const fixture = runtimeFixture({ resolveProviderDriver: drivers.resolveProviderDriver });
+    fixture.setThread(onProvider(providerInstance, "model-a"));
+    try {
+      await finishFirstTurn(fixture, drivers, providerInstance);
+      await sendAfterSwitch(fixture);
+      await vi.waitFor(() =>
+        expect(drivers.connection(providerInstance).send).toHaveBeenCalledTimes(2),
+      );
+
+      expect(await fixture.runtime.execute(windowId, rewindFrom(84))).toMatchObject({
+        kind: "operation-failed",
+        failure: { category: "conflict", message: expect.stringContaining("A turn is running") },
+      });
+      expect(fixture.conversation().turns).toHaveLength(2);
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it("discloses a purged reply as left out rather than handing over a shorter history", async () => {
     const drivers = twoHarnesses();
     const fixture = runtimeFixture({ resolveProviderDriver: drivers.resolveProviderDriver });
@@ -7184,10 +7428,11 @@ function runtimeFixture(options: {
     readonly thread: CodeThread;
     readonly excludeOperationId: CodeOperationId;
     readonly inheritedFrom?: { readonly source: CodeThread; readonly throughOperationId: string };
+    readonly purpose?: "provider-switch" | "rewind";
   }) =>
     admittedParentCodeContext({
       threadId: input.thread.id,
-      purpose: "provider-switch",
+      purpose: input.purpose ?? "provider-switch",
       excludeOperationId: String(input.excludeOperationId),
       externalContentIngested: options.externalContentIngested ?? false,
       ...(input.inheritedFrom === undefined

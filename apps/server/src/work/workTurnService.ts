@@ -15,6 +15,7 @@ import type { AgentRunParentContextSelection } from "../agentRun/agentRunParentC
 import {
   conversationHandoffRefusalMessage,
   providerSwitchHandoffRecord,
+  restartHandoffRecord,
   selectionBelongsToThread,
   type ConversationHandoffRefusal,
 } from "../agentRun/conversationHandoff";
@@ -38,6 +39,11 @@ import {
   decodeWorkTurnRequestId,
   decodeWorkTurnState,
   decodeStartWorkThreadTurnCommand,
+  decodeRewindWorkThreadCommand,
+  MAX_WORK_REWOUND_TURNS,
+  decodeWorkThreadRewindResult,
+  type WorkThreadRewindResult,
+  type WorkTurnHandoff,
   type ContextCompactionSettledRecord,
   type ContextInspectorSnapshot,
   type MentionableThreadId,
@@ -177,6 +183,8 @@ function statusUpkeepInstruction(reasons: ReadonlyArray<WorkResumeBriefReason>):
 export const WORK_TRANSCRIPT_WINDOW_BYTES = 2 * 1024 * 1024;
 
 /** Why the host refuses a turn on a Work thread a person marked Done. */
+const WORK_REWIND_WHILE_TURN_RUNS =
+  "A turn is running in this thread. Wait for it to finish or stop it, then rewind.";
 export const WORK_THREAD_MARKED_DONE_TURN_REFUSAL =
   "This task is marked Done. Archive and reactivate it before sending more.";
 
@@ -299,7 +307,11 @@ export interface WorkTurnServiceDependencies {
    * a provider keeping its history in a session of its own. Absent on a host
    * that cannot hand a conversation over, which then refuses such a switch.
    */
-  readonly selectConversationHandoff?: (thread: WorkThread) => AgentRunParentContextSelection;
+  readonly selectConversationHandoff?: (
+    thread: WorkThread,
+    /** Why the turn starts a new session; the receiving model is told which. */
+    purpose: "provider-switch" | "rewind" | "fork",
+  ) => AgentRunParentContextSelection;
   /**
    * Whether the selected provider and model honestly accept images. The host
    * refuses a turn that names attachments when this is false, rather than
@@ -586,21 +598,25 @@ export class WorkTurnService {
   #selectConversationHandoff(
     thread: WorkThread,
     previous: WorkTurnState,
+    reason: "provider-switch" | "branch" | "rewind",
   ): {
     readonly blocks: ReadonlyArray<ProviderContextBlock>;
-    readonly record: ProviderSwitchConversationHandoff;
+    readonly record: WorkTurnHandoff;
   } {
-    const refuse = (reason: ConversationHandoffRefusal): never => {
+    const refuse = (refusal: ConversationHandoffRefusal): never => {
       throw this.#failure(
         "unavailable",
-        conversationHandoffRefusalMessage(reason, { thread: "Work task", cause: "switch" }),
+        conversationHandoffRefusalMessage(refusal, {
+          thread: "Work task",
+          cause: reason === "branch" ? "branch" : "switch",
+        }),
       );
     };
     const select = this.#selectConversationHandoffContext;
     if (select === undefined) return refuse("unsupported");
     let selection: AgentRunParentContextSelection;
     try {
-      selection = select(thread);
+      selection = select(thread, reason === "branch" ? "fork" : reason);
     } catch {
       return refuse("source-unavailable");
     }
@@ -611,13 +627,18 @@ export class WorkTurnService {
       projectId: String(thread.projectId),
     });
     if (owned !== "ok") return refuse(owned);
+    if (reason !== "provider-switch")
+      return {
+        blocks: selection.blocks,
+        record: restartHandoffRecord(selection, reason === "branch" ? "fork" : "rewind"),
+      };
     return {
       blocks: selection.blocks,
       record: providerSwitchHandoffRecord(
         selection,
         // A handoff that never completed is made again from the provider the
         // conversation came from, not the one that may not have received it.
-        previous.handoff !== undefined && previous.status !== "completed"
+        previous.handoff?.reason === "provider-switch" && previous.status !== "completed"
           ? {
               providerInstanceId: previous.handoff.previousProviderInstanceId,
               modelId: previous.handoff.previousModelId,
@@ -999,6 +1020,7 @@ export class WorkTurnService {
                     this.#supportsModelSwitch?.(command.authority.providerInstanceId) === true) &&
                 previous.authority.bindingRevisionId === command.authority.bindingRevisionId &&
                 previous.authority.workingDirectory === command.authority.workingDirectory,
+              ...(this.#projection.rewoundSinceLatest(command.threadId) ? { rewound: true } : {}),
               // A same-provider model swap the provider cannot carry on starts
               // a fresh session with a handoff instead of refusing the turn.
               ...(previous.authority.modelId !== command.authority.modelId &&
@@ -1009,7 +1031,10 @@ export class WorkTurnService {
               // the provider is sent anything, so a turn that carried a
               // handoff and did not complete may never have delivered it.
               ...(previous.handoff !== undefined && previous.status !== "completed"
-                ? { undeliveredHandoff: previous.handoff.reason }
+                ? {
+                    undeliveredHandoff:
+                      previous.handoff.reason === "fork" ? "branch" : previous.handoff.reason,
+                  }
                 : // A restart that cut the turn off before its session recorded a
                   // cursor left no session of the provider's to resume, so the
                   // conversation goes to a fresh one as text.
@@ -1019,6 +1044,9 @@ export class WorkTurnService {
                   : {}),
             },
           }),
+      // A fork whose turns are all carried copies has no session of its own:
+      // those turns ran in the source.
+      ...(previous?.carriedFrom !== undefined ? { branchWithoutSession: true } : {}),
       handoff: "allowed",
     });
     if (sessionDecision.kind === "refuse") {
@@ -1043,7 +1071,7 @@ export class WorkTurnService {
       sessionDecision.kind === "new-session-with-handoff" &&
       previous !== undefined &&
       thread !== undefined
-        ? this.#selectConversationHandoff(thread, previous)
+        ? this.#selectConversationHandoff(thread, previous, sessionDecision.reason)
         : undefined;
     const harnessContext =
       thread === undefined
@@ -1289,6 +1317,90 @@ export class WorkTurnService {
     });
     this.#inflight.set(String(command.requestId), launch);
     return decodeWorkTurnLookupResult({ kind: "accepted", turn: this.#withLive(accepted) });
+  }
+
+  /**
+   * Rewind the thread in place to just before one of its turns. Work takes no
+   * file checkpoints, so only the conversation goes back; files stay as they
+   * are. The removal is journaled before anything else, so the transcript, a
+   * replay after a restart, and every later turn read the same kept turns,
+   * and the next turn never takes up the session that held the removed ones.
+   * The first removed turn's prompt comes back for the composer.
+   */
+  async rewindThread(
+    authenticatedWindowId: WindowId,
+    input: unknown,
+  ): Promise<WorkThreadRewindResult> {
+    this.#assertReady();
+    const command = decodeRewindWorkThreadCommand(input);
+    const thread = await this.#threads.read(authenticatedWindowId, command.threadId);
+    if (thread === undefined) {
+      throw this.#failure("unauthorized", "Work thread is unavailable for this window.");
+    }
+    const journaled = this.#projection.rewind(String(command.rewindId));
+    if (journaled !== undefined) return this.#rewindResult(command, journaled.removedRequestIds);
+    if (this.#startingTurns.has(String(command.threadId)) || this.isTurnActive(command.threadId)) {
+      throw this.#failure("stale", WORK_REWIND_WHILE_TURN_RUNS);
+    }
+    const turns = this.#projection.listForThread(command.threadId);
+    const from = turns.findIndex(
+      (turn) => String(turn.requestId) === String(command.fromRequestId),
+    );
+    if (from === -1) {
+      throw this.#failure(
+        "invalid",
+        "That message is no longer part of this thread's conversation.",
+      );
+    }
+    const removed = turns.slice(from).map((turn) => turn.requestId);
+    const [first, ...rest] = removed;
+    if (first === undefined) {
+      throw this.#failure(
+        "invalid",
+        "That message is no longer part of this thread's conversation.",
+      );
+    }
+    if (removed.length > MAX_WORK_REWOUND_TURNS) {
+      throw this.#failure(
+        "invalid",
+        "Rewinding this far removes more turns than one rewind can. Rewind to a later message.",
+      );
+    }
+    try {
+      this.#append(command.rewindId, 0, "work.thread-rewound@1", {
+        kind: "thread-rewound",
+        rewindId: command.rewindId,
+        threadId: command.threadId,
+        fromRequestId: command.fromRequestId,
+        removedRequestIds: [first, ...rest],
+        rewoundAt: decodeTimestamp(this.#clock()),
+      });
+    } catch (error) {
+      const retried = this.#projection.rewind(String(command.rewindId));
+      if (error instanceof ConcurrencyConflict && retried !== undefined)
+        return this.#rewindResult(command, retried.removedRequestIds);
+      throw this.#mapFailure(error);
+    }
+    // Other panes and clients on this thread hold the removed turns until
+    // they read the transcript again.
+    this.#liveUpdates.invalidate(command.threadId);
+    return this.#rewindResult(command, removed);
+  }
+
+  #rewindResult(
+    command: ReturnType<typeof decodeRewindWorkThreadCommand>,
+    removed: ReadonlyArray<WorkTurnRequestId>,
+  ): WorkThreadRewindResult {
+    const prompt = this.#projection.lookup(command.fromRequestId)?.prompt;
+    if (prompt === undefined)
+      throw this.#failure("unavailable", "The rewound turn could not be read.");
+    return decodeWorkThreadRewindResult({
+      kind: "thread-rewound",
+      threadId: command.threadId,
+      fromRequestId: command.fromRequestId,
+      removedTurns: removed.length,
+      prompt,
+    });
   }
 
   async lookupFirstTurn(
@@ -2403,7 +2515,7 @@ export class WorkTurnService {
   #append(
     requestId: WorkTurnRequestId,
     expectedVersion: number,
-    eventName: "work.turn-accepted@1" | "work.turn-updated@1",
+    eventName: "work.turn-accepted@1" | "work.turn-updated@1" | "work.thread-rewound@1",
     payload: unknown,
     // A person's turn is theirs; a turn the host starts on its own (a routine,
     // a usage-limit resume) is the system's, so the journal tells them apart.

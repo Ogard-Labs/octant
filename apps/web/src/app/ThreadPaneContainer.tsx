@@ -679,11 +679,16 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 onCreateWorkThread={(projectId, draft, images, modelOptionValues) =>
                   handleCreateWorkThread(projectId, draft, images, undefined, modelOptionValues)
                 }
-                onOpenWorkThread={(threadId, projectId) => {
+                onOpenWorkThread={(threadId, projectId, title) => {
                   const thread = workNavigation.navigation.find(
                     (candidate) => candidate.threadId === String(threadId),
                   );
-                  void openWorkThread(threadId, thread?.title ?? "Task", undefined, projectId);
+                  void openWorkThread(
+                    threadId,
+                    title ?? thread?.title ?? "Task",
+                    undefined,
+                    projectId,
+                  );
                 }}
                 onArchiveProject={(projectId) => void setProjectArchived(projectId, true)}
                 onOpenCodeThread={(threadId, title, projectId) =>

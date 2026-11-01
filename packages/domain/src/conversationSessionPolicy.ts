@@ -45,7 +45,14 @@ export interface ConversationSessionInput {
      * handoff, and the person was shown none, so the session is not taken up
      * again: the conversation is handed over again in a fresh one.
      */
-    readonly undeliveredHandoff?: "provider-switch" | "branch";
+    readonly undeliveredHandoff?: "provider-switch" | "branch" | "rewind";
+    /**
+     * The person rewound the thread after this attempt's turn, which is now
+     * the last one kept. The session it ran on still holds the removed turns,
+     * so it is never taken up again: a runtime-owned conversation starts a new
+     * session with the kept turns handed over, and a host rebuilds from them.
+     */
+    readonly rewound?: boolean;
   };
   /**
    * The thread is a branch that carries a copy of its source's messages and
@@ -68,7 +75,7 @@ export type ConversationSessionDecision =
   | { readonly kind: "continue-session" }
   | {
       readonly kind: "new-session-with-handoff";
-      readonly reason: "provider-switch" | "branch";
+      readonly reason: "provider-switch" | "branch" | "rewind";
     }
   | {
       readonly kind: "refuse";
@@ -95,7 +102,8 @@ export function decideConversationSession(
       previous !== undefined &&
       previous.providerInstanceId === input.recipient.providerInstanceId &&
       previous.continuable &&
-      previous.undeliveredHandoff === undefined
+      previous.undeliveredHandoff === undefined &&
+      previous.rewound !== true
       ? { kind: "continue-session" }
       : { kind: "host-rebuild" };
   }
@@ -109,6 +117,11 @@ export function decideConversationSession(
   }
   const { previous } = input;
   if (previous === undefined) return { kind: "new-session" };
+  if (previous.rewound === true) {
+    return input.handoff === "allowed"
+      ? { kind: "new-session-with-handoff", reason: "rewind" }
+      : { kind: "refuse", reason: "handoff-unavailable" };
+  }
   if (previous.providerInstanceId === input.recipient.providerInstanceId) {
     if (previous.undeliveredHandoff !== undefined) {
       return input.handoff === "allowed"

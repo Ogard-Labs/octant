@@ -320,6 +320,9 @@ export function wireWork(deps: WorkDependencies) {
       projects: projectService,
       projection: workThreadProjection,
       turnProjection: workTurnProjection,
+      isMarked: (threadId) =>
+        readThreadExternalContentTaint(persistence.connection, String(threadId))
+          .externalContentIngested,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
       workingDirectories: { resolve: resolveThreadWorkingDirectory },
@@ -539,10 +542,10 @@ export function wireWork(deps: WorkDependencies) {
       supportsModelSwitch: (providerInstanceId) =>
         providerRuntimeRegistry.observedState(providerInstanceId)?.capabilities.modelSwitch ===
         "supported",
-      selectConversationHandoff: (thread) =>
+      selectConversationHandoff: (thread, purpose) =>
         admittedParentWorkContext({
           threadId: thread.id,
-          purpose: "provider-switch",
+          purpose,
           externalContentIngested: readThreadExternalContentTaint(
             persistence.connection,
             String(thread.id),

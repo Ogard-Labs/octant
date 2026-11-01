@@ -3,7 +3,12 @@ import { ProviderChildObservationState } from "./providers";
 import { Schema } from "effect";
 import { AgentRunResultDeliveryMark } from "./agentRun";
 import { ContextCompactionSettledRecord } from "./context";
-import { ProviderSwitchConversationHandoff } from "./contextHandoff";
+import {
+  ContextHandoffMessages,
+  ContextHandoffOmissions,
+  ProviderSwitchConversationHandoff,
+  RewindConversationHandoff,
+} from "./contextHandoff";
 import { ExtensionSelection } from "./extensions";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { HostId } from "./host";
@@ -198,6 +203,40 @@ export const WorkTurnWrittenFiles = Schema.Struct({
 }).annotations(strict);
 export type WorkTurnWrittenFiles = typeof WorkTurnWrittenFiles.Type;
 
+/**
+ * A fork's first own turn on a provider that keeps its conversation in a
+ * session of its own: the source's turns through the fork point, carried into
+ * the fork, go to a new session as bounded, attributed text.
+ */
+export const WorkForkConversationHandoff = Schema.Struct({
+  reason: Schema.Literal("fork"),
+  messages: ContextHandoffMessages,
+  omissions: ContextHandoffOmissions,
+  /** Whether the fork had taken in outside content when the handoff was read. */
+  externalContentIngested: Schema.Boolean,
+  nativeSessionTransferred: Schema.Literal(false),
+  hiddenReasoningTransferred: Schema.Literal(false),
+}).annotations(strict);
+export type WorkForkConversationHandoff = typeof WorkForkConversationHandoff.Type;
+
+/** What a Work turn started its session with that it did not write itself, by cause. */
+export const WorkTurnHandoff = Schema.Union(
+  ProviderSwitchConversationHandoff,
+  RewindConversationHandoff,
+  WorkForkConversationHandoff,
+);
+export type WorkTurnHandoff = typeof WorkTurnHandoff.Type;
+
+/**
+ * The source turn a fork's carried copy came from. A carried turn ran in the
+ * source, never in the fork, so no session it names is the fork's to resume.
+ */
+export const WorkTurnCarriedFrom = Schema.Struct({
+  threadId: WorkThreadId,
+  requestId: WorkTurnRequestId,
+}).annotations(strict);
+export type WorkTurnCarriedFrom = typeof WorkTurnCarriedFrom.Type;
+
 export const WorkTurnState = Schema.Struct({
   requestId: WorkTurnRequestId,
   threadId: WorkThreadId,
@@ -211,7 +250,9 @@ export const WorkTurnState = Schema.Struct({
    * when the provider changed and the new one keeps its history in a session.
    * Journaled with the turn's acceptance, before the provider is sent anything.
    */
-  handoff: Schema.optional(ProviderSwitchConversationHandoff),
+  handoff: Schema.optional(WorkTurnHandoff),
+  /** Present on a fork's copy of one of its source's turns. */
+  carriedFrom: Schema.optional(WorkTurnCarriedFrom),
   status: WorkTurnLifecycleStatus,
   prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(200_000)),
   extensionSelections: Schema.optional(Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32))),
@@ -447,7 +488,8 @@ export const WorkTurnAccepted = Schema.Struct({
   authority: WorkTurnAuthority,
   providerSessionId: ProviderSessionId,
   resumeCursor: Schema.optional(ProviderResumeCursor),
-  handoff: Schema.optional(ProviderSwitchConversationHandoff),
+  handoff: Schema.optional(WorkTurnHandoff),
+  carriedFrom: Schema.optional(WorkTurnCarriedFrom),
   prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(200_000)),
   attachments: Schema.optional(
     Schema.Array(WorkAttachmentReference).pipe(Schema.maxItems(MAX_WORK_TURN_ATTACHMENTS)),
@@ -466,6 +508,12 @@ export type WorkTurnAccepted = typeof WorkTurnAccepted.Type;
 
 export const WorkTurnUpdated = Schema.Struct({
   resumeCursor: Schema.optional(ProviderResumeCursor),
+  /**
+   * The settled state a fork copied from its source turn. Nothing ran in the
+   * fork, so observers of finished turns (notifications, the message queue)
+   * pass it by.
+   */
+  carried: Schema.optional(Schema.Literal(true)),
   kind: Schema.Literal("turn-updated"),
   requestId: WorkTurnRequestId,
   threadId: WorkThreadId,
@@ -483,7 +531,55 @@ export const WorkTurnUpdated = Schema.Struct({
 }).annotations(strict);
 export type WorkTurnUpdated = typeof WorkTurnUpdated.Type;
 
-export const WORK_TURN_EVENT_NAMES = ["work.turn-accepted@1", "work.turn-updated@1"] as const;
+/**
+ * Rewind a Work thread in place to just before one of its turns. Work takes no
+ * file checkpoints, so only the conversation is taken back; the files stay as
+ * they are. `rewindId` names the journaled removal, so a retry answers from it.
+ */
+export const RewindWorkThreadCommand = Schema.Struct({
+  kind: Schema.Literal("rewind-work-thread"),
+  rewindId: WorkTurnRequestId,
+  threadId: WorkThreadId,
+  /** The first turn the rewind removes; every later turn goes with it. */
+  fromRequestId: WorkTurnRequestId,
+}).annotations(strict);
+export type RewindWorkThreadCommand = typeof RewindWorkThreadCommand.Type;
+
+/** The most turns one rewind names; a longer tail is refused rather than half removed. */
+export const MAX_WORK_REWOUND_TURNS = 10_000;
+
+/**
+ * The journaled removal: the turns a rewind took out of the thread, in thread
+ * order. The removed turns stay in the journal under their own requests; this
+ * record is what keeps them out of the thread and away from the model.
+ */
+export const WorkThreadRewound = Schema.Struct({
+  kind: Schema.Literal("thread-rewound"),
+  rewindId: WorkTurnRequestId,
+  threadId: WorkThreadId,
+  fromRequestId: WorkTurnRequestId,
+  removedRequestIds: Schema.NonEmptyArray(WorkTurnRequestId).pipe(
+    Schema.maxItems(MAX_WORK_REWOUND_TURNS),
+  ),
+  rewoundAt: UtcTimestamp,
+}).annotations(strict);
+export type WorkThreadRewound = typeof WorkThreadRewound.Type;
+
+/** What a rewind did; the first removed turn's prompt goes back to the composer. */
+export const WorkThreadRewindResult = Schema.Struct({
+  kind: Schema.Literal("thread-rewound"),
+  threadId: WorkThreadId,
+  fromRequestId: WorkTurnRequestId,
+  removedTurns: Schema.Int.pipe(Schema.positive()),
+  prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(200_000)),
+}).annotations(strict);
+export type WorkThreadRewindResult = typeof WorkThreadRewindResult.Type;
+
+export const WORK_TURN_EVENT_NAMES = [
+  "work.turn-accepted@1",
+  "work.turn-updated@1",
+  "work.thread-rewound@1",
+] as const;
 export type WorkTurnEventName = (typeof WORK_TURN_EVENT_NAMES)[number];
 
 /**
@@ -526,4 +622,7 @@ export const decodeWorkThreadTranscriptWindowRequest = Schema.decodeUnknownSync(
 export const decodeWorkTurnStreamFrame = Schema.decodeUnknownSync(WorkTurnStreamFrame);
 export const decodeWorkTurnAccepted = Schema.decodeUnknownSync(WorkTurnAccepted);
 export const decodeWorkTurnUpdated = Schema.decodeUnknownSync(WorkTurnUpdated);
+export const decodeRewindWorkThreadCommand = Schema.decodeUnknownSync(RewindWorkThreadCommand);
+export const decodeWorkThreadRewound = Schema.decodeUnknownSync(WorkThreadRewound);
+export const decodeWorkThreadRewindResult = Schema.decodeUnknownSync(WorkThreadRewindResult);
 export const decodeWorkTurnWrittenFiles = Schema.decodeUnknownSync(WorkTurnWrittenFiles);

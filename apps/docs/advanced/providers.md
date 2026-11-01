@@ -1116,6 +1116,11 @@ connection check refuses, Settings names an Octant-authored reason and the
 next action instead of a generic incompatibility sentence. Detected versions
 stay visible when the probe read them. Raw provider output never appears here.
 
+**Session rollback** says whether a provider can cut its own session back when
+you rewind a Work or Code thread. The Octant Harness can. The other providers
+say **None**: after a rewind, your next message starts a fresh session with
+the messages you kept handed over as text.
+
 A Codex CLI configured for Amazon Bedrock works in Octant only with a Bedrock
 API key: one you signed that Codex account in to Bedrock with, or, for the
 first Codex account, `AWS_BEARER_TOKEN_BEDROCK` (plus `AWS_REGION`) in the

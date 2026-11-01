@@ -151,6 +151,23 @@ listed greyed out with the reason, and the host refuses them too. The thread
 keeps working in the same place inside the new Project's folder. Octant refuses
 the move while a turn is running or the agent is waiting on you.
 
+## Fork and rewind
+
+You cannot edit a message you already sent in a Work thread. Each message's
+**More actions** menu has two ways back instead.
+
+**Fork from here** starts a new Work thread in the same Project that carries
+the conversation up to that point as text, and leaves this thread as it is.
+On your message it forks through the reply before it. The new thread starts at
+Ask first and is marked as having read outside content when this one is.
+
+**Rewind to here…** takes this thread back in place. On your message it
+removes that message and everything after it; on a reply, everything after
+the reply. The removed messages no longer reach the model, and your message
+comes back to the composer to change and send again. Work keeps no copies of
+your files, so a rewind changes the conversation only; files stay as they
+are. Octant refuses a rewind while a turn of the thread runs.
+
 ## Export
 
 **Export…** downloads a portable JSON cut of this Work thread: the

@@ -11,6 +11,7 @@ export function handoffSummary(
 ): CodeConversationTurnHandoff {
   switch (event.reason) {
     case "provider-switch":
+    case "rewind":
       return {
         reason: event.reason,
         previousProviderInstanceId: event.previousProviderInstanceId,
@@ -30,6 +31,12 @@ export function handoffSummary(
       };
     case "fork-native-session":
       return { reason: event.reason, forkedFrom: event.forkedFrom };
+    case "rewind-native-session":
+      return {
+        reason: event.reason,
+        previousSessionId: event.previousSessionId,
+        throughOperationId: event.throughOperationId,
+      };
   }
 }
 
@@ -37,7 +44,10 @@ function count(value: number, one: string, many: string): string {
   return `${value} ${value === 1 ? one : many}`;
 }
 
-type TextHandoff = Exclude<CodeConversationTurnHandoff, { readonly reason: "fork-native-session" }>;
+type TextHandoff = Exclude<
+  CodeConversationTurnHandoff,
+  { readonly reason: "fork-native-session" | "rewind-native-session" }
+>;
 
 /** Every omission the host counted, named, so a short handoff never reads as a short conversation. */
 export function omissionsDisclosure(
@@ -110,6 +120,18 @@ export function conversationHandoffDisclosure(
       ].join("");
     case "fork-native-session":
       return "Forked by continuing the source's own session up to the reply it was forked from, with its messages and tool activity. The source's later replies did not transfer.";
+    case "rewind":
+      return [
+        `After the rewind, a fresh session started with ${count(handoff.messages, "recent message", "recent messages")} of the kept conversation as text.`,
+        handoff.inherited === undefined
+          ? ""
+          : ` ${count(handoff.inherited.messages, "of them comes", "of them come")} from the conversation this was forked from, up to the reply it was forked from.`,
+        omissionsDisclosure(handoff),
+        handoff.externalContentIngested ? " This thread has taken in outside content." : "",
+        " The removed turns, hidden reasoning, tool activity and the previous session did not transfer.",
+      ].join("");
+    case "rewind-native-session":
+      return "After the rewind, the provider continued its own session cut back to the last kept reply, with its messages and tool activity. The removed turns did not transfer.";
   }
 }
 

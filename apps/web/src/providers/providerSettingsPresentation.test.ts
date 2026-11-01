@@ -8,6 +8,7 @@ import {
   providerRowReadinessLabel,
   ownReviewerLabel,
   reviewVerdictsLabel,
+  sessionRollbackLabel,
 } from "./providerSettingsPresentation";
 
 describe("provider Settings presentation", () => {
@@ -359,6 +360,18 @@ describe("reviewVerdictsLabel", () => {
 
   it("says nothing for a runtime with no reviewer of its own", () => {
     expect(reviewVerdictsLabel(report("unsupported"))).toBeUndefined();
+  });
+});
+
+describe("sessionRollbackLabel", () => {
+  it("says honestly when a provider cannot cut its own session back, including when it never said", () => {
+    expect(sessionRollbackLabel({ sessionRollback: "supported" } as never)).toContain(
+      "continues its own session",
+    );
+    expect(sessionRollbackLabel({ sessionRollback: "unsupported" } as never)).toContain(
+      "starts a fresh session with the kept turns as text",
+    );
+    expect(sessionRollbackLabel({} as never)).toMatch(/^None\./);
   });
 });
 
