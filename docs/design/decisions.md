@@ -629,7 +629,7 @@ A Work or Code Project has one main folder plus extra folders the person adds; e
 - The `@file` picker (Work and Code) lists and reads a file in an extra folder by its absolute path, only inside one of the Project's current extra folders; Code search covers the extra folders and marks each match with its folder; the harness shell and the ACP client file and terminal tools reach every Project folder.
 - The Code editor and the Files explorer open, read and save a file in an extra folder, named by its absolute path and placed by the same root authority; each extra folder is its own tree beneath the checkout's, and a search match there opens.
 - A Work artifact the host creates for a thread is placed in that thread's working directory, read from the thread and never from the request, and stays in the main folder without a thread; no thread works in an extra folder, so an artifact never lands in one.
-- The Terminal tab's menu restarts a thread terminal in a listed extra folder, and the explorer watches each extra folder live, placed by the same root authority and refused for any path that is not the root of a current extra folder.
+- The Terminal tab's menu restarts a thread terminal in a listed extra folder, and the explorer watches the first two extra folders live (the rest relist on Refresh), placed by the same root authority and refused for any path that is not the root of a current extra folder.
 
 Status: Built. Since: 2026-10-31. Detail: [Architecture: Projects with several folders](../architecture.md#projects-with-several-folders).
 

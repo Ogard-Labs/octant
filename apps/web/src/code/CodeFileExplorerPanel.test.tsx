@@ -400,6 +400,30 @@ describe("CodeFileExplorerPanel extra folders", () => {
     );
   });
 
+  it("follows only the first extra folders live so the window keeps connections free", async () => {
+    const list = vi.fn(async () => listing([]));
+    const watch = vi.fn(async function* (_query: { readonly folder?: string }) {
+      await new Promise(() => undefined);
+    });
+    const folders = ["a", "b", "c", "d"].map((name) => `/Users/me/${name}`);
+    render(
+      <CodeFileExplorerPanel
+        checkoutId={checkoutId}
+        client={{ list, watch } as never}
+        extraFolders={folders}
+        onOpenFile={vi.fn()}
+        threadId={threadId}
+      />,
+    );
+
+    await screen.findByRole("region", { name: "d (extra folder)" });
+    const watched = watch.mock.calls.map(([query]) => query.folder);
+    expect(watched).toContain("/Users/me/a");
+    expect(watched).toContain("/Users/me/b");
+    expect(watched).not.toContain("/Users/me/c");
+    expect(watched).not.toContain("/Users/me/d");
+  });
+
   it("shows an extra folder whose name the file-path schema refuses as unavailable and keeps the checkout's tree", async () => {
     const list = vi.fn(async () =>
       listing([
